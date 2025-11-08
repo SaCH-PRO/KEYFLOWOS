@@ -1,6 +1,7 @@
 # Ignore environment variables
 .env
 .env.local
+
 # Ignore build output
 .next/
 dist/

@@ -104,7 +104,7 @@ This architecture is the "flow" made manifest. It is a modern, scalable, and eff
 
 2.1. Project Structure: The Monorepo
 We will use a pnpm monorepo. This is the most efficient structure for sharing code and types, ensuring perfect consistency between the frontend, backend, and database.
-•	keyflow-os/
+•	KEYFLOWOS/
 o	apps/web/: The UI (Next.js 14+ App Router). This is the single, unified frontend for the entire user journey. It serves:
 	Public Pages: The marketing Homepage/Landing Page, the public-facing "Social Links" page (our /@username feature), and all client-facing pages (e.g., /book/[slug], /pay/[invoiceId]).
 	App Pages: The entire authenticated application, including the central "Cockpit" (Dashboard) and all module break-out pages (Commerce, Bookings, Settings, etc.).
@@ -621,7 +621,7 @@ ________________________________________
 
 4. Debugged & Testable File/Folder Structure
 This is the complete monorepo structure, designed for action.
-keyflow-os/
+KEYFLOWOS/
 ├── .gitignore
 ├── package.json             # Root package.json (for pnpm, scripts, and root devDependencies)
 ├── pnpm-workspace.yaml      # Defines the monorepo workspaces ("apps/*", "packages/*")
@@ -865,7 +865,7 @@ Directive: Use these scripts in the root package.json to manage the monorepo. Th
 •	Location: /package.json
 JSON
 {
-  "name": "keyflow-os-monorepo",
+  "name": "KEYFLOWOS-monorepo",
   "private": true,
   "scripts": {
     "build": "pnpm -r build",
@@ -1088,7 +1088,7 @@ This is your master checklist. You must complete each module as a self-contained
 Phase 0: The Foundation (Setup)
 Goal: Create the "scaffolding" for the entire system. This phase builds no features but is essential for all future modules.
 •	[ ] Initialize Monorepo:
-o	Create the root keyflow-os/ directory and initialize pnpm (pnpm init).
+o	Create the root KEYFLOWOS/ directory and initialize pnpm (pnpm init).
 o	Create the pnpm-workspace.yaml file and define the workspaces: apps/* and packages/*.
 o	Create the folder structure: apps/web, apps/server, packages/db, packages/ui, packages/api.
 •	[ ] Setup packages/db (The Blueprint):
