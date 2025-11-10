@@ -2,12 +2,12 @@ import type { Config } from "tailwindcss";
 
 const config: Config = {
   content: [
-    "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
-    "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
-    "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
-    "../../packages/ui/src/**/*.{ts,tsx}", // Watch the UI package
+    "./apps/web/src/**/*.{js,ts,jsx,tsx,mdx}",
+    "./packages/ui/src/**/*.{ts,tsx}",
   ],
-  theme: {},
-  plugins: [require("tailwindcss-animate")],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
 };
 export default config;
