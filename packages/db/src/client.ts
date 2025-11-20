@@ -1,10 +1,11 @@
 import { PrismaClient } from "@prisma/client";
-import { softDeleteExtension } from "./middleware/soft-delete";
+import { softDelete } from "./middleware/soft-delete";
+
+// Create the soft delete extension for specific models
+const softDeleteExtension = softDelete(["Contact"]); // Add other model names as needed
 
 // create and configure Prisma client
 const prisma = new PrismaClient().$extends(softDeleteExtension);
-
-// register the soft-delete middleware globally
 
 // export the configured client for use across the monorepo
 export const db = prisma;
