@@ -1,0 +1,459 @@
+generator client {
+  provider = "prisma-client-js"
+  // Output to a shared, generated location within packages/db
+  output   = "../src/generated/client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---
+// MODULE 1: IDENTITY & ACCOUNTS
+// ---
+model User {
+  id    String  @id @default(cuid()) // Corresponds to Supabase auth.users.id
+  email String  @unique
+  name  String?
+
+  businesses Membership[]
+  sessions   Session[]
+
+  @@map("users")
+}
+
+model Business {
+  id      String @id @default(cuid())
+  name    String
+  ownerId String @map("owner_id")
+
+  // Module Relationships
+  members          Membership[]
+  contacts         Contact[]
+  invoices         Invoice[]
+  quotes           Quote[]
+  products         Product[]
+  bookings         Booking[]
+  services         Service[]
+  staff            StaffMember[]
+  socialPosts      SocialPost[]
+  socialConns      SocialConnection[]
+  automations      Automation[]
+  projects         Project[]
+  projectTasks     ProjectTask[]
+  projectTemplates ProjectTemplate[] // <-- added
+  sites            Site[]
+
+  // Field for UI/UX: Gamification, Onboarding, etc.
+  metaData Json? @default("{}") @map("meta_data")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@map("businesses")
+}
+
+model Membership {
+  id   String @id @default(cuid())
+  role String // "OWNER", "ADMIN", "STAFF"
+
+  userId     String   @map("user_id")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade) // Safe to cascade
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade) // Safe to cascade
+
+  @@unique([userId, businessId])
+  @@index([userId])
+  @@index([businessId])
+  @@map("memberships")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  expiresAt DateTime @map("expires_at")
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+// ---
+// MODULE 2: CRM (RELATIONSHIP INTELLIGENCE)
+// ---
+model Contact {
+  id        String  @id @default(cuid())
+  firstName String? @map("first_name")
+  lastName  String? @map("last_name")
+  email     String? @unique
+  phone     String?
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  // Relationships
+  quotes   Quote[]
+  invoices Invoice[]
+  bookings Booking[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at") // Soft delete
+
+  @@index([businessId])
+  @@map("contacts")
+}
+
+// ---
+// MODULE 3: COMMERCE (QUOTES, INVOICES, PAYMENTS)
+// ---
+model Product {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  price       Float
+  currency    String  @default("TTD") // Caribbean localization
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  // Relationships
+  quoteItems      QuoteItem[]
+  invoiceItems    InvoiceItem[]
+  projectTemplate ProjectTemplate? // Link to a project template
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at") // Soft delete
+
+  @@index([businessId])
+  @@map("products")
+}
+
+model Quote {
+  id          String    @id @default(cuid())
+  quoteNumber String    @map("quote_number")
+  status      String    @default("DRAFT") // DRAFT, SENT, ACCEPTED, REJECTED
+  total       Float
+  currency    String    @default("TTD")
+  issueDate   DateTime  @default(now()) @map("issue_date")
+  expiryDate  DateTime? @map("expiry_date")
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  contactId  String   @map("contact_id")
+  contact    Contact  @relation(fields: [contactId], references: [id], onDelete: NoAction) // DATA INTEGRITY: Do not delete quote if contact is deleted
+
+  items     QuoteItem[]
+  invoiceId String?     @unique @map("invoice_id")
+  invoice   Invoice?
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at") // Soft delete
+
+  @@unique([businessId, quoteNumber])
+  @@index([businessId, contactId])
+  @@map("quotes")
+}
+
+model QuoteItem {
+  id          String @id @default(cuid())
+  description String
+  quantity    Int
+  unitPrice   Float  @map("unit_price")
+  total       Float
+
+  quoteId   String   @map("quote_id")
+  quote     Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade) // Safe to cascade
+  productId String?  @map("product_id")
+  product   Product? @relation(fields: [productId], references: [id], onDelete: NoAction) // DATA INTEGRITY: Keep item history
+
+  @@index([quoteId])
+  @@index([productId])
+  @@map("quote_items")
+}
+
+model Invoice {
+  id            String    @id @default(cuid())
+  invoiceNumber String    @map("invoice_number")
+  status        String    @default("DRAFT") // DRAFT, SENT, PAID, VOID, OVERDUE
+  total         Float
+  currency      String    @default("TTD")
+  issueDate     DateTime  @default(now()) @map("issue_date")
+  dueDate       DateTime? @map("due_date")
+  paidAt        DateTime? @map("paid_at")
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  contactId  String   @map("contact_id")
+  contact    Contact  @relation(fields: [contactId], references: [id], onDelete: NoAction) // DATA INTEGRITY
+
+  items    InvoiceItem[]
+  payments Payment[]
+  booking  Booking?
+  quote    Quote?        @relation(fields: [quoteId], references: [id], onUpdate: NoAction, onDelete: NoAction) // DATA INTEGRITY
+  quoteId  String?       @unique @map("quote_id")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at") // Soft delete
+
+  @@unique([businessId, invoiceNumber])
+  @@index([businessId, contactId])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id          String @id @default(cuid())
+  description String
+  quantity    Int
+  unitPrice   Float  @map("unit_price")
+  total       Float
+
+  invoiceId String   @map("invoice_id")
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade) // Safe to cascade
+  productId String?  @map("product_id")
+  product   Product? @relation(fields: [productId], references: [id], onDelete: NoAction) // DATA INTEGRITY
+
+  @@index([invoiceId])
+  @@index([productId])
+  @@map("invoice_items")
+}
+
+model Payment {
+  id                String   @id @default(cuid())
+  amount            Float
+  currency          String
+  status            String // PENDING, SUCCESSFUL, FAILED
+  provider          String // "stripe", "wipay"
+  providerPaymentId String   @unique @map("provider_payment_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  businessId String  @map("business_id") // For easier indexing
+  invoiceId  String  @map("invoice_id")
+  invoice    Invoice @relation(fields: [invoiceId], references: [id], onDelete: NoAction) // DATA INTEGRITY
+
+  @@index([businessId, invoiceId])
+  @@map("payments")
+}
+
+// ---
+// MODULE 4: BOOKINGS (SCHEDULING & TIME)
+// ---
+model StaffMember {
+  id   String @id @default(cuid())
+  name String
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  services       Service[]
+  bookings       Booking[]
+  availabilities Availability[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at") // Soft delete
+
+  @@index([businessId])
+  @@map("staff_members")
+}
+
+model Service {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  duration    Int // Duration in minutes
+  price       Float // Price for this service
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  bookings Booking[]
+  staff    StaffMember[] // Staff who can perform this service
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at") // Soft delete
+
+  @@index([businessId])
+  @@map("services")
+}
+
+model Availability {
+  id        String @id @default(cuid())
+  dayOfWeek Int    @map("day_of_week") // 0 = Sunday, 1 = Monday, etc.
+  startTime String @map("start_time") // "HH:MM"
+  endTime   String @map("end_time") // "HH:MM"
+
+  staffId String      @map("staff_id")
+  staff   StaffMember @relation(fields: [staffId], references: [id], onDelete: Cascade) // Safe to cascade
+
+  @@index([staffId])
+  @@map("availabilities")
+}
+
+model Booking {
+  id        String   @id @default(cuid())
+  startTime DateTime @map("start_time")
+  endTime   DateTime @map("end_time")
+  status    String   @default("PENDING") // PENDING, CONFIRMED, CANCELLED, COMPLETED
+
+  businessId String      @map("business_id")
+  business   Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  contactId  String      @map("contact_id")
+  contact    Contact     @relation(fields: [contactId], references: [id], onDelete: NoAction) // DATA INTEGRITY
+  serviceId  String      @map("service_id")
+  service    Service     @relation(fields: [serviceId], references: [id], onDelete: NoAction) // DATA INTEGRITY
+  staffId    String      @map("staff_id")
+  staff      StaffMember @relation(fields: [staffId], references: [id], onDelete: NoAction) // DATA INTEGRITY
+
+  invoiceId String?  @unique @map("invoice_id")
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onUpdate: NoAction, onDelete: NoAction) // DATA INTEGRITY
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at") // Soft delete
+
+  @@index([businessId, staffId, startTime, endTime])
+  @@index([businessId, contactId])
+  @@map("bookings")
+}
+
+// ---
+// MODULE 5: SOCIAL INTELLIGENCE
+// ---
+model SocialConnection {
+  id         String  @id @default(cuid())
+  platform   String // "FACEBOOK", "INSTAGRAM", "WHATSAPP"
+  platformId String? @map("platform_id")
+  token      String // Encrypted access token
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@map("social_connections")
+}
+
+model SocialPost {
+  id          String    @id @default(cuid())
+  content     String
+  mediaUrls   String[]  @map("media_urls")
+  status      String    @default("DRAFT") // DRAFT, SCHEDULED, POSTED, FAILED
+  scheduledAt DateTime? @map("scheduled_at")
+  postedAt    DateTime? @map("posted_at")
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at") // Soft delete
+
+  @@index([businessId, status, scheduledAt])
+  @@map("social_posts")
+}
+
+// ---
+// MODULE 6: MARKETING AUTOMATION & PROJECTS
+// ---
+model Automation {
+  id      String @id @default(cuid())
+  name    String
+  trigger String // "invoice.paid", "booking.created"
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  // MVP: Simple JSON for form-based actions
+  // e.g., { "actionType": "SEND_WHATSAPP", "templateId": "abc", "contactField": "booking.contact" }
+  actionData Json? @map("action_data")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at") // Soft delete
+
+  @@index([businessId, trigger])
+  @@map("automations")
+}
+
+model Project {
+  id     String @id @default(cuid())
+  name   String
+  status String @default("ACTIVE") // ACTIVE, COMPLETED, ARCHIVED
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  tasks ProjectTask[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at") // Soft delete
+
+  @@index([businessId])
+  @@map("projects")
+}
+
+model ProjectTask {
+  id          String    @id @default(cuid())
+  title       String
+  isCompleted Boolean   @default(false) @map("is_completed")
+  dueDate     DateTime? @map("due_date")
+
+  projectId String  @map("project_id")
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([projectId])
+  @@index([businessId])
+  @@map("project_tasks")
+}
+
+model ProjectTemplate {
+  id   String @id @default(cuid())
+  name String
+
+  taskTitles Json @map("task_titles") // Store the list of tasks to create as JSON
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  productId String?  @unique @map("product_id") // Link template to a *single* product
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([businessId])
+  @@map("project_templates")
+}
+
+// ---
+// MODULE 7: WEBSITE & DIGITAL PRESENCE (MVP: Social Links Page)
+// ---
+model Site {
+  id        String @id @default(cuid())
+  subdomain String @unique // e.g., "keyflow.app/@myclinic"
+
+  // MVP: Simple JSON for "Social Links" page
+  // e.g., { "title": "My Clinic", "links": [{"name": "Website", "url": "..."}] }
+  siteData Json? @map("site_data")
+
+  businessId String   @unique @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at") // Soft delete
+
+  @@map("sites")
+}
