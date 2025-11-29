@@ -1,4 +1,4 @@
-import { Booking, Contact, Invoice, InvoiceItem } from '@keyflow/db';
+import { Booking, Contact, Invoice, InvoiceItem, SocialPost } from '@keyflow/db';
 
 // Payload for when a new contact is created
 export class ContactCreatedPayload {
@@ -19,9 +19,15 @@ export class InvoicePaidPayload {
   businessId!: string;
 }
 
+export class PostPublishedPayload {
+  post!: SocialPost;
+  businessId!: string;
+}
+
 // Master event map for reference and typing
 export interface KeyFlowEventMap {
   'contact.created': ContactCreatedPayload;
   'booking.created': BookingCreatedPayload;
   'invoice.paid': InvoicePaidPayload;
+  'post.published': PostPublishedPayload;
 }

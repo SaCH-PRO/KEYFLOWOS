@@ -15,6 +15,7 @@ import { SiteModule } from './modules/site/site.module';
 import { AiModule } from './modules/ai/ai.module';
 import { FlowModule } from './modules/flow/flow.module';
 import { GamificationModule } from './modules/gamification/gamification.module';
+import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { AuthMiddleware } from './core/auth/auth.middleware';
 
 @Module({
@@ -36,6 +37,7 @@ import { AuthMiddleware } from './core/auth/auth.middleware';
     AiModule,
     FlowModule,
     GamificationModule,
+    WebhooksModule,
   ],
   controllers: [AppController],
   providers: [AppService],

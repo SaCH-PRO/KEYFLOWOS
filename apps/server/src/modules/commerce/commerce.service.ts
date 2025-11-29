@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InvoicePaidPayload } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { Service } from '@keyflow/db';
 
 @Injectable()
 export class CommerceService {
@@ -26,6 +27,31 @@ export class CommerceService {
     });
   }
 
+  async createInvoiceForService(businessId: string, contactId: string, service: Service) {
+    const total = service.price;
+    return this.prisma.client.invoice.create({
+      data: {
+        businessId,
+        contactId,
+        status: 'DRAFT',
+        issueDate: new Date(),
+        total,
+        currency: service.currency ?? 'TTD',
+        items: {
+          create: [
+            {
+              description: service.name,
+              quantity: 1,
+              unitPrice: service.price,
+              total,
+            },
+          ],
+        },
+      },
+      include: { items: true, contact: true },
+    });
+  }
+
   async markInvoicePaid(invoiceId: string) {
     const invoice = await this.prisma.client.invoice.update({
       where: { id: invoiceId },
@@ -36,6 +62,10 @@ export class CommerceService {
     const payload: InvoicePaidPayload = {
       invoice,
       businessId: invoice.businessId,
+      // For wildcard consumers that want the event name
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      eventName: 'invoice.paid',
     };
     this.events.emit('invoice.paid', payload);
     return invoice;

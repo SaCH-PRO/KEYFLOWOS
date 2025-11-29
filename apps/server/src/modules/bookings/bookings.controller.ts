@@ -3,6 +3,7 @@ import { BookingsService } from './bookings.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CreateBookingDto } from './dto/create-booking.dto';
+import { PublicCreateBookingDto } from './dto/public-create-booking.dto';
 
 @Controller('bookings')
 export class BookingsController {
@@ -27,6 +28,25 @@ export class BookingsController {
       staffId: body.staffId,
       startTime: new Date(body.startTime),
       endTime: new Date(body.endTime),
+    });
+  }
+
+  @Post('public/businesses/:businessId')
+  publicCreateBooking(
+    @Param('businessId') businessId: string,
+    @Body() body: PublicCreateBookingDto,
+  ) {
+    return this.bookings.publicCreateBooking({
+      businessId,
+      serviceId: body.serviceId,
+      staffId: body.staffId,
+      startTime: new Date(body.startTime),
+      contact: {
+        firstName: body.firstName,
+        lastName: body.lastName,
+        email: body.email,
+        phone: body.phone,
+      },
     });
   }
 }

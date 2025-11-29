@@ -6,6 +6,7 @@ import { PrismaService } from '../src/core/prisma/prisma.service';
 class PrismaMock implements Partial<PrismaService> {
   private invoices: any[] = [{ id: 'inv_1', businessId: 'biz_1', status: 'DRAFT', paidAt: null }];
   private products: any[] = [];
+  private invoicesCreated: any[] = [];
   client = {
     product: {
       findMany: vi.fn(({ where }: any) =>
@@ -21,6 +22,15 @@ class PrismaMock implements Partial<PrismaService> {
       update: vi.fn(({ where, data }: any) => {
         const invoice = this.invoices.find((i) => i.id === where.id);
         Object.assign(invoice, data);
+        return invoice;
+      }),
+      create: vi.fn(({ data }: any) => {
+        const invoice = {
+          ...data,
+          id: `inv_${this.invoicesCreated.length + 2}`,
+          items: (data.items?.create as any[]) ?? [],
+        };
+        this.invoicesCreated.push(invoice);
         return invoice;
       }),
     },
@@ -56,5 +66,27 @@ describe('CommerceService', () => {
 
     expect(products).toHaveLength(1);
     expect(products[0].name).toBe('Plan');
+  });
+
+  it('creates invoice for service', async () => {
+    const events = { emit: vi.fn() } as unknown as EventEmitter2;
+    const prisma = new PrismaMock() as unknown as PrismaService;
+    const service = new CommerceService(prisma, events);
+
+    const invoice = await service.createInvoiceForService('biz_1', 'contact_1', {
+      id: 'service_1',
+      name: 'Consult',
+      price: 50,
+      duration: 60,
+      businessId: 'biz_1',
+      description: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      deletedAt: null,
+      currency: 'TTD',
+    } as any);
+
+    expect(invoice.status).toBe('DRAFT');
+    expect(invoice.items?.[0].description).toBe('Consult');
   });
 });
