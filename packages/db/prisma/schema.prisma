@@ -36,6 +36,9 @@ model Business {
   quotes           Quote[]
   products         Product[]
   bookings         Booking[]
+  contactEvents    ContactEvent[]
+  contactNotes     ContactNote[]
+  contactTasks     ContactTask[]
   services         Service[]
   staff            StaffMember[]
   socialPosts      SocialPost[]
@@ -90,6 +93,10 @@ model Contact {
   lastName  String?  @map("last_name")
   email     String?  @unique
   phone     String?
+  status    String   @default("LEAD")
+  source    String?
+  tags      String[] @default([])
+  custom    Json?    @default("{}")
 
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -98,6 +105,9 @@ model Contact {
   quotes   Quote[]
   invoices Invoice[]
   bookings Booking[]
+  events   ContactEvent[]
+  notes    ContactNote[]
+  tasks    ContactTask[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
@@ -105,6 +115,53 @@ model Contact {
 
   @@index([businessId])
   @@map("contacts")
+}
+
+model ContactEvent {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  contactId  String   @map("contact_id")
+  type       String
+  data       Json
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, contactId])
+  @@map("contact_events")
+}
+
+model ContactNote {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  contactId  String   @map("contact_id")
+  authorId   String?  @map("author_id")
+  body       String
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, contactId])
+  @@map("contact_notes")
+}
+
+model ContactTask {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  contactId   String   @map("contact_id")
+  assigneeId  String?  @map("assignee_id")
+  title       String
+  dueDate     DateTime? @map("due_date")
+  status      String    @default("OPEN")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, contactId])
+  @@map("contact_tasks")
 }
 
 // ---

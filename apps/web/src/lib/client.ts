@@ -9,6 +9,34 @@ const contactSchema = z.object({
   lastName: z.string().nullable().optional(),
   email: z.string().nullable().optional(),
   phone: z.string().nullable().optional(),
+  status: z.string().optional(),
+  source: z.string().nullable().optional(),
+  tags: z.array(z.string()).optional().default([]),
+  custom: z.record(z.any()).nullable().optional(),
+});
+
+const eventSchema = z.object({
+  id: z.string(),
+  contactId: z.string(),
+  type: z.string(),
+  data: z.any(),
+  createdAt: z.string(),
+});
+
+const noteSchema = z.object({
+  id: z.string(),
+  contactId: z.string(),
+  body: z.string(),
+  createdAt: z.string(),
+});
+
+const taskSchema = z.object({
+  id: z.string(),
+  contactId: z.string(),
+  title: z.string(),
+  status: z.string().optional(),
+  dueDate: z.string().nullable().optional(),
+  createdAt: z.string(),
 });
 
 const productSchema = z.object({
@@ -26,6 +54,9 @@ const bookingSchema = z.object({
 });
 
 export type Contact = z.infer<typeof contactSchema>;
+export type ContactEvent = z.infer<typeof eventSchema>;
+export type ContactNote = z.infer<typeof noteSchema>;
+export type ContactTask = z.infer<typeof taskSchema>;
 export type Product = z.infer<typeof productSchema>;
 export type Booking = z.infer<typeof bookingSchema>;
 export type Invoice = {
@@ -86,6 +117,19 @@ export async function fetchContacts(businessId: string = DEFAULT_BUSINESS_ID) {
   );
 }
 
+export async function fetchContactDetail(contactId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}`,
+    z.object({
+      contact: contactSchema.nullable(),
+      events: z.array(eventSchema),
+      notes: z.array(noteSchema),
+      tasks: z.array(taskSchema),
+    }),
+    { contact: null, events: [], notes: [], tasks: [] },
+  );
+}
+
 export async function fetchBookings(businessId: string = DEFAULT_BUSINESS_ID) {
   return apiGet(
     `/bookings/businesses/${encodeURIComponent(businessId)}`,
@@ -133,6 +177,7 @@ export async function createContact(input: { businessId?: string; firstName?: st
     lastName: input.lastName ?? "User",
     email: input.email ?? "",
     phone: input.phone ?? "",
+    status: "LEAD",
   };
 
   const res = await apiPost<Contact>({
@@ -152,6 +197,20 @@ export async function createContact(input: { businessId?: string; firstName?: st
   };
 
   return { data: synthesized, error: res.error };
+}
+
+export async function addContactNote(contactId: string, body: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<ContactNote>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/notes`,
+    body: { body },
+  });
+}
+
+export async function addContactTask(contactId: string, title: string, dueDate?: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<ContactTask>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/tasks`,
+    body: { title, dueDate },
+  });
 }
 
 export async function createProduct(input: { businessId?: string; name: string; price: number; currency?: string }) {
