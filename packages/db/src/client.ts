@@ -1,8 +1,31 @@
 import { PrismaClient } from "@prisma/client";
 import { softDelete } from "./middleware/soft-delete";
 
-// Create the soft delete extension for specific models
-const softDeleteExtension = softDelete(["Contact"]); // Add other model names as needed
+// Enable soft delete for all models that include a deletedAt column
+const softDeleteExtension = softDelete([
+  "User",
+  "Business",
+  "Membership",
+  "Session",
+  "Contact",
+  "Product",
+  "Quote",
+  "QuoteItem",
+  "Invoice",
+  "InvoiceItem",
+  "Payment",
+  "StaffMember",
+  "Service",
+  "Availability",
+  "Booking",
+  "SocialConnection",
+  "SocialPost",
+  "Automation",
+  "Project",
+  "ProjectTask",
+  "ProjectTemplate",
+  "Site",
+]);
 
 // Create and configure Prisma client with soft delete extension
 export const db = new PrismaClient().$extends(softDeleteExtension);
