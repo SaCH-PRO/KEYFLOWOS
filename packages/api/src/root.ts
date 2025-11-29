@@ -6,6 +6,7 @@ import { bookingsRouter } from './routers/bookings';
 import { socialRouter } from './routers/social';
 import { automationRouter } from './routers/automation';
 import { siteRouter } from './routers/site';
+import { adminRouter } from './routers/admin';
 
 export const appRouter = router({
   identity: identityRouter,
@@ -15,6 +16,7 @@ export const appRouter = router({
   social: socialRouter,
   automation: automationRouter,
   site: siteRouter,
+  admin: adminRouter,
 });
 
 export type AppRouter = typeof appRouter;

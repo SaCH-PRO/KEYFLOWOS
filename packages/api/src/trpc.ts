@@ -10,7 +10,7 @@ export type AppContext = {
   db: typeof DbClient;
   eventBus: EventBus;
   // Auth context (populated by guards)
-  user?: { id: string; email: string };
+  user?: { id: string; email: string; role?: string };
   business?: { id: string; role: string };
 };
 
@@ -23,6 +23,13 @@ export const middleware = t.middleware;
 export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
   if (!ctx.user) {
     throw new Error('Unauthorized');
+  }
+  return next({ ctx });
+});
+
+export const superAdminProcedure = t.procedure.use(({ ctx, next }) => {
+  if (!ctx.user || ctx.user.role !== 'SUPER_ADMIN') {
+    throw new Error('Forbidden');
   }
   return next({ ctx });
 });

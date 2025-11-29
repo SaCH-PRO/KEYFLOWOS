@@ -7,9 +7,13 @@ export class BusinessGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest() as any;
-    const user = req.user as { id?: string } | undefined;
+    const user = req.user as { id?: string; role?: string } | undefined;
     if (!user?.id) {
       throw new UnauthorizedException('Authentication required');
+    }
+
+    if (user.role === 'SUPER_ADMIN') {
+      return true;
     }
 
     const businessId = req.params?.businessId || req.body?.businessId;
