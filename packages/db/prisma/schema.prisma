@@ -16,6 +16,7 @@ model User {
   id    String @id @default(cuid()) // Corresponds to Supabase auth.users.id
   email String @unique
   name  String?
+  role  String @default("USER") // USER | SUPER_ADMIN
 
   businesses Membership[]
   sessions   Session[]

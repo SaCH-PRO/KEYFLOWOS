@@ -99,7 +99,7 @@ export default function AppHome() {
     <div className="space-y-4 md:space-y-6">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
         <div>
-          <h1 className="text-xl md:text-2xl font-semibold tracking-tight">Cockpit</h1>
+          <h1 className="text-xl md:text-2xl font-semibold tracking-tight">Keyflow Command</h1>
           <p className="text-xs md:text-sm text-muted-foreground mt-1">
             Your business graph, live. Watch leads flow into bookings and revenue in real-time.
           </p>
