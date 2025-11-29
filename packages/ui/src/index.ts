@@ -3,4 +3,8 @@ export * from "./components/input";
 export * from "./components/card";
 export * from "./components/badge";
 export * from "./components/achievement";
+export * from "./components/momentum-bar";
+export * from "./components/flow-feed";
+export * from "./components/flow-graph-placeholder";
+export * from "./components/shell";
 export * from "./lib/utils";

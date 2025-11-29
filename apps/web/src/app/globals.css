@@ -4,10 +4,70 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    /* ... all your other shadcn variables ... */
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    /* LIGHT */
+    --kf-background: 0 0% 100%;
+    --kf-foreground: 224 71% 4%;
+
+    --kf-card: 0 0% 100%;
+    --kf-card-foreground: 224 71% 4%;
+
+    --kf-popover: 0 0% 100%;
+    --kf-popover-foreground: 224 71% 4%;
+
+    --kf-border: 214 32% 91%;
+    --kf-input: 214 32% 91%;
+
+    --kf-primary: 224 96% 52%; /* electric blue */
+    --kf-primary-foreground: 210 40% 98%;
+
+    --kf-secondary: 210 40% 98%;
+    --kf-secondary-foreground: 222 47% 11%;
+
+    --kf-muted: 210 40% 96%;
+    --kf-muted-foreground: 215 16% 47%;
+
+    --kf-accent: 210 40% 96%;
+    --kf-accent-foreground: 222 47% 11%;
+
+    --kf-destructive: 0 84% 60%;
+    --kf-destructive-foreground: 210 40% 98%;
+
+    --kf-ring: 224 96% 52%;
+  }
+
+  .dark {
+    /* DARK */
+    --kf-background: 230 35% 6%;
+    --kf-foreground: 210 40% 98%;
+
+    --kf-card: 230 35% 9%;
+    --kf-card-foreground: 210 40% 98%;
+
+    --kf-popover: 230 35% 9%;
+    --kf-popover-foreground: 210 40% 98%;
+
+    --kf-border: 220 35% 18%;
+    --kf-input: 220 35% 18%;
+
+    --kf-primary: 224 96% 52%; /* electric blue */
+    --kf-primary-foreground: 210 40% 98%;
+
+    --kf-secondary: 220 35% 13%;
+    --kf-secondary-foreground: 210 40% 98%;
+
+    --kf-muted: 220 35% 11%;
+    --kf-muted-foreground: 215 20% 65%;
+
+    --kf-accent: 260 90% 66%; /* magenta accent */
+    --kf-accent-foreground: 210 40% 98%;
+
+    --kf-destructive: 355 95% 61%;
+    --kf-destructive-foreground: 210 40% 98%;
+
+    --kf-ring: 224 96% 52%;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
   }
 }
