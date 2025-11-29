@@ -1,3 +1,16 @@
+<<<<<<< HEAD
 node_modules
 
 .early.coverage
+=======
+# Ignore environment variables
+.env
+.env.local
+
+# Ignore build output
+.next/
+dist/
+**/dist/
+# Ignore node modules
+node_modules/
+>>>>>>> dfe993612f4ee85a6ee5223d660e4ace57c758e5
