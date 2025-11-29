@@ -9,7 +9,7 @@ export type FeedItem = {
   time: string;
   description: string;
   suggestion?: string;
-  meta?: { invoiceId?: string };
+  meta?: { invoiceId?: string; contactEmail?: string };
 };
 
 const defaultFeed: FeedItem[] = [
@@ -101,6 +101,15 @@ export function FlowFeedPanel({
                       onClick={() => onAction?.(item)}
                     >
                       Open receipt
+                      <ArrowRight className="w-3 h-3" />
+                    </button>
+                  )}
+                  {item.meta?.contactEmail && (
+                    <button
+                      className="inline-flex items-center gap-1 rounded-full border border-border/70 px-2 py-0.5 text-[10px] text-muted-foreground hover:text-primary hover:border-primary/60"
+                      onClick={() => onAction?.(item)}
+                    >
+                      Remind {item.meta.contactEmail}
                       <ArrowRight className="w-3 h-3" />
                     </button>
                   )}

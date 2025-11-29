@@ -5,7 +5,7 @@ export async function POST(request: Request) {
   const title = body?.title ?? "Update";
   const suggestion = body?.suggestion ?? "Review this event";
 
-  const aiEndpoint = process.env.AI_SUGGEST_URL;
+  const aiEndpoint = process.env.NEXT_PUBLIC_AI_SUGGEST_URL;
 
   if (aiEndpoint) {
     try {
