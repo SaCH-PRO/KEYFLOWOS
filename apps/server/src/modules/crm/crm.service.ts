@@ -29,4 +29,19 @@ export class CrmService {
       },
     });
   }
+
+  async findOrCreateContact(
+    businessId: string,
+    input: { firstName?: string | null; lastName?: string | null; email?: string | null; phone?: string | null },
+  ) {
+    if (input.email) {
+      const existing = await this.prisma.client.contact.findFirst({
+        where: { businessId, email: input.email, deletedAt: null },
+      });
+      if (existing) {
+        return existing;
+      }
+    }
+    return this.createContact({ businessId, ...input });
+  }
 }
