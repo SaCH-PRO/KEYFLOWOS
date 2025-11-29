@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3001';
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
 type FetchOptions = {
   path: string;
@@ -8,22 +8,28 @@ type FetchOptions = {
 
 type ApiResponse<T> = { data: T | null; error: string | null };
 
+function getAuthHeaders(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  const token = window.localStorage?.getItem("kf_token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export async function apiPost<T>({ path, body, init }: FetchOptions): Promise<ApiResponse<T>> {
   try {
     const res = await fetch(`${API_BASE}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...getAuthHeaders(), ...(init?.headers as any) },
       body: body ? JSON.stringify(body) : undefined,
       ...init,
     });
     const data = await res.json().catch(() => null);
     if (!res.ok) {
-      return { data: null, error: data?.message ?? 'Request failed' };
+      return { data: null, error: data?.message ?? "Request failed" };
     }
     return { data, error: null };
   } catch (err: any) {
-    return { data: null, error: err?.message ?? 'Network error' };
+    return { data: null, error: err?.message ?? "Network error" };
   }
 }
 
-export { API_BASE };
+export { API_BASE, getAuthHeaders };

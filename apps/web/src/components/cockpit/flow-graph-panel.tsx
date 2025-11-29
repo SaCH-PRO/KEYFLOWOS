@@ -2,7 +2,9 @@
 
 import { motion } from "framer-motion";
 
-const phases = [
+export type Phase = { label: string; value: number };
+
+const defaultPhases: Phase[] = [
   { label: "Leads", value: 24 },
   { label: "Conversations", value: 15 },
   { label: "Quotes Sent", value: 8 },
@@ -10,7 +12,7 @@ const phases = [
   { label: "Bookings", value: 5 },
 ];
 
-export function FlowGraphPanel() {
+export function FlowGraphPanel({ phases = defaultPhases, bottleneck }: { phases?: Phase[]; bottleneck?: string }) {
   return (
     <div className="rounded-3xl border border-border/60 bg-slate-950/80 backdrop-blur-xl p-3 md:p-4 flex flex-col h-[420px]">
       <div className="flex items-center justify-between mb-2">
@@ -54,7 +56,7 @@ export function FlowGraphPanel() {
 
       <div className="mt-3 flex items-center justify-between text-[11px] text-muted-foreground">
         <span>
-          Bottleneck: <span className="text-amber-300">Quotes → Paid</span>
+          Bottleneck: <span className="text-amber-300">{bottleneck ?? "Quotes → Paid"}</span>
         </span>
         <button className="text-primary hover:underline">Ask AI to fix this</button>
       </div>

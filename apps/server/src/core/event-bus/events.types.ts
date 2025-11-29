@@ -15,7 +15,7 @@ export class BookingCreatedPayload {
 
 // Payload for when an invoice is paid
 export class InvoicePaidPayload {
-  invoice!: Invoice & { items?: InvoiceItem[]; contact?: Contact };
+  invoice!: Invoice & { items?: InvoiceItem[]; contact?: Contact; bookingId?: string | null };
   businessId!: string;
 }
 

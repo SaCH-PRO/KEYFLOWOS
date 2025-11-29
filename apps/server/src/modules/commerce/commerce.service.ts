@@ -33,10 +33,11 @@ export class CommerceService {
       data: {
         businessId,
         contactId,
+        invoiceNumber: `INV-${Date.now()}`,
         status: 'DRAFT',
         issueDate: new Date(),
         total,
-        currency: service.currency ?? 'TTD',
+        currency: (service as any).currency ?? 'TTD',
         items: {
           create: [
             {
@@ -49,6 +50,14 @@ export class CommerceService {
         },
       },
       include: { items: true, contact: true },
+    });
+  }
+
+  listInvoices(businessId: string) {
+    return this.prisma.client.invoice.findMany({
+      where: { businessId, deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+      include: { contact: true },
     });
   }
 

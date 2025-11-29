@@ -40,7 +40,7 @@ describe('Identity e2e', () => {
     app = moduleRef.createNestApplication();
     const controller = moduleRef.get(IdentityController);
     (controller as any).identity = identityServiceMock;
-    app.use((req, _res, next) => {
+    app.use((req: any, _res: any, next: any) => {
       (req as any).user = { id: 'user_1' };
       next();
     });

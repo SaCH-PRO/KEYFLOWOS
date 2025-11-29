@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { Button, Card, Input, Badge } from "@keyflow/ui";
 import { apiPost, API_BASE } from "@/lib/api";
+import { DEFAULT_BUSINESS_ID } from "@/lib/client";
+import { motion } from "framer-motion";
 
 const serviceOptions = [
   { id: "svc_consult", label: "Consultation · TTD 500" },
@@ -14,17 +16,19 @@ const staffOptions = [
 ];
 
 export default function PublicBookPage() {
-  const [businessId, setBusinessId] = useState("");
+  const [businessId, setBusinessId] = useState(DEFAULT_BUSINESS_ID);
   const [serviceId, setServiceId] = useState(serviceOptions[0]?.id ?? "");
   const [staffId, setStaffId] = useState(staffOptions[0]?.id ?? "");
   const [startTime, setStartTime] = useState("");
   const [firstName, setFirstName] = useState("");
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatus("Submitting...");
+    setSuccess(false);
     const { data, error } = await apiPost<{
       bookingId: string;
       invoiceId?: string;
@@ -43,6 +47,7 @@ export default function PublicBookPage() {
       setStatus(`Error: ${error}`);
     } else {
       setStatus(`Booked! bookingId=${data?.bookingId} invoiceId=${data?.invoiceId ?? "none"}`);
+      setSuccess(true);
     }
   };
 
@@ -112,7 +117,15 @@ export default function PublicBookPage() {
               <Button type="submit">Submit Booking</Button>
             </div>
           </form>
-          {status && <p className="mt-3 text-sm text-slate-200">{status}</p>}
+          {status && (
+            <motion.p
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={`mt-3 text-sm ${success ? "text-emerald-300" : "text-amber-200"}`}
+            >
+              {status}
+            </motion.p>
+          )}
         </Card>
       </div>
     </main>
