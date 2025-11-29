@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { InvoicePaidPayload } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Injectable()
@@ -29,8 +30,14 @@ export class CommerceService {
     const invoice = await this.prisma.client.invoice.update({
       where: { id: invoiceId },
       data: { status: 'PAID', paidAt: new Date() },
+      include: { items: true, contact: true },
     });
-    this.events.emit('invoice.paid', { invoiceId, businessId: invoice.businessId });
+
+    const payload: InvoicePaidPayload = {
+      invoice,
+      businessId: invoice.businessId,
+    };
+    this.events.emit('invoice.paid', payload);
     return invoice;
   }
 }

@@ -37,7 +37,13 @@ describe('CommerceService', () => {
     const invoice = await service.markInvoicePaid('inv_1');
 
     expect(invoice.status).toBe('PAID');
-    expect(emit).toHaveBeenCalledWith('invoice.paid', { invoiceId: 'inv_1', businessId: 'biz_1' });
+    expect(emit).toHaveBeenCalledWith(
+      'invoice.paid',
+      expect.objectContaining({
+        businessId: 'biz_1',
+        invoice: expect.objectContaining({ id: 'inv_1', status: 'PAID' }),
+      }),
+    );
   });
 
   it('creates and lists products', async () => {

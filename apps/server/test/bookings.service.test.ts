@@ -40,7 +40,13 @@ describe('BookingsService', () => {
       endTime: new Date(),
     });
 
-    expect(emit).toHaveBeenCalledWith('booking.created', { bookingId: booking.id, businessId: 'biz_1' });
+    expect(emit).toHaveBeenCalledWith(
+      'booking.created',
+      expect.objectContaining({
+        businessId: 'biz_1',
+        booking: expect.objectContaining({ id: booking.id }),
+      }),
+    );
   });
 
   it('lists bookings per business', async () => {
