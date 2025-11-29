@@ -9,6 +9,7 @@ export type FeedItem = {
   time: string;
   description: string;
   suggestion?: string;
+  meta?: { invoiceId?: string };
 };
 
 const defaultFeed: FeedItem[] = [
@@ -44,9 +45,11 @@ function iconFor(type: FeedItem["type"]) {
 export function FlowFeedPanel({
   items = defaultFeed,
   onAsk,
+  onAction,
 }: {
   items?: FeedItem[];
   onAsk?: (item: FeedItem) => void | Promise<void>;
+  onAction?: (item: FeedItem) => void | Promise<void>;
 }) {
   return (
     <div className="rounded-3xl border border-border/60 bg-slate-950/80 backdrop-blur-xl p-3 md:p-4 flex flex-col h-[420px]">
@@ -89,6 +92,15 @@ export function FlowFeedPanel({
                       onClick={() => onAsk?.(item)}
                     >
                       <span>Ask AI: {item.suggestion}</span>
+                      <ArrowRight className="w-3 h-3" />
+                    </button>
+                  )}
+                  {item.meta?.invoiceId && (
+                    <button
+                      className="inline-flex items-center gap-1 rounded-full border border-border/70 px-2 py-0.5 text-[10px] text-muted-foreground hover:text-primary hover:border-primary/60"
+                      onClick={() => onAction?.(item)}
+                    >
+                      Open receipt
                       <ArrowRight className="w-3 h-3" />
                     </button>
                   )}

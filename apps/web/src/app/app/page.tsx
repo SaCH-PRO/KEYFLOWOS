@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import { AchievementsStrip } from "@/components/cockpit/achievements-strip";
@@ -6,7 +6,7 @@ import { FeedItem, FlowFeedPanel } from "@/components/cockpit/flow-feed-panel";
 import { FlowGraphPanel, Phase } from "@/components/cockpit/flow-graph-panel";
 import { FlowStatsRow } from "@/components/cockpit/flow-stats-row";
 import { MomentumBar } from "@keyflow/ui";
-import { fetchBookings, fetchContacts, fetchProducts, fetchInvoices, Invoice, Product } from "@/lib/client";
+import { fetchBookings, fetchContacts, fetchProducts, fetchInvoices, Invoice } from "@/lib/client";
 import { apiPost } from "@/lib/api";
 
 export default function AppHome() {
@@ -16,12 +16,12 @@ export default function AppHome() {
     avgResponseTime: "--",
   });
   const [loading, setLoading] = useState(true);
-  const [feed, setFeed] = useState<FeedItem[]>([]);
   const [phases, setPhases] = useState<Phase[]>([]);
   const [momentum, setMomentum] = useState(0.35);
   const [streaks, setStreaks] = useState<string[]>([]);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
 
   useEffect(() => {
     const load = async () => {
@@ -35,30 +35,61 @@ export default function AppHome() {
       const contactCount = Array.isArray(contacts) ? contacts.length : 0;
       const bookingCount = Array.isArray(bookings) ? bookings.length : 0;
       const productCount = Array.isArray(products) ? products.length : 0;
+      const invoiceCount = Array.isArray(invs) ? invs.length : 0;
+      const invoicesPaid = Array.isArray(invs) ? invs.filter((i) => i.status?.toUpperCase() === "PAID").length : 0;
 
       setStats({
         mrr: `TTD ${Math.max(5000, bookingCount * 2000 + productCount * 1200).toLocaleString()}`,
         conversionRate: `${Math.min(80, 20 + contactCount * 3)}%`,
         avgResponseTime: `${Math.max(2, 6 - contactCount * 0.2).toFixed(1)}m`,
       });
-      setFeed(buildFeed({ contactsCount: contactCount, bookingCount, productCount }));
+
+      const initialFeed = buildFeed({
+        contactsCount: contactCount,
+        bookingCount,
+        productCount,
+        invoices: invs ?? [],
+      });
+      setFeedItems(initialFeed);
+
       setPhases([
         { label: "Leads", value: Math.max(contactCount, 5) },
         { label: "Conversations", value: Math.max(Math.round(contactCount * 0.6), 3) },
         { label: "Quotes Sent", value: Math.max(Math.round(contactCount * 0.4), 2) },
-        { label: "Invoices Paid", value: Math.max(Math.round((invs?.length ?? 0) * 0.7), 1) },
+        { label: "Invoices Paid", value: Math.max(Math.round(invoiceCount * 0.7), 1) },
         { label: "Bookings", value: Math.max(bookingCount, 1) },
       ]);
-      const momentumScore = Math.min(1, 0.2 + bookingCount * 0.08 + productCount * 0.05 + contactCount * 0.03);
+
+      const momentumScore = Math.min(
+        1,
+        0.15 + bookingCount * 0.08 + productCount * 0.05 + contactCount * 0.03 + invoicesPaid * 0.06,
+      );
       setMomentum(momentumScore);
       setStreaks([
-        bookingCount > 0 ? "Bookings rising" : "Start bookings",
-        productCount > 0 ? "Revenue streak" : "Launch billing",
+        bookingCount >= 3 ? "Booking streak" : "Create bookings",
+        invoicesPaid >= 2 ? "Revenue streak" : "Collect payments",
       ]);
       setInvoices(invs ?? []);
       setLoading(false);
     };
     void load();
+
+    if (typeof window !== "undefined") {
+      const handler = (event: Event) => {
+        const detail = (event as CustomEvent).detail as { invoiceNumber?: string; total?: number; currency?: string; invoiceId?: string };
+        const newItem: FeedItem = {
+          type: "payment",
+          title: `${detail.invoiceNumber ?? "Invoice"} marked PAID`,
+          time: "just now",
+          description: `${detail.currency ?? "TTD"} ${Number(detail.total ?? 0).toLocaleString()}`,
+          suggestion: "Send receipt",
+          meta: detail.invoiceId ? { invoiceId: detail.invoiceId } : undefined,
+        };
+        setFeedItems((prev) => [newItem, ...prev].slice(0, 8));
+      };
+      window.addEventListener("kf:invoicePaid", handler as EventListener);
+      return () => window.removeEventListener("kf:invoicePaid", handler as EventListener);
+    }
   }, []);
 
   return (
@@ -87,9 +118,14 @@ export default function AppHome() {
 
       <div className="grid gap-4 md:gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1.4fr)]">
         <FlowFeedPanel
-          items={feed}
+          items={feedItems}
           onAsk={(item) => {
             void requestAiSuggestion(item, (msg) => setAiSuggestion(msg));
+          }}
+          onAction={(item) => {
+            if (item.meta?.invoiceId) {
+              window.open(`/commerce/invoices/${item.meta.invoiceId}/receipt`, "_blank");
+            }
           }}
         />
         <FlowGraphPanel phases={phases} bottleneck="Quotes → Paid" />
@@ -121,8 +157,7 @@ export default function AppHome() {
   );
 }
 
-function buildFeed(input: { contactsCount: number; bookingCount: number; productCount: number }): FeedItem[] {
-  const now = new Date();
+function buildFeed(input: { contactsCount: number; bookingCount: number; productCount: number; invoices: Invoice[] }): FeedItem[] {
   const minutesAgo = (n: number) => `${n} min ago`;
   const items: FeedItem[] = [];
 
@@ -143,6 +178,19 @@ function buildFeed(input: { contactsCount: number; bookingCount: number; product
       time: minutesAgo(12),
       description: "TTD 850.00 received via Stripe.",
       suggestion: "Send review request",
+    });
+  }
+
+  if (input.invoices.length > 0) {
+    input.invoices.slice(0, 2).forEach((inv, idx) => {
+      items.push({
+        type: "payment",
+        title: `${inv.invoiceNumber ?? "Invoice"} ${inv.status}`,
+        time: minutesAgo(20 + idx * 3),
+        description: `${inv.currency} ${Number(inv.total).toLocaleString()} · ${inv.status}`,
+        suggestion: inv.status === "PAID" ? "Send receipt" : "Remind contact",
+        meta: { invoiceId: inv.id },
+      });
     });
   }
 

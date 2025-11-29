@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { CommandPalette } from "@/components/command-palette";
 import {
   Activity,
   Settings,
@@ -28,6 +30,22 @@ const navItems = [
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // Hotkey Cmd/Ctrl + K
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+      if (e.key === "Escape") {
+        setPaletteOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-slate-950/95 text-foreground">
       <div className="flex">
@@ -76,7 +94,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <div className="flex items-center gap-3">
               <span className="inline-flex items-center gap-2 rounded-full border border-primary/70 bg-primary/10 px-3 py-1 text-[11px] font-medium text-primary">
                 <span className="h-1.5 w-1.5 rounded-full bg-primary animate-ping" />
-                Cmd + K
+                Cmd/Ctrl + K
               </span>
               <span className="text-xs text-muted-foreground hidden md:inline">
                 Run AI actions, jump to modules, or search.
@@ -95,6 +113,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="flex-1 px-4 md:px-6 py-4 md:py-6">{children}</div>
         </main>
       </div>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
   );
 }

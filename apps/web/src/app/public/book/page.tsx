@@ -24,11 +24,16 @@ export default function PublicBookPage() {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [bookingId, setBookingId] = useState<string | null>(null);
+  const [invoiceId, setInvoiceId] = useState<string | null>(null);
+  const [copyMsg, setCopyMsg] = useState<string | null>(null);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatus("Submitting...");
     setSuccess(false);
+    setBookingId(null);
+    setInvoiceId(null);
     const { data, error } = await apiPost<{
       bookingId: string;
       invoiceId?: string;
@@ -48,6 +53,8 @@ export default function PublicBookPage() {
     } else {
       setStatus(`Booked! bookingId=${data?.bookingId} invoiceId=${data?.invoiceId ?? "none"}`);
       setSuccess(true);
+      setBookingId(data?.bookingId ?? null);
+      setInvoiceId(data?.invoiceId ?? null);
     }
   };
 
@@ -118,13 +125,66 @@ export default function PublicBookPage() {
             </div>
           </form>
           {status && (
-            <motion.p
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={`mt-3 text-sm ${success ? "text-emerald-300" : "text-amber-200"}`}
-            >
-              {status}
-            </motion.p>
+            <div className="relative mt-3">
+              {success && (
+                <motion.span
+                  className="pointer-events-none absolute inset-0 rounded-2xl border border-emerald-400/50"
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: [0.6, 0], scale: [1, 1.2] }}
+                  transition={{ duration: 0.8, ease: "easeOut", repeat: 1 }}
+                />
+              )}
+              <motion.p
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className={`text-sm ${success ? "text-emerald-300" : "text-amber-200"}`}
+              >
+                {status}
+              </motion.p>
+              {success && (
+                <div className="mt-2 text-xs text-slate-200 space-y-1">
+                  {bookingId && (
+                    <div>
+                      Booking ID: <code className="font-mono">{bookingId}</code>
+                    </div>
+                  )}
+                  {invoiceId && (
+                    <div>
+                      Invoice ID: <code className="font-mono">{invoiceId}</code>
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    {invoiceId && (
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 rounded-full border border-primary/60 px-3 py-1 text-[11px] text-primary hover:bg-primary/10"
+                        onClick={() => window.open(`${API_BASE}/commerce/invoices/${invoiceId}/receipt`, "_blank")}
+                      >
+                        View receipt
+                      </button>
+                    )}
+                    {bookingId && (
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground hover:border-primary/60 hover:text-primary"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(`${window.location.origin}/public/book?bookingId=${bookingId}`);
+                            setCopyMsg("Link copied");
+                            setTimeout(() => setCopyMsg(null), 1500);
+                          } catch (err) {
+                            setCopyMsg("Copy failed");
+                          }
+                        }}
+                      >
+                        Share booking
+                      </button>
+                    )}
+                  </div>
+                  {copyMsg && <div className="text-[11px] text-emerald-300">{copyMsg}</div>}
+                </div>
+              )}
+            </div>
           )}
         </Card>
       </div>

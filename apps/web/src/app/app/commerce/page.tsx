@@ -128,6 +128,13 @@ export default function CommercePage() {
                   const { data, error } = await markInvoicePaid(inv.id);
                   if (!error && data) {
                     setInvoices((prev) => prev.map((i) => (i.id === inv.id ? { ...i, status: data.status ?? "PAID" } : i)));
+                    if (typeof window !== "undefined") {
+                      window.dispatchEvent(
+                        new CustomEvent("kf:invoicePaid", {
+                          detail: { invoiceNumber: data.invoiceNumber ?? inv.invoiceNumber, total: data.total, currency: data.currency },
+                        }),
+                      );
+                    }
                   } else {
                     setInvoiceError(error ?? "Failed to mark paid");
                   }
