@@ -1,0 +1,24 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --kf-bg: #0d0d0e;
+  --kf-surface: #1f2225;
+  --kf-glass: rgba(31, 34, 37, 0.7);
+  --kf-border: rgba(213, 215, 218, 0.12);
+  --kf-text: #e7eaee;
+  --kf-text-muted: #a9afb8;
+  --kf-electric: #4ea8ff;
+  --kf-pulse: #a374ff;
+  --kf-mint: #4cffce;
+  --kf-amber: #ffc34d;
+  --kf-red: #ff4e4e;
+  --kf-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+  --kf-glow: 0 0 24px rgba(78, 168, 255, 0.35);
+  --kf-radius: 16px;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: var(--kf-bg);
+  color: var(--kf-text);
+}

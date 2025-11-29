@@ -6,7 +6,34 @@ const config: Config = {
     "./packages/ui/src/**/*.{ts,tsx}",
   ],
   theme: {
-    extend: {},
+    extend: {
+      colors: {
+        'neo-black': '#000000',
+        'neo-graphite': '#0D0D0E',
+        'neo-chrome': '#1F2225',
+        'neo-silver': '#D5D7DA',
+        'electric-blue': '#4EA8FF',
+        'pulse-violet': '#A374FF',
+        'neon-mint': '#4CFFCE',
+        'amber-circuit': '#FFC34D',
+        'cyber-red': '#FF4E4E',
+      },
+      fontFamily: {
+        sans: ['Inter', 'ui-sans-serif', 'system-ui'],
+        mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular'],
+      },
+      boxShadow: {
+        'glass': '0 10px 40px rgba(0, 0, 0, 0.45)',
+        'neon': '0 0 20px rgba(78, 168, 255, 0.35)',
+      },
+      borderRadius: {
+        lg: '14px',
+        xl: '18px',
+      },
+      transitionTimingFunction: {
+        'flow': 'cubic-bezier(0.19, 1, 0.22, 1)',
+      },
+    },
   },
   plugins: [],
 };

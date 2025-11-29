@@ -13,6 +13,8 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "incremental": true,
+    "types": ["next", "react", "react-dom", "node"],
+    "typeRoots": ["./node_modules/@types", "../../node_modules/@types"],
     "plugins": [
       {
         "name": "next"
@@ -20,12 +22,7 @@
     ],
     "paths": {
       "@/*": ["./src/*"],
-      "@keyflow/ui": ["../../packages/ui/src"],
-      "react": ["./node_modules/@types/react/index.d.ts"],
-      "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime.d.ts"],
-      "react/jsx-dev-runtime": ["./node_modules/@types/react/jsx-dev-runtime.d.ts"],
-      "react-dom": ["./node_modules/@types/react-dom/index.d.ts"],
-      "react-dom/*": ["./node_modules/@types/react-dom/*"]
+      "@keyflow/ui": ["../../packages/ui/src"]
     }
   },
   "include": [
@@ -38,5 +35,5 @@
     "../../packages/ui/src/**/*.ts",
     "../../packages/ui/src/**/*.tsx"
   ],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "../../packages/ui/src/**/*.stories.tsx"]
 }

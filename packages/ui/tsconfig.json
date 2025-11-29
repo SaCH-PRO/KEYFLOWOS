@@ -1,21 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "noEmit": false,
-    "outDir": "dist",
-    "rootDir": "src",
-    "declaration": true,
-    "declarationMap": true,
-    "emitDeclarationOnly": false,
     "jsx": "react-jsx",
-    "module": "esnext",
-    "moduleResolution": "node",
-    "target": "es2019",
-    "lib": ["dom", "dom.iterable", "esnext"],
-    "skipLibCheck": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true
+    "types": ["react", "react-dom", "node"]
   },
-  "include": ["src"],
-  "exclude": ["dist"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules", "dist", "src/**/*.stories.tsx"]
 }
