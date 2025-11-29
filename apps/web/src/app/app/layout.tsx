@@ -28,7 +28,7 @@ const navSections = [
   {
     title: "Primary",
     items: [
-      { label: "Keyflow Command", href: "/app", icon: Activity },
+  { label: "Command", href: "/app", icon: Activity },
       { label: "CRM", href: "/app/crm", icon: Users },
       { label: "Commerce", href: "/app/commerce", icon: CreditCard },
       { label: "Bookings", href: "/app/bookings", icon: Calendar },
@@ -89,15 +89,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <div className="h-9 w-9 rounded-2xl bg-primary/20 flex items-center justify-center shadow-glow-primary">
               <span className="h-4 w-4 rounded-full bg-primary" />
             </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-[0.28em] text-muted-foreground">KeyFlow</div>
-              <div className="text-sm font-semibold">Command OS</div>
+            <div className="text-sm font-semibold text-primary tracking-[0.24em] drop-shadow-[0_0_12px_rgba(41,123,255,0.7)]">
+              KEYFLOWOS
             </div>
-            <button className="ml-auto inline-flex items-center gap-1 rounded-full border border-border/60 bg-slate-900/70 px-2 py-1 text-[11px] text-muted-foreground hover:border-primary/60 hover:text-foreground">
-              <Building2 className="w-3 h-3" />
-              Demo Co
-              <ChevronDown className="w-3 h-3" />
-            </button>
           </div>
 
           <nav className="flex-1 px-2 py-4 space-y-4">
@@ -130,8 +124,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             ))}
           </nav>
 
-          <div className="px-4 pb-4 border-t border-border/60 flex items-center justify-between text-xs text-muted-foreground">
-            <span>Workspace: Demo</span>
+          <div className="px-4 pb-4 border-t border-border/60 flex items-center justify-end text-xs text-muted-foreground">
             <ThemeToggle />
           </div>
         </aside>

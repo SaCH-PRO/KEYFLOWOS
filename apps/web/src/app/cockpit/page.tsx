@@ -13,7 +13,7 @@ export default function CockpitPage() {
     <Shell
       sidebar={
         <div className="p-4 space-y-3 text-sm text-slate-200">
-          <div className="uppercase text-xs tracking-[0.08em] text-slate-400 mb-2">Keyflow Command</div>
+          <div className="uppercase text-xs tracking-[0.08em] text-slate-400 mb-2">Command</div>
           <div className="space-y-1">
             {["Flow Feed", "Live Graph", "Cmd+K", "Automations", "Billing"].map((item) => (
               <div

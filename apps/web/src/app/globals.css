@@ -76,3 +76,59 @@
     -moz-osx-font-smoothing: grayscale;
   }
 }
+
+@layer components {
+  .landing {
+    @apply relative min-h-screen flex flex-col items-center justify-center px-6 text-center gap-6;
+    background: radial-gradient(circle at 40% 20%, rgba(41,123,255,0.16), transparent 45%),
+      radial-gradient(circle at 70% 60%, rgba(0,207,255,0.18), transparent 50%),
+      #02040b;
+    overflow: hidden;
+  }
+  .landing::before {
+    content: "";
+    position: absolute;
+    inset: -10% 10% 30% 10%;
+    background: radial-gradient(circle at 50% 30%, rgba(0,207,255,0.18), transparent 60%);
+    filter: blur(60px);
+    opacity: 0.7;
+    animation: slow-pulse 8s ease-in-out infinite alternate;
+    pointer-events: none;
+  }
+  .landing-title {
+    letter-spacing: 0.38em;
+    text-indent: 0.38em;
+    text-transform: uppercase;
+    color: #7fe6ff;
+    text-shadow:
+      0 0 6px #7fe6ff,
+      0 0 16px #7fe6ff,
+      0 0 32px #2fd0ff,
+      0 0 56px #00cfff;
+  }
+  .landing-tagline {
+    @apply text-base md:text-lg max-w-3xl text-[#9fb3ff] leading-relaxed;
+  }
+  .landing-button {
+    @apply relative inline-flex items-center justify-center rounded-full border text-base font-semibold px-6 py-3 transition-all;
+    background: linear-gradient(135deg, rgba(41,123,255,0.9), rgba(0,207,255,0.7));
+    border-color: rgba(78,168,255,0.7);
+    color: #e9f4ff;
+    box-shadow: 0 0 22px rgba(41,123,255,0.45), 0 0 48px rgba(0,207,255,0.35);
+  }
+  .landing-button:hover {
+    box-shadow: 0 0 28px rgba(41,123,255,0.55), 0 0 62px rgba(0,207,255,0.45);
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes slow-pulse {
+  0% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0.8;
+    transform: scale(1.05);
+  }
+}
