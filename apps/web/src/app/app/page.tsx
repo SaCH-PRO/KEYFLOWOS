@@ -10,16 +10,16 @@ import { fetchBookings, fetchContacts, fetchProducts, fetchInvoices, Invoice } f
 import { apiPost } from "@/lib/api";
 
 export default function AppHome() {
-  const [stats, setStats] = useState({
-    mrr: "TTD --",
-    conversionRate: "--",
-    avgResponseTime: "--",
-  });
+  const [stats, setStats] = useState({ mrr: "TTD --", conversionRate: "--", avgResponseTime: "--" });
   const [loading, setLoading] = useState(true);
   const [phases, setPhases] = useState<Phase[]>([]);
+  const [bottleneck, setBottleneck] = useState<string>("Quotes â†’ Paid");
   const [momentum, setMomentum] = useState(0.35);
   const [streaks, setStreaks] = useState<string[]>([]);
+  const [headerBadges, setHeaderBadges] = useState<string[]>([]);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
 
@@ -44,21 +44,19 @@ export default function AppHome() {
         avgResponseTime: `${Math.max(2, 6 - contactCount * 0.2).toFixed(1)}m`,
       });
 
-      const initialFeed = buildFeed({
-        contactsCount: contactCount,
-        bookingCount,
-        productCount,
-        invoices: invs ?? [],
-      });
+      const initialFeed = buildFeed({ contactsCount: contactCount, bookingCount, productCount, invoices: invs ?? [] });
       setFeedItems(initialFeed);
 
-      setPhases([
-        { label: "Leads", value: Math.max(contactCount, 5) },
-        { label: "Conversations", value: Math.max(Math.round(contactCount * 0.6), 3) },
-        { label: "Quotes Sent", value: Math.max(Math.round(contactCount * 0.4), 2) },
-        { label: "Invoices Paid", value: Math.max(Math.round(invoiceCount * 0.7), 1) },
+      // Derive phases from live counts (best-effort with available endpoints)
+      const phaseValues: Phase[] = [
+        { label: "Leads", value: Math.max(contactCount, 1) },
+        { label: "Quotes Sent", value: Math.max(invoiceCount, 1) }, // using invoices as closest available proxy
+        { label: "Invoices Paid", value: Math.max(invoicesPaid, 1) },
         { label: "Bookings", value: Math.max(bookingCount, 1) },
-      ]);
+      ];
+      setPhases(phaseValues);
+      const minPhase = phaseValues.reduce((a, b) => (b.value < a.value ? b : a), phaseValues[0]);
+      setBottleneck(minPhase.label);
 
       const momentumScore = Math.min(
         1,
@@ -69,6 +67,11 @@ export default function AppHome() {
         bookingCount >= 3 ? "Booking streak" : "Create bookings",
         invoicesPaid >= 2 ? "Revenue streak" : "Collect payments",
       ]);
+      const badges: string[] = [];
+      if (bookingCount >= 3) badges.push("Momentum rising");
+      if (invoicesPaid >= 2) badges.push("Revenue streak");
+      if (contactCount >= 5) badges.push("Lead surge");
+      setHeaderBadges(badges);
       setInvoices(invs ?? []);
       setLoading(false);
     };
@@ -101,14 +104,38 @@ export default function AppHome() {
             Your business graph, live. Watch leads flow into bookings and revenue in real-time.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button className="inline-flex items-center gap-2 rounded-full border border-primary/70 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            className="inline-flex items-center gap-2 rounded-full border border-primary/70 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 disabled:opacity-60 disabled:cursor-not-allowed"
+            onClick={async () => {
+              setAiLoading(true);
+              const msg = await requestAiSuggestion({
+                type: "automation",
+                title: "Health Check",
+                time: "now",
+                description: "AI health check",
+                suggestion: "Summarize health",
+              });
+              setAiSuggestion(msg);
+              setActionMessage(msg);
+              setAiLoading(false);
+            }}
+            disabled={aiLoading}
+          >
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-ping" />
-            Run AI Health Check
+            {aiLoading ? "AI thinking..." : "Run AI Health Check"}
           </button>
           <button className="hidden sm:inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:border-primary/60 hover:text-foreground">
             Export Report
           </button>
+          <div className="hidden lg:flex flex-wrap gap-2">
+            {headerBadges.map((b) => (
+              <span key={b} className="inline-flex items-center gap-1 rounded-full border border-primary/50 bg-primary/10 px-2.5 py-1 text-[11px] text-primary">
+                <span className="h-1.5 w-1.5 rounded-full bg-primary animate-ping" />
+                {b}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -120,20 +147,52 @@ export default function AppHome() {
         <FlowFeedPanel
           items={feedItems}
           onAsk={(item) => {
-            void requestAiSuggestion(item, (msg) => setAiSuggestion(msg));
+            void requestAiSuggestion(item).then((msg) => {
+              setAiSuggestion(msg);
+              setActionMessage(msg);
+            });
           }}
           onAction={(item) => {
             if (item.meta?.invoiceId) {
               window.open(`/commerce/invoices/${item.meta.invoiceId}/receipt`, "_blank");
+              void sendAction("send-receipt", { invoiceId: item.meta.invoiceId }).then((msg) => setActionMessage(msg));
+              setTimeout(() => setActionMessage(null), 2000);
+            }
+            if (item.meta?.contactEmail) {
+              void sendAction("remind-contact", { contactEmail: item.meta.contactEmail }).then((msg) => setActionMessage(msg));
             }
           }}
         />
-        <FlowGraphPanel phases={phases} bottleneck="Quotes → Paid" />
+        <div className="space-y-2">
+          <FlowGraphPanel phases={phases} bottleneck={bottleneck} />
+          <button
+            className="inline-flex items-center gap-2 rounded-full border border-primary/70 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20"
+            onClick={async () => {
+              const msg = await requestAiSuggestion({
+                type: "automation",
+                title: "Fix bottleneck",
+                time: "now",
+                description: bottleneck,
+                suggestion: `Improve ${bottleneck}`,
+              });
+              setAiSuggestion(msg);
+              setActionMessage(msg);
+            }}
+          >
+            Ask AI to fix {bottleneck}
+          </button>
+        </div>
       </div>
 
       {aiSuggestion && (
         <div className="rounded-2xl border border-primary/50 bg-primary/10 px-4 py-3 text-sm text-primary">
           {aiSuggestion}
+        </div>
+      )}
+
+      {actionMessage && (
+        <div className="rounded-2xl border border-border/70 bg-slate-900/60 px-4 py-2 text-xs text-muted-foreground">
+          {actionMessage}
         </div>
       )}
 
@@ -147,7 +206,7 @@ export default function AppHome() {
                 className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-slate-900/60 px-3 py-1 text-xs text-muted-foreground"
               >
                 <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                {inv.invoiceNumber ?? inv.id} · {inv.status}
+                {inv.invoiceNumber ?? inv.id} Â· {inv.status}
               </span>
             ))}
           </div>
@@ -187,9 +246,9 @@ function buildFeed(input: { contactsCount: number; bookingCount: number; product
         type: "payment",
         title: `${inv.invoiceNumber ?? "Invoice"} ${inv.status}`,
         time: minutesAgo(20 + idx * 3),
-        description: `${inv.currency} ${Number(inv.total).toLocaleString()} · ${inv.status}`,
+        description: `${inv.currency} ${Number(inv.total).toLocaleString()} Â· ${inv.status}`,
         suggestion: inv.status === "PAID" ? "Send receipt" : "Remind contact",
-        meta: { invoiceId: inv.id },
+        meta: { invoiceId: inv.id, contactEmail: inv.contact?.email ?? undefined },
       });
     });
   }
@@ -205,10 +264,21 @@ function buildFeed(input: { contactsCount: number; bookingCount: number; product
   return items;
 }
 
-async function requestAiSuggestion(item: FeedItem, setAiSuggestion: (msg: string) => void) {
+async function requestAiSuggestion(item: FeedItem): Promise<string> {
   const { data, error } = await apiPost<{ suggestion: string }>({
     path: "/api/ai/suggest",
     body: { title: item.title, type: item.type, suggestion: item.suggestion },
   });
-  setAiSuggestion(data?.suggestion ?? error ?? "AI is thinking...");
+  return data?.suggestion ?? error ?? "AI is thinking...";
+}
+
+async function sendAction(
+  type: "remind-contact" | "send-receipt",
+  payload: { contactEmail?: string; invoiceId?: string },
+): Promise<string> {
+  const { data, error } = await apiPost<{ message: string }>({
+    path: "/api/actions",
+    body: { type, ...payload },
+  });
+  return data?.message ?? error ?? "Action queued";
 }

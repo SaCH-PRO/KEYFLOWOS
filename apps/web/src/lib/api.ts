@@ -1,4 +1,5 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+const AI_SUGGEST_URL = process.env.NEXT_PUBLIC_AI_SUGGEST_URL;
 
 type FetchOptions = {
   path: string;
@@ -33,3 +34,4 @@ export async function apiPost<T>({ path, body, init }: FetchOptions): Promise<Ap
 }
 
 export { API_BASE, getAuthHeaders };
+export { AI_SUGGEST_URL };

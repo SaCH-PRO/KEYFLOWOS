@@ -17,10 +17,26 @@ export class FlowListener {
       await this.bookingsService.confirmBooking(payload.invoice.bookingId);
       this.logger.debug(`Booking ${payload.invoice.bookingId} confirmed via invoice.paid`);
     }
+
+    // Emit browser event via console log marker to let frontend append to feed (simple telemetry)
+    this.logger.log(
+      JSON.stringify({
+        event: 'invoice.paid',
+        invoiceId: payload.invoice.id,
+        total: payload.invoice.total,
+        currency: payload.invoice.currency,
+        contactId: payload.invoice.contact?.id,
+      }),
+    );
   }
 
   @OnEvent('booking.created')
   handleBookingCreated(payload: unknown) {
     this.logger.debug(`Flow observed booking.created`, payload as any);
+  }
+
+  @OnEvent('contact.created')
+  handleContactCreated(payload: unknown) {
+    this.logger.debug(`Flow observed contact.created`, payload as any);
   }
 }

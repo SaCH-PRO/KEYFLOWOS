@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { motion } from "framer-motion";
 
@@ -30,27 +30,36 @@ export function FlowGraphPanel({ phases = defaultPhases, bottleneck }: { phases?
         <div className="absolute inset-4 rounded-[2rem] bg-gradient-to-br from-primary/10 via-slate-900/80 to-emerald-500/5 blur-2xl pointer-events-none" />
 
         <div className="relative h-full flex items-center justify-between px-4">
-          {phases.map((phase, idx) => (
-            <motion.div
-              key={phase.label}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: idx * 0.05 }}
-              className="flex flex-col items-center gap-2"
-            >
-              <div className="relative">
-                <div className="h-16 w-16 rounded-3xl bg-slate-950 border border-border/70 flex flex-col items-center justify-center shadow-soft-elevated">
-                  <span className="text-xs font-semibold">{phase.value}</span>
-                  <span className="text-[9px] text-muted-foreground">{phase.label}</span>
-                </div>
-                {idx < phases.length - 1 && (
-                  <div className="hidden md:block absolute left-1/2 top-1/2 translate-x-[52px] -translate-y-1/2 w-16 h-px bg-gradient-to-r from-primary/40 via-primary/80 to-emerald-400/60">
-                    <span className="block h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+          {phases.map((phase, idx) => {
+            const isBottleneck = bottleneck && phase.label === bottleneck;
+            return (
+              <motion.div
+                key={phase.label}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: idx * 0.05 }}
+                className="flex flex-col items-center gap-2"
+              >
+                <div className="relative">
+                  <div
+                    className={`h-16 w-16 rounded-3xl flex flex-col items-center justify-center shadow-soft-elevated ${
+                      isBottleneck
+                        ? "bg-amber-500/10 border border-amber-400/70 text-amber-100"
+                        : "bg-slate-950 border border-border/70"
+                    }`}
+                  >
+                    <span className="text-xs font-semibold">{phase.value}</span>
+                    <span className="text-[9px] text-muted-foreground">{phase.label}</span>
                   </div>
-                )}
-              </div>
-            </motion.div>
-          ))}
+                  {idx < phases.length - 1 && (
+                    <div className="hidden md:block absolute left-1/2 top-1/2 translate-x-[52px] -translate-y-1/2 w-16 h-px bg-gradient-to-r from-primary/40 via-primary/80 to-emerald-400/60">
+                      <span className="block h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            );
+          })}
         </div>
       </div>
 

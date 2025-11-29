@@ -65,7 +65,7 @@ export class CommerceService {
     const invoice = await this.prisma.client.invoice.update({
       where: { id: invoiceId },
       data: { status: 'PAID', paidAt: new Date() },
-      include: { items: true, contact: true },
+      include: { items: true, contact: true, booking: true },
     });
 
     const payload: InvoicePaidPayload = {

@@ -59,13 +59,15 @@ export default function PublicPayPage() {
                   transition={{ duration: 0.8, ease: "easeOut", repeat: 1 }}
                 />
               )}
-              <motion.p
+              <motion.div
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
-                className={`text-sm ${success ? "text-emerald-300" : "text-amber-200"}`}
+                className={`rounded-2xl border px-3 py-2 text-sm ${
+                  success ? "border-emerald-400/50 bg-emerald-400/10 text-emerald-200" : "border-amber-300/50 bg-amber-300/10 text-amber-100"
+                }`}
               >
                 {status}
-              </motion.p>
+              </motion.div>
               {success && paidInvoiceId && (
                 <div className="mt-2 text-xs text-slate-200 space-y-1">
                   <div>
