@@ -9,11 +9,14 @@ export default function PublicPayPage() {
   const [invoiceId, setInvoiceId] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [paidInvoiceId, setPaidInvoiceId] = useState<string | null>(null);
+  const [copyMsg, setCopyMsg] = useState<string | null>(null);
 
   const markPaid = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatus("Marking paid...");
     setSuccess(false);
+    setPaidInvoiceId(null);
     const { data, error } = await apiPost<any>({
       path: `/commerce/invoices/${encodeURIComponent(invoiceId)}/paid`,
       body: {},
@@ -23,6 +26,7 @@ export default function PublicPayPage() {
     } else {
       setStatus(`Invoice ${data?.id ?? invoiceId} marked PAID.`);
       setSuccess(true);
+      setPaidInvoiceId(data?.id ?? invoiceId);
     }
   };
 
@@ -46,13 +50,53 @@ export default function PublicPayPage() {
             </div>
           </form>
           {status && (
-            <motion.p
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={`mt-3 text-sm ${success ? "text-emerald-300" : "text-amber-200"}`}
-            >
-              {status}
-            </motion.p>
+            <div className="relative mt-3">
+              {success && (
+                <motion.span
+                  className="pointer-events-none absolute inset-0 rounded-2xl border border-emerald-400/50"
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: [0.6, 0], scale: [1, 1.2] }}
+                  transition={{ duration: 0.8, ease: "easeOut", repeat: 1 }}
+                />
+              )}
+              <motion.p
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className={`text-sm ${success ? "text-emerald-300" : "text-amber-200"}`}
+              >
+                {status}
+              </motion.p>
+              {success && paidInvoiceId && (
+                <div className="mt-2 text-xs text-slate-200 space-y-1">
+                  <div>
+                    Invoice ID: <code className="font-mono">{paidInvoiceId}</code>
+                  </div>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-full border border-primary/60 px-3 py-1 text-[11px] text-primary hover:bg-primary/10"
+                    onClick={() => window.open(`${API_BASE}/commerce/invoices/${paidInvoiceId}/receipt`, "_blank")}
+                  >
+                    Download receipt
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground hover:border-primary/60 hover:text-primary"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(`${window.location.origin}/commerce/invoices/${paidInvoiceId}/receipt`);
+                        setCopyMsg("Receipt link copied");
+                        setTimeout(() => setCopyMsg(null), 1500);
+                      } catch (err) {
+                        setCopyMsg("Copy failed");
+                      }
+                    }}
+                  >
+                    Share receipt
+                  </button>
+                  {copyMsg && <div className="text-[11px] text-emerald-300">{copyMsg}</div>}
+                </div>
+              )}
+            </div>
           )}
         </Card>
       </div>

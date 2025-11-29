@@ -3,10 +3,11 @@ import { CommerceService } from './commerce.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CreateProductDto } from './dto/create-product.dto';
+import { ReceiptService } from './receipt.service';
 
 @Controller('commerce')
 export class CommerceController {
-  constructor(private readonly commerce: CommerceService) {}
+  constructor(private readonly commerce: CommerceService, private readonly receipts: ReceiptService) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/products')
@@ -33,5 +34,11 @@ export class CommerceController {
   @Get('businesses/:businessId/invoices')
   listInvoices(@Param('businessId') businessId: string) {
     return this.commerce.listInvoices(businessId);
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('invoices/:invoiceId/receipt')
+  getReceipt(@Param('invoiceId') invoiceId: string) {
+    return this.receipts.buildReceipt(invoiceId);
   }
 }
