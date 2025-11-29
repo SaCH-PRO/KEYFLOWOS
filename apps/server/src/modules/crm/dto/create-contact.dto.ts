@@ -16,4 +16,18 @@ export class CreateContactDto {
   @IsString()
   @IsOptional()
   phone?: string;
+
+  @IsString()
+  @IsOptional()
+  status?: string;
+
+  @IsString()
+  @IsOptional()
+  source?: string;
+
+  @IsOptional()
+  tags?: string[];
+
+  @IsOptional()
+  custom?: Record<string, any>;
 }
