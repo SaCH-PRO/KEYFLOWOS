@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './core/prisma/prisma.module';
@@ -15,6 +15,7 @@ import { SiteModule } from './modules/site/site.module';
 import { AiModule } from './modules/ai/ai.module';
 import { FlowModule } from './modules/flow/flow.module';
 import { GamificationModule } from './modules/gamification/gamification.module';
+import { AuthMiddleware } from './core/auth/auth.middleware';
 
 @Module({
   imports: [
@@ -39,4 +40,8 @@ import { GamificationModule } from './modules/gamification/gamification.module';
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(AuthMiddleware).forRoutes('*');
+  }
+}
