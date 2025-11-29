@@ -37,9 +37,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <span className="h-4 w-4 rounded-full bg-primary" />
             </div>
             <div>
-              <div className="text-[10px] uppercase tracking-[0.28em] text-muted-foreground">
-                KeyFlow
-              </div>
+              <div className="text-[10px] uppercase tracking-[0.28em] text-muted-foreground">KeyFlow</div>
               <div className="text-sm font-semibold">Command OS</div>
             </div>
           </div>

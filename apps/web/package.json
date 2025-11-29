@@ -15,17 +15,19 @@
     "next": "^16.0.5",
     "next-themes": "^0.3.0",
     "react": "19.2.0",
-    "react-dom": "19.2.0"
+    "react-dom": "19.2.0",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "autoprefixer": "^10.4.20",
     "baseline-browser-mapping": "^2.8.32",
     "eslint": "^9",
     "eslint-config-next": "^16.0.5",
-    "tailwindcss": "^4",
+    "postcss": "^8.4.41",
+    "tailwindcss": "^3.4.13",
     "typescript": "^5"
   }
 }
