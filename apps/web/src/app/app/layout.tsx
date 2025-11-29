@@ -31,6 +31,8 @@ const navItems = [
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // Temporary momentum value; could be wired to live data
+  const momentumValue = 0.65;
 
   // Hotkey Cmd/Ctrl + K
   useEffect(() => {
@@ -48,6 +50,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, []);
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-slate-950/95 text-foreground">
+      {/* Slim momentum bar visible across pages */}
+      <div className="h-1 w-full bg-slate-900/80 border-b border-border/60">
+        <div
+          className="h-full bg-gradient-to-r from-primary via-emerald-400 to-emerald-200 transition-all duration-500 shadow-[0_0_12px_rgba(78,168,255,0.5)]"
+          style={{ width: `${Math.round(momentumValue * 100)}%` }}
+        />
+      </div>
       <div className="flex">
         <aside className="hidden md:flex md:flex-col md:w-64 border-r border-border/60 bg-slate-950/70 backdrop-blur-xl">
           <div className="flex items-center gap-2 px-5 py-4 border-b border-border/60">
