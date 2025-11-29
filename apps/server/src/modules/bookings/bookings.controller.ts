@@ -1,15 +1,18 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { BookingsService } from './bookings.service';
+import { AuthGuard } from '../../core/auth/auth.guard';
 
 @Controller('bookings')
 export class BookingsController {
   constructor(private readonly bookings: BookingsService) {}
 
+  @UseGuards(AuthGuard)
   @Get('businesses/:businessId')
   listBookings(@Param('businessId') businessId: string) {
     return this.bookings.listBookings(businessId);
   }
 
+  @UseGuards(AuthGuard)
   @Post('businesses/:businessId')
   createBooking(
     @Param('businessId') businessId: string,

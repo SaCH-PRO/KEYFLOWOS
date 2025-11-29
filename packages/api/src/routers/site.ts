@@ -1,12 +1,17 @@
-import { publicProcedure, router } from '../trpc';
+import { protectedProcedure, router } from '../trpc';
 import { z } from 'zod';
 
 export const siteRouter = router({
-  health: publicProcedure.query(() => ({ status: 'ok', module: 'site' })),
-  getSite: publicProcedure
+  health: protectedProcedure.query(({ ctx }) => ({
+    status: 'ok',
+    module: 'site',
+    user: ctx.user,
+  })),
+  getSite: protectedProcedure
     .input(z.object({ businessId: z.string() }))
-    .query(({ input }) => ({
-      businessId: input.businessId,
-      site: null,
-    })),
+    .query(({ input, ctx }) =>
+      ctx.db.site.findFirst({
+        where: { businessId: input.businessId, deletedAt: null },
+      }),
+    ),
 });
