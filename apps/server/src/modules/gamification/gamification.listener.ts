@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { InvoicePaidPayload, PostPublishedPayload } from '../../core/event-bus/events.types';
+import { BookingCreatedPayload, InvoicePaidPayload, PostPublishedPayload } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Injectable()
@@ -44,6 +44,24 @@ export class GamificationListener {
         data: { metaData: { ...metaData, firstPostPublished: true } },
       });
       this.logger.debug(`Gamification: marked firstPostPublished for business ${payload.businessId}`);
+    }
+  }
+
+  @OnEvent('booking.created')
+  async handleFirstBooking(payload: BookingCreatedPayload) {
+    this.logger.debug(`Gamification observed booking.created`, payload as any);
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: payload.businessId },
+      select: { metaData: true },
+    });
+    if (!business) return;
+    const metaData = (business.metaData as Record<string, unknown>) || {};
+    if (!metaData.firstBooking) {
+      await this.prisma.client.business.update({
+        where: { id: payload.businessId },
+        data: { metaData: { ...metaData, firstBooking: true } },
+      });
+      this.logger.debug(`Gamification: marked firstBooking for business ${payload.businessId}`);
     }
   }
 }

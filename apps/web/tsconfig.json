@@ -35,5 +35,5 @@
     "../../packages/ui/src/**/*.ts",
     "../../packages/ui/src/**/*.tsx"
   ],
-  "exclude": ["node_modules", "../../packages/ui/src/**/*.stories.tsx"]
+  "exclude": ["node_modules", "../../packages/ui/src/**/*.stories.tsx", ".next"]
 }
