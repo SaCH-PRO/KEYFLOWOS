@@ -1,9 +1,13 @@
-import { publicProcedure, router } from '../trpc';
+import { protectedProcedure, router } from '../trpc';
 import { z } from 'zod';
 
 export const automationRouter = router({
-  health: publicProcedure.query(() => ({ status: 'ok', module: 'automation' })),
-  listPlaybooks: publicProcedure
+  health: protectedProcedure.query(({ ctx }) => ({
+    status: 'ok',
+    module: 'automation',
+    user: ctx.user,
+  })),
+  listPlaybooks: protectedProcedure
     .input(z.object({ businessId: z.string() }))
     .query(({ input }) => ({
       businessId: input.businessId,
