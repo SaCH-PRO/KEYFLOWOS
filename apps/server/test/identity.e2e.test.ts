@@ -1,43 +1,34 @@
 import 'reflect-metadata';
 import { Test } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
+import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { describe, beforeAll, afterAll, it, expect } from 'vitest';
 import { IdentityController } from '../src/modules/identity/identity.controller';
 import { IdentityService } from '../src/modules/identity/identity.service';
 import { AuthGuard } from '../src/core/auth/auth.guard';
 import { BusinessGuard } from '../src/core/auth/business.guard';
-import { PrismaService } from '../src/core/prisma/prisma.service';
-import { ValidationPipe } from '@nestjs/common';
 
-class PrismaMock implements Partial<PrismaService> {
-  private businesses: any[] = [];
-  client = {
-    business: {
-      findMany: async ({ where }: any) => {
-        if (where?.ownerId) {
-          return this.businesses.filter((b) => b.ownerId === where.ownerId && b.deletedAt === null);
-        }
-        return this.businesses.filter((b) => b.deletedAt === null);
-      },
-      create: async ({ data }: any) => {
-        const item = { ...data, id: `biz_${this.businesses.length + 1}`, deletedAt: null };
-        this.businesses.push(item);
-        return item;
-      },
-    },
-  };
-}
+const identityServiceMock = {
+  items: [] as any[],
+  listBusinesses() {
+    return this.items;
+  },
+  createBusiness(input: { name: string; ownerId?: string }) {
+    const item = { id: `biz_${this.items.length + 1}`, ...input };
+    this.items.push(item);
+    return item;
+  },
+};
 
-describe.skip('Identity e2e', () => {
+describe('Identity e2e', () => {
   let app: INestApplication;
 
   beforeAll(async () => {
+    identityServiceMock.items = [];
     const moduleRef = await Test.createTestingModule({
       controllers: [IdentityController],
       providers: [
-        { provide: PrismaService, useValue: new PrismaMock() },
-        IdentityService,
+        { provide: IdentityService, useValue: identityServiceMock },
       ],
     })
       .overrideGuard(AuthGuard)
@@ -47,6 +38,12 @@ describe.skip('Identity e2e', () => {
       .compile();
 
     app = moduleRef.createNestApplication();
+    const controller = moduleRef.get(IdentityController);
+    (controller as any).identity = identityServiceMock;
+    app.use((req, _res, next) => {
+      (req as any).user = { id: 'user_1' };
+      next();
+    });
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,

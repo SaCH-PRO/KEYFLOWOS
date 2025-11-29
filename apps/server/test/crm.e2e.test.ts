@@ -5,34 +5,30 @@ import request from 'supertest';
 import { describe, beforeAll, afterAll, it, expect } from 'vitest';
 import { CrmController } from '../src/modules/crm/crm.controller';
 import { CrmService } from '../src/modules/crm/crm.service';
-import { PrismaService } from '../src/core/prisma/prisma.service';
 import { AuthGuard } from '../src/core/auth/auth.guard';
 import { BusinessGuard } from '../src/core/auth/business.guard';
 
-class PrismaMock implements Partial<PrismaService> {
-  private contacts: any[] = [];
-  client = {
-    contact: {
-      findMany: async ({ where }: any) =>
-        this.contacts.filter((c) => c.businessId === where.businessId && c.deletedAt === null),
-      create: async ({ data }: any) => {
-        const item = { ...data, id: `contact_${this.contacts.length + 1}`, deletedAt: null };
-        this.contacts.push(item);
-        return item;
-      },
-    },
-  };
-}
+const crmServiceMock = {
+  contacts: [] as any[],
+  listContacts(businessId: string) {
+    return this.contacts.filter((c: any) => c.businessId === businessId);
+  },
+  createContact(input: { businessId: string; firstName?: string; email?: string }) {
+    const item = { id: `contact_${this.contacts.length + 1}`, ...input };
+    this.contacts.push(item);
+    return item;
+  },
+};
 
-describe.skip('CRM e2e', () => {
+describe('CRM e2e', () => {
   let app: INestApplication;
 
   beforeAll(async () => {
+    crmServiceMock.contacts = [];
     const moduleRef = await Test.createTestingModule({
       controllers: [CrmController],
       providers: [
-        { provide: PrismaService, useValue: new PrismaMock() },
-        CrmService,
+        { provide: CrmService, useValue: crmServiceMock },
       ],
     })
       .overrideGuard(AuthGuard)
@@ -42,6 +38,12 @@ describe.skip('CRM e2e', () => {
       .compile();
 
     app = moduleRef.createNestApplication();
+    const controller = moduleRef.get(CrmController);
+    (controller as any).crm = crmServiceMock;
+    app.use((req, _res, next) => {
+      (req as any).user = { id: 'user_1' };
+      next();
+    });
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,

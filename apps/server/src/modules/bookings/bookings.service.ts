@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { BookingCreatedPayload } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Injectable()
@@ -30,8 +31,22 @@ export class BookingsService {
         startTime: input.startTime,
         endTime: input.endTime,
       },
+      include: { contact: true },
     });
-    this.events.emit('booking.created', { bookingId: booking.id, businessId: booking.businessId });
+
+    const payload: BookingCreatedPayload = {
+      booking,
+      contact: booking.contact,
+      businessId: booking.businessId,
+    };
+    this.events.emit('booking.created', payload);
     return booking;
+  }
+
+  async confirmBooking(bookingId: string) {
+    return this.prisma.client.booking.update({
+      where: { id: bookingId },
+      data: { status: 'CONFIRMED' },
+    });
   }
 }
