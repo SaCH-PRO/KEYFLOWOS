@@ -1,5 +1,6 @@
 import { protectedProcedure, router } from '../trpc';
 import { z } from 'zod';
+import { assertBusinessAccess } from '../lib/access';
 
 export const bookingsRouter = router({
   health: protectedProcedure.query(({ ctx }) => ({
@@ -9,12 +10,13 @@ export const bookingsRouter = router({
   })),
   listBookings: protectedProcedure
     .input(z.object({ businessId: z.string() }))
-    .query(({ input, ctx }) =>
-      ctx.db.booking.findMany({
+    .query(async ({ input, ctx }) => {
+      await assertBusinessAccess(ctx, input.businessId);
+      return ctx.db.booking.findMany({
         where: { businessId: input.businessId, deletedAt: null },
         orderBy: { startTime: 'desc' },
-      }),
-    ),
+      });
+    }),
   createBooking: protectedProcedure
     .input(
       z.object({
@@ -27,6 +29,7 @@ export const bookingsRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      await assertBusinessAccess(ctx, input.businessId);
       const booking = await ctx.db.booking.create({
         data: {
           businessId: input.businessId,

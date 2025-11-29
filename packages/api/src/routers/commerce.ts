@@ -1,5 +1,6 @@
 import { protectedProcedure, router } from '../trpc';
 import { z } from 'zod';
+import { assertBusinessAccess } from '../lib/access';
 
 export const commerceRouter = router({
   health: protectedProcedure.query(({ ctx }) => ({
@@ -9,12 +10,13 @@ export const commerceRouter = router({
   })),
   listProducts: protectedProcedure
     .input(z.object({ businessId: z.string() }))
-    .query(({ input, ctx }) =>
-      ctx.db.product.findMany({
+    .query(async ({ input, ctx }) => {
+      await assertBusinessAccess(ctx, input.businessId);
+      return ctx.db.product.findMany({
         where: { businessId: input.businessId, deletedAt: null },
         orderBy: { createdAt: 'desc' },
-      }),
-    ),
+      });
+    }),
   createProduct: protectedProcedure
     .input(
       z.object({
@@ -25,8 +27,9 @@ export const commerceRouter = router({
         description: z.string().optional(),
       }),
     )
-    .mutation(({ input, ctx }) =>
-      ctx.db.product.create({
+    .mutation(async ({ input, ctx }) => {
+      await assertBusinessAccess(ctx, input.businessId);
+      return ctx.db.product.create({
         data: {
           businessId: input.businessId,
           name: input.name,
@@ -34,8 +37,8 @@ export const commerceRouter = router({
           currency: input.currency ?? 'TTD',
           description: input.description ?? null,
         },
-      }),
-    ),
+      });
+    }),
   markInvoicePaid: protectedProcedure
     .input(z.object({ invoiceId: z.string() }))
     .mutation(async ({ input, ctx }) => {
@@ -43,6 +46,7 @@ export const commerceRouter = router({
         where: { id: input.invoiceId },
         data: { status: 'PAID', paidAt: new Date() },
       });
+      await assertBusinessAccess(ctx, invoice.businessId);
       ctx.eventBus.emit('invoice.paid', { invoiceId: input.invoiceId, businessId: invoice.businessId });
       return invoice;
     }),

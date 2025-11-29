@@ -1,5 +1,6 @@
 import { protectedProcedure, router } from '../trpc';
 import { z } from 'zod';
+import { assertBusinessAccess } from '../lib/access';
 
 export const crmRouter = router({
   health: protectedProcedure.query(({ ctx }) => ({
@@ -9,12 +10,13 @@ export const crmRouter = router({
   })),
   listContacts: protectedProcedure
     .input(z.object({ businessId: z.string() }))
-    .query(({ input, ctx }) =>
-      ctx.db.contact.findMany({
+    .query(async ({ input, ctx }) => {
+      await assertBusinessAccess(ctx, input.businessId);
+      return ctx.db.contact.findMany({
         where: { businessId: input.businessId, deletedAt: null },
         orderBy: { createdAt: 'desc' },
-      }),
-    ),
+      });
+    }),
   createContact: protectedProcedure
     .input(
       z.object({
@@ -25,8 +27,9 @@ export const crmRouter = router({
         phone: z.string().optional(),
       }),
     )
-    .mutation(({ input, ctx }) =>
-      ctx.db.contact.create({
+    .mutation(async ({ input, ctx }) => {
+      await assertBusinessAccess(ctx, input.businessId);
+      return ctx.db.contact.create({
         data: {
           businessId: input.businessId,
           firstName: input.firstName ?? null,
@@ -34,6 +37,6 @@ export const crmRouter = router({
           email: input.email ?? null,
           phone: input.phone ?? null,
         },
-      }),
-    ),
+      });
+    }),
 });
