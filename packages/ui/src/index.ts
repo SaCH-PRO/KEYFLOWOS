@@ -7,4 +7,8 @@ export * from "./components/momentum-bar";
 export * from "./components/flow-feed";
 export * from "./components/flow-graph-placeholder";
 export * from "./components/shell";
+export * from "./components/table";
+export * from "./components/dialog";
+export * from "./components/drawer";
+export * from "./components/toast";
 export * from "./lib/utils";
