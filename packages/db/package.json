@@ -1,10 +1,19 @@
 {
-  "name": "db",
-  "version": "1.0.0",
+  "name": "@keyflow/db",
+  "version": "0.1.0",
   "description": "",
-  "main": "index.js",
+  "type": "module",
+  "main": "./src/client.ts",
+  "module": "./src/client.ts",
+  "types": "./src/client.ts",
   "scripts": {
     "db:generate": "prisma generate --schema=./prisma/schema.prisma"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/client.ts",
+      "default": "./src/client.ts"
+    }
   },
   "keywords": [],
   "author": "",

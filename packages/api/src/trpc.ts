@@ -1,10 +1,9 @@
 import { initTRPC } from '@trpc/server';
-import { CreateNestContext } from 'nestjs-trpc';
-import { PrismaClient } from '@keyflow/db';
+import type { db as DbClient } from '@keyflow/db';
 
 // This context is created by NestJS and passed to your resolvers
-export type AppContext = CreateNestContext & {
-  db: PrismaClient;
+export type AppContext = {
+  db: typeof DbClient;
   // Auth context (populated by guards)
   user?: { id: string; email: string };
   business?: { id: string; role: string };
