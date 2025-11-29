@@ -1,12 +1,19 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { ArrowRight, MessageCircle, CreditCard, CalendarClock } from "lucide-react";
+import { ArrowRight, CalendarClock, CreditCard, MessageCircle } from "lucide-react";
 
-const feed = [
+export type FeedItem = {
+  type: "payment" | "booking" | "message" | "automation";
+  title: string;
+  time: string;
+  description: string;
+  suggestion?: string;
+};
+
+const defaultFeed: FeedItem[] = [
   {
     type: "payment",
-    icon: CreditCard,
     title: "Invoice #004 paid by Sarah Smith",
     time: "2 min ago",
     description: "TTD 850.00 received via Stripe.",
@@ -14,7 +21,6 @@ const feed = [
   },
   {
     type: "booking",
-    icon: CalendarClock,
     title: "New booking: Consultation with Dr. Ali",
     time: "18 min ago",
     description: "Wed 3:00–4:00 PM, 60 min consult.",
@@ -22,7 +28,6 @@ const feed = [
   },
   {
     type: "message",
-    icon: MessageCircle,
     title: "New WhatsApp lead: John from Instagram",
     time: "35 min ago",
     description: "Asking about first-time visit pricing.",
@@ -30,7 +35,19 @@ const feed = [
   },
 ];
 
-export function FlowFeedPanel() {
+function iconFor(type: FeedItem["type"]) {
+  if (type === "payment") return CreditCard;
+  if (type === "booking") return CalendarClock;
+  return MessageCircle;
+}
+
+export function FlowFeedPanel({
+  items = defaultFeed,
+  onAsk,
+}: {
+  items?: FeedItem[];
+  onAsk?: (item: FeedItem) => void | Promise<void>;
+}) {
   return (
     <div className="rounded-3xl border border-border/60 bg-slate-950/80 backdrop-blur-xl p-3 md:p-4 flex flex-col h-[420px]">
       <div className="flex items-center justify-between mb-2">
@@ -45,11 +62,11 @@ export function FlowFeedPanel() {
       </div>
 
       <div className="mt-2 flex-1 overflow-y-auto space-y-2 pr-1">
-        {feed.map((item, index) => {
-          const Icon = item.icon;
+        {items.map((item, index) => {
+          const Icon = iconFor(item.type);
           return (
             <motion.div
-              key={item.title}
+              key={`${item.title}-${index}`}
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.05 * index }}
@@ -66,10 +83,15 @@ export function FlowFeedPanel() {
                     <span className="text-[10px] text-muted-foreground">· {item.time}</span>
                   </div>
                   <p className="text-[11px] text-muted-foreground">{item.description}</p>
-                  <button className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] mt-1 hover:bg-primary/20">
-                    <span>Ask AI: {item.suggestion}</span>
-                    <ArrowRight className="w-3 h-3" />
-                  </button>
+                  {item.suggestion && (
+                    <button
+                      className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] mt-1 hover:bg-primary/20"
+                      onClick={() => onAsk?.(item)}
+                    >
+                      <span>Ask AI: {item.suggestion}</span>
+                      <ArrowRight className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
               </div>
             </motion.div>

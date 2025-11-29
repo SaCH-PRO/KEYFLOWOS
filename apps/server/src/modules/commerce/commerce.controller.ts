@@ -28,4 +28,10 @@ export class CommerceController {
   markInvoicePaid(@Param('invoiceId') invoiceId: string) {
     return this.commerce.markInvoicePaid(invoiceId);
   }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/invoices')
+  listInvoices(@Param('businessId') businessId: string) {
+    return this.commerce.listInvoices(businessId);
+  }
 }

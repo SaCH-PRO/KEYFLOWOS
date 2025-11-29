@@ -40,7 +40,7 @@ describe('CRM e2e', () => {
     app = moduleRef.createNestApplication();
     const controller = moduleRef.get(CrmController);
     (controller as any).crm = crmServiceMock;
-    app.use((req, _res, next) => {
+    app.use((req: any, _res: any, next: any) => {
       (req as any).user = { id: 'user_1' };
       next();
     });
