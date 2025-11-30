@@ -4,6 +4,7 @@ import { BookingCreatedPayload } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
+import { AutomationService } from '../automation/automation.service';
 
 @Injectable()
 export class BookingsService {
@@ -12,6 +13,7 @@ export class BookingsService {
     private readonly events: EventEmitter2,
     private readonly crm: CrmService,
     private readonly commerce: CommerceService,
+    private readonly automation: AutomationService,
   ) {}
 
   listBookings(businessId: string) {
@@ -68,10 +70,35 @@ export class BookingsService {
   }
 
   async confirmBooking(bookingId: string) {
-    return this.prisma.client.booking.update({
+    const booking = await this.prisma.client.booking.update({
       where: { id: bookingId },
       data: { status: 'CONFIRMED' },
     });
+    if (booking.contactId) {
+      await this.crm.logContactEvent({
+        businessId: booking.businessId,
+        contactId: booking.contactId,
+        type: 'booking.confirmed',
+        data: {
+          bookingId: booking.id,
+          startTime: booking.startTime,
+          endTime: booking.endTime,
+          staffId: booking.staffId,
+        },
+        actorType: 'SYSTEM',
+        source: 'bookings',
+      });
+    }
+    if (booking.contactId) {
+      await this.automation.handle({
+        type: 'booking.status_changed',
+        businessId: booking.businessId,
+        contactId: booking.contactId,
+        bookingId: booking.id,
+        status: 'CONFIRMED',
+      });
+    }
+    return booking;
   }
 
   async publicCreateBooking(input: {

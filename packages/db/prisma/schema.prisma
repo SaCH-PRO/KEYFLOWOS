@@ -250,12 +250,13 @@ model QuoteItem {
 model Invoice {
   id            String   @id @default(cuid())
   invoiceNumber String   @map("invoice_number")
-  status        String   @default("DRAFT") // DRAFT, SENT, PAID, VOID, OVERDUE
+  status        String   @default("DRAFT") // DRAFT, SENT, PAID, VOID, OVERDUE, FAILED
   total         Float
   currency      String   @default("TTD")
   issueDate     DateTime @default(now()) @map("issue_date")
   dueDate       DateTime? @map("due_date")
   paidAt        DateTime? @map("paid_at")
+  sentAt        DateTime? @map("sent_at")
 
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)

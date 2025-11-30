@@ -7,6 +7,7 @@ class PrismaMock implements Partial<PrismaService> {
   private invoices: any[] = [{ id: 'inv_1', businessId: 'biz_1', status: 'DRAFT', paidAt: null }];
   private products: any[] = [];
   private invoicesCreated: any[] = [];
+  private quotes: any[] = [{ id: 'quote_1', businessId: 'biz_1', status: 'DRAFT', contactId: 'contact_1' }];
   client = {
     product: {
       findMany: vi.fn(({ where }: any) =>
@@ -34,6 +35,13 @@ class PrismaMock implements Partial<PrismaService> {
         return invoice;
       }),
     },
+    quote: {
+      update: vi.fn(({ where, data }: any) => {
+        const quote = this.quotes.find((q) => q.id === where.id);
+        Object.assign(quote, data);
+        return quote;
+      }),
+    },
   };
 }
 
@@ -42,7 +50,8 @@ describe('CommerceService', () => {
     const emit = vi.fn();
     const events = { emit } as unknown as EventEmitter2;
     const prisma = new PrismaMock() as unknown as PrismaService;
-    const service = new CommerceService(prisma, events);
+    const crm = { logContactEvent: vi.fn() } as any;
+    const service = new CommerceService(prisma, events, crm);
 
     const invoice = await service.markInvoicePaid('inv_1');
 
@@ -59,7 +68,8 @@ describe('CommerceService', () => {
   it('creates and lists products', async () => {
     const events = { emit: vi.fn() } as unknown as EventEmitter2;
     const prisma = new PrismaMock() as unknown as PrismaService;
-    const service = new CommerceService(prisma, events);
+    const crm = { logContactEvent: vi.fn() } as any;
+    const service = new CommerceService(prisma, events, crm);
 
     await service.createProduct({ businessId: 'biz_1', name: 'Plan', price: 10 });
     const products = await service.listProducts('biz_1');
@@ -71,7 +81,8 @@ describe('CommerceService', () => {
   it('creates invoice for service', async () => {
     const events = { emit: vi.fn() } as unknown as EventEmitter2;
     const prisma = new PrismaMock() as unknown as PrismaService;
-    const service = new CommerceService(prisma, events);
+    const crm = { logContactEvent: vi.fn() } as any;
+    const service = new CommerceService(prisma, events, crm);
 
     const invoice = await service.createInvoiceForService('biz_1', 'contact_1', {
       id: 'service_1',
@@ -88,5 +99,24 @@ describe('CommerceService', () => {
 
     expect(invoice.status).toBe('DRAFT');
     expect(invoice.items?.[0].description).toBe('Consult');
+  });
+
+  it('updates quote status and logs CRM event', async () => {
+    const events = { emit: vi.fn() } as unknown as EventEmitter2;
+    const prisma = new PrismaMock() as unknown as PrismaService;
+    const crm = { logContactEvent: vi.fn() } as any;
+    const service = new CommerceService(prisma, events, crm);
+
+    const quote = await service.updateQuoteStatus({ quoteId: 'quote_1', status: 'ACCEPTED', actorId: 'user_1' });
+
+    expect(quote.status).toBe('ACCEPTED');
+    expect(crm.logContactEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contactId: 'contact_1',
+        type: 'quote.accepted',
+        actorType: 'USER',
+        actorId: 'user_1',
+      }),
+    );
   });
 });

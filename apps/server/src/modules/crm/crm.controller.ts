@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { CrmService } from './crm.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -21,6 +21,10 @@ export class CrmController {
     @Query('hasUpcomingBookings') hasUpcomingBookings?: string,
     @Query('staleDays') staleDays?: string,
     @Query('newThisWeek') newThisWeek?: string,
+    @Query('tags') tags?: string | string[],
+    @Query('skip') skip?: string,
+    @Query('take') take?: string,
+    @Query('includeStats') includeStats?: string,
   ) {
     return this.crm.listContacts({
       businessId,
@@ -30,6 +34,10 @@ export class CrmController {
       hasUpcomingBookings: hasUpcomingBookings === 'true',
       staleDays: staleDays ? Number(staleDays) : undefined,
       newThisWeek: newThisWeek === 'true',
+      tags: Array.isArray(tags) ? tags : tags ? [tags] : undefined,
+      skip: skip ? Number(skip) : undefined,
+      take: take ? Number(take) : undefined,
+      includeStats: includeStats === 'true',
     });
   }
 
@@ -90,8 +98,33 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Body() body: CreateNoteDto,
+    @Req() req: any,
   ) {
-    return this.crm.addNote({ businessId, contactId, body: body.body });
+    return this.crm.addNote({
+      businessId,
+      contactId,
+      body: body.body,
+      authorId: req?.user?.id,
+      source: 'crm',
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/segments')
+  segmentSummary(@Param('businessId') businessId: string) {
+    return this.crm.segmentSummary({ businessId });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/tasks/due')
+  dueTasks(
+    @Param('businessId') businessId: string,
+    @Query('windowDays') windowDays?: string,
+  ) {
+    return this.crm.dueTasks({
+      businessId,
+      windowDays: windowDays ? Number(windowDays) : 7,
+    });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -100,6 +133,7 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Body() body: CreateTaskDto,
+    @Req() req: any,
   ) {
     return this.crm.addTask({
       businessId,
@@ -109,6 +143,8 @@ export class CrmController {
       priority: body.priority,
       assigneeId: body.assigneeId,
       remindAt: body.remindAt,
+      creatorId: req?.user?.id,
+      source: 'crm',
     });
   }
 
