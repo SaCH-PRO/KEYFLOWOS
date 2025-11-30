@@ -91,8 +91,10 @@ model Contact {
   id        String   @id @default(cuid())
   firstName String?  @map("first_name")
   lastName  String?  @map("last_name")
-  email     String?  @unique
+  email     String?
+  emailNormalized String? @map("email_normalized")
   phone     String?
+  phoneNormalized String? @map("phone_normalized")
   status    String   @default("LEAD")
   source    String?
   tags      String[] @default([])
@@ -114,6 +116,9 @@ model Contact {
   deletedAt DateTime? @map("deleted_at") // Soft delete
 
   @@index([businessId])
+  @@index([businessId, createdAt])
+  @@unique([businessId, emailNormalized])
+  @@unique([businessId, phoneNormalized])
   @@map("contacts")
 }
 
@@ -123,6 +128,9 @@ model ContactEvent {
   contactId  String   @map("contact_id")
   type       String
   data       Json
+  actorType  String?  @map("actor_type")
+  actorId    String?  @map("actor_id")
+  source     String?
   createdAt  DateTime @default(now()) @map("created_at")
 
   contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
@@ -138,6 +146,7 @@ model ContactNote {
   contactId  String   @map("contact_id")
   authorId   String?  @map("author_id")
   body       String
+  source     String?
   createdAt  DateTime @default(now()) @map("created_at")
 
   contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
@@ -155,6 +164,10 @@ model ContactTask {
   title       String
   dueDate     DateTime? @map("due_date")
   status      String    @default("OPEN")
+  priority    String    @default("NORMAL")
+  remindAt    DateTime? @map("remind_at")
+  completedAt DateTime? @map("completed_at")
+  source      String?
   createdAt   DateTime  @default(now()) @map("created_at")
 
   contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)

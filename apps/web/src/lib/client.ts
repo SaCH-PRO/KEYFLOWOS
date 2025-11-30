@@ -8,7 +8,9 @@ const contactSchema = z.object({
   firstName: z.string().nullable().optional(),
   lastName: z.string().nullable().optional(),
   email: z.string().nullable().optional(),
+  emailNormalized: z.string().nullable().optional(),
   phone: z.string().nullable().optional(),
+  phoneNormalized: z.string().nullable().optional(),
   status: z.string().optional(),
   source: z.string().nullable().optional(),
   tags: z.array(z.string()).optional().default([]),
@@ -20,6 +22,9 @@ const eventSchema = z.object({
   contactId: z.string(),
   type: z.string(),
   data: z.any(),
+  actorType: z.string().nullable().optional(),
+  actorId: z.string().nullable().optional(),
+  source: z.string().nullable().optional(),
   createdAt: z.string(),
 });
 
@@ -35,7 +40,11 @@ const taskSchema = z.object({
   contactId: z.string(),
   title: z.string(),
   status: z.string().optional(),
+  priority: z.string().optional(),
+  assigneeId: z.string().nullable().optional(),
   dueDate: z.string().nullable().optional(),
+  remindAt: z.string().nullable().optional(),
+  completedAt: z.string().nullable().optional(),
   createdAt: z.string(),
 });
 
@@ -70,11 +79,7 @@ export type Invoice = {
 
 type ApiResult<T> = { data: T | null; error: string | null };
 
-const fallbackContacts: Contact[] = [
-  { id: "ct_1", firstName: "Sarah", lastName: "Smith", email: "sarah@example.com", phone: "868-555-1212" },
-  { id: "ct_2", firstName: "John", lastName: "Doe", email: "john@example.com", phone: "868-555-2020" },
-  { id: "ct_3", firstName: "Amira", lastName: "Khan", email: "amira@example.com", phone: "868-555-3333" },
-];
+const fallbackContacts: Contact[] = [];
 
 const fallbackBookings: Booking[] = [
   { id: "bk_1", startTime: new Date().toISOString(), endTime: new Date(Date.now() + 60 * 60 * 1000).toISOString(), status: "CONFIRMED" },
@@ -236,10 +241,21 @@ export async function addContactNote(contactId: string, body: string, businessId
   });
 }
 
-export async function addContactTask(contactId: string, title: string, dueDate?: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function addContactTask(
+  contactId: string,
+  title: string,
+  options?: { dueDate?: string; priority?: "NORMAL" | "HIGH" | "LOW"; assigneeId?: string; remindAt?: string },
+  businessId: string = DEFAULT_BUSINESS_ID,
+) {
   return apiPost<ContactTask>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/tasks`,
-    body: { title, dueDate },
+    body: {
+      title,
+      dueDate: options?.dueDate,
+      priority: options?.priority,
+      assigneeId: options?.assigneeId,
+      remindAt: options?.remindAt,
+    },
   });
 }
 
