@@ -109,9 +109,26 @@ async function apiGet<T>(path: string, schema: z.ZodSchema<T>, fallback?: T): Pr
   }
 }
 
-export async function fetchContacts(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchContacts(
+  businessId: string = DEFAULT_BUSINESS_ID,
+  opts?: {
+    status?: string;
+    search?: string;
+    hasUnpaidInvoices?: boolean;
+    hasUpcomingBookings?: boolean;
+    staleDays?: number;
+    newThisWeek?: boolean;
+  },
+) {
+  const params = new URLSearchParams();
+  if (opts?.status) params.set("status", opts.status);
+  if (opts?.search) params.set("search", opts.search);
+  if (opts?.hasUnpaidInvoices) params.set("hasUnpaidInvoices", "true");
+  if (opts?.hasUpcomingBookings) params.set("hasUpcomingBookings", "true");
+  if (opts?.staleDays) params.set("staleDays", String(opts.staleDays));
+  if (opts?.newThisWeek) params.set("newThisWeek", "true");
   return apiGet(
-    `/crm/businesses/${encodeURIComponent(businessId)}/contacts`,
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts${params.toString() ? `?${params.toString()}` : ""}`,
     z.array(contactSchema),
     fallbackContacts,
   );
@@ -170,14 +187,27 @@ export async function fetchInvoices(businessId: string = DEFAULT_BUSINESS_ID) {
   );
 }
 
-export async function createContact(input: { businessId?: string; firstName?: string; lastName?: string; email?: string; phone?: string }) {
+export async function createContact(input: {
+  businessId?: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  status?: string;
+  source?: string;
+  tags?: string[];
+  custom?: Record<string, any>;
+}) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   const body = {
     firstName: input.firstName ?? "Guest",
     lastName: input.lastName ?? "User",
     email: input.email ?? "",
     phone: input.phone ?? "",
-    status: "LEAD",
+    status: input.status ?? "LEAD",
+    source: input.source ?? "",
+    tags: input.tags ?? [],
+    custom: input.custom ?? {},
   };
 
   const res = await apiPost<Contact>({
@@ -210,6 +240,47 @@ export async function addContactTask(contactId: string, title: string, dueDate?:
   return apiPost<ContactTask>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/tasks`,
     body: { title, dueDate },
+  });
+}
+
+export async function completeContactTask(taskId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<ContactTask>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/tasks/${encodeURIComponent(taskId)}/complete`,
+    body: {},
+  });
+}
+
+export async function mergeContacts(input: { businessId?: string; contactId: string; duplicateId: string }) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<Contact>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(input.contactId)}/merge/${encodeURIComponent(input.duplicateId)}`,
+    body: {},
+  });
+}
+
+export async function updateContact(input: {
+  businessId?: string;
+  contactId: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  status?: string;
+  source?: string;
+  tags?: string[];
+  custom?: Record<string, any>;
+}) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<Contact>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(input.contactId)}`,
+    body: input,
+  });
+}
+
+export async function deleteContact(contactId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<Contact>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/delete`,
+    body: {},
   });
 }
 

@@ -9,11 +9,45 @@ export const crmRouter = router({
     user: ctx.user,
   })),
   listContacts: protectedProcedure
-    .input(z.object({ businessId: z.string() }))
+    .input(
+      z.object({
+        businessId: z.string(),
+        status: z.string().optional(),
+        search: z.string().optional(),
+        hasUnpaidInvoices: z.boolean().optional(),
+        hasUpcomingBookings: z.boolean().optional(),
+      }),
+    )
     .query(async ({ input, ctx }) => {
       await assertBusinessAccess(ctx, input.businessId);
+      const where: any = { businessId: input.businessId, deletedAt: null };
+      if (input.status) where.status = input.status;
+      if (input.search) {
+        where.OR = [
+          { firstName: { contains: input.search, mode: 'insensitive' } },
+          { lastName: { contains: input.search, mode: 'insensitive' } },
+          { email: { contains: input.search, mode: 'insensitive' } },
+          { phone: { contains: input.search, mode: 'insensitive' } },
+        ];
+      }
+      if (input.hasUnpaidInvoices) {
+        where.invoices = {
+          some: {
+            status: { not: 'PAID' },
+            deletedAt: null,
+          },
+        };
+      }
+      if (input.hasUpcomingBookings) {
+        where.bookings = {
+          some: {
+            startTime: { gt: new Date() },
+            deletedAt: null,
+          },
+        };
+      }
       return ctx.db.contact.findMany({
-        where: { businessId: input.businessId, deletedAt: null },
+        where,
         orderBy: { createdAt: 'desc' },
         select: {
           id: true,
@@ -84,6 +118,44 @@ export const crmRouter = router({
           tags: input.tags ?? [],
           custom: input.custom ?? {},
         },
+      });
+    }),
+  updateContact: protectedProcedure
+    .input(
+      z.object({
+        businessId: z.string(),
+        contactId: z.string(),
+        firstName: z.string().optional(),
+        lastName: z.string().optional(),
+        email: z.string().email().optional(),
+        phone: z.string().optional(),
+        status: z.string().optional(),
+        source: z.string().optional(),
+        tags: z.array(z.string()).optional(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      await assertBusinessAccess(ctx, input.businessId);
+      return ctx.db.contact.update({
+        where: { id: input.contactId },
+        data: {
+          firstName: input.firstName ?? undefined,
+          lastName: input.lastName ?? undefined,
+          email: input.email ?? undefined,
+          phone: input.phone ?? undefined,
+          status: input.status ?? undefined,
+          source: input.source ?? undefined,
+          tags: input.tags ?? undefined,
+        },
+      });
+    }),
+  softDeleteContact: protectedProcedure
+    .input(z.object({ businessId: z.string(), contactId: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      await assertBusinessAccess(ctx, input.businessId);
+      return ctx.db.contact.update({
+        where: { id: input.contactId },
+        data: { deletedAt: new Date() },
       });
     }),
   addNote: protectedProcedure

@@ -77,6 +77,22 @@ export class CommerceService {
       eventName: 'invoice.paid',
     };
     this.events.emit('invoice.paid', payload);
+    if (invoice.contactId) {
+      await this.prisma.client.contactEvent.create({
+        data: {
+          businessId: invoice.businessId,
+          contactId: invoice.contactId,
+          type: 'invoice.paid',
+          data: {
+            invoiceId: invoice.id,
+            total: invoice.total,
+            currency: invoice.currency,
+            paidAt: invoice.paidAt,
+            bookingId: invoice.bookingId,
+          },
+        },
+      });
+    }
     return invoice;
   }
 }

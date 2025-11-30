@@ -5,9 +5,67 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 export class CrmService {
   constructor(private readonly prisma: PrismaService) {}
 
-  listContacts(businessId: string) {
+  listContacts(input: {
+    businessId: string;
+    status?: string;
+    search?: string;
+    hasUnpaidInvoices?: boolean;
+    hasUpcomingBookings?: boolean;
+    staleDays?: number;
+    newThisWeek?: boolean;
+  }) {
+    const where: any = { businessId: input.businessId, deletedAt: null };
+    if (input.status) where.status = input.status;
+    if (input.search) {
+      where.OR = [
+        { firstName: { contains: input.search, mode: 'insensitive' } },
+        { lastName: { contains: input.search, mode: 'insensitive' } },
+        { email: { contains: input.search, mode: 'insensitive' } },
+        { phone: { contains: input.search, mode: 'insensitive' } },
+      ];
+    }
+    if (input.hasUnpaidInvoices) {
+      where.invoices = {
+        some: {
+          status: { in: ['SENT', 'OVERDUE'] },
+          deletedAt: null,
+        },
+      };
+    }
+    if (input.hasUpcomingBookings) {
+      where.bookings = {
+        some: {
+          startTime: { gt: new Date() },
+          status: { notIn: ['CANCELLED'] },
+          deletedAt: null,
+        },
+      };
+    }
+    if (input.staleDays) {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - input.staleDays);
+      where.NOT = [
+        {
+          bookings: {
+            some: {
+              startTime: { gt: cutoff },
+              deletedAt: null,
+            },
+          },
+        },
+      ];
+    }
+    if (input.newThisWeek) {
+      const start = new Date();
+      start.setHours(0, 0, 0, 0);
+      const day = start.getDay();
+      const diff = start.getDate() - day + (day === 0 ? -6 : 1); // Monday start
+      start.setDate(diff);
+      where.createdAt = { gte: start };
+    }
+
     return this.prisma.client.contact.findMany({
-      where: { businessId, deletedAt: null },
+      where,
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -35,6 +93,15 @@ export class CrmService {
         tags: input.tags ?? [],
         custom: input.custom ?? {},
       },
+      select: { id: true },
+    }).then(async (created) => {
+      await this.logEvent(input.businessId, created.id, 'contact.created', {
+        firstName: input.firstName,
+        lastName: input.lastName,
+        email: input.email,
+        source: input.source,
+      });
+      return this.prisma.client.contact.findUnique({ where: { id: created.id } });
     });
   }
 
@@ -51,6 +118,63 @@ export class CrmService {
       }
     }
     return this.createContact({ businessId, ...input });
+  }
+
+  async updateContact(input: {
+    businessId: string;
+    contactId: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    status?: string;
+    source?: string | null;
+    tags?: string[];
+    custom?: any;
+  }) {
+    return this.prisma.client.contact.update({
+      where: { id: input.contactId },
+      data: {
+        firstName: input.firstName ?? undefined,
+        lastName: input.lastName ?? undefined,
+        email: input.email ?? undefined,
+        phone: input.phone ?? undefined,
+        status: input.status ?? undefined,
+        source: input.source ?? undefined,
+        tags: input.tags ?? undefined,
+        custom: input.custom ?? undefined,
+      },
+    });
+  }
+
+  async softDeleteContact(input: { businessId: string; contactId: string }) {
+    return this.prisma.client.contact.update({
+      where: { id: input.contactId },
+      data: { deletedAt: new Date() },
+    });
+  }
+
+  async mergeContacts(input: { businessId: string; primaryId: string; duplicateId: string }) {
+    // Move events/notes/tasks to primary, then soft-delete duplicate
+    await this.prisma.client.$transaction([
+      this.prisma.client.contactEvent.updateMany({
+        where: { businessId: input.businessId, contactId: input.duplicateId },
+        data: { contactId: input.primaryId },
+      }),
+      this.prisma.client.contactNote.updateMany({
+        where: { businessId: input.businessId, contactId: input.duplicateId },
+        data: { contactId: input.primaryId },
+      }),
+      this.prisma.client.contactTask.updateMany({
+        where: { businessId: input.businessId, contactId: input.duplicateId },
+        data: { contactId: input.primaryId },
+      }),
+      this.prisma.client.contact.update({
+        where: { id: input.duplicateId },
+        data: { deletedAt: new Date() },
+      }),
+    ]);
+    return this.prisma.client.contact.findUnique({ where: { id: input.primaryId } });
   }
 
   async contactDetail(params: { businessId: string; contactId: string }) {
@@ -95,6 +219,34 @@ export class CrmService {
         title: input.title,
         dueDate: input.dueDate ? new Date(input.dueDate) : null,
       },
+    }).then(async (task) => {
+      await this.logEvent(input.businessId, input.contactId, 'task.created', { title: input.title, dueDate: input.dueDate });
+      return task;
     });
+  }
+
+  async completeTask(input: { businessId: string; taskId: string }) {
+    const task = await this.prisma.client.contactTask.update({
+      where: { id: input.taskId },
+      data: { status: 'DONE', completedAt: new Date() },
+    });
+    await this.logEvent(input.businessId, task.contactId, 'task.completed', { taskId: task.id, title: task.title });
+    return task;
+  }
+
+  private logEvent(businessId: string, contactId: string, type: string, data: any) {
+    return this.prisma.client.contactEvent.create({
+      data: {
+        businessId,
+        contactId,
+        type,
+        data,
+      },
+    });
+  }
+
+  // Expose for other modules to log events without cycle
+  async logContactEvent(input: { businessId: string; contactId: string; type: string; data: any }) {
+    return this.logEvent(input.businessId, input.contactId, input.type, input.data);
   }
 }
