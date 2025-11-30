@@ -50,6 +50,18 @@ export class BookingsService {
       eventName: 'booking.created',
     };
     this.events.emit('booking.created', payload);
+    // Log contact event for CRM timeline
+    await this.crm.logContactEvent({
+      businessId: booking.businessId,
+      contactId: booking.contactId,
+      type: 'booking.created',
+      data: {
+        bookingId: booking.id,
+        serviceId: booking.serviceId,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+      },
+    });
     return booking;
   }
 
@@ -101,6 +113,18 @@ export class BookingsService {
       eventName: 'booking.created',
     };
     this.events.emit('booking.created', payload);
+    await this.crm.logContactEvent({
+      businessId: booking.businessId,
+      contactId: booking.contactId,
+      type: 'booking.created',
+      data: {
+        bookingId: booking.id,
+        serviceId: booking.serviceId,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        invoiceId: invoice?.id,
+      },
+    });
 
     return { success: true, bookingId: booking.id, invoiceId: invoice?.id };
   }
