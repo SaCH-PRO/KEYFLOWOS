@@ -26,7 +26,7 @@ export default function PipelinePage() {
     <div className="space-y-4">
       <div>
         <h1 className="text-xl font-semibold">CRM Pipeline</h1>
-        <p className="text-sm text-muted-foreground">Drag-free quick view; click buttons to move stages.</p>
+        <p className="text-sm text-muted-foreground">Quick view; click buttons to move stages.</p>
       </div>
       <div className="grid gap-3 md:grid-cols-4">
         {STATUSES.map((status) => (
@@ -43,12 +43,12 @@ export default function PipelinePage() {
                     <div className="text-sm font-semibold">
                       {`${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || "Unnamed"}
                     </div>
-                    <div className="text-xs text-muted-foreground">{c.email ?? "—"}</div>
+                    <div className="text-xs text-muted-foreground">{c.email || c.phone || "No contact info"}</div>
                     <div className="flex flex-wrap gap-1">
                       {STATUSES.map((s) =>
                         s === status ? null : (
                           <Button key={s} size="xs" variant="outline" onClick={() => void move(c.id, s)}>
-                            → {s}
+                            Move to {s}
                           </Button>
                         ),
                       )}

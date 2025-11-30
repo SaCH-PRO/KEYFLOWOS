@@ -61,6 +61,8 @@ export class BookingsService {
         startTime: booking.startTime,
         endTime: booking.endTime,
       },
+      actorType: 'SYSTEM',
+      source: 'bookings',
     });
     return booking;
   }
@@ -124,6 +126,8 @@ export class BookingsService {
         endTime: booking.endTime,
         invoiceId: invoice?.id,
       },
+      actorType: 'SYSTEM',
+      source: 'bookings',
     });
 
     return { success: true, bookingId: booking.id, invoiceId: invoice?.id };

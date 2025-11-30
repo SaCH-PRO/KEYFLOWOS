@@ -1,4 +1,4 @@
-import { IsEmail, IsOptional, IsString } from 'class-validator';
+import { IsEmail, IsIn, IsOptional, IsString } from 'class-validator';
 
 export class UpdateContactDto {
   @IsString()
@@ -18,6 +18,7 @@ export class UpdateContactDto {
   phone?: string;
 
   @IsString()
+  @IsIn(['LEAD', 'PROSPECT', 'CLIENT', 'LOST'])
   @IsOptional()
   status?: string;
 

@@ -106,6 +106,9 @@ export class CrmController {
       contactId,
       title: body.title,
       dueDate: body.dueDate,
+      priority: body.priority,
+      assigneeId: body.assigneeId,
+      remindAt: body.remindAt,
     });
   }
 
