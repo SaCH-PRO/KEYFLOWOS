@@ -27,10 +27,13 @@ export default function ContactDetailPage() {
   const [noteBody, setNoteBody] = useState("");
   const [taskTitle, setTaskTitle] = useState("");
   const [taskDue, setTaskDue] = useState("");
+  const [taskAssignee, setTaskAssignee] = useState("");
   const [isPending, startTransition] = useTransition();
   const [status, setStatus] = useState<string>("LEAD");
   const [tags, setTags] = useState<string>("");
   const [mergeId, setMergeId] = useState("");
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [aiNext, setAiNext] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -50,6 +53,25 @@ export default function ContactDetailPage() {
       const { data: detail } = await fetchContactDetail(contactId);
       setData(detail);
     });
+  };
+
+  const runAiAssist = () => {
+    if (!data?.contact) return;
+    const c = data.contact;
+    const score = c.meta?.leadScore ?? 50;
+    const unpaid = c.meta?.outstandingBalance ?? 0;
+    const last = c.meta?.lastInteractionAt ? new Date(c.meta.lastInteractionAt).toLocaleDateString() : "recently";
+    const nextTask = c.meta?.nextDueTaskAt ? new Date(c.meta.nextDueTaskAt).toLocaleDateString() : "none";
+    setAiSummary(
+      `Contact ${c.firstName ?? ""} ${c.lastName ?? ""} is a ${c.status ?? "LEAD"} with score ${score}. Last touch ${last}, outstanding balance ${unpaid}. Next task ${nextTask}.`,
+    );
+    if (unpaid > 0) {
+      setAiNext("Send payment reminder and schedule a follow-up call in 2 days.");
+    } else if ((data.tasks ?? []).some((t) => t.status !== "DONE")) {
+      setAiNext("Complete open tasks and confirm next meeting.");
+    } else {
+      setAiNext("Send a check-in message with a tailored offer based on their status.");
+    }
   };
 
   const updateStatusTags = async () => {
@@ -88,9 +110,10 @@ export default function ContactDetailPage() {
   const addTaskAction = async () => {
     if (!taskTitle.trim()) return;
     startTransition(async () => {
-      await addContactTask(contactId, taskTitle, { dueDate: taskDue || undefined });
+      await addContactTask(contactId, taskTitle, { dueDate: taskDue || undefined, assigneeId: taskAssignee || undefined });
       setTaskTitle("");
       setTaskDue("");
+      setTaskAssignee("");
       const { data: detail } = await fetchContactDetail(contactId);
       setData(detail);
     });
@@ -173,6 +196,18 @@ export default function ContactDetailPage() {
 
       <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
         <div className="space-y-3">
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={runAiAssist}>
+              AI Summary & Next Step
+            </Button>
+          </div>
+          {aiSummary && (
+            <div className="rounded-xl border border-border/60 bg-slate-900/60 p-3 text-sm space-y-1">
+              <div className="font-semibold">AI Summary</div>
+              <div className="text-muted-foreground">{aiSummary}</div>
+              {aiNext && <div className="text-primary">Next best action: {aiNext}</div>}
+            </div>
+          )}
           <Section title="Timeline">
             <div className="space-y-2">
               {data.events.length === 0 && <Empty text="No events yet." />}
@@ -210,7 +245,7 @@ export default function ContactDetailPage() {
                     <span>{n.source ?? "manual"}</span>
                     <span>{new Date(n.createdAt).toLocaleString()}</span>
                   </div>
-                  <div className="text-sm mt-1">{n.body}</div>
+                  <div className="text-sm mt-1">{highlightMentions(n.body)}</div>
                 </div>
               ))}
             </div>
@@ -231,6 +266,11 @@ export default function ContactDetailPage() {
                   value={taskDue}
                   onChange={(e) => setTaskDue(e.target.value)}
                 />
+                <Input
+                  placeholder="Assignee ID or name"
+                  value={taskAssignee}
+                  onChange={(e) => setTaskAssignee(e.target.value)}
+                />
                 <Button onClick={addTaskAction} disabled={isPending}>
                   Add task
                 </Button>
@@ -243,6 +283,7 @@ export default function ContactDetailPage() {
                       <div className="text-sm font-semibold">{t.title}</div>
                       <div className="text-xs text-muted-foreground">
                         Due: {t.dueDate ? new Date(t.dueDate).toLocaleString() : "n/a"} • Status: {t.status}
+                        {t.assigneeId && ` • Assignee: ${t.assigneeId}`}
                       </div>
                     </div>
                     {t.status !== "DONE" && (
@@ -272,4 +313,21 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Empty({ text }: { text: string }) {
   return <div className="text-xs text-muted-foreground">{text}</div>;
+}
+
+function highlightMentions(text: string) {
+  const parts = text.split(/(@\w+)/g);
+  return (
+    <span>
+      {parts.map((part, idx) =>
+        part.startsWith("@") ? (
+          <span key={idx} className="text-primary font-semibold">
+            {part}
+          </span>
+        ) : (
+          <span key={idx}>{part}</span>
+        ),
+      )}
+    </span>
+  );
 }
