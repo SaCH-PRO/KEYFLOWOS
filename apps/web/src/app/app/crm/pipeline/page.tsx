@@ -23,9 +23,17 @@ export default function PipelinePage() {
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [tagFilter, setTagFilter] = useState("");
   const [newContact, setNewContact] = useState({ firstName: "", lastName: "", email: "", phone: "", status: "LEAD" });
+  const [savedViews, setSavedViews] = useState<{ name: string; search: string; status: string; tags: string }[]>([]);
+  const [viewName, setViewName] = useState("");
+  const [selected, setSelected] = useState<string[]>([]);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const stored = window.localStorage.getItem("crm_saved_views");
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (stored) setSavedViews(JSON.parse(stored));
+    }
     const load = async () => {
       const [{ data: contactData }, { data: segmentData }, { data: dueData }] = await Promise.all([
         fetchContacts(undefined, {
@@ -48,7 +56,7 @@ export default function PipelinePage() {
     startTransition(() => {
       void load();
     });
-  }, [search, statusFilter]);
+  }, [search, statusFilter, tagFilter]);
 
   async function move(contactId: string, status: string) {
     await updateContact({ contactId, status });
@@ -93,6 +101,67 @@ export default function PipelinePage() {
               </Button>
             ))}
           </div>
+        </div>
+        <div className="mt-2 flex flex-wrap gap-2 items-center">
+          <Input
+            placeholder="Saved view name"
+            value={viewName}
+            onChange={(e) => setViewName(e.target.value)}
+            className="w-48"
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              if (!viewName.trim()) return;
+              const next = [
+                ...savedViews.filter((v) => v.name !== viewName.trim()),
+                { name: viewName.trim(), search, status: statusFilter, tags: tagFilter },
+              ];
+              setSavedViews(next);
+              if (typeof window !== "undefined") {
+                window.localStorage.setItem("crm_saved_views", JSON.stringify(next));
+              }
+              setViewName("");
+            }}
+          >
+            Save view
+          </Button>
+          {savedViews.map((v) => (
+            <Button
+              key={v.name}
+              size="xs"
+              variant="outline"
+              onClick={() => {
+                setSearch(v.search);
+                setStatusFilter(v.status);
+                setTagFilter(v.tags);
+              }}
+            >
+              {v.name}
+            </Button>
+          ))}
+        </div>
+        <div className="mt-2 flex flex-wrap gap-2 items-center">
+          <span className="text-xs text-muted-foreground">Bulk move selected:</span>
+          {STATUSES.map((s) => (
+            <Button
+              key={s}
+              size="xs"
+              variant="outline"
+              onClick={async () => {
+                await Promise.all(selected.map((id) => updateContact({ contactId: id, status: s })));
+                setContacts((prev) => prev.map((c) => (selected.includes(c.id) ? { ...c, status: s } : c)));
+                setSelected([]);
+              }}
+              disabled={selected.length === 0 || isPending}
+            >
+              {s}
+            </Button>
+          ))}
+          {selected.length > 0 && (
+            <span className="text-xs text-muted-foreground">{selected.length} selected</span>
+          )}
         </div>
         <div className="mt-3 rounded-2xl border border-border/60 bg-slate-950/60 p-3 space-y-2">
           <div className="text-sm font-semibold">Add Contact</div>
@@ -179,8 +248,19 @@ export default function PipelinePage() {
                     draggable
                     onDragStart={(e) => e.dataTransfer.setData("text/plain", c.id)}
                   >
-                    <div className="text-sm font-semibold">
-                      {`${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || "Unnamed"}
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={selected.includes(c.id)}
+                        onChange={(e) => {
+                          setSelected((prev) =>
+                            e.target.checked ? [...prev, c.id] : prev.filter((id) => id !== c.id),
+                          );
+                        }}
+                      />
+                      <div className="text-sm font-semibold">
+                        {`${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || "Unnamed"}
+                      </div>
                     </div>
                     <div className="text-xs text-muted-foreground">{c.email || c.phone || "No contact info"}</div>
                     <div className="flex flex-wrap gap-1 text-[11px] text-muted-foreground">
