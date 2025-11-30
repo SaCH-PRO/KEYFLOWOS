@@ -15,6 +15,18 @@ const contactSchema = z.object({
   source: z.string().nullable().optional(),
   tags: z.array(z.string()).optional().default([]),
   custom: z.record(z.any()).nullable().optional(),
+  meta: z
+    .object({
+      outstandingBalance: z.number().optional(),
+      unpaidInvoices: z.number().optional(),
+      paidInvoices: z.number().optional(),
+      lastInteractionAt: z.string().optional(),
+      nextDueTaskAt: z.string().nullable().optional(),
+      overdueTasks: z.number().optional(),
+      bookingsRecent: z.number().optional(),
+      leadScore: z.number().optional(),
+    })
+    .optional(),
 });
 
 const eventSchema = z.object({
@@ -46,6 +58,7 @@ const taskSchema = z.object({
   remindAt: z.string().nullable().optional(),
   completedAt: z.string().nullable().optional(),
   createdAt: z.string(),
+  contact: contactSchema.optional(),
 });
 
 const productSchema = z.object({
@@ -123,6 +136,10 @@ export async function fetchContacts(
     hasUpcomingBookings?: boolean;
     staleDays?: number;
     newThisWeek?: boolean;
+    tags?: string[];
+    skip?: number;
+    take?: number;
+    includeStats?: boolean;
   },
 ) {
   const params = new URLSearchParams();
@@ -132,6 +149,10 @@ export async function fetchContacts(
   if (opts?.hasUpcomingBookings) params.set("hasUpcomingBookings", "true");
   if (opts?.staleDays) params.set("staleDays", String(opts.staleDays));
   if (opts?.newThisWeek) params.set("newThisWeek", "true");
+  if (opts?.tags?.length) opts.tags.forEach((t) => params.append("tags", t));
+  if (opts?.skip !== undefined) params.set("skip", String(opts.skip));
+  if (opts?.take !== undefined) params.set("take", String(opts.take));
+  if (opts?.includeStats) params.set("includeStats", "true");
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts${params.toString() ? `?${params.toString()}` : ""}`,
     z.array(contactSchema),
@@ -257,6 +278,34 @@ export async function addContactTask(
       remindAt: options?.remindAt,
     },
   });
+}
+
+export async function fetchSegmentSummary(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/segments`,
+    z.object({
+      lead: z.number(),
+      prospect: z.number(),
+      client: z.number(),
+      lost: z.number(),
+      unpaid: z.number(),
+      stale: z.number(),
+      newThisWeek: z.number(),
+    }),
+    { lead: 0, prospect: 0, client: 0, lost: 0, unpaid: 0, stale: 0, newThisWeek: 0 },
+  );
+}
+
+export async function fetchDueTasks(
+  businessId: string = DEFAULT_BUSINESS_ID,
+  windowDays = 7,
+): Promise<ApiResult<ContactTask[]>> {
+  const params = new URLSearchParams({ windowDays: String(windowDays) });
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/tasks/due?${params.toString()}`,
+    z.array(taskSchema),
+    [],
+  );
 }
 
 export async function completeContactTask(taskId: string, businessId: string = DEFAULT_BUSINESS_ID) {

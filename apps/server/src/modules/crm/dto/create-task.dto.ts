@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsOptional, IsString, IsIn } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString, IsIn, IsISO8601 } from 'class-validator';
 
 export class CreateTaskDto {
   @IsString()
@@ -6,7 +6,7 @@ export class CreateTaskDto {
   title!: string;
 
   @IsOptional()
-  @IsString()
+  @IsISO8601()
   dueDate?: string;
 
   @IsOptional()
@@ -18,6 +18,6 @@ export class CreateTaskDto {
   assigneeId?: string;
 
   @IsOptional()
-  @IsString()
+  @IsISO8601()
   remindAt?: string;
 }
