@@ -22,23 +22,26 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     }
   }, [open]);
 
-  const actions: Action[] = [
-    { label: "Go to Cockpit", hint: "Dashboard", onSelect: () => router.push("/app") },
-    { label: "Go to CRM", hint: "Contacts", onSelect: () => router.push("/app/crm") },
-    { label: "Go to Commerce", hint: "Invoices & Products", onSelect: () => router.push("/app/commerce") },
-    { label: "Go to Bookings", hint: "Schedule", onSelect: () => router.push("/app/bookings") },
-    { label: "Go to Studio", hint: "Blueprint workspace", onSelect: () => router.push("/app/studio") },
-    {
-      label: "Open Public Booking Page",
-      hint: "Client-facing",
-      onSelect: () => window.open("/public/book", "_blank"),
-    },
-    {
-      label: "Open Public Pay Page",
-      hint: "Invoice payment",
-      onSelect: () => window.open("/public/pay", "_blank"),
-    },
-  ];
+  const actions = useMemo<Action[]>(
+    () => [
+      { label: "Go to Cockpit", hint: "Dashboard", onSelect: () => router.push("/app") },
+      { label: "Go to CRM", hint: "Contacts", onSelect: () => router.push("/app/crm") },
+      { label: "Go to Commerce", hint: "Invoices & Products", onSelect: () => router.push("/app/commerce") },
+      { label: "Go to Bookings", hint: "Schedule", onSelect: () => router.push("/app/bookings") },
+      { label: "Go to Studio", hint: "Blueprint workspace", onSelect: () => router.push("/app/studio") },
+      {
+        label: "Open Public Booking Page",
+        hint: "Client-facing",
+        onSelect: () => window.open("/public/book", "_blank"),
+      },
+      {
+        label: "Open Public Pay Page",
+        hint: "Invoice payment",
+        onSelect: () => window.open("/public/pay", "_blank"),
+      },
+    ],
+    [router],
+  );
 
   const filtered = useMemo(() => {
     if (!query) return actions;

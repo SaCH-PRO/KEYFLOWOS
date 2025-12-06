@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Button } from '@keyflow/ui';
-import { API_BASE, apiPost } from '@/lib/api';
+import { apiPost } from '@/lib/api';
 
 export default function BookPage() {
   const [businessId, setBusinessId] = useState('');

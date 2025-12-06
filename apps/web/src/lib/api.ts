@@ -9,6 +9,19 @@ type FetchOptions = {
 
 type ApiResponse<T> = { data: T | null; error: string | null };
 
+function buildHeaders(initHeaders?: HeadersInit) {
+  const headers = new Headers({
+    "Content-Type": "application/json",
+    ...getAuthHeaders(),
+  });
+  if (initHeaders) {
+    new Headers(initHeaders).forEach((value, key) => {
+      headers.set(key, value);
+    });
+  }
+  return headers;
+}
+
 function getAuthHeaders(): Record<string, string> {
   if (typeof window === "undefined") return {};
   const token = window.localStorage?.getItem("kf_token");
@@ -16,22 +29,28 @@ function getAuthHeaders(): Record<string, string> {
 }
 
 export async function apiPost<T>({ path, body, init }: FetchOptions): Promise<ApiResponse<T>> {
+  const { headers: initHeaders, ...restInit } = init ?? {};
+  const headers = buildHeaders(initHeaders);
+
   try {
     const res = await fetch(`${API_BASE}${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...getAuthHeaders(), ...(init?.headers as any) },
+      headers,
       body: body ? JSON.stringify(body) : undefined,
-      ...init,
+      ...restInit,
     });
-    const data = await res.json().catch(() => null);
+    const data: unknown = await res.json().catch(() => null);
     if (!res.ok) {
-      return { data: null, error: data?.message ?? "Request failed" };
+      const parsed = (typeof data === "object" && data !== null ? (data as Record<string, unknown>) : null);
+      const message =
+        parsed && typeof parsed.message === "string" ? parsed.message : res.statusText || "Request failed";
+      return { data: null, error: message };
     }
-    return { data, error: null };
-  } catch (err: any) {
-    return { data: null, error: err?.message ?? "Network error" };
+    return { data: data as T, error: null };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Network error";
+    return { data: null, error: message };
   }
 }
 
-export { API_BASE, getAuthHeaders };
-export { AI_SUGGEST_URL };
+export { API_BASE, getAuthHeaders, AI_SUGGEST_URL };

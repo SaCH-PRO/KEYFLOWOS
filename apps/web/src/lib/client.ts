@@ -14,7 +14,7 @@ const contactSchema = z.object({
   status: z.string().optional(),
   source: z.string().nullable().optional(),
   tags: z.array(z.string()).optional().default([]),
-  custom: z.record(z.any()).nullable().optional(),
+  custom: z.record(z.unknown()).nullable().optional(),
   meta: z
     .object({
       outstandingBalance: z.number().optional(),
@@ -33,7 +33,7 @@ const eventSchema = z.object({
   id: z.string(),
   contactId: z.string(),
   type: z.string(),
-  data: z.any(),
+  data: z.unknown(),
   actorType: z.string().nullable().optional(),
   actorId: z.string().nullable().optional(),
   source: z.string().nullable().optional(),
@@ -112,18 +112,22 @@ const fallbackInvoices: Invoice[] = [
 
 async function apiGet<T>(path: string, schema: z.ZodSchema<T>, fallback?: T): Promise<ApiResult<T>> {
   try {
-    const res = await fetch(`${API_BASE}${path}`, { headers: { ...(getAuthHeaders() as any) } });
+    const res = await fetch(`${API_BASE}${path}`, { headers: getAuthHeaders() });
     const json = await res.json().catch(() => null);
     if (!res.ok || !json) {
-      return { data: fallback ?? null, error: json?.message ?? res.statusText };
+      const message = typeof json === "object" && json && "message" in json && typeof (json as Record<string, unknown>).message === "string"
+        ? (json as Record<string, unknown>).message
+        : res.statusText;
+      return { data: fallback ?? null, error: message };
     }
     const parsed = schema.safeParse(json);
     if (!parsed.success) {
       return { data: fallback ?? null, error: "Failed to parse response" };
     }
     return { data: parsed.data, error: null };
-  } catch (err: any) {
-    return { data: fallback ?? null, error: err?.message ?? "Network error" };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Network error";
+    return { data: fallback ?? null, error: message };
   }
 }
 
@@ -222,7 +226,7 @@ export async function createContact(input: {
   status?: string;
   source?: string;
   tags?: string[];
-  custom?: Record<string, any>;
+  custom?: Record<string, unknown>;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   const body = {
@@ -333,7 +337,7 @@ export async function updateContact(input: {
   status?: string;
   source?: string;
   tags?: string[];
-  custom?: Record<string, any>;
+  custom?: Record<string, unknown>;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<Contact>({

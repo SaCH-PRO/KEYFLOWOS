@@ -3,8 +3,8 @@ import { db } from '@keyflow/db';
 
 @Injectable()
 export class PrismaService implements OnModuleInit, OnModuleDestroy {
-  // Loosen typing to simplify testing/mocking while keeping runtime wired to generated client.
-  readonly client: any = db;
+  // Keep runtime wiring to the generated Prisma client while preserving its typing.
+  readonly client = db;
 
   async onModuleInit() {
     // Connect lazily on first query by default; uncomment to force eager connect

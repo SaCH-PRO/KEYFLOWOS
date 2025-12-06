@@ -33,7 +33,7 @@ export default function AuthSignup() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const onSubmit = async (e: FormEvent) => {
+  const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
@@ -41,8 +41,10 @@ export default function AuthSignup() {
       const session = await supabaseSignUp(email, password);
       window.localStorage.setItem("kf_token", session.access_token);
       router.push("/app");
-    } catch (err: any) {
-      setError(err?.message ?? "Signup failed");
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Signup failed";
+      setError(message);
+    } finally {
       setLoading(false);
     }
   };
