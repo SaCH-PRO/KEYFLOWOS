@@ -1,6 +1,106 @@
 import { BadRequestException, Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
+import type { Contact, Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AutomationService } from '../automation/automation.service';
+
+type ContactMeta = {
+  outstandingBalance: number;
+  unpaidInvoices: number;
+  paidInvoices: number;
+  lastInteractionAt: Date;
+  nextDueTaskAt: Date | null;
+  overdueTasks: number;
+  bookingsRecent: number;
+  leadScore: number;
+};
+
+type ContactWithStats = Contact & {
+  meta?: ContactMeta;
+};
+
+type ContactListOptions = {
+  businessId: string;
+  status?: string;
+  search?: string;
+  hasUnpaidInvoices?: boolean;
+  hasUpcomingBookings?: boolean;
+  staleDays?: number;
+  newThisWeek?: boolean;
+  tags?: string[];
+  skip?: number;
+  take?: number;
+  includeStats?: boolean;
+};
+
+type ContactHighlight = {
+  contactId: string;
+  name: string;
+  status: string;
+  leadScore: number;
+  outstandingBalance: number;
+  unpaidInvoices: number;
+  lastInteractionAt: Date | null;
+  tags: string[];
+};
+
+type ServiceAffinity = {
+  serviceId: string;
+  serviceName: string;
+  bookings: number;
+  revenue: number;
+  topContact?: {
+    id: string;
+    name: string;
+    bookings: number;
+  };
+};
+
+type SegmentInsight = {
+  key: string;
+  label: string;
+  description: string;
+  count: number;
+  contacts: ContactWithStats[];
+};
+
+type TimelineEntry = {
+  id: string;
+  type: 'event' | 'note' | 'task' | 'invoice' | 'booking';
+  contactId: string;
+  title: string;
+  description?: string;
+  timestamp: Date;
+  meta?: Record<string, unknown>;
+};
+
+type NextActionSeverity = 'high' | 'medium' | 'info';
+
+type NextAction = {
+  id: string;
+  contactId: string;
+  title: string;
+  detail: string;
+  severity: NextActionSeverity;
+  trigger: string;
+};
+
+type AiStub = {
+  id: string;
+  title: string;
+  detail: string;
+};
+
+type FlowHighlightsPayload = {
+  highlights: {
+    highPotential: ContactHighlight[];
+    overdueReminders: ContactHighlight[];
+    serviceAffinity: ServiceAffinity[];
+  };
+  segments: SegmentInsight[];
+  timeline: TimelineEntry[];
+  nextActions: NextAction[];
+  aiNextActions: AiStub[];
+};
 
 @Injectable()
 export class CrmService {
@@ -33,19 +133,7 @@ export class CrmService {
     return contact;
   }
 
-  listContacts(input: {
-    businessId: string;
-    status?: string;
-    search?: string;
-    hasUnpaidInvoices?: boolean;
-    hasUpcomingBookings?: boolean;
-    staleDays?: number;
-    newThisWeek?: boolean;
-    tags?: string[];
-    skip?: number;
-    take?: number;
-    includeStats?: boolean;
-  }) {
+  async listContacts(input: ContactListOptions) {
     const where: any = { businessId: input.businessId, deletedAt: null };
     if (input.status) where.status = input.status;
     if (input.search) {
@@ -101,116 +189,114 @@ export class CrmService {
 
     const skip = input.skip ?? 0;
     const take = input.take ?? 50;
-    return this.prisma.client.contact.findMany({
+    const contacts = await this.prisma.client.contact.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       skip,
       take,
-    }).then(async (contacts) => {
-      if (!input.includeStats || contacts.length === 0) return contacts;
-      const ids = contacts.map((c) => c.id);
-      const [invoices, tasks, events, notes, bookings] = await Promise.all([
-        this.prisma.client.invoice.findMany({
-          where: { businessId: input.businessId, contactId: { in: ids }, deletedAt: null },
-          select: { id: true, contactId: true, status: true, total: true, currency: true, dueDate: true, paidAt: true },
-        }),
-        this.prisma.client.contactTask.findMany({
-          where: { businessId: input.businessId, contactId: { in: ids }, deletedAt: null },
-          select: { contactId: true, status: true, dueDate: true, createdAt: true },
-        }),
-        this.prisma.client.contactEvent.findMany({
-          where: { businessId: input.businessId, contactId: { in: ids } },
-          select: { contactId: true, createdAt: true },
-        }),
-        this.prisma.client.contactNote.findMany({
-          where: { businessId: input.businessId, contactId: { in: ids } },
-          select: { contactId: true, createdAt: true },
-        }),
-        this.prisma.client.booking.findMany({
-          where: { businessId: input.businessId, contactId: { in: ids }, deletedAt: null },
-          select: { contactId: true, status: true, startTime: true },
-        }),
-      ]);
-
-      const statsMap = new Map<string, any>();
-      for (const c of contacts) {
-        statsMap.set(c.id, {
-          outstandingBalance: 0,
-          unpaidInvoices: 0,
-          paidInvoices: 0,
-          lastInteractionAt: c.updatedAt,
-          nextDueTaskAt: null as Date | null,
-          overdueTasks: 0,
-          bookingsRecent: 0,
-        });
-      }
-
-      invoices.forEach((inv) => {
-        const s = statsMap.get(inv.contactId);
-        if (!s) return;
-        if (['SENT', 'OVERDUE'].includes(inv.status)) {
-          s.outstandingBalance += Number(inv.total ?? 0);
-          s.unpaidInvoices += 1;
-        }
-        if (inv.status === 'PAID') {
-          s.paidInvoices += 1;
-        }
-      });
-
-      tasks.forEach((task) => {
-        const s = statsMap.get(task.contactId);
-        if (!s) return;
-        if (task.status !== 'DONE' && task.dueDate) {
-          const due = new Date(task.dueDate);
-          if (!s.nextDueTaskAt || due < s.nextDueTaskAt) s.nextDueTaskAt = due;
-          if (due < new Date()) s.overdueTasks += 1;
-        }
-        if (task.createdAt > s.lastInteractionAt) s.lastInteractionAt = task.createdAt;
-      });
-
-      events.forEach((e) => {
-        const s = statsMap.get(e.contactId);
-        if (s && e.createdAt > s.lastInteractionAt) s.lastInteractionAt = e.createdAt;
-      });
-      notes.forEach((n) => {
-        const s = statsMap.get(n.contactId);
-        if (s && n.createdAt > s.lastInteractionAt) s.lastInteractionAt = n.createdAt;
-      });
-      const recentCutoff = new Date();
-      recentCutoff.setDate(recentCutoff.getDate() - 14);
-      bookings.forEach((b) => {
-        const s = statsMap.get(b.contactId);
-        if (!s) return;
-        if (b.status === 'COMPLETED' && b.startTime > recentCutoff) s.bookingsRecent += 1;
-        if (b.startTime > s.lastInteractionAt) s.lastInteractionAt = b.startTime;
-      });
-
-      const withStats = contacts.map((c) => {
-        const s = statsMap.get(c.id);
-        if (!s) return c;
-        const leadScore =
-          50 +
-          s.bookingsRecent * 15 +
-          s.paidInvoices * 10 -
-          s.unpaidInvoices * 5 -
-          s.overdueTasks * 5 +
-          (c.status === 'CLIENT' ? 5 : 0);
-        return {
-          ...c,
-          meta: {
-            outstandingBalance: s.outstandingBalance,
-            unpaidInvoices: s.unpaidInvoices,
-            paidInvoices: s.paidInvoices,
-            lastInteractionAt: s.lastInteractionAt,
-            nextDueTaskAt: s.nextDueTaskAt,
-            overdueTasks: s.overdueTasks,
-            bookingsRecent: s.bookingsRecent,
-            leadScore,
-          },
-        };
-      });
-      return withStats;
     });
+    if (!input.includeStats || contacts.length === 0) {
+      return contacts;
+    }
+    return this.attachContactStats(input.businessId, contacts);
+  }
+
+  private async attachContactStats(businessId: string, contacts: Contact[]): Promise<ContactWithStats[]> {
+    const ids = contacts.map((c) => c.id);
+    const [invoices, tasks, events, notes, bookings] = await Promise.all([
+      this.prisma.client.invoice.findMany({
+        where: { businessId, contactId: { in: ids }, deletedAt: null },
+        select: { id: true, contactId: true, status: true, total: true, currency: true, dueDate: true, paidAt: true },
+      }),
+      this.prisma.client.contactTask.findMany({
+        where: { businessId, contactId: { in: ids } },
+        select: { contactId: true, status: true, dueDate: true, createdAt: true },
+      }),
+      this.prisma.client.contactEvent.findMany({
+        where: { businessId, contactId: { in: ids } },
+        select: { contactId: true, createdAt: true },
+      }),
+      this.prisma.client.contactNote.findMany({
+        where: { businessId, contactId: { in: ids } },
+        select: { contactId: true, createdAt: true },
+      }),
+      this.prisma.client.booking.findMany({
+        where: { businessId, contactId: { in: ids }, deletedAt: null },
+        select: { contactId: true, status: true, startTime: true },
+      }),
+    ]);
+
+    const statsMap = new Map<string, ContactMeta>();
+    for (const contact of contacts) {
+      statsMap.set(contact.id, {
+        outstandingBalance: 0,
+        unpaidInvoices: 0,
+        paidInvoices: 0,
+        lastInteractionAt: contact.updatedAt,
+        nextDueTaskAt: null,
+        overdueTasks: 0,
+        bookingsRecent: 0,
+        leadScore: 50,
+      });
+    }
+
+    invoices.forEach((inv) => {
+      const stats = statsMap.get(inv.contactId);
+      if (!stats) return;
+      if (['SENT', 'OVERDUE'].includes(inv.status)) {
+        stats.outstandingBalance += Number(inv.total ?? 0);
+        stats.unpaidInvoices += 1;
+      }
+      if (inv.status === 'PAID') {
+        stats.paidInvoices += 1;
+      }
+    });
+
+    tasks.forEach((task) => {
+      const stats = statsMap.get(task.contactId);
+      if (!stats) return;
+      if (task.status !== 'DONE' && task.dueDate) {
+        const due = new Date(task.dueDate);
+        if (!stats.nextDueTaskAt || due < stats.nextDueTaskAt) stats.nextDueTaskAt = due;
+        if (due < new Date()) stats.overdueTasks += 1;
+      }
+      if (task.createdAt > stats.lastInteractionAt) stats.lastInteractionAt = task.createdAt;
+    });
+
+    events.forEach((event) => {
+      const stats = statsMap.get(event.contactId);
+      if (stats && event.createdAt > stats.lastInteractionAt) stats.lastInteractionAt = event.createdAt;
+    });
+    notes.forEach((note) => {
+      const stats = statsMap.get(note.contactId);
+      if (stats && note.createdAt > stats.lastInteractionAt) stats.lastInteractionAt = note.createdAt;
+    });
+    const recentCutoff = new Date();
+    recentCutoff.setDate(recentCutoff.getDate() - 14);
+    bookings.forEach((booking) => {
+      const stats = statsMap.get(booking.contactId);
+      if (!stats) return;
+      if (booking.status === 'COMPLETED' && booking.startTime > recentCutoff) stats.bookingsRecent += 1;
+      if (booking.startTime > stats.lastInteractionAt) stats.lastInteractionAt = booking.startTime;
+    });
+
+    const withStats = contacts.map((contact) => {
+      const stats = statsMap.get(contact.id);
+      if (!stats) return contact;
+      const leadScore =
+        50 +
+        stats.bookingsRecent * 15 +
+        stats.paidInvoices * 10 -
+        stats.unpaidInvoices * 5 -
+        stats.overdueTasks * 5 +
+        (contact.status === 'CLIENT' ? 5 : 0);
+      stats.leadScore = leadScore;
+      return {
+        ...contact,
+        meta: stats,
+      };
+    });
+    return withStats;
   }
 
   createContact(input: {
@@ -554,22 +640,326 @@ export class CrmService {
     return { lead, prospect, client, lost, unpaid, stale, newThisWeek };
   }
 
+  async flowHighlights(input: { businessId: string }): Promise<FlowHighlightsPayload> {
+    const contacts = await this.listContacts({ businessId: input.businessId, includeStats: true, take: 200 });
+    const [segments, serviceAffinity, timeline] = await Promise.all([
+      this.buildSegmentInsights(input.businessId),
+      this.buildServiceAffinity(input.businessId),
+      this.buildTimeline(input.businessId),
+    ]);
+    return {
+      highlights: {
+        highPotential: this.buildHighlightCards(contacts, 4, (meta) => meta.leadScore),
+        overdueReminders: this.buildHighlightCards(
+          contacts,
+          4,
+          (meta) => meta.outstandingBalance,
+          (contact) => (contact.meta?.outstandingBalance ?? 0) > 0,
+        ),
+        serviceAffinity,
+      },
+      segments,
+      timeline,
+      nextActions: this.buildNextActions(contacts),
+      aiNextActions: [
+        {
+          id: 'ai-next-actions-stub',
+          title: 'AI insights coming soon',
+          detail: 'This placeholder will be replaced once the Flow listeners and AI module are wired.',
+        },
+      ],
+    };
+  }
+
+  private buildHighlightCards(
+    contacts: ContactWithStats[],
+    limit: number,
+    metric: (meta: ContactMeta) => number,
+    filter: (contact: ContactWithStats) => boolean = () => true,
+  ): ContactHighlight[] {
+    const filtered = contacts.filter((contact) => contact.meta && filter(contact));
+    return filtered
+      .sort((a, b) => metric(b.meta!) - metric(a.meta!))
+      .slice(0, limit)
+      .map((contact) => this.contactToHighlight(contact));
+  }
+
+  private contactToHighlight(contact: ContactWithStats): ContactHighlight {
+    const meta = contact.meta;
+    return {
+      contactId: contact.id,
+      name: `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() || 'Unnamed',
+      status: contact.status,
+      leadScore: meta?.leadScore ?? 50,
+      outstandingBalance: meta?.outstandingBalance ?? 0,
+      unpaidInvoices: meta?.unpaidInvoices ?? 0,
+      lastInteractionAt: meta?.lastInteractionAt ?? null,
+      tags: contact.tags ?? [],
+    };
+  }
+
+  private async buildSegmentInsights(businessId: string): Promise<SegmentInsight[]> {
+    const now = new Date();
+    const startOfWeek = new Date(now);
+    startOfWeek.setHours(0, 0, 0, 0);
+    const day = startOfWeek.getDay();
+    const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
+    startOfWeek.setDate(diff);
+    const staleCutoff = new Date();
+    staleCutoff.setDate(staleCutoff.getDate() - 21);
+
+    const definitions: Array<{
+      key: string;
+      label: string;
+      description: string;
+      params?: Partial<ContactListOptions>;
+      take?: number;
+      countWhere: Prisma.ContactWhereInput;
+    }> = [
+      {
+        key: 'new-this-week',
+        label: 'New this week',
+        description: 'Fresh leads created since the start of the week',
+        params: { newThisWeek: true },
+        take: 6,
+        countWhere: { businessId, deletedAt: null, createdAt: { gte: startOfWeek } },
+      },
+      {
+        key: 'cold-with-unpaid',
+        label: 'Cold leads with unpaid invoices',
+        description: 'No recent activity plus outstanding invoices',
+        params: { hasUnpaidInvoices: true, staleDays: 21 },
+        countWhere: {
+          businessId,
+          deletedAt: null,
+          invoices: {
+            some: {
+              status: { in: ['SENT', 'OVERDUE'] as string[] },
+              deletedAt: null,
+            },
+          },
+          bookings: { none: { startTime: { gte: staleCutoff }, deletedAt: null } },
+        },
+      },
+      {
+        key: 'top-clients',
+        label: 'Top clients',
+        description: 'Clients who book and pay frequently',
+        params: { status: 'CLIENT' },
+        countWhere: { businessId, deletedAt: null, status: 'CLIENT' },
+      },
+    ];
+
+    const insights: SegmentInsight[] = [];
+    for (const def of definitions) {
+      const options: ContactListOptions = {
+        businessId,
+        ...def.params,
+        includeStats: def.params?.includeStats ?? true,
+        take: def.take ?? 6,
+      };
+      const [contacts, count] = await Promise.all([
+        this.listContacts(options),
+        this.prisma.client.contact.count({ where: def.countWhere }),
+      ]);
+      insights.push({
+        key: def.key,
+        label: def.label,
+        description: def.description,
+        count,
+        contacts: contacts.slice(0, 6),
+      });
+    }
+    return insights;
+  }
+
+  private async buildServiceAffinity(businessId: string): Promise<ServiceAffinity[]> {
+    const serviceStats = await this.prisma.client.booking.groupBy({
+      by: ['serviceId'],
+      where: { businessId, deletedAt: null },
+      _count: { serviceId: true },
+      orderBy: { _count: { serviceId: 'desc' } },
+      take: 5,
+    });
+    if (serviceStats.length === 0) return [];
+    const serviceIds = serviceStats.map((stat) => stat.serviceId);
+    const services = await this.prisma.client.service.findMany({
+      where: { id: { in: serviceIds } },
+    });
+    const serviceMap = new Map(services.map((service) => [service.id, service]));
+    const contactStats = await this.prisma.client.booking.groupBy({
+      by: ['serviceId', 'contactId'],
+      where: { businessId, deletedAt: null, serviceId: { in: serviceIds } },
+      _count: { contactId: true },
+    });
+    const contactIds = Array.from(new Set(contactStats.map((stat) => stat.contactId)));
+    const contacts = await this.prisma.client.contact.findMany({
+      where: { id: { in: contactIds } },
+      select: { id: true, firstName: true, lastName: true },
+    });
+    const contactMap = new Map(contacts.map((contact) => [contact.id, contact]));
+
+    const affinity = serviceStats.map((stat) => {
+      const service = serviceMap.get(stat.serviceId);
+      if (!service) return null;
+      const bestContact = contactStats
+        .filter((entry) => entry.serviceId === stat.serviceId)
+        .sort((a, b) => b._count.contactId - a._count.contactId)[0];
+      const topContact = bestContact ? contactMap.get(bestContact.contactId) : undefined;
+      const entry: ServiceAffinity = {
+        serviceId: service.id,
+        serviceName: service.name,
+        bookings: stat._count.serviceId,
+        revenue: stat._count.serviceId * service.price,
+      };
+      if (topContact) {
+        entry.topContact = {
+          id: topContact.id,
+          name: `${topContact.firstName ?? ''} ${topContact.lastName ?? ''}`.trim() || 'Unnamed',
+          bookings: bestContact?._count.contactId ?? 0,
+        };
+      }
+      return entry;
+    });
+    return affinity.filter((entry): entry is ServiceAffinity => entry !== null);
+  }
+
+  private async buildTimeline(businessId: string, limit = 20): Promise<TimelineEntry[]> {
+    const [events, notes, tasks, invoices, bookings] = await Promise.all([
+      this.prisma.client.contactEvent.findMany({
+        where: { businessId },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      }),
+      this.prisma.client.contactNote.findMany({
+        where: { businessId },
+        orderBy: { createdAt: 'desc' },
+        take: 8,
+      }),
+      this.prisma.client.contactTask.findMany({
+        where: { businessId },
+        orderBy: { createdAt: 'desc' },
+        take: 8,
+      }),
+      this.prisma.client.invoice.findMany({
+        where: { businessId, deletedAt: null },
+        orderBy: { createdAt: 'desc' },
+        take: 6,
+      }),
+      this.prisma.client.booking.findMany({
+        where: { businessId, deletedAt: null },
+        orderBy: { createdAt: 'desc' },
+        take: 6,
+      }),
+    ]);
+
+    const entries: TimelineEntry[] = [
+      ...events.map((event) => ({
+        id: event.id,
+        type: 'event' as const,
+        contactId: event.contactId,
+        title: event.type,
+        description: `Event recorded via ${event.source ?? 'system'}`,
+        timestamp: event.createdAt,
+      })),
+      ...notes.map((note) => ({
+        id: note.id,
+        type: 'note' as const,
+        contactId: note.contactId,
+        title: 'Note added',
+        description: note.body.slice(0, 120),
+        timestamp: note.createdAt,
+      })),
+      ...tasks.map((task) => ({
+        id: task.id,
+        type: 'task' as const,
+        contactId: task.contactId,
+        title: `Task: ${task.title}`,
+        description: task.dueDate ? `Due ${new Date(task.dueDate).toLocaleString()}` : 'No due date',
+        timestamp: task.createdAt,
+      })),
+      ...invoices.map((invoice) => ({
+        id: invoice.id,
+        type: 'invoice' as const,
+        contactId: invoice.contactId,
+        title: `Invoice ${invoice.status}`,
+        description: `Total ${invoice.total} ${invoice.currency}`,
+        timestamp: invoice.createdAt,
+      })),
+      ...bookings.map((booking) => ({
+        id: booking.id,
+        type: 'booking' as const,
+        contactId: booking.contactId,
+        title: `Booking ${booking.status}`,
+        description: `Starts ${booking.startTime?.toISOString() ?? 'TBD'}`,
+        timestamp: booking.createdAt,
+      })),
+    ];
+
+    return entries.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()).slice(0, limit);
+  }
+
+  private buildNextActions(contacts: ContactWithStats[]): NextAction[] {
+    const actions: NextAction[] = [];
+    const staleCutoff = new Date();
+    staleCutoff.setDate(staleCutoff.getDate() - 7);
+    const soon = new Date();
+    soon.setDate(soon.getDate() + 2);
+
+    for (const contact of contacts) {
+      if (!contact.meta) continue;
+      const { outstandingBalance, lastInteractionAt, nextDueTaskAt } = contact.meta;
+      if (outstandingBalance > 0) {
+        actions.push({
+          id: `${contact.id}-overdue`,
+          contactId: contact.id,
+          title: 'Collect overdue invoice',
+          detail: `Outstanding balance of ${outstandingBalance.toFixed(2)}`,
+          severity: 'high',
+          trigger: 'overdue-invoice',
+        });
+      }
+      if (lastInteractionAt <= staleCutoff) {
+        actions.push({
+          id: `${contact.id}-stale`,
+          contactId: contact.id,
+          title: 'Re-engage stale contact',
+          detail: `No interaction since ${lastInteractionAt.toLocaleDateString()}`,
+          severity: 'medium',
+          trigger: 'stale-contact',
+        });
+      }
+      if (nextDueTaskAt && nextDueTaskAt <= soon) {
+        actions.push({
+          id: `${contact.id}-task`,
+          contactId: contact.id,
+          title: 'Task due soon',
+          detail: `Next task due ${nextDueTaskAt.toLocaleDateString()}`,
+          severity: 'medium',
+          trigger: 'upcoming-task',
+        });
+      }
+      if (actions.length >= 6) break;
+    }
+
+    return actions;
+  }
+
   async dueTasks(input: { businessId: string; windowDays?: number }) {
     const windowDays = input.windowDays ?? 7;
     const now = new Date();
     const soon = new Date();
     soon.setDate(soon.getDate() + windowDays);
     return this.prisma.client.contactTask.findMany({
-      where: {
-        businessId: input.businessId,
-        status: { not: 'DONE' },
-        deletedAt: null,
-        OR: [
-          { dueDate: { lte: now } },
-          { dueDate: { lte: soon } },
-          { remindAt: { lte: soon } },
-        ],
-      },
+        where: {
+          businessId: input.businessId,
+          status: { not: 'DONE' },
+          OR: [
+            { dueDate: { lte: now } },
+            { dueDate: { lte: soon } },
+            { remindAt: { lte: soon } },
+          ],
+        },
       orderBy: { dueDate: 'asc' },
       include: { contact: true },
       take: 50,

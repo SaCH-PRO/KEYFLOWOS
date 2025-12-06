@@ -18,7 +18,7 @@ export async function POST(request: Request) {
       if (res.ok && json?.suggestion) {
         return NextResponse.json({ suggestion: json.suggestion });
       }
-    } catch (err) {
+    } catch {
       // fall back to stub below
     }
   }

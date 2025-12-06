@@ -116,6 +116,12 @@ export class CrmController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/highlights')
+  flowHighlights(@Param('businessId') businessId: string) {
+    return this.crm.flowHighlights({ businessId });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/tasks/due')
   dueTasks(
     @Param('businessId') businessId: string,
