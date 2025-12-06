@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Param, Post, Query, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { CrmImportService } from './crm-import.service';
+import { CrmPlaybookService } from './crm-playbook.service';
 import { CrmService } from './crm.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -13,7 +14,11 @@ import type { Express } from 'express';
 
 @Controller('crm')
 export class CrmController {
-  constructor(private readonly crm: CrmService, private readonly crmImport: CrmImportService) {}
+  constructor(
+    private readonly crm: CrmService,
+    private readonly crmImport: CrmImportService,
+    private readonly playbook: CrmPlaybookService,
+  ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/contacts')
@@ -229,5 +234,26 @@ export class CrmController {
   @Get('businesses/:businessId/imports/:importId/records')
   listImportRecords(@Param('businessId') businessId: string, @Param('importId') importId: string) {
     return this.crmImport.listImportRecords(businessId, importId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/contacts/:contactId/playbook')
+  getPlaybook(@Param('businessId') businessId: string, @Param('contactId') contactId: string) {
+    return this.playbook.getOrCreatePlaybook({ businessId, contactId });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/contacts/:contactId/playbook')
+  updatePlaybook(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Body() body: { data: any; type?: string },
+  ) {
+    return this.playbook.updatePlaybook({
+      businessId,
+      contactId,
+      data: body.data,
+      type: body.type,
+    });
   }
 }
