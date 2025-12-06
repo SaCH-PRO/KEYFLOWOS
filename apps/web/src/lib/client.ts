@@ -76,6 +76,34 @@ const bookingSchema = z.object({
 });
 
 export type Contact = z.infer<typeof contactSchema>;
+const contactImportSchema = z.object({
+  id: z.string(),
+  businessId: z.string(),
+  sourceType: z.enum(["csv", "xlsx", "pdf", "image", "link"]),
+  sourceUrl: z.string().nullable().optional(),
+  originalName: z.string().nullable().optional(),
+  status: z.string(),
+  totalRows: z.number().nullable().optional(),
+  processedRows: z.number().nullable().optional(),
+  error: z.string().nullable().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  completedAt: z.string().nullable().optional(),
+});
+export type ContactImportJob = z.infer<typeof contactImportSchema>;
+export type ContactMedia = {
+  id: string;
+  businessId: string;
+  contactId?: string | null;
+  type: string;
+  url: string;
+  ocrText?: string | null;
+  createdAt: string;
+};
+export type ContactImportOcrResponse = {
+  contact: Contact;
+  media: ContactMedia;
+};
 export type ContactEvent = z.infer<typeof eventSchema>;
 export type ContactNote = z.infer<typeof noteSchema>;
 export type ContactTask = z.infer<typeof taskSchema>;
@@ -310,6 +338,61 @@ export async function fetchDueTasks(
     z.array(taskSchema),
     [],
   );
+}
+
+export async function fetchImportJobs(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGet(`/crm/businesses/${encodeURIComponent(businessId)}/imports`, z.array(contactImportSchema), []);
+}
+
+export async function importContactsFromFile(input: {
+  businessId?: string;
+  type: 'csv' | 'xlsx' | 'pdf' | 'image';
+  file: File;
+}) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const params = new URLSearchParams({ type: input.type });
+  const url = `${API_BASE}/crm/businesses/${encodeURIComponent(businessId)}/import/file?${params.toString()}`;
+  const formData = new FormData();
+  formData.append('file', input.file);
+  const headers = getAuthHeaders();
+  const res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+  const payload = await res.json().catch(() => null);
+  if (!res.ok || !payload || typeof payload !== 'object') {
+    const message =
+      (payload && typeof payload === 'object' && 'message' in payload && typeof payload.message === 'string'
+        ? payload.message
+        : res.statusText) || 'Import failed';
+    throw new Error(message);
+  }
+  return contactImportSchema.parse(payload);
+}
+
+export async function importContactsFromLink(url: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<ContactImportJob>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/import/link`,
+    body: { url },
+  });
+}
+
+export async function createContactFromOcr(params: {
+  businessId?: string;
+  ocrText: string;
+  url?: string;
+  type?: string;
+}) {
+  const businessId = params.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<ContactImportOcrResponse>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/import/image/ocr`,
+    body: {
+      ocrText: params.ocrText,
+      url: params.url,
+      type: params.type,
+    },
+  });
 }
 
 export async function completeContactTask(taskId: string, businessId: string = DEFAULT_BUSINESS_ID) {

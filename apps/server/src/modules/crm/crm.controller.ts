@@ -1,4 +1,6 @@
-import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Query, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { CrmImportService } from './crm-import.service';
 import { CrmService } from './crm.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -6,10 +8,12 @@ import { CreateContactDto } from './dto/create-contact.dto';
 import { CreateNoteDto } from './dto/create-note.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
+import { memoryStorage } from 'multer';
+import type { Express } from 'express';
 
 @Controller('crm')
 export class CrmController {
-  constructor(private readonly crm: CrmService) {}
+  constructor(private readonly crm: CrmService, private readonly crmImport: CrmImportService) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/contacts')
@@ -161,5 +165,69 @@ export class CrmController {
     @Param('taskId') taskId: string,
   ) {
     return this.crm.completeTask({ businessId, taskId });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/import/file')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024 },
+    }),
+  )
+  async importContactsFromFile(
+    @Param('businessId') businessId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Query('type') type?: string,
+  ) {
+    if (!file || !file.buffer) {
+      throw new BadRequestException('File is required');
+    }
+    const allowed: Array<'csv' | 'xlsx' | 'pdf' | 'image'> = ['csv', 'xlsx', 'pdf', 'image'];
+    const sourceType = allowed.includes(type as any) ? (type as 'csv' | 'xlsx' | 'pdf' | 'image') : 'csv';
+    return this.crmImport.createFileImport({
+      businessId,
+      sourceType,
+      originalName: file.originalname,
+      fileBuffer: file.buffer,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/import/link')
+  async importContactsFromLink(@Param('businessId') businessId: string, @Body('url') url?: string) {
+    if (!url) {
+      throw new BadRequestException('url is required');
+    }
+    return this.crmImport.createLinkImport({ businessId, sourceUrl: url });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/import/image/ocr')
+  async createContactFromOcr(
+    @Param('businessId') businessId: string,
+    @Body() body: { ocrText?: string; url?: string; type?: string },
+  ) {
+    if (!body?.ocrText) {
+      throw new BadRequestException('ocrText is required');
+    }
+    return this.crmImport.createContactFromOcr({
+      businessId,
+      ocrText: body.ocrText,
+      mediaUrl: body.url,
+      type: body.type,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/imports')
+  listImports(@Param('businessId') businessId: string) {
+    return this.crmImport.listImports(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/imports/:importId/records')
+  listImportRecords(@Param('businessId') businessId: string, @Param('importId') importId: string) {
+    return this.crmImport.listImportRecords(businessId, importId);
   }
 }
