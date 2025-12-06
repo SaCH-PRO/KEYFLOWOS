@@ -4,6 +4,12 @@ import { useState } from "react";
 import { Badge, Button, Card, Input } from "@keyflow/ui";
 import { apiPost, API_BASE } from "@/lib/api";
 
+type SocialPostResponse = {
+  id?: string;
+  status?: string;
+  [key: string]: unknown;
+};
+
 export default function PublicSocialPage() {
   const [businessId, setBusinessId] = useState("");
   const [postId, setPostId] = useState("");
@@ -13,13 +19,13 @@ export default function PublicSocialPage() {
 
   const request = async (path: string, body: Record<string, unknown>) => {
     setStatus("Submitting...");
-    const { data, error } = await apiPost<any>({ path, body });
+    const { data, error } = await apiPost<SocialPostResponse>({ path, body });
     if (error) {
       setStatus(`Error: ${error}`);
       return;
     }
     setStatus(JSON.stringify(data));
-    if ((data as any)?.id) setPostId((data as any).id);
+    if (data?.id) setPostId(data.id);
   };
 
   return (

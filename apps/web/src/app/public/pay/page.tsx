@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button, Card, Input, Badge } from "@keyflow/ui";
 import { apiPost, API_BASE } from "@/lib/api";
+import { Invoice } from "@/lib/client";
 import { motion } from "framer-motion";
 
 export default function PublicPayPage() {
@@ -17,7 +18,7 @@ export default function PublicPayPage() {
     setStatus("Marking paid...");
     setSuccess(false);
     setPaidInvoiceId(null);
-    const { data, error } = await apiPost<any>({
+    const { data, error } = await apiPost<Invoice>({
       path: `/commerce/invoices/${encodeURIComponent(invoiceId)}/paid`,
       body: {},
     });
@@ -88,7 +89,7 @@ export default function PublicPayPage() {
                         await navigator.clipboard.writeText(`${window.location.origin}/commerce/invoices/${paidInvoiceId}/receipt`);
                         setCopyMsg("Receipt link copied");
                         setTimeout(() => setCopyMsg(null), 1500);
-                      } catch (err) {
+                      } catch {
                         setCopyMsg("Copy failed");
                       }
                     }}

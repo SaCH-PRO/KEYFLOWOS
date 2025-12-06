@@ -174,9 +174,9 @@ export default function PublicBookPage() {
                             await navigator.clipboard.writeText(`${window.location.origin}/public/book?bookingId=${bookingId}`);
                             setCopyMsg("Link copied");
                             setTimeout(() => setCopyMsg(null), 1500);
-                          } catch (err) {
-                            setCopyMsg("Copy failed");
-                          }
+                        } catch {
+                          setCopyMsg("Copy failed");
+                        }
                         }}
                       >
                         Share booking

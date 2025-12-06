@@ -17,7 +17,7 @@ import {
   updateContact,
 } from "@/lib/client";
 
-type Detail = { contact: Contact | null; events: ContactEvent[]; notes: ContactNote[]; tasks: ContactTask[]; meta?: any };
+type Detail = { contact: Contact | null; events: ContactEvent[]; notes: ContactNote[]; tasks: ContactTask[] };
 
 export default function ContactDetailPage() {
   const params = useParams();
@@ -130,7 +130,8 @@ export default function ContactDetailPage() {
   if (!data) return <div className="p-4 text-sm text-muted-foreground">Loading contact...</div>;
   if (!data.contact) return <div className="p-4 text-sm text-muted-foreground">Contact not found.</div>;
 
-  const c = data.contact;
+const c = data.contact;
+const meta = c.meta;
 
   return (
     <div className="space-y-4">
@@ -146,9 +147,9 @@ export default function ContactDetailPage() {
                 {t}
               </Badge>
             ))}
-            {data.meta?.outstandingBalance > 0 && (
+            {meta?.outstandingBalance && meta.outstandingBalance > 0 && (
               <Badge variant="outline" className="border-amber-500/60 text-amber-300">
-                Owed: {data.meta.outstandingBalance.toLocaleString()}
+                Owed: {meta.outstandingBalance.toLocaleString()}
               </Badge>
             )}
           </div>
