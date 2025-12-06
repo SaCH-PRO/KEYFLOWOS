@@ -27,9 +27,44 @@ type ContactListOptions = {
   staleDays?: number;
   newThisWeek?: boolean;
   tags?: string[];
+  ownerId?: string;
+  lifecycleStage?: string;
+  companyName?: string;
+  industry?: string;
+  city?: string;
+  country?: string;
+  segment?: string;
+  doNotContact?: boolean;
   skip?: number;
   take?: number;
   includeStats?: boolean;
+};
+
+type ContactExtraAttributes = {
+  displayName?: string | null;
+  secondaryEmail?: string | null;
+  secondaryPhone?: string | null;
+  whatsappNumber?: string | null;
+  preferredChannel?: string | null;
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+  timezone?: string | null;
+  companyName?: string | null;
+  jobTitle?: string | null;
+  department?: string | null;
+  industry?: string | null;
+  ownerId?: string | null;
+  lifecycleStage?: string | null;
+  sourceDetail?: string | null;
+  segment?: string | null;
+  language?: string | null;
+  marketingOptIn?: boolean | null;
+  doNotContact?: boolean | null;
+  notesInternal?: string | null;
 };
 
 type ContactHighlight = {
@@ -186,6 +221,14 @@ export class CrmService {
     if (input.tags && input.tags.length > 0) {
       where.tags = { hasSome: input.tags };
     }
+    if (input.ownerId) where.ownerId = input.ownerId;
+    if (input.lifecycleStage) where.lifecycleStage = input.lifecycleStage;
+    if (input.companyName) where.companyName = { contains: input.companyName, mode: 'insensitive' };
+    if (input.industry) where.industry = { contains: input.industry, mode: 'insensitive' };
+    if (input.city) where.city = { contains: input.city, mode: 'insensitive' };
+    if (input.country) where.country = { contains: input.country, mode: 'insensitive' };
+    if (input.segment) where.segment = input.segment;
+    if (typeof input.doNotContact === 'boolean') where.doNotContact = input.doNotContact;
 
     const skip = input.skip ?? 0;
     const take = input.take ?? 50;
@@ -307,9 +350,10 @@ export class CrmService {
     phone?: string | null;
     status?: string;
     source?: string | null;
+    sourceDetail?: string | null;
     tags?: string[];
     custom?: any;
-  }) {
+  } & ContactExtraAttributes) {
     const emailNormalized = this.normalizeEmail(input.email);
     const phoneNormalized = this.normalizePhone(input.phone);
 
@@ -327,6 +371,30 @@ export class CrmService {
           source: input.source ?? null,
           tags: input.tags ?? [],
           custom: input.custom ?? {},
+          sourceDetail: input.sourceDetail ?? null,
+          displayName: input.displayName ?? null,
+          secondaryEmail: input.secondaryEmail ?? null,
+          secondaryPhone: input.secondaryPhone ?? null,
+          whatsappNumber: input.whatsappNumber ?? null,
+          preferredChannel: input.preferredChannel ?? null,
+          addressLine1: input.addressLine1 ?? null,
+          addressLine2: input.addressLine2 ?? null,
+          city: input.city ?? null,
+          state: input.state ?? null,
+          postalCode: input.postalCode ?? null,
+          country: input.country ?? null,
+          timezone: input.timezone ?? null,
+          companyName: input.companyName ?? null,
+          jobTitle: input.jobTitle ?? null,
+          department: input.department ?? null,
+          industry: input.industry ?? null,
+          ownerId: input.ownerId ?? null,
+          lifecycleStage: input.lifecycleStage ?? null,
+          segment: input.segment ?? null,
+          language: input.language ?? null,
+          marketingOptIn: input.marketingOptIn ?? null,
+          doNotContact: input.doNotContact ?? null,
+          notesInternal: input.notesInternal ?? null,
         },
         select: { id: true },
       })
@@ -376,9 +444,10 @@ export class CrmService {
     phone?: string | null;
     status?: string;
     source?: string | null;
+    sourceDetail?: string | null;
     tags?: string[];
     custom?: any;
-  }) {
+  } & ContactExtraAttributes) {
     const existing = await this.assertContact(input.businessId, input.contactId);
     const emailNormalized = this.normalizeEmail(input.email);
     const phoneNormalized = this.normalizePhone(input.phone);
@@ -395,6 +464,30 @@ export class CrmService {
         source: input.source ?? undefined,
         tags: input.tags ?? undefined,
         custom: input.custom ?? undefined,
+        sourceDetail: input.sourceDetail ?? undefined,
+        displayName: input.displayName ?? undefined,
+        secondaryEmail: input.secondaryEmail ?? undefined,
+        secondaryPhone: input.secondaryPhone ?? undefined,
+        whatsappNumber: input.whatsappNumber ?? undefined,
+        preferredChannel: input.preferredChannel ?? undefined,
+        addressLine1: input.addressLine1 ?? undefined,
+        addressLine2: input.addressLine2 ?? undefined,
+        city: input.city ?? undefined,
+        state: input.state ?? undefined,
+        postalCode: input.postalCode ?? undefined,
+        country: input.country ?? undefined,
+        timezone: input.timezone ?? undefined,
+        companyName: input.companyName ?? undefined,
+        jobTitle: input.jobTitle ?? undefined,
+        department: input.department ?? undefined,
+        industry: input.industry ?? undefined,
+        ownerId: input.ownerId ?? undefined,
+        lifecycleStage: input.lifecycleStage ?? undefined,
+        segment: input.segment ?? undefined,
+        language: input.language ?? undefined,
+        marketingOptIn: input.marketingOptIn ?? undefined,
+        doNotContact: input.doNotContact ?? undefined,
+        notesInternal: input.notesInternal ?? undefined,
       },
     }).then(async (updated) => {
       if (this.automation && input.status && existing?.status !== input.status) {

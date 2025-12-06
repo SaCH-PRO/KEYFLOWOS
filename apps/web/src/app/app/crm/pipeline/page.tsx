@@ -547,6 +547,28 @@ export default function PipelinePage() {
                         </div>
                       </div>
                       <div className="text-xs text-muted-foreground">{c.email || c.phone || "No contact info"}</div>
+                      {(c.companyName || c.jobTitle || c.segment || c.doNotContact) && (
+                        <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                          {c.companyName && (
+                            <span className="rounded-full border border-border/50 px-2 py-0.5">
+                              {c.companyName}
+                            </span>
+                          )}
+                          {c.jobTitle && (
+                            <span className="rounded-full border border-border/50 px-2 py-0.5">
+                              {c.jobTitle}
+                            </span>
+                          )}
+                          {c.segment && (
+                            <span className="rounded-full border border-border/50 px-2 py-0.5">
+                              Segment: {c.segment}
+                            </span>
+                          )}
+                          {c.doNotContact && (
+                            <span className="text-rose-300">Do not contact</span>
+                          )}
+                        </div>
+                      )}
                       <div className="flex flex-wrap gap-1 text-[11px] text-muted-foreground">
                         {c.meta?.leadScore !== undefined && (
                           <span className="rounded-full border border-border/50 px-2 py-0.5">

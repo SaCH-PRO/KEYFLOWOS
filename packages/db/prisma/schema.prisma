@@ -39,8 +39,9 @@ model Business {
   contactEvents    ContactEvent[]
   contactNotes     ContactNote[]
   contactTasks     ContactTask[]
-  contactImports   ContactImport[]
-  contactMedia     ContactMedia[]
+    contactImports   ContactImport[]
+    contactMedia     ContactMedia[]
+    playbooks        ContactPlaybook[]
   services         Service[]
   staff            StaffMember[]
   socialPosts      SocialPost[]
@@ -101,6 +102,30 @@ model Contact {
   source    String?
   tags      String[] @default([])
   custom    Json?    @default("{}")
+  displayName  String?  @map("display_name")
+  secondaryEmail  String? @map("secondary_email")
+  secondaryPhone  String? @map("secondary_phone")
+  whatsappNumber  String? @map("whatsapp_number")
+  preferredChannel String? @map("preferred_channel")
+  addressLine1 String? @map("address_line_1")
+  addressLine2 String? @map("address_line_2")
+  city         String?
+  state        String?
+  postalCode   String? @map("postal_code")
+  country      String?
+  timezone     String?
+  companyName String? @map("company_name")
+  jobTitle    String? @map("job_title")
+  department  String?
+  industry    String?
+  ownerId        String? @map("owner_id")
+  lifecycleStage String? @map("lifecycle_stage")
+  sourceDetail   String? @map("source_detail")
+  segment        String?
+  language       String?
+  marketingOptIn Boolean? @map("marketing_opt_in")
+  doNotContact   Boolean? @map("do_not_contact")
+  notesInternal  String?  @map("notes_internal")
 
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -108,12 +133,13 @@ model Contact {
   // Relationships
   quotes   Quote[]
   invoices Invoice[]
-  bookings Booking[]
-  events   ContactEvent[]
-  notes    ContactNote[]
-  tasks    ContactTask[]
-  importRecords ContactImportContact[]
-  media         ContactMedia[]
+    bookings Booking[]
+    events   ContactEvent[]
+    notes    ContactNote[]
+    tasks    ContactTask[]
+    importRecords ContactImportContact[]
+    media         ContactMedia[]
+    playbooks     ContactPlaybook[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
@@ -235,6 +261,24 @@ model ContactMedia {
 
   @@index([businessId, contactId])
   @@map("contact_media")
+}
+
+model ContactPlaybook {
+  id            String   @id @default(cuid())
+  businessId    String   @map("business_id")
+  contactId     String   @map("contact_id")
+  type          String   // 'default' | 'medical' | 'coaching' | etc.
+  schemaVersion String   @map("schema_version")
+  data          Json
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt      @map("updated_at")
+  lastUsedAt    DateTime? @map("last_used_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, contactId])
+  @@map("contact_playbooks")
 }
 
 // ---

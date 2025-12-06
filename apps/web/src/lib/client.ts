@@ -15,6 +15,30 @@ const contactSchema = z.object({
   source: z.string().nullable().optional(),
   tags: z.array(z.string()).optional().default([]),
   custom: z.record(z.unknown()).nullable().optional(),
+  displayName: z.string().nullable().optional(),
+  secondaryEmail: z.string().nullable().optional(),
+  secondaryPhone: z.string().nullable().optional(),
+  whatsappNumber: z.string().nullable().optional(),
+  preferredChannel: z.string().nullable().optional(),
+  addressLine1: z.string().nullable().optional(),
+  addressLine2: z.string().nullable().optional(),
+  city: z.string().nullable().optional(),
+  state: z.string().nullable().optional(),
+  postalCode: z.string().nullable().optional(),
+  country: z.string().nullable().optional(),
+  timezone: z.string().nullable().optional(),
+  companyName: z.string().nullable().optional(),
+  jobTitle: z.string().nullable().optional(),
+  department: z.string().nullable().optional(),
+  industry: z.string().nullable().optional(),
+  ownerId: z.string().nullable().optional(),
+  lifecycleStage: z.string().nullable().optional(),
+  sourceDetail: z.string().nullable().optional(),
+  segment: z.string().nullable().optional(),
+  language: z.string().nullable().optional(),
+  marketingOptIn: z.boolean().nullable().optional(),
+  doNotContact: z.boolean().nullable().optional(),
+  notesInternal: z.string().nullable().optional(),
   meta: z
     .object({
       outstandingBalance: z.number().optional(),
@@ -91,6 +115,18 @@ const contactImportSchema = z.object({
   completedAt: z.string().nullable().optional(),
 });
 export type ContactImportJob = z.infer<typeof contactImportSchema>;
+const contactPlaybookSchema = z.object({
+  id: z.string(),
+  businessId: z.string(),
+  contactId: z.string(),
+  type: z.string(),
+  schemaVersion: z.string(),
+  data: z.record(z.unknown()),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  lastUsedAt: z.string().nullable().optional(),
+});
+export type ContactPlaybook = z.infer<typeof contactPlaybookSchema>;
 export type ContactMedia = {
   id: string;
   businessId: string;
@@ -103,6 +139,17 @@ export type ContactMedia = {
 export type ContactImportOcrResponse = {
   contact: Contact;
   media: ContactMedia;
+};
+export type ContactPlaybook = {
+  id: string;
+  businessId: string;
+  contactId: string;
+  type: string;
+  schemaVersion: string;
+  data: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt?: string | null;
 };
 export type ContactEvent = z.infer<typeof eventSchema>;
 export type ContactNote = z.infer<typeof noteSchema>;
@@ -255,6 +302,12 @@ export async function createContact(input: {
   source?: string;
   tags?: string[];
   custom?: Record<string, unknown>;
+  displayName?: string;
+  companyName?: string;
+  jobTitle?: string;
+  lifecycleStage?: string;
+  segment?: string;
+  notesInternal?: string;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   const body = {
@@ -266,6 +319,12 @@ export async function createContact(input: {
     source: input.source ?? "",
     tags: input.tags ?? [],
     custom: input.custom ?? {},
+    displayName: input.displayName,
+    companyName: input.companyName,
+    jobTitle: input.jobTitle,
+    lifecycleStage: input.lifecycleStage,
+    segment: input.segment,
+    notesInternal: input.notesInternal,
   };
 
   const res = await apiPost<Contact>({
@@ -285,6 +344,27 @@ export async function createContact(input: {
   };
 
   return { data: synthesized, error: res.error };
+}
+
+export async function fetchContactPlaybook(contactId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/playbook`,
+    contactPlaybookSchema,
+    null,
+  );
+}
+
+export async function updateContactPlaybook(params: {
+  contactId: string;
+  data: Record<string, unknown>;
+  type?: string;
+  businessId?: string;
+}) {
+  const businessId = params.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<ContactPlaybook>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(params.contactId)}/playbook`,
+    body: { data: params.data, type: params.type },
+  });
 }
 
 export async function addContactNote(contactId: string, body: string, businessId: string = DEFAULT_BUSINESS_ID) {
@@ -421,6 +501,12 @@ export async function updateContact(input: {
   source?: string;
   tags?: string[];
   custom?: Record<string, unknown>;
+  displayName?: string;
+  companyName?: string;
+  jobTitle?: string;
+  lifecycleStage?: string;
+  segment?: string;
+  notesInternal?: string;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<Contact>({
