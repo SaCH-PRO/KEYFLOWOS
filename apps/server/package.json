@@ -20,14 +20,19 @@
     "@trpc/server": "^10.45.2",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.3",
+    "csv-parse": "^5.4.0",
     "express": "^4.19.2",
+    "multer": "^2.0.2",
+    "pdf-parse": "^1.1.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "7.8.1",
+    "xlsx": "^0.18.5",
     "zod": "^3.24.0"
   },
   "devDependencies": {
-    "@types/express": "^5.0.5",
     "@nestjs/testing": "^10.4.8",
+    "@types/express": "^5.0.5",
+    "@types/multer": "^2.0.0",
     "@types/supertest": "^2.0.16",
     "supertest": "^7.0.0",
     "vitest": "^2.1.1"

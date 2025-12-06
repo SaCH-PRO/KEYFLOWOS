@@ -39,6 +39,8 @@ model Business {
   contactEvents    ContactEvent[]
   contactNotes     ContactNote[]
   contactTasks     ContactTask[]
+  contactImports   ContactImport[]
+  contactMedia     ContactMedia[]
   services         Service[]
   staff            StaffMember[]
   socialPosts      SocialPost[]
@@ -110,6 +112,8 @@ model Contact {
   events   ContactEvent[]
   notes    ContactNote[]
   tasks    ContactTask[]
+  importRecords ContactImportContact[]
+  media         ContactMedia[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
@@ -176,6 +180,61 @@ model ContactTask {
 
   @@index([businessId, contactId])
   @@map("contact_tasks")
+}
+
+model ContactImport {
+  id            String   @id @default(cuid())
+  businessId    String   @map("business_id")
+  sourceType    String   @map("source_type")
+  sourceUrl     String?  @map("source_url")
+  originalName  String?  @map("original_name")
+  status        String   @default("PENDING")
+  totalRows     Int?     @map("total_rows")
+  processedRows Int?     @map("processed_rows")
+  headerMapping Json?    @map("header_mapping")
+  error         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  completedAt   DateTime? @map("completed_at")
+
+  business Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  records  ContactImportContact[]
+
+  @@index([businessId, createdAt])
+  @@map("contact_imports")
+}
+
+model ContactImportContact {
+  id        String   @id @default(cuid())
+  importId  String   @map("import_id")
+  contactId String?  @map("contact_id")
+  rawData   Json     @map("raw_data")
+  status    String   @default("PENDING")
+  error     String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  import ContactImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+  contact Contact?      @relation(fields: [contactId], references: [id])
+
+  @@index([importId])
+  @@index([contactId])
+  @@map("contact_import_contacts")
+}
+
+model ContactMedia {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  contactId  String?  @map("contact_id")
+  type       String
+  url        String
+  ocrText    String?  @map("ocr_text")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  contact  Contact? @relation(fields: [contactId], references: [id])
+
+  @@index([businessId, contactId])
+  @@map("contact_media")
 }
 
 // ---
