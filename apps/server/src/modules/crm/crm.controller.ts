@@ -237,6 +237,34 @@ export class CrmController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/contacts/:contactId/events')
+  contactEvents(@Param('businessId') businessId: string, @Param('contactId') contactId: string) {
+    return this.crm.listContactEvents({ businessId, contactId });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/contacts/:contactId/notes')
+  contactNotes(@Param('businessId') businessId: string, @Param('contactId') contactId: string) {
+    return this.crm.listContactNotes({ businessId, contactId });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/tasks')
+  listTasks(
+    @Param('businessId') businessId: string,
+    @Query('contactId') contactId?: string,
+    @Query('status') status?: string,
+    @Query('dueBefore') dueBefore?: string,
+  ) {
+    return this.crm.listContactTasks({
+      businessId,
+      contactId,
+      status,
+      dueBefore: dueBefore ? new Date(dueBefore) : undefined,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/contacts/:contactId/playbook')
   getPlaybook(@Param('businessId') businessId: string, @Param('contactId') contactId: string) {
     return this.playbook.getOrCreatePlaybook({ businessId, contactId });

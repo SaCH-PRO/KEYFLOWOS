@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import type { ChangeEvent } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Badge, Button, Input, Textarea } from "@keyflow/ui";
+import { Badge, Button, Input } from "@keyflow/ui";
 import {
   Contact,
+  ContactPlaybook,
   ContactEvent,
   ContactNote,
   ContactTask,
@@ -15,9 +17,19 @@ import {
   deleteContact,
   mergeContacts,
   updateContact,
+  fetchContactPlaybook,
+  updateContactPlaybook,
 } from "@/lib/client";
 
-type Detail = { contact: Contact | null; events: ContactEvent[]; notes: ContactNote[]; tasks: ContactTask[] };
+type ContactWithTags = Omit<Contact, "tags"> & { tags?: string[] };
+type TaskWithContactTags = Omit<ContactTask, "contact"> & { contact?: ContactWithTags | null };
+type Detail = {
+  contact: ContactWithTags | null;
+  events: ContactEvent[];
+  notes: ContactNote[];
+  tasks: TaskWithContactTags[];
+  meta?: Contact["meta"];
+};
 
 export default function ContactDetailPage() {
   const params = useParams();
@@ -34,24 +46,59 @@ export default function ContactDetailPage() {
   const [mergeId, setMergeId] = useState("");
   const [aiSummary, setAiSummary] = useState<string | null>(null);
   const [aiNext, setAiNext] = useState<string | null>(null);
+  const [playbook, setPlaybook] = useState<ContactPlaybook | null>(null);
+  const [playbookText, setPlaybookText] = useState("");
+  const [playbookSaving, setPlaybookSaving] = useState(false);
+  const [playbookError, setPlaybookError] = useState<string | null>(null);
+  const normalizeContact = useCallback(
+    (contact?: Contact | null): ContactWithTags | null => (contact ? { ...contact, tags: contact.tags ?? [] } : null),
+    [],
+  );
+  const refreshDetail = useCallback(async () => {
+    if (!contactId) return null;
+    const { data: detail } = await fetchContactDetail(contactId);
+    const normalizedTasks: TaskWithContactTags[] = (detail?.tasks ?? []).map((task) => ({
+      ...task,
+      contact: task.contact ? normalizeContact(task.contact) : null,
+    }));
+    const normalized: Detail | null = detail
+      ? {
+          contact: normalizeContact(detail.contact),
+          events: detail.events ?? [],
+          notes: detail.notes ?? [],
+          tasks: normalizedTasks,
+          meta: (detail as any).meta,
+        }
+      : null;
+    setData(normalized);
+    return normalized;
+  }, [contactId, normalizeContact]);
+
+  const loadPlaybook = useCallback(async () => {
+    if (!contactId) return;
+    const { data } = await fetchContactPlaybook(contactId);
+    if (data) {
+      setPlaybook(data);
+      setPlaybookText(JSON.stringify(data.data ?? {}, null, 2));
+    }
+  }, [contactId]);
 
   useEffect(() => {
     const load = async () => {
-      const { data: detail } = await fetchContactDetail(contactId);
-      setData(detail);
-      setStatus(detail.contact?.status ?? "LEAD");
-      setTags(detail.contact?.tags?.join(", ") ?? "");
+      const normalized = await refreshDetail();
+      setStatus(normalized?.contact?.status ?? "LEAD");
+      setTags(normalized?.contact?.tags?.join(", ") ?? "");
+      await loadPlaybook();
     };
     if (contactId) void load();
-  }, [contactId]);
+  }, [contactId, refreshDetail, loadPlaybook]);
 
   const addNoteAction = async () => {
     if (!noteBody.trim()) return;
     startTransition(async () => {
       await addContactNote(contactId, noteBody);
       setNoteBody("");
-      const { data: detail } = await fetchContactDetail(contactId);
-      setData(detail);
+      await refreshDetail();
     });
   };
 
@@ -84,8 +131,9 @@ export default function ContactDetailPage() {
           .map((t) => t.trim())
           .filter(Boolean),
       });
-      const { data: detail } = await fetchContactDetail(contactId);
-      setData(detail);
+      const normalized = await refreshDetail();
+      setStatus(normalized?.contact?.status ?? status);
+      setTags(normalized?.contact?.tags?.join(", ") ?? tags);
     });
   };
 
@@ -102,9 +150,24 @@ export default function ContactDetailPage() {
     startTransition(async () => {
       await mergeContacts({ contactId, duplicateId: mergeId });
       setMergeId("");
-      const { data: detail } = await fetchContactDetail(contactId);
-      setData(detail);
+      await refreshDetail();
     });
+  };
+
+  const savePlaybook = async () => {
+    if (!contactId) return;
+    setPlaybookSaving(true);
+    setPlaybookError(null);
+    try {
+      const parsed = playbookText.trim() ? JSON.parse(playbookText) : {};
+      await updateContactPlaybook({ contactId, data: parsed, type: playbook?.type });
+      await loadPlaybook();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to save playbook";
+      setPlaybookError(message);
+    } finally {
+      setPlaybookSaving(false);
+    }
   };
 
   const addTaskAction = async () => {
@@ -114,16 +177,14 @@ export default function ContactDetailPage() {
       setTaskTitle("");
       setTaskDue("");
       setTaskAssignee("");
-      const { data: detail } = await fetchContactDetail(contactId);
-      setData(detail);
+      await refreshDetail();
     });
   };
 
   const completeTaskAction = async (taskId: string) => {
     startTransition(async () => {
       await completeContactTask(taskId);
-      const { data: detail } = await fetchContactDetail(contactId);
-      setData(detail);
+      await refreshDetail();
     });
   };
 
@@ -143,12 +204,12 @@ const meta = c.meta;
           </div>
           <div className="mt-2 flex gap-2 text-xs text-muted-foreground flex-wrap">
             {c.tags?.map((t) => (
-              <Badge key={t} variant="outline">
+              <Badge key={t} className="border border-border/60 px-2 py-0.5">
                 {t}
               </Badge>
             ))}
             {meta?.outstandingBalance && meta.outstandingBalance > 0 && (
-              <Badge variant="outline" className="border-amber-500/60 text-amber-300">
+              <Badge className="border border-amber-500/60 text-amber-300 px-2 py-0.5">
                 Owed: {meta.outstandingBalance.toLocaleString()}
               </Badge>
             )}
@@ -164,7 +225,7 @@ const meta = c.meta;
         <div className="flex flex-wrap gap-2 items-center">
           <div className="flex gap-1 flex-wrap">
             {["LEAD", "PROSPECT", "CLIENT", "LOST"].map((s) => (
-              <Button key={s} size="xs" variant={status === s ? "default" : "outline"} onClick={() => setStatus(s)}>
+              <Button key={s} variant={status === s ? "default" : "outline"} onClick={() => setStatus(s)}>
                 {s}
               </Button>
             ))}
@@ -175,10 +236,10 @@ const meta = c.meta;
             onChange={(e) => setTags(e.target.value)}
             className="min-w-[200px]"
           />
-          <Button size="sm" onClick={updateStatusTags} disabled={isPending}>
+          <Button onClick={updateStatusTags} disabled={isPending}>
             Save
           </Button>
-          <Button size="sm" variant="destructive" onClick={deleteAction} disabled={isPending}>
+          <Button variant="outline" onClick={deleteAction} disabled={isPending}>
             Delete
           </Button>
         </div>
@@ -189,16 +250,45 @@ const meta = c.meta;
             onChange={(e) => setMergeId(e.target.value)}
             className="min-w-[240px]"
           />
-          <Button size="sm" variant="outline" onClick={mergeAction} disabled={isPending}>
+          <Button variant="outline" onClick={mergeAction} disabled={isPending}>
             Merge into this contact
           </Button>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-border/60 bg-slate-950/60 p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-semibold">Playbook</div>
+          {playbook && (
+            <span className="text-[11px] text-muted-foreground">
+              Type: {playbook.type} · Version: {playbook.schemaVersion}
+            </span>
+          )}
+        </div>
+        <textarea
+          className="w-full rounded-md border border-border/60 bg-background p-2 text-sm text-foreground min-h-[160px]"
+          value={playbookText}
+          onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setPlaybookText(e.target.value)}
+          placeholder='{ "notes": "Add structured client info here" }'
+        />
+        {playbookError && <div className="text-xs text-red-400">{playbookError}</div>}
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={loadPlaybook} disabled={isPending || playbookSaving}>
+            Reload playbook
+          </Button>
+          <Button onClick={savePlaybook} disabled={playbookSaving || isPending}>
+            {playbookSaving ? "Saving..." : "Save playbook"}
+          </Button>
+        </div>
+        <div className="text-[11px] text-muted-foreground">
+          Paste structured JSON (e.g., medical history, onboarding steps). Saved per contact and versioned.
         </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
         <div className="space-y-3">
           <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={runAiAssist}>
+            <Button variant="outline" onClick={runAiAssist}>
               AI Summary & Next Step
             </Button>
           </div>
@@ -229,11 +319,11 @@ const meta = c.meta;
           <Section title="Notes">
             <div className="space-y-2">
               <div className="flex gap-2">
-                <Textarea
+                <textarea
                   placeholder="Add a note"
                   value={noteBody}
-                  onChange={(e) => setNoteBody(e.target.value)}
-                  className="min-h-[80px]"
+                  onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setNoteBody(e.target.value)}
+                  className="min-h-[80px] w-full rounded-md border border-border/60 bg-background p-2 text-sm text-foreground"
                 />
                 <Button onClick={addNoteAction} disabled={isPending}>
                   Add
@@ -243,7 +333,7 @@ const meta = c.meta;
               {data.notes.map((n) => (
                 <div key={n.id} className="rounded-xl border border-border/60 bg-slate-900/60 p-2">
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>{n.source ?? "manual"}</span>
+                    <span>{(n as any)?.source ?? "manual"}</span>
                     <span>{new Date(n.createdAt).toLocaleString()}</span>
                   </div>
                   <div className="text-sm mt-1">{highlightMentions(n.body)}</div>
@@ -288,7 +378,7 @@ const meta = c.meta;
                       </div>
                     </div>
                     {t.status !== "DONE" && (
-                      <Button size="xs" variant="outline" onClick={() => void completeTaskAction(t.id)}>
+                      <Button variant="outline" onClick={() => void completeTaskAction(t.id)}>
                         Mark done
                       </Button>
                     )}
