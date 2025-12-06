@@ -307,6 +307,7 @@ export async function createContact(input: {
   lifecycleStage?: string;
   segment?: string;
   notesInternal?: string;
+  preferredChannel?: string;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   const body = {
@@ -324,6 +325,7 @@ export async function createContact(input: {
     lifecycleStage: input.lifecycleStage,
     segment: input.segment,
     notesInternal: input.notesInternal,
+    preferredChannel: input.preferredChannel,
   };
 
   const res = await apiPost<Contact>({
@@ -340,7 +342,7 @@ export async function createContact(input: {
     lastName: body.lastName,
     email: body.email,
     phone: body.phone,
-    tags: [],
+    tags: body.tags ?? [],
   };
 
   return { data: synthesized, error: res.error };

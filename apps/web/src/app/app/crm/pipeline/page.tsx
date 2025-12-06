@@ -105,6 +105,12 @@ export default function PipelinePage() {
     email: "",
     phone: "",
     status: "LEAD",
+    source: "",
+    tags: "",
+    companyName: "",
+    jobTitle: "",
+    preferredChannel: "",
+    lifecycleStage: "",
   });
   const [savedViews, setSavedViews] = useState<{ name: string; search: string; status: string; tags: string }[]>([]);
   const [viewName, setViewName] = useState("");
@@ -440,6 +446,9 @@ export default function PipelinePage() {
           </SectionCard>
 
           <SectionCard title="Quick add">
+            <p className="text-xs text-muted-foreground">
+              Capture a contact with the essentials—status, source, tags, and role—without leaving the pipeline.
+            </p>
             <div className="grid gap-2 md:grid-cols-5">
               <Input
                 placeholder="First name"
@@ -474,6 +483,43 @@ export default function PipelinePage() {
                 ))}
               </div>
             </div>
+            <div className="grid gap-2 md:grid-cols-5">
+              <Input
+                placeholder="Source (Instagram, Website, Referral...)"
+                value={newContact.source}
+                onChange={(e) => setNewContact((prev) => ({ ...prev, source: e.target.value }))}
+              />
+              <Input
+                placeholder="Tags (comma-separated)"
+                value={newContact.tags}
+                onChange={(e) => setNewContact((prev) => ({ ...prev, tags: e.target.value }))}
+              />
+              <Input
+                placeholder="Company"
+                value={newContact.companyName}
+                onChange={(e) => setNewContact((prev) => ({ ...prev, companyName: e.target.value }))}
+              />
+              <Input
+                placeholder="Job title / role"
+                value={newContact.jobTitle}
+                onChange={(e) => setNewContact((prev) => ({ ...prev, jobTitle: e.target.value }))}
+              />
+              <Input
+                placeholder="Preferred channel (Email/WhatsApp/SMS)"
+                value={newContact.preferredChannel}
+                onChange={(e) => setNewContact((prev) => ({ ...prev, preferredChannel: e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-2 md:grid-cols-2">
+              <Input
+                placeholder="Lifecycle stage (lead/prospect/client…)"
+                value={newContact.lifecycleStage}
+                onChange={(e) => setNewContact((prev) => ({ ...prev, lifecycleStage: e.target.value }))}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Tags accept comma-separated values. Fields are optional—use what’s relevant and stay quick.
+              </p>
+            </div>
             <Button
               variant="default"
               className="px-3 py-1 text-xs"
@@ -484,8 +530,29 @@ export default function PipelinePage() {
                   email: newContact.email,
                   phone: newContact.phone,
                   status: newContact.status,
+                  source: newContact.source || undefined,
+                  tags: newContact.tags
+                    .split(",")
+                    .map((t) => t.trim())
+                    .filter(Boolean),
+                  companyName: newContact.companyName || undefined,
+                  jobTitle: newContact.jobTitle || undefined,
+                  preferredChannel: newContact.preferredChannel || undefined,
+                  lifecycleStage: newContact.lifecycleStage || undefined,
                 });
-                setNewContact({ firstName: "", lastName: "", email: "", phone: "", status: "LEAD" });
+                setNewContact({
+                  firstName: "",
+                  lastName: "",
+                  email: "",
+                  phone: "",
+                  status: "LEAD",
+                  source: "",
+                  tags: "",
+                  companyName: "",
+                  jobTitle: "",
+                  preferredChannel: "",
+                  lifecycleStage: "",
+                });
                 startTransition(() => {
                   void loadData();
                 });
