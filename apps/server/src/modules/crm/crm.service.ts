@@ -585,6 +585,44 @@ export class CrmService {
     return { contact, events, notes, tasks, meta: { outstandingBalance: outstanding } };
   }
 
+  async listContactEvents(params: { businessId: string; contactId: string; limit?: number }) {
+    await this.assertContact(params.businessId, params.contactId);
+    return this.prisma.client.contactEvent.findMany({
+      where: { businessId: params.businessId, contactId: params.contactId },
+      orderBy: { createdAt: 'desc' },
+      take: params.limit ?? 20,
+    });
+  }
+
+  async listContactNotes(params: { businessId: string; contactId: string }) {
+    await this.assertContact(params.businessId, params.contactId);
+    return this.prisma.client.contactNote.findMany({
+      where: { businessId: params.businessId, contactId: params.contactId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async listContactTasks(input: {
+    businessId: string;
+    contactId?: string;
+    status?: string;
+    dueBefore?: Date;
+  }) {
+    const where: any = { businessId: input.businessId };
+    if (input.contactId) {
+      await this.assertContact(input.businessId, input.contactId);
+      where.contactId = input.contactId;
+    }
+    if (input.status) where.status = input.status;
+    if (input.dueBefore) where.dueDate = { lte: input.dueBefore };
+    return this.prisma.client.contactTask.findMany({
+      where,
+      orderBy: { dueDate: 'asc', createdAt: 'desc' },
+      include: { contact: true },
+      take: 100,
+    });
+  }
+
   addNote(input: { businessId: string; contactId: string; body: string; authorId?: string | null; source?: string }) {
     return this.assertContact(input.businessId, input.contactId).then(async () => {
       const note = await this.prisma.client.contactNote.create({

@@ -13,7 +13,7 @@ const contactSchema = z.object({
   phoneNormalized: z.string().nullable().optional(),
   status: z.string().optional(),
   source: z.string().nullable().optional(),
-  tags: z.array(z.string()).optional().default([]),
+  tags: z.array(z.string()).optional(),
   custom: z.record(z.unknown()).nullable().optional(),
   displayName: z.string().nullable().optional(),
   secondaryEmail: z.string().nullable().optional(),
@@ -99,7 +99,7 @@ const bookingSchema = z.object({
   status: z.string(),
 });
 
-export type Contact = z.infer<typeof contactSchema>;
+export type Contact = z.infer<typeof contactSchema> & { tags?: string[] };
 const contactImportSchema = z.object({
   id: z.string(),
   businessId: z.string(),
@@ -140,20 +140,9 @@ export type ContactImportOcrResponse = {
   contact: Contact;
   media: ContactMedia;
 };
-export type ContactPlaybook = {
-  id: string;
-  businessId: string;
-  contactId: string;
-  type: string;
-  schemaVersion: string;
-  data: Record<string, unknown>;
-  createdAt: string;
-  updatedAt: string;
-  lastUsedAt?: string | null;
-};
 export type ContactEvent = z.infer<typeof eventSchema>;
 export type ContactNote = z.infer<typeof noteSchema>;
-export type ContactTask = z.infer<typeof taskSchema>;
+export type ContactTask = Omit<z.infer<typeof taskSchema>, "contact"> & { contact?: Contact | null };
 export type Product = z.infer<typeof productSchema>;
 export type Booking = z.infer<typeof bookingSchema>;
 export type Invoice = {
@@ -190,9 +179,10 @@ async function apiGet<T>(path: string, schema: z.ZodSchema<T>, fallback?: T): Pr
     const res = await fetch(`${API_BASE}${path}`, { headers: getAuthHeaders() });
     const json = await res.json().catch(() => null);
     if (!res.ok || !json) {
-      const message = typeof json === "object" && json && "message" in json && typeof (json as Record<string, unknown>).message === "string"
-        ? (json as Record<string, unknown>).message
-        : res.statusText;
+      let message: string = res.statusText;
+      if (typeof json === "object" && json && "message" in json && typeof (json as Record<string, unknown>).message === "string") {
+        message = (json as Record<string, string>).message;
+      }
       return { data: fallback ?? null, error: message };
     }
     const parsed = schema.safeParse(json);
@@ -239,16 +229,25 @@ export async function fetchContacts(
   );
 }
 
+const contactDetailSchema = z.object({
+  contact: contactSchema.nullable(),
+  events: z.array(eventSchema),
+  notes: z.array(noteSchema),
+  tasks: z.array(taskSchema),
+  meta: z
+    .object({
+      outstandingBalance: z.number().optional(),
+    })
+    .nullable()
+    .optional(),
+});
+export type ContactDetail = z.infer<typeof contactDetailSchema>;
+
 export async function fetchContactDetail(contactId: string, businessId: string = DEFAULT_BUSINESS_ID) {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}`,
-    z.object({
-      contact: contactSchema.nullable(),
-      events: z.array(eventSchema),
-      notes: z.array(noteSchema),
-      tasks: z.array(taskSchema),
-    }),
-    { contact: null, events: [], notes: [], tasks: [] },
+    contactDetailSchema,
+    null,
   );
 }
 
@@ -341,9 +340,51 @@ export async function createContact(input: {
     lastName: body.lastName,
     email: body.email,
     phone: body.phone,
+    tags: [],
   };
 
   return { data: synthesized, error: res.error };
+}
+
+export async function fetchContactEvents(
+  contactId: string,
+  businessId: string = DEFAULT_BUSINESS_ID,
+): Promise<ApiResult<ContactEvent[]>> {
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/events`,
+    z.array(eventSchema),
+    [],
+  );
+}
+
+export async function fetchContactNotes(
+  contactId: string,
+  businessId: string = DEFAULT_BUSINESS_ID,
+): Promise<ApiResult<ContactNote[]>> {
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/notes`,
+    z.array(noteSchema),
+    [],
+  );
+}
+
+export async function fetchContactTasks(params: {
+  businessId?: string;
+  contactId?: string;
+  status?: string;
+  dueBefore?: string;
+}): Promise<ApiResult<ContactTask[]>> {
+  const businessId = params.businessId ?? DEFAULT_BUSINESS_ID;
+  const query = new URLSearchParams();
+  if (params.contactId) query.set('contactId', params.contactId);
+  if (params.status) query.set('status', params.status);
+  if (params.dueBefore) query.set('dueBefore', params.dueBefore);
+  const path = `/crm/businesses/${encodeURIComponent(businessId)}/tasks${query.toString() ? `?${query.toString()}` : ''}`;
+  return apiGet(
+    path,
+    z.array(taskSchema),
+    [],
+  );
 }
 
 export async function fetchContactPlaybook(contactId: string, businessId: string = DEFAULT_BUSINESS_ID) {
