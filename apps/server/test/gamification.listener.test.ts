@@ -4,7 +4,7 @@ import { PrismaService } from '../src/core/prisma/prisma.service';
 
 class PrismaMock implements Partial<PrismaService> {
   private meta: Record<string, any> = {};
-  client = {
+  client: any = {
     business: {
       findUnique: vi.fn(({ where }: any) => {
         if (this.meta[where.id]) {

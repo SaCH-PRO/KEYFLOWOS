@@ -3,6 +3,18 @@ import { API_BASE, apiPost, getAuthHeaders } from "./api";
 
 const DEFAULT_BUSINESS_ID = process.env.NEXT_PUBLIC_DEMO_BUSINESS_ID ?? "biz_demo";
 
+const contactMetaSchema = z.object({
+  outstandingBalance: z.number().optional(),
+  unpaidInvoices: z.number().optional(),
+  paidInvoices: z.number().optional(),
+  lastInteractionAt: z.string().optional(),
+  nextDueTaskAt: z.string().nullable().optional(),
+  overdueTasks: z.number().optional(),
+  bookingsRecent: z.number().optional(),
+  leadScore: z.number().optional(),
+  predictedNextBookingAt: z.string().nullable().optional(),
+});
+
 const contactSchema = z.object({
   id: z.string(),
   firstName: z.string().nullable().optional(),
@@ -39,18 +51,7 @@ const contactSchema = z.object({
   marketingOptIn: z.boolean().nullable().optional(),
   doNotContact: z.boolean().nullable().optional(),
   notesInternal: z.string().nullable().optional(),
-  meta: z
-    .object({
-      outstandingBalance: z.number().optional(),
-      unpaidInvoices: z.number().optional(),
-      paidInvoices: z.number().optional(),
-      lastInteractionAt: z.string().optional(),
-      nextDueTaskAt: z.string().nullable().optional(),
-      overdueTasks: z.number().optional(),
-      bookingsRecent: z.number().optional(),
-      leadScore: z.number().optional(),
-    })
-    .optional(),
+  meta: contactMetaSchema.optional(),
 });
 
 const eventSchema = z.object({
@@ -69,6 +70,7 @@ const noteSchema = z.object({
   contactId: z.string(),
   body: z.string(),
   createdAt: z.string(),
+  source: z.string().nullable().optional(),
 });
 
 const taskSchema = z.object({
@@ -234,12 +236,7 @@ const contactDetailSchema = z.object({
   events: z.array(eventSchema),
   notes: z.array(noteSchema),
   tasks: z.array(taskSchema),
-  meta: z
-    .object({
-      outstandingBalance: z.number().optional(),
-    })
-    .nullable()
-    .optional(),
+  meta: contactMetaSchema.nullable().optional(),
 });
 export type ContactDetail = z.infer<typeof contactDetailSchema>;
 

@@ -46,6 +46,33 @@ export class CrmImportService {
 
   constructor(private readonly prisma: PrismaService, private readonly crm: CrmService) {}
 
+  private toParsedRow(raw: unknown): ParsedRow {
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      const entries = Object.entries(raw as Record<string, unknown>).map(([key, value]) => [
+        key,
+        value === null || value === undefined ? null : String(value),
+      ]);
+      return Object.fromEntries(entries) as ParsedRow;
+    }
+    return {};
+  }
+
+  private normalizeFieldMapping(mapping: unknown): FieldMapping | null {
+    if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping)) return null;
+    const record = mapping as Record<string, unknown>;
+    const normalized: FieldMapping = { custom: [] };
+    const keys: Array<keyof Omit<FieldMapping, 'custom'>> = ['firstName', 'lastName', 'email', 'phone', 'status', 'tags'];
+    for (const key of keys) {
+      if (typeof record[key] === 'string') {
+        normalized[key] = record[key] as string;
+      }
+    }
+    if (Array.isArray(record.custom)) {
+      normalized.custom = (record.custom as unknown[]).filter((item): item is string => typeof item === 'string');
+    }
+    return normalized;
+  }
+
   async createFileImport(params: {
     businessId: string;
     sourceType: 'csv' | 'xlsx' | 'pdf' | 'image';
@@ -150,8 +177,11 @@ export class CrmImportService {
       throw new BadRequestException('Import record not found');
     }
 
-    const rawHeaders = Object.keys(record.rawData);
-    const mapping = (record.import.headerMapping as FieldMapping | null) ?? this.inferFieldMapping(rawHeaders);
+    const parsedRow = this.toParsedRow(record.rawData);
+    const rawHeaders = Object.keys(parsedRow);
+    const mapping =
+      this.normalizeFieldMapping(record.import.headerMapping) ??
+      this.inferFieldMapping(rawHeaders);
     if (!record.import.headerMapping) {
       await this.prisma.client.contactImport.update({
         where: { id: record.importId },
@@ -159,8 +189,11 @@ export class CrmImportService {
       });
     }
 
-    const contactInput = this.buildContactInput(record.rawData, mapping);
+    const contactInput = this.buildContactInput(parsedRow, mapping);
     const contact = await this.crm.findOrCreateContact(record.import.businessId, contactInput);
+    if (!contact) {
+      throw new BadRequestException('Failed to create contact from import record');
+    }
 
     await this.prisma.client.contactImportContact.update({
       where: { id: record.id },
@@ -192,6 +225,9 @@ export class CrmImportService {
       email: mapped.email,
       phone: mapped.phone,
     });
+    if (!contact) {
+      throw new BadRequestException('Failed to create contact from OCR text');
+    }
 
     const media = await this.prisma.client.contactMedia.create({
       data: {
@@ -242,10 +278,27 @@ export class CrmImportService {
       const normalized = header.toLowerCase().replace(/[^a-z0-9]/g, '_');
       const match = this.synonymMap[normalized];
       if (match) {
-        if (match === 'tags') {
-          mapping.tags = header;
-        } else {
-          mapping[match as keyof FieldMapping] = header;
+        switch (match) {
+          case 'tags':
+            mapping.tags = header;
+            break;
+          case 'firstName':
+            mapping.firstName = header;
+            break;
+          case 'lastName':
+            mapping.lastName = header;
+            break;
+          case 'email':
+            mapping.email = header;
+            break;
+          case 'phone':
+            mapping.phone = header;
+            break;
+          case 'status':
+            mapping.status = header;
+            break;
+          default:
+            break;
         }
       } else {
         mapping.custom?.push(header);
@@ -256,13 +309,24 @@ export class CrmImportService {
 
   private buildContactInput(row: ParsedRow, mapping: FieldMapping) {
     const contact: Record<string, unknown> = {};
-    if (mapping.firstName && row[mapping.firstName]) contact.firstName = row[mapping.firstName];
-    if (mapping.lastName && row[mapping.lastName]) contact.lastName = row[mapping.lastName];
-    if (mapping.email && row[mapping.email]) contact.email = row[mapping.email];
-    if (mapping.phone && row[mapping.phone]) contact.phone = row[mapping.phone];
-    if (mapping.status && row[mapping.status]) contact.status = row[mapping.status];
-    if (mapping.tags && row[mapping.tags]) {
-      contact.tags = (row[mapping.tags] as string)
+    if (mapping.firstName && typeof row[mapping.firstName] === 'string' && row[mapping.firstName]) {
+      contact.firstName = row[mapping.firstName];
+    }
+    if (mapping.lastName && typeof row[mapping.lastName] === 'string' && row[mapping.lastName]) {
+      contact.lastName = row[mapping.lastName];
+    }
+    if (mapping.email && typeof row[mapping.email] === 'string' && row[mapping.email]) {
+      contact.email = row[mapping.email];
+    }
+    if (mapping.phone && typeof row[mapping.phone] === 'string' && row[mapping.phone]) {
+      contact.phone = row[mapping.phone];
+    }
+    if (mapping.status && typeof row[mapping.status] === 'string' && row[mapping.status]) {
+      contact.status = row[mapping.status];
+    }
+    const tagsValue = mapping.tags ? row[mapping.tags] : null;
+    if (typeof tagsValue === 'string' && tagsValue) {
+      contact.tags = tagsValue
         .split(',')
         .map((value) => value.trim())
         .filter(Boolean);

@@ -5,7 +5,7 @@ import { PrismaService } from '../src/core/prisma/prisma.service';
 
 class PrismaMock implements Partial<PrismaService> {
   posts: any[] = [];
-  client = {
+  client: any = {
     socialPost: {
       create: vi.fn(({ data }: any) => {
         const post = { ...data, id: `post_${this.posts.length + 1}`, deletedAt: null };

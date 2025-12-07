@@ -4,7 +4,7 @@ import { PrismaService } from '../src/core/prisma/prisma.service';
 
 class PrismaMock implements Partial<PrismaService> {
   private businesses: any[] = [];
-  client = {
+  client: any = {
     business: {
       findMany: vi.fn(({ where }: any) => {
         if (where?.ownerId) {

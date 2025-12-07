@@ -257,16 +257,43 @@ export default function PipelinePage() {
   }, []);
 
   const detailContact = contactDetail?.contact ?? null;
-  const timelineEntries = contactDetail?.events ?? [];
+  const timelineEntries = useMemo(() => contactDetail?.events ?? [], [contactDetail]);
   const notesEntries = contactDetail?.notes ?? [];
   const tasksEntries = contactDetail?.tasks ?? [];
-  const outstandingBalance = detailContact ? contactDetail?.meta?.outstandingBalance ?? 0 : 0;
+  const detailMeta: Contact["meta"] | null = contactDetail?.meta ?? null;
+  const outstandingBalance = detailContact ? detailMeta?.outstandingBalance ?? 0 : 0;
+  const lastInteractionAt = detailContact ? detailMeta?.lastInteractionAt ?? null : null;
+  const leadScore = detailContact ? detailMeta?.leadScore ?? null : null;
+  const nextDueTaskAt = detailContact ? detailMeta?.nextDueTaskAt ?? null : null;
   const contactFullName =
     detailContact?.displayName?.trim() ||
     `${detailContact?.firstName ?? ""} ${detailContact?.lastName ?? ""}`.trim() ||
     "";
   const drawerOpen = Boolean(selectedContactId);
   const statusTone = CONTACT_STATUS_TONES[detailContact?.status ?? ""] ?? "info";
+  const groupedTimeline = useMemo(() => {
+    const groups: Array<{ date: string; events: ContactEvent[] }> = [];
+    timelineEntries.forEach((event) => {
+      const dateLabel = new Date(event.createdAt).toLocaleDateString();
+      const existing = groups.find((g) => g.date === dateLabel);
+      if (existing) existing.events.push(event);
+      else groups.push({ date: dateLabel, events: [event] });
+    });
+    return groups;
+  }, [timelineEntries]);
+
+  const pipelineStats = useMemo(() => {
+    const total = contacts.length;
+    const totalOutstanding = contacts.reduce((sum, c) => sum + (c.meta?.outstandingBalance ?? 0), 0);
+    const avgLeadScore =
+      contacts.length > 0
+        ? Math.round(
+            contacts.reduce((sum, c) => sum + (c.meta?.leadScore ?? 0), 0) / contacts.length,
+          )
+        : 0;
+    const overdueTasks = dueTasks.length;
+    return { total, totalOutstanding, avgLeadScore, overdueTasks };
+  }, [contacts, dueTasks]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -362,6 +389,32 @@ export default function PipelinePage() {
       <div className="space-y-6">
         <div className="grid gap-4 lg:grid-cols-[2fr,1fr]">
         <div className="space-y-4">
+          <SectionCard
+            title="CRM health"
+            headerAction={<Badge tone="info">{pipelineStats.total} contacts</Badge>}
+          >
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 text-[11px] text-muted-foreground">
+              <div className="rounded-xl border border-border/50 bg-slate-900/60 p-3">
+                <div className="text-xs uppercase">Outstanding</div>
+                <div className="text-lg font-semibold text-white">
+                  {pipelineStats.totalOutstanding ? `$${pipelineStats.totalOutstanding.toLocaleString()}` : "None"}
+                </div>
+              </div>
+              <div className="rounded-xl border border-border/50 bg-slate-900/60 p-3">
+                <div className="text-xs uppercase">Avg lead score</div>
+                <div className="text-lg font-semibold text-white">{pipelineStats.avgLeadScore || "–"}</div>
+              </div>
+              <div className="rounded-xl border border-border/50 bg-slate-900/60 p-3">
+                <div className="text-xs uppercase">Overdue tasks</div>
+                <div className="text-lg font-semibold text-white">{pipelineStats.overdueTasks}</div>
+              </div>
+              <div className="rounded-xl border border-border/50 bg-slate-900/60 p-3">
+                <div className="text-xs uppercase">Total contacts</div>
+                <div className="text-lg font-semibold text-white">{pipelineStats.total}</div>
+              </div>
+            </div>
+          </SectionCard>
+
           <SectionCard title="Pipeline overview" headerAction={<Badge tone="info">{contacts.length} contacts</Badge>}>
             <p className="text-xs text-muted-foreground">
               Search, filter, and save views so the whole team can surface the right leads in seconds.
@@ -881,6 +934,16 @@ export default function PipelinePage() {
                             Next task: {new Date(c.meta.nextDueTaskAt).toLocaleDateString()}
                           </span>
                         )}
+                        {c.meta?.lastInteractionAt && (
+                          <span className="rounded-full border border-border/50 px-2 py-0.5">
+                            Last activity: {new Date(c.meta.lastInteractionAt).toLocaleDateString()}
+                          </span>
+                        )}
+                        {c.meta?.predictedNextBookingAt && (
+                          <span className="rounded-full border border-emerald-500/50 text-emerald-200 px-2 py-0.5">
+                            Next booking est: {new Date(c.meta.predictedNextBookingAt).toLocaleDateString()}
+                          </span>
+                        )}
                       </div>
                       <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
                         <Link href={`/app/crm/contacts/${c.id}`} className="underline hover:text-foreground">
@@ -935,11 +998,37 @@ export default function PipelinePage() {
                 {detailContact.companyName && <span>{detailContact.companyName}</span>}
                 {detailContact.jobTitle && <span className="ml-2">{detailContact.jobTitle}</span>}
               </div>
-              <div className="rounded-xl border border-border/50 bg-slate-900/50 p-3 text-[12px] text-muted-foreground">
-                <div>Outstanding balance: {outstandingBalance ? `$${outstandingBalance.toLocaleString()}` : "None"}</div>
-                <div>Events captured: {timelineEntries.length}</div>
-                <div>Notes logged: {notesEntries.length}</div>
-                <div>Tasks tracked: {tasksEntries.length}</div>
+              <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3 text-[12px] text-muted-foreground">
+                <div className="rounded-xl border border-border/50 bg-slate-900/50 p-3">
+                  <div className="text-xs uppercase">Outstanding</div>
+                  <div className="text-base font-semibold text-white">
+                    {outstandingBalance ? `$${outstandingBalance.toLocaleString()}` : "None"}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-border/50 bg-slate-900/50 p-3">
+                  <div className="text-xs uppercase">Lead score</div>
+                  <div className="text-base font-semibold text-white">{leadScore ?? "–"}</div>
+                </div>
+                <div className="rounded-xl border border-border/50 bg-slate-900/50 p-3">
+                  <div className="text-xs uppercase">Last activity</div>
+                  <div className="text-base font-semibold text-white">
+                    {lastInteractionAt ? new Date(lastInteractionAt).toLocaleDateString() : "No activity"}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-border/50 bg-slate-900/50 p-3">
+                  <div className="text-xs uppercase">Next due task</div>
+                  <div className="text-base font-semibold text-white">
+                    {nextDueTaskAt ? new Date(nextDueTaskAt).toLocaleDateString() : "None"}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-border/50 bg-slate-900/50 p-3">
+                  <div className="text-xs uppercase">Events</div>
+                  <div className="text-base font-semibold text-white">{timelineEntries.length}</div>
+                </div>
+                <div className="rounded-xl border border-border/50 bg-slate-900/50 p-3">
+                  <div className="text-xs uppercase">Tasks</div>
+                  <div className="text-base font-semibold text-white">{tasksEntries.length}</div>
+                </div>
               </div>
             </div>
 
@@ -958,18 +1047,27 @@ export default function PipelinePage() {
             </SectionCard>
 
             <SectionCard title="Timeline" className="bg-slate-900/70">
-              <div className="space-y-2">
-                {timelineEntries.slice(0, 4).map((event) => (
-                  <div key={event.id} className="rounded-xl border border-border/50 bg-slate-950/60 p-2 text-[11px] text-muted-foreground">
-                    <div className="flex items-center justify-between text-white">
-                      <span className="font-semibold">{event.type}</span>
-                      <span className="text-[10px] text-slate-400">{formatDate(event.createdAt)}</span>
-                    </div>
-                    <p>
-                      {event.data && typeof event.data === "object"
-                        ? JSON.stringify(event.data).slice(0, 80)
-                        : String(event.data)}
-                    </p>
+              <div className="space-y-3 text-[11px] text-muted-foreground">
+                {groupedTimeline.length === 0 && <p>No events yet.</p>}
+                {groupedTimeline.map((group) => (
+                  <div key={group.date} className="space-y-2">
+                    <div className="text-[10px] uppercase text-slate-400">{group.date}</div>
+                    {group.events.slice(0, 6).map((event) => (
+                      <div
+                        key={event.id}
+                        className="rounded-xl border border-border/50 bg-slate-950/60 p-2"
+                      >
+                        <div className="flex items-center justify-between text-white">
+                          <span className="font-semibold">{event.type}</span>
+                          <span className="text-[10px] text-slate-400">{formatDate(event.createdAt)}</span>
+                        </div>
+                        <p className="line-clamp-2">
+                          {event.data && typeof event.data === "object"
+                            ? JSON.stringify(event.data).slice(0, 120)
+                            : String(event.data)}
+                        </p>
+                      </div>
+                    ))}
                   </div>
                 ))}
               </div>

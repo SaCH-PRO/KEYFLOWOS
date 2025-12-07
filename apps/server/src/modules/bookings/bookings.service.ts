@@ -45,7 +45,7 @@ export class BookingsService {
 
     const payload: BookingCreatedPayload = {
       booking,
-      contact: booking.contact,
+      contact: booking.contact ?? undefined,
       businessId: booking.businessId,
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore
@@ -53,19 +53,21 @@ export class BookingsService {
     };
     this.events.emit('booking.created', payload);
     // Log contact event for CRM timeline
-    await this.crm.logContactEvent({
-      businessId: booking.businessId,
-      contactId: booking.contactId,
-      type: 'booking.created',
-      data: {
-        bookingId: booking.id,
-        serviceId: booking.serviceId,
-        startTime: booking.startTime,
-        endTime: booking.endTime,
-      },
-      actorType: 'SYSTEM',
-      source: 'bookings',
-    });
+    if (booking.contactId) {
+      await this.crm.logContactEvent({
+        businessId: booking.businessId,
+        contactId: booking.contactId,
+        type: 'booking.created',
+        data: {
+          bookingId: booking.id,
+          serviceId: booking.serviceId,
+          startTime: booking.startTime,
+          endTime: booking.endTime,
+        },
+        actorType: 'SYSTEM',
+        source: 'bookings',
+      });
+    }
     return booking;
   }
 
@@ -116,6 +118,9 @@ export class BookingsService {
     const end = new Date(start.getTime() + service.duration * 60000);
 
     const contact = await this.crm.findOrCreateContact(input.businessId, input.contact);
+    if (!contact) {
+      throw new Error('Failed to create or find contact');
+    }
 
     const invoice =
       service.price > 0 ? await this.commerce.createInvoiceForService(input.businessId, contact.id, service) : null;
@@ -135,27 +140,29 @@ export class BookingsService {
 
     const payload: BookingCreatedPayload = {
       booking,
-      contact: booking.contact,
+      contact: booking.contact ?? undefined,
       businessId: booking.businessId,
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore
       eventName: 'booking.created',
     };
     this.events.emit('booking.created', payload);
-    await this.crm.logContactEvent({
-      businessId: booking.businessId,
-      contactId: booking.contactId,
-      type: 'booking.created',
-      data: {
-        bookingId: booking.id,
-        serviceId: booking.serviceId,
-        startTime: booking.startTime,
-        endTime: booking.endTime,
-        invoiceId: invoice?.id,
-      },
-      actorType: 'SYSTEM',
-      source: 'bookings',
-    });
+    if (booking.contactId) {
+      await this.crm.logContactEvent({
+        businessId: booking.businessId,
+        contactId: booking.contactId,
+        type: 'booking.created',
+        data: {
+          bookingId: booking.id,
+          serviceId: booking.serviceId,
+          startTime: booking.startTime,
+          endTime: booking.endTime,
+          invoiceId: invoice?.id,
+        },
+        actorType: 'SYSTEM',
+        source: 'bookings',
+      });
+    }
 
     return { success: true, bookingId: booking.id, invoiceId: invoice?.id };
   }
