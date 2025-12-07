@@ -67,7 +67,7 @@ export default function ContactDetailPage() {
           events: detail.events ?? [],
           notes: detail.notes ?? [],
           tasks: normalizedTasks,
-          meta: (detail as any).meta,
+          meta: detail.meta ?? undefined,
         }
       : null;
     setData(normalized);
@@ -333,7 +333,7 @@ const meta = c.meta;
               {data.notes.map((n) => (
                 <div key={n.id} className="rounded-xl border border-border/60 bg-slate-900/60 p-2">
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>{(n as any)?.source ?? "manual"}</span>
+                    <span>{n.source ?? "manual"}</span>
                     <span>{new Date(n.createdAt).toLocaleString()}</span>
                   </div>
                   <div className="text-sm mt-1">{highlightMentions(n.body)}</div>

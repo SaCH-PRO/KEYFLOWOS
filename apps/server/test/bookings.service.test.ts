@@ -8,7 +8,7 @@ class PrismaMock implements Partial<PrismaService> {
   private services: any[] = [
     { id: 'service_1', businessId: 'biz_1', duration: 60, price: 100, name: 'Consult', deletedAt: null },
   ];
-  client = {
+  client: any = {
     booking: {
       findMany: vi.fn(({ where }: any) =>
         this.bookings.filter((b) => b.businessId === where.businessId && b.deletedAt === null),
@@ -43,11 +43,14 @@ describe('BookingsService', () => {
     const emit = vi.fn();
     const events = { emit } as unknown as EventEmitter2;
     const prisma = new PrismaMock() as unknown as PrismaService;
+    const crm = { findOrCreateContact: vi.fn(), logContactEvent: vi.fn() };
+    const automation = { handle: vi.fn() };
     const service = new BookingsService(
       prisma,
       events,
-      { findOrCreateContact: vi.fn() } as any,
+      crm as any,
       { createInvoiceForService: vi.fn() } as any,
+      automation as any,
     );
 
     const booking = await service.createBooking({
@@ -71,11 +74,14 @@ describe('BookingsService', () => {
   it('lists bookings per business', async () => {
     const events = { emit: vi.fn() } as unknown as EventEmitter2;
     const prisma = new PrismaMock() as unknown as PrismaService;
+    const crm = { findOrCreateContact: vi.fn(), logContactEvent: vi.fn() };
+    const automation = { handle: vi.fn() };
     const service = new BookingsService(
       prisma,
       events,
-      { findOrCreateContact: vi.fn() } as any,
+      crm as any,
       { createInvoiceForService: vi.fn() } as any,
+      automation as any,
     );
 
     await service.createBooking({
@@ -106,11 +112,14 @@ describe('BookingsService', () => {
     const prisma = new PrismaMock() as unknown as PrismaService;
     const createInvoiceForService = vi.fn().mockResolvedValue({ id: 'inv_1' });
     const findOrCreateContact = vi.fn().mockResolvedValue({ id: 'contact_public' });
+    const logContactEvent = vi.fn();
+    const automation = { handle: vi.fn() };
     const service = new BookingsService(
       prisma,
       events,
-      { findOrCreateContact } as any,
+      { findOrCreateContact, logContactEvent } as any,
       { createInvoiceForService } as any,
+      automation as any,
     );
 
     const result = await service.publicCreateBooking({

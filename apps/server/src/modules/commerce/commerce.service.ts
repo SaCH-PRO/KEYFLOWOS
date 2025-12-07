@@ -94,7 +94,7 @@ export class CommerceService {
           total: invoice.total,
           currency: invoice.currency,
           paidAt: invoice.paidAt,
-          bookingId: invoice.bookingId,
+          bookingId: invoice.booking?.id,
         },
         actorType: actorId ? 'USER' : 'SYSTEM',
         actorId: actorId ?? undefined,
@@ -129,16 +129,6 @@ export class CommerceService {
         actorType: actorId ? 'USER' : 'SYSTEM',
         actorId: actorId ?? undefined,
         source: 'commerce',
-      });
-    }
-    if (params.status === 'OVERDUE' && invoice.contactId) {
-      await this.automation.handle({
-        type: 'invoice.overdue',
-        businessId: invoice.businessId,
-        contactId: invoice.contactId,
-        invoiceId: invoice.id,
-        total: invoice.total,
-        currency: invoice.currency,
       });
     }
     return invoice;
@@ -195,7 +185,7 @@ export class CommerceService {
           total: invoice.total,
           currency: invoice.currency,
           dueDate: invoice.dueDate,
-          bookingId: invoice.bookingId,
+          bookingId: invoice.booking?.id,
         },
         actorType: params.actorId ? 'USER' : 'SYSTEM',
         actorId: params.actorId ?? undefined,
