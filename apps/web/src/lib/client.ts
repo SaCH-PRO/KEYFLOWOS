@@ -620,4 +620,16 @@ export async function markInvoicePaid(invoiceId: string) {
   });
 }
 
+export type BootstrapIdentityResponse = {
+  user: { id: string; email: string; name?: string | null; role: string };
+  business: { id: string; name: string };
+};
+
+export async function bootstrapIdentity(input: { username?: string; email?: string; name?: string }) {
+  return apiPost<BootstrapIdentityResponse>({
+    path: `/identity/bootstrap`,
+    body: input,
+  });
+}
+
 export { DEFAULT_BUSINESS_ID };
