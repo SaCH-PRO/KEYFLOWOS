@@ -11,4 +11,5 @@ export * from "./components/table";
 export * from "./components/dialog";
 export * from "./components/drawer";
 export * from "./components/toast";
+export * from "./components/layout";
 export * from "./lib/utils";

@@ -29,7 +29,7 @@ const navSections = [
     title: "Primary",
     items: [
   { label: "Command", href: "/app", icon: Activity },
-      { label: "CRM", href: "/app/crm", icon: Users },
+      { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
       { label: "Commerce", href: "/app/commerce", icon: CreditCard },
       { label: "Bookings", href: "/app/bookings", icon: Calendar },
       { label: "Social", href: "/app/social", icon: Share2 },
@@ -157,7 +157,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 {addMenuOpen ? (
                   <div className="absolute right-0 mt-2 w-48 rounded-2xl border border-border/70 bg-slate-950/90 shadow-soft-elevated p-2 text-sm text-foreground z-20">
                     {[
-                      { label: "New Contact", href: "/app/crm" },
+                      { label: "New Contact", href: "/app/crm/pipeline" },
                       { label: "New Invoice", href: "/app/commerce" },
                       { label: "New Booking", href: "/app/bookings" },
                       { label: "New Automation", href: "/app/automations" },
