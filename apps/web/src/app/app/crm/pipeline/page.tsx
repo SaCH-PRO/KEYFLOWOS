@@ -23,12 +23,13 @@ import {
   importContactsFromLink,
   updateContact,
 } from "@/lib/client";
+import { ensureWorkspace, getStoredBusinessId } from "@/lib/workspace";
 
 const STATUSES = ["LEAD", "PROSPECT", "CLIENT", "LOST"] as const;
 const IMPORT_TYPES: Array<"csv" | "xlsx" | "pdf" | "image"> = ["csv", "xlsx", "pdf", "image"];
 const PAGE_SIZE = 50;
 
-type ContactWithTags = Omit<Contact, "tags"> & { tags?: string[] };
+type ContactWithTags = Omit<Contact, "tags"> & { tags?: string[]; localOnly?: boolean };
 type NormalizedContactTask = Omit<ContactTask, "contact"> & { contact?: ContactWithTags | null };
 type NormalizedContactDetail = Omit<ContactDetail, "contact" | "tasks"> & {
   contact: ContactWithTags | null;
@@ -112,6 +113,7 @@ function SectionCard({ title, headerAction, children, className = "", onClick }:
 export default function PipelinePage() {
   const isMobile = useIsMobile();
   const [contacts, setContacts] = useState<ContactWithTags[]>([]);
+  const [businessId, setBusinessId] = useState<string | null>(null);
   const [segments, setSegments] = useState<{ [key: string]: number }>({});
   const [dueTasks, setDueTasks] = useState<ContactTask[]>([]);
   const [importJobs, setImportJobs] = useState<ContactImportJob[]>([]);
@@ -168,6 +170,27 @@ export default function PipelinePage() {
   const [metricSlots, setMetricSlots] = useState<MetricKey[]>(["leads", "prospects", "clients"]);
   const [contactPhotoFile, setContactPhotoFile] = useState<File | null>(null);
   const [contactPhotoPreview, setContactPhotoPreview] = useState<string | null>(null);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [workspaceLoading, setWorkspaceLoading] = useState(true);
+  useEffect(() => {
+    const initWorkspace = async () => {
+      const stored = getStoredBusinessId();
+      if (stored) {
+        setBusinessId(stored);
+        setWorkspaceLoading(false);
+        return;
+      }
+      const created = await ensureWorkspace();
+      if (created) {
+        setBusinessId(created);
+        setWorkspaceLoading(false);
+        return;
+      }
+      setWorkspaceError("We could not find your workspace. Please sign in again.");
+      setWorkspaceLoading(false);
+    };
+    void initWorkspace();
+  }, []);
   const setMetricSlot = useCallback((index: number, key: MetricKey) => {
     setMetricSlots((prev) => {
       const next = [...prev];
@@ -175,6 +198,28 @@ export default function PipelinePage() {
       return next;
     });
   }, []);
+
+  if (workspaceLoading) {
+    return (
+      <ContentContainer>
+        <div className="py-12 text-center space-y-4">
+          <p className="text-lg font-semibold text-slate-900">Preparing your workspace...</p>
+          <p className="text-sm text-slate-600">Hang tight while we load your personal space.</p>
+        </div>
+      </ContentContainer>
+    );
+  }
+
+  if (workspaceError) {
+    return (
+      <ContentContainer>
+        <div className="py-12 text-center space-y-4">
+          <p className="text-lg font-semibold text-red-700">{workspaceError}</p>
+          <p className="text-sm text-slate-600">Try logging in again to create your workspace.</p>
+        </div>
+      </ContentContainer>
+    );
+  }
 
   const activeFilters = useMemo(
     () => (statusFilter !== "ALL" ? 1 : 0) + (search ? 1 : 0) + (tagFilter ? 1 : 0),
@@ -190,6 +235,7 @@ export default function PipelinePage() {
 
   const loadData = useCallback(
     async (opts?: { append?: boolean }) => {
+      if (!businessId) return;
       const append = opts?.append ?? false;
       const normalizedTags = tagFilter
         .split(",")
@@ -199,7 +245,7 @@ export default function PipelinePage() {
       else setLoading(true);
       try {
         if (append) {
-          const { data: contactData } = await fetchContacts(undefined, {
+          const { data: contactData } = await fetchContacts(businessId, {
             includeStats: true,
             take: PAGE_SIZE,
             skip: nextOffset,
@@ -218,9 +264,10 @@ export default function PipelinePage() {
           setNextOffset((prev) => prev + mapped.length);
           setHasMore(mapped.length === PAGE_SIZE);
         } else {
+          const existingLocal = contacts.filter((c) => c.localOnly);
           const [{ data: contactData }, { data: segmentData }, { data: dueData }, { data: importData }] =
             await Promise.all([
-              fetchContacts(undefined, {
+              fetchContacts(businessId, {
                 includeStats: true,
                 take: PAGE_SIZE,
                 skip: 0,
@@ -228,9 +275,9 @@ export default function PipelinePage() {
                 status: statusFilter !== "ALL" ? statusFilter : undefined,
                 tags: normalizedTags.length > 0 ? normalizedTags : undefined,
               }),
-              fetchSegmentSummary(),
-              fetchDueTasks(),
-              fetchImportJobs(),
+              fetchSegmentSummary(businessId),
+              fetchDueTasks(businessId),
+              fetchImportJobs(businessId),
             ]);
           const mapped = (contactData ?? []).map(
             (contact) =>
@@ -239,19 +286,25 @@ export default function PipelinePage() {
                 tags: contact.tags ?? [],
               }) as ContactWithTags,
           );
-          setContacts(mapped);
+          const merged = [
+            ...existingLocal.filter((local) => !mapped.some((m) => m.id === local.id)),
+            ...mapped,
+          ];
+          setContacts(merged);
           setSegments(segmentData ?? {});
           setDueTasks(dueData ?? []);
           setImportJobs(importData ?? []);
           setNextOffset(mapped.length);
           setHasMore(mapped.length === PAGE_SIZE);
         }
+      } catch (error) {
+        console.error("Failed to load contacts", error);
       } finally {
         if (append) setLoadingMore(false);
         else setLoading(false);
       }
     },
-    [search, statusFilter, tagFilter, nextOffset],
+    [search, statusFilter, tagFilter, nextOffset, contacts, businessId],
   );
 
   const loadMore = useCallback(() => {
@@ -262,10 +315,11 @@ export default function PipelinePage() {
   }, [hasMore, loadData, loadingMore, startTransition]);
 
   const loadContactDetail = useCallback(async (contactId: string) => {
+    if (!businessId) return;
     setDetailError(null);
     setDetailLoading(true);
     try {
-      const { data, error } = await fetchContactDetail(contactId);
+      const { data, error } = await fetchContactDetail(contactId, businessId);
       if (error) {
         setDetailError(error);
       }
@@ -295,16 +349,17 @@ export default function PipelinePage() {
     } finally {
       setDetailLoading(false);
     }
-  }, []);
+  }, [businessId]);
 
   const quickAddTask = useCallback(
     async (contactId: string) => {
+      if (!businessId) return;
       if (typeof window === "undefined") return;
       const title = window.prompt("Add a quick task title");
       if (!title || !title.trim()) return;
       setQuickActionLoading(contactId);
       try {
-        await addContactTask(contactId, title.trim());
+        await addContactTask(contactId, title.trim(), undefined, businessId);
         startTransition(() => {
           void loadData();
           void loadContactDetail(contactId);
@@ -313,7 +368,7 @@ export default function PipelinePage() {
         setQuickActionLoading(null);
       }
     },
-    [loadContactDetail, loadData],
+    [businessId, loadContactDetail, loadData],
   );
 
   const selectContact = useCallback(
@@ -329,10 +384,10 @@ export default function PipelinePage() {
   const [taskLoading, setTaskLoading] = useState(false);
 
   const handleAddNote = useCallback(async () => {
-    if (!selectedContactId || !newNote.trim()) return;
+    if (!selectedContactId || !newNote.trim() || !businessId) return;
     setNoteLoading(true);
     try {
-      const result = await addContactNote(selectedContactId, newNote.trim());
+      const result = await addContactNote(selectedContactId, newNote.trim(), businessId);
       if (result.error) {
         throw new Error(result.error);
       }
@@ -343,15 +398,20 @@ export default function PipelinePage() {
     } finally {
       setNoteLoading(false);
     }
-  }, [selectedContactId, newNote, loadContactDetail]);
+  }, [businessId, loadContactDetail, newNote, selectedContactId]);
 
   const handleAddTask = useCallback(async () => {
-    if (!selectedContactId || !newTaskTitle.trim()) return;
+    if (!selectedContactId || !newTaskTitle.trim() || !businessId) return;
     setTaskLoading(true);
     try {
-      const result = await addContactTask(selectedContactId, newTaskTitle.trim(), {
-        dueDate: newTaskDue || undefined,
-      });
+      const result = await addContactTask(
+        selectedContactId,
+        newTaskTitle.trim(),
+        {
+          dueDate: newTaskDue || undefined,
+        },
+        businessId,
+      );
       if (result.error) {
         throw new Error(result.error);
       }
@@ -363,7 +423,7 @@ export default function PipelinePage() {
     } finally {
       setTaskLoading(false);
     }
-  }, [selectedContactId, newTaskTitle, newTaskDue, loadContactDetail]);
+  }, [businessId, loadContactDetail, newTaskDue, newTaskTitle, selectedContactId]);
 
   const aiSuggestions = useMemo(() => generateAiSuggestions(contactDetail), [contactDetail]);
 
@@ -429,9 +489,16 @@ export default function PipelinePage() {
             c.companyName,
             c.jobTitle,
             c.status,
+            c.source,
+            c.preferredChannel,
+            c.lifecycleStage,
+            c.segment,
+            c.meta?.leadScore,
+            c.meta?.outstandingBalance,
+            c.meta?.overdueTasks,
             ...(c.tags ?? []),
           ]
-            .filter(Boolean)
+            .filter((field) => field !== undefined && field !== null)
             .some((field) => String(field).toLowerCase().includes(q)),
         )
       : contacts;
@@ -506,10 +573,11 @@ export default function PipelinePage() {
   }, [startTransition]);
 
   useEffect(() => {
+    if (!businessId) return;
     startTransition(() => {
       void loadData();
     });
-  }, [loadData, startTransition]);
+  }, [businessId, loadData, startTransition]);
 
   useEffect(() => {
     if (!isMobile) {
@@ -537,6 +605,7 @@ export default function PipelinePage() {
   }, [contacts, selectedContactId, loadContactDetail]);
 
   useEffect(() => {
+    if (!businessId) return;
     const targetContact = selectedContactId ?? contacts[0]?.id;
     if (!targetContact) {
       startTransition(() => {
@@ -549,7 +618,7 @@ export default function PipelinePage() {
       setEventsContactId(targetContact);
       setEventsLoading(true);
     });
-    void fetchContactEvents(targetContact)
+    void fetchContactEvents(targetContact, businessId)
       .then((result) => {
         setRecentEvents(result.data ?? []);
       })
@@ -559,14 +628,15 @@ export default function PipelinePage() {
       .finally(() => {
         setEventsLoading(false);
       });
-  }, [contacts, selectedContactId]);
+  }, [businessId, contacts, selectedContactId]);
 
   useEffect(() => {
     setTimelineFilter("ALL");
   }, [selectedContactId]);
 
   async function move(contactId: string, status: string) {
-    await updateContact({ contactId, status });
+    if (!businessId) return;
+    await updateContact({ businessId, contactId, status });
     setContacts((prev) => prev.map((c) => (c.id === contactId ? { ...c, status } : c)));
   }
 
@@ -712,12 +782,12 @@ export default function PipelinePage() {
               />
               <Button
                 variant="outline"
-                className="px-3 py-1 text-xs"
-                onClick={handleAddNote}
-                disabled={!newNote.trim() || noteLoading}
-              >
-                Add note
-              </Button>
+                      className="px-3 py-1 text-xs"
+                      onClick={handleAddNote}
+                      disabled={!newNote.trim() || noteLoading}
+                    >
+                      Add note
+                    </Button>
               <div className="space-y-2">
                 {notesEntries.slice(0, 4).map((note) => (
                   <div
@@ -1110,7 +1180,8 @@ export default function PipelinePage() {
                         contactPhotoFile && contactPhotoFile.size > 0
                           ? await fileToDataUrl(contactPhotoFile)
                           : undefined;
-                      await createContact({
+                      const result = await createContact({
+                        businessId: businessId ?? undefined,
                         firstName: newContact.firstName,
                         lastName: newContact.lastName,
                         email: newContact.email,
@@ -1132,6 +1203,31 @@ export default function PipelinePage() {
                             }
                           : undefined,
                       });
+                      const parsedTags = newContact.tags
+                        .split(",")
+                        .map((t) => t.trim())
+                        .filter(Boolean);
+                      const created: ContactWithTags = {
+                        id: result.data?.id ?? `local_${Date.now()}`,
+                        firstName: result.data?.firstName ?? newContact.firstName,
+                        lastName: result.data?.lastName ?? newContact.lastName,
+                        email: result.data?.email ?? newContact.email,
+                        phone: result.data?.phone ?? newContact.phone,
+                        status: result.data?.status ?? newContact.status,
+                        source: result.data?.source ?? newContact.source,
+                        companyName: result.data?.companyName ?? newContact.companyName,
+                        jobTitle: result.data?.jobTitle ?? newContact.jobTitle,
+                        preferredChannel: result.data?.preferredChannel ?? newContact.preferredChannel,
+                        lifecycleStage: result.data?.lifecycleStage ?? newContact.lifecycleStage,
+                        segment: result.data?.segment ?? undefined,
+                        tags: result.data?.tags && result.data.tags.length > 0 ? result.data.tags : parsedTags,
+                        meta: result.data?.meta,
+                        localOnly: true,
+                      };
+                      setContacts((prev) => {
+                        const filtered = prev.filter((c) => c.id !== created.id);
+                        return [created, ...filtered];
+                      });
                       setNewContact({
                         firstName: "",
                         lastName: "",
@@ -1145,6 +1241,11 @@ export default function PipelinePage() {
                         preferredChannel: "",
                         lifecycleStage: "",
                       });
+                      // Reset filters to ensure the freshly added contact is visible in the database card.
+                      setStatusFilter("ALL");
+                      setTagFilter("");
+                      setSearch("");
+                      setSearchInput("");
                       setContactPhotoFile(null);
                       setContactPhotoPreview(null);
                       setShowAddContact(false);
@@ -1197,9 +1298,9 @@ export default function PipelinePage() {
                   variant="outline"
                   className="px-3 py-1 text-xs"
                   onClick={async () => {
-                    if (!importFile) return;
+                    if (!importFile || !businessId) return;
                     try {
-                      await importContactsFromFile({ type: importType, file: importFile });
+                      await importContactsFromFile({ businessId, type: importType, file: importFile });
                       setImportFile(null);
                     } catch (error) {
                       console.error("File import failed", error);
@@ -1226,9 +1327,9 @@ export default function PipelinePage() {
                   variant="outline"
                   className="px-3 py-1 text-xs"
                   onClick={async () => {
-                    if (!cameraImage) return;
+                    if (!cameraImage || !businessId) return;
                     try {
-                      await importContactsFromFile({ type: "image", file: cameraImage });
+                      await importContactsFromFile({ businessId, type: "image", file: cameraImage });
                       setCameraImage(null);
                     } catch (error) {
                       console.error("Camera import failed", error);
@@ -1253,8 +1354,8 @@ export default function PipelinePage() {
                   variant="outline"
                   className="px-3 py-1 text-xs"
                   onClick={async () => {
-                    if (!importLink.trim()) return;
-                    const result = await importContactsFromLink(importLink.trim());
+                    if (!importLink.trim() || !businessId) return;
+                    const result = await importContactsFromLink(importLink.trim(), businessId);
                     if (result.error) {
                       console.error("Link import failed", result.error);
                     } else {
@@ -1282,8 +1383,8 @@ export default function PipelinePage() {
                   variant="outline"
                   className="px-3 py-1 text-xs"
                   onClick={async () => {
-                    if (!ocrText.trim()) return;
-                    const result = await createContactFromOcr({ ocrText: ocrText.trim() });
+                    if (!ocrText.trim() || !businessId) return;
+                    const result = await createContactFromOcr({ businessId, ocrText: ocrText.trim() });
                     if (result.error) {
                       console.error("OCR import failed", result.error);
                     } else {
@@ -1342,194 +1443,6 @@ export default function PipelinePage() {
         </div>
       </div>
 
-      <SectionCard title="Pipeline board">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-muted-foreground">Bulk move selected:</span>
-          {STATUSES.map((s) => (
-            <Button
-              key={s}
-              variant="outline"
-              className="px-2 py-1 text-xs"
-              onClick={async () => {
-                await Promise.all(selected.map((id) => updateContact({ contactId: id, status: s })));
-                setContacts((prev) => prev.map((c) => (selected.includes(c.id) ? { ...c, status: s } : c)));
-                setSelected([]);
-              }}
-              disabled={selected.length === 0 || isPending}
-            >
-              {s}
-            </Button>
-          ))}
-          {selected.length > 0 && (
-            <span className="text-xs text-muted-foreground">{selected.length} selected</span>
-          )}
-        </div>
-        {loading ? (
-          <p className="text-xs text-muted-foreground mt-3">Loading contacts...</p>
-        ) : contacts.length === 0 ? (
-          <p className="text-xs text-muted-foreground mt-3">No contacts found for this view.</p>
-        ) : (
-          <>
-            <div className="grid gap-3 md:grid-cols-4 mt-4">
-              {STATUSES.map((status) => (
-                <div
-                  key={status}
-                  className="rounded-2xl border border-slate-200 bg-slate-50 p-3 space-y-2"
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    const contactId = e.dataTransfer.getData("text/plain");
-                    if (contactId) void move(contactId, status);
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-semibold">{status}</div>
-                    <Badge tone="info">{contacts.filter((c) => (c.status ?? "LEAD") === status).length}</Badge>
-                  </div>
-                  <div className="space-y-2">
-                    {contacts
-                      .filter((c) => (c.status ?? "LEAD") === status)
-                      .map((c) => (
-                          <div
-                            key={c.id}
-                      className={`rounded-xl border p-2 space-y-1 transition ${
-                      c.id === selectedContactId
-                                ? "border-emerald-500 bg-white shadow-[0_0_20px_rgba(16,185,129,0.25)]"
-                                : "border-slate-200 bg-white"
-                            }`}
-                            draggable
-                            onDragStart={(e) => e.dataTransfer.setData("text/plain", c.id)}
-                          >
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={selected.includes(c.id)}
-                              onChange={(e) => {
-                                setSelected((prev) =>
-                                  e.target.checked ? [...prev, c.id] : prev.filter((id) => id !== c.id),
-                                );
-                              }}
-                            />
-                          <div className="text-sm font-semibold">
-                            {`${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || "Unnamed"}
-                          </div>
-                        </div>
-                      <div className="text-xs text-muted-foreground">{c.email || c.phone || "No contact info"}</div>
-                      {(c.companyName || c.jobTitle || c.segment || c.doNotContact) && (
-                        <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                          {c.companyName && (
-                            <span className="rounded-full border border-border/50 px-2 py-0.5">
-                              {c.companyName}
-                                </span>
-                              )}
-                              {c.jobTitle && (
-                                <span className="rounded-full border border-border/50 px-2 py-0.5">
-                                  {c.jobTitle}
-                                </span>
-                              )}
-                              {c.segment && (
-                                <span className="rounded-full border border-border/50 px-2 py-0.5">
-                                  Segment: {c.segment}
-                                </span>
-                              )}
-                              {c.doNotContact && (
-                                <span className="text-rose-300">Do not contact</span>
-                              )}
-                        </div>
-                      )}
-                      <div className="flex flex-wrap gap-1 text-[11px] text-muted-foreground">
-                        {c.meta?.leadScore !== undefined && (
-                          <span className="rounded-full border border-border/50 px-2 py-0.5">
-                            Score: {c.meta.leadScore}
-                          </span>
-                        )}
-                            {c.meta?.outstandingBalance !== undefined && c.meta.outstandingBalance > 0 && (
-                              <span className="rounded-full border border-amber-500/60 text-amber-300 px-2 py-0.5">
-                                Owed: {c.meta.outstandingBalance.toLocaleString()}
-                              </span>
-                            )}
-                            {c.meta?.nextDueTaskAt && (
-                              <span className="rounded-full border border-border/50 px-2 py-0.5">
-                                Next task: {new Date(c.meta.nextDueTaskAt).toLocaleDateString()}
-                              </span>
-                            )}
-                            {c.meta?.lastInteractionAt && (
-                              <span className="rounded-full border border-border/50 px-2 py-0.5">
-                                Last activity: {new Date(c.meta.lastInteractionAt).toLocaleDateString()}
-                              </span>
-                            )}
-                            {c.meta?.predictedNextBookingAt && (
-                              <span className="rounded-full border border-emerald-500/50 text-emerald-200 px-2 py-0.5">
-                                Next booking est: {new Date(c.meta.predictedNextBookingAt).toLocaleDateString()}
-                              </span>
-                        )}
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                        <Link href={`/app/crm/contacts/${c.id}`} className="underline hover:text-foreground">
-                          View detail
-                        </Link>
-                        <Button
-                          variant="outline"
-                          className="px-2 py-1 text-[11px]"
-                          onClick={() => selectContact(c.id)}
-                        >
-                          Overview
-                        </Button>
-                        {c.phone && (
-                          <a
-                            href={`tel:${c.phone}`}
-                            className="rounded border border-border/50 px-2 py-1 hover:bg-border/20"
-                          >
-                            Call
-                          </a>
-                        )}
-                        {c.email && (
-                          <a
-                            href={`mailto:${c.email}`}
-                            className="rounded border border-border/50 px-2 py-1 hover:bg-border/20"
-                          >
-                            Email
-                          </a>
-                        )}
-                        <Button
-                          variant="outline"
-                          className="px-2 py-1 text-[11px]"
-                          disabled={quickActionLoading === c.id}
-                          onClick={() => void quickAddTask(c.id)}
-                        >
-                          {quickActionLoading === c.id ? "Adding..." : "Quick task"}
-                        </Button>
-                      </div>
-                          <div className="flex flex-wrap gap-1">
-                            {STATUSES.map((s) =>
-                              s === status ? null : (
-                                <Button
-                                  key={s}
-                                  variant="outline"
-                                  className="px-2 py-1 text-[11px]"
-                                  onClick={() => void move(c.id, s)}
-                                >
-                                  Move to {s}
-                                </Button>
-                              ),
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-            {hasMore && (
-              <div className="mt-4 flex items-center justify-center gap-2 text-xs text-muted-foreground">
-                <Button variant="outline" className="px-3 py-1 text-xs" onClick={loadMore} disabled={loadingMore}>
-                  {loadingMore ? "Loading more..." : "Load more contacts"}
-                </Button>
-                {loadingMore && <span>Fetching contacts...</span>}
-              </div>
-            )}
-          </>
-        )}
-      </SectionCard>
       <SectionCard
         title="Database"
         className="bg-white"
@@ -1563,45 +1476,53 @@ export default function PipelinePage() {
               </select>
               <Badge tone="info">{dbFiltered.length} shown</Badge>
             </div>
-            <div className="overflow-x-auto rounded-2xl border border-border/50">
-              <table className="min-w-full text-xs text-left">
-                <thead className="bg-slate-900/70 text-muted-foreground">
-                  <tr>
-                    <th className="px-3 py-2">Name</th>
-                    <th className="px-3 py-2">Email</th>
-                    <th className="px-3 py-2">Phone</th>
-                    <th className="px-3 py-2">Status</th>
-                    <th className="px-3 py-2">Company</th>
-                    <th className="px-3 py-2">Tags</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dbFiltered.slice(0, 50).map((c) => (
-                    <tr key={c.id} className="border-t border-border/40 hover:bg-slate-900/60">
-                      <td className="px-3 py-2 font-semibold text-white">
-                        {`${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || "Unnamed"}
-                      </td>
-                      <td className="px-3 py-2 text-muted-foreground">{c.email || "-"}</td>
-                      <td className="px-3 py-2 text-muted-foreground">{c.phone || "-"}</td>
-                      <td className="px-3 py-2">
-                        <Badge tone={CONTACT_STATUS_TONES[c.status ?? ""] ?? "default"}>{c.status ?? "LEAD"}</Badge>
-                      </td>
-                      <td className="px-3 py-2 text-muted-foreground">{c.companyName || "-"}</td>
-                      <td className="px-3 py-2 text-muted-foreground">
-                        {(c.tags ?? []).slice(0, 3).join(", ") || "-"}
-                      </td>
-                    </tr>
-                  ))}
-                  {dbFiltered.length === 0 && (
+              <div className="overflow-x-auto rounded-2xl border border-border/50">
+                <table className="min-w-full text-xs text-left">
+                  <thead className="bg-slate-900/70 text-muted-foreground">
                     <tr>
-                      <td className="px-3 py-3 text-muted-foreground" colSpan={6}>
-                        No contacts match this view.
-                      </td>
+                      <th className="px-3 py-2">Name</th>
+                      <th className="px-3 py-2">Email</th>
+                      <th className="px-3 py-2">Phone</th>
+                      <th className="px-3 py-2">Status</th>
+                      <th className="px-3 py-2">Company</th>
+                      <th className="px-3 py-2">Source</th>
+                      <th className="px-3 py-2">Preferred</th>
+                      <th className="px-3 py-2">Lifecycle</th>
+                      <th className="px-3 py-2">Segment</th>
+                      <th className="px-3 py-2">Tags</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {dbFiltered.map((c) => (
+                      <tr key={c.id} className="border-t border-border/40 hover:bg-slate-900/60">
+                        <td className="px-3 py-2 font-semibold text-white">
+                          {`${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || "Unnamed"}
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground">{c.email || "-"}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{c.phone || "-"}</td>
+                        <td className="px-3 py-2">
+                          <Badge tone={CONTACT_STATUS_TONES[c.status ?? ""] ?? "default"}>{c.status ?? "LEAD"}</Badge>
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground">{c.companyName || "-"}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{c.source || "-"}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{c.preferredChannel || "-"}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{c.lifecycleStage || "-"}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{c.segment || "-"}</td>
+                        <td className="px-3 py-2 text-muted-foreground">
+                          {(c.tags ?? []).slice(0, 3).join(", ") || "-"}
+                        </td>
+                      </tr>
+                    ))}
+                    {dbFiltered.length === 0 && (
+                      <tr>
+                        <td className="px-3 py-3 text-muted-foreground" colSpan={10}>
+                          No contacts match this view.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
           </div>
         )}
       </SectionCard>

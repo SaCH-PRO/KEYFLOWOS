@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { FormEvent, useMemo, useState } from "react";
+import { bootstrapIdentity } from "@/lib/client";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -28,18 +29,30 @@ async function supabaseSignIn(email: string, password: string) {
 
 export default function AuthLogin() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const verified = useMemo(() => searchParams?.get("verified") === "1", [searchParams]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [banner, setBanner] = useState<string | null>(verified ? "Email verified. Please sign in to continue." : null);
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
+    setBanner(null);
     setLoading(true);
     try {
       const session = await supabaseSignIn(email, password);
       window.localStorage.setItem("kf_token", session.access_token);
+      const bootstrap = await bootstrapIdentity({ email });
+      if (bootstrap.data?.business?.id) {
+        window.localStorage.setItem("kf_business_id", bootstrap.data.business.id);
+      } else if (bootstrap.error) {
+        throw new Error(bootstrap.error);
+      } else {
+        throw new Error("Could not create workspace. Please try again.");
+      }
       router.push("/app");
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Login failed";
@@ -57,6 +70,7 @@ export default function AuthLogin() {
         onSubmit={onSubmit}
         className="w-full max-w-md mx-auto bg-slate-900/40 border border-primary/30 rounded-3xl p-6 flex flex-col gap-4 shadow-[0_0_35px_rgba(41,123,255,0.25)]"
       >
+        {banner && <div className="text-xs text-emerald-300">{banner}</div>}
         {error && <div className="text-xs text-amber-400">{error}</div>}
         <label className="flex flex-col text-left text-sm text-muted-foreground gap-1">
           Email
@@ -67,6 +81,7 @@ export default function AuthLogin() {
             onChange={(e) => setEmail(e.target.value)}
             className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
             placeholder="you@example.com"
+            suppressHydrationWarning
           />
         </label>
         <label className="flex flex-col text-left text-sm text-muted-foreground gap-1">
@@ -78,6 +93,7 @@ export default function AuthLogin() {
             onChange={(e) => setPassword(e.target.value)}
             className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
             placeholder="••••••••"
+            suppressHydrationWarning
           />
         </label>
         <button type="submit" className="landing-button w-full disabled:opacity-70" disabled={loading}>
