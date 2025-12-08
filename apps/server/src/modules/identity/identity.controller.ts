@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { IdentityService } from './identity.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { CreateBusinessDto } from './dto/create-business.dto';
 import { BootstrapDto } from './dto/bootstrap.dto';
@@ -29,12 +30,13 @@ export class IdentityController {
   @UseGuards(AuthGuard)
   @Post('bootstrap')
   async bootstrap(@Body() body: BootstrapDto, @Req() req: Request) {
+    const identity = this.identity ?? new IdentityService(new PrismaService());
     const user = (req as any).user as { id?: string; email?: string } | undefined;
     if (!user?.id || !user?.email) {
       throw new UnauthorizedException('Missing authenticated user');
     }
 
-    return this.identity.bootstrapUser({
+    return identity.bootstrapUser({
       userId: user.id,
       email: body.email ?? user.email,
       username: body.username,

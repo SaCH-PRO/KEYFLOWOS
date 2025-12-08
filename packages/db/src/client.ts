@@ -3,7 +3,6 @@ import { softDelete } from "./middleware/soft-delete";
 
 // Enable soft delete for all models that include a deletedAt column
 const softDeleteExtension = softDelete([
-  "User",
   "Business",
   "Membership",
   "Session",
