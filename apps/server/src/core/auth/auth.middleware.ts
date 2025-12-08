@@ -21,19 +21,30 @@ export class AuthMiddleware implements NestMiddleware {
 
   async use(req: Request, _res: Response, next: NextFunction) {
     const header = req.headers['authorization'];
-    const token = typeof header === 'string' && header.startsWith('Bearer ')
-      ? header.replace('Bearer ', '').trim()
-      : undefined;
+    const token =
+      typeof header === 'string' && header.startsWith('Bearer ')
+        ? header.replace('Bearer ', '').trim()
+        : undefined;
+
+    this.logger.debug(`Auth header: ${header ? `${String(header).slice(0, 12)}...` : 'none'}`);
+    this.logger.debug(`SupabaseAuthService injected: ${this.supabaseAuth ? 'yes' : 'no'}`);
 
     try {
-      const user = await this.supabaseAuth.getUserFromToken(token);
+      const supabaseAuth = this.supabaseAuth ?? new SupabaseAuthService();
+      const user = await supabaseAuth.getUserFromToken(token);
       if (user?.id) {
         (req as any).user = await this.attachRole(user.id, user.email);
+        this.logger.debug(
+          `Attached user from supabase: id=${user.id} email=${user.email ?? 'n/a'}`,
+        );
       } else if (token) {
         // Fallback: decode JWT locally to avoid blocking when Supabase is unavailable.
         const decoded = this.decodeJwt(token);
         const fallbackId = decoded?.sub || decoded?.user_id;
         if (fallbackId) {
+          this.logger.debug(
+            `Attached user from decoded JWT: id=${fallbackId} email=${decoded?.email ?? 'n/a'}`,
+          );
           (req as any).user = await this.attachRole(fallbackId, decoded?.email);
         }
       }
