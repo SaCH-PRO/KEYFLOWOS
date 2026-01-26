@@ -7,9 +7,11 @@ const contactMetaSchema = z.object({
   outstandingBalance: z.number().optional(),
   unpaidInvoices: z.number().optional(),
   paidInvoices: z.number().optional(),
+  oldestUnpaidInvoiceDueAt: z.string().nullable().optional(),
   lastInteractionAt: z.string().optional(),
   nextDueTaskAt: z.string().nullable().optional(),
   overdueTasks: z.number().optional(),
+  overdueBookings: z.number().optional(),
   bookingsRecent: z.number().optional(),
   leadScore: z.number().optional(),
   predictedNextBookingAt: z.string().nullable().optional(),
@@ -99,6 +101,17 @@ const bookingSchema = z.object({
   startTime: z.string(),
   endTime: z.string(),
   status: z.string(),
+});
+
+const invoiceSummarySchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  total: z.number().nullable().optional(),
+  currency: z.string().nullable().optional(),
+  dueDate: z.string().nullable().optional(),
+  issueDate: z.string().nullable().optional(),
+  createdAt: z.string().optional(),
+  paidAt: z.string().nullable().optional(),
 });
 
 export type Contact = z.infer<typeof contactSchema> & { tags?: string[] };
@@ -236,9 +249,86 @@ const contactDetailSchema = z.object({
   events: z.array(eventSchema),
   notes: z.array(noteSchema),
   tasks: z.array(taskSchema),
+  invoices: z.array(invoiceSummarySchema).optional(),
+  bookings: z.array(bookingSchema).optional(),
   meta: contactMetaSchema.nullable().optional(),
 });
 export type ContactDetail = z.infer<typeof contactDetailSchema>;
+
+const highlightContactSchema = z.object({
+  contactId: z.string(),
+  name: z.string(),
+  status: z.string(),
+  leadScore: z.number().optional(),
+  outstandingBalance: z.number().optional(),
+  unpaidInvoices: z.number().optional(),
+  lastInteractionAt: z.string().nullable().optional(),
+  tags: z.array(z.string()).optional(),
+});
+
+const serviceAffinitySchema = z.object({
+  serviceId: z.string(),
+  serviceName: z.string(),
+  bookings: z.number(),
+  revenue: z.number(),
+  topContact: z
+    .object({
+      id: z.string(),
+      name: z.string(),
+      bookings: z.number(),
+    })
+    .optional(),
+});
+
+const segmentInsightSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  description: z.string(),
+  count: z.number(),
+  contacts: z.array(contactSchema),
+});
+
+const timelineEntrySchema = z.object({
+  id: z.string(),
+  type: z.string(),
+  contactId: z.string(),
+  contactName: z.string().optional(),
+  contactEmail: z.string().nullable().optional(),
+  title: z.string(),
+  description: z.string().optional(),
+  timestamp: z.string(),
+  meta: z.record(z.unknown()).optional(),
+});
+
+const nextActionSchema = z.object({
+  id: z.string(),
+  contactId: z.string(),
+  contactName: z.string().optional(),
+  title: z.string(),
+  detail: z.string(),
+  severity: z.enum(["high", "medium", "info"]),
+  trigger: z.string(),
+});
+
+const aiStubSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  detail: z.string(),
+});
+
+const flowHighlightsSchema = z.object({
+  highlights: z.object({
+    highPotential: z.array(highlightContactSchema),
+    overdueReminders: z.array(highlightContactSchema),
+    serviceAffinity: z.array(serviceAffinitySchema),
+  }),
+  segments: z.array(segmentInsightSchema),
+  timeline: z.array(timelineEntrySchema),
+  nextActions: z.array(nextActionSchema),
+  aiNextActions: z.array(aiStubSchema),
+});
+
+export type FlowHighlights = z.infer<typeof flowHighlightsSchema>;
 
 export async function fetchContactDetail(contactId: string, businessId: string = DEFAULT_BUSINESS_ID) {
   return apiGet(
@@ -445,6 +535,20 @@ export async function fetchSegmentSummary(businessId: string = DEFAULT_BUSINESS_
       newThisWeek: z.number(),
     }),
     { lead: 0, prospect: 0, client: 0, lost: 0, unpaid: 0, stale: 0, newThisWeek: 0 },
+  );
+}
+
+export async function fetchCrmHighlights(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/highlights`,
+    flowHighlightsSchema,
+    {
+      highlights: { highPotential: [], overdueReminders: [], serviceAffinity: [] },
+      segments: [],
+      timeline: [],
+      nextActions: [],
+      aiNextActions: [],
+    },
   );
 }
 

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { InvoicePaidPayload } from '../../core/event-bus/events.types';
+import { InvoicePaidPayload, InvoiceStatusPayload } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { Service } from '@keyflow/db';
 import { CrmService } from '../crm/crm.service';
@@ -190,6 +190,27 @@ export class CommerceService {
         actorType: params.actorId ? 'USER' : 'SYSTEM',
         actorId: params.actorId ?? undefined,
         source: 'commerce',
+      });
+    }
+    if (params.status === 'SENT' || params.status === 'OVERDUE') {
+      const payload: InvoiceStatusPayload = {
+        invoice,
+        businessId: invoice.businessId,
+        status: params.status,
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore
+        eventName: `invoice.${params.status.toLowerCase()}`,
+      };
+      this.events.emit(`invoice.${params.status.toLowerCase()}`, payload);
+    }
+    if (params.status === 'OVERDUE' && invoice.contactId) {
+      await this.automation.handle({
+        type: 'invoice.overdue',
+        businessId: invoice.businessId,
+        contactId: invoice.contactId,
+        invoiceId: invoice.id,
+        total: invoice.total,
+        currency: invoice.currency,
       });
     }
     return invoice;
