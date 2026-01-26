@@ -13,6 +13,7 @@ class PrismaMock implements Partial<PrismaService> {
       findMany: vi.fn(({ where }: any) =>
         this.bookings.filter((b) => b.businessId === where.businessId && b.deletedAt === null),
       ),
+      findFirst: vi.fn(() => null),
       create: vi.fn(({ data }: any) => {
         const item = {
           ...data,
@@ -23,6 +24,9 @@ class PrismaMock implements Partial<PrismaService> {
         this.bookings.push(item);
         return item;
       }),
+    },
+    availability: {
+      findMany: vi.fn(() => []),
     },
     service: {
       findFirstOrThrow: vi.fn(({ where }: any) => {
@@ -131,7 +135,11 @@ describe('BookingsService', () => {
     });
 
     expect(createInvoiceForService).toHaveBeenCalled();
-    expect(findOrCreateContact).toHaveBeenCalledWith('biz_1', { email: 'a@example.com' });
+    expect(findOrCreateContact).toHaveBeenCalledWith('biz_1', {
+      email: 'a@example.com',
+      source: 'booking',
+      sourceDetail: 'public-booking',
+    });
     expect(result.success).toBe(true);
     expect(result.invoiceId).toBe('inv_1');
     expect(emit).toHaveBeenCalledWith(

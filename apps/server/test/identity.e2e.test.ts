@@ -62,6 +62,6 @@ describe('Identity e2e', () => {
     await agent.post('/identity/businesses').send({ name: 'Acme' }).expect(201);
     const res = await agent.get('/identity/businesses').expect(200);
     expect(res.body).toHaveLength(1);
-    expect(res.body[0].name).toBe('Acme');
+    expect(res.body[0].business?.name ?? res.body[0].name).toBe('Acme');
   });
 });

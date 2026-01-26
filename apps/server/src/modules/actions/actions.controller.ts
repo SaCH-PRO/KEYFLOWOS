@@ -1,9 +1,10 @@
 import { Body, Controller, Post, UseGuards, NotFoundException } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
+import { BusinessGuard } from '../../core/auth/business.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Controller('actions')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, BusinessGuard)
 export class ActionsController {
   constructor(private readonly prisma: PrismaService) {}
 

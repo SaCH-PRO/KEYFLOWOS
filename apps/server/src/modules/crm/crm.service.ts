@@ -486,6 +486,13 @@ export class CrmService {
         businessId: input.businessId,
       };
       this.events.emit('contact.created', payload);
+      if (this.automation) {
+        await this.automation.handle({
+          type: 'contact.created',
+          businessId: input.businessId,
+          contactId: contact.id,
+        });
+      }
     }
     return contact;
   }
@@ -673,6 +680,13 @@ export class CrmService {
       toStatus: updated.status,
     };
     this.events.emit('contact.updated', payload);
+    if (this.automation) {
+      await this.automation.handle({
+        type: 'contact.updated',
+        businessId: input.businessId,
+        contactId: input.contactId,
+      });
+    }
 
     if (this.automation && input.status && existing?.status !== input.status) {
       await this.automation.handle({

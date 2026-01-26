@@ -6,7 +6,10 @@ class PrismaServiceMock {
   constructor(private readonly businessAccess: boolean) {}
   client = {
     business: {
-      findFirst: async () => (this.businessAccess ? { id: 'biz_1' } : null),
+      findFirst: async () => (this.businessAccess ? { id: 'biz_1', ownerId: 'user_1' } : null),
+    },
+    membership: {
+      findFirst: async () => (this.businessAccess ? { id: 'membership_1', role: 'OWNER' } : null),
     },
   };
 }

@@ -7,19 +7,33 @@ export class IdentityService {
 
   listBusinesses(userId?: string) {
     if (userId) {
-      return this.prisma.client.business.findMany({
-        where: { ownerId: userId, deletedAt: null },
+      return this.prisma.client.membership.findMany({
+        where: { userId },
+        include: { business: true, user: true },
       });
     }
     return this.prisma.client.business.findMany({ where: { deletedAt: null } });
   }
 
-  createBusiness(input: { name: string; ownerId?: string }) {
-    return this.prisma.client.business.create({
-      data: {
-        name: input.name,
-        ownerId: input.ownerId ?? '',
-      },
+  async createBusiness(input: { name: string; ownerId?: string }) {
+    const ownerId = input.ownerId ?? '';
+    return this.prisma.client.$transaction(async (tx) => {
+      const business = await tx.business.create({
+        data: {
+          name: input.name,
+          ownerId,
+        },
+      });
+      if (ownerId) {
+        await tx.membership.create({
+          data: {
+            userId: ownerId,
+            businessId: business.id,
+            role: 'OWNER',
+          },
+        });
+      }
+      return business;
     });
   }
 
@@ -91,5 +105,46 @@ export class IdentityService {
     });
 
     return { user, business };
+  }
+
+  async listTeam(businessId: string) {
+    return this.prisma.client.membership.findMany({
+      where: { businessId },
+      include: { user: true },
+    });
+  }
+
+  async inviteMember(input: { businessId: string; email: string; role: string }) {
+    const existingUser = await this.prisma.client.user.findFirst({
+      where: { email: input.email },
+    });
+    const user =
+      existingUser ||
+      (await this.prisma.client.user.create({
+        data: {
+          email: input.email,
+          role: 'USER',
+        },
+      }));
+
+    const membership = await this.prisma.client.membership.upsert({
+      where: { userId_businessId: { userId: user.id, businessId: input.businessId } },
+      create: {
+        userId: user.id,
+        businessId: input.businessId,
+        role: input.role,
+      },
+      update: {
+        role: input.role,
+      },
+      include: { user: true },
+    });
+
+    return membership;
+  }
+
+  async deleteMembership(input: { membershipId: string }) {
+    await this.prisma.client.membership.delete({ where: { id: input.membershipId } });
+    return { success: true, id: input.membershipId };
   }
 }

@@ -1,10 +1,11 @@
-import { Body, Controller, Get, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { IdentityService } from './identity.service';
-import { PrismaService } from '../../core/prisma/prisma.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
+import { BusinessGuard } from '../../core/auth/business.guard';
 import { CreateBusinessDto } from './dto/create-business.dto';
 import { BootstrapDto } from './dto/bootstrap.dto';
+import { InviteMemberDto } from './dto/invite-member.dto';
 
 @Controller('identity')
 export class IdentityController {
@@ -25,6 +26,36 @@ export class IdentityController {
       name: body.name,
       ownerId: body.ownerId ?? user?.id,
     });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/team')
+  listTeam(@Param('businessId') businessId: string) {
+    return this.identity.listTeam(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/team/invite')
+  inviteMember(@Param('businessId') businessId: string, @Body() body: InviteMemberDto, @Req() req: Request) {
+    const role = (req as any).business?.role;
+    if (role !== 'OWNER') {
+      throw new ForbiddenException('Only business owners can invite team members');
+    }
+    return this.identity.inviteMember({
+      businessId,
+      email: body.email,
+      role: body.role,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/team/:membershipId')
+  deleteMembership(@Param('membershipId') membershipId: string, @Req() req: Request) {
+    const role = (req as any).business?.role;
+    if (role !== 'OWNER') {
+      throw new ForbiddenException('Only business owners can remove team members');
+    }
+    return this.identity.deleteMembership({ membershipId });
   }
 
   @UseGuards(AuthGuard)
