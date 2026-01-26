@@ -1,27 +1,44 @@
-'use client';
+"use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Button, Card, Input, Badge } from "@keyflow/ui";
-import { apiPost, API_BASE } from "@/lib/api";
-import { Invoice } from "@/lib/client";
+import { API_BASE } from "@/lib/api";
+import { fetchInvoicePublic, markInvoicePaidPublic } from "@/lib/client";
 import { motion } from "framer-motion";
 
 export default function PublicPayPage() {
+  const searchParams = useSearchParams();
   const [invoiceId, setInvoiceId] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [paidInvoiceId, setPaidInvoiceId] = useState<string | null>(null);
   const [copyMsg, setCopyMsg] = useState<string | null>(null);
+  const [invoice, setInvoice] = useState<any | null>(null);
+  const [loadingInvoice, setLoadingInvoice] = useState(false);
+
+  useEffect(() => {
+    const idParam = searchParams?.get("invoiceId");
+    if (idParam) setInvoiceId(idParam);
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!invoiceId) {
+      setInvoice(null);
+      return;
+    }
+    setLoadingInvoice(true);
+    fetchInvoicePublic(invoiceId)
+      .then((res) => setInvoice(res.data ?? null))
+      .finally(() => setLoadingInvoice(false));
+  }, [invoiceId]);
 
   const markPaid = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatus("Marking paid...");
     setSuccess(false);
     setPaidInvoiceId(null);
-    const { data, error } = await apiPost<Invoice>({
-      path: `/commerce/invoices/${encodeURIComponent(invoiceId)}/paid`,
-      body: {},
-    });
+    const { data, error } = await markInvoicePaidPublic(invoiceId);
     if (error) {
       setStatus(`Error: ${error}`);
     } else {
@@ -50,6 +67,18 @@ export default function PublicPayPage() {
               <Button type="submit">Mark Paid</Button>
             </div>
           </form>
+          <div className="mt-3 rounded-xl border border-border/60 bg-slate-950/70 px-3 py-2 text-xs text-muted-foreground">
+            {loadingInvoice && <div>Loading invoice details...</div>}
+            {!loadingInvoice && invoice && (
+              <>
+                <div>Invoice: {invoice.invoiceNumber ?? invoice.id}</div>
+                <div>
+                  Total: {invoice.currency ?? "TTD"} {invoice.total ?? 0}
+                </div>
+                <div>Status: {invoice.status}</div>
+              </>
+            )}
+          </div>
           {status && (
             <div className="relative mt-3">
               {success && (
@@ -77,7 +106,7 @@ export default function PublicPayPage() {
                   <button
                     type="button"
                     className="inline-flex items-center gap-1 rounded-full border border-primary/60 px-3 py-1 text-[11px] text-primary hover:bg-primary/10"
-                    onClick={() => window.open(`${API_BASE}/commerce/invoices/${paidInvoiceId}/receipt`, "_blank")}
+                        onClick={() => window.open(`${API_BASE}/commerce/public/invoices/${paidInvoiceId}/receipt`, "_blank")}
                   >
                     Download receipt
                   </button>
@@ -86,7 +115,9 @@ export default function PublicPayPage() {
                     className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground hover:border-primary/60 hover:text-primary"
                     onClick={async () => {
                       try {
-                        await navigator.clipboard.writeText(`${window.location.origin}/commerce/invoices/${paidInvoiceId}/receipt`);
+                        await navigator.clipboard.writeText(
+                          `${window.location.origin}/commerce/public/invoices/${paidInvoiceId}/receipt`,
+                        );
                         setCopyMsg("Receipt link copied");
                         setTimeout(() => setCopyMsg(null), 1500);
                       } catch {

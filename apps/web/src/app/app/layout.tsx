@@ -46,6 +46,7 @@ const navSections = [
   {
     title: "Studio",
     items: [
+      { label: "Identity", href: "/app/identity", icon: Building2 },
       { label: "Studio", href: "/app/studio", icon: Sparkles },
       { label: "Settings", href: "/app/settings", icon: Settings },
     ],

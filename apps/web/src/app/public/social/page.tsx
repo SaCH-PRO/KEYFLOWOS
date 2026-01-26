@@ -1,93 +1,144 @@
-'use client';
+"use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Badge, Button, Card, Input } from "@keyflow/ui";
-import { apiPost, API_BASE } from "@/lib/api";
+import { fetchSiteBySubdomain, fetchSite, upsertSite } from "@/lib/client";
 
-type SocialPostResponse = {
-  id?: string;
-  status?: string;
-  [key: string]: unknown;
-};
+type SiteLink = { label: string; url: string };
 
 export default function PublicSocialPage() {
-  const [businessId, setBusinessId] = useState("");
-  const [postId, setPostId] = useState("");
-  const [content, setContent] = useState("");
-  const [mediaUrls, setMediaUrls] = useState("");
+  const searchParams = useSearchParams();
+  const subdomainParam = searchParams?.get("subdomain") ?? "";
+  const businessIdParam = searchParams?.get("businessId") ?? "";
+  const [subdomain, setSubdomain] = useState(subdomainParam);
+  const [businessId, setBusinessId] = useState(businessIdParam);
+  const [title, setTitle] = useState("KeyFlow Social");
+  const [links, setLinks] = useState<SiteLink[]>([]);
+  const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
-  const request = async (path: string, body: Record<string, unknown>) => {
-    setStatus("Submitting...");
-    const { data, error } = await apiPost<SocialPostResponse>({ path, body });
-    if (error) {
-      setStatus(`Error: ${error}`);
+  const parsedLinks = useMemo(
+    () =>
+      links.filter((link) => link.label.trim() && link.url.trim()).map((link) => ({
+        label: link.label.trim(),
+        url: link.url.trim(),
+      })),
+    [links],
+  );
+
+  useEffect(() => {
+    if (subdomainParam) setSubdomain(subdomainParam);
+    if (businessIdParam) setBusinessId(businessIdParam);
+  }, [subdomainParam, businessIdParam]);
+
+  useEffect(() => {
+    const load = async () => {
+      if (subdomain) {
+        setLoading(true);
+        const res = await fetchSiteBySubdomain(subdomain);
+        if (res.data?.siteData && typeof res.data.siteData === "object") {
+          const data = res.data.siteData as { title?: string; links?: SiteLink[] };
+          setTitle(data.title ?? "KeyFlow Social");
+          setLinks(Array.isArray(data.links) ? data.links : []);
+        }
+        setLoading(false);
+      } else if (businessId) {
+        setLoading(true);
+        const res = await fetchSite(businessId);
+        if (res.data?.siteData && typeof res.data.siteData === "object") {
+          const data = res.data.siteData as { title?: string; links?: SiteLink[] };
+          setTitle(data.title ?? "KeyFlow Social");
+          setLinks(Array.isArray(data.links) ? data.links : []);
+        }
+        setLoading(false);
+      }
+    };
+    void load();
+  }, [subdomain, businessId]);
+
+  const handleSave = async () => {
+    if (!businessId.trim()) {
+      setStatus("Business ID required to save.");
       return;
     }
-    setStatus(JSON.stringify(data));
-    if (data?.id) setPostId(data.id);
+    const payload = { title, links: parsedLinks };
+    const res = await upsertSite({ businessId, subdomain, siteData: payload });
+    setStatus(res.error ?? "Saved.");
   };
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-950 to-black text-white px-4 py-8">
       <div className="mx-auto max-w-4xl space-y-6">
         <div className="flex flex-col gap-2">
-          <Badge tone="info">Public Social</Badge>
-          <h1 className="text-3xl font-semibold">Social Post Tester</h1>
-          <p className="text-sm text-slate-300">
-            Create a draft and publish it via the live social endpoints at <code className="font-mono">{API_BASE}</code>.
-          </p>
+          <Badge tone="info">Public Links</Badge>
+          <h1 className="text-3xl font-semibold">{title}</h1>
+          <p className="text-sm text-slate-300">Share your links instantly. Use ?subdomain= or ?businessId=.</p>
         </div>
 
-        <Card title="Create & Publish" badge="Live" className="bg-[rgba(0,0,0,0.35)] border border-[var(--kf-border)]">
-          <div className="grid grid-cols-1 gap-4">
-            <Input label="Business ID" value={businessId} onChange={(e) => setBusinessId(e.target.value)} />
-            <textarea
-              className="w-full rounded-lg bg-[var(--kf-glass)] border border-[var(--kf-border)] px-3 py-2 text-sm text-[var(--kf-text)]"
-              placeholder="Content"
-              rows={3}
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-            />
-            <Input
-              label="Media URLs (comma separated, optional)"
-              value={mediaUrls}
-              onChange={(e) => setMediaUrls(e.target.value)}
-            />
-            <div className="flex gap-3">
-              <Button
-                type="button"
-                onClick={() =>
-                  request(`/social/businesses/${encodeURIComponent(businessId)}/posts`, {
-                    content,
-                    mediaUrls: mediaUrls ? mediaUrls.split(",").map((u) => u.trim()) : [],
-                  })
-                }
-              >
-                Create Draft
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() =>
-                  request(
-                    `/social/businesses/${encodeURIComponent(businessId)}/posts/${encodeURIComponent(postId)}/publish`,
-                    {},
-                  )
-                }
-                disabled={!postId || !businessId}
-              >
-                Publish Draft
-              </Button>
+        <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
+          <Card title="Links" badge={loading ? "Loading" : `${parsedLinks.length}`}>
+            <div className="space-y-2">
+              {parsedLinks.length === 0 && <div className="text-xs text-muted-foreground">No links yet.</div>}
+              {parsedLinks.map((link) => (
+                <a
+                  key={`${link.label}-${link.url}`}
+                  href={link.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center justify-between rounded-xl border border-border/60 bg-slate-900/60 px-3 py-2 text-sm"
+                >
+                  <span>{link.label}</span>
+                  <span className="text-xs text-muted-foreground">{link.url}</span>
+                </a>
+              ))}
             </div>
-          </div>
-          <div className="mt-4 rounded border border-[var(--kf-border)] bg-[rgba(0,0,0,0.35)] px-4 py-3 text-sm text-[var(--kf-text)]">
-            <p className="font-semibold mb-1">Post ID</p>
-            <p>{postId || "None yet"}</p>
-            <p className="font-semibold mt-3 mb-1">Status</p>
-            <p>{status || "Idle"}</p>
-          </div>
-        </Card>
+          </Card>
+
+          <Card title="Edit site" badge="Owner">
+            <div className="space-y-2">
+              <Input label="Business ID" value={businessId} onChange={(e) => setBusinessId(e.target.value)} />
+              <Input label="Subdomain" value={subdomain} onChange={(e) => setSubdomain(e.target.value)} />
+              <Input label="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
+              {links.map((link, idx) => (
+                <div key={`link-${idx}`} className="grid gap-2 md:grid-cols-2">
+                  <Input
+                    label="Label"
+                    value={link.label}
+                    onChange={(e) =>
+                      setLinks((prev) => {
+                        const next = [...prev];
+                        next[idx] = { ...next[idx], label: e.target.value };
+                        return next;
+                      })
+                    }
+                  />
+                  <Input
+                    label="URL"
+                    value={link.url}
+                    onChange={(e) =>
+                      setLinks((prev) => {
+                        const next = [...prev];
+                        next[idx] = { ...next[idx], url: e.target.value };
+                        return next;
+                      })
+                    }
+                  />
+                </div>
+              ))}
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setLinks((prev) => [...prev, { label: "", url: "" }])}
+                >
+                  Add link
+                </Button>
+                <Button onClick={handleSave}>Save</Button>
+              </div>
+              {status && <div className="text-xs text-muted-foreground">{status}</div>}
+            </div>
+          </Card>
+        </div>
       </div>
     </main>
   );

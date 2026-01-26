@@ -1,69 +1,167 @@
 "use client";
 
-import { Sparkles, Zap } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Sparkles } from "lucide-react";
+import { Badge, Button, Card, Input } from "@keyflow/ui";
+import { Automation, createAutomation, fetchAutomations } from "@/lib/client";
 
-const playbooks = [
-  {
-    name: "Invoice paid → Send receipt + booking confirmation",
-    trigger: "invoice.paid",
-    action: "Email + WhatsApp confirmation",
-    status: "Active",
-  },
-  {
-    name: "New lead → Create contact + draft DM",
-    trigger: "contact.created",
-    action: "Social DM draft",
-    status: "Draft",
-  },
+const triggers = [
+  "contact.created",
+  "contact.updated",
+  "contact.stage_changed",
+  "invoice.paid",
+  "invoice.sent",
+  "invoice.overdue",
+  "booking.created",
+  "booking.confirmed",
+  "booking.status_changed",
 ];
 
 export default function AutomationsPage() {
+  const [automations, setAutomations] = useState<Automation[]>([]);
+  const [form, setForm] = useState({
+    name: "",
+    trigger: "contact.created",
+    actionKind: "CREATE_TASK",
+    title: "",
+    tag: "",
+    eventType: "",
+    dueInDays: "2",
+  });
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchAutomations().then((res) => {
+      setAutomations(res.data ?? []);
+      if (res.error) setError(res.error);
+    });
+  }, []);
+
+  const handleCreate = async () => {
+    setError(null);
+    if (!form.name.trim()) {
+      setError("Name required.");
+      return;
+    }
+    const actions = [];
+    if (form.actionKind === "CREATE_TASK") {
+      if (!form.title.trim()) {
+        setError("Task title required.");
+        return;
+      }
+      actions.push({ kind: "CREATE_TASK", title: form.title.trim(), dueInDays: Number(form.dueInDays) || 2 });
+    } else if (form.actionKind === "TAG_CONTACT") {
+      if (!form.tag.trim()) {
+        setError("Tag required.");
+        return;
+      }
+      actions.push({ kind: "TAG_CONTACT", tag: form.tag.trim() });
+    } else if (form.actionKind === "LOG_EVENT") {
+      if (!form.eventType.trim()) {
+        setError("Event type required.");
+        return;
+      }
+      actions.push({ kind: "LOG_EVENT", eventType: form.eventType.trim() });
+    }
+    const res = await createAutomation({
+      name: form.name.trim(),
+      trigger: form.trigger,
+      actionData: { actions },
+    });
+    if (res.error) {
+      setError(res.error);
+      return;
+    }
+    const updated = await fetchAutomations();
+    setAutomations(updated.data ?? []);
+    setForm({
+      name: "",
+      trigger: "contact.created",
+      actionKind: "CREATE_TASK",
+      title: "",
+      tag: "",
+      eventType: "",
+      dueInDays: "2",
+    });
+  };
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="flex items-center gap-3">
         <div className="h-10 w-10 rounded-3xl bg-primary/20 border border-primary/40 flex items-center justify-center text-primary">
           <Sparkles className="w-5 h-5" />
         </div>
         <div>
           <h1 className="text-xl font-semibold">Automations</h1>
-          <p className="text-sm text-muted-foreground">
-            Event-driven playbooks. Triggers fire on bookings, invoices, contacts, and social events.
-          </p>
+          <p className="text-sm text-muted-foreground">Event-driven playbooks wired to CRM + Commerce.</p>
         </div>
       </div>
 
-      <div className="rounded-3xl border border-border/60 bg-slate-950/60 backdrop-blur p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Live Playbooks</div>
-            <p className="text-sm text-muted-foreground">These respond to emitted events in the backend.</p>
-          </div>
-          <button className="inline-flex items-center gap-2 rounded-full border border-primary/70 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20">
-            <Zap className="w-4 h-4" />
-            New playbook
-          </button>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          {playbooks.map((pb) => (
-            <div
-              key={pb.name}
-              className="rounded-2xl border border-border/60 bg-slate-900/60 p-3 flex flex-col gap-1 text-sm"
+      {error && <div className="text-xs text-amber-400">{error}</div>}
+
+      <Card title="Create automation" badge="Active">
+        <div className="grid gap-2 md:grid-cols-2">
+          <Input label="Name" value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+          <label className="text-xs text-muted-foreground">
+            Trigger
+            <select
+              className="mt-1 w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+              value={form.trigger}
+              onChange={(e) => setForm((prev) => ({ ...prev, trigger: e.target.value }))}
             >
+              {triggers.map((trigger) => (
+                <option key={trigger} value={trigger}>
+                  {trigger}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs text-muted-foreground">
+            Action
+            <select
+              className="mt-1 w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+              value={form.actionKind}
+              onChange={(e) => setForm((prev) => ({ ...prev, actionKind: e.target.value }))}
+            >
+              <option value="CREATE_TASK">Create Task</option>
+              <option value="TAG_CONTACT">Tag Contact</option>
+              <option value="LOG_EVENT">Log Event</option>
+            </select>
+          </label>
+          {form.actionKind === "CREATE_TASK" && (
+            <>
+              <Input label="Task title" value={form.title} onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))} />
+              <Input label="Due in days" value={form.dueInDays} onChange={(e) => setForm((prev) => ({ ...prev, dueInDays: e.target.value }))} />
+            </>
+          )}
+          {form.actionKind === "TAG_CONTACT" && (
+            <Input label="Tag" value={form.tag} onChange={(e) => setForm((prev) => ({ ...prev, tag: e.target.value }))} />
+          )}
+          {form.actionKind === "LOG_EVENT" && (
+            <Input label="Event type" value={form.eventType} onChange={(e) => setForm((prev) => ({ ...prev, eventType: e.target.value }))} />
+          )}
+        </div>
+        <div className="mt-3">
+          <Button onClick={handleCreate}>Save automation</Button>
+        </div>
+      </Card>
+
+      <Card title="Live playbooks" badge={`${automations.length}`}>
+        <div className="space-y-2">
+          {automations.length === 0 && <div className="text-xs text-muted-foreground">No automations yet.</div>}
+          {automations.map((automation) => (
+            <div key={automation.id} className="rounded-2xl border border-border/60 bg-slate-900/60 p-3 text-sm">
               <div className="flex items-center justify-between">
-                <div className="font-semibold">{pb.name}</div>
-                <span className="rounded-full border border-emerald-400/60 bg-emerald-400/10 px-2 py-0.5 text-[11px] text-emerald-200">
-                  {pb.status}
-                </span>
+                <div className="font-semibold">{automation.name}</div>
+                <Badge tone="info">{automation.trigger}</Badge>
               </div>
-              <div className="text-[12px] text-muted-foreground">Trigger: {pb.trigger}</div>
-              <div className="text-[12px] text-muted-foreground">Action: {pb.action}</div>
+              <div className="text-[11px] text-muted-foreground mt-1">
+                Actions: {Array.isArray((automation as any).actionData?.actions) ? (automation as any).actionData.actions.length : 1}
+              </div>
             </div>
           ))}
         </div>
-        <div className="rounded-2xl border border-dashed border-border/60 p-3 text-xs text-muted-foreground">
-          Future: visual builder with nodes for trigger → conditions → actions, connected to React Flow.
-        </div>
-      </div>
+      </Card>
     </div>
   );
 }

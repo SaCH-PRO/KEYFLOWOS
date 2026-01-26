@@ -1,32 +1,39 @@
-'use client';
+"use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Card, Input, Badge } from "@keyflow/ui";
 import { apiPost, API_BASE } from "@/lib/api";
-import { DEFAULT_BUSINESS_ID } from "@/lib/client";
+import { DEFAULT_BUSINESS_ID, Service, StaffMember, fetchPublicServices, fetchPublicStaff } from "@/lib/client";
 import { motion } from "framer-motion";
-
-const serviceOptions = [
-  { id: "svc_consult", label: "Consultation · TTD 500" },
-  { id: "svc_follow", label: "Follow-up · TTD 300" },
-];
-const staffOptions = [
-  { id: "staff_ali", label: "Dr. Ali" },
-  { id: "staff_sam", label: "Sam · Coordinator" },
-];
 
 export default function PublicBookPage() {
   const [businessId, setBusinessId] = useState(DEFAULT_BUSINESS_ID);
-  const [serviceId, setServiceId] = useState(serviceOptions[0]?.id ?? "");
-  const [staffId, setStaffId] = useState(staffOptions[0]?.id ?? "");
+  const [services, setServices] = useState<Service[]>([]);
+  const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [serviceId, setServiceId] = useState("");
+  const [staffId, setStaffId] = useState("");
   const [startTime, setStartTime] = useState("");
   const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [bookingId, setBookingId] = useState<string | null>(null);
   const [invoiceId, setInvoiceId] = useState<string | null>(null);
   const [copyMsg, setCopyMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!businessId) return;
+    fetchPublicServices(businessId).then((res) => {
+      setServices(res.data ?? []);
+      if (!serviceId && res.data?.[0]?.id) setServiceId(res.data[0].id);
+    });
+    fetchPublicStaff(businessId).then((res) => {
+      setStaff(res.data ?? []);
+      if (!staffId && res.data?.[0]?.id) setStaffId(res.data[0].id);
+    });
+  }, [businessId, serviceId, staffId]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,6 +41,10 @@ export default function PublicBookPage() {
     setSuccess(false);
     setBookingId(null);
     setInvoiceId(null);
+    if (!serviceId || !staffId) {
+      setStatus("Please select a service and staff member.");
+      return;
+    }
     const { data, error } = await apiPost<{
       bookingId: string;
       invoiceId?: string;
@@ -45,7 +56,9 @@ export default function PublicBookPage() {
         staffId,
         startTime,
         firstName: firstName || undefined,
+        lastName: lastName || undefined,
         email: email || undefined,
+        phone: phone || undefined,
       },
     });
     if (error) {
@@ -90,11 +103,11 @@ export default function PublicBookPage() {
                 value={serviceId}
                 onChange={(e) => setServiceId(e.target.value)}
               >
-                {serviceOptions.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.label}
-                  </option>
-                ))}
+              {services.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} · {s.currency ?? "TTD"} {s.price}
+                </option>
+              ))}
               </select>
             </label>
             <label className="flex flex-col gap-1 text-sm text-[var(--kf-text)]">
@@ -104,11 +117,11 @@ export default function PublicBookPage() {
                 value={staffId}
                 onChange={(e) => setStaffId(e.target.value)}
               >
-                {staffOptions.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.label}
-                  </option>
-                ))}
+              {staff.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
               </select>
             </label>
             <Input
@@ -119,7 +132,9 @@ export default function PublicBookPage() {
               placeholder="2025-12-01T15:00:00Z"
             />
             <Input label="First Name" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+            <Input label="Last Name" value={lastName} onChange={(e) => setLastName(e.target.value)} />
             <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <Input label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
             <div className="md:col-span-2 flex justify-end">
               <Button type="submit">Submit Booking</Button>
             </div>
@@ -160,7 +175,7 @@ export default function PublicBookPage() {
                       <button
                         type="button"
                         className="inline-flex items-center gap-1 rounded-full border border-primary/60 px-3 py-1 text-[11px] text-primary hover:bg-primary/10"
-                        onClick={() => window.open(`${API_BASE}/commerce/invoices/${invoiceId}/receipt`, "_blank")}
+                        onClick={() => window.open(`${API_BASE}/commerce/public/invoices/${invoiceId}/receipt`, "_blank")}
                       >
                         View receipt
                       </button>
