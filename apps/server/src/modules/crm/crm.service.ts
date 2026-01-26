@@ -1,5 +1,11 @@
 import { BadRequestException, Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Contact, Prisma } from '@prisma/client';
+import {
+  ContactCreatedPayload,
+  ContactMergedPayload,
+  ContactUpdatedPayload,
+} from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AutomationService } from '../automation/automation.service';
 
@@ -7,9 +13,11 @@ type ContactMeta = {
   outstandingBalance: number;
   unpaidInvoices: number;
   paidInvoices: number;
+  oldestUnpaidInvoiceDueAt: Date | null;
   lastInteractionAt: Date;
   nextDueTaskAt: Date | null;
   overdueTasks: number;
+  overdueBookings: number;
   bookingsRecent: number;
   leadScore: number;
 };
@@ -102,6 +110,8 @@ type TimelineEntry = {
   id: string;
   type: 'event' | 'note' | 'task' | 'invoice' | 'booking';
   contactId: string;
+  contactName?: string;
+  contactEmail?: string | null;
   title: string;
   description?: string;
   timestamp: Date;
@@ -113,6 +123,7 @@ type NextActionSeverity = 'high' | 'medium' | 'info';
 type NextAction = {
   id: string;
   contactId: string;
+  contactName?: string;
   title: string;
   detail: string;
   severity: NextActionSeverity;
@@ -141,6 +152,7 @@ type FlowHighlightsPayload = {
 export class CrmService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly events: EventEmitter2,
     @Inject(forwardRef(() => AutomationService)) private readonly automation: AutomationService,
   ) {}
 
@@ -150,6 +162,26 @@ export class CrmService {
 
   private normalizePhone(phone?: string | null) {
     return phone ? phone.replace(/[^0-9+]/g, '') : null;
+  }
+
+  private normalizeTags(tags?: string[] | null) {
+    if (!tags) return [];
+    return tags.map((tag) => tag.trim()).filter(Boolean);
+  }
+
+  private formatContactName(contact: {
+    displayName?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    email?: string | null;
+    phone?: string | null;
+  }) {
+    if (contact.displayName && contact.displayName.trim()) return contact.displayName.trim();
+    const full = `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim();
+    if (full) return full;
+    if (contact.email) return contact.email;
+    if (contact.phone) return contact.phone;
+    return 'Unnamed';
   }
 
   private parseDateOrNull(input?: string | null) {
@@ -171,13 +203,27 @@ export class CrmService {
   async listContacts(input: ContactListOptions) {
     const where: any = { businessId: input.businessId, deletedAt: null };
     if (input.status) where.status = input.status;
-    if (input.search) {
-      where.OR = [
-        { firstName: { contains: input.search, mode: 'insensitive' } },
-        { lastName: { contains: input.search, mode: 'insensitive' } },
-        { email: { contains: input.search, mode: 'insensitive' } },
-        { phone: { contains: input.search, mode: 'insensitive' } },
+    const searchValue = input.search?.trim();
+    if (searchValue) {
+      const normalizedEmail = this.normalizeEmail(searchValue);
+      const normalizedPhone = this.normalizePhone(searchValue);
+      const orConditions: Prisma.ContactWhereInput[] = [
+        { firstName: { contains: searchValue, mode: 'insensitive' } },
+        { lastName: { contains: searchValue, mode: 'insensitive' } },
+        { displayName: { contains: searchValue, mode: 'insensitive' } },
+        { email: { contains: searchValue, mode: 'insensitive' } },
+        { phone: { contains: searchValue, mode: 'insensitive' } },
+        { companyName: { contains: searchValue, mode: 'insensitive' } },
+        { segment: { contains: searchValue, mode: 'insensitive' } },
+        { tags: { has: searchValue } },
       ];
+      if (normalizedEmail) {
+        orConditions.push({ emailNormalized: { contains: normalizedEmail } });
+      }
+      if (normalizedPhone) {
+        orConditions.push({ phoneNormalized: { contains: normalizedPhone } });
+      }
+      where.OR = orConditions;
     }
     if (input.hasUnpaidInvoices) {
       where.invoices = {
@@ -249,7 +295,17 @@ export class CrmService {
     const [invoices, tasks, events, notes, bookings] = await Promise.all([
       this.prisma.client.invoice.findMany({
         where: { businessId, contactId: { in: ids }, deletedAt: null },
-        select: { id: true, contactId: true, status: true, total: true, currency: true, dueDate: true, paidAt: true },
+        select: {
+          id: true,
+          contactId: true,
+          status: true,
+          total: true,
+          currency: true,
+          dueDate: true,
+          issueDate: true,
+          createdAt: true,
+          paidAt: true,
+        },
       }),
       this.prisma.client.contactTask.findMany({
         where: { businessId, contactId: { in: ids } },
@@ -275,20 +331,29 @@ export class CrmService {
         outstandingBalance: 0,
         unpaidInvoices: 0,
         paidInvoices: 0,
+        oldestUnpaidInvoiceDueAt: null,
         lastInteractionAt: contact.updatedAt,
         nextDueTaskAt: null,
         overdueTasks: 0,
+        overdueBookings: 0,
         bookingsRecent: 0,
         leadScore: 50,
       });
     }
 
+    const now = new Date();
     invoices.forEach((inv) => {
       const stats = statsMap.get(inv.contactId);
       if (!stats) return;
       if (['SENT', 'OVERDUE'].includes(inv.status)) {
         stats.outstandingBalance += Number(inv.total ?? 0);
         stats.unpaidInvoices += 1;
+        const dueDate = inv.dueDate ?? inv.issueDate ?? inv.createdAt;
+        if (dueDate) {
+          if (!stats.oldestUnpaidInvoiceDueAt || dueDate < stats.oldestUnpaidInvoiceDueAt) {
+            stats.oldestUnpaidInvoiceDueAt = dueDate;
+          }
+        }
       }
       if (inv.status === 'PAID') {
         stats.paidInvoices += 1;
@@ -301,7 +366,7 @@ export class CrmService {
       if (task.status !== 'DONE' && task.dueDate) {
         const due = new Date(task.dueDate);
         if (!stats.nextDueTaskAt || due < stats.nextDueTaskAt) stats.nextDueTaskAt = due;
-        if (due < new Date()) stats.overdueTasks += 1;
+        if (due < now) stats.overdueTasks += 1;
       }
       if (task.createdAt > stats.lastInteractionAt) stats.lastInteractionAt = task.createdAt;
     });
@@ -320,6 +385,7 @@ export class CrmService {
       const stats = statsMap.get(booking.contactId);
       if (!stats) return;
       if (booking.status === 'COMPLETED' && booking.startTime > recentCutoff) stats.bookingsRecent += 1;
+      if (booking.status === 'PENDING' && booking.startTime < now) stats.overdueBookings += 1;
       if (booking.startTime > stats.lastInteractionAt) stats.lastInteractionAt = booking.startTime;
     });
 
@@ -342,7 +408,7 @@ export class CrmService {
     return withStats;
   }
 
-  createContact(input: {
+  async createContact(input: {
     businessId: string;
     firstName?: string | null;
     lastName?: string | null;
@@ -354,74 +420,112 @@ export class CrmService {
     tags?: string[];
     custom?: any;
   } & ContactExtraAttributes) {
-    const emailNormalized = this.normalizeEmail(input.email);
-    const phoneNormalized = this.normalizePhone(input.phone);
+    const normalizeString = (value?: string | null) => {
+      const trimmed = value?.trim();
+      return trimmed ? trimmed : null;
+    };
+    const firstName = normalizeString(input.firstName);
+    const lastName = normalizeString(input.lastName);
+    const email = normalizeString(input.email);
+    const phone = normalizeString(input.phone);
+    const emailNormalized = this.normalizeEmail(email);
+    const phoneNormalized = this.normalizePhone(phone);
+    const tags = this.normalizeTags(input.tags);
 
-    return this.prisma.client.contact
-      .create({
-        data: {
-          businessId: input.businessId,
-          firstName: input.firstName ?? null,
-          lastName: input.lastName ?? null,
-          email: input.email ?? null,
-          emailNormalized,
-          phone: input.phone ?? null,
-          phoneNormalized,
-          status: input.status ?? 'LEAD',
-          source: input.source ?? null,
-          tags: input.tags ?? [],
-          custom: input.custom ?? {},
-          sourceDetail: input.sourceDetail ?? null,
-          displayName: input.displayName ?? null,
-          secondaryEmail: input.secondaryEmail ?? null,
-          secondaryPhone: input.secondaryPhone ?? null,
-          whatsappNumber: input.whatsappNumber ?? null,
-          preferredChannel: input.preferredChannel ?? null,
-          addressLine1: input.addressLine1 ?? null,
-          addressLine2: input.addressLine2 ?? null,
-          city: input.city ?? null,
-          state: input.state ?? null,
-          postalCode: input.postalCode ?? null,
-          country: input.country ?? null,
-          timezone: input.timezone ?? null,
-          companyName: input.companyName ?? null,
-          jobTitle: input.jobTitle ?? null,
-          department: input.department ?? null,
-          industry: input.industry ?? null,
-          ownerId: input.ownerId ?? null,
-          lifecycleStage: input.lifecycleStage ?? null,
-          segment: input.segment ?? null,
-          language: input.language ?? null,
-          marketingOptIn: input.marketingOptIn ?? null,
-          doNotContact: input.doNotContact ?? null,
-          notesInternal: input.notesInternal ?? null,
-        },
-        select: { id: true },
-      })
-      .then(async (created) => {
-        await this.logEvent(input.businessId, created.id, 'contact.created', {
-          firstName: input.firstName,
-          lastName: input.lastName,
-          email: input.email,
-          source: input.source,
-        });
-        return this.prisma.client.contact.findUnique({ where: { id: created.id } });
-      });
+    const created = await this.prisma.client.contact.create({
+      data: {
+        businessId: input.businessId,
+        firstName,
+        lastName,
+        email,
+        emailNormalized,
+        phone,
+        phoneNormalized,
+        status: input.status ?? 'LEAD',
+        source: input.source ?? 'manual',
+        tags,
+        custom: input.custom ?? {},
+        sourceDetail: normalizeString(input.sourceDetail),
+        displayName: normalizeString(input.displayName),
+        secondaryEmail: normalizeString(input.secondaryEmail),
+        secondaryPhone: normalizeString(input.secondaryPhone),
+        whatsappNumber: normalizeString(input.whatsappNumber),
+        preferredChannel: normalizeString(input.preferredChannel),
+        addressLine1: normalizeString(input.addressLine1),
+        addressLine2: normalizeString(input.addressLine2),
+        city: normalizeString(input.city),
+        state: normalizeString(input.state),
+        postalCode: normalizeString(input.postalCode),
+        country: normalizeString(input.country),
+        timezone: normalizeString(input.timezone),
+        companyName: normalizeString(input.companyName),
+        jobTitle: normalizeString(input.jobTitle),
+        department: normalizeString(input.department),
+        industry: normalizeString(input.industry),
+        ownerId: input.ownerId ?? null,
+        lifecycleStage: normalizeString(input.lifecycleStage),
+        segment: normalizeString(input.segment),
+        language: normalizeString(input.language),
+        marketingOptIn: input.marketingOptIn ?? null,
+        doNotContact: input.doNotContact ?? null,
+        notesInternal: input.notesInternal ?? null,
+      },
+      select: { id: true },
+    });
+
+    await this.logEvent(input.businessId, created.id, 'contact.created', {
+      firstName,
+      lastName,
+      email,
+      source: input.source ?? 'manual',
+    });
+    const contact = await this.prisma.client.contact.findUnique({ where: { id: created.id } });
+    if (contact) {
+      const payload: ContactCreatedPayload = {
+        contact,
+        businessId: input.businessId,
+      };
+      this.events.emit('contact.created', payload);
+    }
+    return contact;
   }
 
   async findOrCreateContact(
     businessId: string,
-    input: { firstName?: string | null; lastName?: string | null; email?: string | null; phone?: string | null },
+    input: {
+      firstName?: string | null;
+      lastName?: string | null;
+      email?: string | null;
+      phone?: string | null;
+      source?: string | null;
+      sourceDetail?: string | null;
+      tags?: string[];
+    },
   ) {
-    const emailNormalized = this.normalizeEmail(input.email);
-    const phoneNormalized = this.normalizePhone(input.phone);
+    const normalizeString = (value?: string | null) => {
+      const trimmed = value?.trim();
+      return trimmed ? trimmed : null;
+    };
+    const email = normalizeString(input.email);
+    const phone = normalizeString(input.phone);
+    const emailNormalized = this.normalizeEmail(email);
+    const phoneNormalized = this.normalizePhone(phone);
+    const tags = this.normalizeTags(input.tags);
 
-    if (input.email) {
+    if (email) {
       const existing = await this.prisma.client.contact.findFirst({
         where: { businessId, emailNormalized, deletedAt: null },
       });
       if (existing) {
-        return existing;
+        return this.mergeContactDetails(existing, businessId, {
+          firstName: input.firstName,
+          lastName: input.lastName,
+          email,
+          phone,
+          source: input.source,
+          sourceDetail: input.sourceDetail,
+          tags,
+        });
       }
     }
     if (phoneNormalized) {
@@ -429,10 +533,57 @@ export class CrmService {
         where: { businessId, phoneNormalized, deletedAt: null },
       });
       if (existingByPhone) {
-        return existingByPhone;
+        return this.mergeContactDetails(existingByPhone, businessId, {
+          firstName: input.firstName,
+          lastName: input.lastName,
+          email,
+          phone,
+          source: input.source,
+          sourceDetail: input.sourceDetail,
+          tags,
+        });
       }
     }
-    return this.createContact({ businessId, ...input });
+    return this.createContact({
+      businessId,
+      firstName: input.firstName,
+      lastName: input.lastName,
+      email,
+      phone,
+      source: input.source ?? undefined,
+      sourceDetail: input.sourceDetail ?? undefined,
+      tags,
+    });
+  }
+
+  private async mergeContactDetails(
+    existing: Contact,
+    businessId: string,
+    input: {
+      firstName?: string | null;
+      lastName?: string | null;
+      email?: string | null;
+      phone?: string | null;
+      source?: string | null;
+      sourceDetail?: string | null;
+      tags?: string[];
+    },
+  ) {
+    const updates: Partial<Contact> & ContactExtraAttributes = {};
+    if (input.firstName && !existing.firstName) updates.firstName = input.firstName;
+    if (input.lastName && !existing.lastName) updates.lastName = input.lastName;
+    if (input.email && !existing.email) updates.email = input.email;
+    if (input.phone && !existing.phone) updates.phone = input.phone;
+    if (input.source && !existing.source) updates.source = input.source;
+    if (input.sourceDetail && !existing.sourceDetail) updates.sourceDetail = input.sourceDetail;
+    if (input.tags && input.tags.length > 0) {
+      const merged = new Set([...(existing.tags ?? []), ...input.tags]);
+      updates.tags = Array.from(merged);
+    }
+    if (Object.keys(updates).length === 0) {
+      return existing;
+    }
+    return this.updateContact({ businessId, contactId: existing.id, ...updates });
   }
 
   async updateContact(input: {
@@ -449,58 +600,90 @@ export class CrmService {
     custom?: any;
   } & ContactExtraAttributes) {
     const existing = await this.assertContact(input.businessId, input.contactId);
-    const emailNormalized = this.normalizeEmail(input.email);
-    const phoneNormalized = this.normalizePhone(input.phone);
-    return this.prisma.client.contact.update({
+    const trimOptional = (value?: string | null) => {
+      if (value === undefined) return undefined;
+      const trimmed = value?.trim();
+      return trimmed ? trimmed : null;
+    };
+    const email = trimOptional(input.email);
+    const phone = trimOptional(input.phone);
+    const emailNormalized = email !== undefined ? this.normalizeEmail(email) : undefined;
+    const phoneNormalized = phone !== undefined ? this.normalizePhone(phone) : undefined;
+    const tags = input.tags !== undefined ? this.normalizeTags(input.tags) : undefined;
+
+    const data: Prisma.ContactUpdateInput = {
+      firstName: trimOptional(input.firstName),
+      lastName: trimOptional(input.lastName),
+      email,
+      emailNormalized,
+      phone,
+      phoneNormalized,
+      status: input.status ?? undefined,
+      source: input.source ?? undefined,
+      tags,
+      custom: input.custom ?? undefined,
+      sourceDetail: trimOptional(input.sourceDetail),
+      displayName: trimOptional(input.displayName),
+      secondaryEmail: trimOptional(input.secondaryEmail),
+      secondaryPhone: trimOptional(input.secondaryPhone),
+      whatsappNumber: trimOptional(input.whatsappNumber),
+      preferredChannel: trimOptional(input.preferredChannel),
+      addressLine1: trimOptional(input.addressLine1),
+      addressLine2: trimOptional(input.addressLine2),
+      city: trimOptional(input.city),
+      state: trimOptional(input.state),
+      postalCode: trimOptional(input.postalCode),
+      country: trimOptional(input.country),
+      timezone: trimOptional(input.timezone),
+      companyName: trimOptional(input.companyName),
+      jobTitle: trimOptional(input.jobTitle),
+      department: trimOptional(input.department),
+      industry: trimOptional(input.industry),
+      ownerId: input.ownerId ?? undefined,
+      lifecycleStage: trimOptional(input.lifecycleStage),
+      segment: trimOptional(input.segment),
+      language: trimOptional(input.language),
+      marketingOptIn: input.marketingOptIn ?? undefined,
+      doNotContact: input.doNotContact ?? undefined,
+      notesInternal: input.notesInternal ?? undefined,
+    };
+
+    const updated = await this.prisma.client.contact.update({
       where: { id: input.contactId },
-      data: {
-        firstName: input.firstName ?? undefined,
-        lastName: input.lastName ?? undefined,
-        email: input.email ?? undefined,
-        emailNormalized,
-        phone: input.phone ?? undefined,
-        phoneNormalized,
-        status: input.status ?? undefined,
-        source: input.source ?? undefined,
-        tags: input.tags ?? undefined,
-        custom: input.custom ?? undefined,
-        sourceDetail: input.sourceDetail ?? undefined,
-        displayName: input.displayName ?? undefined,
-        secondaryEmail: input.secondaryEmail ?? undefined,
-        secondaryPhone: input.secondaryPhone ?? undefined,
-        whatsappNumber: input.whatsappNumber ?? undefined,
-        preferredChannel: input.preferredChannel ?? undefined,
-        addressLine1: input.addressLine1 ?? undefined,
-        addressLine2: input.addressLine2 ?? undefined,
-        city: input.city ?? undefined,
-        state: input.state ?? undefined,
-        postalCode: input.postalCode ?? undefined,
-        country: input.country ?? undefined,
-        timezone: input.timezone ?? undefined,
-        companyName: input.companyName ?? undefined,
-        jobTitle: input.jobTitle ?? undefined,
-        department: input.department ?? undefined,
-        industry: input.industry ?? undefined,
-        ownerId: input.ownerId ?? undefined,
-        lifecycleStage: input.lifecycleStage ?? undefined,
-        segment: input.segment ?? undefined,
-        language: input.language ?? undefined,
-        marketingOptIn: input.marketingOptIn ?? undefined,
-        doNotContact: input.doNotContact ?? undefined,
-        notesInternal: input.notesInternal ?? undefined,
-      },
-    }).then(async (updated) => {
-      if (this.automation && input.status && existing?.status !== input.status) {
-        await this.automation.handle({
-          type: 'contact.stage_changed',
-          businessId: input.businessId,
-          contactId: input.contactId,
-          from: existing?.status,
-          to: input.status,
-        });
-      }
-      return updated;
+      data,
     });
+
+    const updatedFields = Object.keys(data).filter(
+      (key) => data[key as keyof Prisma.ContactUpdateInput] !== undefined,
+    );
+    if (updatedFields.length > 0) {
+      await this.logEvent(
+        input.businessId,
+        input.contactId,
+        'contact.updated',
+        { updatedFields },
+        { actorType: 'USER', source: 'crm' },
+      );
+    }
+
+    const payload: ContactUpdatedPayload = {
+      contact: updated,
+      businessId: input.businessId,
+      fromStatus: existing?.status,
+      toStatus: updated.status,
+    };
+    this.events.emit('contact.updated', payload);
+
+    if (this.automation && input.status && existing?.status !== input.status) {
+      await this.automation.handle({
+        type: 'contact.stage_changed',
+        businessId: input.businessId,
+        contactId: input.contactId,
+        from: existing?.status,
+        to: input.status,
+      });
+    }
+    return updated;
   }
 
   async softDeleteContact(input: { businessId: string; contactId: string }) {
@@ -553,12 +736,21 @@ export class CrmService {
       { duplicateId: input.duplicateId },
       { actorType: 'SYSTEM', source: 'crm' },
     );
-    return this.prisma.client.contact.findUnique({ where: { id: input.primaryId } });
+    const merged = await this.prisma.client.contact.findUnique({ where: { id: input.primaryId } });
+    if (merged) {
+      const payload: ContactMergedPayload = {
+        contact: merged,
+        businessId: input.businessId,
+        duplicateId: input.duplicateId,
+      };
+      this.events.emit('contact.merged', payload);
+    }
+    return merged;
   }
 
   async contactDetail(params: { businessId: string; contactId: string }) {
     const contact = await this.assertContact(params.businessId, params.contactId);
-    const [events, notes, tasks, invoices] = await Promise.all([
+    const [events, notes, tasks, invoices, bookings] = await Promise.all([
       this.prisma.client.contactEvent.findMany({
         where: { businessId: params.businessId, contactId: params.contactId },
         orderBy: { createdAt: 'desc' },
@@ -576,13 +768,86 @@ export class CrmService {
       }),
       this.prisma.client.invoice.findMany({
         where: { businessId: params.businessId, contactId: params.contactId, deletedAt: null },
-        select: { status: true, total: true, dueDate: true, paidAt: true, createdAt: true },
+        select: {
+          id: true,
+          status: true,
+          total: true,
+          currency: true,
+          dueDate: true,
+          issueDate: true,
+          createdAt: true,
+          paidAt: true,
+        },
+      }),
+      this.prisma.client.booking.findMany({
+        where: { businessId: params.businessId, contactId: params.contactId, deletedAt: null },
+        select: { id: true, status: true, startTime: true, endTime: true, serviceId: true, staffId: true },
       }),
     ]);
-    const outstanding = invoices
-      .filter((inv) => ['SENT', 'OVERDUE'].includes(inv.status))
-      .reduce((sum, inv) => sum + Number(inv.total ?? 0), 0);
-    return { contact, events, notes, tasks, meta: { outstandingBalance: outstanding } };
+
+    const meta: ContactMeta = {
+      outstandingBalance: 0,
+      unpaidInvoices: 0,
+      paidInvoices: 0,
+      oldestUnpaidInvoiceDueAt: null,
+      lastInteractionAt: contact.updatedAt,
+      nextDueTaskAt: null,
+      overdueTasks: 0,
+      overdueBookings: 0,
+      bookingsRecent: 0,
+      leadScore: 50,
+    };
+
+    const now = new Date();
+    const recentCutoff = new Date();
+    recentCutoff.setDate(recentCutoff.getDate() - 14);
+
+    for (const inv of invoices) {
+      if (['SENT', 'OVERDUE'].includes(inv.status)) {
+        meta.outstandingBalance += Number(inv.total ?? 0);
+        meta.unpaidInvoices += 1;
+        const dueDate = inv.dueDate ?? inv.issueDate ?? inv.createdAt;
+        if (dueDate) {
+          if (!meta.oldestUnpaidInvoiceDueAt || dueDate < meta.oldestUnpaidInvoiceDueAt) {
+            meta.oldestUnpaidInvoiceDueAt = dueDate;
+          }
+        }
+      }
+      if (inv.status === 'PAID') {
+        meta.paidInvoices += 1;
+      }
+    }
+
+    for (const task of tasks) {
+      if (task.status !== 'DONE' && task.dueDate) {
+        const due = new Date(task.dueDate);
+        if (!meta.nextDueTaskAt || due < meta.nextDueTaskAt) meta.nextDueTaskAt = due;
+        if (due < now) meta.overdueTasks += 1;
+      }
+      if (task.createdAt > meta.lastInteractionAt) meta.lastInteractionAt = task.createdAt;
+    }
+
+    for (const event of events) {
+      if (event.createdAt > meta.lastInteractionAt) meta.lastInteractionAt = event.createdAt;
+    }
+    for (const note of notes) {
+      if (note.createdAt > meta.lastInteractionAt) meta.lastInteractionAt = note.createdAt;
+    }
+    for (const booking of bookings) {
+      if (booking.status === 'COMPLETED' && booking.startTime > recentCutoff) meta.bookingsRecent += 1;
+      if (booking.status === 'PENDING' && booking.startTime < now) meta.overdueBookings += 1;
+      if (booking.startTime > meta.lastInteractionAt) meta.lastInteractionAt = booking.startTime;
+    }
+
+    meta.leadScore =
+      50 +
+      meta.bookingsRecent * 15 +
+      meta.paidInvoices * 10 -
+      meta.unpaidInvoices * 5 -
+      meta.overdueTasks * 5 +
+      (contact.status === 'CLIENT' ? 5 : 0);
+
+    return { contact, events, notes, tasks, invoices, bookings, meta };
   }
 
   async listContactEvents(params: { businessId: string; contactId: string; limit?: number }) {
@@ -819,7 +1084,7 @@ export class CrmService {
     const meta = contact.meta;
     return {
       contactId: contact.id,
-      name: `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() || 'Unnamed',
+      name: this.formatContactName(contact),
       status: contact.status,
       leadScore: meta?.leadScore ?? 50,
       outstandingBalance: meta?.outstandingBalance ?? 0,
@@ -946,7 +1211,7 @@ export class CrmService {
       if (topContact) {
         entry.topContact = {
           id: topContact.id,
-          name: `${topContact.firstName ?? ''} ${topContact.lastName ?? ''}`.trim() || 'Unnamed',
+          name: this.formatContactName(topContact),
           bookings: bestContact?._count.contactId ?? 0,
         };
       }
@@ -984,11 +1249,34 @@ export class CrmService {
       }),
     ]);
 
+    const contactIds = Array.from(
+      new Set(
+        [
+          ...events.map((event) => event.contactId),
+          ...notes.map((note) => note.contactId),
+          ...tasks.map((task) => task.contactId),
+          ...invoices.map((invoice) => invoice.contactId),
+          ...bookings.map((booking) => booking.contactId),
+        ].filter(Boolean),
+      ),
+    );
+    const contacts = contactIds.length
+      ? await this.prisma.client.contact.findMany({
+          where: { id: { in: contactIds } },
+          select: { id: true, firstName: true, lastName: true, displayName: true, email: true, phone: true },
+        })
+      : [];
+    const contactMap = new Map(contacts.map((contact) => [contact.id, contact]));
+
     const entries: TimelineEntry[] = [
       ...events.map((event) => ({
         id: event.id,
         type: 'event' as const,
         contactId: event.contactId,
+        contactName: contactMap.get(event.contactId)
+          ? this.formatContactName(contactMap.get(event.contactId)!)
+          : undefined,
+        contactEmail: contactMap.get(event.contactId)?.email ?? null,
         title: event.type,
         description: `Event recorded via ${event.source ?? 'system'}`,
         timestamp: event.createdAt,
@@ -997,6 +1285,8 @@ export class CrmService {
         id: note.id,
         type: 'note' as const,
         contactId: note.contactId,
+        contactName: contactMap.get(note.contactId) ? this.formatContactName(contactMap.get(note.contactId)!) : undefined,
+        contactEmail: contactMap.get(note.contactId)?.email ?? null,
         title: 'Note added',
         description: note.body.slice(0, 120),
         timestamp: note.createdAt,
@@ -1005,6 +1295,8 @@ export class CrmService {
         id: task.id,
         type: 'task' as const,
         contactId: task.contactId,
+        contactName: contactMap.get(task.contactId) ? this.formatContactName(contactMap.get(task.contactId)!) : undefined,
+        contactEmail: contactMap.get(task.contactId)?.email ?? null,
         title: `Task: ${task.title}`,
         description: task.dueDate ? `Due ${new Date(task.dueDate).toLocaleString()}` : 'No due date',
         timestamp: task.createdAt,
@@ -1013,6 +1305,10 @@ export class CrmService {
         id: invoice.id,
         type: 'invoice' as const,
         contactId: invoice.contactId,
+        contactName: contactMap.get(invoice.contactId)
+          ? this.formatContactName(contactMap.get(invoice.contactId)!)
+          : undefined,
+        contactEmail: contactMap.get(invoice.contactId)?.email ?? null,
         title: `Invoice ${invoice.status}`,
         description: `Total ${invoice.total} ${invoice.currency}`,
         timestamp: invoice.createdAt,
@@ -1021,6 +1317,10 @@ export class CrmService {
         id: booking.id,
         type: 'booking' as const,
         contactId: booking.contactId,
+        contactName: contactMap.get(booking.contactId)
+          ? this.formatContactName(contactMap.get(booking.contactId)!)
+          : undefined,
+        contactEmail: contactMap.get(booking.contactId)?.email ?? null,
         title: `Booking ${booking.status}`,
         description: `Starts ${booking.startTime?.toISOString() ?? 'TBD'}`,
         timestamp: booking.createdAt,
@@ -1036,24 +1336,65 @@ export class CrmService {
     staleCutoff.setDate(staleCutoff.getDate() - 7);
     const soon = new Date();
     soon.setDate(soon.getDate() + 2);
+    const now = new Date();
+    const pushAction = (action: NextAction) => {
+      if (actions.length >= 6) return;
+      actions.push(action);
+    };
 
     for (const contact of contacts) {
       if (!contact.meta) continue;
-      const { outstandingBalance, lastInteractionAt, nextDueTaskAt } = contact.meta;
+      const {
+        outstandingBalance,
+        lastInteractionAt,
+        nextDueTaskAt,
+        overdueTasks,
+        overdueBookings,
+        oldestUnpaidInvoiceDueAt,
+      } = contact.meta;
+      const contactName = this.formatContactName(contact);
       if (outstandingBalance > 0) {
-        actions.push({
-          id: `${contact.id}-overdue`,
+        const overdue = oldestUnpaidInvoiceDueAt ? oldestUnpaidInvoiceDueAt < now : false;
+        const dueLabel = oldestUnpaidInvoiceDueAt
+          ? `Oldest due ${oldestUnpaidInvoiceDueAt.toLocaleDateString()}`
+          : `Outstanding balance of ${outstandingBalance.toFixed(2)}`;
+        pushAction({
+          id: `${contact.id}-invoice`,
           contactId: contact.id,
-          title: 'Collect overdue invoice',
-          detail: `Outstanding balance of ${outstandingBalance.toFixed(2)}`,
+          contactName,
+          title: overdue ? 'Overdue invoice follow-up' : 'Invoice payment follow-up',
+          detail: dueLabel,
+          severity: overdue ? 'high' : 'medium',
+          trigger: 'invoice-unpaid',
+        });
+      }
+      if (overdueBookings > 0) {
+        pushAction({
+          id: `${contact.id}-booking`,
+          contactId: contact.id,
+          contactName,
+          title: 'Confirm overdue booking',
+          detail: `${overdueBookings} booking${overdueBookings > 1 ? 's' : ''} awaiting confirmation`,
           severity: 'high',
-          trigger: 'overdue-invoice',
+          trigger: 'booking-overdue',
+        });
+      }
+      if (overdueTasks > 0) {
+        pushAction({
+          id: `${contact.id}-task-overdue`,
+          contactId: contact.id,
+          contactName,
+          title: 'Overdue tasks',
+          detail: `${overdueTasks} task${overdueTasks > 1 ? 's' : ''} overdue`,
+          severity: 'medium',
+          trigger: 'task-overdue',
         });
       }
       if (lastInteractionAt <= staleCutoff) {
-        actions.push({
+        pushAction({
           id: `${contact.id}-stale`,
           contactId: contact.id,
+          contactName,
           title: 'Re-engage stale contact',
           detail: `No interaction since ${lastInteractionAt.toLocaleDateString()}`,
           severity: 'medium',
@@ -1061,9 +1402,10 @@ export class CrmService {
         });
       }
       if (nextDueTaskAt && nextDueTaskAt <= soon) {
-        actions.push({
+        pushAction({
           id: `${contact.id}-task`,
           contactId: contact.id,
+          contactName,
           title: 'Task due soon',
           detail: `Next task due ${nextDueTaskAt.toLocaleDateString()}`,
           severity: 'medium',
