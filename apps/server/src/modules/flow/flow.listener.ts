@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { InvoicePaidPayload } from '../../core/event-bus/events.types';
+import { BookingConfirmedPayload, InvoicePaidPayload, InvoiceStatusPayload } from '../../core/event-bus/events.types';
 import { BookingsService } from '../bookings/bookings.service';
 
 @Injectable()
@@ -33,6 +33,16 @@ export class FlowListener {
   @OnEvent('booking.created')
   handleBookingCreated(payload: unknown) {
     this.logger.debug(`Flow observed booking.created`, payload as any);
+  }
+
+  @OnEvent('booking.confirmed')
+  handleBookingConfirmed(payload: BookingConfirmedPayload) {
+    this.logger.debug(`Flow observed booking.confirmed`, payload as any);
+  }
+
+  @OnEvent('invoice.overdue')
+  handleInvoiceOverdue(payload: InvoiceStatusPayload) {
+    this.logger.debug(`Flow observed invoice.overdue`, payload as any);
   }
 
   @OnEvent('contact.created')

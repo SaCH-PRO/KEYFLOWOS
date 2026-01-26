@@ -189,7 +189,11 @@ export class CrmImportService {
       });
     }
 
-    const contactInput = this.buildContactInput(parsedRow, mapping);
+    const contactInput = {
+      ...this.buildContactInput(parsedRow, mapping),
+      source: 'import',
+      sourceDetail: record.import.sourceType,
+    };
     const contact = await this.crm.findOrCreateContact(record.import.businessId, contactInput);
     if (!contact) {
       throw new BadRequestException('Failed to create contact from import record');
@@ -224,6 +228,8 @@ export class CrmImportService {
       lastName: mapped.lastName,
       email: mapped.email,
       phone: mapped.phone,
+      source: 'ocr',
+      sourceDetail: params.type ?? 'business_card',
     });
     if (!contact) {
       throw new BadRequestException('Failed to create contact from OCR text');
