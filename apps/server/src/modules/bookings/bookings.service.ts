@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { BookingCreatedPayload } from '../../core/event-bus/events.types';
+import { BookingConfirmedPayload, BookingCreatedPayload } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
@@ -75,7 +75,17 @@ export class BookingsService {
     const booking = await this.prisma.client.booking.update({
       where: { id: bookingId },
       data: { status: 'CONFIRMED' },
+      include: { contact: true },
     });
+    const payload: BookingConfirmedPayload = {
+      booking,
+      contact: booking.contact ?? undefined,
+      businessId: booking.businessId,
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      eventName: 'booking.confirmed',
+    };
+    this.events.emit('booking.confirmed', payload);
     if (booking.contactId) {
       await this.crm.logContactEvent({
         businessId: booking.businessId,
@@ -117,7 +127,11 @@ export class BookingsService {
     const start = new Date(input.startTime);
     const end = new Date(start.getTime() + service.duration * 60000);
 
-    const contact = await this.crm.findOrCreateContact(input.businessId, input.contact);
+    const contact = await this.crm.findOrCreateContact(input.businessId, {
+      ...input.contact,
+      source: 'booking',
+      sourceDetail: 'public-booking',
+    });
     if (!contact) {
       throw new Error('Failed to create or find contact');
     }
