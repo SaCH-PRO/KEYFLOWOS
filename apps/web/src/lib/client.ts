@@ -2,6 +2,18 @@ import { z } from "zod";
 import { API_BASE, apiPost, getAuthHeaders } from "./api";
 
 const DEFAULT_BUSINESS_ID = process.env.NEXT_PUBLIC_DEMO_BUSINESS_ID ?? "biz_demo";
+const ACTIVE_BUSINESS_KEY = "kf_business_id";
+
+export function getActiveBusinessId() {
+  if (typeof window === "undefined") return DEFAULT_BUSINESS_ID;
+  return window.localStorage.getItem(ACTIVE_BUSINESS_KEY) || DEFAULT_BUSINESS_ID;
+}
+
+export function setActiveBusinessId(businessId: string) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(ACTIVE_BUSINESS_KEY, businessId);
+  window.dispatchEvent(new CustomEvent("kf:businessChanged", { detail: { businessId } }));
+}
 
 const contactMetaSchema = z.object({
   outstandingBalance: z.number().optional(),
@@ -279,7 +291,7 @@ async function apiGet<T>(path: string, schema: z.ZodSchema<T>, fallback?: T): Pr
 }
 
 export async function fetchContacts(
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = getActiveBusinessId(),
   opts?: {
     status?: string;
     search?: string;
@@ -475,7 +487,7 @@ const membershipSchema = z.object({
     .optional(),
 });
 
-export async function fetchContactDetail(contactId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchContactDetail(contactId: string, businessId: string = getActiveBusinessId()) {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}`,
     contactDetailSchema,
@@ -483,7 +495,7 @@ export async function fetchContactDetail(contactId: string, businessId: string =
   );
 }
 
-export async function fetchBookings(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchBookings(businessId: string = getActiveBusinessId()) {
   return apiGet(
     `/bookings/businesses/${encodeURIComponent(businessId)}`,
     z.array(bookingSchema),
@@ -498,7 +510,7 @@ export async function updateBookingStatus(input: { bookingId: string; status: st
   });
 }
 
-export async function fetchServices(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchServices(businessId: string = getActiveBusinessId()) {
   return apiGet(`/bookings/businesses/${encodeURIComponent(businessId)}/services`, z.array(serviceSchema), []);
 }
 
@@ -514,7 +526,7 @@ export async function createService(input: {
   price: number;
   currency?: string;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? getActiveBusinessId();
   return apiPost<Service>({
     path: `/bookings/businesses/${encodeURIComponent(businessId)}/services`,
     body: {
@@ -550,7 +562,7 @@ export async function deleteService(serviceId: string) {
   });
 }
 
-export async function fetchStaff(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchStaff(businessId: string = getActiveBusinessId()) {
   return apiGet(`/bookings/businesses/${encodeURIComponent(businessId)}/staff`, z.array(staffSchema), []);
 }
 
@@ -559,7 +571,7 @@ export async function fetchPublicStaff(businessId: string) {
 }
 
 export async function createStaff(input: { businessId?: string; name: string }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? getActiveBusinessId();
   return apiPost<StaffMember>({
     path: `/bookings/businesses/${encodeURIComponent(businessId)}/staff`,
     body: { name: input.name },
@@ -610,7 +622,7 @@ export async function deleteAvailability(availabilityId: string) {
   });
 }
 
-export async function fetchProducts(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchProducts(businessId: string = getActiveBusinessId()) {
   return apiGet(
     `/commerce/businesses/${encodeURIComponent(businessId)}/products`,
     z.array(productSchema),
@@ -618,7 +630,7 @@ export async function fetchProducts(businessId: string = DEFAULT_BUSINESS_ID) {
   );
 }
 
-export async function fetchInvoices(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchInvoices(businessId: string = getActiveBusinessId()) {
   return apiGet(
     `/commerce/businesses/${encodeURIComponent(businessId)}/invoices`,
     z.array(
@@ -659,7 +671,7 @@ export async function createInvoice(input: {
   currency?: string;
   items: Array<{ description: string; quantity: number; unitPrice: number; total?: number; productId?: string | null }>;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? getActiveBusinessId();
   return apiPost<unknown>({
     path: `/commerce/businesses/${encodeURIComponent(businessId)}/invoices`,
     body: input,
@@ -690,7 +702,7 @@ export async function deleteInvoice(invoiceId: string) {
   });
 }
 
-export async function fetchQuotes(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchQuotes(businessId: string = getActiveBusinessId()) {
   return apiGet(`/commerce/businesses/${encodeURIComponent(businessId)}/quotes`, z.array(quoteSchema), []);
 }
 
@@ -707,7 +719,7 @@ export async function createQuote(input: {
   currency?: string;
   items: Array<{ description: string; quantity: number; unitPrice: number; total?: number; productId?: string | null }>;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? getActiveBusinessId();
   return apiPost<unknown>({
     path: `/commerce/businesses/${encodeURIComponent(businessId)}/quotes`,
     body: input,
@@ -756,7 +768,7 @@ export async function createContact(input: {
   notesInternal?: string;
   preferredChannel?: string;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? getActiveBusinessId();
   const body = {
     firstName: input.firstName ?? "Guest",
     lastName: input.lastName ?? "User",
@@ -797,7 +809,7 @@ export async function createContact(input: {
 
 export async function fetchContactEvents(
   contactId: string,
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = getActiveBusinessId(),
 ): Promise<ApiResult<ContactEvent[]>> {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/events`,
@@ -808,7 +820,7 @@ export async function fetchContactEvents(
 
 export async function fetchContactNotes(
   contactId: string,
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = getActiveBusinessId(),
 ): Promise<ApiResult<ContactNote[]>> {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/notes`,
@@ -823,7 +835,7 @@ export async function fetchContactTasks(params: {
   status?: string;
   dueBefore?: string;
 }): Promise<ApiResult<ContactTask[]>> {
-  const businessId = params.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = params.businessId ?? getActiveBusinessId();
   const query = new URLSearchParams();
   if (params.contactId) query.set('contactId', params.contactId);
   if (params.status) query.set('status', params.status);
@@ -836,7 +848,7 @@ export async function fetchContactTasks(params: {
   );
 }
 
-export async function fetchContactPlaybook(contactId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchContactPlaybook(contactId: string, businessId: string = getActiveBusinessId()) {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/playbook`,
     contactPlaybookSchema,
@@ -850,14 +862,14 @@ export async function updateContactPlaybook(params: {
   type?: string;
   businessId?: string;
 }) {
-  const businessId = params.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = params.businessId ?? getActiveBusinessId();
   return apiPost<ContactPlaybook>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(params.contactId)}/playbook`,
     body: { data: params.data, type: params.type },
   });
 }
 
-export async function addContactNote(contactId: string, body: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function addContactNote(contactId: string, body: string, businessId: string = getActiveBusinessId()) {
   return apiPost<ContactNote>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/notes`,
     body: { body },
@@ -868,7 +880,7 @@ export async function addContactTask(
   contactId: string,
   title: string,
   options?: { dueDate?: string; priority?: "NORMAL" | "HIGH" | "LOW"; assigneeId?: string; remindAt?: string },
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = getActiveBusinessId(),
 ) {
   return apiPost<ContactTask>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/tasks`,
@@ -882,7 +894,7 @@ export async function addContactTask(
   });
 }
 
-export async function fetchSegmentSummary(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchSegmentSummary(businessId: string = getActiveBusinessId()) {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/segments`,
     z.object({
@@ -898,7 +910,7 @@ export async function fetchSegmentSummary(businessId: string = DEFAULT_BUSINESS_
   );
 }
 
-export async function fetchCrmHighlights(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchCrmHighlights(businessId: string = getActiveBusinessId()) {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/highlights`,
     flowHighlightsSchema,
@@ -912,7 +924,7 @@ export async function fetchCrmHighlights(businessId: string = DEFAULT_BUSINESS_I
   );
 }
 
-export async function fetchAutomations(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchAutomations(businessId: string = getActiveBusinessId()) {
   return apiGet(`/automation/businesses/${encodeURIComponent(businessId)}`, z.array(automationSchema), []);
 }
 
@@ -922,7 +934,7 @@ export async function createAutomation(input: {
   trigger: string;
   actionData?: Record<string, unknown>;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? getActiveBusinessId();
   return apiPost<Automation>({
     path: `/automation/businesses/${encodeURIComponent(businessId)}`,
     body: {
@@ -940,7 +952,7 @@ export async function updateAutomation(input: {
   trigger?: string;
   actionData?: Record<string, unknown>;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? getActiveBusinessId();
   return apiPost<Automation>({
     path: `/automation/businesses/${encodeURIComponent(businessId)}/${encodeURIComponent(input.automationId)}`,
     body: {
@@ -953,7 +965,7 @@ export async function updateAutomation(input: {
 }
 
 export async function deleteAutomation(input: { businessId?: string; automationId: string }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? getActiveBusinessId();
   return apiPost<{ success: boolean; id: string }>({
     path: `/automation/businesses/${encodeURIComponent(businessId)}/${encodeURIComponent(input.automationId)}`,
     body: {},
@@ -961,7 +973,7 @@ export async function deleteAutomation(input: { businessId?: string; automationI
   });
 }
 
-export async function fetchSocialPosts(businessId: string = DEFAULT_BUSINESS_ID, status?: string) {
+export async function fetchSocialPosts(businessId: string = getActiveBusinessId(), status?: string) {
   const query = status ? `?status=${encodeURIComponent(status)}` : "";
   return apiGet(`/social/businesses/${encodeURIComponent(businessId)}/posts${query}`, z.array(socialPostSchema), []);
 }
@@ -971,7 +983,7 @@ export async function createSocialPost(input: {
   content: string;
   mediaUrls?: string[];
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? getActiveBusinessId();
   return apiPost<SocialPost>({
     path: `/social/businesses/${encodeURIComponent(businessId)}/posts`,
     body: {
@@ -989,7 +1001,7 @@ export async function updateSocialPost(input: {
   status?: string;
   scheduledAt?: string;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? getActiveBusinessId();
   return apiPost<SocialPost>({
     path: `/social/businesses/${encodeURIComponent(businessId)}/posts/${encodeURIComponent(input.postId)}`,
     body: {
@@ -1003,7 +1015,7 @@ export async function updateSocialPost(input: {
 }
 
 export async function deleteSocialPost(input: { businessId?: string; postId: string }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? getActiveBusinessId();
   return apiPost<{ success: boolean; id: string }>({
     path: `/social/businesses/${encodeURIComponent(businessId)}/posts/${encodeURIComponent(input.postId)}`,
     body: {},
@@ -1011,7 +1023,7 @@ export async function deleteSocialPost(input: { businessId?: string; postId: str
   });
 }
 
-export async function fetchSocialConnections(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchSocialConnections(businessId: string = getActiveBusinessId()) {
   return apiGet(
     `/social/businesses/${encodeURIComponent(businessId)}/connections`,
     z.array(socialConnectionSchema),
@@ -1025,7 +1037,7 @@ export async function createSocialConnection(input: {
   platformId?: string;
   token: string;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? getActiveBusinessId();
   return apiPost<SocialConnection>({
     path: `/social/businesses/${encodeURIComponent(businessId)}/connections`,
     body: {
@@ -1037,7 +1049,7 @@ export async function createSocialConnection(input: {
 }
 
 export async function deleteSocialConnection(input: { businessId?: string; connectionId: string }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? getActiveBusinessId();
   return apiPost<{ success: boolean; id: string }>({
     path: `/social/businesses/${encodeURIComponent(businessId)}/connections/${encodeURIComponent(input.connectionId)}`,
     body: {},
@@ -1045,12 +1057,12 @@ export async function deleteSocialConnection(input: { businessId?: string; conne
   });
 }
 
-export async function fetchProjects(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchProjects(businessId: string = getActiveBusinessId()) {
   return apiGet(`/projects/businesses/${encodeURIComponent(businessId)}`, z.array(projectSchema), []);
 }
 
 export async function createProject(input: { businessId?: string; name: string }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? getActiveBusinessId();
   return apiPost<Project>({
     path: `/projects/businesses/${encodeURIComponent(businessId)}`,
     body: { name: input.name },
@@ -1109,7 +1121,7 @@ export async function deleteProjectTask(taskId: string) {
   });
 }
 
-export async function fetchProjectTemplates(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchProjectTemplates(businessId: string = getActiveBusinessId()) {
   return apiGet(
     `/projects/businesses/${encodeURIComponent(businessId)}/templates`,
     z.array(projectTemplateSchema),
@@ -1118,7 +1130,7 @@ export async function fetchProjectTemplates(businessId: string = DEFAULT_BUSINES
 }
 
 export async function createProjectTemplate(input: { businessId?: string; name: string; taskTitles: string[] }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? getActiveBusinessId();
   return apiPost<ProjectTemplate>({
     path: `/projects/businesses/${encodeURIComponent(businessId)}/templates`,
     body: { name: input.name, taskTitles: input.taskTitles },
@@ -1130,14 +1142,14 @@ export async function createProjectFromTemplate(input: {
   templateId: string;
   name?: string;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? getActiveBusinessId();
   return apiPost<Project>({
     path: `/projects/businesses/${encodeURIComponent(businessId)}/templates/${encodeURIComponent(input.templateId)}/instantiate`,
     body: { name: input.name },
   });
 }
 
-export async function fetchReportSummary(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchReportSummary(businessId: string = getActiveBusinessId()) {
   return apiGet(
     `/reports/businesses/${encodeURIComponent(businessId)}/summary`,
     reportSummarySchema,
@@ -1153,12 +1165,12 @@ export async function fetchReportSummary(businessId: string = DEFAULT_BUSINESS_I
   );
 }
 
-export async function fetchSite(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchSite(businessId: string = getActiveBusinessId()) {
   return apiGet(`/site/businesses/${encodeURIComponent(businessId)}`, siteSchema, null);
 }
 
 export async function upsertSite(input: { businessId?: string; subdomain: string; siteData?: Record<string, unknown> }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? getActiveBusinessId();
   return apiPost<Site>({
     path: `/site/businesses/${encodeURIComponent(businessId)}`,
     body: { subdomain: input.subdomain, siteData: input.siteData ?? {} },
@@ -1200,7 +1212,7 @@ export async function deleteTeamMember(input: { businessId: string; membershipId
 }
 
 export async function fetchDueTasks(
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = getActiveBusinessId(),
   windowDays = 7,
 ): Promise<ApiResult<ContactTask[]>> {
   const params = new URLSearchParams({ windowDays: String(windowDays) });
@@ -1211,7 +1223,7 @@ export async function fetchDueTasks(
   );
 }
 
-export async function fetchImportJobs(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchImportJobs(businessId: string = getActiveBusinessId()) {
   return apiGet(`/crm/businesses/${encodeURIComponent(businessId)}/imports`, z.array(contactImportSchema), []);
 }
 
@@ -1220,7 +1232,7 @@ export async function importContactsFromFile(input: {
   type: 'csv' | 'xlsx' | 'pdf' | 'image';
   file: File;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? getActiveBusinessId();
   const params = new URLSearchParams({ type: input.type });
   const url = `${API_BASE}/crm/businesses/${encodeURIComponent(businessId)}/import/file?${params.toString()}`;
   const formData = new FormData();
@@ -1242,7 +1254,7 @@ export async function importContactsFromFile(input: {
   return contactImportSchema.parse(payload);
 }
 
-export async function importContactsFromLink(url: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function importContactsFromLink(url: string, businessId: string = getActiveBusinessId()) {
   return apiPost<ContactImportJob>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/import/link`,
     body: { url },
@@ -1255,7 +1267,7 @@ export async function createContactFromOcr(params: {
   url?: string;
   type?: string;
 }) {
-  const businessId = params.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = params.businessId ?? getActiveBusinessId();
   return apiPost<ContactImportOcrResponse>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/import/image/ocr`,
     body: {
@@ -1266,7 +1278,7 @@ export async function createContactFromOcr(params: {
   });
 }
 
-export async function completeContactTask(taskId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function completeContactTask(taskId: string, businessId: string = getActiveBusinessId()) {
   return apiPost<ContactTask>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/tasks/${encodeURIComponent(taskId)}/complete`,
     body: {},
@@ -1274,7 +1286,7 @@ export async function completeContactTask(taskId: string, businessId: string = D
 }
 
 export async function mergeContacts(input: { businessId?: string; contactId: string; duplicateId: string }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? getActiveBusinessId();
   return apiPost<Contact>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(input.contactId)}/merge/${encodeURIComponent(input.duplicateId)}`,
     body: {},
@@ -1299,14 +1311,14 @@ export async function updateContact(input: {
   segment?: string;
   notesInternal?: string;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? getActiveBusinessId();
   return apiPost<Contact>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(input.contactId)}`,
     body: input,
   });
 }
 
-export async function deleteContact(contactId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function deleteContact(contactId: string, businessId: string = getActiveBusinessId()) {
   return apiPost<Contact>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/delete`,
     body: {},
@@ -1314,7 +1326,7 @@ export async function deleteContact(contactId: string, businessId: string = DEFA
 }
 
 export async function createProduct(input: { businessId?: string; name: string; price: number; currency?: string }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? getActiveBusinessId();
   const body = { name: input.name, price: input.price, currency: input.currency ?? "TTD" };
 
   const res = await apiPost<Product>({
@@ -1341,7 +1353,7 @@ export async function createBooking(input: {
   startTime: string;
   endTime: string;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? getActiveBusinessId();
   const res = await apiPost<Booking>({
     path: `/bookings/businesses/${encodeURIComponent(businessId)}`,
     body: {
@@ -1390,4 +1402,4 @@ export async function bootstrapIdentity(input: { username?: string; email?: stri
   });
 }
 
-export { DEFAULT_BUSINESS_ID };
+export { DEFAULT_BUSINESS_ID, ACTIVE_BUSINESS_KEY };

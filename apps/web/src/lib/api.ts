@@ -25,7 +25,11 @@ function buildHeaders(initHeaders?: HeadersInit) {
 function getAuthHeaders(): Record<string, string> {
   if (typeof window === "undefined") return {};
   const token = window.localStorage?.getItem("kf_token");
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  const businessId = window.localStorage?.getItem("kf_business_id");
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(businessId ? { "x-business-id": businessId } : {}),
+  };
 }
 
 export async function apiPost<T>({ path, body, init }: FetchOptions): Promise<ApiResponse<T>> {

@@ -8,12 +8,14 @@ import {
   deleteTeamMember,
   fetchBusinesses,
   fetchTeam,
+  getActiveBusinessId,
   inviteTeamMember,
+  setActiveBusinessId as setActiveBusinessIdStorage,
 } from "@/lib/client";
 
 export default function IdentityPage() {
   const [businesses, setBusinesses] = useState<Membership[]>([]);
-  const [activeBusinessId, setActiveBusinessId] = useState<string>("");
+  const [activeBusinessId, setActiveBusinessId] = useState<string>(() => getActiveBusinessId());
   const [team, setTeam] = useState<Membership[]>([]);
   const [businessName, setBusinessName] = useState("");
   const [invite, setInvite] = useState({ email: "", role: "STAFF" });
@@ -25,7 +27,12 @@ export default function IdentityPage() {
       if (res.error) setError(res.error);
       const items = res.data ?? [];
       setBusinesses(items);
-      if (items[0]?.business?.id) {
+      const stored = getActiveBusinessId();
+      const exists = items.some((membership) => membership.business?.id === stored);
+      if (exists) {
+        setActiveBusinessId(stored);
+      } else if (items[0]?.business?.id) {
+        setActiveBusinessIdStorage(items[0].business.id);
         setActiveBusinessId(items[0].business.id);
       }
     };
@@ -49,6 +56,7 @@ export default function IdentityPage() {
       return;
     }
     if (res.data?.id) {
+      setActiveBusinessIdStorage(res.data.id);
       setActiveBusinessId(res.data.id);
     }
     const refreshed = await fetchBusinesses();
@@ -105,7 +113,11 @@ export default function IdentityPage() {
                   name="business"
                   value={membership.business?.id}
                   checked={activeBusinessId === membership.business?.id}
-                  onChange={() => setActiveBusinessId(membership.business?.id ?? "")}
+                  onChange={() => {
+                    const nextId = membership.business?.id ?? "";
+                    setActiveBusinessIdStorage(nextId);
+                    setActiveBusinessId(nextId);
+                  }}
                 />
                 <span className="font-semibold">{membership.business?.name ?? "Unnamed"}</span>
                 <Badge tone="info">{membership.role}</Badge>

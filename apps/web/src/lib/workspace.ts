@@ -1,6 +1,6 @@
 "use client";
 
-import { bootstrapIdentity } from "./client";
+import { bootstrapIdentity, setActiveBusinessId } from "./client";
 
 const BUSINESS_ID_KEY = "kf_business_id";
 const TOKEN_KEY = "kf_token";
@@ -11,8 +11,7 @@ export function getStoredBusinessId(): string | null {
 }
 
 export function setStoredBusinessId(id: string) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(BUSINESS_ID_KEY, id);
+  setActiveBusinessId(id);
 }
 
 export async function ensureWorkspace(): Promise<string | null> {

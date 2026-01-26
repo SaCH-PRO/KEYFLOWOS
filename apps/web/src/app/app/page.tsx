@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useState } from "react";
 import { AchievementsStrip } from "@/components/cockpit/achievements-strip";
@@ -7,13 +7,13 @@ import { FlowGraphPanel, Phase } from "@/components/cockpit/flow-graph-panel";
 import { FlowStatsRow } from "@/components/cockpit/flow-stats-row";
 import { MomentumBar } from "@keyflow/ui";
 import { fetchBookings, fetchContacts, fetchProducts, fetchInvoices, Invoice } from "@/lib/client";
-import { apiPost } from "@/lib/api";
+import { API_BASE, apiPost } from "@/lib/api";
 
 export default function AppHome() {
   const [stats, setStats] = useState({ mrr: "TTD --", conversionRate: "--", avgResponseTime: "--" });
   const [loading, setLoading] = useState(true);
   const [phases, setPhases] = useState<Phase[]>([]);
-  const [bottleneck, setBottleneck] = useState<string>("Quotes â†’ Paid");
+  const [bottleneck, setBottleneck] = useState<string>("Quotes -> Paid");
   const [momentum, setMomentum] = useState(0.35);
   const [streaks, setStreaks] = useState<string[]>([]);
   const [headerBadges, setHeaderBadges] = useState<string[]>([]);
@@ -154,7 +154,7 @@ export default function AppHome() {
           }}
           onAction={(item) => {
             if (item.meta?.invoiceId) {
-              window.open(`/commerce/invoices/${item.meta.invoiceId}/receipt`, "_blank");
+              window.open(`${API_BASE}/commerce/public/invoices/${item.meta.invoiceId}/receipt`, "_blank");
               void sendAction("send-receipt", { invoiceId: item.meta.invoiceId }).then((msg) => setActionMessage(msg));
               setTimeout(() => setActionMessage(null), 2000);
             }
@@ -206,7 +206,7 @@ export default function AppHome() {
                 className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-slate-900/60 px-3 py-1 text-xs text-muted-foreground"
               >
                 <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                {inv.invoiceNumber ?? inv.id} Â· {inv.status}
+                {inv.invoiceNumber ?? inv.id} - {inv.status}
               </span>
             ))}
           </div>
@@ -246,7 +246,7 @@ function buildFeed(input: { contactsCount: number; bookingCount: number; product
         type: "payment",
         title: `${inv.invoiceNumber ?? "Invoice"} ${inv.status}`,
         time: minutesAgo(20 + idx * 3),
-        description: `${inv.currency} ${Number(inv.total).toLocaleString()} Â· ${inv.status}`,
+        description: `${inv.currency} ${Number(inv.total).toLocaleString()} - ${inv.status}`,
         suggestion: inv.status === "PAID" ? "Send receipt" : "Remind contact",
         meta: { invoiceId: inv.id, contactEmail: inv.contact?.email ?? undefined },
       });

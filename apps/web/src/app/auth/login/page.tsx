@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useMemo, useState } from "react";
-import { bootstrapIdentity } from "@/lib/client";
+import { bootstrapIdentity, setActiveBusinessId } from "@/lib/client";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -47,7 +47,7 @@ export default function AuthLogin() {
       window.localStorage.setItem("kf_token", session.access_token);
       const bootstrap = await bootstrapIdentity({ email });
       if (bootstrap.data?.business?.id) {
-        window.localStorage.setItem("kf_business_id", bootstrap.data.business.id);
+        setActiveBusinessId(bootstrap.data.business.id);
       } else if (bootstrap.error) {
         throw new Error(bootstrap.error);
       } else {
