@@ -4,7 +4,9 @@ import { PrismaService } from '../src/core/prisma/prisma.service';
 
 class PrismaMock implements Partial<PrismaService> {
   private businesses: any[] = [];
+  private memberships: any[] = [];
   client: any = {
+    $transaction: async (callback: any) => callback(this.client),
     business: {
       findMany: vi.fn(({ where }: any) => {
         if (where?.ownerId) {
@@ -16,6 +18,37 @@ class PrismaMock implements Partial<PrismaService> {
         const item = { ...data, id: `biz_${this.businesses.length + 1}`, deletedAt: null };
         this.businesses.push(item);
         return item;
+      }),
+    },
+    membership: {
+      findMany: vi.fn(({ where }: any) => {
+        const filtered = this.memberships.filter((m) => {
+          if (where?.userId && m.userId !== where.userId) return false;
+          if (where?.businessId && m.businessId !== where.businessId) return false;
+          return true;
+        });
+        return filtered.map((membership) => ({
+          ...membership,
+          business: this.businesses.find((b) => b.id === membership.businessId),
+          user: { id: membership.userId },
+        }));
+      }),
+      create: vi.fn(({ data }: any) => {
+        const item = { ...data, id: `mem_${this.memberships.length + 1}` };
+        this.memberships.push(item);
+        return item;
+      }),
+      upsert: vi.fn(({ where, create, update }: any) => {
+        const existing = this.memberships.find(
+          (m) => m.userId === where.userId_businessId.userId && m.businessId === where.userId_businessId.businessId,
+        );
+        if (existing) {
+          Object.assign(existing, update);
+          return { ...existing, user: { id: existing.userId } };
+        }
+        const item = { ...create, id: `mem_${this.memberships.length + 1}` };
+        this.memberships.push(item);
+        return { ...item, user: { id: item.userId } };
       }),
     },
   };
@@ -33,7 +66,7 @@ describe('IdentityService', () => {
     const all = await service.listBusinesses(undefined);
 
     expect(owned).toHaveLength(1);
-    expect(owned[0].name).toBe('Acme');
+    expect(owned[0].business?.name ?? owned[0].name).toBe('Acme');
     expect(all).toHaveLength(2);
   });
 });

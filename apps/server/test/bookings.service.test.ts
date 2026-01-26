@@ -57,13 +57,15 @@ describe('BookingsService', () => {
       automation as any,
     );
 
+    const start = new Date();
+    const end = new Date(start.getTime() + 60 * 60 * 1000);
     const booking = await service.createBooking({
       businessId: 'biz_1',
       contactId: 'contact_1',
       serviceId: 'service_1',
       staffId: 'staff_1',
-      startTime: new Date(),
-      endTime: new Date(),
+      startTime: start,
+      endTime: end,
     });
 
     expect(emit).toHaveBeenCalledWith(
@@ -88,21 +90,25 @@ describe('BookingsService', () => {
       automation as any,
     );
 
+    const startA = new Date();
+    const endA = new Date(startA.getTime() + 60 * 60 * 1000);
     await service.createBooking({
       businessId: 'biz_1',
       contactId: 'contact_1',
       serviceId: 'service_1',
       staffId: 'staff_1',
-      startTime: new Date(),
-      endTime: new Date(),
+      startTime: startA,
+      endTime: endA,
     });
+    const startB = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    const endB = new Date(startB.getTime() + 60 * 60 * 1000);
     await service.createBooking({
       businessId: 'biz_2',
       contactId: 'contact_2',
       serviceId: 'service_2',
       staffId: 'staff_2',
-      startTime: new Date(),
-      endTime: new Date(),
+      startTime: startB,
+      endTime: endB,
     });
 
     const biz1 = await service.listBookings('biz_1');
