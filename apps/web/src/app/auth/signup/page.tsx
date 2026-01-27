@@ -195,7 +195,7 @@ export default function AuthSignup() {
               className="landing-button w-full disabled:opacity-70"
               onClick={() => router.push("/auth/login")}
             >
-              I've verified — continue to sign in
+              I&apos;ve verified — continue to sign in
             </button>
             <button
               type="button"

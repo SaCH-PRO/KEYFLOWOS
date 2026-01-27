@@ -11,8 +11,10 @@ export default function PublicSocialPage() {
   const searchParams = useSearchParams();
   const subdomainParam = searchParams?.get("subdomain") ?? "";
   const businessIdParam = searchParams?.get("businessId") ?? "";
-  const [subdomain, setSubdomain] = useState(subdomainParam);
-  const [businessId, setBusinessId] = useState(businessIdParam);
+  const [subdomainInput, setSubdomainInput] = useState("");
+  const [businessIdInput, setBusinessIdInput] = useState("");
+  const subdomain = subdomainInput || subdomainParam;
+  const businessId = businessIdInput || businessIdParam;
   const [title, setTitle] = useState("KeyFlow Social");
   const [links, setLinks] = useState<SiteLink[]>([]);
   const [loading, setLoading] = useState(false);
@@ -26,11 +28,6 @@ export default function PublicSocialPage() {
       })),
     [links],
   );
-
-  useEffect(() => {
-    if (subdomainParam) setSubdomain(subdomainParam);
-    if (businessIdParam) setBusinessId(businessIdParam);
-  }, [subdomainParam, businessIdParam]);
 
   useEffect(() => {
     const load = async () => {
@@ -97,8 +94,8 @@ export default function PublicSocialPage() {
 
           <Card title="Edit site" badge="Owner">
             <div className="space-y-2">
-              <Input label="Business ID" value={businessId} onChange={(e) => setBusinessId(e.target.value)} />
-              <Input label="Subdomain" value={subdomain} onChange={(e) => setSubdomain(e.target.value)} />
+              <Input label="Business ID" value={businessIdInput || businessIdParam} onChange={(e) => setBusinessIdInput(e.target.value)} />
+              <Input label="Subdomain" value={subdomainInput || subdomainParam} onChange={(e) => setSubdomainInput(e.target.value)} />
               <Input label="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
               {links.map((link, idx) => (
                 <div key={`link-${idx}`} className="grid gap-2 md:grid-cols-2">

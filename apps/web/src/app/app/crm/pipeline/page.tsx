@@ -94,6 +94,28 @@ type SectionCardProps = {
 };
 
 function SectionCard({ title, headerAction, children, className = "", onClick }: SectionCardProps) {
+  if (workspaceLoading) {
+    return (
+      <ContentContainer>
+        <div className="py-12 text-center space-y-4">
+          <p className="text-lg font-semibold text-foreground">Preparing your workspace...</p>
+          <p className="text-sm text-muted-foreground">Hang tight while we load your personal space.</p>
+        </div>
+      </ContentContainer>
+    );
+  }
+
+  if (workspaceError) {
+    return (
+      <ContentContainer>
+        <div className="py-12 text-center space-y-4">
+          <p className="text-lg font-semibold text-red-700">{workspaceError}</p>
+          <p className="text-sm text-muted-foreground">Try logging in again to create your workspace.</p>
+        </div>
+      </ContentContainer>
+    );
+  }
+
   return (
     <Card
       className={`space-y-3 shadow-[var(--kf-shadow)] transition-shadow ${className}`}
@@ -198,28 +220,6 @@ export default function PipelinePage() {
       return next;
     });
   }, []);
-
-  if (workspaceLoading) {
-    return (
-      <ContentContainer>
-        <div className="py-12 text-center space-y-4">
-          <p className="text-lg font-semibold text-foreground">Preparing your workspace...</p>
-          <p className="text-sm text-muted-foreground">Hang tight while we load your personal space.</p>
-        </div>
-      </ContentContainer>
-    );
-  }
-
-  if (workspaceError) {
-    return (
-      <ContentContainer>
-        <div className="py-12 text-center space-y-4">
-          <p className="text-lg font-semibold text-red-700">{workspaceError}</p>
-          <p className="text-sm text-muted-foreground">Try logging in again to create your workspace.</p>
-        </div>
-      </ContentContainer>
-    );
-  }
 
   const activeFilters = useMemo(
     () => (statusFilter !== "ALL" ? 1 : 0) + (search ? 1 : 0) + (tagFilter ? 1 : 0),

@@ -68,8 +68,7 @@ const formatTime = (value?: string) => {
 export default function CockpitPage() {
   const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
-  const [highlights, setHighlights] = useState<FlowHighlights | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [highlightsByBusiness, setHighlightsByBusiness] = useState<Record<string, FlowHighlights>>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Contact[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -89,24 +88,20 @@ export default function CockpitPage() {
 
   useEffect(() => {
     if (!businessId) return;
-    setLoading(true);
     fetchCrmHighlights(businessId)
       .then((result) => {
-        setHighlights(result.data ?? emptyHighlights);
+        const data = result.data ?? emptyHighlights;
+        setHighlightsByBusiness((prev) => ({ ...prev, [businessId]: data }));
       })
       .catch(() => {
-        setHighlights(emptyHighlights);
-      })
-      .finally(() => setLoading(false));
+        setHighlightsByBusiness((prev) => ({ ...prev, [businessId]: emptyHighlights }));
+      });
   }, [businessId]);
 
   useEffect(() => {
     if (!businessId) return;
     const query = searchQuery.trim();
-    if (!query) {
-      setSearchResults([]);
-      return;
-    }
+    if (!query) return;
     const timer = setTimeout(() => {
       setSearchLoading(true);
       fetchContacts(businessId, { search: query, take: 6, includeStats: true })
@@ -116,6 +111,11 @@ export default function CockpitPage() {
     }, 300);
     return () => clearTimeout(timer);
   }, [businessId, searchQuery]);
+
+  const highlights = businessId ? highlightsByBusiness[businessId] ?? null : null;
+  const loading = Boolean(businessId) && !highlights;
+  const trimmedQuery = searchQuery.trim();
+  const visibleSearchResults = trimmedQuery ? searchResults : [];
 
   const summary = highlights ?? emptyHighlights;
   const feedItems = useMemo(() => {
@@ -165,7 +165,7 @@ export default function CockpitPage() {
       <div className="space-y-4">
         <Card
           title="CRM Command"
-          badge={searchLoading ? "Searching..." : `${searchResults.length} results`}
+          badge={searchLoading ? "Searching..." : `${visibleSearchResults.length} results`}
           className="bg-[rgba(0,0,0,0.4)]"
         >
           <div className="flex flex-wrap items-center gap-2">
@@ -182,12 +182,12 @@ export default function CockpitPage() {
               Open CRM
             </Button>
           </div>
-          {searchQuery.trim() && (
+          {trimmedQuery && (
             <div className="mt-3 space-y-2 text-sm">
-              {searchResults.length === 0 && !searchLoading && (
+              {visibleSearchResults.length === 0 && !searchLoading && (
                 <div className="text-xs text-muted-foreground">No contacts match that query.</div>
               )}
-              {searchResults.map((contact) => (
+              {visibleSearchResults.map((contact) => (
                 <Link
                   key={contact.id}
                   href={`/app/crm/contacts/${contact.id}`}

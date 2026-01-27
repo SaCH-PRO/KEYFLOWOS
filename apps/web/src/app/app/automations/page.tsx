@@ -149,17 +149,23 @@ export default function AutomationsPage() {
       <Card title="Live playbooks" badge={`${automations.length}`}>
         <div className="space-y-2">
           {automations.length === 0 && <div className="text-xs text-muted-foreground">No automations yet.</div>}
-          {automations.map((automation) => (
-            <div key={automation.id} className="rounded-2xl border border-border/60 bg-background p-3 text-sm">
-              <div className="flex items-center justify-between">
-                <div className="font-semibold">{automation.name}</div>
-                <Badge tone="info">{automation.trigger}</Badge>
+          {automations.map((automation) => {
+            const actionData =
+              automation.actionData && typeof automation.actionData === "object"
+                ? (automation.actionData as { actions?: unknown })
+                : undefined;
+            const actions = actionData?.actions;
+            const actionCount = Array.isArray(actions) ? actions.length : actions ? 1 : 0;
+            return (
+              <div key={automation.id} className="rounded-2xl border border-border/60 bg-background p-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <div className="font-semibold">{automation.name}</div>
+                  <Badge tone="info">{automation.trigger}</Badge>
+                </div>
+                <div className="text-[11px] text-muted-foreground mt-1">Actions: {actionCount}</div>
               </div>
-              <div className="text-[11px] text-muted-foreground mt-1">
-                Actions: {Array.isArray((automation as any).actionData?.actions) ? (automation as any).actionData.actions.length : 1}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </Card>
     </div>

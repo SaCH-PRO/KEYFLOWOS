@@ -74,21 +74,37 @@ export default function BookingsPage() {
 
   useEffect(() => {
     if (!bookingForm.staffId) {
-      setAvailability([]);
       return;
     }
     fetchAvailability(bookingForm.staffId).then(({ data }) => setAvailability(data ?? []));
   }, [bookingForm.staffId]);
 
-  useEffect(() => {
-    if (!bookingForm.startTime || !bookingForm.serviceId) return;
-    const service = services.find((item) => item.id === bookingForm.serviceId);
-    if (!service) return;
-    const startDate = new Date(bookingForm.startTime);
-    if (Number.isNaN(startDate.getTime())) return;
-    const end = new Date(startDate.getTime() + service.duration * 60000);
-    setBookingForm((prev) => ({ ...prev, endTime: end.toISOString().slice(0, 16) }));
-  }, [bookingForm.startTime, bookingForm.serviceId, services]);
+  const computeEndTime = (startTimeValue: string, serviceIdValue: string) => {
+    if (!startTimeValue || !serviceIdValue) return "";
+    const service = services.find((item) => item.id === serviceIdValue);
+    if (!service) return "";
+    const startDate = new Date(startTimeValue);
+    if (Number.isNaN(startDate.getTime())) return "";
+    return new Date(startDate.getTime() + service.duration * 60000).toISOString().slice(0, 16);
+  };
+
+  const handleServiceChange = (value: string) => {
+    setBookingForm((prev) => {
+      const next = { ...prev, serviceId: value };
+      const computed = computeEndTime(next.startTime, value);
+      if (computed) next.endTime = computed;
+      return next;
+    });
+  };
+
+  const handleStartTimeChange = (value: string) => {
+    setBookingForm((prev) => {
+      const next = { ...prev, startTime: value };
+      const computed = computeEndTime(value, next.serviceId);
+      if (computed) next.endTime = computed;
+      return next;
+    });
+  };
 
   const bookingRows = useMemo(
     () =>
@@ -102,6 +118,8 @@ export default function BookingsPage() {
       ]),
     [bookings],
   );
+
+  const visibleAvailability = bookingForm.staffId ? availability : [];
 
   async function handleCreateBooking() {
     setFormError(null);
@@ -224,7 +242,7 @@ export default function BookingsPage() {
               <select
                 className="mt-1 w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
                 value={bookingForm.serviceId}
-                onChange={(e) => setBookingForm((prev) => ({ ...prev, serviceId: e.target.value }))}
+                onChange={(e) => handleServiceChange(e.target.value)}
               >
                 <option value="">Select service</option>
                 {services.map((s) => (
@@ -253,7 +271,7 @@ export default function BookingsPage() {
               label="Start time"
               type="datetime-local"
               value={bookingForm.startTime}
-              onChange={(e) => setBookingForm((prev) => ({ ...prev, startTime: e.target.value }))}
+              onChange={(e) => handleStartTimeChange(e.target.value)}
             />
             <Input
               label="End time"
@@ -295,8 +313,8 @@ export default function BookingsPage() {
             Add availability
           </Button>
           <div className="space-y-1 text-xs text-muted-foreground">
-            {availability.length === 0 && <div>No availability logged yet.</div>}
-            {availability.map((slot) => (
+            {visibleAvailability.length === 0 && <div>No availability logged yet.</div>}
+            {visibleAvailability.map((slot) => (
               <div key={slot.id} className="flex items-center justify-between">
                 <span>
                   {dayLabels[slot.dayOfWeek] ?? slot.dayOfWeek} · {slot.startTime} - {slot.endTime}

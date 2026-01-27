@@ -4,34 +4,29 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Button, Card, Input, Badge } from "@keyflow/ui";
 import { API_BASE } from "@/lib/api";
-import { fetchInvoicePublic, markInvoicePaidPublic } from "@/lib/client";
+import { fetchInvoicePublic, markInvoicePaidPublic, type Invoice } from "@/lib/client";
 import { motion } from "framer-motion";
 
 export default function PublicPayPage() {
   const searchParams = useSearchParams();
-  const [invoiceId, setInvoiceId] = useState("");
+  const invoiceIdParam = searchParams?.get("invoiceId") ?? "";
+  const [invoiceId, setInvoiceId] = useState(invoiceIdParam);
   const [status, setStatus] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [paidInvoiceId, setPaidInvoiceId] = useState<string | null>(null);
   const [copyMsg, setCopyMsg] = useState<string | null>(null);
-  const [invoice, setInvoice] = useState<any | null>(null);
+  const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loadingInvoice, setLoadingInvoice] = useState(false);
 
   useEffect(() => {
-    const idParam = searchParams?.get("invoiceId");
-    if (idParam) setInvoiceId(idParam);
-  }, [searchParams]);
-
-  useEffect(() => {
-    if (!invoiceId) {
-      setInvoice(null);
-      return;
-    }
+    if (!invoiceId) return;
     setLoadingInvoice(true);
     fetchInvoicePublic(invoiceId)
       .then((res) => setInvoice(res.data ?? null))
       .finally(() => setLoadingInvoice(false));
   }, [invoiceId]);
+
+  const activeInvoice = invoiceId && invoice ? (invoice.id === invoiceId ? invoice : null) : null;
 
   const markPaid = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,13 +64,13 @@ export default function PublicPayPage() {
           </form>
           <div className="mt-3 rounded-xl border border-border/60 bg-card px-3 py-2 text-xs text-muted-foreground">
             {loadingInvoice && <div>Loading invoice details...</div>}
-            {!loadingInvoice && invoice && (
+            {!loadingInvoice && activeInvoice && (
               <>
-                <div>Invoice: {invoice.invoiceNumber ?? invoice.id}</div>
+                <div>Invoice: {activeInvoice.invoiceNumber ?? activeInvoice.id}</div>
                 <div>
-                  Total: {invoice.currency ?? "TTD"} {invoice.total ?? 0}
+                  Total: {activeInvoice.currency ?? "TTD"} {activeInvoice.total ?? 0}
                 </div>
-                <div>Status: {invoice.status}</div>
+                <div>Status: {activeInvoice.status}</div>
               </>
             )}
           </div>
