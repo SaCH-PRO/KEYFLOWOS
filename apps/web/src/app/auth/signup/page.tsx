@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Send } from "lucide-react";
 import { bootstrapIdentity, setActiveBusinessId } from "@/lib/client";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -174,191 +175,219 @@ export default function AuthSignup() {
     }
   };
 
+  const inputClass =
+    "w-full border-b border-slate-300 bg-transparent px-0 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none";
+
   return (
-    <div className="landing">
-      <div className="w-full max-w-md space-y-4">
-        <Link href="/" className="text-xs text-primary hover:underline">
-          Back to home
-        </Link>
-      </div>
-      <h1 className="landing-title text-3xl md:text-4xl font-semibold">Create your workspace</h1>
-      <p className="landing-tagline">Sign up with your email and set up your profile to begin your flow.</p>
-      {pendingVerification ? (
-        <div className="w-full max-w-md mx-auto bg-card border border-border rounded-3xl p-5 sm:p-6 flex flex-col gap-4 text-center shadow-[var(--kf-shadow)]">
-          <h2 className="text-xl font-semibold text-foreground">Verify your email</h2>
-          <p className="text-sm text-muted-foreground">
-            We sent a verification link to <span className="text-primary">{email}</span>. Please check your inbox and click the link to continue.
-          </p>
-          <div className="flex flex-col gap-2">
-            <button
-              type="button"
-              className="landing-button w-full disabled:opacity-70"
-              onClick={() => router.push("/auth/login")}
-            >
-              I&apos;ve verified — continue to sign in
-            </button>
-            <button
-              type="button"
-              className="text-sm text-primary hover:underline"
-              onClick={() => setPendingVerification(false)}
-            >
-              Edit info / try again
-            </button>
-            <button
-              type="button"
-              className="text-sm text-primary hover:underline disabled:opacity-60"
-              onClick={resendVerification}
-              disabled={resending}
-            >
-              {resending ? "Resending..." : "Resend verification email"}
-            </button>
+    <div className="min-h-screen bg-[#d1d1d1] text-slate-900 px-4 py-10">
+      <div className="mx-auto w-full max-w-5xl">
+        <div className="flex items-center justify-between text-xs text-slate-600">
+          <Link href="/" className="inline-flex items-center gap-2 hover:text-slate-900">
+            <span className="h-5 w-5 rounded-full border border-slate-300 bg-white/80" />
+            Back to home
+          </Link>
+          <span className="uppercase tracking-[0.3em]">KeyFlowOS</span>
+        </div>
+
+        <div className="mt-8 overflow-hidden rounded-[34px] bg-white shadow-[0_35px_80px_rgba(15,23,42,0.25)]">
+          <div className="grid min-h-[520px] grid-cols-1 md:grid-cols-[0.45fr_0.55fr]">
+            <div className="relative flex flex-col items-center justify-between gap-6 bg-[linear-gradient(160deg,#1d5a96,#2f78b6)] px-8 py-10 text-white">
+              <div className="absolute inset-y-0 right-0 hidden w-10 translate-x-1/2 rounded-full bg-white md:block" />
+              <div className="text-center space-y-2">
+                <p className="text-sm opacity-80">Hello,</p>
+                <p className="text-2xl font-semibold">welcome to!</p>
+              </div>
+              <div className="flex flex-col items-center gap-3 text-center">
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white/15">
+                  <Send className="h-7 w-7" />
+                </div>
+                <div className="text-lg font-semibold tracking-wide">KeyFlowOS</div>
+                <p className="text-xs text-white/70 max-w-[220px]">
+                  Your workspace for bookings, revenue, and customer flow.
+                </p>
+              </div>
+              <div className="text-xs uppercase tracking-[0.32em]">Sign up ▸</div>
+            </div>
+
+            <div className="flex flex-col justify-center px-8 py-10">
+              <div className="text-center">
+                <h1 className="text-xl font-semibold">Create your account</h1>
+                <p className="mt-2 text-sm text-slate-500">Set up your profile to begin your flow.</p>
+              </div>
+
+              {pendingVerification ? (
+                <div className="mt-8 space-y-4 text-center">
+                  <p className="text-sm text-slate-600">
+                    We sent a verification link to <span className="font-semibold text-slate-900">{email}</span>.
+                  </p>
+                  <div className="flex flex-col gap-2">
+                    <button
+                      type="button"
+                      className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white shadow-[0_12px_24px_rgba(29,90,150,0.35)]"
+                      onClick={() => router.push("/auth/login")}
+                    >
+                      I&apos;ve verified — continue to sign in
+                    </button>
+                    <button
+                      type="button"
+                      className="text-sm text-blue-600 hover:underline"
+                      onClick={() => setPendingVerification(false)}
+                    >
+                      Edit info / try again
+                    </button>
+                    <button
+                      type="button"
+                      className="text-sm text-blue-600 hover:underline disabled:opacity-60"
+                      onClick={resendVerification}
+                      disabled={resending}
+                    >
+                      {resending ? "Resending..." : "Resend verification email"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <form onSubmit={onSubmit} className="mt-8 space-y-5">
+                  {error && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700" aria-live="polite">
+                      {error}
+                    </div>
+                  )}
+                  {banner && (
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700" aria-live="polite">
+                      {banner}
+                    </div>
+                  )}
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block text-sm text-slate-600">
+                      First name
+                      <input
+                        required
+                        value={firstName}
+                        onChange={(e) => setFirstName(e.target.value)}
+                        autoComplete="given-name"
+                        className={inputClass}
+                        placeholder="Enter your name"
+                      />
+                    </label>
+                    <label className="block text-sm text-slate-600">
+                      Last name
+                      <input
+                        required
+                        value={lastName}
+                        onChange={(e) => setLastName(e.target.value)}
+                        autoComplete="family-name"
+                        className={inputClass}
+                        placeholder="Enter your name"
+                      />
+                    </label>
+                  </div>
+                  <label className="block text-sm text-slate-600">
+                    Username
+                    <input
+                      required
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      autoComplete="username"
+                      className={inputClass}
+                      placeholder="Enter your username"
+                    />
+                    <span className="text-[11px] text-slate-500">
+                      {usernameStatus === "checking" && "Checking availability..."}
+                      {usernameStatus === "available" && <span className="text-emerald-600">Available</span>}
+                      {usernameStatus === "taken" && <span className="text-amber-600">Taken, choose another.</span>}
+                      {usernameStatus === "idle" && "Letters/numbers, unique to you."}
+                    </span>
+                  </label>
+                  <label className="block text-sm text-slate-600">
+                    E-mail Address
+                    <input
+                      required
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      autoComplete="email"
+                      inputMode="email"
+                      className={inputClass}
+                      placeholder="Enter your email"
+                    />
+                  </label>
+                  <label className="block text-sm text-slate-600">
+                    Password
+                    <div className="flex items-center gap-3 border-b border-slate-300">
+                      <input
+                        required
+                        type={showPassword ? "text" : "password"}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        autoComplete="new-password"
+                        className="flex-1 bg-transparent px-0 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none"
+                        placeholder="Enter your password"
+                      />
+                      <button type="button" className="text-xs text-blue-600" onClick={() => setShowPassword((p) => !p)}>
+                        {showPassword ? "Hide" : "Show"}
+                      </button>
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-2 space-y-1">
+                      <p>Password requirements:</p>
+                      <ul className="list-disc list-inside space-y-0.5">
+                        <li className={password.length >= 8 ? "text-emerald-600" : ""}>At least 8 characters</li>
+                        <li className={/[A-Z]/.test(password) ? "text-emerald-600" : ""}>One uppercase letter</li>
+                        <li className={/[a-z]/.test(password) ? "text-emerald-600" : ""}>One lowercase letter</li>
+                        <li className={/[0-9]/.test(password) ? "text-emerald-600" : ""}>One number</li>
+                      </ul>
+                    </div>
+                  </label>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block text-sm text-slate-600">
+                      Company / brand
+                      <input
+                        value={company}
+                        onChange={(e) => setCompany(e.target.value)}
+                        autoComplete="organization"
+                        className={inputClass}
+                        placeholder="Business name"
+                      />
+                    </label>
+                    <label className="block text-sm text-slate-600">
+                      Contact number
+                      <input
+                        value={contactNumber}
+                        onChange={(e) => setContactNumber(e.target.value)}
+                        autoComplete="tel"
+                        inputMode="tel"
+                        className={inputClass}
+                        placeholder="+1 555 123 4567"
+                      />
+                    </label>
+                  </div>
+
+                  <label className="flex items-center gap-2 text-xs text-slate-500">
+                    <input type="checkbox" className="h-3 w-3 accent-blue-600" />
+                    By signing up I agree with Terms &amp; Conditions
+                  </label>
+
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      type="submit"
+                      className="rounded-lg border border-slate-300 px-5 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400"
+                      disabled={loading}
+                    >
+                      {loading ? "Creating..." : "Sign Up"}
+                    </button>
+                    <Link
+                      href="/auth/login"
+                      className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white shadow-[0_12px_24px_rgba(29,90,150,0.35)]"
+                    >
+                      Sign In
+                    </Link>
+                  </div>
+                </form>
+              )}
+            </div>
           </div>
         </div>
-      ) : (
-        <form
-          onSubmit={onSubmit}
-          className="w-full max-w-md mx-auto bg-card border border-border rounded-3xl p-5 sm:p-6 flex flex-col gap-4 shadow-[var(--kf-shadow)]"
-        >
-          {error && (
-            <div className="text-xs text-amber-400" aria-live="polite">
-              {error}
-            </div>
-          )}
-          {banner && (
-            <div className="text-xs text-emerald-300" aria-live="polite">
-              {banner}
-            </div>
-          )}
-          <div className="grid gap-3">
-            <label className="flex flex-col text-left text-sm text-foreground gap-1">
-              Username (unique)
-              <input
-                required
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                autoComplete="username"
-                className="rounded-2xl bg-muted border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
-                placeholder="yourname"
-              />
-              <span className="text-[11px] text-muted-foreground">
-                {usernameStatus === "checking" && "Checking availability..."}
-                {usernameStatus === "available" && <span className="text-emerald-300">Available</span>}
-                {usernameStatus === "taken" && <span className="text-amber-300">Taken, choose another.</span>}
-                {usernameStatus === "idle" && "Letters/numbers, unique to you."}
-              </span>
-            </label>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex flex-col text-left text-sm text-foreground gap-1">
-                First name
-                <input
-                  required
-                  value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
-                  autoComplete="given-name"
-                  className="rounded-2xl bg-muted border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
-                  placeholder="First"
-                />
-              </label>
-              <label className="flex flex-col text-left text-sm text-foreground gap-1">
-                Last name
-                <input
-                  required
-                  value={lastName}
-                  onChange={(e) => setLastName(e.target.value)}
-                  autoComplete="family-name"
-                  className="rounded-2xl bg-muted border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
-                  placeholder="Last"
-                />
-              </label>
-            </div>
-            <label className="flex flex-col text-left text-sm text-foreground gap-1">
-              Company / brand
-              <input
-                value={company}
-                onChange={(e) => setCompany(e.target.value)}
-                autoComplete="organization"
-                className="rounded-2xl bg-muted border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
-                placeholder="Business name"
-              />
-            </label>
-            <label className="flex flex-col text-left text-sm text-foreground gap-1">
-              Age
-              <input
-                type="number"
-                min="13"
-                value={age}
-                onChange={(e) => setAge(e.target.value)}
-                inputMode="numeric"
-                className="rounded-2xl bg-muted border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
-                placeholder="18"
-              />
-            </label>
-            <label className="flex flex-col text-left text-sm text-foreground gap-1">
-              Contact number
-              <input
-                value={contactNumber}
-                onChange={(e) => setContactNumber(e.target.value)}
-                autoComplete="tel"
-                inputMode="tel"
-                className="rounded-2xl bg-muted border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
-                placeholder="+1 555 123 4567"
-              />
-            </label>
-          </div>
-          <label className="flex flex-col text-left text-sm text-foreground gap-1">
-            Email
-            <input
-              required
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              autoComplete="email"
-              inputMode="email"
-              className="rounded-2xl bg-muted border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
-              placeholder="you@example.com"
-            />
-          </label>
-          <label className="flex flex-col text-left text-sm text-foreground gap-1">
-            Password
-            <div className="relative">
-              <input
-                required
-                type={showPassword ? "text" : "password"}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="new-password"
-                className="w-full rounded-2xl bg-muted border border-border/60 px-3 py-2 pr-12 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
-                placeholder="Create a secure password"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword((p) => !p)}
-                className="absolute inset-y-0 right-2 flex items-center text-xs text-primary"
-              >
-                {showPassword ? "Hide" : "Show"}
-              </button>
-            </div>
-            <div className="text-[11px] text-muted-foreground mt-1 space-y-1">
-              <p>Password requirements:</p>
-              <ul className="list-disc list-inside space-y-0.5">
-                <li className={password.length >= 8 ? "text-emerald-300" : ""}>At least 8 characters</li>
-                <li className={/[A-Z]/.test(password) ? "text-emerald-300" : ""}>One uppercase letter</li>
-                <li className={/[a-z]/.test(password) ? "text-emerald-300" : ""}>One lowercase letter</li>
-                <li className={/[0-9]/.test(password) ? "text-emerald-300" : ""}>One number</li>
-              </ul>
-            </div>
-          </label>
-          <button type="submit" className="landing-button w-full disabled:opacity-70" disabled={loading}>
-            {loading ? "Creating..." : "BEGIN FLOW"}
-          </button>
-          <div className="text-sm text-muted-foreground text-center">
-            Already have an account?{" "}
-            <Link href="/auth/login" className="text-primary hover:underline">
-              Sign in
-            </Link>
-          </div>
-        </form>
-      )}
+      </div>
     </div>
   );
 }
