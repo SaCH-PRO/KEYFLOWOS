@@ -4,42 +4,43 @@
 
 @layer base {
   :root {
-    /* LIGHT – premium electric blue on clean surface */
-    --kf-background: 216 33% 98%;
-    --kf-foreground: 222 65% 8%;
+    /* VIBRANT – white base with pink + blue hues */
+    --kf-background: 0 0% 100%;
+    --kf-foreground: 222 40% 12%;
 
     --kf-card: 0 0% 100%;
-    --kf-card-foreground: 222 65% 8%;
+    --kf-card-foreground: 222 40% 12%;
 
     --kf-popover: 0 0% 100%;
-    --kf-popover-foreground: 222 65% 8%;
+    --kf-popover-foreground: 222 40% 12%;
 
-    --kf-border: 220 28% 88%;
-    --kf-input: 220 28% 88%;
+    --kf-border: 220 30% 90%;
+    --kf-input: 220 30% 90%;
 
     /* Electric blue brand */
-    --kf-primary: 217 100% 58%; /* #297BFF */
-    --kf-primary-foreground: 210 40% 98%;
+    --kf-primary: 215 100% 56%; /* vivid blue */
+    --kf-primary-foreground: 0 0% 100%;
 
-    /* Soft slate neutrals for light mode */
-    --kf-secondary: 220 18% 92%;
-    --kf-secondary-foreground: 222 47% 12%;
+    /* Soft blush secondary */
+    --kf-secondary: 330 80% 96%;
+    --kf-secondary-foreground: 330 35% 20%;
 
-    --kf-muted: 220 18% 90%;
-    --kf-muted-foreground: 220 15% 45%;
+    --kf-muted: 220 20% 94%;
+    --kf-muted-foreground: 220 12% 40%;
 
-    --kf-accent: 260 85% 63%; /* hyper violet accent */
-    --kf-accent-foreground: 210 40% 98%;
+    /* Pink accent */
+    --kf-accent: 325 90% 62%;
+    --kf-accent-foreground: 0 0% 100%;
 
     --kf-destructive: 0 72% 56%;
     --kf-destructive-foreground: 0 0% 100%;
 
-    --kf-ring: 217 100% 58%;
+    --kf-ring: 215 100% 56%;
   }
 
   .dark {
-    /* DARK – black base with neon electric blue outlines */
-    --kf-background: 220 15% 4%; /* near-black */
+    /* DARK – black base with blue highlights */
+    --kf-background: 220 15% 4%;
     --kf-foreground: 210 40% 97%;
 
     --kf-card: 220 18% 8%;
@@ -48,25 +49,25 @@
     --kf-popover: 220 18% 8%;
     --kf-popover-foreground: 210 40% 97%;
 
-    --kf-border: 220 22% 18%; /* subtle graphite for outlines */
+    --kf-border: 220 22% 18%;
     --kf-input: 220 22% 18%;
 
-    --kf-primary: 217 100% 58%; /* electric blue core */
+    --kf-primary: 215 100% 62%; /* bright blue */
     --kf-primary-foreground: 210 40% 98%;
 
-    --kf-secondary: 222 18% 18%;
+    --kf-secondary: 220 18% 16%;
     --kf-secondary-foreground: 210 40% 92%;
 
     --kf-muted: 220 16% 14%;
     --kf-muted-foreground: 215 18% 62%;
 
-    --kf-accent: 260 82% 62%; /* neon violet for AI */
+    --kf-accent: 215 90% 58%; /* blue accent */
     --kf-accent-foreground: 210 40% 98%;
 
     --kf-destructive: 355 90% 60%;
     --kf-destructive-foreground: 210 40% 98%;
 
-    --kf-ring: 217 100% 58%; /* neon outline */
+    --kf-ring: 215 100% 62%;
   }
 
   body {
