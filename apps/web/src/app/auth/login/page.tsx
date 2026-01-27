@@ -63,65 +63,99 @@ export default function AuthLogin() {
   };
 
   return (
-    <div className="landing">
-      <div className="w-full max-w-md space-y-4">
-        <Link href="/" className="text-xs text-primary hover:underline">
-          Back to home
-        </Link>
-      </div>
-      <h1 className="landing-title text-3xl md:text-4xl font-semibold">Sign in</h1>
-      <p className="landing-tagline">Use your email and password. New here? Continue to sign up instead.</p>
-      <form
-        onSubmit={onSubmit}
-        className="w-full max-w-md mx-auto bg-card border border-border rounded-3xl p-5 sm:p-6 flex flex-col gap-4 shadow-[var(--kf-shadow)]"
-      >
-        {banner && (
-          <div className="text-xs text-emerald-300" aria-live="polite">
-            {banner}
-          </div>
-        )}
-        {error && (
-          <div className="text-xs text-amber-400" aria-live="polite">
-            {error}
-          </div>
-        )}
-        <label className="flex flex-col text-left text-sm text-foreground gap-1">
-          Email
-          <input
-            required
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
-            inputMode="email"
-            className="rounded-2xl bg-muted border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
-            placeholder="you@example.com"
-            suppressHydrationWarning
-          />
-        </label>
-        <label className="flex flex-col text-left text-sm text-foreground gap-1">
-          Password
-          <input
-            required
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-            className="rounded-2xl bg-muted border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
-            placeholder="••••••••"
-            suppressHydrationWarning
-          />
-        </label>
-        <button type="submit" className="landing-button w-full disabled:opacity-70" disabled={loading}>
-          {loading ? "Signing in..." : "BEGIN FLOW"}
-        </button>
-        <div className="text-sm text-muted-foreground text-center">
-          New to KeyFlowOS?{" "}
-          <Link href="/auth/signup" className="text-primary hover:underline">
-            Create your workspace
+    <div className="relative min-h-screen bg-background text-foreground overflow-hidden">
+      <div className="pointer-events-none absolute -left-32 top-0 h-80 w-80 rounded-full bg-[radial-gradient(circle,rgba(244,140,69,0.18),transparent_70%)] blur-2xl" />
+      <div className="pointer-events-none absolute -right-24 top-20 h-96 w-96 rounded-full bg-[radial-gradient(circle,rgba(255,120,92,0.14),transparent_70%)] blur-3xl" />
+      <div className="relative mx-auto flex min-h-screen max-w-6xl flex-col justify-center gap-10 px-6 py-12 lg:flex-row lg:items-center">
+        <div className="flex-1 space-y-6">
+          <Link href="/" className="inline-flex items-center gap-2 text-xs text-muted-foreground hover:text-primary">
+            <span className="h-6 w-6 rounded-2xl bg-primary/15 border border-primary/40" />
+            Back to home
           </Link>
+          <div className="space-y-4">
+            <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card/70 px-3 py-1 text-[11px] uppercase tracking-[0.32em] text-muted-foreground">
+              KeyFlowOS
+            </span>
+            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-semibold tracking-tight">
+              Welcome back.
+            </h1>
+            <p className="text-sm sm:text-base text-muted-foreground max-w-xl">
+              Sign in to your workspace and keep the flow moving — bookings, revenue, and client signals in one place.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {["Adaptive CRM", "Real-time insights", "Automations", "Instant payments"].map((item) => (
+              <div key={item} className="flex items-center gap-3 rounded-2xl border border-border/60 bg-card/70 px-3 py-2 text-sm">
+                <span className="h-2.5 w-2.5 rounded-full bg-primary shadow-[0_0_14px_rgba(244,140,69,0.45)]" />
+                <span>{item}</span>
+              </div>
+            ))}
+          </div>
         </div>
-      </form>
+
+        <div className="w-full max-w-md lg:max-w-sm">
+          <div className="rounded-[28px] border border-border/70 bg-card/90 p-6 shadow-[var(--kf-shadow)] backdrop-blur">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold">Sign in</h2>
+                <p className="text-xs text-muted-foreground">Continue with your KeyFlowOS account.</p>
+              </div>
+              <div className="h-10 w-10 rounded-2xl border border-border/60 bg-muted flex items-center justify-center text-xs font-semibold text-muted-foreground">
+                KF
+              </div>
+            </div>
+
+            <form onSubmit={onSubmit} className="mt-6 flex flex-col gap-4">
+              {banner && (
+                <div className="rounded-2xl border border-emerald-400/40 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-200" aria-live="polite">
+                  {banner}
+                </div>
+              )}
+              {error && (
+                <div className="rounded-2xl border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs text-amber-200" aria-live="polite">
+                  {error}
+                </div>
+              )}
+              <label className="flex flex-col text-left text-sm text-foreground gap-1">
+                Email
+                <input
+                  required
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                  inputMode="email"
+                  className="rounded-2xl bg-muted border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                  placeholder="you@example.com"
+                  suppressHydrationWarning
+                />
+              </label>
+              <label className="flex flex-col text-left text-sm text-foreground gap-1">
+                Password
+                <input
+                  required
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                  className="rounded-2xl bg-muted border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                  placeholder="••••••••"
+                  suppressHydrationWarning
+                />
+              </label>
+              <button type="submit" className="landing-button w-full disabled:opacity-70" disabled={loading}>
+                {loading ? "Signing in..." : "BEGIN FLOW"}
+              </button>
+              <div className="text-sm text-muted-foreground text-center">
+                New to KeyFlowOS?{" "}
+                <Link href="/auth/signup" className="text-primary hover:underline">
+                  Create your workspace
+                </Link>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
