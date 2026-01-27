@@ -1,5 +1,6 @@
 {
   "name": "keyflowos-monorepo",
+  "name": "KEYFLOWOS-monorepo",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -18,7 +19,8 @@
     "eslint": "^9.0.0",
     "turbo": "latest",
     "tsx": "^4.20.6",
-    "autoprefixer": "^10.4.20"
+    "autoprefixer": "^10.4.20",
+    "prisma": "^5.13.0"
   },
   "packageManager": "pnpm@9.12.0",
   "engines": {
