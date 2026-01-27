@@ -85,7 +85,7 @@ export default function AuthLogin() {
             {error}
           </div>
         )}
-        <label className="flex flex-col text-left text-sm text-muted-foreground gap-1">
+        <label className="flex flex-col text-left text-sm text-white gap-1">
           Email
           <input
             required
@@ -99,7 +99,7 @@ export default function AuthLogin() {
             suppressHydrationWarning
           />
         </label>
-        <label className="flex flex-col text-left text-sm text-muted-foreground gap-1">
+        <label className="flex flex-col text-left text-sm text-white gap-1">
           Password
           <input
             required

@@ -230,7 +230,7 @@ export default function AuthSignup() {
             </div>
           )}
           <div className="grid gap-3">
-            <label className="flex flex-col text-left text-sm text-muted-foreground gap-1">
+            <label className="flex flex-col text-left text-sm text-white gap-1">
               Username (unique)
               <input
                 required
@@ -248,7 +248,7 @@ export default function AuthSignup() {
               </span>
             </label>
             <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex flex-col text-left text-sm text-muted-foreground gap-1">
+              <label className="flex flex-col text-left text-sm text-white gap-1">
                 First name
                 <input
                   required
@@ -259,7 +259,7 @@ export default function AuthSignup() {
                   placeholder="First"
                 />
               </label>
-              <label className="flex flex-col text-left text-sm text-muted-foreground gap-1">
+              <label className="flex flex-col text-left text-sm text-white gap-1">
                 Last name
                 <input
                   required
@@ -271,7 +271,7 @@ export default function AuthSignup() {
                 />
               </label>
             </div>
-            <label className="flex flex-col text-left text-sm text-muted-foreground gap-1">
+            <label className="flex flex-col text-left text-sm text-white gap-1">
               Company / brand
               <input
                 value={company}
@@ -281,7 +281,7 @@ export default function AuthSignup() {
                 placeholder="Business name"
               />
             </label>
-            <label className="flex flex-col text-left text-sm text-muted-foreground gap-1">
+            <label className="flex flex-col text-left text-sm text-white gap-1">
               Age
               <input
                 type="number"
@@ -293,7 +293,7 @@ export default function AuthSignup() {
                 placeholder="18"
               />
             </label>
-            <label className="flex flex-col text-left text-sm text-muted-foreground gap-1">
+            <label className="flex flex-col text-left text-sm text-white gap-1">
               Contact number
               <input
                 value={contactNumber}
@@ -305,7 +305,7 @@ export default function AuthSignup() {
               />
             </label>
           </div>
-          <label className="flex flex-col text-left text-sm text-muted-foreground gap-1">
+          <label className="flex flex-col text-left text-sm text-white gap-1">
             Email
             <input
               required
@@ -318,7 +318,7 @@ export default function AuthSignup() {
               placeholder="you@example.com"
             />
           </label>
-          <label className="flex flex-col text-left text-sm text-muted-foreground gap-1">
+          <label className="flex flex-col text-left text-sm text-white gap-1">
             Password
             <div className="relative">
               <input
