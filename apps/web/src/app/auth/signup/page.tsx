@@ -184,7 +184,7 @@ export default function AuthSignup() {
       <h1 className="landing-title text-3xl md:text-4xl font-semibold">Create your workspace</h1>
       <p className="landing-tagline">Sign up with your email and set up your profile to begin your flow.</p>
       {pendingVerification ? (
-        <div className="w-full max-w-md mx-auto bg-slate-900/40 border border-primary/30 rounded-3xl p-5 sm:p-6 flex flex-col gap-4 text-center shadow-[0_0_35px_rgba(41,123,255,0.25)]">
+        <div className="w-full max-w-md mx-auto bg-card border border-border rounded-3xl p-5 sm:p-6 flex flex-col gap-4 text-center shadow-[var(--kf-shadow)]">
           <h2 className="text-xl font-semibold text-foreground">Verify your email</h2>
           <p className="text-sm text-muted-foreground">
             We sent a verification link to <span className="text-primary">{email}</span>. Please check your inbox and click the link to continue.
@@ -217,7 +217,7 @@ export default function AuthSignup() {
       ) : (
         <form
           onSubmit={onSubmit}
-          className="w-full max-w-md mx-auto bg-slate-900/40 border border-primary/30 rounded-3xl p-5 sm:p-6 flex flex-col gap-4 shadow-[0_0_35px_rgba(41,123,255,0.25)]"
+          className="w-full max-w-md mx-auto bg-card border border-border rounded-3xl p-5 sm:p-6 flex flex-col gap-4 shadow-[var(--kf-shadow)]"
         >
           {error && (
             <div className="text-xs text-amber-400" aria-live="polite">
@@ -230,14 +230,14 @@ export default function AuthSignup() {
             </div>
           )}
           <div className="grid gap-3">
-            <label className="flex flex-col text-left text-sm text-white gap-1">
+            <label className="flex flex-col text-left text-sm text-foreground gap-1">
               Username (unique)
               <input
                 required
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 autoComplete="username"
-                className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-white placeholder:text-slate-400 focus:border-primary focus:outline-none"
+                className="rounded-xl bg-background border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
                 placeholder="yourname"
               />
               <span className="text-[11px] text-muted-foreground">
@@ -248,40 +248,40 @@ export default function AuthSignup() {
               </span>
             </label>
             <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex flex-col text-left text-sm text-white gap-1">
+              <label className="flex flex-col text-left text-sm text-foreground gap-1">
                 First name
                 <input
                   required
                   value={firstName}
                   onChange={(e) => setFirstName(e.target.value)}
                   autoComplete="given-name"
-                  className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-white placeholder:text-slate-400 focus:border-primary focus:outline-none"
+                  className="rounded-xl bg-background border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
                   placeholder="First"
                 />
               </label>
-              <label className="flex flex-col text-left text-sm text-white gap-1">
+              <label className="flex flex-col text-left text-sm text-foreground gap-1">
                 Last name
                 <input
                   required
                   value={lastName}
                   onChange={(e) => setLastName(e.target.value)}
                   autoComplete="family-name"
-                  className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-white placeholder:text-slate-400 focus:border-primary focus:outline-none"
+                  className="rounded-xl bg-background border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
                   placeholder="Last"
                 />
               </label>
             </div>
-            <label className="flex flex-col text-left text-sm text-white gap-1">
+            <label className="flex flex-col text-left text-sm text-foreground gap-1">
               Company / brand
               <input
                 value={company}
                 onChange={(e) => setCompany(e.target.value)}
                 autoComplete="organization"
-                className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-white placeholder:text-slate-400 focus:border-primary focus:outline-none"
+                className="rounded-xl bg-background border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
                 placeholder="Business name"
               />
             </label>
-            <label className="flex flex-col text-left text-sm text-white gap-1">
+            <label className="flex flex-col text-left text-sm text-foreground gap-1">
               Age
               <input
                 type="number"
@@ -289,23 +289,23 @@ export default function AuthSignup() {
                 value={age}
                 onChange={(e) => setAge(e.target.value)}
                 inputMode="numeric"
-                className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-white placeholder:text-slate-400 focus:border-primary focus:outline-none"
+                className="rounded-xl bg-background border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
                 placeholder="18"
               />
             </label>
-            <label className="flex flex-col text-left text-sm text-white gap-1">
+            <label className="flex flex-col text-left text-sm text-foreground gap-1">
               Contact number
               <input
                 value={contactNumber}
                 onChange={(e) => setContactNumber(e.target.value)}
                 autoComplete="tel"
                 inputMode="tel"
-                className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-white placeholder:text-slate-400 focus:border-primary focus:outline-none"
+                className="rounded-xl bg-background border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
                 placeholder="+1 555 123 4567"
               />
             </label>
           </div>
-          <label className="flex flex-col text-left text-sm text-white gap-1">
+          <label className="flex flex-col text-left text-sm text-foreground gap-1">
             Email
             <input
               required
@@ -314,11 +314,11 @@ export default function AuthSignup() {
               onChange={(e) => setEmail(e.target.value)}
               autoComplete="email"
               inputMode="email"
-              className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-white placeholder:text-slate-400 focus:border-primary focus:outline-none"
+              className="rounded-xl bg-background border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
               placeholder="you@example.com"
             />
           </label>
-          <label className="flex flex-col text-left text-sm text-white gap-1">
+          <label className="flex flex-col text-left text-sm text-foreground gap-1">
             Password
             <div className="relative">
               <input
@@ -327,7 +327,7 @@ export default function AuthSignup() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="new-password"
-                className="w-full rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 pr-12 text-sm text-white placeholder:text-slate-400 focus:border-primary focus:outline-none"
+                className="w-full rounded-xl bg-background border border-border/60 px-3 py-2 pr-12 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
                 placeholder="Create a secure password"
               />
               <button

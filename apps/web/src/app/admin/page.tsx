@@ -25,7 +25,7 @@ export default function AdminHome() {
         {metrics.map((m) => (
           <div
             key={m.label}
-            className="rounded-2xl border border-border/70 bg-slate-950/70 p-4 shadow-soft-elevated"
+            className="rounded-2xl border border-border/70 bg-card p-4 shadow-[var(--kf-shadow)]"
           >
             <div className="text-xs text-muted-foreground uppercase tracking-[0.12em]">{m.label}</div>
             <div className="text-xl font-semibold mt-1">{m.value}</div>
@@ -35,7 +35,7 @@ export default function AdminHome() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl border border-border/70 bg-slate-950/70 p-5">
+        <div className="rounded-2xl border border-border/70 bg-card p-5 shadow-[var(--kf-shadow)]">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-sm font-semibold">Growth funnel</h3>
@@ -45,9 +45,9 @@ export default function AdminHome() {
               Live
             </span>
           </div>
-          <div className="mt-4 h-48 rounded-xl border border-border/60 bg-gradient-to-r from-slate-900 via-primary/10 to-emerald-400/10" />
+          <div className="mt-4 h-48 rounded-xl border border-border/60 bg-gradient-to-r from-muted via-primary/10 to-accent/10" />
         </div>
-        <div className="rounded-2xl border border-border/70 bg-slate-950/70 p-5 space-y-3">
+        <div className="rounded-2xl border border-border/70 bg-card p-5 space-y-3 shadow-[var(--kf-shadow)]">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold">System Mind</h3>
             <span className="text-[11px] rounded-full bg-emerald-500/10 border border-emerald-400/50 px-2 py-1 text-emerald-200">
@@ -56,7 +56,7 @@ export default function AdminHome() {
           </div>
           <div className="space-y-2 text-sm text-muted-foreground">
             {insights.map((i) => (
-              <div key={i} className="rounded-xl border border-border/60 bg-slate-900/70 p-3">
+              <div key={i} className="rounded-xl border border-border/60 bg-background p-3">
                 {i}
               </div>
             ))}

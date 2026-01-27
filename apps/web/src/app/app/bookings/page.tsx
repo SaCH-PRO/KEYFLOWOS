@@ -198,7 +198,7 @@ export default function BookingsPage() {
       )}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-3 rounded-3xl border border-border/60 bg-slate-950/60 p-4">
+        <div className="space-y-3 rounded-3xl border border-border/60 bg-card p-4 shadow-[var(--kf-shadow)]">
           <div className="text-sm font-semibold">Create booking</div>
           <div className="grid gap-2 md:grid-cols-2">
             <label className="text-xs text-muted-foreground">
@@ -265,7 +265,7 @@ export default function BookingsPage() {
           <Button onClick={handleCreateBooking}>Save booking</Button>
         </div>
 
-        <div className="space-y-3 rounded-3xl border border-border/60 bg-slate-950/60 p-4">
+        <div className="space-y-3 rounded-3xl border border-border/60 bg-card p-4 shadow-[var(--kf-shadow)]">
           <div className="text-sm font-semibold">Staff availability</div>
           <div className="text-xs text-muted-foreground">Select a staff member to add working hours.</div>
           <div className="grid gap-2 md:grid-cols-3">
@@ -308,7 +308,7 @@ export default function BookingsPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-3 rounded-3xl border border-border/60 bg-slate-950/60 p-4">
+        <div className="space-y-3 rounded-3xl border border-border/60 bg-card p-4 shadow-[var(--kf-shadow)]">
           <div className="text-sm font-semibold">Services</div>
           <div className="grid gap-2 md:grid-cols-2">
             <Input
@@ -349,7 +349,7 @@ export default function BookingsPage() {
           </div>
         </div>
 
-        <div className="space-y-3 rounded-3xl border border-border/60 bg-slate-950/60 p-4">
+        <div className="space-y-3 rounded-3xl border border-border/60 bg-card p-4 shadow-[var(--kf-shadow)]">
           <div className="text-sm font-semibold">Staff</div>
           <div className="flex gap-2">
             <Input
@@ -371,7 +371,7 @@ export default function BookingsPage() {
 
       <div>
         {bookingRows.length === 0 ? (
-          <div className="rounded-2xl border border-border/60 bg-slate-950/50 p-4 text-sm text-muted-foreground">
+          <div className="rounded-2xl border border-border/60 bg-muted p-4 text-sm text-muted-foreground">
             {loading ? "Loading bookings..." : "No bookings yet. Add one to begin scheduling."}
           </div>
         ) : (

@@ -10,14 +10,14 @@ interface ShellProps {
 
 export function Shell({ sidebar, topbar, children, className }: ShellProps) {
   return (
-    <div className={cn("min-h-screen bg-[var(--kf-bg)] text-[var(--kf-text)]", className)}>
+    <div className={cn("min-h-screen bg-[hsl(var(--kf-background))] text-[hsl(var(--kf-foreground))]", className)}>
       <div className="mx-auto flex max-w-7xl gap-4 px-6 py-4">
-        <aside className="w-64 shrink-0 rounded-2xl border border-[var(--kf-border)] bg-[rgba(31,34,37,0.9)] shadow-glass backdrop-blur-md">
+        <aside className="w-64 shrink-0 rounded-2xl border border-[hsl(var(--kf-border))] bg-[hsl(var(--kf-card))] shadow-[var(--kf-shadow)]">
           {sidebar}
         </aside>
         <div className="flex w-full flex-col gap-4">
           {topbar}
-          <main className="rounded-2xl border border-[var(--kf-border)] bg-[rgba(0,0,0,0.3)] shadow-glass backdrop-blur-md p-4">
+          <main className="rounded-2xl border border-[hsl(var(--kf-border))] bg-[hsl(var(--kf-card))] shadow-[var(--kf-shadow)] p-4">
             {children}
           </main>
         </div>

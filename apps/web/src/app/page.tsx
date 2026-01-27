@@ -26,10 +26,10 @@ export default function Home() {
           ].map((item) => (
             <div
               key={item.title}
-              className="rounded-2xl border border-primary/20 bg-slate-900/40 p-4 text-sm text-slate-200"
+              className="rounded-2xl border border-border bg-card p-4 text-sm text-muted-foreground shadow-[var(--kf-shadow)]"
             >
               <div className="text-xs uppercase tracking-[0.2em] text-primary">{item.title}</div>
-              <div className="mt-2 text-sm text-slate-200">{item.desc}</div>
+              <div className="mt-2 text-sm text-muted-foreground">{item.desc}</div>
             </div>
           ))}
         </div>

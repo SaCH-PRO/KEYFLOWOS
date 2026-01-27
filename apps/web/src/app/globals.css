@@ -1,3 +1,5 @@
+@import url("https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -16,6 +18,7 @@
 
     --kf-border: 220 30% 90%;
     --kf-input: 220 30% 90%;
+    --kf-surface: 220 20% 98%;
 
     /* Electric blue brand */
     --kf-primary: 215 100% 56%; /* vivid blue */
@@ -36,6 +39,18 @@
     --kf-destructive-foreground: 0 0% 100%;
 
     --kf-ring: 215 100% 56%;
+
+    --kf-text: hsl(var(--kf-foreground));
+    --kf-text-muted: hsl(var(--kf-muted-foreground));
+    --kf-glass: rgba(255, 255, 255, 0.85);
+    --kf-electric: hsl(var(--kf-primary));
+    --kf-pulse: hsl(var(--kf-accent));
+    --kf-mint: #24d08d;
+    --kf-amber: #f5b942;
+    --kf-red: #f45b69;
+    --kf-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+    --kf-glow: 0 0 24px rgba(41, 123, 255, 0.2);
+    --kf-radius: 18px;
   }
 
   .dark {
@@ -68,11 +83,24 @@
     --kf-destructive-foreground: 210 40% 98%;
 
     --kf-ring: 215 100% 62%;
+
+    --kf-text: hsl(var(--kf-foreground));
+    --kf-text-muted: hsl(var(--kf-muted-foreground));
+    --kf-glass: rgba(12, 14, 18, 0.72);
+    --kf-electric: hsl(var(--kf-primary));
+    --kf-pulse: hsl(var(--kf-accent));
+    --kf-mint: #38e8a7;
+    --kf-amber: #f8c15a;
+    --kf-red: #ff5f6f;
+    --kf-shadow: 0 20px 50px rgba(0, 0, 0, 0.55);
+    --kf-glow: 0 0 28px rgba(74, 163, 255, 0.35);
+    --kf-radius: 18px;
   }
 
   body {
     background-color: hsl(var(--kf-background));
     color: hsl(var(--kf-foreground));
+    font-family: "Satoshi", system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -81,16 +109,18 @@
 @layer components {
   .landing {
     @apply relative min-h-[100svh] flex flex-col items-center justify-start sm:justify-center px-4 sm:px-6 text-center gap-6 py-10 sm:py-12;
-    background: radial-gradient(circle at 40% 20%, rgba(41,123,255,0.16), transparent 45%),
-      radial-gradient(circle at 70% 60%, rgba(0,207,255,0.18), transparent 50%),
-      #02040b;
+    background:
+      radial-gradient(circle at 10% 20%, hsl(var(--kf-accent) / 0.12), transparent 45%),
+      radial-gradient(circle at 80% 10%, hsl(var(--kf-primary) / 0.14), transparent 45%),
+      radial-gradient(circle at 60% 70%, hsl(var(--kf-primary) / 0.1), transparent 50%),
+      hsl(var(--kf-background));
     overflow-x: hidden;
   }
   .landing::before {
     content: "";
     position: absolute;
     inset: -10% 10% 30% 10%;
-    background: radial-gradient(circle at 50% 30%, rgba(0,207,255,0.18), transparent 60%);
+    background: radial-gradient(circle at 50% 30%, hsl(var(--kf-primary) / 0.18), transparent 60%);
     filter: blur(60px);
     opacity: 0.7;
     animation: slow-pulse 8s ease-in-out infinite alternate;
@@ -100,36 +130,34 @@
     letter-spacing: clamp(0.12em, 2.5vw, 0.38em);
     text-indent: clamp(0.12em, 2.5vw, 0.38em);
     text-transform: uppercase;
-    color: #7fe6ff;
+    color: hsl(var(--kf-foreground));
     text-shadow:
-      0 0 6px #7fe6ff,
-      0 0 16px #7fe6ff,
-      0 0 32px #2fd0ff,
-      0 0 56px #00cfff;
+      0 0 18px hsl(var(--kf-primary) / 0.25),
+      0 0 36px hsl(var(--kf-accent) / 0.18);
   }
   .landing-tagline {
-    @apply text-sm sm:text-base md:text-lg max-w-3xl text-[#9fb3ff] leading-relaxed;
+    @apply text-sm sm:text-base md:text-lg max-w-3xl text-[hsl(var(--kf-muted-foreground))] leading-relaxed;
   }
   .landing-button {
     @apply relative inline-flex items-center justify-center rounded-full border text-base font-semibold px-6 py-3 transition-all w-full sm:w-auto;
-    background: linear-gradient(135deg, rgba(41,123,255,0.9), rgba(0,207,255,0.7));
-    border-color: rgba(78,168,255,0.7);
-    color: #e9f4ff;
-    box-shadow: 0 0 22px rgba(41,123,255,0.45), 0 0 48px rgba(0,207,255,0.35);
+    background: linear-gradient(135deg, hsl(var(--kf-primary)), hsl(var(--kf-accent)));
+    border-color: hsl(var(--kf-primary) / 0.6);
+    color: hsl(var(--kf-primary-foreground));
+    box-shadow: 0 10px 30px hsl(var(--kf-primary) / 0.25);
   }
   .landing-button:hover {
-    box-shadow: 0 0 28px rgba(41,123,255,0.55), 0 0 62px rgba(0,207,255,0.45);
+    box-shadow: 0 14px 40px hsl(var(--kf-primary) / 0.35);
     transform: translateY(-2px);
   }
   .landing-button-secondary {
     background: transparent;
-    border-color: rgba(78,168,255,0.6);
-    color: #7fe6ff;
+    border-color: hsl(var(--kf-primary) / 0.5);
+    color: hsl(var(--kf-primary));
     box-shadow: none;
   }
   .landing-button-secondary:hover {
     box-shadow: none;
-    background: rgba(41,123,255,0.12);
+    background: hsl(var(--kf-primary) / 0.08);
   }
 }
 

@@ -229,7 +229,7 @@ export default function CommercePage() {
         </div>
       )}
 
-      <div className="rounded-3xl border border-border/60 bg-slate-950/60 p-4 space-y-3">
+      <div className="rounded-3xl border border-border/60 bg-card p-4 space-y-3 shadow-[var(--kf-shadow)]">
         <div className="text-sm font-semibold">Create product</div>
         <div className="flex flex-wrap gap-2 items-end">
           <Input
@@ -255,7 +255,7 @@ export default function CommercePage() {
           <Button onClick={handleCreateProduct}>Add</Button>
         </div>
         {productRows.length === 0 ? (
-          <div className="rounded-2xl border border-border/60 bg-slate-950/50 p-4 text-sm text-muted-foreground">
+          <div className="rounded-2xl border border-border/60 bg-muted p-4 text-sm text-muted-foreground">
             {loading ? "Loading products..." : "No products yet. Add one to begin billing."}
           </div>
         ) : (
@@ -264,7 +264,7 @@ export default function CommercePage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-3xl border border-border/60 bg-slate-950/60 p-4 space-y-3">
+        <div className="rounded-3xl border border-border/60 bg-card p-4 space-y-3 shadow-[var(--kf-shadow)]">
           <div className="text-sm font-semibold">Create invoice</div>
           <label className="text-xs text-muted-foreground">
             Contact
@@ -345,7 +345,7 @@ export default function CommercePage() {
           </div>
         </div>
 
-        <div className="rounded-3xl border border-border/60 bg-slate-950/60 p-4 space-y-3">
+        <div className="rounded-3xl border border-border/60 bg-card p-4 space-y-3 shadow-[var(--kf-shadow)]">
           <div className="text-sm font-semibold">Create quote</div>
           <label className="text-xs text-muted-foreground">
             Contact
@@ -433,7 +433,7 @@ export default function CommercePage() {
           {invoiceError && <span className="text-xs text-amber-400">API unreachable — showing demo data.</span>}
         </div>
         {invoiceRows.length === 0 ? (
-          <div className="rounded-2xl border border-border/60 bg-slate-950/50 p-4 text-sm text-muted-foreground">
+          <div className="rounded-2xl border border-border/60 bg-muted p-4 text-sm text-muted-foreground">
             {loading ? "Loading invoices..." : "No invoices yet."}
           </div>
         ) : (
@@ -446,7 +446,7 @@ export default function CommercePage() {
           <h2 className="text-lg font-semibold">Quotes</h2>
         </div>
         {quoteRows.length === 0 ? (
-          <div className="rounded-2xl border border-border/60 bg-slate-950/50 p-4 text-sm text-muted-foreground">
+          <div className="rounded-2xl border border-border/60 bg-muted p-4 text-sm text-muted-foreground">
             {loading ? "Loading quotes..." : "No quotes yet."}
           </div>
         ) : (

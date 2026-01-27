@@ -11,9 +11,9 @@ export default function AdminEvents() {
         <h1 className="text-2xl font-semibold tracking-tight">Events</h1>
         <p className="text-sm text-muted-foreground">Recent platform-wide signals.</p>
       </div>
-      <div className="rounded-2xl border border-border/70 bg-slate-950/70 p-4 space-y-2">
+      <div className="rounded-2xl border border-border/70 bg-card p-4 space-y-2 shadow-[var(--kf-shadow)]">
         {events.map((e) => (
-          <div key={e.detail} className="rounded-xl border border-border/60 bg-slate-900/70 px-3 py-3 text-sm">
+          <div key={e.detail} className="rounded-xl border border-border/60 bg-background px-3 py-3 text-sm">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>{e.type}</span>
               <span>{e.time}</span>

@@ -12,17 +12,17 @@ export function MomentumBar({ value, label = "Flow Momentum", streaks = [], clas
   return (
     <div
       className={cn(
-        "relative overflow-hidden rounded-xl border border-[var(--kf-border)] bg-[rgba(31,34,37,0.9)] p-3 shadow-glass",
+        "relative overflow-hidden rounded-2xl border border-[hsl(var(--kf-border))] bg-[hsl(var(--kf-card))] p-4 shadow-[var(--kf-shadow)]",
         className,
       )}
     >
-      <div className="flex items-center justify-between text-xs uppercase tracking-[0.08em] text-[var(--kf-text-muted)]">
+      <div className="flex items-center justify-between text-xs uppercase tracking-[0.16em] text-[hsl(var(--kf-muted-foreground))]">
         <span>{label}</span>
-        <span className="text-[var(--kf-electric)]">{Math.round(clamped * 100)}%</span>
+        <span className="text-[hsl(var(--kf-primary))]">{Math.round(clamped * 100)}%</span>
       </div>
-      <div className="mt-2 h-3 w-full overflow-hidden rounded-full bg-[rgba(213,215,218,0.08)]">
+      <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-[hsl(var(--kf-muted))]">
         <div
-          className="h-full rounded-full bg-gradient-to-r from-[var(--kf-electric)] via-[var(--kf-pulse)] to-[var(--kf-mint)] transition-[width] duration-300 ease-flow shadow-[0_0_18px_rgba(78,168,255,0.45)]"
+          className="h-full rounded-full bg-gradient-to-r from-[hsl(var(--kf-primary))] via-[hsl(var(--kf-accent))] to-[var(--kf-mint)] transition-[width] duration-300 ease-flow shadow-[0_6px_16px_hsl(var(--kf-primary)/0.25)]"
           style={{ width: `${Math.round(clamped * 100)}%` }}
         />
       </div>
@@ -31,7 +31,7 @@ export function MomentumBar({ value, label = "Flow Momentum", streaks = [], clas
           {streaks.map((s) => (
             <span
               key={s}
-              className="rounded-full border border-[var(--kf-electric)] bg-[rgba(78,168,255,0.08)] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--kf-electric)] shadow-[0_0_10px_rgba(78,168,255,0.25)]"
+              className="rounded-full border border-[hsl(var(--kf-primary))] bg-[hsl(var(--kf-primary)/0.08)] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[hsl(var(--kf-primary))]"
             >
               {s}
             </span>

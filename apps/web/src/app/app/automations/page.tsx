@@ -150,7 +150,7 @@ export default function AutomationsPage() {
         <div className="space-y-2">
           {automations.length === 0 && <div className="text-xs text-muted-foreground">No automations yet.</div>}
           {automations.map((automation) => (
-            <div key={automation.id} className="rounded-2xl border border-border/60 bg-slate-900/60 p-3 text-sm">
+            <div key={automation.id} className="rounded-2xl border border-border/60 bg-background p-3 text-sm">
               <div className="flex items-center justify-between">
                 <div className="font-semibold">{automation.name}</div>
                 <Badge tone="info">{automation.trigger}</Badge>

@@ -132,7 +132,7 @@ export default function IdentityPage() {
           <div className="space-y-2">
             {team.length === 0 && <div className="text-xs text-muted-foreground">No team members yet.</div>}
             {team.map((member) => (
-              <div key={member.id} className="flex items-center justify-between rounded-xl border border-border/60 bg-slate-900/60 px-3 py-2 text-sm">
+              <div key={member.id} className="flex items-center justify-between rounded-xl border border-border/60 bg-background px-3 py-2 text-sm">
                 <div>
                   <div className="font-semibold">{member.user?.name ?? member.user?.email ?? "User"}</div>
                   <div className="text-xs text-muted-foreground">{member.user?.email ?? "-"}</div>

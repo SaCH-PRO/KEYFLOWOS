@@ -19,26 +19,26 @@ export default function AdminSystem() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl border border-primary/40 bg-primary/10 p-5 space-y-3 shadow-glow-primary">
+        <div className="rounded-2xl border border-primary/40 bg-primary/10 p-5 space-y-3 shadow-[var(--kf-glow)]">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold">AI Insights</h3>
-            <span className="text-[11px] rounded-full bg-emerald-500/10 border border-emerald-400/50 px-2 py-1 text-emerald-200">
+            <span className="text-[11px] rounded-full bg-[var(--kf-mint)]/10 border border-[var(--kf-mint)]/50 px-2 py-1 text-[var(--kf-mint)]">
               Live
             </span>
           </div>
           <div className="space-y-2 text-sm text-foreground">
             {insights.map((i) => (
-              <div key={i} className="rounded-xl border border-border/60 bg-slate-950/60 p-3">
+              <div key={i} className="rounded-xl border border-border/60 bg-background p-3">
                 {i}
               </div>
             ))}
           </div>
         </div>
-        <div className="rounded-2xl border border-border/70 bg-slate-950/70 p-5 space-y-3">
+        <div className="rounded-2xl border border-border/70 bg-card p-5 space-y-3 shadow-[var(--kf-shadow)]">
           <h3 className="text-sm font-semibold">Suggested Actions</h3>
           <div className="space-y-2 text-sm text-foreground">
             {actions.map((a) => (
-              <div key={a} className="rounded-xl border border-border/60 bg-slate-900/70 p-3">
+              <div key={a} className="rounded-xl border border-border/60 bg-background p-3">
                 {a}
               </div>
             ))}

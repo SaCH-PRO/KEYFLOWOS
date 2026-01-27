@@ -28,12 +28,12 @@ function SectionCard({
 }) {
   return (
     <Card
-      className={`space-y-3 rounded-xl border border-slate-200 bg-white shadow-sm hover:shadow-md transition-shadow ${className}`}
+      className={`space-y-3 shadow-[var(--kf-shadow)] transition-shadow ${className}`}
       padding="lg"
       shadow="sm"
     >
       <div className="flex items-center justify-between gap-3">
-        <p className="text-sm font-semibold text-slate-900">{title}</p>
+        <p className="text-sm font-semibold text-foreground">{title}</p>
         {action}
       </div>
       {children}
@@ -133,9 +133,9 @@ export default function CrmDashboardPage() {
             {segmentKeys.map((segment) => (
               <div
                 key={segment.key}
-                className="rounded-xl border border-slate-200 bg-white p-3 text-sm shadow-sm hover:shadow-md transition-shadow"
+                className="rounded-xl border border-border bg-card p-3 text-sm shadow-[var(--kf-shadow)] transition-shadow"
               >
-                <div className="flex items-center justify-between text-slate-600">
+                <div className="flex items-center justify-between text-muted-foreground">
                   <span>{segment.label}</span>
                   <Badge tone={segment.tone}>{segments[segment.key] ?? 0}</Badge>
                 </div>
@@ -149,18 +149,18 @@ export default function CrmDashboardPage() {
             {topContacts.map((c) => (
               <div
                 key={c.id}
-                className="rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-900 shadow-sm hover:shadow-md transition-shadow"
+                className="rounded-xl border border-border bg-card p-3 text-sm text-foreground shadow-[var(--kf-shadow)] transition-shadow"
               >
                 <div className="flex items-center justify-between">
                   <span>{`${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || "Unnamed"}</span>
                   <Badge tone="success">Score {c.meta?.leadScore ?? "-"}</Badge>
                 </div>
-                <div className="text-[11px] text-slate-500">
+                <div className="text-[11px] text-muted-foreground">
                   {c.email || c.phone || "No contact info"}
                 </div>
-                <div className="flex flex-wrap gap-1 text-[11px] text-slate-500">
+                <div className="flex flex-wrap gap-1 text-[11px] text-muted-foreground">
                   {(c.tags ?? []).slice(0, 3).map((t) => (
-                    <span key={t} className="rounded-full border border-slate-200 px-2 py-0.5">
+                    <span key={t} className="rounded-full border border-border px-2 py-0.5">
                       {t}
                     </span>
                   ))}
@@ -172,7 +172,7 @@ export default function CrmDashboardPage() {
                 </div>
               </div>
             ))}
-            {topContacts.length === 0 && <p className="text-xs text-slate-500">No contacts yet.</p>}
+            {topContacts.length === 0 && <p className="text-xs text-muted-foreground">No contacts yet.</p>}
           </div>
         </SectionCard>
 
@@ -181,11 +181,11 @@ export default function CrmDashboardPage() {
             {overdueTasks.slice(0, 6).map((t) => (
               <div
                 key={t.id}
-                className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-2 shadow-sm hover:shadow-md transition-shadow"
+                className="flex items-center justify-between rounded-xl border border-border bg-card p-2 shadow-[var(--kf-shadow)] transition-shadow"
               >
                 <div>
-                  <div className="text-sm font-semibold text-slate-900">{t.title}</div>
-                  <div className="text-[11px] text-slate-500">
+                  <div className="text-sm font-semibold text-foreground">{t.title}</div>
+                  <div className="text-[11px] text-muted-foreground">
                     {t.contact
                       ? `${t.contact.firstName ?? ""} ${t.contact.lastName ?? ""}`.trim() ||
                         t.contact.email ||
@@ -193,12 +193,12 @@ export default function CrmDashboardPage() {
                       : ""}
                   </div>
                 </div>
-                <div className="text-[11px] text-slate-500">
+                <div className="text-[11px] text-muted-foreground">
                   {t.dueDate ? new Date(t.dueDate).toLocaleDateString() : "No due"}
                 </div>
               </div>
             ))}
-            {overdueTasks.length === 0 && <p className="text-xs text-slate-500">No open tasks.</p>}
+            {overdueTasks.length === 0 && <p className="text-xs text-muted-foreground">No open tasks.</p>}
           </div>
         </SectionCard>
       </CardGrid>
@@ -218,17 +218,17 @@ export default function CrmDashboardPage() {
         }
       >
         {events.length === 0 ? (
-          <p className="text-xs text-slate-500">No recent events.</p>
+          <p className="text-xs text-muted-foreground">No recent events.</p>
         ) : (
           <div className="grid gap-2 md:grid-cols-2">
             {events.slice(0, 10).map((event) => (
               <div
                 key={event.id}
-                className="rounded-xl border border-slate-200 bg-white p-2 text-[11px] text-slate-600 shadow-sm hover:shadow-md transition-shadow"
+                className="rounded-xl border border-border bg-card p-2 text-[11px] text-muted-foreground shadow-[var(--kf-shadow)] transition-shadow"
               >
-                <div className="flex items-center justify-between text-slate-900">
+                <div className="flex items-center justify-between text-foreground">
                   <span className="font-semibold">{event.type}</span>
-                  <span className="text-[10px] text-slate-500">{new Date(event.createdAt).toLocaleString()}</span>
+                  <span className="text-[10px] text-muted-foreground">{new Date(event.createdAt).toLocaleString()}</span>
                 </div>
                 <p className="line-clamp-2">
                   {event.data && typeof event.data === "object"
@@ -243,26 +243,26 @@ export default function CrmDashboardPage() {
 
       <Drawer open={insightsOpen} onClose={() => setInsightsOpen(false)} title="Pipeline insights">
         <div className="space-y-3 p-2">
-          <div className="text-xs text-slate-500">Mobile-first snapshot of where to focus.</div>
+          <div className="text-xs text-muted-foreground">Mobile-first snapshot of where to focus.</div>
           <div className="grid gap-2 sm:grid-cols-2">
-            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="text-xs uppercase text-slate-500">Total contacts</div>
-              <div className="text-lg font-semibold text-slate-900">{totalContacts}</div>
+            <div className="rounded-xl border border-border bg-card p-3 shadow-[var(--kf-shadow)]">
+              <div className="text-xs uppercase text-muted-foreground">Total contacts</div>
+              <div className="text-lg font-semibold text-foreground">{totalContacts}</div>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="text-xs uppercase text-slate-500">Upcoming tasks</div>
-              <div className="text-lg font-semibold text-slate-900">{tasks.length}</div>
+            <div className="rounded-xl border border-border bg-card p-3 shadow-[var(--kf-shadow)]">
+              <div className="text-xs uppercase text-muted-foreground">Upcoming tasks</div>
+              <div className="text-lg font-semibold text-foreground">{tasks.length}</div>
             </div>
           </div>
           <div className="space-y-2">
             {insights.map((item) => (
               <div
                 key={item.label}
-                className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
+                className="flex items-center justify-between rounded-xl border border-border bg-card px-3 py-2 shadow-[var(--kf-shadow)]"
               >
                 <div>
-                  <div className="text-sm font-semibold text-slate-900">{item.label}</div>
-                  <div className="text-[11px] text-slate-500">{item.hint}</div>
+                  <div className="text-sm font-semibold text-foreground">{item.label}</div>
+                  <div className="text-[11px] text-muted-foreground">{item.hint}</div>
                 </div>
                 <Badge tone={item.tone}>{item.value}</Badge>
               </div>

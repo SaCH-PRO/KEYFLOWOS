@@ -105,7 +105,7 @@ export default function ProjectsPage() {
             </Button>
             <div className="space-y-2">
               {templates.map((template) => (
-                <div key={template.id} className="rounded-xl border border-border/60 bg-slate-900/60 p-3 text-sm">
+                <div key={template.id} className="rounded-xl border border-border/60 bg-background p-3 text-sm">
                   <div className="font-semibold">{template.name}</div>
                   <div className="text-xs text-muted-foreground">
                     {(template.taskTitles ?? []).length} tasks
@@ -127,7 +127,7 @@ export default function ProjectsPage() {
             {projects.map((project) => (
               <div
                 key={project.id}
-                className="rounded-2xl border border-border/60 bg-slate-900/60 p-3 text-sm cursor-pointer"
+                className="rounded-2xl border border-border/60 bg-background p-3 text-sm cursor-pointer"
                 onClick={() => setSelectedProjectId(project.id)}
               >
                 <div className="flex items-center justify-between">
@@ -155,7 +155,7 @@ export default function ProjectsPage() {
                 </div>
                 <div className="space-y-2 text-sm">
                   {(projects.find((p) => p.id === selectedProjectId)?.tasks ?? []).map((task) => (
-                    <div key={task.id} className="rounded-xl border border-border/60 bg-slate-900/60 p-2">
+                    <div key={task.id} className="rounded-xl border border-border/60 bg-background p-2">
                       <div className="flex items-center justify-between">
                         <span className={task.isCompleted ? "line-through text-muted-foreground" : ""}>{task.title}</span>
                         <Button size="xs" variant="outline" onClick={() => handleToggleTask(task.id, task.isCompleted)}>

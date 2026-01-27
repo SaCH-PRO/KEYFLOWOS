@@ -26,7 +26,7 @@ const achievements = [
 
 export function AchievementsStrip() {
   return (
-    <div className="rounded-3xl border border-border/60 bg-slate-950/70 px-3 py-2 md:px-4 md:py-3 flex items-center gap-3 overflow-x-auto">
+    <div className="rounded-3xl border border-border/60 bg-card px-3 py-2 md:px-4 md:py-3 flex items-center gap-3 overflow-x-auto shadow-[var(--kf-shadow)]">
       <span className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Achievements</span>
       <div className="flex gap-2">
         {achievements.map((ach, index) => {
@@ -37,13 +37,13 @@ export function AchievementsStrip() {
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 + index * 0.05 }}
-              className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-slate-900/70 px-2.5 py-1 text-[11px] text-muted-foreground"
+              className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-background px-2.5 py-1 text-[11px] text-muted-foreground"
             >
               <span
                 className={`h-5 w-5 rounded-full flex items-center justify-center ${
                   ach.achieved
-                    ? "bg-gradient-to-br from-primary/80 to-emerald-500/70 text-white shadow-glow-primary"
-                    : "bg-slate-800 text-muted-foreground"
+                    ? "bg-gradient-to-br from-primary/80 to-accent/70 text-white shadow-[var(--kf-glow)]"
+                    : "bg-muted text-muted-foreground"
                 }`}
               >
                 <Icon className="w-3 h-3" />

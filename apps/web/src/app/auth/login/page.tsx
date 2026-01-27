@@ -73,7 +73,7 @@ export default function AuthLogin() {
       <p className="landing-tagline">Use your email and password. New here? Continue to sign up instead.</p>
       <form
         onSubmit={onSubmit}
-        className="w-full max-w-md mx-auto bg-slate-900/40 border border-primary/30 rounded-3xl p-5 sm:p-6 flex flex-col gap-4 shadow-[0_0_35px_rgba(41,123,255,0.25)]"
+        className="w-full max-w-md mx-auto bg-card border border-border rounded-3xl p-5 sm:p-6 flex flex-col gap-4 shadow-[var(--kf-shadow)]"
       >
         {banner && (
           <div className="text-xs text-emerald-300" aria-live="polite">
@@ -85,7 +85,7 @@ export default function AuthLogin() {
             {error}
           </div>
         )}
-        <label className="flex flex-col text-left text-sm text-white gap-1">
+        <label className="flex flex-col text-left text-sm text-foreground gap-1">
           Email
           <input
             required
@@ -94,12 +94,12 @@ export default function AuthLogin() {
             onChange={(e) => setEmail(e.target.value)}
             autoComplete="email"
             inputMode="email"
-            className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-white placeholder:text-slate-400 focus:border-primary focus:outline-none"
+            className="rounded-xl bg-background border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
             placeholder="you@example.com"
             suppressHydrationWarning
           />
         </label>
-        <label className="flex flex-col text-left text-sm text-white gap-1">
+        <label className="flex flex-col text-left text-sm text-foreground gap-1">
           Password
           <input
             required
@@ -107,7 +107,7 @@ export default function AuthLogin() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
-            className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-white placeholder:text-slate-400 focus:border-primary focus:outline-none"
+            className="rounded-xl bg-background border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
             placeholder="••••••••"
             suppressHydrationWarning
           />

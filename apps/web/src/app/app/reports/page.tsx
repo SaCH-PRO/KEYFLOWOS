@@ -50,7 +50,7 @@ export default function ReportsPage() {
       </div>
 
       {!summary && (
-        <div className="rounded-2xl border border-border/60 bg-slate-950/70 p-4 text-sm text-muted-foreground">
+        <div className="rounded-2xl border border-border/60 bg-muted p-4 text-sm text-muted-foreground">
           Loading report summary...
         </div>
       )}

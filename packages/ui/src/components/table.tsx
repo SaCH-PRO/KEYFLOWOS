@@ -10,13 +10,13 @@ export function Table({ headers, rows, className }: TableProps) {
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-2xl border border-[var(--kf-border)] bg-[rgba(0,0,0,0.3)] backdrop-blur-md shadow-glass",
+        "overflow-hidden rounded-2xl border border-[hsl(var(--kf-border))] bg-[hsl(var(--kf-card))] shadow-[var(--kf-shadow)]",
         className,
       )}
     >
       <div className="overflow-x-auto">
-        <table className="min-w-full text-sm text-left text-[var(--kf-text)]">
-          <thead className="bg-[rgba(78,168,255,0.06)] text-xs uppercase tracking-wide text-[var(--kf-text-muted)]">
+        <table className="min-w-full text-sm text-left text-[hsl(var(--kf-foreground))]">
+          <thead className="bg-[hsl(var(--kf-muted))] text-[11px] uppercase tracking-[0.18em] text-[hsl(var(--kf-muted-foreground))]">
             <tr>
               {headers.map((h) => (
                 <th key={h} className="px-4 py-3 font-semibold">
@@ -29,10 +29,10 @@ export function Table({ headers, rows, className }: TableProps) {
             {rows.map((row, idx) => (
               <tr
                 key={idx}
-                className="border-t border-[var(--kf-border)]/60 hover:bg-[rgba(78,168,255,0.04)] transition-colors"
+                className="border-t border-[hsl(var(--kf-border))] hover:bg-[hsl(var(--kf-muted))] transition-colors"
               >
                 {row.map((cell, cidx) => (
-                  <td key={cidx} className="px-4 py-3 align-middle text-[var(--kf-text)]">
+                  <td key={cidx} className="px-4 py-3 align-middle text-[hsl(var(--kf-foreground))]">
                     {cell}
                   </td>
                 ))}

@@ -37,7 +37,7 @@ export function FlowStatsRow({ stats }: FlowStatsProps) {
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: index * 0.05 }}
-          className="relative rounded-3xl border border-border/60 bg-gradient-to-br from-slate-950/80 via-slate-950/70 to-slate-900/70 px-4 py-3 md:px-5 md:py-4 shadow-soft-elevated overflow-hidden"
+          className="relative rounded-3xl border border-border/60 bg-card px-4 py-3 md:px-5 md:py-4 shadow-[var(--kf-shadow)] overflow-hidden"
         >
           <div className="pointer-events-none absolute -right-10 -top-10 h-24 w-24 rounded-full bg-primary/15 blur-2xl" />
           <div className="flex items-center justify-between gap-2">
@@ -47,8 +47,8 @@ export function FlowStatsRow({ stats }: FlowStatsProps) {
               <div className="text-[11px] text-muted-foreground mt-1">{card.description}</div>
             </div>
             <div className="flex flex-col items-end gap-1">
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/40 px-2 py-0.5 text-[10px] text-emerald-300">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="inline-flex items-center gap-1 rounded-full bg-[var(--kf-mint)]/10 border border-[var(--kf-mint)]/50 px-2 py-0.5 text-[10px] text-[var(--kf-mint)]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[var(--kf-mint)] animate-pulse" />
                 Stable
               </span>
               <span className="text-[10px] text-muted-foreground">Last sync: 2m</span>

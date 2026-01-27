@@ -261,7 +261,7 @@ export default function ContactDetailPage() {
             </div>
             {filteredEvents.length === 0 && <Empty text="No events yet." />}
             {filteredEvents.map((e) => (
-              <div key={e.id} className="rounded-xl border border-border/60 bg-slate-900/60 p-2 text-sm">
+              <div key={e.id} className="rounded-xl border border-border/60 bg-background p-2 text-sm">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold">{e.type}</span>
                   <span className="text-xs text-muted-foreground">{new Date(e.createdAt).toLocaleString()}</span>
@@ -303,7 +303,7 @@ export default function ContactDetailPage() {
             </div>
             {filteredNotes.length === 0 && <Empty text="No notes yet." />}
             {filteredNotes.map((n) => (
-              <div key={n.id} className="rounded-xl border border-border/60 bg-slate-900/60 p-2">
+              <div key={n.id} className="rounded-xl border border-border/60 bg-background p-2">
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <span>{n.source ?? "manual"}</span>
                   <span>{new Date(n.createdAt).toLocaleString()}</span>
@@ -338,7 +338,7 @@ export default function ContactDetailPage() {
             </div>
             {(data?.tasks ?? []).length === 0 && <Empty text="No tasks yet." />}
             {(data?.tasks ?? []).map((t) => (
-              <div key={t.id} className="rounded-xl border border-border/60 bg-slate-900/60 p-2">
+              <div key={t.id} className="rounded-xl border border-border/60 bg-background p-2">
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <div className="flex items-center gap-2 text-sm font-semibold">
@@ -387,7 +387,7 @@ export default function ContactDetailPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3 md:sticky md:top-0 md:bg-slate-950/80 md:backdrop-blur md:p-2 md:rounded-xl md:z-10">
+      <div className="flex items-start justify-between gap-3 md:sticky md:top-0 md:bg-background/90 md:backdrop-blur md:p-2 md:rounded-xl md:z-10">
         <div>
           <h1 className="text-xl font-semibold">{`${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || "Unnamed"}</h1>
           <div className="text-sm text-muted-foreground">
@@ -411,7 +411,7 @@ export default function ContactDetailPage() {
         </Button>
       </div>
 
-      <div className="rounded-2xl border border-border/60 bg-slate-950/60 p-3 space-y-2">
+      <div className="rounded-2xl border border-border/60 bg-card p-3 space-y-2 shadow-[var(--kf-shadow)]">
         <div className="text-sm font-semibold">Manage Contact</div>
         <div className="flex flex-wrap gap-2 items-center">
           <div className="flex gap-1 flex-wrap">
@@ -447,7 +447,7 @@ export default function ContactDetailPage() {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-border/60 bg-slate-950/60 p-3 space-y-3">
+      <div className="rounded-2xl border border-border/60 bg-card p-3 space-y-3 shadow-[var(--kf-shadow)]">
         <div className="flex items-center justify-between gap-2">
           <div>
             <div className="text-sm font-semibold">Playbook</div>
@@ -476,9 +476,9 @@ export default function ContactDetailPage() {
                 Object.entries(parsedPlaybook).map(([key, value]) => (
                   <div
                     key={key}
-                    className="rounded-xl border border-border/50 bg-slate-900/60 p-2 text-xs text-muted-foreground"
+                    className="rounded-xl border border-border/50 bg-background p-2 text-xs text-muted-foreground"
                   >
-                    <div className="text-white text-sm font-semibold">{key}</div>
+                    <div className="text-foreground text-sm font-semibold">{key}</div>
                     <pre className="whitespace-pre-wrap text-[11px]">
                       {typeof value === "object" ? JSON.stringify(value, null, 2) : String(value)}
                     </pre>
@@ -522,7 +522,7 @@ export default function ContactDetailPage() {
             </Button>
           </div>
           {aiSummary && (
-            <div className="rounded-xl border border-border/60 bg-slate-900/60 p-3 text-sm space-y-1">
+            <div className="rounded-xl border border-border/60 bg-background p-3 text-sm space-y-1">
               <div className="font-semibold">AI Summary</div>
               <div className="text-muted-foreground">{aiSummary}</div>
               {aiNext && <div className="text-primary">Next best action: {aiNext}</div>}
@@ -542,14 +542,14 @@ export default function ContactDetailPage() {
 function Section({ title, children, isMobile }: { title: string; children: React.ReactNode; isMobile?: boolean }) {
   if (isMobile) {
     return (
-      <details className="rounded-2xl border border-border/60 bg-slate-950/60 p-3 space-y-2" open>
+      <details className="rounded-2xl border border-border/60 bg-card p-3 space-y-2 shadow-[var(--kf-shadow)]" open>
         <summary className="text-sm font-semibold cursor-pointer">{title}</summary>
         {children}
       </details>
     );
   }
   return (
-    <div className="rounded-2xl border border-border/60 bg-slate-950/60 p-3 space-y-2">
+    <div className="rounded-2xl border border-border/60 bg-card p-3 space-y-2 shadow-[var(--kf-shadow)]">
       <div className="text-sm font-semibold">{title}</div>
       {children}
     </div>

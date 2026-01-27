@@ -28,11 +28,11 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-black via-slate-950 to-slate-900 text-foreground">
+    <div className="min-h-screen bg-background text-foreground">
       <div className="flex">
-        <aside className="hidden md:flex md:flex-col md:w-64 border-r border-border/70 bg-slate-950/80 backdrop-blur-xl">
+        <aside className="hidden md:flex md:flex-col md:w-64 border-r border-border/70 bg-card">
           <div className="flex items-center gap-2 px-5 py-4 border-b border-border/70">
-            <div className="h-9 w-9 rounded-2xl bg-primary/20 flex items-center justify-center shadow-glow-primary">
+            <div className="h-9 w-9 rounded-2xl bg-primary/20 flex items-center justify-center shadow-[var(--kf-glow)]">
               <Shield className="w-4 h-4 text-primary" />
             </div>
             <div>
@@ -55,7 +55,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                     "group relative flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium transition-colors border border-transparent",
                     active
                       ? "text-primary bg-primary/10 border-primary/30"
-                      : "text-muted-foreground hover:text-foreground hover:bg-slate-900/60 hover:border-border/60",
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted hover:border-border/60",
                   )}
                 >
                   <span className="absolute inset-0 rounded-3xl opacity-0 group-hover:opacity-100 blur-xl bg-primary/20 pointer-events-none transition-opacity" />
@@ -76,7 +76,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           </div>
         </aside>
         <main className="flex-1 min-h-screen">
-          <header className="h-14 border-b border-border/70 px-4 md:px-6 flex items-center justify-between bg-slate-950/70 backdrop-blur-xl">
+          <header className="h-14 border-b border-border/70 px-4 md:px-6 flex items-center justify-between bg-background/80 backdrop-blur-xl">
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
               <LayoutTemplate className="w-4 h-4" />
               Overwatch - full platform view

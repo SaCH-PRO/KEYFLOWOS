@@ -1,24 +1,94 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url("https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap");
 
 :root {
-  --kf-bg: #0d0d0e;
-  --kf-surface: #1f2225;
-  --kf-glass: rgba(31, 34, 37, 0.7);
-  --kf-border: rgba(213, 215, 218, 0.12);
-  --kf-text: #e7eaee;
-  --kf-text-muted: #a9afb8;
-  --kf-electric: #4ea8ff;
-  --kf-pulse: #a374ff;
-  --kf-mint: #4cffce;
-  --kf-amber: #ffc34d;
-  --kf-red: #ff4e4e;
-  --kf-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
-  --kf-glow: 0 0 24px rgba(78, 168, 255, 0.35);
-  --kf-radius: 16px;
+  --kf-background: 0 0% 100%;
+  --kf-foreground: 222 40% 12%;
+
+  --kf-card: 0 0% 100%;
+  --kf-card-foreground: 222 40% 12%;
+
+  --kf-popover: 0 0% 100%;
+  --kf-popover-foreground: 222 40% 12%;
+
+  --kf-border: 220 30% 90%;
+  --kf-input: 220 30% 90%;
+  --kf-surface: 220 20% 98%;
+
+  --kf-primary: 215 100% 56%;
+  --kf-primary-foreground: 0 0% 100%;
+
+  --kf-secondary: 330 80% 96%;
+  --kf-secondary-foreground: 330 35% 20%;
+
+  --kf-muted: 220 20% 94%;
+  --kf-muted-foreground: 220 12% 40%;
+
+  --kf-accent: 325 90% 62%;
+  --kf-accent-foreground: 0 0% 100%;
+
+  --kf-destructive: 0 72% 56%;
+  --kf-destructive-foreground: 0 0% 100%;
+
+  --kf-ring: 215 100% 56%;
+
+  --kf-text: hsl(var(--kf-foreground));
+  --kf-text-muted: hsl(var(--kf-muted-foreground));
+  --kf-glass: rgba(255, 255, 255, 0.85);
+  --kf-electric: hsl(var(--kf-primary));
+  --kf-pulse: hsl(var(--kf-accent));
+  --kf-mint: #24d08d;
+  --kf-amber: #f5b942;
+  --kf-red: #f45b69;
+  --kf-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+  --kf-glow: 0 0 24px rgba(41, 123, 255, 0.2);
+  --kf-radius: 18px;
+}
+
+.dark {
+  --kf-background: 220 15% 4%;
+  --kf-foreground: 210 40% 97%;
+
+  --kf-card: 220 18% 8%;
+  --kf-card-foreground: 210 40% 97%;
+
+  --kf-popover: 220 18% 8%;
+  --kf-popover-foreground: 210 40% 97%;
+
+  --kf-border: 220 22% 18%;
+  --kf-input: 220 22% 18%;
+
+  --kf-primary: 215 100% 62%;
+  --kf-primary-foreground: 210 40% 98%;
+
+  --kf-secondary: 220 18% 16%;
+  --kf-secondary-foreground: 210 40% 92%;
+
+  --kf-muted: 220 16% 14%;
+  --kf-muted-foreground: 215 18% 62%;
+
+  --kf-accent: 215 90% 58%;
+  --kf-accent-foreground: 210 40% 98%;
+
+  --kf-destructive: 355 90% 60%;
+  --kf-destructive-foreground: 210 40% 98%;
+
+  --kf-ring: 215 100% 62%;
+
+  --kf-text: hsl(var(--kf-foreground));
+  --kf-text-muted: hsl(var(--kf-muted-foreground));
+  --kf-glass: rgba(12, 14, 18, 0.72);
+  --kf-electric: hsl(var(--kf-primary));
+  --kf-pulse: hsl(var(--kf-accent));
+  --kf-mint: #38e8a7;
+  --kf-amber: #f8c15a;
+  --kf-red: #ff5f6f;
+  --kf-shadow: 0 20px 50px rgba(0, 0, 0, 0.55);
+  --kf-glow: 0 0 28px rgba(74, 163, 255, 0.35);
+  --kf-radius: 18px;
 }
 
 body {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  background: var(--kf-bg);
-  color: var(--kf-text);
+  font-family: "Satoshi", system-ui, -apple-system, sans-serif;
+  background: hsl(var(--kf-background));
+  color: hsl(var(--kf-foreground));
 }

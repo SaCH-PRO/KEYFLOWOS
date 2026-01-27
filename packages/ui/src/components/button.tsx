@@ -7,17 +7,20 @@ type Variant = "default" | "secondary" | "outline" | "subtle";
 type Size = "xs" | "sm" | "md";
 
 const variantStyles: Record<Variant, string> = {
-  default: "bg-indigo-600 text-white hover:bg-indigo-500 focus-visible:ring-indigo-600",
-  secondary: "bg-slate-100 text-slate-900 hover:bg-slate-200 focus-visible:ring-slate-300",
+  default:
+    "bg-[hsl(var(--kf-primary))] text-[hsl(var(--kf-primary-foreground))] hover:bg-[hsl(var(--kf-primary)/0.9)] focus-visible:ring-[hsl(var(--kf-ring))] shadow-[0_10px_24px_hsl(var(--kf-primary)/0.2)]",
+  secondary:
+    "bg-[hsl(var(--kf-secondary))] text-[hsl(var(--kf-secondary-foreground))] border border-[hsl(var(--kf-border))] hover:bg-[hsl(var(--kf-secondary)/0.7)] focus-visible:ring-[hsl(var(--kf-ring))]",
   outline:
-    "border border-slate-300 text-slate-900 hover:bg-slate-100 focus-visible:ring-slate-300",
-  subtle: "bg-slate-50 border border-slate-200 text-slate-900 hover:bg-slate-100",
+    "border border-[hsl(var(--kf-border))] text-[hsl(var(--kf-foreground))] hover:bg-[hsl(var(--kf-muted))] focus-visible:ring-[hsl(var(--kf-ring))]",
+  subtle:
+    "bg-transparent text-[hsl(var(--kf-foreground))] hover:bg-[hsl(var(--kf-muted))] focus-visible:ring-[hsl(var(--kf-ring))]",
 };
 
 const sizeStyles: Record<Size, string> = {
-  xs: "h-7 px-3 text-xs rounded-lg",
-  sm: "h-8 px-3 text-sm rounded-lg",
-  md: "h-10 px-4 text-sm rounded-lg",
+  xs: "h-8 px-3 text-xs rounded-xl",
+  sm: "h-9 px-4 text-sm rounded-xl",
+  md: "h-11 px-5 text-sm rounded-xl",
 };
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -32,7 +35,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         type={type}
         className={cn(
-          "inline-flex items-center justify-center whitespace-nowrap font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+          "inline-flex items-center justify-center whitespace-nowrap font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--kf-background))] disabled:pointer-events-none disabled:opacity-50",
           sizeStyles[size],
           variantStyles[variant],
           className,

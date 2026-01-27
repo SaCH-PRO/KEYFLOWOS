@@ -96,13 +96,13 @@ type SectionCardProps = {
 function SectionCard({ title, headerAction, children, className = "", onClick }: SectionCardProps) {
   return (
     <Card
-      className={`space-y-3 rounded-xl border border-slate-200 bg-white shadow-sm hover:shadow-md transition-shadow ${className}`}
+      className={`space-y-3 shadow-[var(--kf-shadow)] transition-shadow ${className}`}
       padding="lg"
       shadow="sm"
       onClick={onClick}
     >
       <div className="flex items-center justify-between gap-3">
-        <p className="text-sm font-semibold text-slate-900">{title}</p>
+        <p className="text-sm font-semibold text-foreground">{title}</p>
         {headerAction}
       </div>
       {children}
@@ -203,8 +203,8 @@ export default function PipelinePage() {
     return (
       <ContentContainer>
         <div className="py-12 text-center space-y-4">
-          <p className="text-lg font-semibold text-slate-900">Preparing your workspace...</p>
-          <p className="text-sm text-slate-600">Hang tight while we load your personal space.</p>
+          <p className="text-lg font-semibold text-foreground">Preparing your workspace...</p>
+          <p className="text-sm text-muted-foreground">Hang tight while we load your personal space.</p>
         </div>
       </ContentContainer>
     );
@@ -215,7 +215,7 @@ export default function PipelinePage() {
       <ContentContainer>
         <div className="py-12 text-center space-y-4">
           <p className="text-lg font-semibold text-red-700">{workspaceError}</p>
-          <p className="text-sm text-slate-600">Try logging in again to create your workspace.</p>
+          <p className="text-sm text-muted-foreground">Try logging in again to create your workspace.</p>
         </div>
       </ContentContainer>
     );
@@ -677,40 +677,40 @@ export default function PipelinePage() {
               {detailContact.jobTitle && <span className="ml-2">{detailContact.jobTitle}</span>}
             </div>
             <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3 text-[12px] text-muted-foreground">
-              <div className="rounded-xl border border-border/50 bg-slate-900/50 p-3">
+              <div className="rounded-xl border border-border/50 bg-background p-3">
                 <div className="text-xs uppercase">Outstanding</div>
-                <div className="text-base font-semibold text-white">
+                <div className="text-base font-semibold text-foreground">
                   {outstandingBalance ? `$${outstandingBalance.toLocaleString()}` : "None"}
                 </div>
               </div>
-              <div className="rounded-xl border border-border/50 bg-slate-900/50 p-3">
+              <div className="rounded-xl border border-border/50 bg-background p-3">
                 <div className="text-xs uppercase">Lead score</div>
-                <div className="text-base font-semibold text-white">{leadScore ?? "-"}</div>
+                <div className="text-base font-semibold text-foreground">{leadScore ?? "-"}</div>
               </div>
-              <div className="rounded-xl border border-border/50 bg-slate-900/50 p-3">
+              <div className="rounded-xl border border-border/50 bg-background p-3">
                 <div className="text-xs uppercase">Last activity</div>
-                <div className="text-base font-semibold text-white">
+                <div className="text-base font-semibold text-foreground">
                   {lastInteractionAt ? new Date(lastInteractionAt).toLocaleDateString() : "No activity"}
                 </div>
               </div>
-              <div className="rounded-xl border border-border/50 bg-slate-900/50 p-3">
+              <div className="rounded-xl border border-border/50 bg-background p-3">
                 <div className="text-xs uppercase">Next due task</div>
-                <div className="text-base font-semibold text-white">
+                <div className="text-base font-semibold text-foreground">
                   {nextDueTaskAt ? new Date(nextDueTaskAt).toLocaleDateString() : "None"}
                 </div>
               </div>
-              <div className="rounded-xl border border-border/50 bg-slate-900/50 p-3">
+              <div className="rounded-xl border border-border/50 bg-background p-3">
                 <div className="text-xs uppercase">Events</div>
-                <div className="text-base font-semibold text-white">{timelineEntries.length}</div>
+                <div className="text-base font-semibold text-foreground">{timelineEntries.length}</div>
               </div>
-              <div className="rounded-xl border border-border/50 bg-slate-900/50 p-3">
+              <div className="rounded-xl border border-border/50 bg-background p-3">
                 <div className="text-xs uppercase">Tasks</div>
-                <div className="text-base font-semibold text-white">{tasksEntries.length}</div>
+                <div className="text-base font-semibold text-foreground">{tasksEntries.length}</div>
               </div>
             </div>
           </div>
 
-          <SectionCard title="AI summary" className="bg-slate-900/70">
+          <SectionCard title="AI summary" className="bg-card">
             {aiSuggestions.length === 0 ? (
               <p className="text-xs text-muted-foreground">
                 More signals unlock adaptive suggestions; keep engaging to surface ideas.
@@ -726,7 +726,7 @@ export default function PipelinePage() {
 
           <SectionCard
             title="Timeline"
-            className="bg-slate-900/70"
+            className="bg-card"
             headerAction={
               <div className="flex gap-2 items-center">
                 <label className="text-[11px] text-muted-foreground">Filter:</label>
@@ -749,15 +749,15 @@ export default function PipelinePage() {
               {groupedTimeline.length === 0 && <p>No events yet.</p>}
               {groupedTimeline.map((group) => (
                 <div key={group.date} className="space-y-2">
-                  <div className="text-[10px] uppercase text-slate-400">{group.date}</div>
+                  <div className="text-[10px] uppercase text-muted-foreground">{group.date}</div>
                   {group.events.slice(0, 6).map((event) => (
                     <div
                       key={event.id}
-                      className="rounded-xl border border-border/50 bg-slate-950/60 p-2"
+                      className="rounded-xl border border-border/50 bg-background p-2"
                     >
-                      <div className="flex items-center justify-between text-white">
+                      <div className="flex items-center justify-between text-foreground">
                         <span className="font-semibold">{event.type}</span>
-                        <span className="text-[10px] text-slate-400">{formatDate(event.createdAt)}</span>
+                        <span className="text-[10px] text-muted-foreground">{formatDate(event.createdAt)}</span>
                       </div>
                       <p className="line-clamp-2">
                         {event.data && typeof event.data === "object"
@@ -771,7 +771,7 @@ export default function PipelinePage() {
             </div>
           </SectionCard>
 
-          <SectionCard title="Notes" className="bg-slate-900/70">
+          <SectionCard title="Notes" className="bg-card">
             <div className="space-y-2">
               <textarea
                 className="w-full rounded border border-border/50 bg-background p-2 text-xs text-foreground"
@@ -792,17 +792,17 @@ export default function PipelinePage() {
                 {notesEntries.slice(0, 4).map((note) => (
                   <div
                     key={note.id}
-                    className="rounded-xl border border-border/40 bg-slate-900/50 p-2 text-[11px] text-muted-foreground"
+                    className="rounded-xl border border-border/40 bg-background p-2 text-[11px] text-muted-foreground"
                   >
                     <p>{note.body}</p>
-                    <p className="text-[10px] text-slate-400">{formatDate(note.createdAt)}</p>
+                    <p className="text-[10px] text-muted-foreground">{formatDate(note.createdAt)}</p>
                   </div>
                 ))}
               </div>
             </div>
           </SectionCard>
 
-          <SectionCard title="Tasks" className="bg-slate-900/70">
+          <SectionCard title="Tasks" className="bg-card">
             <div className="space-y-2">
               <Input
                 placeholder="Task title"
@@ -829,10 +829,10 @@ export default function PipelinePage() {
                 {tasksEntries.slice(0, 4).map((task) => (
                   <div
                     key={task.id}
-                    className="rounded-xl border border-border/40 bg-slate-900/50 p-2 text-[11px] text-muted-foreground"
+                    className="rounded-xl border border-border/40 bg-background p-2 text-[11px] text-muted-foreground"
                   >
-                    <p className="font-semibold text-white">{task.title}</p>
-                    <p className="text-[10px] text-slate-400">Due {formatDate(task.dueDate)}</p>
+                    <p className="font-semibold text-foreground">{task.title}</p>
+                    <p className="text-[10px] text-muted-foreground">Due {formatDate(task.dueDate)}</p>
                   </div>
                 ))}
               </div>
@@ -846,7 +846,7 @@ export default function PipelinePage() {
   return (
     <ContentContainer>
       <Card
-        className="sticky top-4 z-30 bg-white/90 backdrop-blur rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow"
+        className="sticky top-4 z-30 bg-background/90 backdrop-blur rounded-xl border border-border shadow-[var(--kf-shadow)] transition-shadow"
         padding="sm"
         shadow="sm"
         onClick={() => {
@@ -854,7 +854,7 @@ export default function PipelinePage() {
         }}
       >
         <div className="flex items-center justify-between gap-3">
-          <p className="text-sm font-semibold text-slate-900">CRM SUITE</p>
+          <p className="text-sm font-semibold text-foreground">CRM SUITE</p>
           <div className="flex items-center gap-2">
             <Badge tone="info">{pipelineStats.total} contacts</Badge>
             <Button
@@ -870,30 +870,30 @@ export default function PipelinePage() {
           </div>
         </div>
         {showOverview && (
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-6 text-[11px] text-slate-600">
-            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="text-xs uppercase text-slate-500">Total contacts</div>
-              <div className="text-lg font-semibold text-slate-900">{contacts.length}</div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-6 text-[11px] text-muted-foreground">
+            <div className="rounded-xl border border-border bg-card p-3 shadow-[var(--kf-shadow)]">
+              <div className="text-xs uppercase text-muted-foreground">Total contacts</div>
+              <div className="text-lg font-semibold text-foreground">{contacts.length}</div>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="text-xs uppercase text-slate-500">Overdue tasks</div>
-              <div className="text-lg font-semibold text-slate-900">{pipelineStats.overdueTasks}</div>
+            <div className="rounded-xl border border-border bg-card p-3 shadow-[var(--kf-shadow)]">
+              <div className="text-xs uppercase text-muted-foreground">Overdue tasks</div>
+              <div className="text-lg font-semibold text-foreground">{pipelineStats.overdueTasks}</div>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="text-xs uppercase text-slate-500">Leads</div>
-              <div className="text-lg font-semibold text-slate-900">{segments.lead ?? 0}</div>
+            <div className="rounded-xl border border-border bg-card p-3 shadow-[var(--kf-shadow)]">
+              <div className="text-xs uppercase text-muted-foreground">Leads</div>
+              <div className="text-lg font-semibold text-foreground">{segments.lead ?? 0}</div>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="text-xs uppercase text-slate-500">Prospects</div>
-              <div className="text-lg font-semibold text-slate-900">{segments.prospect ?? 0}</div>
+            <div className="rounded-xl border border-border bg-card p-3 shadow-[var(--kf-shadow)]">
+              <div className="text-xs uppercase text-muted-foreground">Prospects</div>
+              <div className="text-lg font-semibold text-foreground">{segments.prospect ?? 0}</div>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="text-xs uppercase text-slate-500">Clients</div>
-              <div className="text-lg font-semibold text-slate-900">{segments.client ?? 0}</div>
+            <div className="rounded-xl border border-border bg-card p-3 shadow-[var(--kf-shadow)]">
+              <div className="text-xs uppercase text-muted-foreground">Clients</div>
+              <div className="text-lg font-semibold text-foreground">{segments.client ?? 0}</div>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="text-xs uppercase text-slate-500">Lost</div>
-              <div className="text-lg font-semibold text-slate-900">{segments.lost ?? 0}</div>
+            <div className="rounded-xl border border-border bg-card p-3 shadow-[var(--kf-shadow)]">
+              <div className="text-xs uppercase text-muted-foreground">Lost</div>
+              <div className="text-lg font-semibold text-foreground">{segments.lost ?? 0}</div>
             </div>
           </div>
         )}
@@ -910,7 +910,7 @@ export default function PipelinePage() {
               </Button>
             </div>
           }
-          className="bg-white h-fit"
+          className="bg-card h-fit"
         >
           {pipelineOpen && (
             <>
@@ -923,13 +923,13 @@ export default function PipelinePage() {
                   return (
                     <div
                       key={`${metricKey}-${index}`}
-                      className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm space-y-2"
+                      className="rounded-xl border border-border bg-card p-3 shadow-[var(--kf-shadow)] space-y-2"
                       title={current.hint}
                     >
                       <div className="flex items-center justify-between">
-                        <div className="text-xs uppercase text-slate-500">{current.label}</div>
+                        <div className="text-xs uppercase text-muted-foreground">{current.label}</div>
                         <select
-                          className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px]"
+                          className="rounded border border-border bg-background px-2 py-1 text-[11px]"
                           value={metricKey}
                           onChange={(e) => setMetricSlot(index, e.target.value as MetricKey)}
                         >
@@ -940,7 +940,7 @@ export default function PipelinePage() {
                           ))}
                         </select>
                       </div>
-                      <div className="text-lg font-semibold text-slate-900">{current.value}</div>
+                      <div className="text-lg font-semibold text-foreground">{current.value}</div>
                     </div>
                   );
                 })}
@@ -1039,7 +1039,7 @@ export default function PipelinePage() {
         <div className="space-y-4">
           <SectionCard
             title="ADD CONTACT"
-            className="border-slate-200 bg-white"
+            className="border-border bg-card"
             headerAction={
               <Button
                 variant="outline"
@@ -1114,8 +1114,8 @@ export default function PipelinePage() {
                   value={newContact.tags}
                   onChange={(e) => setNewContact((prev) => ({ ...prev, tags: e.target.value }))}
                 />
-                <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <div className="flex items-center justify-between text-sm font-semibold text-slate-900">
+                <div className="space-y-2 rounded-xl border border-border bg-muted p-3">
+                  <div className="flex items-center justify-between text-sm font-semibold text-foreground">
                     <span>Profile photo (optional)</span>
                     {contactPhotoPreview && (
                       <Button
@@ -1131,7 +1131,7 @@ export default function PipelinePage() {
                     )}
                   </div>
                   <div className="flex items-center gap-3">
-                    <label className="flex cursor-pointer items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-xs text-slate-600 hover:border-slate-400">
+                    <label className="flex cursor-pointer items-center justify-center rounded-lg border border-dashed border-border bg-background px-3 py-2 text-xs text-muted-foreground hover:border-border">
                       <input
                         type="file"
                         accept="image/*"
@@ -1153,11 +1153,11 @@ export default function PipelinePage() {
                       <img
                         src={contactPhotoPreview}
                         alt="Preview"
-                        className="h-12 w-12 rounded-full object-cover border border-slate-200"
+                        className="h-12 w-12 rounded-full object-cover border border-border"
                       />
                     )}
                   </div>
-                  <p className="text-[11px] text-slate-500">JPEG/PNG, up to ~5MB. Stored on the contact for quick visual ID.</p>
+                  <p className="text-[11px] text-muted-foreground">JPEG/PNG, up to ~5MB. Stored on the contact for quick visual ID.</p>
                 </div>
                   <div className="flex flex-wrap gap-2">
                     {STATUSES.map((s) => (
@@ -1273,11 +1273,11 @@ export default function PipelinePage() {
           <SectionCard title="Import & capture" headerAction={<Badge tone="info">{importJobs.length} jobs</Badge>}>
             <div ref={importRef} className="space-y-4">
               <div className="flex flex-wrap gap-2">
-                <span className="text-xs font-semibold text-slate-600">Upload</span>
+                <span className="text-xs font-semibold text-muted-foreground">Upload</span>
                 <select
                   value={importType}
                   onChange={(e) => setImportType(e.target.value as "csv" | "xlsx" | "pdf" | "image")}
-                  className="rounded border border-slate-200 bg-white px-2 py-1 text-xs"
+                  className="rounded border border-border bg-background px-2 py-1 text-xs"
                 >
                   {IMPORT_TYPES.map((type) => (
                     <option key={type} value={type}>
@@ -1292,7 +1292,7 @@ export default function PipelinePage() {
                   className="text-xs"
                 />
                 {importFile && (
-                  <span className="text-[11px] text-slate-500">Ready to upload: {importFile.name}</span>
+                  <span className="text-[11px] text-muted-foreground">Ready to upload: {importFile.name}</span>
                 )}
                 <Button
                   variant="outline"
@@ -1321,7 +1321,7 @@ export default function PipelinePage() {
                   className="text-xs"
                 />
                 {cameraImage && (
-                  <span className="text-[11px] text-slate-500">Captured: {cameraImage.name}</span>
+                  <span className="text-[11px] text-muted-foreground">Captured: {cameraImage.name}</span>
                 )}
                 <Button
                   variant="outline"
@@ -1370,10 +1370,10 @@ export default function PipelinePage() {
                   Save link source
                 </Button>
               </div>
-              <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                <div className="text-xs font-semibold text-slate-700">Paste business card OCR text</div>
+              <div className="space-y-2 rounded-2xl border border-border bg-muted p-3">
+                <div className="text-xs font-semibold text-foreground">Paste business card OCR text</div>
                 <textarea
-                  className="w-full rounded border border-slate-200 bg-white p-2 text-xs text-slate-900"
+                  className="w-full rounded border border-border bg-background p-2 text-xs text-foreground"
                   rows={3}
                   placeholder="Paste text extracted from a business card here..."
                   value={ocrText}
@@ -1407,18 +1407,18 @@ export default function PipelinePage() {
                     return (
                       <div
                         key={job.id}
-                        className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2"
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-background px-3 py-2"
                       >
                         <div className="space-y-1">
                           <div className="text-sm font-semibold">{job.originalName ?? job.sourceType}</div>
-                          <div className="text-[11px] text-slate-500">
+                          <div className="text-[11px] text-muted-foreground">
                             Rows: {job.processedRows ?? 0}/{job.totalRows ?? 0}
                           </div>
                           {job.error && (
                             <div className="text-[11px] text-rose-500">Error: {job.error}</div>
                           )}
                         </div>
-                        <div className="flex flex-col items-end gap-1 text-[11px] text-slate-500">
+                        <div className="flex flex-col items-end gap-1 text-[11px] text-muted-foreground">
                           <Badge tone={tone}>{job.status}</Badge>
                           <span>Updated {timestamp}</span>
                           {job.sourceUrl && (
@@ -1445,7 +1445,7 @@ export default function PipelinePage() {
 
       <SectionCard
         title="Database"
-        className="bg-white"
+        className="bg-card"
         headerAction={
           <div className="flex items-center gap-2">
             <Button variant="outline" className="px-3 py-1 text-xs" onClick={() => setDbOpen((p) => !p)}>
@@ -1478,7 +1478,7 @@ export default function PipelinePage() {
             </div>
               <div className="overflow-x-auto rounded-2xl border border-border/50">
                 <table className="min-w-full text-xs text-left">
-                  <thead className="bg-slate-900/70 text-muted-foreground">
+                  <thead className="bg-muted text-muted-foreground">
                     <tr>
                       <th className="px-3 py-2">Name</th>
                       <th className="px-3 py-2">Email</th>
@@ -1494,8 +1494,8 @@ export default function PipelinePage() {
                   </thead>
                   <tbody>
                     {dbFiltered.map((c) => (
-                      <tr key={c.id} className="border-t border-border/40 hover:bg-slate-900/60">
-                        <td className="px-3 py-2 font-semibold text-white">
+                      <tr key={c.id} className="border-t border-border/40 hover:bg-muted">
+                        <td className="px-3 py-2 font-semibold text-foreground">
                           {`${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || "Unnamed"}
                         </td>
                         <td className="px-3 py-2 text-muted-foreground">{c.email || "-"}</td>

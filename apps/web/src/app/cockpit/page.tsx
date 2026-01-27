@@ -146,13 +146,13 @@ export default function CockpitPage() {
   return (
     <Shell
       sidebar={
-        <div className="p-4 space-y-3 text-sm text-slate-200">
-          <div className="uppercase text-xs tracking-[0.08em] text-slate-400 mb-2">Command</div>
+        <div className="p-4 space-y-3 text-sm text-foreground">
+          <div className="uppercase text-xs tracking-[0.08em] text-muted-foreground mb-2">Command</div>
           <div className="space-y-1">
             {["Flow Feed", "Live Graph", "Cmd+K", "Automations", "Billing"].map((item) => (
               <div
                 key={item}
-                className="cursor-pointer rounded-lg px-3 py-2 text-slate-100 hover:bg-[rgba(78,168,255,0.08)] hover:text-[var(--kf-electric)] transition-colors"
+                className="cursor-pointer rounded-lg px-3 py-2 text-foreground hover:bg-primary/10 hover:text-primary transition-colors"
               >
                 {item}
               </div>
@@ -191,7 +191,7 @@ export default function CockpitPage() {
                 <Link
                   key={contact.id}
                   href={`/app/crm/contacts/${contact.id}`}
-                  className="flex items-center justify-between rounded-lg border border-border/60 bg-slate-950/60 px-3 py-2 hover:border-primary/60"
+                  className="flex items-center justify-between rounded-lg border border-border/60 bg-background px-3 py-2 hover:border-primary/60"
                 >
                   <div>
                     <div className="text-sm font-semibold">
@@ -222,7 +222,7 @@ export default function CockpitPage() {
                   {summary.nextActions.slice(0, 6).map((action) => (
                     <div
                       key={action.id}
-                      className="rounded-xl border border-border/60 bg-slate-950/50 px-3 py-2"
+                      className="rounded-xl border border-border/60 bg-background px-3 py-2"
                     >
                       <div className="flex items-center justify-between">
                         <div className="font-semibold">{action.title}</div>
@@ -243,7 +243,7 @@ export default function CockpitPage() {
               ) : (
                 <div className="grid gap-2 md:grid-cols-2">
                   {summary.highlights.serviceAffinity.map((service) => (
-                    <div key={service.serviceId} className="rounded-xl border border-border/60 bg-slate-950/50 p-3">
+                    <div key={service.serviceId} className="rounded-xl border border-border/60 bg-background p-3">
                       <div className="text-sm font-semibold">{service.serviceName}</div>
                       <div className="text-[11px] text-muted-foreground">
                         {service.bookings} bookings · {service.revenue.toLocaleString()} revenue
@@ -266,7 +266,7 @@ export default function CockpitPage() {
                 {summary.highlights.highPotential.slice(0, 4).map((contact) => (
                   <div
                     key={contact.contactId}
-                    className="rounded-xl border border-border/60 bg-slate-950/50 px-3 py-2"
+                    className="rounded-xl border border-border/60 bg-background px-3 py-2"
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-semibold">{contact.name}</span>
@@ -287,7 +287,7 @@ export default function CockpitPage() {
                 {summary.highlights.overdueReminders.slice(0, 4).map((contact) => (
                   <div
                     key={contact.contactId}
-                    className="rounded-xl border border-border/60 bg-slate-950/50 px-3 py-2 text-sm"
+                    className="rounded-xl border border-border/60 bg-background px-3 py-2 text-sm"
                   >
                     <div className="flex items-center justify-between">
                       <span className="font-semibold">{contact.name}</span>
@@ -309,7 +309,7 @@ export default function CockpitPage() {
               ) : (
                 <div className="space-y-2">
                   {summary.segments.map((segment) => (
-                    <div key={segment.key} className="rounded-xl border border-border/60 bg-slate-950/50 px-3 py-2">
+                    <div key={segment.key} className="rounded-xl border border-border/60 bg-background px-3 py-2">
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-semibold">{segment.label}</span>
                         <Badge tone="info">{segment.count}</Badge>
@@ -323,8 +323,8 @@ export default function CockpitPage() {
             <Card title="AI next actions (stub)" badge={`${summary.aiNextActions.length} hooks`}>
               <div className="space-y-2 text-xs text-muted-foreground">
                 {summary.aiNextActions.map((stub) => (
-                  <div key={stub.id} className="rounded-xl border border-border/60 bg-slate-950/50 px-3 py-2">
-                    <div className="font-semibold text-sm text-white">{stub.title}</div>
+                  <div key={stub.id} className="rounded-xl border border-border/60 bg-background px-3 py-2">
+                    <div className="font-semibold text-sm text-foreground">{stub.title}</div>
                     <div>{stub.detail}</div>
                   </div>
                 ))}

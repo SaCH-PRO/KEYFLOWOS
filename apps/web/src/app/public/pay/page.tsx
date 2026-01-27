@@ -49,25 +49,25 @@ export default function PublicPayPage() {
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white px-4 py-10">
+    <main className="min-h-screen bg-background text-foreground px-4 py-10">
       <div className="mx-auto max-w-4xl space-y-6">
         <div className="flex flex-col gap-2">
           <Badge tone="info">Public Payment</Badge>
           <h1 className="text-3xl font-semibold">Pay Invoice</h1>
-          <p className="text-sm text-slate-300">
+          <p className="text-sm text-muted-foreground">
             Minimalist payment UI with frosted glass. Calls the mark-paid endpoint at{" "}
             <code className="font-mono">{API_BASE}</code>.
           </p>
         </div>
 
-        <Card title="Payment" badge="Live" className="bg-[rgba(0,0,0,0.35)] border border-[var(--kf-border)]">
+        <Card title="Payment" badge="Live">
           <form onSubmit={markPaid} className="grid grid-cols-1 gap-4">
             <Input label="Invoice ID" value={invoiceId} onChange={(e) => setInvoiceId(e.target.value)} required placeholder="inv_xxx" />
             <div className="flex justify-end">
               <Button type="submit">Mark Paid</Button>
             </div>
           </form>
-          <div className="mt-3 rounded-xl border border-border/60 bg-slate-950/70 px-3 py-2 text-xs text-muted-foreground">
+          <div className="mt-3 rounded-xl border border-border/60 bg-card px-3 py-2 text-xs text-muted-foreground">
             {loadingInvoice && <div>Loading invoice details...</div>}
             {!loadingInvoice && invoice && (
               <>
@@ -99,7 +99,7 @@ export default function PublicPayPage() {
                 {status}
               </motion.div>
               {success && paidInvoiceId && (
-                <div className="mt-2 text-xs text-slate-200 space-y-1">
+                <div className="mt-2 text-xs text-muted-foreground space-y-1">
                   <div>
                     Invoice ID: <code className="font-mono">{paidInvoiceId}</code>
                   </div>

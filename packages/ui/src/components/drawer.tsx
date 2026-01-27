@@ -16,26 +16,26 @@ export function Drawer({ open, onClose, title, children }: DrawerProps) {
         open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
       )}
     >
-      <div className="flex-1 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="flex-1 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div
         className={cn(
-          "w-[380px] max-w-full border-l border-[var(--kf-border)] bg-[rgba(10,12,18,0.9)] shadow-glass backdrop-blur-xl transition-transform duration-200",
+          "w-[380px] max-w-full border-l border-[hsl(var(--kf-border))] bg-[hsl(var(--kf-card))] shadow-[var(--kf-shadow)] transition-transform duration-200",
           open ? "translate-x-0" : "translate-x-full",
         )}
       >
         <div className="p-4 space-y-3">
           <div className="flex items-center justify-between">
-            {title && <h3 className="text-base font-semibold text-[var(--kf-text)]">{title}</h3>}
+            {title && <h3 className="text-base font-semibold text-[hsl(var(--kf-foreground))]">{title}</h3>}
             {onClose && (
               <button
-                className="rounded-full border border-[var(--kf-border)] bg-[rgba(255,255,255,0.03)] px-2 py-1 text-xs text-[var(--kf-text-muted)] hover:text-[var(--kf-text)]"
+                className="rounded-full border border-[hsl(var(--kf-border))] bg-[hsl(var(--kf-muted))] px-2.5 py-1 text-xs text-[hsl(var(--kf-muted-foreground))] hover:text-[hsl(var(--kf-foreground))]"
                 onClick={onClose}
               >
                 Close
               </button>
             )}
           </div>
-          <div className="text-sm text-[var(--kf-text)]">{children}</div>
+          <div className="text-sm text-[hsl(var(--kf-foreground))]">{children}</div>
         </div>
       </div>
     </div>

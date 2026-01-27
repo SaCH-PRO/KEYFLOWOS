@@ -50,7 +50,7 @@ const config: Config = {
         'cyber-red': '#FF4E4E',
       },
       fontFamily: {
-        sans: ['Inter', 'ui-sans-serif', 'system-ui'],
+        sans: ['Satoshi', 'ui-sans-serif', 'system-ui'],
         mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular'],
       },
       boxShadow: {

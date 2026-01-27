@@ -304,7 +304,7 @@ export default function SettingsPage() {
           <Shield className="w-5 h-5" />
         </div>
 
-        <div className="rounded-2xl border border-border/60 bg-slate-950/60 backdrop-blur p-4 space-y-3">
+        <div className="rounded-2xl border border-border/60 bg-card p-4 space-y-3 shadow-[var(--kf-shadow)]">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <Shield className="h-4 w-4 text-primary" />
             Security
@@ -319,7 +319,7 @@ export default function SettingsPage() {
                     type={showCurrent ? "text" : "password"}
                     value={currentPassword}
                     onChange={(e) => setCurrentPassword(e.target.value)}
-                    className="w-full rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2 pr-12 text-sm"
+                    className="w-full rounded-xl border border-border/60 bg-background px-3 py-2 pr-12 text-sm"
                   />
                   <button
                     type="button"
@@ -337,7 +337,7 @@ export default function SettingsPage() {
                     type={showNew ? "text" : "password"}
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
-                    className="w-full rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2 pr-12 text-sm"
+                    className="w-full rounded-xl border border-border/60 bg-background px-3 py-2 pr-12 text-sm"
                   />
                   <button
                     type="button"
@@ -354,12 +354,12 @@ export default function SettingsPage() {
                   type="password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2 text-sm"
+                  className="rounded-xl border border-border/60 bg-background px-3 py-2 text-sm"
                 />
               </label>
               <div className="flex justify-end">
                 <button
-                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary/90"
+                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
                   type="button"
                   onClick={updatePassword}
                 >
@@ -375,13 +375,13 @@ export default function SettingsPage() {
                   type="email"
                   value={resetEmail}
                   onChange={(e) => setResetEmail(e.target.value)}
-                  className="rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2 text-sm"
+                  className="rounded-xl border border-border/60 bg-background px-3 py-2 text-sm"
                   placeholder="you@example.com"
                 />
               </label>
               <div className="flex justify-end">
                 <button
-                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary/90"
+                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
                   type="button"
                   onClick={sendResetLink}
                 >
@@ -409,20 +409,20 @@ export default function SettingsPage() {
       )}
 
       <div className="grid gap-4 md:grid-cols-2">
-        <div className="rounded-2xl border border-border/60 bg-slate-950/60 backdrop-blur p-4 space-y-3 md:col-span-2">
+        <div className="rounded-2xl border border-border/60 bg-card p-4 space-y-3 shadow-[var(--kf-shadow)] md:col-span-2">
           <div className="flex items-center justify-between text-sm font-semibold">
             <span>Account</span>
           </div>
           <div className="space-y-2 text-xs text-muted-foreground">
-            <div className="flex items-center justify-between rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2">
+            <div className="flex items-center justify-between rounded-xl border border-border/60 bg-background px-3 py-2">
               <span className="text-muted-foreground">Username</span>
               <span className="text-foreground">{profile.username || "Not set"}</span>
             </div>
-            <div className="flex items-center justify-between rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2">
+            <div className="flex items-center justify-between rounded-xl border border-border/60 bg-background px-3 py-2">
               <span className="text-muted-foreground">Email</span>
               <span className="text-foreground">{accountEmail || "Not set"}</span>
             </div>
-            <div className="flex items-center justify-between rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2">
+            <div className="flex items-center justify-between rounded-xl border border-border/60 bg-background px-3 py-2">
               <span className="text-muted-foreground">Password</span>
               <span className="text-foreground">••••••••</span>
             </div>
@@ -431,7 +431,7 @@ export default function SettingsPage() {
             </p>
           </div>
         </div>
-        <div className="rounded-2xl border border-border/60 bg-slate-950/60 backdrop-blur p-4 space-y-3">
+        <div className="rounded-2xl border border-border/60 bg-card p-4 space-y-3 shadow-[var(--kf-shadow)]">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <Users className="h-4 w-4 text-primary" />
             Profile & workspace
@@ -442,7 +442,7 @@ export default function SettingsPage() {
                 <label className="text-xs text-muted-foreground">
                   Username
                   <input
-                    className="mt-1 w-full rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-xl border border-border/60 bg-background px-3 py-2 text-sm"
                     value={profile.username}
                     onChange={(e) => setProfile((p) => ({ ...p, username: e.target.value }))}
                     placeholder=""
@@ -451,7 +451,7 @@ export default function SettingsPage() {
                 <label className="text-xs text-muted-foreground">
                   First name
                   <input
-                    className="mt-1 w-full rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-xl border border-border/60 bg-background px-3 py-2 text-sm"
                     value={profile.firstName}
                     onChange={(e) => setProfile((p) => ({ ...p, firstName: e.target.value }))}
                     placeholder=""
@@ -460,7 +460,7 @@ export default function SettingsPage() {
                 <label className="text-xs text-muted-foreground">
                   Last name
                   <input
-                    className="mt-1 w-full rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-xl border border-border/60 bg-background px-3 py-2 text-sm"
                     value={profile.lastName}
                     onChange={(e) => setProfile((p) => ({ ...p, lastName: e.target.value }))}
                     placeholder=""
@@ -469,7 +469,7 @@ export default function SettingsPage() {
                 <label className="text-xs text-muted-foreground">
                   Company
                   <input
-                    className="mt-1 w-full rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-xl border border-border/60 bg-background px-3 py-2 text-sm"
                     value={profile.company}
                     onChange={(e) => setProfile((p) => ({ ...p, company: e.target.value }))}
                     placeholder=""
@@ -478,7 +478,7 @@ export default function SettingsPage() {
                 <label className="text-xs text-muted-foreground">
                   Age
                   <input
-                    className="mt-1 w-full rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-xl border border-border/60 bg-background px-3 py-2 text-sm"
                     value={profile.age}
                     onChange={(e) => setProfile((p) => ({ ...p, age: e.target.value }))}
                     placeholder=""
@@ -487,7 +487,7 @@ export default function SettingsPage() {
                 <label className="text-xs text-muted-foreground">
                   Contact number
                   <input
-                    className="mt-1 w-full rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-xl border border-border/60 bg-background px-3 py-2 text-sm"
                     value={profile.contactNumber}
                     onChange={(e) => setProfile((p) => ({ ...p, contactNumber: e.target.value }))}
                     placeholder=""
@@ -503,7 +503,7 @@ export default function SettingsPage() {
                   Cancel
                 </button>
                 <button
-                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary/90"
+                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
                   onClick={() => void saveSection("profile").then(() => setProfileEdit(false))}
                   type="button"
                 >
@@ -514,34 +514,34 @@ export default function SettingsPage() {
           ) : (
             <>
               <div className="space-y-2 text-xs text-muted-foreground">
-                <div className="flex items-center justify-between rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2">
+                <div className="flex items-center justify-between rounded-xl border border-border/60 bg-background px-3 py-2">
                   <span>Username</span>
                   <span className="text-foreground">{profile.username || "Not set"}</span>
                 </div>
-                <div className="flex items-center justify-between rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2">
+                <div className="flex items-center justify-between rounded-xl border border-border/60 bg-background px-3 py-2">
                   <span>First name</span>
                   <span className="text-foreground">{profile.firstName || "Not set"}</span>
                 </div>
-                <div className="flex items-center justify-between rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2">
+                <div className="flex items-center justify-between rounded-xl border border-border/60 bg-background px-3 py-2">
                   <span>Last name</span>
                   <span className="text-foreground">{profile.lastName || "Not set"}</span>
                 </div>
-                <div className="flex items-center justify-between rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2">
+                <div className="flex items-center justify-between rounded-xl border border-border/60 bg-background px-3 py-2">
                   <span>Company</span>
                   <span className="text-foreground">{profile.company || "Not set"}</span>
                 </div>
-                <div className="flex items-center justify-between rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2">
+                <div className="flex items-center justify-between rounded-xl border border-border/60 bg-background px-3 py-2">
                   <span>Age</span>
                   <span className="text-foreground">{profile.age || "Not set"}</span>
                 </div>
-                <div className="flex items-center justify-between rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2">
+                <div className="flex items-center justify-between rounded-xl border border-border/60 bg-background px-3 py-2">
                   <span>Contact number</span>
                   <span className="text-foreground">{profile.contactNumber || "Not set"}</span>
                 </div>
               </div>
               <div className="flex justify-end">
                 <button
-                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary/90"
+                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
                   type="button"
                   onClick={() => setProfileEdit(true)}
                 >
@@ -552,7 +552,7 @@ export default function SettingsPage() {
           )}
         </div>
 
-        <div className="rounded-2xl border border-border/60 bg-slate-950/60 backdrop-blur p-4 space-y-3">
+        <div className="rounded-2xl border border-border/60 bg-card p-4 space-y-3 shadow-[var(--kf-shadow)]">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <Palette className="h-4 w-4 text-primary" />
             Brand & theme
@@ -562,7 +562,7 @@ export default function SettingsPage() {
               Primary color
               <input
                 type="color"
-                className="mt-1 h-10 w-full rounded-xl border border-border/60 bg-slate-950/80"
+                className="mt-1 h-10 w-full rounded-xl border border-border/60 bg-background"
                 value={brand.primaryColor}
                 onChange={(e) => setBrand((b) => ({ ...b, primaryColor: e.target.value }))}
               />
@@ -571,7 +571,7 @@ export default function SettingsPage() {
               Accent color
               <input
                 type="color"
-                className="mt-1 h-10 w-full rounded-xl border border-border/60 bg-slate-950/80"
+                className="mt-1 h-10 w-full rounded-xl border border-border/60 bg-background"
                 value={brand.accentColor}
                 onChange={(e) => setBrand((b) => ({ ...b, accentColor: e.target.value }))}
               />
@@ -579,7 +579,7 @@ export default function SettingsPage() {
           </div>
           <div className="flex justify-end">
             <button
-              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary/90"
+              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
               onClick={() => saveSection("brand")}
             >
               Save brand
@@ -587,7 +587,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-border/60 bg-slate-950/60 backdrop-blur p-4 space-y-3">
+        <div className="rounded-2xl border border-border/60 bg-card p-4 space-y-3 shadow-[var(--kf-shadow)]">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <Bell className="h-4 w-4 text-primary" />
             Notifications
@@ -620,7 +620,7 @@ export default function SettingsPage() {
           </div>
           <div className="flex justify-end">
             <button
-              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary/90"
+              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
               onClick={() => saveSection("notifications")}
             >
               Save notifications
@@ -628,7 +628,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-border/60 bg-slate-950/60 backdrop-blur p-4 space-y-3">
+        <div className="rounded-2xl border border-border/60 bg-card p-4 space-y-3 shadow-[var(--kf-shadow)]">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <Globe className="h-4 w-4 text-primary" />
             Domains
@@ -636,7 +636,7 @@ export default function SettingsPage() {
           <label className="text-xs text-muted-foreground">
             Primary domain
             <input
-              className="mt-1 w-full rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-xl border border-border/60 bg-background px-3 py-2 text-sm"
               value={domain.domain}
               onChange={(e) => setDomain({ domain: e.target.value })}
               placeholder="app.yourdomain.com"
@@ -644,7 +644,7 @@ export default function SettingsPage() {
           </label>
           <div className="flex justify-end">
             <button
-              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary/90"
+              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
               onClick={() => saveSection("domain")}
             >
               Save domain
@@ -652,7 +652,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-border/60 bg-slate-950/60 backdrop-blur p-4 space-y-3 md:col-span-2">
+        <div className="rounded-2xl border border-border/60 bg-card p-4 space-y-3 shadow-[var(--kf-shadow)] md:col-span-2">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <Shield className="h-4 w-4 text-primary" />
             Access control
@@ -660,7 +660,7 @@ export default function SettingsPage() {
           <div className="grid gap-2 md:grid-cols-[2fr_1fr]">
             <div className="space-y-2 text-xs text-muted-foreground">
               <div className="text-sm text-foreground">Members</div>
-              <div className="rounded-xl border border-border/60 bg-slate-950/80 p-3 space-y-1">
+              <div className="rounded-xl border border-border/60 bg-background p-3 space-y-1">
                 {members.length === 0 ? (
                   <div className="text-muted-foreground text-xs">No members yet.</div>
                 ) : (
@@ -676,13 +676,13 @@ export default function SettingsPage() {
             <div className="space-y-2 text-xs text-muted-foreground">
               <div className="text-sm text-foreground">Invite member</div>
               <input
-                className="w-full rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2 text-sm"
+                className="w-full rounded-xl border border-border/60 bg-background px-3 py-2 text-sm"
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
                 placeholder="member@email.com"
               />
               <button
-                className="w-full rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary/90"
+                className="w-full rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
                 type="button"
                 onClick={inviteMember}
               >

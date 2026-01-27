@@ -52,7 +52,7 @@ export function FlowFeedPanel({
   onAction?: (item: FeedItem) => void | Promise<void>;
 }) {
   return (
-    <div className="rounded-3xl border border-border/60 bg-slate-950/80 backdrop-blur-xl p-3 md:p-4 flex flex-col h-[420px]">
+    <div className="rounded-3xl border border-border/60 bg-card p-3 md:p-4 flex flex-col h-[420px] shadow-[var(--kf-shadow)]">
       <div className="flex items-center justify-between mb-2">
         <div>
           <h2 className="text-sm font-semibold">Flow Feed</h2>
@@ -73,11 +73,11 @@ export function FlowFeedPanel({
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.05 * index }}
-              className="group relative rounded-2xl border border-border/60 bg-slate-900/70 px-3 py-2.5 text-xs flex flex-col gap-1.5"
+              className="group relative rounded-2xl border border-border/60 bg-background px-3 py-2.5 text-xs flex flex-col gap-1.5"
             >
               <div className="absolute inset-0 rounded-3xl opacity-0 group-hover:opacity-100 bg-primary/10 blur-xl transition-opacity pointer-events-none" />
               <div className="relative flex items-start gap-2">
-                <span className="mt-0.5 h-7 w-7 rounded-2xl bg-slate-950/80 border border-border/60 flex items-center justify-center">
+                <span className="mt-0.5 h-7 w-7 rounded-2xl bg-card border border-border/60 flex items-center justify-center">
                   <Icon className="w-3.5 h-3.5 text-primary" />
                 </span>
                 <div className="space-y-0.5">

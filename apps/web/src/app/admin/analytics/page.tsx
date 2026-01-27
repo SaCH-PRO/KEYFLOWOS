@@ -16,13 +16,13 @@ export default function AdminAnalytics() {
         {charts.map((chart) => (
           <div
             key={chart.title}
-            className="rounded-2xl border border-border/70 bg-slate-950/70 p-5 space-y-3 shadow-soft-elevated"
+            className="rounded-2xl border border-border/70 bg-card p-5 space-y-3 shadow-[var(--kf-shadow)]"
           >
             <div>
               <h3 className="text-sm font-semibold">{chart.title}</h3>
               <p className="text-xs text-muted-foreground">{chart.note}</p>
             </div>
-            <div className="h-44 rounded-xl border border-border/60 bg-gradient-to-r from-slate-900 via-primary/10 to-emerald-400/10" />
+            <div className="h-44 rounded-xl border border-border/60 bg-gradient-to-r from-muted via-primary/10 to-accent/10" />
           </div>
         ))}
       </div>

@@ -35,11 +35,11 @@ export default function StudioPage() {
             <Link
               key={mod.label}
               href={mod.href}
-              className="group relative overflow-hidden rounded-3xl border border-border/60 bg-slate-950/60 p-4 backdrop-blur hover:border-primary/60 transition-colors"
+              className="group relative overflow-hidden rounded-3xl border border-border/60 bg-card p-4 hover:border-primary/60 transition-colors shadow-[var(--kf-shadow)]"
             >
           <div className="absolute inset-0 opacity-0 group-hover:opacity-100 bg-gradient-to-br from-primary/10 via-transparent to-emerald-500/5 blur-3xl transition-opacity" />
           <div className="relative flex items-center gap-3">
-            <span className="h-10 w-10 rounded-2xl bg-slate-900/70 border border-border/60 flex items-center justify-center text-primary">
+            <span className="h-10 w-10 rounded-2xl bg-background border border-border/60 flex items-center justify-center text-primary">
               <Icon className="w-5 h-5" />
             </span>
                 <div>
@@ -47,7 +47,7 @@ export default function StudioPage() {
                   <div className="text-xs text-muted-foreground">{mod.description}</div>
                 </div>
               </div>
-              <div className="relative mt-4 rounded-2xl border border-border/60 bg-slate-900/50 p-3 text-xs text-muted-foreground">
+              <div className="relative mt-4 rounded-2xl border border-border/60 bg-background p-3 text-xs text-muted-foreground">
                 <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-primary">
                   <Sparkles className="w-3 h-3" /> Workspace
                 </div>
@@ -60,7 +60,7 @@ export default function StudioPage() {
         })}
       </div>
 
-      <div className="rounded-3xl border border-border/60 bg-slate-950/60 backdrop-blur p-4 space-y-3">
+      <div className="rounded-3xl border border-border/60 bg-card p-4 space-y-3 shadow-[var(--kf-shadow)]">
         <div className="flex items-center justify-between">
           <div>
             <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Blueprint Mode</div>
@@ -70,22 +70,22 @@ export default function StudioPage() {
             Coming Soon
           </span>
         </div>
-        <div className="rounded-2xl border border-dashed border-border/60 bg-slate-900/50 p-4">
+        <div className="rounded-2xl border border-dashed border-border/60 bg-background p-4">
           <div className="text-xs text-muted-foreground mb-2">Graph: Business → Contacts → Invoices → Bookings</div>
           <div className="grid grid-cols-4 gap-3 text-[11px] text-muted-foreground">
-            <div className="rounded-xl border border-border/60 bg-slate-950/70 p-3">
+            <div className="rounded-xl border border-border/60 bg-card p-3">
               <div className="text-primary font-semibold">Business</div>
               <div>Contacts, Products, Invoices</div>
             </div>
-            <div className="rounded-xl border border-border/60 bg-slate-950/70 p-3">
+            <div className="rounded-xl border border-border/60 bg-card p-3">
               <div className="text-primary font-semibold">Contacts</div>
               <div>Invoices, Bookings</div>
             </div>
-            <div className="rounded-xl border border-border/60 bg-slate-950/70 p-3">
+            <div className="rounded-xl border border-border/60 bg-card p-3">
               <div className="text-primary font-semibold">Invoices</div>
               <div>Items, Payments, Booking</div>
             </div>
-            <div className="rounded-xl border border-border/60 bg-slate-950/70 p-3">
+            <div className="rounded-xl border border-border/60 bg-card p-3">
               <div className="text-primary font-semibold">Bookings</div>
               <div>Service, Staff, Contact</div>
             </div>

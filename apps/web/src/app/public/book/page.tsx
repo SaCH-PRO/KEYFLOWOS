@@ -72,28 +72,28 @@ export default function PublicBookPage() {
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white px-4 py-10">
+    <main className="min-h-screen bg-background text-foreground px-4 py-10">
       <div className="mx-auto max-w-5xl grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="space-y-4">
           <Badge tone="info">Public Booking</Badge>
           <h1 className="text-3xl font-semibold leading-tight">Book a session with KeyFlowOS</h1>
-          <p className="text-sm text-slate-300">
+          <p className="text-sm text-muted-foreground">
             Premium, glassy public booking experience. Requests hit the live endpoint at{" "}
             <code className="font-mono">{API_BASE}</code>.
           </p>
-          <div className="grid grid-cols-2 gap-3 text-sm text-slate-300">
-            <div className="rounded-2xl border border-[var(--kf-border)] bg-[rgba(0,0,0,0.35)] p-3">
+          <div className="grid grid-cols-2 gap-3 text-sm text-muted-foreground">
+            <div className="rounded-2xl border border-border/60 bg-card p-3">
               <div className="text-xs uppercase tracking-[0.12em] text-[var(--kf-text-muted)]">Trust</div>
               <div className="mt-1 font-semibold">Secure & Encrypted</div>
             </div>
-            <div className="rounded-2xl border border-[var(--kf-border)] bg-[rgba(0,0,0,0.35)] p-3">
+            <div className="rounded-2xl border border-border/60 bg-card p-3">
               <div className="text-xs uppercase tracking-[0.12em] text-[var(--kf-text-muted)]">Speed</div>
               <div className="mt-1 font-semibold">Instant confirmation</div>
             </div>
           </div>
         </div>
 
-        <Card title="Book Now" badge="Live" className="bg-[rgba(0,0,0,0.35)] border border-[var(--kf-border)]">
+        <Card title="Book Now" badge="Live">
           <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Input label="Business ID" value={businessId} onChange={(e) => setBusinessId(e.target.value)} required />
             <label className="flex flex-col gap-1 text-sm text-[var(--kf-text)]">
@@ -159,7 +159,7 @@ export default function PublicBookPage() {
                 {status}
               </motion.div>
               {success && (
-                <div className="mt-2 text-xs text-slate-200 space-y-1">
+                <div className="mt-2 text-xs text-muted-foreground space-y-1">
                   {bookingId && (
                     <div>
                       Booking ID: <code className="font-mono">{bookingId}</code>

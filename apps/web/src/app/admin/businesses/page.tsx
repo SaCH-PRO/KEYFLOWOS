@@ -11,9 +11,9 @@ export default function AdminBusinesses() {
         <h1 className="text-2xl font-semibold tracking-tight">Businesses</h1>
         <p className="text-sm text-muted-foreground">All workspaces with owner, MRR, and status.</p>
       </div>
-      <div className="overflow-hidden rounded-2xl border border-border/70 bg-slate-950/70">
+      <div className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-[var(--kf-shadow)]">
         <table className="min-w-full text-sm">
-          <thead className="bg-slate-900/70 text-muted-foreground">
+          <thead className="bg-muted text-muted-foreground">
             <tr>
               <th className="px-4 py-3 text-left font-medium">Business</th>
               <th className="px-4 py-3 text-left font-medium">Owner</th>

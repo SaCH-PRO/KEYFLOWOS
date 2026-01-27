@@ -15,8 +15,8 @@ interface CardProps extends HTMLAttributes<HTMLDivElement> {
 
 const shadowStyles: Record<CardShadow, string> = {
   none: "shadow-none",
-  sm: "shadow-sm hover:shadow-md",
-  md: "shadow-md hover:shadow-lg",
+  sm: "shadow-[var(--kf-shadow)]",
+  md: "shadow-[0_24px_50px_rgba(15,23,42,0.12)]",
 };
 
 const paddingStyles: Record<CardPadding, string> = {
@@ -37,26 +37,25 @@ export function Card({
   return (
     <div
       className={cn(
-        "relative overflow-hidden rounded-xl border border-[var(--kf-border)] bg-[var(--kf-glass)] backdrop-blur-md transition-transform duration-200 ease-flow",
+        "relative overflow-hidden rounded-2xl border border-[hsl(var(--kf-border))] bg-[hsl(var(--kf-card))] transition-all duration-200 ease-flow",
         shadowStyles[shadow],
         "hover:-translate-y-[1px]",
         className,
       )}
       {...rest}
     >
-      <div className="absolute inset-0 pointer-events-none bg-gradient-to-br from-[rgba(78,168,255,0.06)] via-transparent to-[rgba(163,116,255,0.06)]" />
       <div className={cn("relative space-y-2", paddingStyles[padding])}>
         {(title || badge) && (
           <div className="flex items-center justify-between">
-            {title && <h3 className="text-base font-semibold text-[var(--kf-text)]">{title}</h3>}
+            {title && <h3 className="text-base font-semibold text-[hsl(var(--kf-foreground))]">{title}</h3>}
             {badge && (
-              <span className="rounded-full border border-[var(--kf-electric)] bg-[rgba(78,168,255,0.08)] px-2 py-1 text-xs text-[var(--kf-electric)]">
+              <span className="rounded-full border border-[hsl(var(--kf-border))] bg-[hsl(var(--kf-muted))] px-2 py-1 text-xs text-[hsl(var(--kf-foreground))]">
                 {badge}
               </span>
             )}
           </div>
         )}
-        <div className="relative z-10">{children}</div>
+        <div className="relative z-10 text-[hsl(var(--kf-foreground))]">{children}</div>
       </div>
     </div>
   );

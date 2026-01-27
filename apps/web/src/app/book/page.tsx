@@ -38,49 +38,49 @@ export default function BookPage() {
   };
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-8 space-y-6">
+    <main className="flex min-h-screen flex-col items-center justify-center bg-background p-8 space-y-6 text-foreground">
       <div className="max-w-xl w-full space-y-4">
         <h1 className="text-3xl font-bold">Public Booking Test</h1>
-        <p className="text-slate-600">
+        <p className="text-muted-foreground">
           Submit a booking to the Nest backend using the new public booking endpoint.
         </p>
         <form onSubmit={submit} className="grid grid-cols-1 gap-4">
           <input
-            className="w-full rounded border border-slate-300 px-3 py-2"
+            className="w-full rounded border border-border bg-background px-3 py-2 text-foreground placeholder:text-muted-foreground"
             placeholder="Business ID"
             value={businessId}
             onChange={(e) => setBusinessId(e.target.value)}
             required
           />
           <input
-            className="w-full rounded border border-slate-300 px-3 py-2"
+            className="w-full rounded border border-border bg-background px-3 py-2 text-foreground placeholder:text-muted-foreground"
             placeholder="Service ID"
             value={serviceId}
             onChange={(e) => setServiceId(e.target.value)}
             required
           />
           <input
-            className="w-full rounded border border-slate-300 px-3 py-2"
+            className="w-full rounded border border-border bg-background px-3 py-2 text-foreground placeholder:text-muted-foreground"
             placeholder="Staff ID"
             value={staffId}
             onChange={(e) => setStaffId(e.target.value)}
             required
           />
           <input
-            className="w-full rounded border border-slate-300 px-3 py-2"
+            className="w-full rounded border border-border bg-background px-3 py-2 text-foreground placeholder:text-muted-foreground"
             placeholder="Start time (ISO)"
             value={startTime}
             onChange={(e) => setStartTime(e.target.value)}
             required
           />
           <input
-            className="w-full rounded border border-slate-300 px-3 py-2"
+            className="w-full rounded border border-border bg-background px-3 py-2 text-foreground placeholder:text-muted-foreground"
             placeholder="First name (optional)"
             value={firstName}
             onChange={(e) => setFirstName(e.target.value)}
           />
           <input
-            className="w-full rounded border border-slate-300 px-3 py-2"
+            className="w-full rounded border border-border bg-background px-3 py-2 text-foreground placeholder:text-muted-foreground"
             placeholder="Email (optional)"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -89,7 +89,7 @@ export default function BookPage() {
             <Button type="submit">Submit Booking</Button>
           </div>
         </form>
-        {status && <p className="text-sm text-slate-700">{status}</p>}
+        {status && <p className="text-sm text-muted-foreground">{status}</p>}
       </div>
     </main>
   );

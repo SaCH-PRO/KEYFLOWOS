@@ -160,7 +160,7 @@ export default function SocialPage() {
             </div>
             {connections.length === 0 && <div className="text-xs text-muted-foreground">No channels connected.</div>}
             {connections.map((connection) => (
-              <div key={connection.id} className="rounded-xl border border-border/60 bg-slate-900/60 px-3 py-2 text-sm">
+              <div key={connection.id} className="rounded-xl border border-border/60 bg-background px-3 py-2 text-sm">
                 <div className="font-semibold">{connection.platform}</div>
                 <div className="text-xs text-muted-foreground">{connection.platformId ?? "No platform ID"}</div>
               </div>
@@ -173,7 +173,7 @@ export default function SocialPage() {
         <div className="space-y-2">
           {posts.length === 0 && <div className="text-xs text-muted-foreground">No posts yet.</div>}
           {posts.map((post) => (
-            <div key={post.id} className="rounded-2xl border border-border/60 bg-slate-900/60 p-3 text-sm">
+            <div key={post.id} className="rounded-2xl border border-border/60 bg-background p-3 text-sm">
               <div className="flex items-center justify-between gap-2">
                 <div className="font-semibold">{post.content.slice(0, 80)}</div>
                 <Badge tone={post.status === "POSTED" ? "success" : post.status === "SCHEDULED" ? "info" : "default"}>

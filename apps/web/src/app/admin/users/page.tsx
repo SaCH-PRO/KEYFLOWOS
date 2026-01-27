@@ -11,9 +11,9 @@ export default function AdminUsers() {
         <h1 className="text-2xl font-semibold tracking-tight">Users</h1>
         <p className="text-sm text-muted-foreground">Platform-wide user list with quick diagnostics.</p>
       </div>
-      <div className="overflow-hidden rounded-2xl border border-border/70 bg-slate-950/70">
+      <div className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-[var(--kf-shadow)]">
         <table className="min-w-full text-sm">
-          <thead className="bg-slate-900/70 text-muted-foreground">
+          <thead className="bg-muted text-muted-foreground">
             <tr>
               <th className="px-4 py-3 text-left font-medium">Email</th>
               <th className="px-4 py-3 text-left font-medium">Businesses</th>

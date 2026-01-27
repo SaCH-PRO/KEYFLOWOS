@@ -68,12 +68,12 @@ export default function PublicSocialPage() {
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-950 to-black text-white px-4 py-8">
+    <main className="min-h-screen bg-background text-foreground px-4 py-8">
       <div className="mx-auto max-w-4xl space-y-6">
         <div className="flex flex-col gap-2">
           <Badge tone="info">Public Links</Badge>
           <h1 className="text-3xl font-semibold">{title}</h1>
-          <p className="text-sm text-slate-300">Share your links instantly. Use ?subdomain= or ?businessId=.</p>
+          <p className="text-sm text-muted-foreground">Share your links instantly. Use ?subdomain= or ?businessId=.</p>
         </div>
 
         <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
@@ -86,7 +86,7 @@ export default function PublicSocialPage() {
                   href={link.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="flex items-center justify-between rounded-xl border border-border/60 bg-slate-900/60 px-3 py-2 text-sm"
+                  className="flex items-center justify-between rounded-xl border border-border/60 bg-background px-3 py-2 text-sm"
                 >
                   <span>{link.label}</span>
                   <span className="text-xs text-muted-foreground">{link.url}</span>

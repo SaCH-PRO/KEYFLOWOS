@@ -191,19 +191,19 @@ export default function AppHome() {
       )}
 
       {actionMessage && (
-        <div className="rounded-2xl border border-border/70 bg-slate-900/60 px-4 py-2 text-xs text-muted-foreground">
+        <div className="rounded-2xl border border-border/70 bg-card px-4 py-2 text-xs text-muted-foreground">
           {actionMessage}
         </div>
       )}
 
       {invoices.length > 0 && (
-        <div className="rounded-3xl border border-border/60 bg-slate-950/70 backdrop-blur px-4 py-3">
+        <div className="rounded-3xl border border-border/60 bg-card px-4 py-3 shadow-[var(--kf-shadow)]">
           <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground mb-2">Recent invoices</div>
           <div className="flex flex-wrap gap-2">
             {invoices.slice(0, 4).map((inv) => (
               <span
                 key={inv.id}
-                className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-slate-900/60 px-3 py-1 text-xs text-muted-foreground"
+                className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background px-3 py-1 text-xs text-muted-foreground"
               >
                 <span className="h-2 w-2 rounded-full bg-emerald-400" />
                 {inv.invoiceNumber ?? inv.id} - {inv.status}
