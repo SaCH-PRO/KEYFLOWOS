@@ -16,11 +16,10 @@ export default function PublicPayPage() {
   const [paidInvoiceId, setPaidInvoiceId] = useState<string | null>(null);
   const [copyMsg, setCopyMsg] = useState<string | null>(null);
   const [invoice, setInvoice] = useState<Invoice | null>(null);
-  const [loadingInvoice, setLoadingInvoice] = useState(false);
+  const [loadingInvoice, setLoadingInvoice] = useState(() => Boolean(invoiceIdParam));
 
   useEffect(() => {
     if (!invoiceId) return;
-    setLoadingInvoice(true);
     fetchInvoicePublic(invoiceId)
       .then((res) => setInvoice(res.data ?? null))
       .finally(() => setLoadingInvoice(false));
@@ -43,6 +42,12 @@ export default function PublicPayPage() {
     }
   };
 
+  const handleInvoiceIdChange = (value: string) => {
+    setInvoiceId(value);
+    setInvoice(null);
+    setLoadingInvoice(Boolean(value));
+  };
+
   return (
     <main className="min-h-screen bg-background text-foreground px-4 py-10">
       <div className="mx-auto max-w-4xl space-y-6">
@@ -57,7 +62,13 @@ export default function PublicPayPage() {
 
         <Card title="Payment" badge="Live">
           <form onSubmit={markPaid} className="grid grid-cols-1 gap-4">
-            <Input label="Invoice ID" value={invoiceId} onChange={(e) => setInvoiceId(e.target.value)} required placeholder="inv_xxx" />
+            <Input
+              label="Invoice ID"
+              value={invoiceId}
+              onChange={(e) => handleInvoiceIdChange(e.target.value)}
+              required
+              placeholder="inv_xxx"
+            />
             <div className="flex justify-end">
               <Button type="submit">Mark Paid</Button>
             </div>

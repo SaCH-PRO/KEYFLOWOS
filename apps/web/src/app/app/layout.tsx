@@ -61,7 +61,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [businessMenuOpen, setBusinessMenuOpen] = useState(false);
   const [businesses, setBusinesses] = useState<Membership[]>([]);
   const [activeBusinessId, setActiveBusinessIdState] = useState<string>(() => getActiveBusinessId());
-  const [businessLoading, setBusinessLoading] = useState(false);
+  const [businessLoading, setBusinessLoading] = useState(true);
   // Temporary momentum value; could be wired to live data
   const momentumValue = 0.65;
 
@@ -83,7 +83,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    setBusinessLoading(true);
     fetchBusinesses()
       .then((res) => {
         const items = res.data ?? [];
