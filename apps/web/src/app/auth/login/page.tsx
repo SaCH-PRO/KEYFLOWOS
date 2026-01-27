@@ -64,14 +64,27 @@ export default function AuthLogin() {
 
   return (
     <div className="landing">
+      <div className="w-full max-w-md space-y-4">
+        <Link href="/" className="text-xs text-primary hover:underline">
+          Back to home
+        </Link>
+      </div>
       <h1 className="landing-title text-3xl md:text-4xl font-semibold">Sign in</h1>
       <p className="landing-tagline">Use your email and password. New here? Continue to sign up instead.</p>
       <form
         onSubmit={onSubmit}
-        className="w-full max-w-md mx-auto bg-slate-900/40 border border-primary/30 rounded-3xl p-6 flex flex-col gap-4 shadow-[0_0_35px_rgba(41,123,255,0.25)]"
+        className="w-full max-w-md mx-auto bg-slate-900/40 border border-primary/30 rounded-3xl p-5 sm:p-6 flex flex-col gap-4 shadow-[0_0_35px_rgba(41,123,255,0.25)]"
       >
-        {banner && <div className="text-xs text-emerald-300">{banner}</div>}
-        {error && <div className="text-xs text-amber-400">{error}</div>}
+        {banner && (
+          <div className="text-xs text-emerald-300" aria-live="polite">
+            {banner}
+          </div>
+        )}
+        {error && (
+          <div className="text-xs text-amber-400" aria-live="polite">
+            {error}
+          </div>
+        )}
         <label className="flex flex-col text-left text-sm text-muted-foreground gap-1">
           Email
           <input
@@ -79,6 +92,8 @@ export default function AuthLogin() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            autoComplete="email"
+            inputMode="email"
             className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
             placeholder="you@example.com"
             suppressHydrationWarning
@@ -91,6 +106,7 @@ export default function AuthLogin() {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
             className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
             placeholder="••••••••"
             suppressHydrationWarning

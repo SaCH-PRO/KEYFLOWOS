@@ -176,10 +176,15 @@ export default function AuthSignup() {
 
   return (
     <div className="landing">
+      <div className="w-full max-w-md space-y-4">
+        <Link href="/" className="text-xs text-primary hover:underline">
+          Back to home
+        </Link>
+      </div>
       <h1 className="landing-title text-3xl md:text-4xl font-semibold">Create your workspace</h1>
       <p className="landing-tagline">Sign up with your email and set up your profile to begin your flow.</p>
       {pendingVerification ? (
-        <div className="w-full max-w-md mx-auto bg-slate-900/40 border border-primary/30 rounded-3xl p-6 flex flex-col gap-4 text-center shadow-[0_0_35px_rgba(41,123,255,0.25)]">
+        <div className="w-full max-w-md mx-auto bg-slate-900/40 border border-primary/30 rounded-3xl p-5 sm:p-6 flex flex-col gap-4 text-center shadow-[0_0_35px_rgba(41,123,255,0.25)]">
           <h2 className="text-xl font-semibold text-foreground">Verify your email</h2>
           <p className="text-sm text-muted-foreground">
             We sent a verification link to <span className="text-primary">{email}</span>. Please check your inbox and click the link to continue.
@@ -212,10 +217,18 @@ export default function AuthSignup() {
       ) : (
         <form
           onSubmit={onSubmit}
-          className="w-full max-w-md mx-auto bg-slate-900/40 border border-primary/30 rounded-3xl p-6 flex flex-col gap-4 shadow-[0_0_35px_rgba(41,123,255,0.25)]"
+          className="w-full max-w-md mx-auto bg-slate-900/40 border border-primary/30 rounded-3xl p-5 sm:p-6 flex flex-col gap-4 shadow-[0_0_35px_rgba(41,123,255,0.25)]"
         >
-          {error && <div className="text-xs text-amber-400">{error}</div>}
-          {banner && <div className="text-xs text-emerald-300">{banner}</div>}
+          {error && (
+            <div className="text-xs text-amber-400" aria-live="polite">
+              {error}
+            </div>
+          )}
+          {banner && (
+            <div className="text-xs text-emerald-300" aria-live="polite">
+              {banner}
+            </div>
+          )}
           <div className="grid gap-3">
             <label className="flex flex-col text-left text-sm text-muted-foreground gap-1">
               Username (unique)
@@ -223,8 +236,9 @@ export default function AuthSignup() {
                 required
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
+                autoComplete="username"
                 className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
-                placeholder=""
+                placeholder="yourname"
               />
               <span className="text-[11px] text-muted-foreground">
                 {usernameStatus === "checking" && "Checking availability..."}
@@ -233,25 +247,27 @@ export default function AuthSignup() {
                 {usernameStatus === "idle" && "Letters/numbers, unique to you."}
               </span>
             </label>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <label className="flex flex-col text-left text-sm text-muted-foreground gap-1">
                 First name
                 <input
                   required
                   value={firstName}
                   onChange={(e) => setFirstName(e.target.value)}
+                  autoComplete="given-name"
                   className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
-              placeholder=""
-            />
-          </label>
-          <label className="flex flex-col text-left text-sm text-muted-foreground gap-1">
-            Last name
-            <input
-              required
-              value={lastName}
-              onChange={(e) => setLastName(e.target.value)}
+                  placeholder="First"
+                />
+              </label>
+              <label className="flex flex-col text-left text-sm text-muted-foreground gap-1">
+                Last name
+                <input
+                  required
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  autoComplete="family-name"
                   className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
-                  placeholder=""
+                  placeholder="Last"
                 />
               </label>
             </div>
@@ -260,8 +276,9 @@ export default function AuthSignup() {
               <input
                 value={company}
                 onChange={(e) => setCompany(e.target.value)}
+                autoComplete="organization"
                 className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
-                placeholder=""
+                placeholder="Business name"
               />
             </label>
             <label className="flex flex-col text-left text-sm text-muted-foreground gap-1">
@@ -271,8 +288,9 @@ export default function AuthSignup() {
                 min="13"
                 value={age}
                 onChange={(e) => setAge(e.target.value)}
+                inputMode="numeric"
                 className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
-                placeholder=""
+                placeholder="18"
               />
             </label>
             <label className="flex flex-col text-left text-sm text-muted-foreground gap-1">
@@ -280,22 +298,26 @@ export default function AuthSignup() {
               <input
                 value={contactNumber}
                 onChange={(e) => setContactNumber(e.target.value)}
+                autoComplete="tel"
+                inputMode="tel"
                 className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
-                placeholder=""
+                placeholder="+1 555 123 4567"
               />
             </label>
           </div>
           <label className="flex flex-col text-left text-sm text-muted-foreground gap-1">
             Email
             <input
-            required
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
-            placeholder=""
-          />
-        </label>
+              required
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              inputMode="email"
+              className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+              placeholder="you@example.com"
+            />
+          </label>
           <label className="flex flex-col text-left text-sm text-muted-foreground gap-1">
             Password
             <div className="relative">
@@ -304,8 +326,9 @@ export default function AuthSignup() {
                 type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                autoComplete="new-password"
                 className="w-full rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 pr-12 text-sm text-foreground focus:border-primary focus:outline-none"
-                placeholder=""
+                placeholder="Create a secure password"
               />
               <button
                 type="button"
