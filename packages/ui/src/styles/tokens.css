@@ -2,7 +2,7 @@
 
 :root {
   --kf-background: 0 0% 100%;
-  --kf-foreground: 222 40% 12%;
+  --kf-foreground: 220 18% 12%;
 
   --kf-card: 0 0% 100%;
   --kf-card-foreground: 222 40% 12%;
@@ -10,85 +10,92 @@
   --kf-popover: 0 0% 100%;
   --kf-popover-foreground: 222 40% 12%;
 
-  --kf-border: 220 30% 90%;
-  --kf-input: 220 30% 90%;
-  --kf-surface: 220 20% 98%;
+  --kf-border: 220 14% 88%;
+  --kf-input: 220 14% 88%;
+  --kf-surface: 220 20% 96%;
 
-  --kf-primary: 215 100% 56%;
+  --kf-primary: 20 90% 55%;
   --kf-primary-foreground: 0 0% 100%;
 
-  --kf-secondary: 330 80% 96%;
-  --kf-secondary-foreground: 330 35% 20%;
+  --kf-secondary: 220 20% 95%;
+  --kf-secondary-foreground: 220 18% 20%;
 
-  --kf-muted: 220 20% 94%;
-  --kf-muted-foreground: 220 12% 40%;
+  --kf-muted: 220 14% 94%;
+  --kf-muted-foreground: 220 10% 46%;
 
-  --kf-accent: 325 90% 62%;
+  --kf-accent: 14 80% 56%;
   --kf-accent-foreground: 0 0% 100%;
 
   --kf-destructive: 0 72% 56%;
   --kf-destructive-foreground: 0 0% 100%;
 
-  --kf-ring: 215 100% 56%;
+  --kf-ring: 20 90% 55%;
 
   --kf-text: hsl(var(--kf-foreground));
   --kf-text-muted: hsl(var(--kf-muted-foreground));
-  --kf-glass: rgba(255, 255, 255, 0.85);
+  --kf-glass: rgba(255, 255, 255, 0.9);
   --kf-electric: hsl(var(--kf-primary));
   --kf-pulse: hsl(var(--kf-accent));
   --kf-mint: #24d08d;
   --kf-amber: #f5b942;
   --kf-red: #f45b69;
-  --kf-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
-  --kf-glow: 0 0 24px rgba(41, 123, 255, 0.2);
-  --kf-radius: 18px;
+  --kf-shadow: 0 20px 50px rgba(15, 23, 42, 0.08);
+  --kf-glow: 0 0 24px rgba(240, 107, 87, 0.25);
+  --kf-radius: 20px;
 }
 
 .dark {
-  --kf-background: 220 15% 4%;
-  --kf-foreground: 210 40% 97%;
+  --kf-background: 220 12% 6%;
+  --kf-foreground: 0 0% 96%;
 
-  --kf-card: 220 18% 8%;
-  --kf-card-foreground: 210 40% 97%;
+  --kf-card: 220 12% 10%;
+  --kf-card-foreground: 0 0% 96%;
 
-  --kf-popover: 220 18% 8%;
-  --kf-popover-foreground: 210 40% 97%;
+  --kf-popover: 220 12% 10%;
+  --kf-popover-foreground: 0 0% 96%;
 
-  --kf-border: 220 22% 18%;
-  --kf-input: 220 22% 18%;
+  --kf-border: 220 10% 18%;
+  --kf-input: 220 12% 16%;
 
-  --kf-primary: 215 100% 62%;
-  --kf-primary-foreground: 210 40% 98%;
+  --kf-primary: 20 90% 58%;
+  --kf-primary-foreground: 0 0% 100%;
 
-  --kf-secondary: 220 18% 16%;
-  --kf-secondary-foreground: 210 40% 92%;
+  --kf-secondary: 220 12% 14%;
+  --kf-secondary-foreground: 0 0% 92%;
 
-  --kf-muted: 220 16% 14%;
-  --kf-muted-foreground: 215 18% 62%;
+  --kf-muted: 220 12% 14%;
+  --kf-muted-foreground: 220 9% 62%;
 
-  --kf-accent: 215 90% 58%;
-  --kf-accent-foreground: 210 40% 98%;
+  --kf-accent: 14 80% 56%;
+  --kf-accent-foreground: 0 0% 98%;
 
   --kf-destructive: 355 90% 60%;
   --kf-destructive-foreground: 210 40% 98%;
 
-  --kf-ring: 215 100% 62%;
+  --kf-ring: 20 90% 58%;
 
   --kf-text: hsl(var(--kf-foreground));
   --kf-text-muted: hsl(var(--kf-muted-foreground));
-  --kf-glass: rgba(12, 14, 18, 0.72);
+  --kf-glass: rgba(16, 18, 22, 0.85);
   --kf-electric: hsl(var(--kf-primary));
   --kf-pulse: hsl(var(--kf-accent));
   --kf-mint: #38e8a7;
   --kf-amber: #f8c15a;
   --kf-red: #ff5f6f;
-  --kf-shadow: 0 20px 50px rgba(0, 0, 0, 0.55);
-  --kf-glow: 0 0 28px rgba(74, 163, 255, 0.35);
-  --kf-radius: 18px;
+  --kf-shadow: 0 22px 60px rgba(0, 0, 0, 0.6);
+  --kf-glow: 0 0 28px rgba(244, 140, 69, 0.35);
+  --kf-radius: 20px;
 }
 
 body {
   font-family: "Satoshi", system-ui, -apple-system, sans-serif;
   background: hsl(var(--kf-background));
   color: hsl(var(--kf-foreground));
+}
+
+.dark body {
+  background:
+    radial-gradient(circle at 18% 20%, hsl(var(--kf-primary) / 0.08), transparent 45%),
+    radial-gradient(circle at 85% 10%, hsl(var(--kf-accent) / 0.06), transparent 50%),
+    hsl(var(--kf-background));
 }

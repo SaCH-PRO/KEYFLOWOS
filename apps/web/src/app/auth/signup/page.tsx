@@ -237,7 +237,7 @@ export default function AuthSignup() {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 autoComplete="username"
-                className="rounded-xl bg-background border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                className="rounded-2xl bg-muted border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
                 placeholder="yourname"
               />
               <span className="text-[11px] text-muted-foreground">
@@ -255,7 +255,7 @@ export default function AuthSignup() {
                   value={firstName}
                   onChange={(e) => setFirstName(e.target.value)}
                   autoComplete="given-name"
-                  className="rounded-xl bg-background border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                  className="rounded-2xl bg-muted border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
                   placeholder="First"
                 />
               </label>
@@ -266,7 +266,7 @@ export default function AuthSignup() {
                   value={lastName}
                   onChange={(e) => setLastName(e.target.value)}
                   autoComplete="family-name"
-                  className="rounded-xl bg-background border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                  className="rounded-2xl bg-muted border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
                   placeholder="Last"
                 />
               </label>
@@ -277,7 +277,7 @@ export default function AuthSignup() {
                 value={company}
                 onChange={(e) => setCompany(e.target.value)}
                 autoComplete="organization"
-                className="rounded-xl bg-background border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                className="rounded-2xl bg-muted border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
                 placeholder="Business name"
               />
             </label>
@@ -289,7 +289,7 @@ export default function AuthSignup() {
                 value={age}
                 onChange={(e) => setAge(e.target.value)}
                 inputMode="numeric"
-                className="rounded-xl bg-background border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                className="rounded-2xl bg-muted border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
                 placeholder="18"
               />
             </label>
@@ -300,7 +300,7 @@ export default function AuthSignup() {
                 onChange={(e) => setContactNumber(e.target.value)}
                 autoComplete="tel"
                 inputMode="tel"
-                className="rounded-xl bg-background border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                className="rounded-2xl bg-muted border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
                 placeholder="+1 555 123 4567"
               />
             </label>
@@ -314,7 +314,7 @@ export default function AuthSignup() {
               onChange={(e) => setEmail(e.target.value)}
               autoComplete="email"
               inputMode="email"
-              className="rounded-xl bg-background border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+              className="rounded-2xl bg-muted border border-border/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
               placeholder="you@example.com"
             />
           </label>
@@ -327,7 +327,7 @@ export default function AuthSignup() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="new-password"
-                className="w-full rounded-xl bg-background border border-border/60 px-3 py-2 pr-12 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                className="w-full rounded-2xl bg-muted border border-border/60 px-3 py-2 pr-12 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
                 placeholder="Create a secure password"
               />
               <button

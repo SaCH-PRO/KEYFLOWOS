@@ -38,6 +38,7 @@ export function Card({
     <div
       className={cn(
         "relative overflow-hidden rounded-2xl border border-[hsl(var(--kf-border))] bg-[hsl(var(--kf-card))] transition-all duration-200 ease-flow",
+        "before:absolute before:inset-0 before:pointer-events-none before:bg-[linear-gradient(145deg,rgba(255,255,255,0.04),rgba(0,0,0,0))]",
         shadowStyles[shadow],
         "hover:-translate-y-[1px]",
         className,

@@ -46,41 +46,41 @@ export default function BookPage() {
         </p>
         <form onSubmit={submit} className="grid grid-cols-1 gap-4">
           <input
-            className="w-full rounded border border-border bg-background px-3 py-2 text-foreground placeholder:text-muted-foreground"
+            className="w-full rounded-2xl border border-border bg-muted px-3 py-2 text-foreground placeholder:text-muted-foreground"
             placeholder="Business ID"
             value={businessId}
             onChange={(e) => setBusinessId(e.target.value)}
             required
           />
           <input
-            className="w-full rounded border border-border bg-background px-3 py-2 text-foreground placeholder:text-muted-foreground"
+            className="w-full rounded-2xl border border-border bg-muted px-3 py-2 text-foreground placeholder:text-muted-foreground"
             placeholder="Service ID"
             value={serviceId}
             onChange={(e) => setServiceId(e.target.value)}
             required
           />
           <input
-            className="w-full rounded border border-border bg-background px-3 py-2 text-foreground placeholder:text-muted-foreground"
+            className="w-full rounded-2xl border border-border bg-muted px-3 py-2 text-foreground placeholder:text-muted-foreground"
             placeholder="Staff ID"
             value={staffId}
             onChange={(e) => setStaffId(e.target.value)}
             required
           />
           <input
-            className="w-full rounded border border-border bg-background px-3 py-2 text-foreground placeholder:text-muted-foreground"
+            className="w-full rounded-2xl border border-border bg-muted px-3 py-2 text-foreground placeholder:text-muted-foreground"
             placeholder="Start time (ISO)"
             value={startTime}
             onChange={(e) => setStartTime(e.target.value)}
             required
           />
           <input
-            className="w-full rounded border border-border bg-background px-3 py-2 text-foreground placeholder:text-muted-foreground"
+            className="w-full rounded-2xl border border-border bg-muted px-3 py-2 text-foreground placeholder:text-muted-foreground"
             placeholder="First name (optional)"
             value={firstName}
             onChange={(e) => setFirstName(e.target.value)}
           />
           <input
-            className="w-full rounded border border-border bg-background px-3 py-2 text-foreground placeholder:text-muted-foreground"
+            className="w-full rounded-2xl border border-border bg-muted px-3 py-2 text-foreground placeholder:text-muted-foreground"
             placeholder="Email (optional)"
             value={email}
             onChange={(e) => setEmail(e.target.value)}

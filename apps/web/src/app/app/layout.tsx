@@ -123,7 +123,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <div className="h-9 w-9 rounded-2xl bg-primary/20 flex items-center justify-center shadow-[var(--kf-glow)]">
               <span className="h-4 w-4 rounded-full bg-primary" />
             </div>
-            <div className="text-sm font-semibold text-primary tracking-[0.24em] drop-shadow-[0_0_12px_rgba(41,123,255,0.7)]">
+            <div className="text-sm font-semibold text-primary tracking-[0.24em] drop-shadow-[0_0_12px_rgba(240,107,87,0.6)]">
               KEYFLOWOS
             </div>
           </div>

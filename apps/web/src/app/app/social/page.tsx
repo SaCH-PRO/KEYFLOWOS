@@ -104,7 +104,7 @@ export default function SocialPage() {
         <Card title="Create post" badge="Live">
           <div className="space-y-3">
             <textarea
-              className="w-full rounded-lg bg-[var(--kf-glass)] border border-[var(--kf-border)] px-3 py-2 text-sm text-[var(--kf-text)]"
+              className="w-full rounded-2xl bg-muted border border-border px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground"
               placeholder="Write your post..."
               rows={4}
               value={postForm.content}

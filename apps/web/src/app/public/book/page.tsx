@@ -83,11 +83,11 @@ export default function PublicBookPage() {
           </p>
           <div className="grid grid-cols-2 gap-3 text-sm text-muted-foreground">
             <div className="rounded-2xl border border-border/60 bg-card p-3">
-              <div className="text-xs uppercase tracking-[0.12em] text-[var(--kf-text-muted)]">Trust</div>
+              <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Trust</div>
               <div className="mt-1 font-semibold">Secure & Encrypted</div>
             </div>
             <div className="rounded-2xl border border-border/60 bg-card p-3">
-              <div className="text-xs uppercase tracking-[0.12em] text-[var(--kf-text-muted)]">Speed</div>
+              <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Speed</div>
               <div className="mt-1 font-semibold">Instant confirmation</div>
             </div>
           </div>
@@ -96,10 +96,10 @@ export default function PublicBookPage() {
         <Card title="Book Now" badge="Live">
           <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Input label="Business ID" value={businessId} onChange={(e) => setBusinessId(e.target.value)} required />
-            <label className="flex flex-col gap-1 text-sm text-[var(--kf-text)]">
-              <span className="text-xs text-[var(--kf-text-muted)]">Service</span>
+            <label className="flex flex-col gap-1 text-sm text-[hsl(var(--kf-foreground))]">
+              <span className="text-xs text-[hsl(var(--kf-muted-foreground))]">Service</span>
               <select
-                className="w-full rounded-lg bg-[var(--kf-glass)] border border-[var(--kf-border)] px-3 py-2 text-sm text-[var(--kf-text)]"
+                className="w-full rounded-2xl bg-[hsl(var(--kf-muted))] border border-[hsl(var(--kf-border))] px-3 py-2 text-sm text-[hsl(var(--kf-foreground))]"
                 value={serviceId}
                 onChange={(e) => setServiceId(e.target.value)}
               >
@@ -110,10 +110,10 @@ export default function PublicBookPage() {
               ))}
               </select>
             </label>
-            <label className="flex flex-col gap-1 text-sm text-[var(--kf-text)]">
-              <span className="text-xs text-[var(--kf-text-muted)]">Staff</span>
+            <label className="flex flex-col gap-1 text-sm text-[hsl(var(--kf-foreground))]">
+              <span className="text-xs text-[hsl(var(--kf-muted-foreground))]">Staff</span>
               <select
-                className="w-full rounded-lg bg-[var(--kf-glass)] border border-[var(--kf-border)] px-3 py-2 text-sm text-[var(--kf-text)]"
+                className="w-full rounded-2xl bg-[hsl(var(--kf-muted))] border border-[hsl(var(--kf-border))] px-3 py-2 text-sm text-[hsl(var(--kf-foreground))]"
                 value={staffId}
                 onChange={(e) => setStaffId(e.target.value)}
               >

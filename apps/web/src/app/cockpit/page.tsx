@@ -166,7 +166,7 @@ export default function CockpitPage() {
         <Card
           title="CRM Command"
           badge={searchLoading ? "Searching..." : `${visibleSearchResults.length} results`}
-          className="bg-[rgba(0,0,0,0.4)]"
+          className="bg-card/90"
         >
           <div className="flex flex-wrap items-center gap-2">
             <Input
