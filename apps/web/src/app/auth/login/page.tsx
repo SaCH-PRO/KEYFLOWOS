@@ -94,7 +94,7 @@ export default function AuthLogin() {
             onChange={(e) => setEmail(e.target.value)}
             autoComplete="email"
             inputMode="email"
-            className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+            className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-white placeholder:text-slate-400 focus:border-primary focus:outline-none"
             placeholder="you@example.com"
             suppressHydrationWarning
           />
@@ -107,7 +107,7 @@ export default function AuthLogin() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
-            className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+            className="rounded-xl bg-slate-950/80 border border-border/60 px-3 py-2 text-sm text-white placeholder:text-slate-400 focus:border-primary focus:outline-none"
             placeholder="••••••••"
             suppressHydrationWarning
           />
