@@ -7,7 +7,7 @@ export default function Home() {
       <p className="landing-tagline">
         Where your business flows.
       </p>
-      <Link href="/auth/login" className="landing-button">
+      <Link href="/auth/start" className="landing-button">
         BEGIN FLOW
       </Link>
     </div>
