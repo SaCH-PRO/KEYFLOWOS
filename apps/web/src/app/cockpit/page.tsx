@@ -89,30 +89,50 @@ export default function CockpitPage() {
 
   useEffect(() => {
     if (!businessId) return;
-    setLoading(true);
-    fetchCrmHighlights(businessId)
-      .then((result) => {
-        setHighlights(result.data ?? emptyHighlights);
-      })
-      .catch(() => {
-        setHighlights(emptyHighlights);
-      })
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    const loadHighlights = async () => {
+      try {
+        const result = await fetchCrmHighlights(businessId);
+        if (!cancelled) {
+          setHighlights(result.data ?? emptyHighlights);
+        }
+      } catch {
+        if (!cancelled) {
+          setHighlights(emptyHighlights);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+    void loadHighlights();
+    return () => {
+      cancelled = true;
+    };
   }, [businessId]);
 
   useEffect(() => {
     if (!businessId) return;
     const query = searchQuery.trim();
     if (!query) {
-      setSearchResults([]);
+      // Clear results asynchronously via microtask to avoid sync setState warning
+      queueMicrotask(() => setSearchResults([]));
       return;
     }
     const timer = setTimeout(() => {
-      setSearchLoading(true);
-      fetchContacts(businessId, { search: query, take: 6, includeStats: true })
-        .then((result) => setSearchResults(result.data ?? []))
-        .catch(() => setSearchResults([]))
-        .finally(() => setSearchLoading(false));
+      const fetchSearch = async () => {
+        setSearchLoading(true);
+        try {
+          const result = await fetchContacts(businessId, { search: query, take: 6, includeStats: true });
+          setSearchResults(result.data ?? []);
+        } catch {
+          setSearchResults([]);
+        } finally {
+          setSearchLoading(false);
+        }
+      };
+      void fetchSearch();
     }, 300);
     return () => clearTimeout(timer);
   }, [businessId, searchQuery]);

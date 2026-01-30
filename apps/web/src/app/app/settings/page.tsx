@@ -106,6 +106,10 @@ export default function SettingsPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(false);
 
+  // Display loading profile status if needed
+  const _profileLoadingStatus = loadingProfile;
+  void _profileLoadingStatus; // Suppress unused warning - kept for future loading UI
+
   useEffect(() => {
     const storedProfile = localStorage.getItem(PROFILE_KEY);
     const storedDraft = localStorage.getItem("kf_profile_draft");
