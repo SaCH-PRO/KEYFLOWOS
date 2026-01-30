@@ -1,8 +1,7 @@
 "use client";
 
 import { type MouseEventHandler, type ReactNode, type RefObject, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import Link from "next/link";
-import { Badge, Button, Card, CardGrid, ContentContainer, Input } from "@keyflow/ui";
+import { Badge, Button, Card, ContentContainer, Input } from "@keyflow/ui";
 import {
   Contact,
   ContactDetail,
@@ -172,6 +171,26 @@ export default function PipelinePage() {
   const [contactPhotoPreview, setContactPhotoPreview] = useState<string | null>(null);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
+  const [noteLoading, setNoteLoading] = useState(false);
+  const [taskLoading, setTaskLoading] = useState(false);
+
+  type MetricKey =
+    | "total"
+    | "overdue"
+    | "outstanding"
+    | "avgLeadScore"
+    | "withPhone"
+    | "withEmail"
+    | "withCompany"
+    | "leads"
+    | "prospects"
+    | "clients"
+    | "lost"
+    | "unpaid"
+    | "stale"
+    | "newThisWeek";
+
+  // All hooks must be called before any conditional returns
   useEffect(() => {
     const initWorkspace = async () => {
       const stored = getStoredBusinessId();
@@ -191,6 +210,7 @@ export default function PipelinePage() {
     };
     void initWorkspace();
   }, []);
+
   const setMetricSlot = useCallback((index: number, key: MetricKey) => {
     setMetricSlots((prev) => {
       const next = [...prev];
@@ -198,28 +218,6 @@ export default function PipelinePage() {
       return next;
     });
   }, []);
-
-  if (workspaceLoading) {
-    return (
-      <ContentContainer>
-        <div className="py-12 text-center space-y-4">
-          <p className="text-lg font-semibold text-slate-900">Preparing your workspace...</p>
-          <p className="text-sm text-slate-600">Hang tight while we load your personal space.</p>
-        </div>
-      </ContentContainer>
-    );
-  }
-
-  if (workspaceError) {
-    return (
-      <ContentContainer>
-        <div className="py-12 text-center space-y-4">
-          <p className="text-lg font-semibold text-red-700">{workspaceError}</p>
-          <p className="text-sm text-slate-600">Try logging in again to create your workspace.</p>
-        </div>
-      </ContentContainer>
-    );
-  }
 
   const activeFilters = useMemo(
     () => (statusFilter !== "ALL" ? 1 : 0) + (search ? 1 : 0) + (tagFilter ? 1 : 0),
@@ -307,13 +305,6 @@ export default function PipelinePage() {
     [search, statusFilter, tagFilter, nextOffset, contacts, businessId],
   );
 
-  const loadMore = useCallback(() => {
-    if (loadingMore || !hasMore) return;
-    startTransition(() => {
-      void loadData({ append: true });
-    });
-  }, [hasMore, loadData, loadingMore, startTransition]);
-
   const loadContactDetail = useCallback(async (contactId: string) => {
     if (!businessId) return;
     setDetailError(null);
@@ -351,26 +342,6 @@ export default function PipelinePage() {
     }
   }, [businessId]);
 
-  const quickAddTask = useCallback(
-    async (contactId: string) => {
-      if (!businessId) return;
-      if (typeof window === "undefined") return;
-      const title = window.prompt("Add a quick task title");
-      if (!title || !title.trim()) return;
-      setQuickActionLoading(contactId);
-      try {
-        await addContactTask(contactId, title.trim(), undefined, businessId);
-        startTransition(() => {
-          void loadData();
-          void loadContactDetail(contactId);
-        });
-      } finally {
-        setQuickActionLoading(null);
-      }
-    },
-    [businessId, loadContactDetail, loadData],
-  );
-
   const selectContact = useCallback(
     (contactId: string) => {
       setSelectedContactId(contactId);
@@ -379,9 +350,6 @@ export default function PipelinePage() {
     },
     [loadContactDetail],
   );
-
-  const [noteLoading, setNoteLoading] = useState(false);
-  const [taskLoading, setTaskLoading] = useState(false);
 
   const handleAddNote = useCallback(async () => {
     if (!selectedContactId || !newNote.trim() || !businessId) return;
@@ -477,6 +445,7 @@ export default function PipelinePage() {
     const overdueTasks = dueTasks.length;
     return { total, totalOutstanding, avgLeadScore, overdueTasks };
   }, [contacts, dueTasks]);
+
   const dbFiltered = useMemo(() => {
     const q = dbSearch.trim().toLowerCase();
     const base = q
@@ -522,21 +491,6 @@ export default function PipelinePage() {
     return sorted;
   }, [contacts, dbSearch, dbSortKey]);
 
-  type MetricKey =
-    | "total"
-    | "overdue"
-    | "outstanding"
-    | "avgLeadScore"
-    | "withPhone"
-    | "withEmail"
-    | "withCompany"
-    | "leads"
-    | "prospects"
-    | "clients"
-    | "lost"
-    | "unpaid"
-    | "stale"
-    | "newThisWeek";
   const metricOptions = useMemo(
     () =>
       [
@@ -557,6 +511,7 @@ export default function PipelinePage() {
       ] satisfies Array<{ key: MetricKey; label: string; value: number; hint: string }>,
     [contacts, pipelineStats, segments],
   );
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const stored = window.localStorage.getItem("crm_saved_views");
@@ -633,6 +588,29 @@ export default function PipelinePage() {
   useEffect(() => {
     setTimelineFilter("ALL");
   }, [selectedContactId]);
+
+  // Now conditional returns are safe since all hooks have been called
+  if (workspaceLoading) {
+    return (
+      <ContentContainer>
+        <div className="py-12 text-center space-y-4">
+          <p className="text-lg font-semibold text-slate-900">Preparing your workspace...</p>
+          <p className="text-sm text-slate-600">Hang tight while we load your personal space.</p>
+        </div>
+      </ContentContainer>
+    );
+  }
+
+  if (workspaceError) {
+    return (
+      <ContentContainer>
+        <div className="py-12 text-center space-y-4">
+          <p className="text-lg font-semibold text-red-700">{workspaceError}</p>
+          <p className="text-sm text-slate-600">Try logging in again to create your workspace.</p>
+        </div>
+      </ContentContainer>
+    );
+  }
 
   async function move(contactId: string, status: string) {
     if (!businessId) return;
