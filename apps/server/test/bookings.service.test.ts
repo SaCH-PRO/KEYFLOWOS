@@ -131,7 +131,11 @@ describe('BookingsService', () => {
     });
 
     expect(createInvoiceForService).toHaveBeenCalled();
-    expect(findOrCreateContact).toHaveBeenCalledWith('biz_1', { email: 'a@example.com' });
+    expect(findOrCreateContact).toHaveBeenCalledWith('biz_1', {
+      email: 'a@example.com',
+      source: 'booking',
+      sourceDetail: 'public-booking',
+    });
     expect(result.success).toBe(true);
     expect(result.invoiceId).toBe('inv_1');
     expect(emit).toHaveBeenCalledWith(
