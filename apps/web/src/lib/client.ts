@@ -763,7 +763,7 @@ export type Playbook = {
   id: string;
   name: string;
   triggerEvent: string;
-  actions: unknown;
+  actions?: unknown;
   enabled: boolean;
   createdAt: string;
 };
@@ -873,7 +873,7 @@ export async function fetchPlaybooks(businessId: string = DEFAULT_BUSINESS_ID) {
       id: z.string(),
       name: z.string(),
       triggerEvent: z.string(),
-      actions: z.unknown(),
+      actions: z.unknown().optional(),
       enabled: z.boolean(),
       createdAt: z.string(),
     })),
