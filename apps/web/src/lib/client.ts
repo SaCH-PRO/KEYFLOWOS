@@ -736,4 +736,173 @@ export async function bootstrapIdentity(input: { username?: string; email?: stri
   });
 }
 
+export type Service = {
+  id: string;
+  name: string;
+  durationMins: number;
+  price: number;
+  currency: string;
+};
+
+export type StaffMember = {
+  id: string;
+  name: string;
+  email?: string | null;
+};
+
+export type SocialPost = {
+  id: string;
+  content: string;
+  status: string;
+  scheduledFor?: string | null;
+  publishedAt?: string | null;
+  createdAt: string;
+};
+
+export type Playbook = {
+  id: string;
+  name: string;
+  triggerEvent: string;
+  actions: unknown;
+  enabled: boolean;
+  createdAt: string;
+};
+
+export async function fetchServices(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGet(
+    `/bookings/businesses/${encodeURIComponent(businessId)}/services`,
+    z.array(z.object({
+      id: z.string(),
+      name: z.string(),
+      durationMins: z.number(),
+      price: z.number(),
+      currency: z.string(),
+    })),
+    [],
+  );
+}
+
+export async function createService(input: { businessId?: string; name: string; durationMins: number; price: number; currency?: string }) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<Service>({
+    path: `/bookings/businesses/${encodeURIComponent(businessId)}/services`,
+    body: { name: input.name, durationMins: input.durationMins, price: input.price, currency: input.currency ?? "TTD" },
+  });
+}
+
+export async function deleteService(serviceId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  try {
+    const res = await fetch(`${API_BASE}/bookings/businesses/${encodeURIComponent(businessId)}/services/${encodeURIComponent(serviceId)}`, {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+    });
+    if (!res.ok) return { error: res.statusText };
+    return { error: null };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Network error" };
+  }
+}
+
+export async function fetchStaff(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGet(
+    `/bookings/businesses/${encodeURIComponent(businessId)}/staff`,
+    z.array(z.object({
+      id: z.string(),
+      name: z.string(),
+      email: z.string().nullable().optional(),
+    })),
+    [],
+  );
+}
+
+export async function createStaff(input: { businessId?: string; name: string; email?: string }) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<StaffMember>({
+    path: `/bookings/businesses/${encodeURIComponent(businessId)}/staff`,
+    body: { name: input.name, email: input.email },
+  });
+}
+
+export async function deleteStaff(staffId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  try {
+    const res = await fetch(`${API_BASE}/bookings/businesses/${encodeURIComponent(businessId)}/staff/${encodeURIComponent(staffId)}`, {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+    });
+    if (!res.ok) return { error: res.statusText };
+    return { error: null };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Network error" };
+  }
+}
+
+export async function fetchPosts(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGet(
+    `/social/businesses/${encodeURIComponent(businessId)}/posts`,
+    z.array(z.object({
+      id: z.string(),
+      content: z.string(),
+      status: z.string(),
+      scheduledFor: z.string().nullable().optional(),
+      publishedAt: z.string().nullable().optional(),
+      createdAt: z.string(),
+    })),
+    [],
+  );
+}
+
+export async function createPost(input: { businessId?: string; content: string; mediaUrls?: string[]; scheduledFor?: string }) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<SocialPost>({
+    path: `/social/businesses/${encodeURIComponent(businessId)}/posts`,
+    body: { content: input.content, mediaUrls: input.mediaUrls, scheduledFor: input.scheduledFor },
+  });
+}
+
+export async function publishPost(postId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<SocialPost>({
+    path: `/social/businesses/${encodeURIComponent(businessId)}/posts/${encodeURIComponent(postId)}/publish`,
+    body: {},
+  });
+}
+
+export async function fetchPlaybooks(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGet(
+    `/automation/businesses/${encodeURIComponent(businessId)}/playbooks`,
+    z.array(z.object({
+      id: z.string(),
+      name: z.string(),
+      triggerEvent: z.string(),
+      actions: z.unknown(),
+      enabled: z.boolean(),
+      createdAt: z.string(),
+    })),
+    [],
+  );
+}
+
+export async function createPlaybook(input: { businessId?: string; name: string; triggerEvent: string; actions: unknown }) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<Playbook>({
+    path: `/automation/businesses/${encodeURIComponent(businessId)}/playbooks`,
+    body: { name: input.name, triggerEvent: input.triggerEvent, actions: input.actions },
+  });
+}
+
+export async function updatePlaybook(input: { businessId?: string; playbookId: string; name?: string; triggerEvent?: string; actions?: unknown; enabled?: boolean }) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  try {
+    const res = await fetch(`${API_BASE}/automation/businesses/${encodeURIComponent(businessId)}/playbooks/${encodeURIComponent(input.playbookId)}`, {
+      method: "PATCH",
+      headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ name: input.name, triggerEvent: input.triggerEvent, actions: input.actions, enabled: input.enabled }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) return { data: null, error: res.statusText };
+    return { data: json as Playbook, error: null };
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e.message : "Network error" };
+  }
+}
+
 export { DEFAULT_BUSINESS_ID };
