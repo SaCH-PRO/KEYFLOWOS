@@ -23,6 +23,11 @@ export class IdentityController {
     return this.identity.getBusiness(businessId);
   }
 
+  @Get('businesses/slug/:slug')
+  getBusinessBySlug(@Param('slug') slug: string) {
+    return this.identity.getBusinessBySlug(slug);
+  }
+
   @UseGuards(AuthGuard)
   @Post('businesses')
   createBusiness(@Body() body: CreateBusinessDto, @Req() req: Request) {
