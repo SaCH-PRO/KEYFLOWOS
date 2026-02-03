@@ -1,7 +1,15 @@
 # KEYFLOWOS Monorepo
 
 ## Overview
-KEYFLOWOS is a business management platform with CRM, invoicing, bookings, and automation features. This is a pnpm monorepo with a Next.js frontend and NestJS backend.
+KEYFLOWOS is an AI-powered operating system for service businesses that eliminates the "tool maze" by providing pre-built Playbooks for common workflows. Features a "Cockpit" dashboard with Flow Graph visualization, AI-driven Flow Feed, and comprehensive CRM as the intelligence layer.
+
+## Recent Changes (Feb 2026)
+- Completed all core modules with real API integration
+- Built public booking page `/book/[slug]` with dynamic business lookup
+- Built public payment page `/pay/[invoiceId]` with invoice display
+- Enhanced Reports page with KPI cards and business health metrics
+- Added business slug lookup endpoint for public pages
+- Fixed TypeScript type issues across the codebase
 
 ## Architecture
 
@@ -10,9 +18,26 @@ KEYFLOWOS is a business management platform with CRM, invoicing, bookings, and a
 - **apps/server**: NestJS backend API - runs on port 3001
 
 ### Packages
-- **packages/db**: Prisma database client with PostgreSQL (Supabase)
-- **packages/ui**: Shared UI components (Storybook)
+- **packages/db**: Prisma database client with PostgreSQL (Replit)
+- **packages/ui**: Shared UI components (Button, Card, Input, Table, Badge, MomentumBar)
 - **packages/api**: Shared API types/contracts
+
+### Modules (Status)
+1. **Identity** - User auth, team management, business settings (Complete)
+2. **CRM** - Contacts, timeline, lead scoring, segments (Complete)
+3. **Commerce** - Products, invoices, quotes, payments (Complete)
+4. **Bookings** - Services, staff, availability, calendar (Complete)
+5. **Social** - Posts, scheduling, content calendar (Complete)
+6. **Automations** - Playbooks, triggers, actions (Complete)
+7. **Reports** - KPIs, revenue, bookings analytics (Complete)
+8. **Cockpit** - Flow Graph, Flow Feed, AI suggestions (Complete)
+
+### Public Pages
+- `/book/[slug]` - Public booking widget for businesses
+- `/pay/[invoiceId]` - Public invoice payment page
+- `/public/book` - Generic booking test page
+- `/public/pay` - Generic payment test page
+- `/public/social` - Social post tester
 
 ## Development
 
@@ -27,18 +52,32 @@ pnpm db:studio        # Open Prisma Studio
 
 ### Environment Variables
 Key environment variables are configured in Replit secrets:
-- `DATABASE_URL`: PostgreSQL connection string
-- `DIRECT_URL`: Direct database connection
-- `SUPABASE_URL`: Supabase API URL
+- `DATABASE_URL`: PostgreSQL connection string (Replit DB)
+- `NEXT_PUBLIC_SUPABASE_URL`: Supabase Auth URL
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase Auth key
 - `NEXT_PUBLIC_API_BASE_URL`: Backend API URL
 - `PORT`: Backend server port (3001)
 
 ## Tech Stack
 - **Frontend**: Next.js 16, React 19, Tailwind CSS, Framer Motion
-- **Backend**: NestJS, tRPC, Prisma
-- **Database**: PostgreSQL (Supabase)
+- **Backend**: NestJS, Prisma
+- **Database**: PostgreSQL (Replit built-in)
+- **Auth**: Supabase Auth
 - **Package Manager**: pnpm (workspace)
 - **Node Version**: 20
+
+## Key Files
+- `packages/db/prisma/schema.prisma` - Database schema
+- `apps/web/src/lib/client.ts` - API client with 30+ typed functions
+- `apps/web/src/app/app/page.tsx` - Cockpit dashboard
+- `KEYFLOW_CRM_SPEC.md` - CRM intelligence layer specification
+- `KEYFLOW_BLUEPRINT.md` - Master execution blueprint
+
+## User Preferences
+- Caribbean localization (TTD currency, Trinidad timezone)
+- Glassmorphism UI with dark theme
+- Event-driven architecture for automation
+- Pre-opinionated flows (Playbooks)
 
 ## Deployment
 The app is configured for Replit autoscale deployment. The frontend runs on port 5000 and is the primary deployment target.

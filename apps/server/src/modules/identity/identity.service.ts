@@ -22,6 +22,14 @@ export class IdentityService {
     return business;
   }
 
+  async getBusinessBySlug(slug: string) {
+    const business = await this.prisma.client.business.findFirst({
+      where: { slug, deletedAt: null },
+    });
+    if (!business) throw new NotFoundException('Business not found');
+    return business;
+  }
+
   createBusiness(input: { name: string; ownerId?: string }) {
     return this.prisma.client.business.create({
       data: {
