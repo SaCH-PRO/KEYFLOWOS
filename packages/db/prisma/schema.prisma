@@ -26,9 +26,12 @@ model User {
 }
 
 model Business {
-  id      String @id @default(cuid())
-  name    String
-  ownerId String @map("owner_id")
+  id       String  @id @default(cuid())
+  name     String
+  ownerId  String  @map("owner_id")
+  slug     String? @unique
+  timezone String  @default("America/Port_of_Spain")
+  currency String  @default("TTD")
 
   // Module Relationships
   members          Membership[]
