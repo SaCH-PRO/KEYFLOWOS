@@ -1,10 +1,7 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
+import { PrismaClient } from "@prisma/client";
 import { softDelete } from "./middleware/soft-delete";
-
-// Use WASM-based client for environments without native binaries
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { PrismaClient } = require("./generated/client/wasm.js");
 
 // Enable soft delete for all models that include a deletedAt column
 const softDeleteExtension = softDelete([
