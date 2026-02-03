@@ -1,0 +1,45 @@
+modules = ["nodejs-20", "web"]
+[agent]
+expertMode = true
+
+[nix]
+channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+NEXT_PUBLIC_API_BASE_URL = "https://d9c92da4-0dde-44b6-a1ad-551bf4dfbe2c-00-39zpddgeqea4v.worf.replit.dev:3001"
+PORT = "3001"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Web Frontend"
+
+[[workflows.workflow]]
+name = "Web Frontend"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd apps/web && pnpm dev"
+waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[deployment]
+deploymentTarget = "autoscale"
+run = ["pnpm", "--filter", "web", "start"]
+build = ["pnpm", "-r", "build"]
