@@ -1017,6 +1017,37 @@ export async function convertQuoteToInvoice(input: {
   });
 }
 
+export async function getGmailAuthUrl(businessId?: string) {
+  const biz = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGetSimple<{ url: string }>(`/commerce/businesses/${encodeURIComponent(biz)}/gmail/auth-url`);
+}
+
+export async function getGmailStatus(businessId?: string) {
+  const biz = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGetSimple<{ connected: boolean; email: string | null }>(`/commerce/businesses/${encodeURIComponent(biz)}/gmail/status`);
+}
+
+export async function disconnectGmail(businessId?: string) {
+  const biz = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiDelete(`/commerce/businesses/${encodeURIComponent(biz)}/gmail`);
+}
+
+export async function sendQuoteEmail(input: {
+  businessId?: string;
+  quoteId: string;
+  recipientEmail: string;
+  message?: string;
+}) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{ success: boolean }>({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/quotes/${encodeURIComponent(input.quoteId)}/send-email`,
+    body: {
+      recipientEmail: input.recipientEmail,
+      message: input.message,
+    },
+  });
+}
+
 export type BootstrapIdentityResponse = {
   user: { id: string; email: string; name?: string | null; role: string };
   business: { id: string; name: string };
