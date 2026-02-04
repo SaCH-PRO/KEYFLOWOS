@@ -151,8 +151,8 @@ type FlowHighlightsPayload = {
 @Injectable()
 export class CrmService {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly events: EventEmitter2,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(forwardRef(() => AutomationService)) private readonly automation: AutomationService,
   ) {}
 

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BookingConfirmedPayload, BookingCreatedPayload } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -9,11 +9,11 @@ import { AutomationService } from '../automation/automation.service';
 @Injectable()
 export class BookingsService {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly events: EventEmitter2,
-    private readonly crm: CrmService,
-    private readonly commerce: CommerceService,
-    private readonly automation: AutomationService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    @Inject(CrmService) private readonly crm: CrmService,
+    @Inject(CommerceService) private readonly commerce: CommerceService,
+    @Inject(AutomationService) private readonly automation: AutomationService,
   ) {}
 
   listBookings(businessId: string) {
