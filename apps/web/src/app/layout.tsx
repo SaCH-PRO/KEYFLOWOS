@@ -5,13 +5,13 @@ import { ThemeColorsProvider } from "@/lib/theme-context";
 import { RegisterSW } from "@/components/register-sw";
 
 export const metadata: Metadata = {
-  title: "KeyFlow OS",
+  title: "KEYFLOWOS",
   description: "The Operating System for Service Businesses - Manage bookings, payments, contacts, and automations",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "KeyFlow",
+    title: "KEYFLOWOS",
   },
   formatDetection: {
     telephone: true,

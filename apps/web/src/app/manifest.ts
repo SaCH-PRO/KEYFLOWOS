@@ -2,8 +2,8 @@ import { MetadataRoute } from 'next'
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'KeyFlow - Business Operating System',
-    short_name: 'KeyFlow',
+    name: 'KEYFLOWOS - Business Operating System',
+    short_name: 'KEYFLOWOS',
     description: 'AI-powered operating system for service businesses. Manage bookings, payments, contacts, and automations.',
     start_url: '/app',
     display: 'standalone',
