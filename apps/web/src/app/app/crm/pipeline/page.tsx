@@ -1,196 +1,78 @@
 "use client";
 
-import { type MouseEventHandler, type ReactNode, type RefObject, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { Badge, Button, Card, ContentContainer, Input } from "@keyflow/ui";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Plus,
+  Search,
+  Filter,
+  Users,
+  TrendingUp,
+  Clock,
+  DollarSign,
+  RefreshCw,
+  ChevronDown,
+  X,
+} from "lucide-react";
+import {
+  ContactCard,
+  ContactCardData,
+  ContactForm,
+  ContactFormData,
+  ContactDetail,
+  ContactDetailData,
+  ContactEvent,
+  ContactNote,
+  ContactTask,
+  ContactImport,
+} from "@/components/contacts";
 import {
   Contact,
-  ContactDetail,
-  ContactEvent,
-  ContactImportJob,
-  ContactTask,
+  ContactDetail as ContactDetailAPI,
   addContactNote,
   addContactTask,
+  completeContactTask,
   createContact,
-  createContactFromOcr,
   fetchContactDetail,
-  fetchContactEvents,
   fetchContacts,
-  fetchDueTasks,
-  fetchImportJobs,
   fetchSegmentSummary,
+  fetchDueTasks,
   importContactsFromFile,
   importContactsFromLink,
+  createContactFromOcr,
   updateContact,
 } from "@/lib/client";
 import { ensureWorkspace, getStoredBusinessId } from "@/lib/workspace";
 
-const STATUSES = ["LEAD", "PROSPECT", "CLIENT", "LOST"] as const;
-const IMPORT_TYPES: Array<"csv" | "xlsx" | "pdf" | "image"> = ["csv", "xlsx", "pdf", "image"];
+const STATUSES = ["ALL", "LEAD", "PROSPECT", "CLIENT", "LOST"] as const;
 const PAGE_SIZE = 50;
 
-type ContactWithTags = Omit<Contact, "tags"> & { tags?: string[]; localOnly?: boolean };
-type NormalizedContactTask = Omit<ContactTask, "contact"> & { contact?: ContactWithTags | null };
-type NormalizedContactDetail = Omit<ContactDetail, "contact" | "tasks"> & {
-  contact: ContactWithTags | null;
-  tasks: NormalizedContactTask[];
-};
-const formatDate = (value?: string | null) => {
-  if (!value) return "-";
-  return new Date(value).toLocaleString();
-};
+type ContactWithTags = Omit<Contact, "tags"> & { tags?: string[] };
 
-const MOBILE_BREAKPOINT = 768;
-
-function useIsMobile() {
-  const [isMobile, setIsMobile] = useState(false);
-  useEffect(() => {
-    const update = () => setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, []);
-  return isMobile;
-}
-
-const generateAiSuggestions = (detail: NormalizedContactDetail | null): string[] => {
-  if (!detail?.contact) return [];
-  const suggestions: string[] = [];
-  if ((detail.meta?.outstandingBalance ?? 0) > 0) {
-    suggestions.push("Reach out about the unpaid balance and offer flexible next steps.");
-  }
-  if (detail?.tasks?.some((task) => task.status === "OPEN")) {
-    suggestions.push("Follow up on the outstanding task(s) to keep momentum.");
-  }
-  if (detail?.events?.length === 0) {
-    suggestions.push("Introduce yourself with a short check-in to kickstart the relationship.");
-  }
-  if (!detail.meta?.outstandingBalance && detail.events?.some((event) => event.type === "booking.created")) {
-    suggestions.push("Share a thank-you note after the new booking.");
-  }
-  return suggestions;
-};
-
-const importToneByStatus: Record<string, "default" | "info" | "success" | "warning" | "danger"> = {
-  COMPLETED: "success",
-  FAILED: "danger",
-  PROCESSING: "info",
-  PENDING: "warning",
-};
-
-const CONTACT_STATUS_TONES: Record<string, "default" | "info" | "success" | "warning" | "danger"> = {
-  LEAD: "info",
-  PROSPECT: "default",
-  CLIENT: "success",
-  LOST: "warning",
-};
-
-type SectionCardProps = {
-  title: string;
-  children: ReactNode;
-  headerAction?: ReactNode;
-  className?: string;
-  onClick?: MouseEventHandler<HTMLDivElement>;
-};
-
-function SectionCard({ title, headerAction, children, className = "", onClick }: SectionCardProps) {
-  return (
-    <Card
-      className={`space-y-3 rounded-xl border border-slate-200 bg-white shadow-sm hover:shadow-md transition-shadow ${className}`}
-      padding="lg"
-      shadow="sm"
-      onClick={onClick}
-    >
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm font-semibold text-slate-900">{title}</p>
-        {headerAction}
-      </div>
-      {children}
-    </Card>
-  );
-}
-
-export default function PipelinePage() {
-  const isMobile = useIsMobile();
-  const [contacts, setContacts] = useState<ContactWithTags[]>([]);
+export default function ContactsPage() {
   const [businessId, setBusinessId] = useState<string | null>(null);
-  const [segments, setSegments] = useState<{ [key: string]: number }>({});
-  const [dueTasks, setDueTasks] = useState<ContactTask[]>([]);
-  const [importJobs, setImportJobs] = useState<ContactImportJob[]>([]);
+  const [workspaceLoading, setWorkspaceLoading] = useState(true);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+
+  const [contacts, setContacts] = useState<ContactWithTags[]>([]);
+  const [segments, setSegments] = useState<Record<string, number>>({});
+  const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [nextOffset, setNextOffset] = useState(0);
+
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
-  const [tagFilter, setTagFilter] = useState("");
-  const [showAddContact, setShowAddContact] = useState(false);
-  const [showOverview, setShowOverview] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
-  const [nextOffset, setNextOffset] = useState(0);
-  const [newContact, setNewContact] = useState({
-    firstName: "",
-    lastName: "",
-    email: "",
-    phone: "",
-    status: "LEAD",
-    source: "",
-    tags: "",
-    companyName: "",
-    jobTitle: "",
-    preferredChannel: "",
-    lifecycleStage: "",
-  });
-  const [savedViews, setSavedViews] = useState<{ name: string; search: string; status: string; tags: string }[]>([]);
-  const [viewName, setViewName] = useState("");
-  const [selected, setSelected] = useState<string[]>([]);
-  const [importType, setImportType] = useState<"csv" | "xlsx" | "pdf" | "image">("csv");
-  const [importFile, setImportFile] = useState<File | null>(null);
-  const [cameraImage, setCameraImage] = useState<File | null>(null);
-  const [importLink, setImportLink] = useState("");
-  const [ocrText, setOcrText] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
+
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
-  const [contactDetail, setContactDetail] = useState<NormalizedContactDetail | null>(null);
+  const [contactDetail, setContactDetail] = useState<ContactDetailAPI | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState<string | null>(null);
-  const [newNote, setNewNote] = useState("");
-  const [newTaskTitle, setNewTaskTitle] = useState("");
-  const [newTaskDue, setNewTaskDue] = useState("");
+
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [showMobileDetail, setShowMobileDetail] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const [recentEvents, setRecentEvents] = useState<ContactEvent[]>([]);
-  const [eventsContactId, setEventsContactId] = useState<string | null>(null);
-  const [eventsLoading, setEventsLoading] = useState(false);
-  const addContactRef = useRef<HTMLDivElement | null>(null);
-  const importRef = useRef<HTMLDivElement | null>(null);
-  const [quickActionLoading, setQuickActionLoading] = useState<string | null>(null);
-  const [timelineFilter, setTimelineFilter] = useState<string>("ALL");
-  const [pipelineOpen, setPipelineOpen] = useState(true);
-  const [dbOpen, setDbOpen] = useState(true);
-  const [dbSearch, setDbSearch] = useState("");
-  const [dbSortKey, setDbSortKey] = useState<"name" | "email" | "phone" | "status" | "company">("name");
-  const [metricSlots, setMetricSlots] = useState<MetricKey[]>(["leads", "prospects", "clients"]);
-  const [contactPhotoFile, setContactPhotoFile] = useState<File | null>(null);
-  const [contactPhotoPreview, setContactPhotoPreview] = useState<string | null>(null);
-  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
-  const [workspaceLoading, setWorkspaceLoading] = useState(true);
-  const [noteLoading, setNoteLoading] = useState(false);
-  const [taskLoading, setTaskLoading] = useState(false);
 
-  type MetricKey =
-    | "total"
-    | "overdue"
-    | "outstanding"
-    | "avgLeadScore"
-    | "withPhone"
-    | "withEmail"
-    | "withCompany"
-    | "leads"
-    | "prospects"
-    | "clients"
-    | "lost"
-    | "unpaid"
-    | "stale"
-    | "newThisWeek";
-
-  // All hooks must be called before any conditional returns
   useEffect(() => {
     const initWorkspace = async () => {
       const stored = getStoredBusinessId();
@@ -211,1316 +93,439 @@ export default function PipelinePage() {
     void initWorkspace();
   }, []);
 
-  const setMetricSlot = useCallback((index: number, key: MetricKey) => {
-    setMetricSlots((prev) => {
-      const next = [...prev];
-      next[index] = key;
-      return next;
-    });
-  }, []);
-
-  const activeFilters = useMemo(
-    () => (statusFilter !== "ALL" ? 1 : 0) + (search ? 1 : 0) + (tagFilter ? 1 : 0),
-    [search, statusFilter, tagFilter],
-  );
-
   useEffect(() => {
-    const id = setTimeout(() => {
-      setSearch(searchInput.trim());
-    }, 300);
-    return () => clearTimeout(id);
+    const timeout = setTimeout(() => setSearch(searchInput.trim()), 300);
+    return () => clearTimeout(timeout);
   }, [searchInput]);
 
-  const loadData = useCallback(
+  const loadContacts = useCallback(
     async (opts?: { append?: boolean }) => {
       if (!businessId) return;
       const append = opts?.append ?? false;
-      const normalizedTags = tagFilter
-        .split(",")
-        .map((tag) => tag.trim())
-        .filter(Boolean);
-      if (append) setLoadingMore(true);
+
+      if (append) setLoading(true);
       else setLoading(true);
+
       try {
         if (append) {
-          const { data: contactData } = await fetchContacts(businessId, {
-            includeStats: true,
+          const { data } = await fetchContacts(businessId, {
             take: PAGE_SIZE,
             skip: nextOffset,
             search: search || undefined,
             status: statusFilter !== "ALL" ? statusFilter : undefined,
-            tags: normalizedTags.length > 0 ? normalizedTags : undefined,
+            includeStats: true,
           });
-          const mapped = (contactData ?? []).map(
-            (contact) =>
-              ({
-                ...contact,
-                tags: contact.tags ?? [],
-              }) as ContactWithTags,
-          );
+          const mapped = (data ?? []).map((c) => ({ ...c, tags: c.tags ?? [] }));
           setContacts((prev) => [...prev, ...mapped]);
           setNextOffset((prev) => prev + mapped.length);
           setHasMore(mapped.length === PAGE_SIZE);
         } else {
-          const existingLocal = contacts.filter((c) => c.localOnly);
-          const [{ data: contactData }, { data: segmentData }, { data: dueData }, { data: importData }] =
-            await Promise.all([
-              fetchContacts(businessId, {
-                includeStats: true,
-                take: PAGE_SIZE,
-                skip: 0,
-                search: search || undefined,
-                status: statusFilter !== "ALL" ? statusFilter : undefined,
-                tags: normalizedTags.length > 0 ? normalizedTags : undefined,
-              }),
-              fetchSegmentSummary(businessId),
-              fetchDueTasks(businessId),
-              fetchImportJobs(businessId),
-            ]);
-          const mapped = (contactData ?? []).map(
-            (contact) =>
-              ({
-                ...contact,
-                tags: contact.tags ?? [],
-              }) as ContactWithTags,
-          );
-          const merged = [
-            ...existingLocal.filter((local) => !mapped.some((m) => m.id === local.id)),
-            ...mapped,
-          ];
-          setContacts(merged);
+          const [{ data: contactData }, { data: segmentData }] = await Promise.all([
+            fetchContacts(businessId, {
+              take: PAGE_SIZE,
+              skip: 0,
+              search: search || undefined,
+              status: statusFilter !== "ALL" ? statusFilter : undefined,
+              includeStats: true,
+            }),
+            fetchSegmentSummary(businessId),
+          ]);
+          const mapped = (contactData ?? []).map((c) => ({ ...c, tags: c.tags ?? [] }));
+          setContacts(mapped);
           setSegments(segmentData ?? {});
-          setDueTasks(dueData ?? []);
-          setImportJobs(importData ?? []);
           setNextOffset(mapped.length);
           setHasMore(mapped.length === PAGE_SIZE);
         }
       } catch (error) {
         console.error("Failed to load contacts", error);
       } finally {
-        if (append) setLoadingMore(false);
-        else setLoading(false);
+        setLoading(false);
       }
     },
-    [search, statusFilter, tagFilter, nextOffset, contacts, businessId],
+    [businessId, search, statusFilter, nextOffset],
   );
 
-  const loadContactDetail = useCallback(async (contactId: string) => {
-    if (!businessId) return;
-    setDetailError(null);
-    setDetailLoading(true);
-    try {
-      const { data, error } = await fetchContactDetail(contactId, businessId);
-      if (error) {
-        setDetailError(error);
-      }
-      const normalizeContact = (contact?: Contact | null): ContactWithTags | null =>
-        contact
-          ? {
-              ...contact,
-              tags: Array.isArray(contact.tags) ? contact.tags : [],
-            }
-          : null;
-      const normalizedTasks: NormalizedContactTask[] = (data?.tasks ?? []).map((task) => ({
-        ...task,
-        contact: normalizeContact(task.contact) ?? null,
-      }));
-      const normalized: NormalizedContactDetail | null = data
-        ? {
-            contact: normalizeContact(data.contact),
-            events: data.events ?? [],
-            notes: data.notes ?? [],
-            tasks: normalizedTasks,
-            meta: data.meta,
-          }
-        : null;
-      setContactDetail(normalized);
-    } catch {
-      setDetailError("Failed to load contact details.");
-    } finally {
+  const loadDetail = useCallback(
+    async (contactId: string) => {
+      if (!businessId) return;
+      setDetailLoading(true);
+      const { data } = await fetchContactDetail(contactId, businessId);
+      setContactDetail(data ?? null);
       setDetailLoading(false);
-    }
-  }, [businessId]);
+    },
+    [businessId],
+  );
 
   const selectContact = useCallback(
     (contactId: string) => {
       setSelectedContactId(contactId);
-      setEventsContactId(contactId);
-      void loadContactDetail(contactId);
+      void loadDetail(contactId);
+      if (window.innerWidth < 1024) {
+        setShowMobileDetail(true);
+      }
     },
-    [loadContactDetail],
-  );
-
-  const handleAddNote = useCallback(async () => {
-    if (!selectedContactId || !newNote.trim() || !businessId) return;
-    setNoteLoading(true);
-    try {
-      const result = await addContactNote(selectedContactId, newNote.trim(), businessId);
-      if (result.error) {
-        throw new Error(result.error);
-      }
-      setNewNote("");
-      await loadContactDetail(selectedContactId);
-    } catch (error) {
-      console.error("Failed to add note", error);
-    } finally {
-      setNoteLoading(false);
-    }
-  }, [businessId, loadContactDetail, newNote, selectedContactId]);
-
-  const handleAddTask = useCallback(async () => {
-    if (!selectedContactId || !newTaskTitle.trim() || !businessId) return;
-    setTaskLoading(true);
-    try {
-      const result = await addContactTask(
-        selectedContactId,
-        newTaskTitle.trim(),
-        {
-          dueDate: newTaskDue || undefined,
-        },
-        businessId,
-      );
-      if (result.error) {
-        throw new Error(result.error);
-      }
-      setNewTaskTitle("");
-      setNewTaskDue("");
-      await loadContactDetail(selectedContactId);
-    } catch (error) {
-      console.error("Failed to add task", error);
-    } finally {
-      setTaskLoading(false);
-    }
-  }, [businessId, loadContactDetail, newTaskDue, newTaskTitle, selectedContactId]);
-
-  const aiSuggestions = useMemo(() => generateAiSuggestions(contactDetail), [contactDetail]);
-
-  const scrollToSection = useCallback((ref: RefObject<HTMLDivElement | null>) => {
-    if (ref.current) {
-      ref.current.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  }, []);
-
-  const detailContact = contactDetail?.contact ?? null;
-  const timelineEntries = useMemo(() => contactDetail?.events ?? [], [contactDetail]);
-  const filteredTimeline = useMemo(
-    () =>
-      timelineFilter === "ALL"
-        ? timelineEntries
-        : timelineEntries.filter((event) => event.type === timelineFilter),
-    [timelineEntries, timelineFilter],
-  );
-  const notesEntries = contactDetail?.notes ?? [];
-  const tasksEntries = contactDetail?.tasks ?? [];
-  const detailMeta: Contact["meta"] | null = contactDetail?.meta ?? null;
-  const outstandingBalance = detailContact ? detailMeta?.outstandingBalance ?? 0 : 0;
-  const lastInteractionAt = detailContact ? detailMeta?.lastInteractionAt ?? null : null;
-  const leadScore = detailContact ? detailMeta?.leadScore ?? null : null;
-  const nextDueTaskAt = detailContact ? detailMeta?.nextDueTaskAt ?? null : null;
-  const contactFullName =
-    detailContact?.displayName?.trim() ||
-    `${detailContact?.firstName ?? ""} ${detailContact?.lastName ?? ""}`.trim() ||
-    "";
-  const statusTone = CONTACT_STATUS_TONES[detailContact?.status ?? ""] ?? "info";
-  const groupedTimeline = useMemo(() => {
-    const groups: Array<{ date: string; events: ContactEvent[] }> = [];
-    filteredTimeline.forEach((event) => {
-      const dateLabel = new Date(event.createdAt).toLocaleDateString();
-      const existing = groups.find((g) => g.date === dateLabel);
-      if (existing) existing.events.push(event);
-      else groups.push({ date: dateLabel, events: [event] });
-    });
-    return groups;
-  }, [filteredTimeline]);
-
-  const pipelineStats = useMemo(() => {
-    const total = contacts.length;
-    const totalOutstanding = contacts.reduce((sum, c) => sum + (c.meta?.outstandingBalance ?? 0), 0);
-    const avgLeadScore =
-      contacts.length > 0
-        ? Math.round(
-            contacts.reduce((sum, c) => sum + (c.meta?.leadScore ?? 0), 0) / contacts.length,
-          )
-        : 0;
-    const overdueTasks = dueTasks.length;
-    return { total, totalOutstanding, avgLeadScore, overdueTasks };
-  }, [contacts, dueTasks]);
-
-  const dbFiltered = useMemo(() => {
-    const q = dbSearch.trim().toLowerCase();
-    const base = q
-      ? contacts.filter((c) =>
-          [
-            c.firstName,
-            c.lastName,
-            c.email,
-            c.phone,
-            c.companyName,
-            c.jobTitle,
-            c.status,
-            c.source,
-            c.preferredChannel,
-            c.lifecycleStage,
-            c.segment,
-            c.meta?.leadScore,
-            c.meta?.outstandingBalance,
-            c.meta?.overdueTasks,
-            ...(c.tags ?? []),
-          ]
-            .filter((field) => field !== undefined && field !== null)
-            .some((field) => String(field).toLowerCase().includes(q)),
-        )
-      : contacts;
-    const sorted = [...base].sort((a, b) => {
-      const field = (contact: ContactWithTags) => {
-        switch (dbSortKey) {
-          case "email":
-            return contact.email ?? "";
-          case "phone":
-            return contact.phone ?? "";
-          case "status":
-            return contact.status ?? "";
-          case "company":
-            return contact.companyName ?? "";
-          default:
-            return `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim();
-        }
-      };
-      return field(a).localeCompare(field(b));
-    });
-    return sorted;
-  }, [contacts, dbSearch, dbSortKey]);
-
-  const metricOptions = useMemo(
-    () =>
-      [
-        { key: "total", label: "Total contacts", value: contacts.length, hint: "All contacts currently in the database." },
-        { key: "overdue", label: "Overdue tasks", value: pipelineStats.overdueTasks, hint: "Open tasks past their due date." },
-        { key: "outstanding", label: "Outstanding balance", value: pipelineStats.totalOutstanding, hint: "Sum of outstanding balances across contacts." },
-        { key: "avgLeadScore", label: "Avg lead score", value: pipelineStats.avgLeadScore, hint: "Average lead score across all contacts." },
-        { key: "withPhone", label: "With phone", value: contacts.filter((c) => !!c.phone).length, hint: "Contacts that have a phone number." },
-        { key: "withEmail", label: "With email", value: contacts.filter((c) => !!c.email).length, hint: "Contacts that have an email address." },
-        { key: "withCompany", label: "With company", value: contacts.filter((c) => !!c.companyName).length, hint: "Contacts that have a company name set." },
-        { key: "leads", label: "Leads", value: segments.lead ?? 0, hint: "Contacts marked as Lead." },
-        { key: "prospects", label: "Prospects", value: segments.prospect ?? 0, hint: "Contacts marked as Prospect." },
-        { key: "clients", label: "Clients", value: segments.client ?? 0, hint: "Contacts marked as Client." },
-        { key: "lost", label: "Lost", value: segments.lost ?? 0, hint: "Contacts marked as Lost." },
-        { key: "unpaid", label: "Unpaid", value: segments.unpaid ?? 0, hint: "Contacts flagged as unpaid." },
-        { key: "stale", label: "Stale", value: segments.stale ?? 0, hint: "Contacts with stale/old activity." },
-        { key: "newThisWeek", label: "New this week", value: segments.newThisWeek ?? 0, hint: "Contacts created this week." },
-      ] satisfies Array<{ key: MetricKey; label: string; value: number; hint: string }>,
-    [contacts, pipelineStats, segments],
+    [loadDetail],
   );
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const stored = window.localStorage.getItem("crm_saved_views");
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        startTransition(() => {
-          setSavedViews(parsed);
-        });
-      } catch (error) {
-        console.error("Failed to load saved views", error);
-      }
-    }
-  }, [startTransition]);
-
-  useEffect(() => {
-    if (!businessId) return;
-    startTransition(() => {
-      void loadData();
-    });
-  }, [businessId, loadData, startTransition]);
-
-  useEffect(() => {
-    if (!isMobile) {
-      setShowAddContact(true);
-    }
-  }, [isMobile]);
-
-  useEffect(() => {
-    if (contacts.length === 0) {
-      setSelectedContactId(null);
-      setContactDetail(null);
-      return;
-    }
-    if (!selectedContactId) {
-      const firstId = contacts[0].id;
-      setSelectedContactId(firstId);
-      setEventsContactId(firstId);
-      void loadContactDetail(firstId);
-      return;
-    }
-    if (!contacts.some((contact) => contact.id === selectedContactId)) {
-      setSelectedContactId(null);
-      setContactDetail(null);
-    }
-  }, [contacts, selectedContactId, loadContactDetail]);
-
-  useEffect(() => {
-    if (!businessId) return;
-    const targetContact = selectedContactId ?? contacts[0]?.id;
-    if (!targetContact) {
+    if (businessId) {
       startTransition(() => {
-        setRecentEvents([]);
-        setEventsContactId(null);
+        void loadContacts();
       });
-      return;
     }
-    startTransition(() => {
-      setEventsContactId(targetContact);
-      setEventsLoading(true);
-    });
-    void fetchContactEvents(targetContact, businessId)
-      .then((result) => {
-        setRecentEvents(result.data ?? []);
-      })
-      .catch(() => {
-        setRecentEvents([]);
-      })
-      .finally(() => {
-        setEventsLoading(false);
-      });
-  }, [businessId, contacts, selectedContactId]);
+  }, [businessId, search, statusFilter, loadContacts]);
 
   useEffect(() => {
-    setTimelineFilter("ALL");
-  }, [selectedContactId]);
+    if (contacts.length > 0 && !selectedContactId) {
+      setSelectedContactId(contacts[0].id);
+      void loadDetail(contacts[0].id);
+    }
+  }, [contacts, selectedContactId, loadDetail]);
 
-  // Now conditional returns are safe since all hooks have been called
+  const handleCreateContact = async (formData: ContactFormData) => {
+    if (!businessId) return;
+    const { data } = await createContact({
+      businessId,
+      firstName: formData.firstName,
+      lastName: formData.lastName,
+      email: formData.email,
+      phone: formData.phone,
+      status: formData.status,
+      source: formData.source || undefined,
+      companyName: formData.companyName || undefined,
+      jobTitle: formData.jobTitle || undefined,
+      preferredChannel: formData.preferredChannel || undefined,
+      lifecycleStage: formData.lifecycleStage || undefined,
+      tags: formData.tags
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean),
+    });
+    if (data) {
+      setShowAddForm(false);
+      void loadContacts();
+    }
+  };
+
+  const handleAddNote = async (body: string) => {
+    if (!selectedContactId || !businessId) return;
+    await addContactNote(selectedContactId, body, businessId);
+    void loadDetail(selectedContactId);
+  };
+
+  const handleAddTask = async (title: string, dueDate?: string) => {
+    if (!selectedContactId || !businessId) return;
+    await addContactTask(selectedContactId, title, { dueDate }, businessId);
+    void loadDetail(selectedContactId);
+  };
+
+  const handleCompleteTask = async (taskId: string) => {
+    if (!businessId) return;
+    await completeContactTask(taskId, businessId);
+    if (selectedContactId) void loadDetail(selectedContactId);
+  };
+
+  const handleUpdateStatus = async (status: string) => {
+    if (!selectedContactId || !businessId) return;
+    await updateContact({ businessId, contactId: selectedContactId, status });
+    setContacts((prev) =>
+      prev.map((c) => (c.id === selectedContactId ? { ...c, status } : c)),
+    );
+    if (contactDetail) {
+      setContactDetail({
+        ...contactDetail,
+        contact: contactDetail.contact ? { ...contactDetail.contact, status } : null,
+      });
+    }
+  };
+
+  const handleImportFile = async (type: "csv" | "xlsx" | "image", file: File) => {
+    if (!businessId) return;
+    await importContactsFromFile({ businessId, type, file });
+    void loadContacts();
+  };
+
+  const handleImportLink = async (url: string) => {
+    if (!businessId) return;
+    await importContactsFromLink(url, businessId);
+    void loadContacts();
+  };
+
+  const handleImportOcr = async (text: string) => {
+    if (!businessId) return;
+    await createContactFromOcr({ businessId, ocrText: text });
+    void loadContacts();
+  };
+
+  const stats = useMemo(
+    () => [
+      { label: "Total", value: contacts.length, icon: Users },
+      { label: "Leads", value: segments.lead ?? 0, icon: TrendingUp },
+      { label: "Clients", value: segments.client ?? 0, icon: DollarSign },
+      { label: "This Week", value: segments.newThisWeek ?? 0, icon: Clock },
+    ],
+    [contacts.length, segments],
+  );
+
+  const selectedContact = useMemo(() => {
+    if (!contactDetail?.contact) return null;
+    return {
+      ...contactDetail.contact,
+      tags: contactDetail.contact.tags ?? [],
+    } as ContactDetailData;
+  }, [contactDetail]);
+
+  const detailEvents: ContactEvent[] = contactDetail?.events ?? [];
+  const detailNotes: ContactNote[] = contactDetail?.notes ?? [];
+  const detailTasks: ContactTask[] = (contactDetail?.tasks ?? []).map((t) => ({
+    id: t.id,
+    title: t.title,
+    status: t.status,
+    dueDate: t.dueDate,
+  }));
+
   if (workspaceLoading) {
     return (
-      <ContentContainer>
-        <div className="py-12 text-center space-y-4">
-          <p className="text-lg font-semibold text-slate-900">Preparing your workspace...</p>
-          <p className="text-sm text-slate-600">Hang tight while we load your personal space.</p>
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center space-y-3">
+          <RefreshCw className="w-8 h-8 animate-spin mx-auto text-muted-foreground" />
+          <p className="text-muted-foreground">Preparing your workspace...</p>
         </div>
-      </ContentContainer>
+      </div>
     );
   }
 
   if (workspaceError) {
     return (
-      <ContentContainer>
-        <div className="py-12 text-center space-y-4">
-          <p className="text-lg font-semibold text-red-700">{workspaceError}</p>
-          <p className="text-sm text-slate-600">Try logging in again to create your workspace.</p>
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center space-y-3">
+          <p className="text-lg font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>
+            {workspaceError}
+          </p>
+          <p className="text-muted-foreground">Try logging in again to create your workspace.</p>
         </div>
-      </ContentContainer>
+      </div>
     );
   }
 
-  async function move(contactId: string, status: string) {
-    if (!businessId) return;
-    await updateContact({ businessId, contactId, status });
-    setContacts((prev) => prev.map((c) => (c.id === contactId ? { ...c, status } : c)));
-  }
-
-  const fileAccept =
-    importType === "csv"
-      ? ".csv"
-      : importType === "xlsx"
-      ? ".xlsx,.xls"
-      : importType === "pdf"
-      ? ".pdf"
-      : "image/*";
-
-  const fileToDataUrl = (file: File) =>
-    new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-
-  const detailContent = (opts?: { padded?: boolean }) => (
-    <div className={`space-y-4 ${opts?.padded ? "p-2" : ""}`}>
-      {detailLoading ? (
-        <p className="text-xs text-muted-foreground">Loading contact details...</p>
-      ) : detailError ? (
-        <p className="text-xs text-rose-400">{detailError}</p>
-      ) : !detailContact ? (
-        <p className="text-xs text-muted-foreground">Select a contact to explore its profile.</p>
-      ) : (
-        <>
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <p className="text-lg font-semibold">{contactFullName || "Unnamed"}</p>
-              <Badge tone={statusTone}>{detailContact.status ?? "Unknown"}</Badge>
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {detailContact.companyName && <span>{detailContact.companyName}</span>}
-              {detailContact.jobTitle && <span className="ml-2">{detailContact.jobTitle}</span>}
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3 text-[12px] text-muted-foreground">
-              <div className="rounded-xl border border-border/50 bg-slate-900/50 p-3">
-                <div className="text-xs uppercase">Outstanding</div>
-                <div className="text-base font-semibold text-white">
-                  {outstandingBalance ? `$${outstandingBalance.toLocaleString()}` : "None"}
-                </div>
-              </div>
-              <div className="rounded-xl border border-border/50 bg-slate-900/50 p-3">
-                <div className="text-xs uppercase">Lead score</div>
-                <div className="text-base font-semibold text-white">{leadScore ?? "-"}</div>
-              </div>
-              <div className="rounded-xl border border-border/50 bg-slate-900/50 p-3">
-                <div className="text-xs uppercase">Last activity</div>
-                <div className="text-base font-semibold text-white">
-                  {lastInteractionAt ? new Date(lastInteractionAt).toLocaleDateString() : "No activity"}
-                </div>
-              </div>
-              <div className="rounded-xl border border-border/50 bg-slate-900/50 p-3">
-                <div className="text-xs uppercase">Next due task</div>
-                <div className="text-base font-semibold text-white">
-                  {nextDueTaskAt ? new Date(nextDueTaskAt).toLocaleDateString() : "None"}
-                </div>
-              </div>
-              <div className="rounded-xl border border-border/50 bg-slate-900/50 p-3">
-                <div className="text-xs uppercase">Events</div>
-                <div className="text-base font-semibold text-white">{timelineEntries.length}</div>
-              </div>
-              <div className="rounded-xl border border-border/50 bg-slate-900/50 p-3">
-                <div className="text-xs uppercase">Tasks</div>
-                <div className="text-base font-semibold text-white">{tasksEntries.length}</div>
-              </div>
-            </div>
-          </div>
-
-          <SectionCard title="AI summary" className="bg-slate-900/70">
-            {aiSuggestions.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                More signals unlock adaptive suggestions; keep engaging to surface ideas.
-              </p>
-            ) : (
-              <ul className="list-disc space-y-1 pl-5 text-[11px] text-muted-foreground">
-                {aiSuggestions.map((suggestion, index) => (
-                  <li key={`ai-${index}`}>{suggestion}</li>
-                ))}
-              </ul>
-            )}
-          </SectionCard>
-
-          <SectionCard
-            title="Timeline"
-            className="bg-slate-900/70"
-            headerAction={
-              <div className="flex gap-2 items-center">
-                <label className="text-[11px] text-muted-foreground">Filter:</label>
-                <select
-                  value={timelineFilter}
-                  onChange={(e) => setTimelineFilter(e.target.value)}
-                  className="rounded border border-border/50 bg-background px-2 py-1 text-[11px]"
-                >
-                  <option value="ALL">All</option>
-                  {Array.from(new Set(timelineEntries.map((e) => e.type))).map((type) => (
-                    <option key={type} value={type}>
-                      {type}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            }
-          >
-            <div className="space-y-3 text-[11px] text-muted-foreground">
-              {groupedTimeline.length === 0 && <p>No events yet.</p>}
-              {groupedTimeline.map((group) => (
-                <div key={group.date} className="space-y-2">
-                  <div className="text-[10px] uppercase text-slate-400">{group.date}</div>
-                  {group.events.slice(0, 6).map((event) => (
-                    <div
-                      key={event.id}
-                      className="rounded-xl border border-border/50 bg-slate-950/60 p-2"
-                    >
-                      <div className="flex items-center justify-between text-white">
-                        <span className="font-semibold">{event.type}</span>
-                        <span className="text-[10px] text-slate-400">{formatDate(event.createdAt)}</span>
-                      </div>
-                      <p className="line-clamp-2">
-                        {event.data && typeof event.data === "object"
-                          ? JSON.stringify(event.data).slice(0, 120)
-                          : String(event.data)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-          </SectionCard>
-
-          <SectionCard title="Notes" className="bg-slate-900/70">
-            <div className="space-y-2">
-              <textarea
-                className="w-full rounded border border-border/50 bg-background p-2 text-xs text-foreground"
-                rows={3}
-                placeholder="Log a conversation or insight..."
-                value={newNote}
-                onChange={(e) => setNewNote(e.target.value)}
-              />
-              <Button
-                variant="outline"
-                      className="px-3 py-1 text-xs"
-                      onClick={handleAddNote}
-                      disabled={!newNote.trim() || noteLoading}
-                    >
-                      Add note
-                    </Button>
-              <div className="space-y-2">
-                {notesEntries.slice(0, 4).map((note) => (
-                  <div
-                    key={note.id}
-                    className="rounded-xl border border-border/40 bg-slate-900/50 p-2 text-[11px] text-muted-foreground"
-                  >
-                    <p>{note.body}</p>
-                    <p className="text-[10px] text-slate-400">{formatDate(note.createdAt)}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </SectionCard>
-
-          <SectionCard title="Tasks" className="bg-slate-900/70">
-            <div className="space-y-2">
-              <Input
-                placeholder="Task title"
-                value={newTaskTitle}
-                onChange={(e) => setNewTaskTitle(e.target.value)}
-                className="text-xs"
-              />
-              <Input
-                type="datetime-local"
-                placeholder="Optional due"
-                value={newTaskDue}
-                onChange={(e) => setNewTaskDue(e.target.value)}
-                className="text-xs"
-              />
-              <Button
-                variant="outline"
-                className="px-3 py-1 text-xs"
-                onClick={handleAddTask}
-                disabled={!newTaskTitle.trim() || taskLoading}
-              >
-                Create task
-              </Button>
-              <div className="space-y-2">
-                {tasksEntries.slice(0, 4).map((task) => (
-                  <div
-                    key={task.id}
-                    className="rounded-xl border border-border/40 bg-slate-900/50 p-2 text-[11px] text-muted-foreground"
-                  >
-                    <p className="font-semibold text-white">{task.title}</p>
-                    <p className="text-[10px] text-slate-400">Due {formatDate(task.dueDate)}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </SectionCard>
-        </>
-      )}
-    </div>
-  );
-
   return (
-    <ContentContainer>
-      <Card
-        className="sticky top-4 z-30 bg-white/90 backdrop-blur rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow"
-        padding="sm"
-        shadow="sm"
-        onClick={() => {
-          if (showOverview) setShowOverview(false);
-        }}
+    <div className="space-y-6">
+      <motion.div
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex flex-col md:flex-row md:items-center md:justify-between gap-4"
       >
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-sm font-semibold text-slate-900">CRM SUITE</p>
-          <div className="flex items-center gap-2">
-            <Badge tone="info">{pipelineStats.total} contacts</Badge>
-            <Button
-              variant="outline"
-              size="xs"
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowOverview((prev) => !prev);
-              }}
-            >
-              Overview
-            </Button>
-          </div>
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Contacts</h1>
+          <p className="text-muted-foreground mt-1">Manage your leads, prospects, and clients</p>
         </div>
-        {showOverview && (
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-6 text-[11px] text-slate-600">
-            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="text-xs uppercase text-slate-500">Total contacts</div>
-              <div className="text-lg font-semibold text-slate-900">{contacts.length}</div>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="text-xs uppercase text-slate-500">Overdue tasks</div>
-              <div className="text-lg font-semibold text-slate-900">{pipelineStats.overdueTasks}</div>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="text-xs uppercase text-slate-500">Leads</div>
-              <div className="text-lg font-semibold text-slate-900">{segments.lead ?? 0}</div>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="text-xs uppercase text-slate-500">Prospects</div>
-              <div className="text-lg font-semibold text-slate-900">{segments.prospect ?? 0}</div>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="text-xs uppercase text-slate-500">Clients</div>
-              <div className="text-lg font-semibold text-slate-900">{segments.client ?? 0}</div>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="text-xs uppercase text-slate-500">Lost</div>
-              <div className="text-lg font-semibold text-slate-900">{segments.lost ?? 0}</div>
-            </div>
-          </div>
-        )}
-      </Card>
-      <div className="space-y-6">
-        <SectionCard
-          title="KEY SEARCH"
-          headerAction={
-            <div className="flex items-center gap-2">
-              <Badge tone="info">{contacts.length} contacts</Badge>
-              {activeFilters > 0 && <Badge tone="warning">{activeFilters} filters</Badge>}
-              <Button variant="outline" className="px-3 py-1 text-xs" onClick={() => setPipelineOpen((p) => !p)}>
-                {pipelineOpen ? "Collapse" : "Expand"}
-              </Button>
-            </div>
-          }
-          className="bg-white h-fit"
+        <button
+          onClick={() => setShowAddForm(true)}
+          className="kf-btn-primary inline-flex items-center gap-2"
         >
-          {pipelineOpen && (
-            <>
-              <p className="text-xs text-muted-foreground">
-                Search, filter, and save views so the whole team can surface the right leads in seconds.
-              </p>
-              <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {metricSlots.map((metricKey, index) => {
-                  const current = metricOptions.find((m) => m.key === metricKey) ?? metricOptions[0];
-                  return (
-                    <div
-                      key={`${metricKey}-${index}`}
-                      className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm space-y-2"
-                      title={current.hint}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="text-xs uppercase text-slate-500">{current.label}</div>
-                        <select
-                          className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px]"
-                          value={metricKey}
-                          onChange={(e) => setMetricSlot(index, e.target.value as MetricKey)}
-                        >
-                          {metricOptions.map((opt) => (
-                            <option key={opt.key} value={opt.key}>
-                              {opt.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="text-lg font-semibold text-slate-900">{current.value}</div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="mt-3 grid gap-2 md:grid-cols-2">
-                <Input
-                  placeholder="Search name/email/phone"
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  className="w-full"
-                />
-                <Input
-                  placeholder="Filter by tags (comma-separated)"
-                  value={tagFilter}
-                  onChange={(e) => setTagFilter(e.target.value)}
-                  className="w-full"
-                />
-              </div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {["ALL", ...STATUSES].map((s) => (
-                  <Button
-                    key={s}
-                    variant={statusFilter === s ? "default" : "outline"}
-                    className="px-3 py-1 text-xs"
-                    onClick={() => setStatusFilter(s)}
-                    disabled={isPending}
-                  >
-                    {s}
-                  </Button>
-                ))}
-                {activeFilters > 0 && (
-                  <Button
-                    variant="outline"
-                    className="px-3 py-1 text-xs"
-                    onClick={() => {
-                      setStatusFilter("ALL");
-                      setSearch("");
-                      setSearchInput("");
-                      setTagFilter("");
-                      startTransition(() => {
-                        void loadData();
-                      });
-                    }}
-                  >
-                    Clear filters
-                  </Button>
-                )}
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Input
-                  placeholder="Saved view name"
-                  value={viewName}
-                  onChange={(e) => setViewName(e.target.value)}
-                  className="w-48"
-                />
-                <Button
-                  variant="outline"
-                  className="px-3 py-1 text-xs"
-                  onClick={() => {
-                    if (!viewName.trim()) return;
-                      const next = [
-                        ...savedViews.filter((v) => v.name !== viewName.trim()),
-                        { name: viewName.trim(), search: searchInput, status: statusFilter, tags: tagFilter },
-                      ];
-                      setSavedViews(next);
-                      if (typeof window !== "undefined") {
-                        window.localStorage.setItem("crm_saved_views", JSON.stringify(next));
-                      }
-                    setViewName("");
-                  }}
-                >
-                  Save view
-                </Button>
-              </div>
-              <div className="flex flex-wrap gap-2 text-[11px]">
-                {savedViews.map((v) => (
-                  <Button
-                    key={v.name}
-                    variant="outline"
-                    className="px-2 py-1"
-                      onClick={() => {
-                        setSearch(v.search);
-                        setSearchInput(v.search);
-                        setStatusFilter(v.status);
-                        setTagFilter(v.tags);
-                      }}
-                    >
-                      {v.name}
-                  </Button>
-                ))}
-              </div>
-            </>
-          )}
-        </SectionCard>
-        <div className="grid gap-4 lg:grid-cols-[2fr,1fr]">
-        <div className="space-y-4">
-          <SectionCard
-            title="ADD CONTACT"
-            className="border-slate-200 bg-white"
-            headerAction={
-              <Button
-                variant="outline"
-                className="px-3 py-1 text-xs"
-                onClick={() => setShowAddContact((prev) => !prev)}
-              >
-                {showAddContact ? "Hide" : "Show"}
-              </Button>
-            }
+          <Plus className="w-4 h-4" />
+          Add Contact
+        </button>
+      </motion.div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {stats.map(({ label, value, icon: Icon }, index) => (
+          <motion.div
+            key={label}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: index * 0.05 }}
+            className="kf-stat-card p-4"
           >
-            {showAddContact && (
-              <>
-                <p className="text-xs text-muted-foreground">
-                  Capture a full profile with rich details. Everything can be edited later.
-                </p>
-                <div ref={addContactRef} className="space-y-3">
-                  <div className="grid gap-2 md:grid-cols-2">
-                    <Input
-                      placeholder="First name"
-                      value={newContact.firstName}
-                      onChange={(e) => setNewContact((prev) => ({ ...prev, firstName: e.target.value }))}
-                    />
-                    <Input
-                      placeholder="Last name"
-                      value={newContact.lastName}
-                      onChange={(e) => setNewContact((prev) => ({ ...prev, lastName: e.target.value }))}
-                    />
-                  </div>
-                <div className="grid gap-2 md:grid-cols-2">
-                  <Input
-                    placeholder="Email"
-                    value={newContact.email}
-                    onChange={(e) => setNewContact((prev) => ({ ...prev, email: e.target.value }))}
-                  />
-                  <Input
-                    placeholder="Phone"
-                    value={newContact.phone}
-                    onChange={(e) => setNewContact((prev) => ({ ...prev, phone: e.target.value }))}
-                  />
-                </div>
-                <div className="grid gap-2 md:grid-cols-2">
-                  <Input
-                    placeholder="Company"
-                    value={newContact.companyName}
-                    onChange={(e) => setNewContact((prev) => ({ ...prev, companyName: e.target.value }))}
-                  />
-                  <Input
-                    placeholder="Job title / role"
-                    value={newContact.jobTitle}
-                    onChange={(e) => setNewContact((prev) => ({ ...prev, jobTitle: e.target.value }))}
-                  />
-                </div>
-                <div className="grid gap-2 md:grid-cols-2">
-                  <Input
-                    placeholder="Source (Instagram, Website, Referral...)"
-                    value={newContact.source}
-                    onChange={(e) => setNewContact((prev) => ({ ...prev, source: e.target.value }))}
-                  />
-                  <Input
-                    placeholder="Preferred channel (Email/WhatsApp/SMS)"
-                    value={newContact.preferredChannel}
-                    onChange={(e) => setNewContact((prev) => ({ ...prev, preferredChannel: e.target.value }))}
-                  />
-                </div>
-                <Input
-                  placeholder="Lifecycle stage (lead/prospect/client...)"
-                  value={newContact.lifecycleStage}
-                  onChange={(e) => setNewContact((prev) => ({ ...prev, lifecycleStage: e.target.value }))}
+            <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1">
+              <Icon className="w-4 h-4" />
+              {label}
+            </div>
+            <div className="text-2xl font-bold">{value}</div>
+          </motion.div>
+        ))}
+      </div>
+
+      <AnimatePresence>
+        {showAddForm && (
+          <ContactForm
+            onSubmit={handleCreateContact}
+            onCancel={() => setShowAddForm(false)}
+            loading={isPending}
+          />
+        )}
+      </AnimatePresence>
+
+      <ContactImport
+        onImportFile={handleImportFile}
+        onImportLink={handleImportLink}
+        onImportOcr={handleImportOcr}
+        loading={isPending}
+      />
+
+      <div className="kf-card p-4 space-y-4">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search contacts..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              className="kf-input w-full pl-10"
+            />
+          </div>
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={`kf-btn-secondary inline-flex items-center gap-2 ${showFilters ? "ring-2 ring-[hsl(var(--kf-accent1))]" : ""}`}
+          >
+            <Filter className="w-4 h-4" />
+            Filters
+            <ChevronDown className={`w-4 h-4 transition-transform ${showFilters ? "rotate-180" : ""}`} />
+          </button>
+          <button
+            onClick={() => loadContacts()}
+            disabled={loading}
+            className="kf-btn-secondary inline-flex items-center gap-2"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            <span className="hidden sm:inline">Refresh</span>
+          </button>
+        </div>
+
+        <AnimatePresence>
+          {showFilters && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="flex flex-wrap gap-2"
+            >
+              {STATUSES.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setStatusFilter(s)}
+                  className={`px-3 py-1.5 text-sm rounded-lg transition-all ${
+                    statusFilter === s ? "kf-btn-primary" : "kf-btn-secondary"
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+              {statusFilter !== "ALL" && (
+                <button
+                  onClick={() => {
+                    setStatusFilter("ALL");
+                    setSearchInput("");
+                  }}
+                  className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" />
+                  Clear
+                </button>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-[1fr,400px]">
+        <div className="space-y-3">
+          {loading && contacts.length === 0 ? (
+            <div className="kf-card p-8 text-center">
+              <RefreshCw className="w-8 h-8 animate-spin mx-auto text-muted-foreground mb-3" />
+              <p className="text-muted-foreground">Loading contacts...</p>
+            </div>
+          ) : contacts.length === 0 ? (
+            <div className="kf-card p-8 text-center">
+              <Users className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
+              <p className="text-lg font-medium mb-1">No contacts yet</p>
+              <p className="text-muted-foreground mb-4">
+                Add your first contact to get started
+              </p>
+              <button
+                onClick={() => setShowAddForm(true)}
+                className="kf-btn-primary inline-flex items-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                Add Contact
+              </button>
+            </div>
+          ) : (
+            <>
+              {contacts.map((contact, index) => (
+                <ContactCard
+                  key={contact.id}
+                  contact={contact as ContactCardData}
+                  isSelected={selectedContactId === contact.id}
+                  onClick={() => selectContact(contact.id)}
+                  index={index}
                 />
-                <Input
-                  placeholder="Tags (comma-separated)"
-                  value={newContact.tags}
-                  onChange={(e) => setNewContact((prev) => ({ ...prev, tags: e.target.value }))}
-                />
-                <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <div className="flex items-center justify-between text-sm font-semibold text-slate-900">
-                    <span>Profile photo (optional)</span>
-                    {contactPhotoPreview && (
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        onClick={() => {
-                          setContactPhotoFile(null);
-                          setContactPhotoPreview(null);
-                        }}
-                      >
-                        Remove
-                      </Button>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <label className="flex cursor-pointer items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-xs text-slate-600 hover:border-slate-400">
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0] ?? null;
-                          setContactPhotoFile(file);
-                          if (file) {
-                            const url = URL.createObjectURL(file);
-                            setContactPhotoPreview(url);
-                          } else {
-                            setContactPhotoPreview(null);
-                          }
-                        }}
-                      />
-                      Upload image
-                    </label>
-                    {contactPhotoPreview && (
-                      <img
-                        src={contactPhotoPreview}
-                        alt="Preview"
-                        className="h-12 w-12 rounded-full object-cover border border-slate-200"
-                      />
-                    )}
-                  </div>
-                  <p className="text-[11px] text-slate-500">JPEG/PNG, up to ~5MB. Stored on the contact for quick visual ID.</p>
-                </div>
-                  <div className="flex flex-wrap gap-2">
-                    {STATUSES.map((s) => (
-                      <Button
-                        key={s}
-                        size="xs"
-                        variant={newContact.status === s ? "default" : "outline"}
-                        className="px-3 py-1 text-xs"
-                        onClick={() => setNewContact((prev) => ({ ...prev, status: s }))}
-                      >
-                        {s}
-                      </Button>
-                    ))}
-                </div>
-                <div className="flex flex-col gap-2 md:flex-row">
-                  <Button
-                    className="flex-1"
-                    onClick={async () => {
-                      const photoDataUrl =
-                        contactPhotoFile && contactPhotoFile.size > 0
-                          ? await fileToDataUrl(contactPhotoFile)
-                          : undefined;
-                      const result = await createContact({
-                        businessId: businessId ?? undefined,
-                        firstName: newContact.firstName,
-                        lastName: newContact.lastName,
-                        email: newContact.email,
-                        phone: newContact.phone,
-                        status: newContact.status,
-                        source: newContact.source || undefined,
-                        tags: newContact.tags
-                          .split(",")
-                          .map((t) => t.trim())
-                          .filter(Boolean),
-                        companyName: newContact.companyName || undefined,
-                        jobTitle: newContact.jobTitle || undefined,
-                        preferredChannel: newContact.preferredChannel || undefined,
-                        lifecycleStage: newContact.lifecycleStage || undefined,
-                        custom: photoDataUrl
-                          ? {
-                              profilePhotoDataUrl: photoDataUrl,
-                              profilePhotoName: contactPhotoFile?.name ?? "photo",
-                            }
-                          : undefined,
-                      });
-                      const parsedTags = newContact.tags
-                        .split(",")
-                        .map((t) => t.trim())
-                        .filter(Boolean);
-                      const created: ContactWithTags = {
-                        id: result.data?.id ?? `local_${Date.now()}`,
-                        firstName: result.data?.firstName ?? newContact.firstName,
-                        lastName: result.data?.lastName ?? newContact.lastName,
-                        email: result.data?.email ?? newContact.email,
-                        phone: result.data?.phone ?? newContact.phone,
-                        status: result.data?.status ?? newContact.status,
-                        source: result.data?.source ?? newContact.source,
-                        companyName: result.data?.companyName ?? newContact.companyName,
-                        jobTitle: result.data?.jobTitle ?? newContact.jobTitle,
-                        preferredChannel: result.data?.preferredChannel ?? newContact.preferredChannel,
-                        lifecycleStage: result.data?.lifecycleStage ?? newContact.lifecycleStage,
-                        segment: result.data?.segment ?? undefined,
-                        tags: result.data?.tags && result.data.tags.length > 0 ? result.data.tags : parsedTags,
-                        meta: result.data?.meta,
-                        localOnly: true,
-                      };
-                      setContacts((prev) => {
-                        const filtered = prev.filter((c) => c.id !== created.id);
-                        return [created, ...filtered];
-                      });
-                      setNewContact({
-                        firstName: "",
-                        lastName: "",
-                        email: "",
-                        phone: "",
-                        status: "LEAD",
-                        source: "",
-                        tags: "",
-                        companyName: "",
-                        jobTitle: "",
-                        preferredChannel: "",
-                        lifecycleStage: "",
-                      });
-                      // Reset filters to ensure the freshly added contact is visible in the database card.
-                      setStatusFilter("ALL");
-                      setTagFilter("");
-                      setSearch("");
-                      setSearchInput("");
-                      setContactPhotoFile(null);
-                      setContactPhotoPreview(null);
-                      setShowAddContact(false);
-                      startTransition(() => {
-                        void loadData();
-                      });
-                    }}
-                  >
-                    Save contact
-                  </Button>
-                  <Button variant="outline" onClick={() => setShowAddContact(false)}>
-                    Cancel
-                  </Button>
-                </div>
-                <p className="text-[11px] text-muted-foreground">
-                  Add as much detail as you want now; you can always enrich the record later.
-                </p>
-              </div>
+              ))}
+              {hasMore && (
+                <button
+                  onClick={() => loadContacts({ append: true })}
+                  disabled={loading}
+                  className="w-full kf-btn-secondary py-3"
+                >
+                  {loading ? "Loading..." : "Load More"}
+                </button>
+              )}
             </>
           )}
-          </SectionCard>
-
         </div>
-        <div className="space-y-4">
-          <SectionCard title="Import & capture" headerAction={<Badge tone="info">{importJobs.length} jobs</Badge>}>
-            <div ref={importRef} className="space-y-4">
-              <div className="flex flex-wrap gap-2">
-                <span className="text-xs font-semibold text-slate-600">Upload</span>
-                <select
-                  value={importType}
-                  onChange={(e) => setImportType(e.target.value as "csv" | "xlsx" | "pdf" | "image")}
-                  className="rounded border border-slate-200 bg-white px-2 py-1 text-xs"
-                >
-                  {IMPORT_TYPES.map((type) => (
-                    <option key={type} value={type}>
-                      {type.toUpperCase()}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="file"
-                  accept={fileAccept}
-                  onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
-                  className="text-xs"
-                />
-                {importFile && (
-                  <span className="text-[11px] text-slate-500">Ready to upload: {importFile.name}</span>
-                )}
-                <Button
-                  variant="outline"
-                  className="px-3 py-1 text-xs"
-                  onClick={async () => {
-                    if (!importFile || !businessId) return;
-                    try {
-                      await importContactsFromFile({ businessId, type: importType, file: importFile });
-                      setImportFile(null);
-                    } catch (error) {
-                      console.error("File import failed", error);
-                    }
-                    startTransition(() => {
-                      void loadData();
-                    });
-                  }}
-                  disabled={!importFile || isPending}
-                >
-                  Upload
-                </Button>
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  onChange={(e) => setCameraImage(e.target.files?.[0] ?? null)}
-                  className="text-xs"
-                />
-                {cameraImage && (
-                  <span className="text-[11px] text-slate-500">Captured: {cameraImage.name}</span>
-                )}
-                <Button
-                  variant="outline"
-                  className="px-3 py-1 text-xs"
-                  onClick={async () => {
-                    if (!cameraImage || !businessId) return;
-                    try {
-                      await importContactsFromFile({ businessId, type: "image", file: cameraImage });
-                      setCameraImage(null);
-                    } catch (error) {
-                      console.error("Camera import failed", error);
-                    }
-                    startTransition(() => {
-                      void loadData();
-                    });
-                  }}
-                  disabled={!cameraImage || isPending}
-                >
-                  Scan via camera
-                </Button>
-              </div>
-              <div className="flex flex-wrap gap-2 items-center">
-                <Input
-                  placeholder="Or import from link (URL)"
-                  value={importLink}
-                  onChange={(e) => setImportLink(e.target.value)}
-                  className="w-64"
-                />
-                <Button
-                  variant="outline"
-                  className="px-3 py-1 text-xs"
-                  onClick={async () => {
-                    if (!importLink.trim() || !businessId) return;
-                    const result = await importContactsFromLink(importLink.trim(), businessId);
-                    if (result.error) {
-                      console.error("Link import failed", result.error);
-                    } else {
-                      setImportLink("");
-                    }
-                    startTransition(() => {
-                      void loadData();
-                    });
-                  }}
-                  disabled={isPending}
-                >
-                  Save link source
-                </Button>
-              </div>
-              <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                <div className="text-xs font-semibold text-slate-700">Paste business card OCR text</div>
-                <textarea
-                  className="w-full rounded border border-slate-200 bg-white p-2 text-xs text-slate-900"
-                  rows={3}
-                  placeholder="Paste text extracted from a business card here..."
-                  value={ocrText}
-                  onChange={(e) => setOcrText(e.target.value)}
-                />
-                <Button
-                  variant="outline"
-                  className="px-3 py-1 text-xs"
-                  onClick={async () => {
-                    if (!ocrText.trim() || !businessId) return;
-                    const result = await createContactFromOcr({ businessId, ocrText: ocrText.trim() });
-                    if (result.error) {
-                      console.error("OCR import failed", result.error);
-                    } else {
-                      setOcrText("");
-                    }
-                    startTransition(() => {
-                      void loadData();
-                    });
-                  }}
-                  disabled={!ocrText.trim() || isPending}
-                >
-                  Create contact from OCR text
-                </Button>
-              </div>
-              {importJobs.length > 0 && (
-                <div className="space-y-2">
-                  {importJobs.map((job) => {
-                    const tone = importToneByStatus[job.status] ?? "default";
-                    const timestamp = new Date(job.completedAt ?? job.updatedAt).toLocaleString();
-                    return (
-                      <div
-                        key={job.id}
-                        className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2"
-                      >
-                        <div className="space-y-1">
-                          <div className="text-sm font-semibold">{job.originalName ?? job.sourceType}</div>
-                          <div className="text-[11px] text-slate-500">
-                            Rows: {job.processedRows ?? 0}/{job.totalRows ?? 0}
-                          </div>
-                          {job.error && (
-                            <div className="text-[11px] text-rose-500">Error: {job.error}</div>
-                          )}
-                        </div>
-                        <div className="flex flex-col items-end gap-1 text-[11px] text-slate-500">
-                          <Badge tone={tone}>{job.status}</Badge>
-                          <span>Updated {timestamp}</span>
-                          {job.sourceUrl && (
-                            <a
-                              href={job.sourceUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-[11px] underline"
-                            >
-                              Source
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </SectionCard>
 
+        <div className="hidden lg:block sticky top-4 h-fit">
+          <ContactDetail
+            contact={selectedContact}
+            events={detailEvents}
+            notes={detailNotes}
+            tasks={detailTasks}
+            loading={detailLoading}
+            onAddNote={handleAddNote}
+            onAddTask={handleAddTask}
+            onCompleteTask={handleCompleteTask}
+            onUpdateStatus={handleUpdateStatus}
+          />
         </div>
       </div>
 
-      <SectionCard
-        title="Database"
-        className="bg-white"
-        headerAction={
-          <div className="flex items-center gap-2">
-            <Button variant="outline" className="px-3 py-1 text-xs" onClick={() => setDbOpen((p) => !p)}>
-              {dbOpen ? "Collapse" : "Expand"}
-            </Button>
-          </div>
-        }
-      >
-        {dbOpen && (
-          <div className="space-y-3">
-            <div className="flex flex-wrap gap-2">
-              <Input
-                placeholder="Search by any identifier"
-                value={dbSearch}
-                onChange={(e) => setDbSearch(e.target.value)}
-                className="w-60"
-              />
-              <select
-                value={dbSortKey}
-                onChange={(e) => setDbSortKey(e.target.value as typeof dbSortKey)}
-                className="rounded border border-border/60 bg-background px-2 py-1 text-xs"
-              >
-                <option value="name">Name</option>
-                <option value="email">Email</option>
-                <option value="phone">Phone</option>
-                <option value="status">Status</option>
-                <option value="company">Company</option>
-              </select>
-              <Badge tone="info">{dbFiltered.length} shown</Badge>
-            </div>
-              <div className="overflow-x-auto rounded-2xl border border-border/50">
-                <table className="min-w-full text-xs text-left">
-                  <thead className="bg-slate-900/70 text-muted-foreground">
-                    <tr>
-                      <th className="px-3 py-2">Name</th>
-                      <th className="px-3 py-2">Email</th>
-                      <th className="px-3 py-2">Phone</th>
-                      <th className="px-3 py-2">Status</th>
-                      <th className="px-3 py-2">Company</th>
-                      <th className="px-3 py-2">Source</th>
-                      <th className="px-3 py-2">Preferred</th>
-                      <th className="px-3 py-2">Lifecycle</th>
-                      <th className="px-3 py-2">Segment</th>
-                      <th className="px-3 py-2">Tags</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {dbFiltered.map((c) => (
-                      <tr key={c.id} className="border-t border-border/40 hover:bg-slate-900/60">
-                        <td className="px-3 py-2 font-semibold text-white">
-                          {`${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || "Unnamed"}
-                        </td>
-                        <td className="px-3 py-2 text-muted-foreground">{c.email || "-"}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{c.phone || "-"}</td>
-                        <td className="px-3 py-2">
-                          <Badge tone={CONTACT_STATUS_TONES[c.status ?? ""] ?? "default"}>{c.status ?? "LEAD"}</Badge>
-                        </td>
-                        <td className="px-3 py-2 text-muted-foreground">{c.companyName || "-"}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{c.source || "-"}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{c.preferredChannel || "-"}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{c.lifecycleStage || "-"}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{c.segment || "-"}</td>
-                        <td className="px-3 py-2 text-muted-foreground">
-                          {(c.tags ?? []).slice(0, 3).join(", ") || "-"}
-                        </td>
-                      </tr>
-                    ))}
-                    {dbFiltered.length === 0 && (
-                      <tr>
-                        <td className="px-3 py-3 text-muted-foreground" colSpan={10}>
-                          No contacts match this view.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+      <AnimatePresence>
+        {showMobileDetail && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/50 lg:hidden"
+            onClick={() => setShowMobileDetail(false)}
+          >
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 25 }}
+              className="absolute bottom-0 left-0 right-0 max-h-[85vh] bg-background rounded-t-3xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="w-12 h-1 bg-muted rounded-full mx-auto mt-3 mb-2" />
+              <div className="overflow-y-auto max-h-[calc(85vh-24px)]">
+                <ContactDetail
+                  contact={selectedContact}
+                  events={detailEvents}
+                  notes={detailNotes}
+                  tasks={detailTasks}
+                  loading={detailLoading}
+                  onClose={() => setShowMobileDetail(false)}
+                  onAddNote={handleAddNote}
+                  onAddTask={handleAddTask}
+                  onCompleteTask={handleCompleteTask}
+                  onUpdateStatus={handleUpdateStatus}
+                />
               </div>
-          </div>
+            </motion.div>
+          </motion.div>
         )}
-      </SectionCard>
+      </AnimatePresence>
     </div>
-    {isMobile && (
-      <div className="fixed bottom-4 right-4 z-30 flex flex-col gap-2 md:hidden">
-        <Button
-          className="shadow-lg"
-          onClick={() => {
-            setShowAddContact(true);
-            setTimeout(() => scrollToSection(addContactRef), 50);
-          }}
-        >
-          Add contact
-        </Button>
-        <Button variant="outline" className="shadow-lg" onClick={() => scrollToSection(importRef)}>
-          Import
-        </Button>
-      </div>
-    )}
-    </ContentContainer>
   );
 }
