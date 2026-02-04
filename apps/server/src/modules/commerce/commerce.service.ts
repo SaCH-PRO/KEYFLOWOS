@@ -468,8 +468,18 @@ export class CommerceService {
     items: { description: string; quantity: number; unitPrice: number; productId?: string }[];
     currency?: string;
     expiryDate?: Date | string;
+    taxRate?: number;
+    discountType?: 'PERCENT' | 'FIXED';
+    discountValue?: number;
+    notes?: string;
   }) {
-    const total = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    const taxRate = input.taxRate ?? 0;
+    const taxAmount = subtotal * taxRate / 100;
+    const discountValue = input.discountValue ?? 0;
+    const discountAmount = input.discountType === 'FIXED' ? discountValue : subtotal * discountValue / 100;
+    const total = subtotal + taxAmount - discountAmount;
+    
     const quote = await this.prisma.client.quote.create({
       data: {
         businessId: input.businessId,
@@ -478,8 +488,15 @@ export class CommerceService {
         status: 'DRAFT',
         issueDate: new Date(),
         expiryDate: input.expiryDate ? new Date(input.expiryDate) : null,
+        subtotal,
+        taxRate,
+        taxAmount,
+        discountType: input.discountType ?? null,
+        discountValue,
+        discountAmount,
         total,
         currency: input.currency ?? 'TTD',
+        notes: input.notes ?? null,
         items: {
           create: input.items.map((item) => ({
             description: item.description,
@@ -512,6 +529,10 @@ export class CommerceService {
     items?: { description: string; quantity: number; unitPrice: number; productId?: string }[];
     currency?: string;
     expiryDate?: Date | string | null;
+    taxRate?: number;
+    discountType?: 'PERCENT' | 'FIXED';
+    discountValue?: number;
+    notes?: string;
   }) {
     const quote = await this.prisma.client.quote.findFirst({
       where: { id: input.quoteId, businessId: input.businessId },
@@ -529,11 +550,31 @@ export class CommerceService {
     if (input.expiryDate !== undefined) {
       updateData.expiryDate = input.expiryDate ? new Date(input.expiryDate) : null;
     }
+    if (input.notes !== undefined) updateData.notes = input.notes;
+    
+    // Get items for recalculating totals
+    const currentItems = input.items ?? (await this.prisma.client.quoteItem.findMany({ where: { quoteId: input.quoteId } }));
+    const subtotal = currentItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    
+    // Handle tax/discount updates
+    const taxRate = input.taxRate ?? quote.taxRate ?? 0;
+    const discountType = input.discountType ?? quote.discountType;
+    const discountValue = input.discountValue ?? quote.discountValue ?? 0;
+    
+    const taxAmount = subtotal * taxRate / 100;
+    const discountAmount = discountType === 'FIXED' ? discountValue : subtotal * discountValue / 100;
+    const total = subtotal + taxAmount - discountAmount;
+    
+    updateData.subtotal = subtotal;
+    updateData.taxRate = taxRate;
+    updateData.taxAmount = taxAmount;
+    updateData.discountType = discountType;
+    updateData.discountValue = discountValue;
+    updateData.discountAmount = discountAmount;
+    updateData.total = total;
     
     if (input.items) {
       await this.prisma.client.quoteItem.deleteMany({ where: { quoteId: input.quoteId } });
-      const total = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-      updateData.total = total;
       updateData.items = {
         create: input.items.map((item) => ({
           description: item.description,

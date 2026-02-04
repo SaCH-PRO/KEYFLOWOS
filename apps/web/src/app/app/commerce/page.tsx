@@ -128,6 +128,10 @@ export default function CommercePage() {
     contactId: "",
     expiryDate: "",
     items: [{ id: generateItemId(), productId: "", description: "", quantity: "1", unitPrice: "" }] as InvoiceLineItem[],
+    taxRate: "12.5",
+    discountType: "PERCENT" as "PERCENT" | "FIXED",
+    discountValue: "",
+    notes: "",
   });
   const [quoteSearch, setQuoteSearch] = useState("");
   const [quoteStatusFilter, setQuoteStatusFilter] = useState<string>("ALL");
@@ -521,6 +525,10 @@ export default function CommercePage() {
       contactId: "",
       expiryDate: "",
       items: [{ id: generateItemId(), productId: "", description: "", quantity: "1", unitPrice: "" }],
+      taxRate: businessProfile?.defaultTaxRate ? String(businessProfile.defaultTaxRate) : "12.5",
+      discountType: "PERCENT",
+      discountValue: "",
+      notes: "",
     });
     setEditingQuoteId(null);
   }
@@ -697,7 +705,7 @@ export default function CommercePage() {
             </Button>
           )}
           {tab === "quotes" && (
-            <Button onClick={() => { setEditingQuoteId(null); setQuoteForm({ contactId: "", expiryDate: "", items: [{ id: generateItemId(), productId: "", description: "", quantity: "1", unitPrice: "" }] }); setShowQuoteBuilder(true); }} className="gap-2">
+            <Button onClick={() => { setEditingQuoteId(null); resetQuoteForm(); setShowQuoteBuilder(true); }} className="gap-2">
               <Plus className="w-4 h-4" />
               New Quote
             </Button>
@@ -1036,12 +1044,97 @@ export default function CommercePage() {
                   ))}
                 </div>
 
-                <div className="flex justify-between items-center pt-2 border-t border-border/40">
-                  <div className="text-sm text-muted-foreground">
-                    Total: <span className="text-foreground font-semibold">
-                      ${quoteForm.items.reduce((sum, item) => sum + (parseFloat(item.quantity) || 0) * (parseFloat(item.unitPrice) || 0), 0).toFixed(2)} TTD
-                    </span>
+                {/* Tax, Discount & Notes */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 border-t border-border/40">
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1.5 block">Tax Rate (%)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      value={quoteForm.taxRate}
+                      onChange={(e) => setQuoteForm((f) => ({ ...f, taxRate: e.target.value }))}
+                      placeholder="12.5"
+                    />
                   </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1.5 block">Discount Type</label>
+                    <select
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      value={quoteForm.discountType}
+                      onChange={(e) => setQuoteForm((f) => ({ ...f, discountType: e.target.value as "PERCENT" | "FIXED" }))}
+                    >
+                      <option value="PERCENT">Percentage (%)</option>
+                      <option value="FIXED">Fixed Amount (TTD)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1.5 block">
+                      Discount {quoteForm.discountType === "PERCENT" ? "(%)" : "(TTD)"}
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      value={quoteForm.discountValue}
+                      onChange={(e) => setQuoteForm((f) => ({ ...f, discountValue: e.target.value }))}
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1.5 block">Notes (optional)</label>
+                  <textarea
+                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 min-h-[60px]"
+                    value={quoteForm.notes}
+                    onChange={(e) => setQuoteForm((f) => ({ ...f, notes: e.target.value }))}
+                    placeholder="Payment terms, conditions, or additional notes..."
+                  />
+                </div>
+
+                {/* Quote Totals */}
+                {(() => {
+                  const subtotal = quoteForm.items.reduce((sum, item) => sum + (parseFloat(item.quantity) || 0) * (parseFloat(item.unitPrice) || 0), 0);
+                  const taxAmount = subtotal * (parseFloat(quoteForm.taxRate) || 0) / 100;
+                  const discountAmount = quoteForm.discountType === "PERCENT"
+                    ? subtotal * (parseFloat(quoteForm.discountValue) || 0) / 100
+                    : parseFloat(quoteForm.discountValue) || 0;
+                  const total = subtotal + taxAmount - discountAmount;
+                  return (
+                    <div className="p-3 rounded-xl bg-muted/30 border border-border/40 space-y-1">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Subtotal:</span>
+                        <span className="font-medium">${subtotal.toFixed(2)} TTD</span>
+                      </div>
+                      {parseFloat(quoteForm.taxRate) > 0 && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">Tax ({quoteForm.taxRate}%):</span>
+                          <span className="font-medium">+${taxAmount.toFixed(2)} TTD</span>
+                        </div>
+                      )}
+                      {parseFloat(quoteForm.discountValue) > 0 && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">
+                            Discount {quoteForm.discountType === "PERCENT" ? `(${quoteForm.discountValue}%)` : ""}:
+                          </span>
+                          <span className="font-medium text-emerald-500">-${discountAmount.toFixed(2)} TTD</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between text-base pt-1 border-t border-border/40">
+                        <span className="font-semibold">Total:</span>
+                        <span className="font-bold text-primary">${total.toFixed(2)} TTD</span>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button variant="outline" onClick={() => { setShowQuoteBuilder(false); resetQuoteForm(); }}>
+                    Cancel
+                  </Button>
                   <Button
                     onClick={async () => {
                       if (!businessId || !quoteForm.contactId) return;
@@ -1076,6 +1169,10 @@ export default function CommercePage() {
                           contactId: quoteForm.contactId,
                           items,
                           expiryDate: quoteForm.expiryDate || undefined,
+                          taxRate: parseFloat(quoteForm.taxRate) || 0,
+                          discountType: quoteForm.discountType,
+                          discountValue: parseFloat(quoteForm.discountValue) || 0,
+                          notes: quoteForm.notes || undefined,
                         });
                         if (res.data) {
                           setQuotes((q) => q.map((quote) => quote.id === editingQuoteId ? res.data! : quote));
@@ -1086,6 +1183,10 @@ export default function CommercePage() {
                           contactId: quoteForm.contactId,
                           items,
                           expiryDate: quoteForm.expiryDate || undefined,
+                          taxRate: parseFloat(quoteForm.taxRate) || 0,
+                          discountType: quoteForm.discountType,
+                          discountValue: parseFloat(quoteForm.discountValue) || 0,
+                          notes: quoteForm.notes || undefined,
                         });
                         if (res.data) {
                           setQuotes((q) => [res.data!, ...q]);
@@ -1193,6 +1294,10 @@ export default function CommercePage() {
                                       quantity: String(item.quantity),
                                       unitPrice: String(item.unitPrice),
                                     })),
+                                    taxRate: String(quote.taxRate ?? 0),
+                                    discountType: (quote.discountType as "PERCENT" | "FIXED") || "PERCENT",
+                                    discountValue: quote.discountValue ? String(quote.discountValue) : "",
+                                    notes: quote.notes || "",
                                   });
                                   setShowQuoteBuilder(true);
                                 }}

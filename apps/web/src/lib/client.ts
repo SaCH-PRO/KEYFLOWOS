@@ -920,6 +920,10 @@ export async function createQuote(input: {
   items: { description: string; quantity: number; unitPrice: number; productId?: string }[];
   currency?: string;
   expiryDate?: string;
+  taxRate?: number;
+  discountType?: "PERCENT" | "FIXED";
+  discountValue?: number;
+  notes?: string;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<Quote>({
@@ -929,6 +933,10 @@ export async function createQuote(input: {
       items: input.items,
       currency: input.currency ?? "TTD",
       expiryDate: input.expiryDate,
+      taxRate: input.taxRate,
+      discountType: input.discountType,
+      discountValue: input.discountValue,
+      notes: input.notes,
     },
   });
 }
@@ -940,6 +948,10 @@ export async function updateQuote(input: {
   items?: { description: string; quantity: number; unitPrice: number; productId?: string }[];
   currency?: string;
   expiryDate?: string | null;
+  taxRate?: number;
+  discountType?: "PERCENT" | "FIXED";
+  discountValue?: number;
+  notes?: string;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPatch<Quote>(
@@ -949,6 +961,10 @@ export async function updateQuote(input: {
       items: input.items,
       currency: input.currency,
       expiryDate: input.expiryDate,
+      taxRate: input.taxRate,
+      discountType: input.discountType,
+      discountValue: input.discountValue,
+      notes: input.notes,
     }
   );
 }
