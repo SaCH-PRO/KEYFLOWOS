@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { API_BASE, apiPost, apiPatch, apiDelete, getAuthHeaders } from "./api";
+import { API_BASE, apiPost, apiPatch, apiDelete, apiGet as apiGetSimple, getAuthHeaders } from "./api";
 
 const DEFAULT_BUSINESS_ID = process.env.NEXT_PUBLIC_DEMO_BUSINESS_ID ?? "biz_demo";
 
@@ -845,6 +845,10 @@ export async function updateInvoiceStatus(invoiceId: string, status: "SENT" | "O
   });
 }
 
+export async function deleteInvoice(businessId: string, invoiceId: string) {
+  return apiDelete(`/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(invoiceId)}`);
+}
+
 export async function updateInvoice(input: {
   businessId?: string;
   invoiceId: string;
@@ -858,9 +862,9 @@ export async function updateInvoice(input: {
   notes?: string | null;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
-  return apiPost<Invoice>({
-    path: `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(input.invoiceId)}`,
-    body: {
+  return apiPatch<Invoice>(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(input.invoiceId)}`,
+    {
       contactId: input.contactId,
       items: input.items,
       currency: input.currency,
@@ -869,9 +873,8 @@ export async function updateInvoice(input: {
       discountType: input.discountType,
       discountValue: input.discountValue,
       notes: input.notes,
-    },
-    method: "PATCH",
-  });
+    }
+  );
 }
 
 // ========== QUOTES ==========
@@ -904,15 +907,11 @@ export type Quote = {
 
 export async function listQuotes(businessId?: string) {
   const bId = businessId ?? DEFAULT_BUSINESS_ID;
-  return apiGet<Quote[]>({
-    path: `/commerce/businesses/${encodeURIComponent(bId)}/quotes`,
-  });
+  return apiGetSimple<Quote[]>(`/commerce/businesses/${encodeURIComponent(bId)}/quotes`);
 }
 
 export async function getQuote(quoteId: string) {
-  return apiGet<Quote>({
-    path: `/commerce/quotes/${encodeURIComponent(quoteId)}`,
-  });
+  return apiGetSimple<Quote>(`/commerce/quotes/${encodeURIComponent(quoteId)}`);
 }
 
 export async function createQuote(input: {
@@ -943,16 +942,15 @@ export async function updateQuote(input: {
   expiryDate?: string | null;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
-  return apiPost<Quote>({
-    path: `/commerce/businesses/${encodeURIComponent(businessId)}/quotes/${encodeURIComponent(input.quoteId)}`,
-    body: {
+  return apiPatch<Quote>(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/quotes/${encodeURIComponent(input.quoteId)}`,
+    {
       contactId: input.contactId,
       items: input.items,
       currency: input.currency,
       expiryDate: input.expiryDate,
-    },
-    method: "PATCH",
-  });
+    }
+  );
 }
 
 export async function updateQuoteStatus(quoteId: string, status: "DRAFT" | "SENT" | "ACCEPTED" | "REJECTED") {
@@ -963,9 +961,7 @@ export async function updateQuoteStatus(quoteId: string, status: "DRAFT" | "SENT
 }
 
 export async function deleteQuote(businessId: string, quoteId: string) {
-  return apiDelete({
-    path: `/commerce/businesses/${encodeURIComponent(businessId)}/quotes/${encodeURIComponent(quoteId)}`,
-  });
+  return apiDelete(`/commerce/businesses/${encodeURIComponent(businessId)}/quotes/${encodeURIComponent(quoteId)}`);
 }
 
 export async function convertQuoteToInvoice(input: {
