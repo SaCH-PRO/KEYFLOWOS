@@ -4,6 +4,13 @@
 KEYFLOWOS is an AI-powered operating system for service businesses that eliminates the "tool maze" by providing pre-built Playbooks for common workflows. Features a "Cockpit" dashboard with Flow Graph visualization, AI-driven Flow Feed, and comprehensive CRM as the intelligence layer.
 
 ## Recent Changes (Feb 2026)
+- **Quote-to-Invoice Workflow** - Complete quotation management with conversion
+  - Create, edit, delete quotes with multi-item line items
+  - Quote status flow: DRAFT → SENT → ACCEPTED/REJECTED
+  - Convert accepted quotes to invoices with tax/discount options
+  - Product picker for quick item selection
+  - Quote details modal with full breakdown
+  - Multi-tenant security: business ownership validation on all mutations
 - **Business Profile & Branding** - Comprehensive business profile management
   - Logo upload with App Storage integration (presigned URL flow)
   - Business info: name, address, phone, email, website, WhatsApp
