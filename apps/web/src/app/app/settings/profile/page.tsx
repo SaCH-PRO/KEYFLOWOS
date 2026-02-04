@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { User, Mail, Phone, CheckCircle2, AlertCircle } from "lucide-react";
+import { User, Mail, Phone, Shield, CheckCircle2, AlertCircle, Eye, EyeOff, Moon, Sun } from "lucide-react";
 import { Button, Input, Card } from "@keyflow/ui";
+import { useTheme } from "next-themes";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -10,12 +11,19 @@ const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 export default function ProfileSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
   const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [form, setForm] = useState({
     email: "",
     name: "",
     phone: "",
   });
+  const [passwordForm, setPasswordForm] = useState({
+    newPassword: "",
+    confirmPassword: "",
+  });
+  const [showPassword, setShowPassword] = useState(false);
+  const { theme, setTheme } = useTheme();
 
   useEffect(() => {
     const load = async () => {
@@ -48,7 +56,7 @@ export default function ProfileSettingsPage() {
     load();
   }, []);
 
-  const handleSave = async () => {
+  const handleSaveProfile = async () => {
     const token = localStorage.getItem("kf_token");
     if (!token || !SUPABASE_URL || !SUPABASE_ANON_KEY) return;
 
@@ -80,12 +88,66 @@ export default function ProfileSettingsPage() {
     setSaving(false);
   };
 
+  const handleChangePassword = async () => {
+    const token = localStorage.getItem("kf_token");
+    if (!token || !SUPABASE_URL || !SUPABASE_ANON_KEY) return;
+
+    if (!passwordForm.newPassword) {
+      setStatus({ type: "error", message: "Please enter a new password" });
+      return;
+    }
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setStatus({ type: "error", message: "Passwords do not match" });
+      return;
+    }
+    if (passwordForm.newPassword.length < 6) {
+      setStatus({ type: "error", message: "Password must be at least 6 characters" });
+      return;
+    }
+
+    setSavingPassword(true);
+    setStatus(null);
+
+    try {
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ password: passwordForm.newPassword }),
+      });
+
+      if (res.ok) {
+        setStatus({ type: "success", message: "Password updated successfully" });
+        setPasswordForm({ newPassword: "", confirmPassword: "" });
+      } else {
+        const err = await res.json();
+        setStatus({ type: "error", message: err.message || "Failed to update password" });
+      }
+    } catch (e) {
+      setStatus({ type: "error", message: "Network error" });
+    }
+    setSavingPassword(false);
+  };
+
   if (loading) {
     return <div className="text-muted-foreground">Loading...</div>;
   }
 
   return (
     <div className="space-y-6 max-w-2xl">
+      <div className="flex items-center gap-3">
+        <div className="h-10 w-10 rounded-3xl bg-primary/20 border border-primary/40 flex items-center justify-center text-primary">
+          <User className="w-5 h-5" />
+        </div>
+        <div>
+          <h1 className="text-xl font-semibold">Profile & Security</h1>
+          <p className="text-sm text-muted-foreground">Your personal account settings</p>
+        </div>
+      </div>
+
       {status && (
         <div
           className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs ${
@@ -107,12 +169,11 @@ export default function ProfileSettingsPage() {
 
         <div className="space-y-4">
           <label className="block text-xs text-muted-foreground">
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 mb-1">
               <Mail className="h-3 w-3" />
               Email
             </div>
             <Input
-              className="mt-1"
               type="email"
               value={form.email}
               disabled
@@ -122,12 +183,11 @@ export default function ProfileSettingsPage() {
           </label>
 
           <label className="block text-xs text-muted-foreground">
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 mb-1">
               <User className="h-3 w-3" />
               Display Name
             </div>
             <Input
-              className="mt-1"
               value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
               placeholder="Your name"
@@ -135,12 +195,11 @@ export default function ProfileSettingsPage() {
           </label>
 
           <label className="block text-xs text-muted-foreground">
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 mb-1">
               <Phone className="h-3 w-3" />
               Phone Number
             </div>
             <Input
-              className="mt-1"
               type="tel"
               value={form.phone}
               onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
@@ -150,9 +209,91 @@ export default function ProfileSettingsPage() {
         </div>
 
         <div className="flex justify-end pt-2">
-          <Button onClick={handleSave} disabled={saving}>
-            {saving ? "Saving..." : "Save Changes"}
+          <Button onClick={handleSaveProfile} disabled={saving}>
+            {saving ? "Saving..." : "Save Profile"}
           </Button>
+        </div>
+      </Card>
+
+      <Card className="p-6 space-y-4">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <Shield className="h-4 w-4 text-primary" />
+          Change Password
+        </div>
+
+        <div className="space-y-4">
+          <label className="block text-xs text-muted-foreground">
+            <div className="mb-1">New Password</div>
+            <div className="relative">
+              <Input
+                type={showPassword ? "text" : "password"}
+                value={passwordForm.newPassword}
+                onChange={(e) => setPasswordForm((f) => ({ ...f, newPassword: e.target.value }))}
+                placeholder="Enter new password"
+              />
+              <button
+                type="button"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                onClick={() => setShowPassword((p) => !p)}
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </label>
+
+          <label className="block text-xs text-muted-foreground">
+            <div className="mb-1">Confirm New Password</div>
+            <Input
+              type="password"
+              value={passwordForm.confirmPassword}
+              onChange={(e) => setPasswordForm((f) => ({ ...f, confirmPassword: e.target.value }))}
+              placeholder="Confirm new password"
+            />
+          </label>
+        </div>
+
+        <div className="flex justify-end pt-2">
+          <Button onClick={handleChangePassword} disabled={savingPassword}>
+            {savingPassword ? "Updating..." : "Update Password"}
+          </Button>
+        </div>
+      </Card>
+
+      <Card className="p-6 space-y-4">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          {theme === "dark" ? <Moon className="h-4 w-4 text-primary" /> : <Sun className="h-4 w-4 text-primary" />}
+          Appearance
+        </div>
+
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm">Theme Mode</p>
+            <p className="text-xs text-muted-foreground">Choose how the app looks for you</p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setTheme("light")}
+              className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
+                theme === "light"
+                  ? "bg-primary text-white"
+                  : "bg-secondary text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              <Sun className="h-4 w-4 inline mr-2" />
+              Light
+            </button>
+            <button
+              onClick={() => setTheme("dark")}
+              className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
+                theme === "dark"
+                  ? "bg-primary text-white"
+                  : "bg-secondary text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              <Moon className="h-4 w-4 inline mr-2" />
+              Dark
+            </button>
+          </div>
         </div>
       </Card>
     </div>

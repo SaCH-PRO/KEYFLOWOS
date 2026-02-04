@@ -2,14 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, Users, User, Link2, Settings, Palette } from "lucide-react";
+import { Building2, Users, User, Link2, Settings } from "lucide-react";
 
 const navItems = [
-  { href: "/app/settings", label: "General", icon: Settings },
+  { href: "/app/settings", label: "Overview", icon: Settings },
+  { href: "/app/settings/profile", label: "Profile", icon: User },
   { href: "/app/settings/business", label: "Business", icon: Building2 },
   { href: "/app/settings/team", label: "Team", icon: Users },
-  { href: "/app/settings/profile", label: "Profile", icon: User },
-  { href: "/app/settings/brand", label: "Brand & Theme", icon: Palette },
   { href: "/app/settings/connections", label: "Connections", icon: Link2 },
 ];
 
@@ -18,10 +17,6 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Settings</h1>
-        <p className="text-sm text-muted-foreground">Manage your workspace, team, and integrations.</p>
-      </div>
       <div className="flex gap-2 border-b border-border pb-3 overflow-x-auto">
         {navItems.map((item) => {
           const isActive = pathname === item.href || (item.href !== "/app/settings" && pathname.startsWith(item.href));
