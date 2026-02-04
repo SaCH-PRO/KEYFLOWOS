@@ -190,6 +190,10 @@
   }
 }
 
+.safe-area-pb {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
 @keyframes slow-pulse {
   0% {
     opacity: 0.5;
