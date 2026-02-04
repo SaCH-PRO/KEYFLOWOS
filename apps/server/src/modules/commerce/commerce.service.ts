@@ -143,7 +143,7 @@ export class CommerceService {
     return this.prisma.client.invoice.findMany({
       where: { businessId, deletedAt: null },
       orderBy: { createdAt: 'desc' },
-      include: { contact: true, quote: true, payments: true },
+      include: { contact: true, quote: true, payments: true, items: true },
     });
   }
 
