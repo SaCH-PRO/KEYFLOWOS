@@ -21,7 +21,7 @@ export default function Home() {
           className="text-5xl md:text-7xl font-bold tracking-tight"
           style={{ color: "hsl(var(--kf-accent1))" }}
         >
-          KEYFLOW
+          KEYFLOWOS
         </h1>
         
         <p className={`text-lg md:text-xl max-w-xl mx-auto ${
