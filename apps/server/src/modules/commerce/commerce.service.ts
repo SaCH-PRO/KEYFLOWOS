@@ -167,6 +167,22 @@ export class CommerceService {
     });
   }
 
+  async deleteInvoice(invoiceId: string, businessId: string) {
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { id: invoiceId, businessId },
+    });
+    if (!invoice) {
+      throw new Error('Invoice not found');
+    }
+    if (invoice.status === 'PAID') {
+      throw new Error('Cannot delete a paid invoice');
+    }
+    return this.prisma.client.invoice.update({
+      where: { id: invoiceId },
+      data: { deletedAt: new Date() },
+    });
+  }
+
   async getInvoiceWithBusiness(invoiceId: string, requireShareable = false) {
     const invoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
