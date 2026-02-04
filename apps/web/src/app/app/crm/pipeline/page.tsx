@@ -70,6 +70,7 @@ export default function ContactsPage() {
   const [detailLoading, setDetailLoading] = useState(false);
 
   const [showAddForm, setShowAddForm] = useState(false);
+  const [editingContact, setEditingContact] = useState<ContactFormData | null>(null);
   const [showMobileDetail, setShowMobileDetail] = useState(false);
   const [isPending, startTransition] = useTransition();
 
@@ -182,32 +183,56 @@ export default function ContactsPage() {
     }
   }, [contacts, selectedContactId, loadDetail]);
 
-  const handleCreateContact = async (formData: ContactFormData) => {
+  const handleSubmitContact = async (formData: ContactFormData) => {
     if (!businessId) return;
 
-    const { data } = await createContact({
-      businessId,
-      firstName: formData.firstName,
-      lastName: formData.lastName,
-      email: formData.email,
-      phone: formData.phone,
-      status: formData.status,
-      source: formData.source || undefined,
-      companyName: formData.companyName || undefined,
-      jobTitle: formData.jobTitle || undefined,
-      preferredChannel: formData.preferredChannel || undefined,
-      lifecycleStage: formData.lifecycleStage || undefined,
-      tags: formData.tags
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean),
-    });
-    if (data) {
-      if (formData.initialNote.trim()) {
-        await addContactNote(data.id, formData.initialNote.trim(), businessId);
-      }
+    const tagsArray = formData.tags
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+
+    if (editingContact && selectedContactId) {
+      await updateContact({
+        businessId,
+        contactId: selectedContactId,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        email: formData.email || undefined,
+        phone: formData.phone || undefined,
+        status: formData.status,
+        source: formData.source || undefined,
+        companyName: formData.companyName || undefined,
+        jobTitle: formData.jobTitle || undefined,
+        preferredChannel: formData.preferredChannel || undefined,
+        lifecycleStage: formData.lifecycleStage || undefined,
+        tags: tagsArray,
+      });
       setShowAddForm(false);
+      setEditingContact(null);
       void loadContacts();
+      void loadDetail(selectedContactId);
+    } else {
+      const { data } = await createContact({
+        businessId,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        email: formData.email,
+        phone: formData.phone,
+        status: formData.status,
+        source: formData.source || undefined,
+        companyName: formData.companyName || undefined,
+        jobTitle: formData.jobTitle || undefined,
+        preferredChannel: formData.preferredChannel || undefined,
+        lifecycleStage: formData.lifecycleStage || undefined,
+        tags: tagsArray,
+      });
+      if (data) {
+        if (formData.initialNote.trim()) {
+          await addContactNote(data.id, formData.initialNote.trim(), businessId);
+        }
+        setShowAddForm(false);
+        void loadContacts();
+      }
     }
   };
 
@@ -245,6 +270,21 @@ export default function ContactsPage() {
 
   const handleEditContact = () => {
     if (!selectedContactId || !contactDetail?.contact) return;
+    const c = contactDetail.contact;
+    setEditingContact({
+      firstName: c.firstName || "",
+      lastName: c.lastName || "",
+      email: c.email || "",
+      phone: c.phone || "",
+      companyName: c.companyName || "",
+      jobTitle: c.jobTitle || "",
+      status: c.status || "LEAD",
+      source: c.source || "",
+      preferredChannel: c.preferredChannel || "WhatsApp",
+      lifecycleStage: c.lifecycleStage || "",
+      tags: Array.isArray(c.tags) ? c.tags.join(", ") : "",
+      initialNote: "",
+    });
     setShowAddForm(true);
   };
 
@@ -367,9 +407,13 @@ export default function ContactsPage() {
       <AnimatePresence>
         {showAddForm && (
           <ContactForm
-            onSubmit={handleCreateContact}
-            onCancel={() => setShowAddForm(false)}
+            onSubmit={handleSubmitContact}
+            onCancel={() => {
+              setShowAddForm(false);
+              setEditingContact(null);
+            }}
             loading={isPending}
+            initialValues={editingContact || undefined}
           />
         )}
       </AnimatePresence>
