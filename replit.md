@@ -4,6 +4,25 @@
 KEYFLOWOS is an AI-powered operating system for service businesses that eliminates the "tool maze" by providing pre-built Playbooks for common workflows. Features a "Cockpit" dashboard with Flow Graph visualization, AI-driven Flow Feed, and comprehensive CRM as the intelligence layer.
 
 ## Recent Changes (Feb 2026)
+- **Real-Time Cockpit Dashboard** - Live business intelligence with data-driven UI
+  - FlowService backend aggregates CRM, invoices, bookings, and quotes in real-time
+  - Momentum calculation based on business activity (revenue, bookings, tasks)
+  - Business flow visualization with bottleneck detection
+  - Quick actions based on business state (e.g., "Add First Product" if empty)
+  - AI-powered suggestions and health check integration
+  - Error handling with user-friendly error messages
+- **Gamification System** - Points, levels, achievements, and challenges
+  - GamificationService with 18+ achievements (First Sale, Flawless Flow, Growth Mode)
+  - XP/level progression (500 XP per level) with automatic milestone detection
+  - Daily streak tracking with multipliers (7-day, 30-day, 90-day streaks)
+  - Daily, weekly, and monthly challenges with XP rewards
+  - Achievement progress bars and unlock notifications
+- **Onboarding Wizard** - Guided 4-step setup for new businesses
+  - Business Profile setup → Products/Services → Contacts → Automation
+  - Progress tracking with completion percentages
+  - Skip options for each step with "Complete Later" functionality
+  - Automatic detection of completed steps from existing data
+  - XP reward for completing onboarding
 - **Google Calendar Integration for Bookings** - Auto-sync bookings to Google Calendar
   - OAuth 2.0 flow with calendar.events scope (read/write)
   - Per-business calendar connection stored in database (access/refresh tokens)
