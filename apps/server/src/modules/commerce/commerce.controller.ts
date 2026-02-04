@@ -130,7 +130,7 @@ export class CommerceController {
     return this.commerce.getInvoiceWithBusiness(invoiceId, true);
   }
 
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, BusinessGuard)
   @Delete('businesses/:businessId/invoices/:invoiceId')
   deleteInvoice(
     @Param('businessId') businessId: string,
