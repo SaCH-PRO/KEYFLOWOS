@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "tsx src/main.ts",
+    "dev": "tsx --import reflect-metadata src/main.ts",
     "start": "node dist/main.js",
     "build": "tsc --project tsconfig.json",
     "test": "vitest run"
