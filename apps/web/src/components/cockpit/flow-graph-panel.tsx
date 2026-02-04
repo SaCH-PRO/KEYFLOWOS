@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { ArrowRight } from "lucide-react";
 
 export type Phase = { label: string; value: number };
 
@@ -13,84 +14,78 @@ const defaultPhases: Phase[] = [
 ];
 
 export function FlowGraphPanel({ phases = defaultPhases, bottleneck }: { phases?: Phase[]; bottleneck?: string }) {
+  const maxValue = Math.max(...phases.map(p => p.value), 1);
+  
   return (
-    <div className="rounded-2xl border border-border bg-card p-4 flex flex-col h-[420px]">
-      <div className="flex items-center justify-between mb-3">
+    <div className="kf-card p-5 flex flex-col">
+      <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-sm font-semibold">Business Graph</h2>
-          <p className="text-xs text-muted-foreground">Visual flow from lead → revenue → booked time.</p>
+          <h2 className="text-base font-semibold">Business Flow</h2>
+          <p className="text-sm text-muted-foreground">Your conversion funnel, live</p>
         </div>
-        <span 
-          className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium"
-          style={{
-            background: "hsl(var(--kf-accent1) / 0.15)",
-            color: "hsl(var(--kf-accent1))",
-            border: "1px solid hsl(var(--kf-accent1) / 0.3)"
-          }}
-        >
+        <span className="kf-badge kf-badge-primary">
           <span 
-            className="h-1.5 w-1.5 rounded-full animate-pulse"
+            className="h-1.5 w-1.5 rounded-full mr-1.5 animate-pulse"
             style={{ background: "hsl(var(--kf-accent1))" }}
           />
-          Stable throughput
+          Live
         </span>
       </div>
 
-      <div className="relative flex-1 mt-2">
-        <div 
-          className="absolute inset-4 rounded-2xl blur-3xl pointer-events-none opacity-10"
-          style={{ background: "hsl(var(--kf-accent1))" }}
-        />
-
-        <div className="relative h-full flex items-center justify-between px-2 md:px-4">
-          {phases.map((phase, idx) => {
-            const isBottleneck = bottleneck && phase.label === bottleneck;
-            return (
-              <motion.div
-                key={phase.label}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: idx * 0.05 }}
-                className="flex flex-col items-center gap-2"
-              >
-                <div className="relative">
-                  <div
-                    className="h-16 w-16 md:h-18 md:w-18 rounded-2xl flex flex-col items-center justify-center"
-                    style={isBottleneck ? {
-                      background: "hsl(var(--kf-accent2) / 0.15)",
-                      border: "2px solid hsl(var(--kf-accent2) / 0.5)"
-                    } : {
-                      background: "hsl(var(--kf-muted))",
-                      border: "1px solid hsl(var(--kf-border))"
-                    }}
-                  >
-                    <span className="text-sm font-bold">{phase.value}</span>
-                    <span className="text-[9px] text-muted-foreground text-center px-1">{phase.label}</span>
+      <div className="flex-1 flex flex-col gap-3">
+        {phases.map((phase, idx) => {
+          const isBottleneck = bottleneck && phase.label === bottleneck;
+          const width = Math.max((phase.value / maxValue) * 100, 15);
+          
+          return (
+            <motion.div
+              key={phase.label}
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: idx * 0.08 }}
+              className="flex items-center gap-3"
+            >
+              <div className="w-24 text-sm text-muted-foreground truncate">
+                {phase.label}
+              </div>
+              
+              <div className="flex-1 h-10 bg-muted rounded-xl overflow-hidden relative">
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${width}%` }}
+                  transition={{ delay: idx * 0.1, duration: 0.5, ease: "easeOut" }}
+                  className="h-full rounded-xl flex items-center justify-end px-3"
+                  style={{ 
+                    background: isBottleneck 
+                      ? "linear-gradient(90deg, hsl(var(--kf-accent2) / 0.8), hsl(var(--kf-accent2)))"
+                      : "linear-gradient(90deg, hsl(var(--kf-accent1) / 0.7), hsl(var(--kf-accent1)))"
+                  }}
+                >
+                  <span className="text-white text-sm font-bold">{phase.value}</span>
+                </motion.div>
+                
+                {isBottleneck && (
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-medium px-2 py-0.5 rounded-full bg-background/80 text-accent2" style={{ color: "hsl(var(--kf-accent2))" }}>
+                    Bottleneck
                   </div>
-                  {idx < phases.length - 1 && (
-                    <div 
-                      className="hidden md:block absolute left-full top-1/2 -translate-y-1/2 w-8 h-0.5 ml-1"
-                      style={{ background: "hsl(var(--kf-accent1))" }}
-                    >
-                      <span 
-                        className="absolute right-0 top-1/2 -translate-y-1/2 h-2 w-2 rounded-full"
-                        style={{ background: "hsl(var(--kf-accent1))" }}
-                      />
-                    </div>
-                  )}
-                </div>
-              </motion.div>
-            );
-          })}
+                )}
+              </div>
+              
+              {idx < phases.length - 1 && (
+                <ArrowRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+              )}
+            </motion.div>
+          );
+        })}
+      </div>
+      
+      {bottleneck && (
+        <div className="mt-4 pt-4 border-t border-border">
+          <p className="text-sm text-muted-foreground">
+            <span className="font-medium" style={{ color: "hsl(var(--kf-accent2))" }}>{bottleneck}</span> is your current bottleneck. Focus here to improve flow.
+          </p>
         </div>
-      </div>
-
-      <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground border-t border-border pt-3">
-        <span>
-          Bottleneck: <span className="font-medium" style={{ color: "hsl(var(--kf-accent2))" }}>{bottleneck ?? "Quotes Sent"}</span>
-        </span>
-        <button className="font-medium hover:underline" style={{ color: "hsl(var(--kf-accent1))" }}>Ask AI to fix this</button>
-      </div>
+      )}
     </div>
   );
 }

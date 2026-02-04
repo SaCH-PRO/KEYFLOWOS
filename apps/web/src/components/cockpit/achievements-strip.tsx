@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Trophy, Sparkles, Star } from "lucide-react";
+import { Trophy, Sparkles, Star, Zap, TrendingUp } from "lucide-react";
 
 const achievements = [
   {
@@ -9,57 +9,63 @@ const achievements = [
     title: "First Sale",
     description: "Invoice paid – momentum unlocked.",
     achieved: true,
-    useAccent2: false,
+    accent: 1,
   },
   {
     icon: Star,
     title: "Flawless Flow",
     description: "No overdue invoices this week.",
-    achieved: false,
-    useAccent2: true,
+    achieved: true,
+    accent: 2,
   },
   {
-    icon: Sparkles,
+    icon: Zap,
     title: "Automation Ready",
     description: "3 playbooks set up.",
     achieved: true,
-    useAccent2: true,
+    accent: 1,
+  },
+  {
+    icon: TrendingUp,
+    title: "Growth Mode",
+    description: "Revenue up 15% this month.",
+    achieved: false,
+    accent: 2,
   },
 ];
 
 export function AchievementsStrip() {
   return (
-    <div className="rounded-2xl border border-border bg-card px-4 py-3 flex items-center gap-4 overflow-x-auto">
-      <span className="text-[11px] uppercase tracking-widest text-muted-foreground font-medium shrink-0">Achievements</span>
-      <div className="flex gap-3">
-        {achievements.map((ach, index) => {
-          const Icon = ach.icon;
-          return (
-            <motion.div
-              key={ach.title}
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 + index * 0.05 }}
-              className="inline-flex items-center gap-2 rounded-xl border border-border bg-muted/50 px-3 py-2 text-xs"
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      {achievements.map((ach, index) => {
+        const Icon = ach.icon;
+        const accentVar = ach.accent === 1 ? "--kf-accent1" : "--kf-accent2";
+        
+        return (
+          <motion.div
+            key={ach.title}
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.1 + index * 0.05 }}
+            className={`kf-card p-4 flex items-center gap-3 ${!ach.achieved ? "opacity-50" : ""}`}
+          >
+            <div
+              className="h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={ach.achieved ? {
+                background: `hsl(var(${accentVar}))`,
+              } : {
+                background: "hsl(var(--kf-muted))",
+              }}
             >
-              <span
-                className="h-6 w-6 rounded-lg flex items-center justify-center"
-                style={ach.achieved ? {
-                  background: ach.useAccent2 ? "hsl(var(--kf-accent2))" : "hsl(var(--kf-accent1))",
-                  color: "white"
-                } : {
-                  background: "hsl(var(--kf-muted))",
-                  color: "hsl(var(--kf-muted-foreground))"
-                }}
-              >
-                <Icon className="w-3.5 h-3.5" />
-              </span>
-              <span className="font-medium">{ach.title}</span>
-              <span className="hidden sm:inline text-[10px] text-muted-foreground">{ach.description}</span>
-            </motion.div>
-          );
-        })}
-      </div>
+              <Icon className="w-5 h-5" style={{ color: ach.achieved ? "white" : "hsl(var(--kf-muted-foreground))" }} />
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-medium truncate">{ach.title}</div>
+              <div className="text-xs text-muted-foreground line-clamp-1">{ach.description}</div>
+            </div>
+          </motion.div>
+        );
+      })}
     </div>
   );
 }

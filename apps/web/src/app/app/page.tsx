@@ -1,13 +1,14 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
 import { AchievementsStrip } from "@/components/cockpit/achievements-strip";
 import { FeedItem, FlowFeedPanel } from "@/components/cockpit/flow-feed-panel";
 import { FlowGraphPanel, Phase } from "@/components/cockpit/flow-graph-panel";
 import { FlowStatsRow } from "@/components/cockpit/flow-stats-row";
-import { MomentumBar } from "@keyflow/ui";
 import { fetchBookings, fetchContacts, fetchProducts, fetchInvoices, Invoice } from "@/lib/client";
 import { apiPost } from "@/lib/api";
+import { Sparkles, FileText, Zap } from "lucide-react";
 
 export default function AppHome() {
   const [stats, setStats] = useState({ mrr: "TTD --", conversionRate: "--", avgResponseTime: "--" });
@@ -15,8 +16,6 @@ export default function AppHome() {
   const [phases, setPhases] = useState<Phase[]>([]);
   const [bottleneck, setBottleneck] = useState<string>("Quotes Sent");
   const [momentum, setMomentum] = useState(0.35);
-  const [streaks, setStreaks] = useState<string[]>([]);
-  const [headerBadges, setHeaderBadges] = useState<string[]>([]);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -47,10 +46,9 @@ export default function AppHome() {
       const initialFeed = buildFeed({ contactsCount: contactCount, bookingCount, productCount, invoices: invs ?? [] });
       setFeedItems(initialFeed);
 
-      // Derive phases from live counts (best-effort with available endpoints)
       const phaseValues: Phase[] = [
         { label: "Leads", value: Math.max(contactCount, 1) },
-        { label: "Quotes Sent", value: Math.max(invoiceCount, 1) }, // using invoices as closest available proxy
+        { label: "Quotes Sent", value: Math.max(invoiceCount, 1) },
         { label: "Invoices Paid", value: Math.max(invoicesPaid, 1) },
         { label: "Bookings", value: Math.max(bookingCount, 1) },
       ];
@@ -63,15 +61,6 @@ export default function AppHome() {
         0.15 + bookingCount * 0.08 + productCount * 0.05 + contactCount * 0.03 + invoicesPaid * 0.06,
       );
       setMomentum(momentumScore);
-      setStreaks([
-        bookingCount >= 3 ? "Booking streak" : "Create bookings",
-        invoicesPaid >= 2 ? "Revenue streak" : "Collect payments",
-      ]);
-      const badges: string[] = [];
-      if (bookingCount >= 3) badges.push("Momentum rising");
-      if (invoicesPaid >= 2) badges.push("Revenue streak");
-      if (contactCount >= 5) badges.push("Lead surge");
-      setHeaderBadges(badges);
       setInvoices(invs ?? []);
       setLoading(false);
     };
@@ -96,18 +85,23 @@ export default function AppHome() {
   }, []);
 
   return (
-    <div className="space-y-4 md:space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+    <div className="space-y-6">
+      <motion.div 
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex flex-col md:flex-row md:items-center md:justify-between gap-4"
+      >
         <div>
-          <h1 className="text-xl md:text-2xl font-semibold tracking-tight">Command Flow</h1>
-          <p className="text-xs md:text-sm text-muted-foreground mt-1">
-            Your business graph, live. Watch leads flow into bookings and revenue in real-time.
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
+            Welcome back
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            Here's what's happening with your business today
           </p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-3">
           <button
-            className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium text-white transition-all hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed"
-            style={{ background: "hsl(var(--kf-accent1))" }}
+            className="kf-btn-primary inline-flex items-center gap-2"
             onClick={async () => {
               setAiLoading(true);
               const msg = await requestAiSuggestion({
@@ -123,28 +117,44 @@ export default function AppHome() {
             }}
             disabled={aiLoading}
           >
-            <span className="h-1.5 w-1.5 rounded-full bg-white animate-ping" />
-            {aiLoading ? "AI thinking..." : "Run AI Health Check"}
+            <Sparkles className="w-4 h-4" />
+            {aiLoading ? "Analyzing..." : "AI Health Check"}
           </button>
-          <button className="hidden sm:inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-sm text-muted-foreground hover:bg-muted transition-colors">
-            Export Report
+          <button className="kf-btn-secondary inline-flex items-center gap-2">
+            <FileText className="w-4 h-4" />
+            <span className="hidden sm:inline">Export</span>
           </button>
-          <div className="hidden lg:flex flex-wrap gap-2">
-            {headerBadges.map((b) => (
-              <span key={b} className="inline-flex items-center gap-1 rounded-full border border-primary/50 bg-primary/10 px-2.5 py-1 text-[11px] text-primary">
-                <span className="h-1.5 w-1.5 rounded-full bg-primary animate-ping" />
-                {b}
-              </span>
-            ))}
-          </div>
         </div>
-      </div>
+      </motion.div>
 
       <FlowStatsRow stats={stats} />
-      <MomentumBar value={momentum} streaks={streaks} />
+      
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.2 }}
+        className="kf-card p-4"
+      >
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Zap className="w-5 h-5" style={{ color: "hsl(var(--kf-accent1))" }} />
+            <span className="text-sm font-medium">Momentum</span>
+          </div>
+          <span className="text-lg font-bold" style={{ color: "hsl(var(--kf-accent1))" }}>
+            {Math.round(momentum * 100)}%
+          </span>
+        </div>
+        <div className="kf-momentum-bar">
+          <div className="kf-momentum-fill" style={{ width: `${momentum * 100}%` }} />
+        </div>
+        <p className="text-xs text-muted-foreground mt-2">
+          Keep the momentum going! Focus on {bottleneck.toLowerCase()} to boost your score.
+        </p>
+      </motion.div>
+
       {!loading && <AchievementsStrip />}
 
-      <div className="grid gap-4 md:gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1.4fr)]">
+      <div className="grid gap-6 lg:grid-cols-2">
         <FlowFeedPanel
           items={feedItems}
           onAsk={(item) => {
@@ -164,10 +174,10 @@ export default function AppHome() {
             }
           }}
         />
-        <div className="space-y-2">
+        <div className="space-y-4">
           <FlowGraphPanel phases={phases} bottleneck={bottleneck} />
           <button
-            className="inline-flex items-center gap-2 rounded-full border border-primary/70 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20"
+            className="w-full kf-btn-secondary inline-flex items-center justify-center gap-2"
             onClick={async () => {
               const msg = await requestAiSuggestion({
                 type: "automation",
@@ -180,41 +190,63 @@ export default function AppHome() {
               setActionMessage(msg);
             }}
           >
-            Ask AI to fix {bottleneck}
+            <Sparkles className="w-4 h-4" />
+            Ask AI to improve {bottleneck}
           </button>
         </div>
       </div>
 
       {aiSuggestion && (
-        <div className="rounded-2xl border border-primary/50 bg-primary/10 px-4 py-3 text-sm text-primary">
-          {aiSuggestion}
-        </div>
+        <motion.div 
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="kf-card-accent p-4"
+        >
+          <div className="flex items-start gap-3">
+            <div 
+              className="h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0"
+              style={{ background: "hsl(var(--kf-accent1))" }}
+            >
+              <Sparkles className="w-4 h-4 text-white" />
+            </div>
+            <div>
+              <div className="text-sm font-medium mb-1">AI Suggestion</div>
+              <p className="text-sm text-muted-foreground">{aiSuggestion}</p>
+            </div>
+          </div>
+        </motion.div>
       )}
 
-      {actionMessage && (
-        <div className="rounded-2xl border border-border bg-card px-4 py-2 text-xs text-muted-foreground">
+      {actionMessage && !aiSuggestion && (
+        <div className="kf-card p-3 text-sm text-muted-foreground">
           {actionMessage}
         </div>
       )}
 
       {invoices.length > 0 && (
-        <div className="rounded-2xl border border-border bg-card p-4">
-          <div className="text-xs uppercase tracking-widest text-muted-foreground mb-3 font-medium">Recent invoices</div>
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.3 }}
+          className="kf-card p-4"
+        >
+          <div className="text-sm font-medium mb-3">Recent Invoices</div>
           <div className="flex flex-wrap gap-2">
             {invoices.slice(0, 4).map((inv) => (
               <span
                 key={inv.id}
-                className="inline-flex items-center gap-2 rounded-xl border border-border bg-muted px-3 py-1.5 text-xs"
+                className="inline-flex items-center gap-2 rounded-xl border border-border bg-muted/50 px-3 py-2 text-sm"
               >
                 <span 
                   className="h-2 w-2 rounded-full" 
-                  style={{ background: inv.status === "PAID" ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-accent2))" }}
+                  style={{ background: inv.status === "PAID" ? "hsl(var(--kf-accent2))" : "hsl(var(--kf-accent1))" }}
                 />
-                {inv.invoiceNumber ?? inv.id} · {inv.status}
+                {inv.invoiceNumber ?? inv.id}
+                <span className="text-xs text-muted-foreground">{inv.status}</span>
               </span>
             ))}
           </div>
-        </div>
+        </motion.div>
       )}
     </div>
   );
@@ -250,7 +282,7 @@ function buildFeed(input: { contactsCount: number; bookingCount: number; product
         type: "payment",
         title: `${inv.invoiceNumber ?? "Invoice"} ${inv.status}`,
         time: minutesAgo(20 + idx * 3),
-        description: `${inv.currency} ${Number(inv.total).toLocaleString()} Â· ${inv.status}`,
+        description: `${inv.currency} ${Number(inv.total).toLocaleString()} · ${inv.status}`,
         suggestion: inv.status === "PAID" ? "Send receipt" : "Remind contact",
         meta: { invoiceId: inv.id, contactEmail: inv.contact?.email ?? undefined },
       });
