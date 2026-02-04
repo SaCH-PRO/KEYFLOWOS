@@ -36,7 +36,6 @@ import {
   fetchContactDetail,
   fetchContacts,
   fetchSegmentSummary,
-  fetchDueTasks,
   importContactsFromFile,
   importContactsFromLink,
   createContactFromOcr,

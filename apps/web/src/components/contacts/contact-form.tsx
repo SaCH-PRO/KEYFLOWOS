@@ -202,12 +202,12 @@ export function ContactForm({ onSubmit, onCancel, loading }: ContactFormProps) {
       <div className="flex gap-3 pt-2">
         <button
           onClick={handleSubmit}
-          disabled={loading}
-          className="kf-btn-primary flex-1"
+          disabled={loading || !form.firstName.trim()}
+          className="kf-btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {loading ? "Saving..." : "Save Contact"}
         </button>
-        <button onClick={onCancel} className="kf-btn-secondary">
+        <button onClick={onCancel} disabled={loading} className="kf-btn-secondary disabled:opacity-50">
           Cancel
         </button>
       </div>
