@@ -7,9 +7,13 @@ KEYFLOWOS is an AI-powered operating system for service businesses that eliminat
 - **Quote-to-Invoice Workflow** - Complete quotation management with conversion
   - Create, edit, delete quotes with multi-item line items
   - Quote status flow: DRAFT → SENT → ACCEPTED/REJECTED
-  - Convert accepted quotes to invoices with tax/discount options
+  - Quote builder with tax, discount, and notes (matching invoice builder)
+  - Tax rate (%), discount type (% or fixed), discount value fields
+  - Live preview of subtotal, tax, discount, and total calculations
+  - Convert accepted quotes to invoices (preserves tax/discount settings)
   - Product picker for quick item selection
   - Quote details modal with full breakdown
+  - Send quote to email modal with recipient and message fields
   - Multi-tenant security: business ownership validation on all mutations
 - **Business Profile & Branding** - Comprehensive business profile management
   - Logo upload with App Storage integration (presigned URL flow)

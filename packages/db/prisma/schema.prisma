@@ -342,8 +342,15 @@ model Quote {
   id          String   @id @default(cuid())
   quoteNumber String   @map("quote_number")
   status      String   @default("DRAFT") // DRAFT, SENT, ACCEPTED, REJECTED
+  subtotal    Float    @default(0)
+  taxRate     Float?   @default(0) @map("tax_rate")
+  taxAmount   Float?   @default(0) @map("tax_amount")
+  discountType  String?  @map("discount_type") // PERCENT or FIXED
+  discountValue Float?   @default(0) @map("discount_value")
+  discountAmount Float?  @default(0) @map("discount_amount")
   total       Float
   currency    String   @default("TTD")
+  notes       String?
   issueDate   DateTime @default(now()) @map("issue_date")
   expiryDate  DateTime? @map("expiry_date")
 
