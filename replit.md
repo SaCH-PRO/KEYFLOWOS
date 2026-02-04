@@ -4,12 +4,14 @@
 KEYFLOWOS is an AI-powered operating system for service businesses that eliminates the "tool maze" by providing pre-built Playbooks for common workflows. Features a "Cockpit" dashboard with Flow Graph visualization, AI-driven Flow Feed, and comprehensive CRM as the intelligence layer.
 
 ## Recent Changes (Feb 2026)
-- Completed all core modules with real API integration
-- Built public booking page `/book/[slug]` with dynamic business lookup
-- Built public payment page `/pay/[invoiceId]` with invoice display
-- Enhanced Reports page with KPI cards and business health metrics
-- Added business slug lookup endpoint for public pages
-- Fixed TypeScript type issues across the codebase
+- Comprehensive UI redesign with modern dual-theme system (light/dark modes)
+- New theming layer with ThemeColorsProvider for customizable accent colors
+- Brand & Theme settings page with color pickers and preset swatches
+- Revamped sidebar with gradient logo, modern card-based design
+- Updated all module pages with new styling and accent color integration
+- Light mode: white background (#FFFFFF), Dark mode: black background (#000000)
+- Default accent colors: blue (#3B82F6) and pink (#EC4899)
+- Fixed FOUC (Flash of Unstyled Content) in theme initialization
 
 ## Architecture
 
