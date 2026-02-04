@@ -157,15 +157,15 @@ export default function CommercePage() {
         </Button>
       </div>
 
-      <div className="flex gap-2 border-b border-border/60 pb-2">
+      <div className="flex gap-2 border-b border-border pb-2">
         {(["invoices", "products"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
+            className={`px-4 py-2 text-sm font-medium rounded-xl transition-colors ${
               tab === t
-                ? "bg-primary/20 text-primary border-b-2 border-primary"
-                : "text-muted-foreground hover:text-foreground"
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
             }`}
           >
             {t === "invoices" && <FileText className="w-4 h-4 inline mr-2" />}
@@ -183,15 +183,15 @@ export default function CommercePage() {
       )}
 
       {showInvoiceBuilder && (
-        <div className="rounded-2xl border border-primary/40 bg-slate-950/80 p-4 space-y-3">
-          <h3 className="text-sm font-medium flex items-center gap-2">
-            <FileText className="w-4 h-4" /> Create Invoice
+        <div className="rounded-2xl border border-primary/30 bg-card p-4 space-y-4">
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <FileText className="w-4 h-4 text-primary" /> Create Invoice
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Contact (optional)</label>
               <select
-                className="w-full rounded-lg border border-border/60 bg-slate-900 px-3 py-2 text-sm"
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
                 value={invoiceForm.contactId}
                 onChange={(e) => setInvoiceForm((f) => ({ ...f, contactId: e.target.value }))}
               >
@@ -243,7 +243,7 @@ export default function CommercePage() {
             </div>
           )}
           {invoices.length === 0 ? (
-            <div className="rounded-2xl border border-border/60 bg-slate-950/50 p-4 text-sm text-muted-foreground">
+            <div className="rounded-2xl border border-border bg-card p-6 text-sm text-muted-foreground text-center">
               {loading ? "Loading invoices..." : "No invoices yet. Create one to start billing."}
             </div>
           ) : (

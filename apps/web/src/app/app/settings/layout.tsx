@@ -22,17 +22,17 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
         <h1 className="text-xl font-semibold">Settings</h1>
         <p className="text-sm text-muted-foreground">Manage your workspace, team, and integrations.</p>
       </div>
-      <div className="flex gap-2 border-b border-border/40 pb-2">
+      <div className="flex gap-2 border-b border-border pb-3 overflow-x-auto">
         {navItems.map((item) => {
           const isActive = pathname === item.href || (item.href !== "/app/settings" && pathname.startsWith(item.href));
           return (
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors ${
+              className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-colors shrink-0 ${
                 isActive
-                  ? "bg-primary/20 text-primary border border-primary/40"
-                  : "text-muted-foreground hover:bg-slate-800/50 hover:text-foreground"
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
               }`}
             >
               <item.icon className="h-4 w-4" />
