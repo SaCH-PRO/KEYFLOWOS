@@ -91,7 +91,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           className="h-full transition-all duration-500"
           style={{ 
             width: `${Math.round(momentumValue * 100)}%`,
-            background: `linear-gradient(90deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))`
+            background: "hsl(var(--kf-accent1))"
           }}
         />
       </div>
@@ -104,11 +104,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-3 px-5 py-4 border-b border-border">
             <div 
               className="h-10 w-10 rounded-2xl flex items-center justify-center"
-              style={{ background: `linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))` }}
+              style={{ background: "hsl(var(--kf-accent1))" }}
             >
               <Command className="h-5 w-5 text-white" />
             </div>
-            <span className="text-base font-bold tracking-wide gradient-text">
+            <span className="text-base font-bold tracking-wide" style={{ color: "hsl(var(--kf-accent1))" }}>
               KEYFLOW
             </span>
           </div>
@@ -139,7 +139,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                       {active && (
                         <div 
                           className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 rounded-r-full"
-                          style={{ background: `linear-gradient(180deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))` }}
+                          style={{ background: "hsl(var(--kf-accent1))" }}
                         />
                       )}
                     </Link>

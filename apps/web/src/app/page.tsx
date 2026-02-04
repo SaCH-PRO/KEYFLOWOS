@@ -21,30 +21,16 @@ export default function Home() {
         style={{
           background: mounted && theme === "light"
             ? `radial-gradient(circle at 40% 20%, hsl(var(--kf-accent1) / 0.08), transparent 45%),
+               radial-gradient(circle at 70% 60%, hsl(var(--kf-accent2) / 0.06), transparent 50%)`
+            : `radial-gradient(circle at 40% 20%, hsl(var(--kf-accent1) / 0.12), transparent 45%),
                radial-gradient(circle at 70% 60%, hsl(var(--kf-accent2) / 0.08), transparent 50%)`
-            : `radial-gradient(circle at 40% 20%, hsl(var(--kf-accent1) / 0.15), transparent 45%),
-               radial-gradient(circle at 70% 60%, hsl(var(--kf-accent2) / 0.15), transparent 50%)`
         }}
-      />
-
-      <div 
-        className="absolute -top-1/4 -right-1/4 w-1/2 h-1/2 rounded-full blur-[120px] opacity-30"
-        style={{ background: "hsl(var(--kf-accent1))" }}
-      />
-      <div 
-        className="absolute -bottom-1/4 -left-1/4 w-1/2 h-1/2 rounded-full blur-[120px] opacity-20"
-        style={{ background: "hsl(var(--kf-accent2))" }}
       />
 
       <div className="relative z-10 space-y-6">
         <h1 
           className="text-5xl md:text-7xl font-bold tracking-tight"
-          style={{
-            background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
-            WebkitBackgroundClip: "text",
-            WebkitTextFillColor: "transparent",
-            backgroundClip: "text"
-          }}
+          style={{ color: "hsl(var(--kf-accent1))" }}
         >
           KEYFLOW
         </h1>
@@ -60,7 +46,7 @@ export default function Home() {
             href="/auth/login" 
             className="px-8 py-3 rounded-xl text-white font-semibold text-lg transition-all hover:opacity-90 hover:scale-105"
             style={{ 
-              background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
+              background: "hsl(var(--kf-accent1))",
               boxShadow: "0 4px 20px hsl(var(--kf-accent1) / 0.3)"
             }}
           >

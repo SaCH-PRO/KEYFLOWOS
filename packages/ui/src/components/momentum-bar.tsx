@@ -25,7 +25,7 @@ export function MomentumBar({ value, label = "Flow Momentum", streaks = [], clas
           className="h-full rounded-full transition-[width] duration-500 ease-out"
           style={{ 
             width: `${Math.round(clamped * 100)}%`,
-            background: "linear-gradient(90deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
+            background: "hsl(var(--kf-accent1))",
             boxShadow: "0 0 12px hsl(var(--kf-accent1) / 0.4)"
           }}
         />
@@ -37,9 +37,9 @@ export function MomentumBar({ value, label = "Flow Momentum", streaks = [], clas
               key={s}
               className="rounded-xl border px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide"
               style={{
-                borderColor: "hsl(var(--kf-accent1) / 0.4)",
-                background: "hsl(var(--kf-accent1) / 0.1)",
-                color: "hsl(var(--kf-accent1))"
+                borderColor: "hsl(var(--kf-accent2) / 0.4)",
+                background: "hsl(var(--kf-accent2) / 0.15)",
+                color: "hsl(var(--kf-accent2))"
               }}
             >
               {s}
