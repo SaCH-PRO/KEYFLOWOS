@@ -224,9 +224,36 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
           </header>
 
-          <div className="flex-1 p-4 md:p-6">{children}</div>
+          <div className="flex-1 p-4 md:p-6 pb-20 md:pb-6">{children}</div>
         </main>
       </div>
+
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 border-t border-border bg-card flex items-center justify-around px-2 z-50 safe-area-pb">
+        {[
+          { label: "Home", href: "/app", icon: Command },
+          { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
+          { label: "Commerce", href: "/app/commerce", icon: CreditCard },
+          { label: "Bookings", href: "/app/bookings", icon: Calendar },
+          { label: "Settings", href: "/app/settings", icon: Settings },
+        ].map((item) => {
+          const Icon = item.icon;
+          const active = pathname === item.href || (item.href !== "/app" && pathname.startsWith(item.href));
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={cn(
+                "flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-colors",
+                active ? "text-primary" : "text-muted-foreground"
+              )}
+            >
+              <Icon className="w-5 h-5" />
+              <span className="text-[10px] font-medium">{item.label}</span>
+            </Link>
+          );
+        })}
+      </nav>
+
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
   );
