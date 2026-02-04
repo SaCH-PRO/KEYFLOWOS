@@ -489,6 +489,31 @@ export default function CommercePage() {
     }
   }
 
+  async function handleDeleteInvoice(invoiceId: string) {
+    if (!businessId) return;
+    if (!confirm("Are you sure you want to delete this invoice?")) return;
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || "https://keyflowos.replit.app"}/commerce/businesses/${businessId}/invoices/${invoiceId}`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("kf_token") || ""}`,
+        },
+      });
+      if (res.ok) {
+        setInvoices((prev) => prev.filter((i) => i.id !== invoiceId));
+        if (selectedInvoice?.id === invoiceId) {
+          setSelectedInvoice(null);
+        }
+      } else {
+        const err = await res.json();
+        setInvoiceError(err.message || "Failed to delete invoice");
+      }
+    } catch (e) {
+      setInvoiceError("Failed to delete invoice");
+    }
+  }
+
   function getStatusBadge(status: string) {
     const styles: Record<string, string> = {
       DRAFT: "bg-slate-500/20 text-slate-300 border-slate-500/40",
@@ -1094,6 +1119,15 @@ export default function CommercePage() {
                                 >
                                   <CheckCircle className="w-3 h-3" /> Paid
                                 </Button>
+                              )}
+                              {inv.status !== "PAID" && (
+                                <button
+                                  onClick={() => handleDeleteInvoice(inv.id)}
+                                  className="p-1.5 rounded-lg hover:bg-red-500/20 transition-colors"
+                                  title="Delete invoice"
+                                >
+                                  <Trash2 className="w-4 h-4 text-red-400 hover:text-red-300" />
+                                </button>
                               )}
                             </div>
                           </td>
