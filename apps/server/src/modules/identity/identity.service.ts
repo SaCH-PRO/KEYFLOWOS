@@ -39,7 +39,27 @@ export class IdentityService {
     });
   }
 
-  async updateBusiness(businessId: string, input: { name?: string; slug?: string; timezone?: string; currency?: string }) {
+  async updateBusiness(businessId: string, input: {
+    name?: string;
+    slug?: string;
+    timezone?: string;
+    currency?: string;
+    logo?: string;
+    address?: string;
+    phone?: string;
+    email?: string;
+    website?: string;
+    facebookHandle?: string;
+    instagramHandle?: string;
+    twitterHandle?: string;
+    linkedinHandle?: string;
+    tiktokHandle?: string;
+    youtubeHandle?: string;
+    whatsappNumber?: string;
+    primaryColor?: string;
+    secondaryColor?: string;
+    defaultTaxRate?: number;
+  }) {
     if (input.slug) {
       const existing = await this.prisma.client.business.findFirst({
         where: { slug: input.slug, NOT: { id: businessId } },

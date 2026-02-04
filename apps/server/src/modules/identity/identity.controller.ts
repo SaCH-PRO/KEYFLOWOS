@@ -42,7 +42,27 @@ export class IdentityController {
   @Patch('businesses/:businessId')
   updateBusiness(
     @Param('businessId') businessId: string,
-    @Body() body: { name?: string; slug?: string; timezone?: string; currency?: string },
+    @Body() body: {
+      name?: string;
+      slug?: string;
+      timezone?: string;
+      currency?: string;
+      logo?: string;
+      address?: string;
+      phone?: string;
+      email?: string;
+      website?: string;
+      facebookHandle?: string;
+      instagramHandle?: string;
+      twitterHandle?: string;
+      linkedinHandle?: string;
+      tiktokHandle?: string;
+      youtubeHandle?: string;
+      whatsappNumber?: string;
+      primaryColor?: string;
+      secondaryColor?: string;
+      defaultTaxRate?: number;
+    },
   ) {
     return this.identity.updateBusiness(businessId, body);
   }
