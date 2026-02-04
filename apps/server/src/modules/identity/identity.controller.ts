@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { IdentityService } from './identity.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -8,7 +8,7 @@ import { BootstrapDto } from './dto/bootstrap.dto';
 
 @Controller('identity')
 export class IdentityController {
-  constructor(private readonly identity: IdentityService) {}
+  constructor(@Inject(IdentityService) private readonly identity: IdentityService) {}
 
   @UseGuards(AuthGuard)
   @Get('businesses')

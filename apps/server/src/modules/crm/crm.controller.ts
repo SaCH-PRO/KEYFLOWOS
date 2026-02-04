@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Query, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Query, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { CrmImportService } from './crm-import.service';
 import { CrmPlaybookService } from './crm-playbook.service';
@@ -15,9 +15,9 @@ import type { Express } from 'express';
 @Controller('crm')
 export class CrmController {
   constructor(
-    private readonly crm: CrmService,
-    private readonly crmImport: CrmImportService,
-    private readonly playbook: CrmPlaybookService,
+    @Inject(CrmService) private readonly crm: CrmService,
+    @Inject(CrmImportService) private readonly crmImport: CrmImportService,
+    @Inject(CrmPlaybookService) private readonly playbook: CrmPlaybookService,
   ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)

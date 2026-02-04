@@ -4,6 +4,8 @@
 KEYFLOWOS is an AI-powered operating system for service businesses that eliminates the "tool maze" by providing pre-built Playbooks for common workflows. Features a "Cockpit" dashboard with Flow Graph visualization, AI-driven Flow Feed, and comprehensive CRM as the intelligence layer.
 
 ## Recent Changes (Feb 2026)
+- **Backend Dependency Injection Fix** - Added @Inject decorators to all NestJS controllers and services for tsx/esbuild compatibility
+- **TypeScript Schema Fixes** - Fixed automation, bookings, and commerce modules to match Prisma schema
 - **Complete Design System Overhaul** - New unique KeyFlow identity with warm Caribbean-inspired palette
 - **Progressive Web App (PWA)** - Installable on any device with offline support
 - **Contacts Page Overhaul** - Modular component architecture with split-view layout

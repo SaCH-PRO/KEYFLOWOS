@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { CommerceService } from './commerce.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -9,7 +9,10 @@ import { UpdateQuoteStatusDto } from './dto/update-quote-status.dto';
 
 @Controller('commerce')
 export class CommerceController {
-  constructor(private readonly commerce: CommerceService, private readonly receipts: ReceiptService) {}
+  constructor(
+    @Inject(CommerceService) private readonly commerce: CommerceService,
+    @Inject(ReceiptService) private readonly receipts: ReceiptService,
+  ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/products')

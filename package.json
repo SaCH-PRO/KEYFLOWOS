@@ -13,6 +13,7 @@
     "test:db:soft-delete": "pnpm --filter db exec tsx --env-file .env src/test-soft-delete.ts"
   },
   "devDependencies": {
+    "@types/node": "^20.19.31",
     "autoprefixer": "^10.4.20",
     "eslint": "^9.0.0",
     "prettier": "^3.2.5",
@@ -30,6 +31,12 @@
     }
   },
   "dependencies": {
+    "@swc-node/register": "^1.11.1",
+    "@swc/core": "^1.15.11",
+    "@swc/helpers": "^0.5.18",
+    "@swc/register": "^0.1.10",
+    "@types/pg": "^8.16.0",
+    "dotenv": "^17.2.3",
     "ts-node": "^10.9.2"
   }
 }
