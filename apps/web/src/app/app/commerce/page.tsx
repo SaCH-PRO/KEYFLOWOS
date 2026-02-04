@@ -32,6 +32,7 @@ import {
   Invoice,
   Contact,
 } from "@/lib/client";
+import { ensureWorkspace, getStoredBusinessId } from "@/lib/workspace";
 
 const productSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -48,6 +49,10 @@ type ProductForm = {
 };
 
 export default function CommercePage() {
+  const [businessId, setBusinessId] = useState<string | null>(null);
+  const [workspaceLoading, setWorkspaceLoading] = useState(true);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+
   const [tab, setTab] = useState<Tab>("products");
   const [products, setProducts] = useState<Product[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -74,12 +79,33 @@ export default function CommercePage() {
   });
 
   useEffect(() => {
+    const initWorkspace = async () => {
+      const stored = getStoredBusinessId();
+      if (stored) {
+        setBusinessId(stored);
+        setWorkspaceLoading(false);
+        return;
+      }
+      const created = await ensureWorkspace();
+      if (created) {
+        setBusinessId(created);
+        setWorkspaceLoading(false);
+        return;
+      }
+      setWorkspaceError("Could not find your workspace. Please sign in again.");
+      setWorkspaceLoading(false);
+    };
+    void initWorkspace();
+  }, []);
+
+  useEffect(() => {
+    if (!businessId) return;
     const load = async () => {
       setLoading(true);
       const [productsRes, invoicesRes, contactsRes] = await Promise.all([
-        fetchProducts(),
-        fetchInvoices(),
-        fetchContacts(),
+        fetchProducts(businessId),
+        fetchInvoices(businessId),
+        fetchContacts(businessId),
       ]);
       setProducts((productsRes.data ?? []).map((p) => ({ ...p, currency: p.currency ?? "TTD" } as Product)));
       setInvoices(invoicesRes.data ?? []);
@@ -89,7 +115,7 @@ export default function CommercePage() {
       setLoading(false);
     };
     void load();
-  }, []);
+  }, [businessId]);
 
   const filteredProducts = useMemo(() => {
     if (!productSearch.trim()) return products;
@@ -138,8 +164,11 @@ export default function CommercePage() {
       return;
     }
 
+    if (!businessId) return;
+
     if (editingProductId) {
       const { data, error } = await updateProduct({
+        businessId,
         productId: editingProductId,
         name: parsed.data.name,
         price: parsed.data.price,
@@ -155,6 +184,7 @@ export default function CommercePage() {
       }
     } else {
       const { data, error } = await createProduct({
+        businessId,
         name: parsed.data.name,
         price: parsed.data.price,
         description: parsed.data.description,
@@ -171,7 +201,8 @@ export default function CommercePage() {
   }
 
   async function handleDeleteProduct(productId: string) {
-    const { error } = await deleteProduct(productId);
+    if (!businessId) return;
+    const { error } = await deleteProduct(productId, businessId);
     if (error) {
       setError(error);
       return;
@@ -182,11 +213,13 @@ export default function CommercePage() {
 
   async function handleCreateInvoice() {
     setFormError(null);
+    if (!businessId) return;
     if (!invoiceForm.description.trim() || !invoiceForm.unitPrice) {
       setFormError("Description and price are required");
       return;
     }
     const { data, error } = await createInvoice({
+      businessId,
       contactId: invoiceForm.contactId || undefined,
       items: [
         {
