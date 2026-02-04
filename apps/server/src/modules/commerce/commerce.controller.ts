@@ -1,17 +1,21 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { Response } from 'express';
 import { CommerceService } from './commerce.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CreateProductDto } from './dto/create-product.dto';
 import { ReceiptService } from './receipt.service';
+import { GmailService } from './gmail.service';
 import { UpdateInvoiceStatusDto } from './dto/update-invoice-status.dto';
 import { UpdateQuoteStatusDto } from './dto/update-quote-status.dto';
+import { buildQuoteEmailHtml } from './quote-email.template';
 
 @Controller('commerce')
 export class CommerceController {
   constructor(
     @Inject(CommerceService) private readonly commerce: CommerceService,
     @Inject(ReceiptService) private readonly receipts: ReceiptService,
+    @Inject(GmailService) private readonly gmail: GmailService,
   ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -223,5 +227,107 @@ export class CommerceController {
     },
   ) {
     return this.commerce.convertQuoteToInvoice({ quoteId, businessId, ...body });
+  }
+
+  // ========== GMAIL INTEGRATION ==========
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/gmail/auth-url')
+  getGmailAuthUrl(@Param('businessId') businessId: string) {
+    const url = this.gmail.getAuthUrl(businessId);
+    return { url };
+  }
+
+  @Get('gmail/callback')
+  async handleGmailCallback(
+    @Query('code') code: string,
+    @Query('state') state: string,
+    @Res() res: Response,
+  ) {
+    const parsedState = this.gmail.verifyState(state);
+    if (!parsedState) {
+      return res.redirect('/app/settings?gmail=error&reason=invalid_state');
+    }
+
+    try {
+      await this.gmail.saveGmailCredentials(parsedState.businessId, code);
+      return res.redirect('/app/settings?gmail=success');
+    } catch {
+      return res.redirect('/app/settings?gmail=error');
+    }
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/gmail/status')
+  getGmailStatus(@Param('businessId') businessId: string) {
+    return this.gmail.getGmailStatus(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/gmail')
+  disconnectGmail(@Param('businessId') businessId: string) {
+    return this.gmail.disconnectGmail(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/quotes/:quoteId/send-email')
+  async sendQuoteEmail(
+    @Param('businessId') businessId: string,
+    @Param('quoteId') quoteId: string,
+    @Body() body: { recipientEmail: string; message?: string },
+  ) {
+    const quote = await this.commerce.getQuote(quoteId);
+    if (!quote || quote.businessId !== businessId) {
+      throw new Error('Quote not found');
+    }
+
+    const business = quote.business;
+    const contact = quote.contact;
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://keyflowos.replit.app';
+
+    const emailHtml = buildQuoteEmailHtml({
+      businessName: business.name,
+      businessLogo: business.logoUrl,
+      businessEmail: business.email,
+      businessPhone: business.phone,
+      businessAddress: business.address,
+      businessWebsite: business.website,
+      primaryColor: business.primaryColor || '#F97316',
+      contactName: contact ? `${contact.firstName || ''} ${contact.lastName || ''}`.trim() || contact.email || 'Customer' : 'Customer',
+      quoteNumber: quote.quoteNumber,
+      quoteDate: new Date(quote.createdAt).toLocaleDateString('en-TT', { dateStyle: 'medium' }),
+      expiryDate: quote.expiryDate ? new Date(quote.expiryDate).toLocaleDateString('en-TT', { dateStyle: 'medium' }) : null,
+      items: quote.items.map((item: { description: string; quantity: number; unitPrice: number }) => ({
+        description: item.description,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+      })),
+      subtotal: quote.subtotal,
+      taxRate: quote.taxRate,
+      taxAmount: quote.taxAmount,
+      discountType: quote.discountType,
+      discountValue: quote.discountValue,
+      discountAmount: quote.discountAmount,
+      total: quote.total,
+      currency: quote.currency,
+      notes: quote.notes,
+      quoteUrl: `${appUrl}/quote/${quote.id}`,
+      customMessage: body.message,
+    });
+
+    await this.gmail.sendEmail({
+      businessId,
+      to: body.recipientEmail,
+      subject: `Quote #${quote.quoteNumber} from ${business.name}`,
+      htmlBody: emailHtml,
+    });
+
+    await this.commerce.updateQuoteStatus({
+      quoteId,
+      status: 'SENT',
+      actorId: undefined,
+    });
+
+    return { success: true };
   }
 }
