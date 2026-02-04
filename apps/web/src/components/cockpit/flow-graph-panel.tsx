@@ -20,16 +20,26 @@ export function FlowGraphPanel({ phases = defaultPhases, bottleneck }: { phases?
           <h2 className="text-sm font-semibold">Business Graph</h2>
           <p className="text-xs text-muted-foreground">Visual flow from lead → revenue → booked time.</p>
         </div>
-        <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/30 px-2.5 py-1 text-[10px] text-primary font-medium">
-          <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+        <span 
+          className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium"
+          style={{
+            background: "hsl(var(--kf-accent1) / 0.15)",
+            color: "hsl(var(--kf-accent1))",
+            border: "1px solid hsl(var(--kf-accent1) / 0.3)"
+          }}
+        >
+          <span 
+            className="h-1.5 w-1.5 rounded-full animate-pulse"
+            style={{ background: "hsl(var(--kf-accent1))" }}
+          />
           Stable throughput
         </span>
       </div>
 
       <div className="relative flex-1 mt-2">
         <div 
-          className="absolute inset-4 rounded-2xl blur-3xl pointer-events-none opacity-20"
-          style={{ background: `linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))` }}
+          className="absolute inset-4 rounded-2xl blur-3xl pointer-events-none opacity-10"
+          style={{ background: "hsl(var(--kf-accent1))" }}
         />
 
         <div className="relative h-full flex items-center justify-between px-2 md:px-4">
@@ -45,11 +55,14 @@ export function FlowGraphPanel({ phases = defaultPhases, bottleneck }: { phases?
               >
                 <div className="relative">
                   <div
-                    className={`h-16 w-16 md:h-18 md:w-18 rounded-2xl flex flex-col items-center justify-center ${
-                      isBottleneck
-                        ? "bg-accent/10 border-2 border-accent/60"
-                        : "bg-muted border border-border"
-                    }`}
+                    className="h-16 w-16 md:h-18 md:w-18 rounded-2xl flex flex-col items-center justify-center"
+                    style={isBottleneck ? {
+                      background: "hsl(var(--kf-accent2) / 0.15)",
+                      border: "2px solid hsl(var(--kf-accent2) / 0.5)"
+                    } : {
+                      background: "hsl(var(--kf-muted))",
+                      border: "1px solid hsl(var(--kf-border))"
+                    }}
                   >
                     <span className="text-sm font-bold">{phase.value}</span>
                     <span className="text-[9px] text-muted-foreground text-center px-1">{phase.label}</span>
@@ -57,11 +70,11 @@ export function FlowGraphPanel({ phases = defaultPhases, bottleneck }: { phases?
                   {idx < phases.length - 1 && (
                     <div 
                       className="hidden md:block absolute left-full top-1/2 -translate-y-1/2 w-8 h-0.5 ml-1"
-                      style={{ background: `linear-gradient(90deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))` }}
+                      style={{ background: "hsl(var(--kf-accent1))" }}
                     >
                       <span 
                         className="absolute right-0 top-1/2 -translate-y-1/2 h-2 w-2 rounded-full"
-                        style={{ background: "hsl(var(--kf-accent2))" }}
+                        style={{ background: "hsl(var(--kf-accent1))" }}
                       />
                     </div>
                   )}
@@ -74,9 +87,9 @@ export function FlowGraphPanel({ phases = defaultPhases, bottleneck }: { phases?
 
       <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground border-t border-border pt-3">
         <span>
-          Bottleneck: <span className="text-accent font-medium">{bottleneck ?? "Quotes → Paid"}</span>
+          Bottleneck: <span className="font-medium" style={{ color: "hsl(var(--kf-accent2))" }}>{bottleneck ?? "Quotes Sent"}</span>
         </span>
-        <button className="text-primary hover:underline font-medium">Ask AI to fix this</button>
+        <button className="font-medium hover:underline" style={{ color: "hsl(var(--kf-accent1))" }}>Ask AI to fix this</button>
       </div>
     </div>
   );

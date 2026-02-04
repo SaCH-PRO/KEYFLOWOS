@@ -59,7 +59,10 @@ export function FlowFeedPanel({
           <h2 className="text-sm font-semibold">Flow Feed</h2>
           <p className="text-xs text-muted-foreground">Live stream of bookings, payments, and leads.</p>
         </div>
-        <button className="text-xs text-primary hover:underline inline-flex items-center gap-1">
+        <button 
+          className="text-xs font-medium hover:underline inline-flex items-center gap-1"
+          style={{ color: "hsl(var(--kf-accent1))" }}
+        >
           View all
           <ArrowRight className="w-3 h-3" />
         </button>
@@ -68,6 +71,7 @@ export function FlowFeedPanel({
       <div className="flex-1 overflow-y-auto space-y-2 pr-1">
         {items.map((item, index) => {
           const Icon = iconFor(item.type);
+          const useAccent2 = item.type === "booking" || item.type === "automation";
           return (
             <motion.div
               key={`${item.title}-${index}`}
@@ -80,21 +84,17 @@ export function FlowFeedPanel({
                 <span 
                   className="mt-0.5 h-8 w-8 rounded-xl flex items-center justify-center shrink-0"
                   style={{ 
-                    background: item.type === "payment" 
-                      ? "hsl(var(--kf-accent1) / 0.15)" 
-                      : item.type === "booking"
-                        ? "hsl(var(--kf-accent2) / 0.15)"
-                        : "hsl(var(--kf-muted))"
+                    background: useAccent2 
+                      ? "hsl(var(--kf-accent2) / 0.15)" 
+                      : "hsl(var(--kf-accent1) / 0.15)"
                   }}
                 >
                   <Icon 
                     className="w-4 h-4" 
                     style={{ 
-                      color: item.type === "payment" 
-                        ? "hsl(var(--kf-accent1))" 
-                        : item.type === "booking"
-                          ? "hsl(var(--kf-accent2))"
-                          : "hsl(var(--kf-muted-foreground))"
+                      color: useAccent2 
+                        ? "hsl(var(--kf-accent2))" 
+                        : "hsl(var(--kf-accent1))"
                     }}
                   />
                 </span>
@@ -110,7 +110,8 @@ export function FlowFeedPanel({
                 <div className="ml-11 flex items-center gap-2">
                   <button
                     onClick={() => onAsk?.(item)}
-                    className="inline-flex items-center gap-1 text-primary hover:underline"
+                    className="inline-flex items-center gap-1 hover:underline"
+                    style={{ color: "hsl(var(--kf-accent2))" }}
                   >
                     <Sparkles className="w-3 h-3" />
                     Ask AI: {item.suggestion}

@@ -9,18 +9,21 @@ const achievements = [
     title: "First Sale",
     description: "Invoice paid – momentum unlocked.",
     achieved: true,
+    useAccent2: false,
   },
   {
     icon: Star,
     title: "Flawless Flow",
     description: "No overdue invoices this week.",
     achieved: false,
+    useAccent2: true,
   },
   {
     icon: Sparkles,
     title: "Automation Ready",
     description: "3 playbooks set up.",
     achieved: true,
+    useAccent2: true,
   },
 ];
 
@@ -42,7 +45,7 @@ export function AchievementsStrip() {
               <span
                 className="h-6 w-6 rounded-lg flex items-center justify-center"
                 style={ach.achieved ? {
-                  background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
+                  background: ach.useAccent2 ? "hsl(var(--kf-accent2))" : "hsl(var(--kf-accent1))",
                   color: "white"
                 } : {
                   background: "hsl(var(--kf-muted))",
