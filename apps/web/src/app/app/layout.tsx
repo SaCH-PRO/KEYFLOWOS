@@ -6,7 +6,9 @@ import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { CommandPalette } from "@/components/command-palette";
-import { clearStoredBusinessId } from "@/lib/workspace";
+import { clearStoredBusinessId, getStoredBusinessId } from "@/lib/workspace";
+import { apiGet } from "@/lib/api";
+import { useThemeColors } from "@/lib/theme-context";
 import {
   Activity,
   Settings,
@@ -52,6 +54,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const momentumValue = 0.52;
+  const { setAccent1, setAccent2 } = useThemeColors();
+
+  useEffect(() => {
+    const loadBrandColors = async () => {
+      const businessId = getStoredBusinessId();
+      if (!businessId) return;
+      const res = await apiGet(`/identity/businesses/${businessId}`);
+      if (res.data) {
+        const data = res.data as { primaryColor?: string; secondaryColor?: string };
+        if (data.primaryColor) setAccent1(data.primaryColor);
+        if (data.secondaryColor) setAccent2(data.secondaryColor);
+      }
+    };
+    loadBrandColors();
+  }, [setAccent1, setAccent2]);
 
   const handleLogout = () => {
     clearStoredBusinessId();
