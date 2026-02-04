@@ -845,6 +845,151 @@ export async function updateInvoiceStatus(invoiceId: string, status: "SENT" | "O
   });
 }
 
+export async function updateInvoice(input: {
+  businessId?: string;
+  invoiceId: string;
+  contactId?: string;
+  items?: { description: string; quantity: number; unitPrice: number; productId?: string }[];
+  currency?: string;
+  dueDate?: string | null;
+  taxRate?: number;
+  discountType?: "PERCENT" | "FIXED" | null;
+  discountValue?: number | null;
+  notes?: string | null;
+}) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<Invoice>({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(input.invoiceId)}`,
+    body: {
+      contactId: input.contactId,
+      items: input.items,
+      currency: input.currency,
+      dueDate: input.dueDate,
+      taxRate: input.taxRate,
+      discountType: input.discountType,
+      discountValue: input.discountValue,
+      notes: input.notes,
+    },
+    method: "PATCH",
+  });
+}
+
+// ========== QUOTES ==========
+
+export type QuoteItem = {
+  id: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  total: number;
+  productId?: string | null;
+};
+
+export type Quote = {
+  id: string;
+  quoteNumber: string;
+  status: "DRAFT" | "SENT" | "ACCEPTED" | "REJECTED";
+  total: number;
+  currency: string;
+  issueDate: string;
+  expiryDate?: string | null;
+  businessId: string;
+  contactId: string;
+  contact?: Contact | null;
+  items: QuoteItem[];
+  invoiceId?: string | null;
+  invoice?: Invoice | null;
+  createdAt: string;
+};
+
+export async function listQuotes(businessId?: string) {
+  const bId = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet<Quote[]>({
+    path: `/commerce/businesses/${encodeURIComponent(bId)}/quotes`,
+  });
+}
+
+export async function getQuote(quoteId: string) {
+  return apiGet<Quote>({
+    path: `/commerce/quotes/${encodeURIComponent(quoteId)}`,
+  });
+}
+
+export async function createQuote(input: {
+  businessId?: string;
+  contactId: string;
+  items: { description: string; quantity: number; unitPrice: number; productId?: string }[];
+  currency?: string;
+  expiryDate?: string;
+}) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<Quote>({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/quotes`,
+    body: {
+      contactId: input.contactId,
+      items: input.items,
+      currency: input.currency ?? "TTD",
+      expiryDate: input.expiryDate,
+    },
+  });
+}
+
+export async function updateQuote(input: {
+  businessId?: string;
+  quoteId: string;
+  contactId?: string;
+  items?: { description: string; quantity: number; unitPrice: number; productId?: string }[];
+  currency?: string;
+  expiryDate?: string | null;
+}) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<Quote>({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/quotes/${encodeURIComponent(input.quoteId)}`,
+    body: {
+      contactId: input.contactId,
+      items: input.items,
+      currency: input.currency,
+      expiryDate: input.expiryDate,
+    },
+    method: "PATCH",
+  });
+}
+
+export async function updateQuoteStatus(quoteId: string, status: "DRAFT" | "SENT" | "ACCEPTED" | "REJECTED") {
+  return apiPost<Quote>({
+    path: `/commerce/quotes/${encodeURIComponent(quoteId)}/status/${status.toLowerCase()}`,
+    body: {},
+  });
+}
+
+export async function deleteQuote(businessId: string, quoteId: string) {
+  return apiDelete({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/quotes/${encodeURIComponent(quoteId)}`,
+  });
+}
+
+export async function convertQuoteToInvoice(input: {
+  businessId?: string;
+  quoteId: string;
+  taxRate?: number;
+  discountType?: "PERCENT" | "FIXED";
+  discountValue?: number;
+  notes?: string;
+  dueDate?: string;
+}) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<Invoice>({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/quotes/${encodeURIComponent(input.quoteId)}/convert`,
+    body: {
+      taxRate: input.taxRate,
+      discountType: input.discountType,
+      discountValue: input.discountValue,
+      notes: input.notes,
+      dueDate: input.dueDate,
+    },
+  });
+}
+
 export type BootstrapIdentityResponse = {
   user: { id: string; email: string; name?: string | null; role: string };
   business: { id: string; name: string };
