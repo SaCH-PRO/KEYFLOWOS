@@ -18,6 +18,8 @@ import {
   MessageSquare,
   ListTodo,
   History,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 
 export type ContactDetailData = {
@@ -70,6 +72,8 @@ interface ContactDetailProps {
   onAddTask?: (title: string, dueDate?: string) => Promise<void>;
   onCompleteTask?: (taskId: string) => Promise<void>;
   onUpdateStatus?: (status: string) => Promise<void>;
+  onEdit?: () => void;
+  onDelete?: () => Promise<void>;
 }
 
 const STATUSES = ["LEAD", "PROSPECT", "CLIENT", "LOST"] as const;
@@ -92,12 +96,24 @@ export function ContactDetail({
   onAddTask,
   onCompleteTask,
   onUpdateStatus,
+  onEdit,
+  onDelete,
 }: ContactDetailProps) {
   const [activeTab, setActiveTab] = useState<"timeline" | "notes" | "tasks">("timeline");
   const [newNote, setNewNote] = useState("");
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskDue, setNewTaskDue] = useState("");
   const [noteLoading, setNoteLoading] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    if (!onDelete) return;
+    setDeleting(true);
+    await onDelete();
+    setDeleting(false);
+    setDeleteConfirm(false);
+  };
   const [taskLoading, setTaskLoading] = useState(false);
 
   if (loading) {
@@ -165,12 +181,53 @@ export function ContactDetail({
             )}
           </div>
         </div>
-        {onClose && (
-          <button onClick={onClose} className="p-1 hover:bg-muted rounded-lg transition-colors lg:hidden">
-            <X className="w-5 h-5 text-muted-foreground" />
-          </button>
-        )}
+        <div className="flex items-center gap-1">
+          {onEdit && (
+            <button
+              onClick={onEdit}
+              className="p-2 hover:bg-muted rounded-lg transition-colors"
+              title="Edit contact"
+            >
+              <Pencil className="w-4 h-4 text-muted-foreground" />
+            </button>
+          )}
+          {onDelete && (
+            <button
+              onClick={() => setDeleteConfirm(true)}
+              className="p-2 hover:bg-red-500/20 rounded-lg transition-colors"
+              title="Delete contact"
+            >
+              <Trash2 className="w-4 h-4 text-red-400" />
+            </button>
+          )}
+          {onClose && (
+            <button onClick={onClose} className="p-1 hover:bg-muted rounded-lg transition-colors lg:hidden">
+              <X className="w-5 h-5 text-muted-foreground" />
+            </button>
+          )}
+        </div>
       </div>
+
+      {deleteConfirm && (
+        <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 space-y-3">
+          <p className="text-sm text-red-400">Are you sure you want to delete this contact?</p>
+          <div className="flex gap-2">
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="px-3 py-1.5 text-sm rounded-lg bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-50"
+            >
+              {deleting ? "Deleting..." : "Yes, Delete"}
+            </button>
+            <button
+              onClick={() => setDeleteConfirm(false)}
+              className="px-3 py-1.5 text-sm rounded-lg bg-muted hover:bg-muted/80 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2">
         {STATUSES.map((s) => (
