@@ -181,22 +181,8 @@ export default function ContactsPage() {
     }
   }, [contacts, selectedContactId, loadDetail]);
 
-  const fileToDataUrl = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-  };
-
   const handleCreateContact = async (formData: ContactFormData) => {
     if (!businessId) return;
-    
-    let photoDataUrl: string | undefined;
-    if (formData.photoFile) {
-      photoDataUrl = await fileToDataUrl(formData.photoFile);
-    }
 
     const { data } = await createContact({
       businessId,
@@ -214,9 +200,6 @@ export default function ContactsPage() {
         .split(",")
         .map((t) => t.trim())
         .filter(Boolean),
-      custom: photoDataUrl
-        ? { profilePhotoDataUrl: photoDataUrl, profilePhotoName: formData.photoFile?.name ?? "photo" }
-        : undefined,
     });
     if (data) {
       if (formData.initialNote.trim()) {
