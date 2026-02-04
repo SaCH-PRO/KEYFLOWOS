@@ -1060,6 +1060,14 @@ export async function bootstrapIdentity(input: { username?: string; email?: stri
   });
 }
 
+export async function updateBusiness(input: { businessId: string; metaData?: Record<string, unknown>; [key: string]: unknown }) {
+  const { businessId, ...data } = input;
+  return apiPatch<{ id: string }>({
+    path: `/identity/businesses/${encodeURIComponent(businessId)}`,
+    body: data,
+  });
+}
+
 export type Service = {
   id: string;
   name: string;
@@ -1231,17 +1239,17 @@ export async function updatePlaybook(input: { businessId?: string; playbookId: s
 
 export async function getCalendarAuthUrl(businessId?: string) {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
-  return apiFetch<{ url: string }>(
-    z.object({ url: z.string() }),
+  return apiGet(
     `/bookings/businesses/${encodeURIComponent(bid)}/calendar/auth-url`,
+    z.object({ url: z.string() }),
   );
 }
 
 export async function getCalendarStatus(businessId?: string) {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
-  return apiFetch<{ connected: boolean; email?: string }>(
-    z.object({ connected: z.boolean(), email: z.string().optional() }),
+  return apiGet(
     `/bookings/businesses/${encodeURIComponent(bid)}/calendar/status`,
+    z.object({ connected: z.boolean(), email: z.string().optional() }),
   );
 }
 
@@ -1257,6 +1265,188 @@ export async function syncBookingToCalendar(bookingId: string, businessId?: stri
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<{ success: boolean; eventId?: string }>({
     path: `/bookings/businesses/${encodeURIComponent(bid)}/bookings/${encodeURIComponent(bookingId)}/sync-calendar`,
+    body: {},
+  });
+}
+
+export interface FlowPhase {
+  name: string;
+  count: number;
+  value: number;
+  trend: 'up' | 'down' | 'stable';
+}
+
+export interface FeedItem {
+  id: string;
+  icon: string;
+  text: string;
+  timestamp: string;
+  tone?: 'success' | 'info' | 'warning' | 'error';
+  actionType?: string;
+  actionId?: string;
+}
+
+export interface QuickAction {
+  id: string;
+  label: string;
+  description: string;
+  icon: string;
+  href: string;
+  priority: number;
+}
+
+export interface CockpitSummary {
+  momentum: number;
+  streaks: string[];
+  phases: FlowPhase[];
+  bottleneck: { phase: string; suggestion: string } | null;
+  feed: FeedItem[];
+  quickActions: QuickAction[];
+  stats: {
+    totalContacts: number;
+    activeLeads: number;
+    pendingInvoices: number;
+    overdueInvoices: number;
+    upcomingBookings: number;
+    monthlyRevenue: number;
+    weeklyBookings: number;
+  };
+  highlights: {
+    highPotential: { contactId: string; name: string; score: number }[];
+    overdueReminders: { contactId: string; name: string; daysSince: number }[];
+  };
+}
+
+const cockpitSummarySchema = z.object({
+  momentum: z.number(),
+  streaks: z.array(z.string()),
+  phases: z.array(z.object({
+    name: z.string(),
+    count: z.number(),
+    value: z.number(),
+    trend: z.enum(['up', 'down', 'stable']),
+  })),
+  bottleneck: z.object({ phase: z.string(), suggestion: z.string() }).nullable(),
+  feed: z.array(z.object({
+    id: z.string(),
+    icon: z.string(),
+    text: z.string(),
+    timestamp: z.string(),
+    tone: z.enum(['success', 'info', 'warning', 'error']).optional(),
+    actionType: z.string().optional(),
+    actionId: z.string().optional(),
+  })),
+  quickActions: z.array(z.object({
+    id: z.string(),
+    label: z.string(),
+    description: z.string(),
+    icon: z.string(),
+    href: z.string(),
+    priority: z.number(),
+  })),
+  stats: z.object({
+    totalContacts: z.number(),
+    activeLeads: z.number(),
+    pendingInvoices: z.number(),
+    overdueInvoices: z.number(),
+    upcomingBookings: z.number(),
+    monthlyRevenue: z.number(),
+    weeklyBookings: z.number(),
+  }),
+  highlights: z.object({
+    highPotential: z.array(z.object({ contactId: z.string(), name: z.string(), score: z.number() })),
+    overdueReminders: z.array(z.object({ contactId: z.string(), name: z.string(), daysSince: z.number() })),
+  }),
+});
+
+export async function fetchCockpitSummary(businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/flow/businesses/${encodeURIComponent(bid)}/cockpit`,
+    cockpitSummarySchema,
+  );
+}
+
+export interface Achievement {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  achieved: boolean;
+  achievedAt?: string;
+  category: 'setup' | 'sales' | 'growth' | 'engagement' | 'mastery';
+  xpReward: number;
+}
+
+export interface Challenge {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  progress: number;
+  target: number;
+  expiresAt?: string;
+  xpReward: number;
+  type: 'daily' | 'weekly' | 'monthly';
+}
+
+export interface GamificationStats {
+  level: number;
+  currentXp: number;
+  xpToNextLevel: number;
+  totalXp: number;
+  streakDays: number;
+  achievements: Achievement[];
+  challenges: Challenge[];
+  recentXpGains: { action: string; xp: number; timestamp: string }[];
+}
+
+const gamificationStatsSchema = z.object({
+  level: z.number(),
+  currentXp: z.number(),
+  xpToNextLevel: z.number(),
+  totalXp: z.number(),
+  streakDays: z.number(),
+  achievements: z.array(z.object({
+    id: z.string(),
+    title: z.string(),
+    description: z.string(),
+    icon: z.string(),
+    achieved: z.boolean(),
+    achievedAt: z.string().optional(),
+    category: z.enum(['setup', 'sales', 'growth', 'engagement', 'mastery']),
+    xpReward: z.number(),
+  })),
+  challenges: z.array(z.object({
+    id: z.string(),
+    title: z.string(),
+    description: z.string(),
+    icon: z.string(),
+    progress: z.number(),
+    target: z.number(),
+    expiresAt: z.string().optional(),
+    xpReward: z.number(),
+    type: z.enum(['daily', 'weekly', 'monthly']),
+  })),
+  recentXpGains: z.array(z.object({
+    action: z.string(),
+    xp: z.number(),
+    timestamp: z.string(),
+  })),
+});
+
+export async function fetchGamificationStats(businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/gamification/businesses/${encodeURIComponent(bid)}/stats`,
+    gamificationStatsSchema,
+  );
+}
+
+export async function updateStreak(businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{ streakDays: number }>({
+    path: `/gamification/businesses/${encodeURIComponent(bid)}/streak`,
     body: {},
   });
 }
