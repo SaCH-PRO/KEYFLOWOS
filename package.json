@@ -13,13 +13,13 @@
     "test:db:soft-delete": "pnpm --filter db exec tsx --env-file .env src/test-soft-delete.ts"
   },
   "devDependencies": {
-    "typescript": "^5.4.5",
-    "prettier": "^3.2.5",
-    "eslint": "^9.0.0",
-    "turbo": "latest",
-    "tsx": "^4.20.6",
     "autoprefixer": "^10.4.20",
-    "prisma": "^5.13.0"
+    "eslint": "^9.0.0",
+    "prettier": "^3.2.5",
+    "prisma": "^5.13.0",
+    "tsx": "^4.20.6",
+    "turbo": "latest",
+    "typescript": "^5.4.5"
   },
   "engines": {
     "node": ">=20"
@@ -28,5 +28,8 @@
     "overrides": {
       "baseline-browser-mapping": "^2.8.32"
     }
+  },
+  "dependencies": {
+    "ts-node": "^10.9.2"
   }
 }
