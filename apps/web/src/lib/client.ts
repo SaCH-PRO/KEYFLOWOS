@@ -164,13 +164,26 @@ export type ContactNote = z.infer<typeof noteSchema>;
 export type ContactTask = Omit<z.infer<typeof taskSchema>, "contact"> & { contact?: Contact | null };
 export type Product = z.infer<typeof productSchema>;
 export type Booking = z.infer<typeof bookingSchema>;
+export type InvoiceItem = {
+  id: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  total: number;
+  productId?: string | null;
+};
+
 export type Invoice = {
   id: string;
   invoiceNumber?: string | null;
   status: string;
   total: number | string;
   currency: string;
+  issueDate?: string | null;
+  dueDate?: string | null;
+  paidAt?: string | null;
   contact?: { firstName?: string | null; lastName?: string | null; email?: string | null } | null;
+  items?: InvoiceItem[];
 };
 
 type ApiResult<T> = { data: T | null; error: string | null };
@@ -183,9 +196,9 @@ const fallbackBookings: Booking[] = [
 ];
 
 const fallbackProducts: Product[] = [
-  { id: "pd_1", name: "Consultation", price: 850, currency: "TTD" },
-  { id: "pd_2", name: "Follow-up Session", price: 600, currency: "TTD" },
-  { id: "pd_3", name: "Wellness Package", price: 1200, currency: "TTD" },
+  { id: "pd_1", name: "Consultation", price: 850, currency: "TTD", category: "SERVICE", isActive: true },
+  { id: "pd_2", name: "Follow-up Session", price: 600, currency: "TTD", category: "SERVICE", isActive: true },
+  { id: "pd_3", name: "Wellness Package", price: 1200, currency: "TTD", category: "PACKAGE", isActive: true },
 ];
 
 const fallbackInvoices: Invoice[] = [
@@ -366,8 +379,11 @@ export async function fetchInvoices(businessId: string = DEFAULT_BUSINESS_ID) {
         id: z.string(),
         invoiceNumber: z.string().nullable().optional(),
         status: z.string(),
-        total: z.number(),
+        total: z.union([z.number(), z.string()]),
         currency: z.string(),
+        issueDate: z.string().nullable().optional(),
+        dueDate: z.string().nullable().optional(),
+        paidAt: z.string().nullable().optional(),
         contact: z
           .object({
             firstName: z.string().nullable().optional(),
@@ -376,6 +392,16 @@ export async function fetchInvoices(businessId: string = DEFAULT_BUSINESS_ID) {
           })
           .nullable()
           .optional(),
+        items: z.array(
+          z.object({
+            id: z.string(),
+            description: z.string(),
+            quantity: z.number(),
+            unitPrice: z.number(),
+            total: z.number(),
+            productId: z.string().nullable().optional(),
+          })
+        ).optional(),
       }),
     ),
     fallbackInvoices,
