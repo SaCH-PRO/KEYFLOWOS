@@ -85,7 +85,7 @@ export function FlowFeedPanel({
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.06 * index }}
-              className="group p-3 rounded-xl border border-border bg-background hover:bg-muted/50 transition-all"
+              className="group p-3 kf-card hover:bg-muted/50 transition-all"
             >
               <div className="flex items-start gap-3">
                 <div 
