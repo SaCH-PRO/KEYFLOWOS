@@ -107,7 +107,7 @@ export default function AppHome() {
         <div className="flex items-center gap-2 flex-wrap">
           <button
             className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium text-white transition-all hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed"
-            style={{ background: `linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))` }}
+            style={{ background: "hsl(var(--kf-accent1))" }}
             onClick={async () => {
               setAiLoading(true);
               const msg = await requestAiSuggestion({

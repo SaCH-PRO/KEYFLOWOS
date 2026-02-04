@@ -8,30 +8,44 @@ export function FlowGraphPlaceholder({ className }: FlowGraphPlaceholderProps) {
   return (
     <div
       className={cn(
-        "relative overflow-hidden rounded-2xl border border-[var(--kf-border)] bg-[rgba(0,0,0,0.3)] p-6 shadow-glass backdrop-blur-md",
-        "before:absolute before:inset-0 before:bg-[radial-gradient(circle_at_20%_20%,rgba(78,168,255,0.08),transparent_35%),radial-gradient(circle_at_80%_60%,rgba(163,116,255,0.08),transparent_35%)]",
+        "relative overflow-hidden rounded-2xl border border-[hsl(var(--kf-border))] bg-[hsl(var(--kf-card))] p-6",
         className,
       )}
     >
-      <div className="relative z-10 flex flex-col gap-3 text-[var(--kf-text)]">
+      <div className="relative z-10 flex flex-col gap-3">
         <div className="flex items-center justify-between">
-          <div className="text-sm uppercase tracking-[0.08em] text-[var(--kf-text-muted)]">Live Business Graph</div>
-          <div className="rounded-full border border-[var(--kf-electric)] bg-[rgba(78,168,255,0.08)] px-3 py-1 text-xs text-[var(--kf-electric)]">
+          <div className="text-sm uppercase tracking-widest text-[hsl(var(--kf-muted-foreground))]">Live Business Graph</div>
+          <div 
+            className="rounded-full px-3 py-1 text-xs font-medium"
+            style={{
+              background: "hsl(var(--kf-accent1) / 0.15)",
+              color: "hsl(var(--kf-accent1))",
+              border: "1px solid hsl(var(--kf-accent1) / 0.3)"
+            }}
+          >
             Coming Alive
           </div>
         </div>
         <div className="grid grid-cols-3 gap-4 text-center text-sm">
-          {["Leads", "Quotes", "Invoices", "Bookings", "Projects", "Automations"].map((node) => (
+          {["Leads", "Quotes", "Invoices", "Bookings", "Projects", "Automations"].map((node, idx) => (
             <div
               key={node}
-              className="relative overflow-hidden rounded-xl border border-[rgba(78,168,255,0.18)] bg-[rgba(31,34,37,0.8)] px-3 py-4 shadow-[0_0_14px_rgba(78,168,255,0.18)] transition-all duration-200 ease-flow hover:-translate-y-0.5 hover:border-[rgba(163,116,255,0.3)]"
+              className="relative overflow-hidden rounded-xl border border-[hsl(var(--kf-border))] bg-[hsl(var(--kf-muted))] px-3 py-4 transition-all duration-200 hover:-translate-y-0.5"
+              style={{
+                borderColor: idx % 2 === 0 ? "hsl(var(--kf-accent1) / 0.2)" : "hsl(var(--kf-accent2) / 0.2)"
+              }}
             >
-              <div className="text-[12px] uppercase tracking-[0.08em] text-[var(--kf-text-muted)]">{node}</div>
-              <div className="mt-1 text-lg font-semibold text-[var(--kf-electric)]">•••</div>
+              <div className="text-[12px] uppercase tracking-widest text-[hsl(var(--kf-muted-foreground))]">{node}</div>
+              <div 
+                className="mt-1 text-lg font-semibold"
+                style={{ color: idx % 2 === 0 ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-accent2))" }}
+              >
+                •••
+              </div>
             </div>
           ))}
         </div>
-        <p className="text-xs text-[var(--kf-text-muted)]">
+        <p className="text-xs text-[hsl(var(--kf-muted-foreground))]">
           This placeholder represents the kinetic Flow Graph. Nodes glow/pulse on events; edges animate energy when data
           moves.
         </p>

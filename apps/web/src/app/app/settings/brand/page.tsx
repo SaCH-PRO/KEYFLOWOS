@@ -181,11 +181,19 @@ export default function BrandSettingsPage() {
         </h3>
         
         <div className="space-y-4">
-          <div 
-            className="h-20 rounded-2xl flex items-center justify-center text-white font-semibold text-lg"
-            style={{ background: `linear-gradient(135deg, ${colors.accent1}, ${colors.accent2})` }}
-          >
-            KeyFlow Gradient
+          <div className="flex gap-3">
+            <div 
+              className="flex-1 h-20 rounded-2xl flex items-center justify-center text-white font-semibold text-lg"
+              style={{ background: colors.accent1 }}
+            >
+              Primary
+            </div>
+            <div 
+              className="flex-1 h-20 rounded-2xl flex items-center justify-center text-white font-semibold text-lg"
+              style={{ background: colors.accent2 }}
+            >
+              Secondary
+            </div>
           </div>
           
           <div className="flex gap-3 flex-wrap">
@@ -204,26 +212,29 @@ export default function BrandSettingsPage() {
             <button
               className="px-4 py-2 rounded-xl font-medium transition-all"
               style={{ 
-                background: `linear-gradient(135deg, ${colors.accent1}, ${colors.accent2})`,
-                color: "white"
+                background: `${colors.accent1}20`,
+                color: colors.accent1,
+                border: `1px solid ${colors.accent1}40`
               }}
             >
-              Gradient Button
+              Outline Button
             </button>
           </div>
 
           <div className="flex gap-4 items-center">
-            <span className="text-sm" style={{ color: colors.accent1 }}>Primary Text</span>
-            <span className="text-sm" style={{ color: colors.accent2 }}>Accent Text</span>
+            <span className="text-sm font-medium" style={{ color: colors.accent1 }}>Primary Text</span>
+            <span className="text-sm font-medium" style={{ color: colors.accent2 }}>Secondary Text</span>
             <span 
-              className="text-sm font-semibold"
-              style={{ 
-                background: `linear-gradient(135deg, ${colors.accent1}, ${colors.accent2})`,
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent"
-              }}
+              className="px-2 py-1 rounded-lg text-xs font-medium"
+              style={{ background: `${colors.accent1}20`, color: colors.accent1 }}
             >
-              Gradient Text
+              Badge
+            </span>
+            <span 
+              className="px-2 py-1 rounded-lg text-xs font-medium"
+              style={{ background: `${colors.accent2}20`, color: colors.accent2 }}
+            >
+              Badge
             </span>
           </div>
         </div>
