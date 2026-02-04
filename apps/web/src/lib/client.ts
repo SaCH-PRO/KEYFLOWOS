@@ -648,6 +648,7 @@ export async function updateContact(input: {
   displayName?: string;
   companyName?: string;
   jobTitle?: string;
+  preferredChannel?: string;
   lifecycleStage?: string;
   segment?: string;
   notesInternal?: string;

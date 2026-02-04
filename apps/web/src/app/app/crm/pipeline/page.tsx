@@ -285,7 +285,9 @@ export default function ContactsPage() {
       tags: Array.isArray(c.tags) ? c.tags.join(", ") : "",
       initialNote: "",
     });
+    setShowMobileDetail(false);
     setShowAddForm(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleDeleteContact = async () => {
