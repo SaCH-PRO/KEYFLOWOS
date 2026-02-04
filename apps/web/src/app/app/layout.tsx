@@ -23,35 +23,26 @@ import {
   BarChart3,
   LogOut,
   Search,
-  Command,
+  Zap,
+  Home,
+  MessageCircle,
+  PanelLeftClose,
+  PanelLeft,
 } from "lucide-react";
 
-const navSections = [
-  {
-    title: "Primary",
-    items: [
-      { label: "Command", href: "/app", icon: Command },
-      { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
-      { label: "Commerce", href: "/app/commerce", icon: CreditCard },
-      { label: "Bookings", href: "/app/bookings", icon: Calendar },
-      { label: "Social", href: "/app/social", icon: Share2 },
-    ],
-  },
-  {
-    title: "Secondary",
-    items: [
-      { label: "Projects", href: "/app/projects", icon: LayoutDashboard },
-      { label: "Automations", href: "/app/automations", icon: Workflow },
-      { label: "Reports", href: "/app/reports", icon: BarChart3 },
-    ],
-  },
-  {
-    title: "Studio",
-    items: [
-      { label: "Studio", href: "/app/studio", icon: Sparkles },
-      { label: "Settings", href: "/app/settings", icon: Settings },
-    ],
-  },
+const navItems = [
+  { label: "Cockpit", href: "/app", icon: Home },
+  { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
+  { label: "Commerce", href: "/app/commerce", icon: CreditCard },
+  { label: "Bookings", href: "/app/bookings", icon: Calendar },
+  { label: "Social", href: "/app/social", icon: MessageCircle },
+  { label: "Automations", href: "/app/automations", icon: Zap },
+  { label: "Reports", href: "/app/reports", icon: BarChart3 },
+];
+
+const bottomNavItems = [
+  { label: "Studio", href: "/app/studio", icon: Sparkles },
+  { label: "Settings", href: "/app/settings", icon: Settings },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -59,7 +50,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const momentumValue = 0.65;
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const momentumValue = 0.52;
 
   const handleLogout = () => {
     clearStoredBusinessId();
@@ -83,79 +75,85 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <div 
-        className="h-1 w-full"
-        style={{ background: "hsl(var(--kf-muted))" }}
-      >
-        <div
-          className="h-full transition-all duration-500"
-          style={{ 
-            width: `${Math.round(momentumValue * 100)}%`,
-            background: "hsl(var(--kf-accent1))"
-          }}
-        />
-      </div>
-
       <div className="flex">
         <aside 
-          className="hidden md:flex md:flex-col md:w-64 border-r border-border min-h-[calc(100vh-4px)]"
+          className={cn(
+            "hidden md:flex md:flex-col border-r border-border min-h-screen transition-all duration-300",
+            sidebarCollapsed ? "w-[72px]" : "w-64"
+          )}
           style={{ background: "hsl(var(--kf-sidebar-bg))" }}
         >
-          <div className="flex items-center gap-3 px-5 py-4 border-b border-border">
+          <div className="flex items-center gap-3 px-4 py-5 border-b border-border">
             <div 
-              className="h-10 w-10 rounded-2xl flex items-center justify-center"
-              style={{ background: "hsl(var(--kf-accent1))" }}
+              className="h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
             >
-              <Command className="h-5 w-5 text-white" />
+              <Zap className="w-5 h-5 text-white" />
             </div>
-            <span className="text-base font-bold tracking-wide" style={{ color: "hsl(var(--kf-accent1))" }}>
-              KEYFLOW
-            </span>
+            {!sidebarCollapsed && (
+              <div className="flex-1 min-w-0">
+                <h1 className="text-lg font-bold tracking-tight">KeyFlow</h1>
+                <p className="text-xs text-muted-foreground truncate">Business OS</p>
+              </div>
+            )}
           </div>
 
-          <nav className="flex-1 px-3 py-4 space-y-6">
-            {navSections.map((section) => (
-              <div key={section.title} className="space-y-1">
-                <div className="px-3 text-[11px] uppercase tracking-widest text-muted-foreground font-medium">
-                  {section.title}
-                </div>
-                {section.items.map((item) => {
-                  const Icon = item.icon;
-                  const active = pathname === item.href || 
-                    (item.href !== "/app" && pathname.startsWith(item.href));
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className={cn(
-                        "group relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all",
-                        active
-                          ? "text-primary bg-primary/10"
-                          : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
-                      )}
-                    >
-                      <Icon className={cn("w-4 h-4", active && "text-primary")} />
-                      <span>{item.label}</span>
-                      {active && (
-                        <div 
-                          className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 rounded-r-full"
-                          style={{ background: "hsl(var(--kf-accent1))" }}
-                        />
-                      )}
-                    </Link>
-                  );
-                })}
-              </div>
-            ))}
-          </nav>
+          <div className="flex-1 flex flex-col py-4 px-3 gap-1">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = pathname === item.href || (item.href !== "/app" && pathname.startsWith(item.href));
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={cn(
+                    "kf-nav-item",
+                    isActive && "active",
+                    sidebarCollapsed && "justify-center px-2"
+                  )}
+                  title={sidebarCollapsed ? item.label : undefined}
+                >
+                  <Icon className="w-5 h-5 flex-shrink-0 kf-nav-icon" />
+                  {!sidebarCollapsed && <span className="text-sm font-medium">{item.label}</span>}
+                </Link>
+              );
+            })}
+          </div>
 
-          <div className="px-4 py-4 border-t border-border flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">Theme</span>
-            <ThemeToggle />
+          <div className="mt-auto px-3 pb-4 space-y-1">
+            {bottomNavItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = pathname.startsWith(item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={cn(
+                    "kf-nav-item",
+                    isActive && "active",
+                    sidebarCollapsed && "justify-center px-2"
+                  )}
+                  title={sidebarCollapsed ? item.label : undefined}
+                >
+                  <Icon className="w-5 h-5 flex-shrink-0 kf-nav-icon" />
+                  {!sidebarCollapsed && <span className="text-sm font-medium">{item.label}</span>}
+                </Link>
+              );
+            })}
+            
+            <div className="pt-3 border-t border-border flex items-center justify-between">
+              {!sidebarCollapsed && <ThemeToggle />}
+              <button
+                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                {sidebarCollapsed ? <PanelLeft className="w-5 h-5" /> : <PanelLeftClose className="w-5 h-5" />}
+              </button>
+            </div>
           </div>
         </aside>
 
-        <main className="flex-1 flex flex-col min-h-[calc(100vh-4px)]">
+        <main className="flex-1 flex flex-col min-h-screen">
           <header 
             className="h-16 border-b border-border px-4 md:px-6 flex items-center justify-between sticky top-0 z-40"
             style={{ background: "hsl(var(--kf-header-bg))" }}
@@ -172,14 +170,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
 
             <div className="flex items-center gap-3">
+              <div className="hidden sm:flex items-center gap-2 mr-2">
+                <div className="text-xs text-muted-foreground">Momentum</div>
+                <div className="w-24 kf-momentum-bar">
+                  <div className="kf-momentum-fill" style={{ width: `${momentumValue * 100}%` }} />
+                </div>
+                <div className="text-sm font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>
+                  {Math.round(momentumValue * 100)}%
+                </div>
+              </div>
+              
               <div className="relative">
                 <button
                   onClick={() => setAddMenuOpen((v) => !v)}
-                  className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium text-white transition-all hover:opacity-90"
-                  style={{ background: "hsl(var(--kf-accent1))" }}
+                  className="kf-btn-primary inline-flex items-center gap-2"
                 >
                   <Plus className="w-4 h-4" />
-                  New
+                  <span className="hidden sm:inline">New</span>
                   <ChevronDown className="w-3 h-3" />
                 </button>
                 {addMenuOpen && (
@@ -188,36 +195,39 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                       { label: "New Contact", href: "/app/crm/pipeline" },
                       { label: "New Invoice", href: "/app/commerce" },
                       { label: "New Booking", href: "/app/bookings" },
-                      { label: "New Automation", href: "/app/automations" },
-                    ].map((item) => (
+                      { label: "New Post", href: "/app/social" },
+                    ].map((action) => (
                       <Link
-                        key={item.label}
-                        href={item.href}
+                        key={action.label}
+                        href={action.href}
                         onClick={() => setAddMenuOpen(false)}
-                        className="flex items-center gap-2 rounded-lg px-3 py-2 hover:bg-muted text-sm transition-colors"
+                        className="block px-3 py-2 text-sm rounded-lg hover:bg-muted transition-colors"
                       >
-                        {item.label}
+                        {action.label}
                       </Link>
                     ))}
                   </div>
                 )}
               </div>
 
-              <button className="inline-flex items-center justify-center h-10 w-10 rounded-xl border border-border bg-card hover:bg-muted text-muted-foreground transition-colors">
-                <Bell className="w-4 h-4" />
+              <button className="relative p-2 rounded-xl border border-border bg-card hover:bg-muted transition-colors">
+                <Bell className="w-5 h-5 text-muted-foreground" />
+                <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full text-[10px] font-bold flex items-center justify-center text-white" style={{ background: "hsl(var(--kf-accent1))" }}>
+                  3
+                </span>
               </button>
 
               <button
                 onClick={handleLogout}
-                className="hidden sm:inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-sm text-muted-foreground hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-colors"
+                className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-xl border border-border bg-card text-sm hover:bg-muted transition-colors"
               >
                 <LogOut className="w-4 h-4" />
-                Log Out
+                <span>Log Out</span>
               </button>
 
               <div 
-                className="h-10 w-10 rounded-xl flex items-center justify-center text-white text-sm font-bold"
-                style={{ background: "hsl(var(--kf-accent1))" }}
+                className="h-10 w-10 rounded-xl flex items-center justify-center text-sm font-bold text-white"
+                style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
               >
                 KF
               </div>
@@ -228,9 +238,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </main>
       </div>
 
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 border-t border-border bg-card flex items-center justify-around px-2 z-50 safe-area-pb">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 border-t border-border bg-card/95 backdrop-blur-lg flex items-center justify-around px-2 z-50 safe-area-pb" style={{ height: "64px" }}>
         {[
-          { label: "Home", href: "/app", icon: Command },
+          { label: "Home", href: "/app", icon: Home },
           { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
           { label: "Commerce", href: "/app/commerce", icon: CreditCard },
           { label: "Bookings", href: "/app/bookings", icon: Calendar },
@@ -243,9 +253,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               key={item.href}
               href={item.href}
               className={cn(
-                "flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-colors",
-                active ? "text-primary" : "text-muted-foreground"
+                "flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-all",
+                active ? "text-accent1" : "text-muted-foreground"
               )}
+              style={active ? { color: "hsl(var(--kf-accent1))" } : undefined}
             >
               <Icon className="w-5 h-5" />
               <span className="text-[10px] font-medium">{item.label}</span>
