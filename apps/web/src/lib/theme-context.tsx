@@ -50,6 +50,7 @@ function hexToHSL(hex: string): string {
 }
 
 function applyColorsToDOM(colors: ThemeColors) {
+  if (typeof document === 'undefined') return;
   const root = document.documentElement;
   root.style.setProperty("--kf-accent1", hexToHSL(colors.accent1));
   root.style.setProperty("--kf-accent2", hexToHSL(colors.accent2));
@@ -57,25 +58,28 @@ function applyColorsToDOM(colors: ThemeColors) {
   root.style.setProperty("--kf-accent2-hex", colors.accent2);
 }
 
-export function ThemeColorsProvider({ children }: { children: ReactNode }) {
-  const [colors, setColors] = useState<ThemeColors>(DEFAULT_COLORS);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
+function getInitialColors(): ThemeColors {
+  if (typeof window === 'undefined') return DEFAULT_COLORS;
+  try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        setColors(parsed);
-        applyColorsToDOM(parsed);
-      } catch {
-        applyColorsToDOM(DEFAULT_COLORS);
+      const parsed = JSON.parse(stored);
+      if (parsed.accent1 && parsed.accent2) {
+        return parsed;
       }
-    } else {
-      applyColorsToDOM(DEFAULT_COLORS);
     }
-    setMounted(true);
-  }, []);
+  } catch {
+    // Ignore parse errors
+  }
+  return DEFAULT_COLORS;
+}
+
+export function ThemeColorsProvider({ children }: { children: ReactNode }) {
+  const [colors, setColors] = useState<ThemeColors>(() => getInitialColors());
+
+  useEffect(() => {
+    applyColorsToDOM(colors);
+  }, [colors]);
 
   const updateColors = (newColors: ThemeColors) => {
     setColors(newColors);
@@ -94,10 +98,6 @@ export function ThemeColorsProvider({ children }: { children: ReactNode }) {
   const resetToDefaults = () => {
     updateColors(DEFAULT_COLORS);
   };
-
-  if (!mounted) {
-    return <>{children}</>;
-  }
 
   return (
     <ThemeColorsContext.Provider value={{ colors, setAccent1, setAccent2, resetToDefaults }}>
