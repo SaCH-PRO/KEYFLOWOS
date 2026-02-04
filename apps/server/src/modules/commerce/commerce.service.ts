@@ -15,7 +15,7 @@ export class CommerceService {
     @Inject(AutomationService) private readonly automation: AutomationService,
   ) {}
 
-  listProducts(businessId: string) {
+  async listProducts(businessId: string) {
     return this.prisma.client.product.findMany({
       where: { businessId, deletedAt: null },
       orderBy: { createdAt: 'desc' },

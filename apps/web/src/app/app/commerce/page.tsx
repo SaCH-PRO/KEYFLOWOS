@@ -35,7 +35,7 @@ import {
   Invoice,
   Contact,
 } from "@/lib/client";
-import { ensureWorkspace, getStoredBusinessId } from "@/lib/workspace";
+import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 
 const productSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -99,15 +99,17 @@ export default function CommercePage() {
 
   useEffect(() => {
     const initWorkspace = async () => {
-      const stored = getStoredBusinessId();
-      if (stored) {
-        setBusinessId(stored);
+      // Always refresh businessId from server to ensure it's valid for current user
+      const fresh = await refreshWorkspace();
+      if (fresh) {
+        setBusinessId(fresh);
         setWorkspaceLoading(false);
         return;
       }
-      const created = await ensureWorkspace();
-      if (created) {
-        setBusinessId(created);
+      // Fallback to stored if refresh fails (offline/network error)
+      const stored = getStoredBusinessId();
+      if (stored) {
+        setBusinessId(stored);
         setWorkspaceLoading(false);
         return;
       }
@@ -121,17 +123,22 @@ export default function CommercePage() {
     if (!businessId) return;
     const load = async () => {
       setLoading(true);
-      const [productsRes, invoicesRes, contactsRes] = await Promise.all([
-        fetchProducts(businessId),
-        fetchInvoices(businessId),
-        fetchContacts(businessId),
-      ]);
-      setProducts((productsRes.data ?? []).map((p) => ({ ...p, currency: p.currency ?? "TTD" } as Product)));
-      setInvoices(invoicesRes.data ?? []);
-      setContacts(contactsRes.data ?? []);
-      if (productsRes.error) setError(productsRes.error);
-      if (invoicesRes.error) setInvoiceError(invoicesRes.error);
-      setLoading(false);
+      try {
+        const [productsRes, invoicesRes, contactsRes] = await Promise.all([
+          fetchProducts(businessId),
+          fetchInvoices(businessId),
+          fetchContacts(businessId),
+        ]);
+        setProducts((productsRes.data ?? []).map((p) => ({ ...p, currency: p.currency ?? "TTD" } as Product)));
+        setInvoices(invoicesRes.data ?? []);
+        setContacts(contactsRes.data ?? []);
+        if (productsRes.error) setError(productsRes.error);
+        if (invoicesRes.error) setInvoiceError(invoicesRes.error);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load data");
+      } finally {
+        setLoading(false);
+      }
     };
     void load();
   }, [businessId]);

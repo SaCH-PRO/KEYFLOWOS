@@ -36,3 +36,18 @@ export async function ensureWorkspace(): Promise<string | null> {
   }
   return null;
 }
+
+// Force refresh businessId from the server (ignores stored value)
+export async function refreshWorkspace(): Promise<string | null> {
+  if (typeof window === "undefined") return null;
+  
+  const token = window.localStorage.getItem(TOKEN_KEY);
+  if (!token) return null;
+
+  const result = await bootstrapIdentity({});
+  if (result.data?.business?.id) {
+    setStoredBusinessId(result.data.business.id);
+    return result.data.business.id;
+  }
+  return null;
+}

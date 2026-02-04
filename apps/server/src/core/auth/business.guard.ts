@@ -19,6 +19,7 @@ export class BusinessGuard implements CanActivate {
     }
 
     const businessId = req.params?.businessId || req.body?.businessId;
+    this.logger.debug(`BusinessGuard checking businessId: ${businessId} for userId: ${user.id}`);
     if (!businessId) {
       return true;
     }

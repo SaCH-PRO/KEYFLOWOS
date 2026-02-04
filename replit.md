@@ -4,6 +4,10 @@
 KEYFLOWOS is an AI-powered operating system for service businesses that eliminates the "tool maze" by providing pre-built Playbooks for common workflows. Features a "Cockpit" dashboard with Flow Graph visualization, AI-driven Flow Feed, and comprehensive CRM as the intelligence layer.
 
 ## Recent Changes (Feb 2026)
+- **Multi-Tenant BusinessId Fix** - All pages now properly use the logged-in user's businessId
+  - Fixed Cockpit, Reports, Bookings, and Commerce pages to call refreshWorkspace() before fetching data
+  - Removed hardcoded DEFAULT_BUSINESS_ID fallbacks that caused auth failures
+  - Pattern: useEffect for workspace init → separate useEffect for data load (depends on businessId)
 - **Commerce Module Overhaul** - Complete product/service management with full CRUD
   - Redesigned Commerce page with KeyFlow UI styling (cards, modals, tabs)
   - Products/services now include description field and TTD pricing
