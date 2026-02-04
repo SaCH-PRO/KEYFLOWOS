@@ -238,6 +238,21 @@ export class CommerceService {
   }
 
   async markInvoicePaid(invoiceId: string, actorId?: string | null) {
+    const existingInvoice = await this.prisma.client.invoice.findUnique({
+      where: { id: invoiceId },
+      select: { businessId: true },
+    });
+    if (!existingInvoice) {
+      throw new Error('Invoice not found');
+    }
+    if (actorId) {
+      const membership = await this.prisma.client.businessMember.findFirst({
+        where: { businessId: existingInvoice.businessId, userId: actorId },
+      });
+      if (!membership) {
+        throw new Error('Not authorized to update this invoice');
+      }
+    }
     const invoice = await this.prisma.client.invoice.update({
       where: { id: invoiceId },
       data: { status: 'PAID', paidAt: new Date() },
@@ -284,6 +299,21 @@ export class CommerceService {
   }
 
   async markInvoicePaymentFailed(invoiceId: string, actorId?: string | null, reason?: string) {
+    const existingInvoice = await this.prisma.client.invoice.findUnique({
+      where: { id: invoiceId },
+      select: { businessId: true },
+    });
+    if (!existingInvoice) {
+      throw new Error('Invoice not found');
+    }
+    if (actorId) {
+      const membership = await this.prisma.client.businessMember.findFirst({
+        where: { businessId: existingInvoice.businessId, userId: actorId },
+      });
+      if (!membership) {
+        throw new Error('Not authorized to update this invoice');
+      }
+    }
     const invoice = await this.prisma.client.invoice.update({
       where: { id: invoiceId },
       data: { status: 'FAILED' },
@@ -308,6 +338,21 @@ export class CommerceService {
     status: 'DRAFT' | 'SENT' | 'ACCEPTED' | 'REJECTED';
     actorId?: string | null;
   }) {
+    const existingQuote = await this.prisma.client.quote.findUnique({
+      where: { id: params.quoteId },
+      select: { businessId: true },
+    });
+    if (!existingQuote) {
+      throw new Error('Quote not found');
+    }
+    if (params.actorId) {
+      const membership = await this.prisma.client.businessMember.findFirst({
+        where: { businessId: existingQuote.businessId, userId: params.actorId },
+      });
+      if (!membership) {
+        throw new Error('Not authorized to update this quote');
+      }
+    }
     const quote = await this.prisma.client.quote.update({
       where: { id: params.quoteId },
       data: { status: params.status },
@@ -334,6 +379,21 @@ export class CommerceService {
     sentAt?: Date | string;
     dueDate?: Date | string | null;
   }) {
+    const existingInvoice = await this.prisma.client.invoice.findUnique({
+      where: { id: params.invoiceId },
+      select: { businessId: true },
+    });
+    if (!existingInvoice) {
+      throw new Error('Invoice not found');
+    }
+    if (params.actorId) {
+      const membership = await this.prisma.client.businessMember.findFirst({
+        where: { businessId: existingInvoice.businessId, userId: params.actorId },
+      });
+      if (!membership) {
+        throw new Error('Not authorized to update this invoice');
+      }
+    }
     const invoice = await this.prisma.client.invoice.update({
       where: { id: params.invoiceId },
       data: {
