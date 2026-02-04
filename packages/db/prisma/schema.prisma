@@ -32,6 +32,31 @@ model Business {
   timezone String  @default("America/Port_of_Spain")
   currency String  @default("TTD")
 
+  // Business Profile
+  logoUrl      String?  @map("logo_url")
+  tagline      String?
+  description  String?
+  address      String?
+  city         String?
+  country      String?
+  phone        String?
+  email        String?
+  website      String?
+
+  // Social Handles
+  facebook     String?
+  instagram    String?
+  twitter      String?
+  linkedin     String?
+  tiktok       String?
+  youtube      String?
+  whatsapp     String?
+
+  // Brand Settings
+  primaryColor   String?  @default("#F97316") @map("primary_color")
+  secondaryColor String?  @default("#14B8A6") @map("secondary_color")
+  defaultTaxRate Float?   @default(0) @map("default_tax_rate")
+
   // Module Relationships
   members          Membership[]
   contacts         Contact[]
@@ -361,8 +386,15 @@ model Invoice {
   id            String   @id @default(cuid())
   invoiceNumber String   @map("invoice_number")
   status        String   @default("DRAFT") // DRAFT, SENT, PAID, VOID, OVERDUE, FAILED
+  subtotal      Float    @default(0)
+  taxRate       Float?   @default(0) @map("tax_rate")
+  taxAmount     Float?   @default(0) @map("tax_amount")
+  discountType  String?  @map("discount_type") // PERCENTAGE or FIXED
+  discountValue Float?   @default(0) @map("discount_value")
+  discountAmount Float?  @default(0) @map("discount_amount")
   total         Float
   currency      String   @default("TTD")
+  notes         String?
   issueDate     DateTime @default(now()) @map("issue_date")
   dueDate       DateTime? @map("due_date")
   paidAt        DateTime? @map("paid_at")
