@@ -1229,4 +1229,36 @@ export async function updatePlaybook(input: { businessId?: string; playbookId: s
   }
 }
 
+export async function getCalendarAuthUrl(businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiFetch<{ url: string }>(
+    z.object({ url: z.string() }),
+    `/bookings/businesses/${encodeURIComponent(bid)}/calendar/auth-url`,
+  );
+}
+
+export async function getCalendarStatus(businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiFetch<{ connected: boolean; email?: string }>(
+    z.object({ connected: z.boolean(), email: z.string().optional() }),
+    `/bookings/businesses/${encodeURIComponent(bid)}/calendar/status`,
+  );
+}
+
+export async function disconnectCalendar(businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{ success: boolean }>({
+    path: `/bookings/businesses/${encodeURIComponent(bid)}/calendar/disconnect`,
+    body: {},
+  });
+}
+
+export async function syncBookingToCalendar(bookingId: string, businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{ success: boolean; eventId?: string }>({
+    path: `/bookings/businesses/${encodeURIComponent(bid)}/bookings/${encodeURIComponent(bookingId)}/sync-calendar`,
+    body: {},
+  });
+}
+
 export { DEFAULT_BUSINESS_ID };

@@ -1,5 +1,7 @@
-import { Body, Controller, Get, Inject, Param, Post, UseGuards, Delete } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, UseGuards, Delete, Query, Res } from '@nestjs/common';
+import { Response } from 'express';
 import { BookingsService } from './bookings.service';
+import { CalendarService } from './calendar.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CreateBookingDto } from './dto/create-booking.dto';
@@ -10,6 +12,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 export class BookingsController {
   constructor(
     @Inject(BookingsService) private readonly bookings: BookingsService,
+    @Inject(CalendarService) private readonly calendar: CalendarService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
@@ -121,5 +124,54 @@ export class BookingsController {
       data: { deletedAt: new Date() },
     });
     return { success: true };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/calendar/auth-url')
+  getCalendarAuthUrl(@Param('businessId') businessId: string) {
+    const url = this.calendar.getAuthUrl(businessId);
+    return { url };
+  }
+
+  @Get('calendar/callback')
+  async handleCalendarCallback(
+    @Query('code') code: string,
+    @Query('state') state: string,
+    @Res() res: Response,
+  ) {
+    const parsedState = this.calendar.verifyState(state);
+    if (!parsedState) {
+      return res.redirect('/app/bookings?calendar=error&reason=invalid_state');
+    }
+
+    try {
+      await this.calendar.saveCalendarCredentials(parsedState.businessId, code);
+      return res.redirect('/app/bookings?calendar=success');
+    } catch {
+      return res.redirect('/app/bookings?calendar=error');
+    }
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/calendar/status')
+  getCalendarStatus(@Param('businessId') businessId: string) {
+    return this.calendar.getCalendarStatus(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/calendar/disconnect')
+  async disconnectCalendar(@Param('businessId') businessId: string) {
+    await this.calendar.disconnectCalendar(businessId);
+    return { success: true };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/bookings/:bookingId/sync-calendar')
+  async syncBookingToCalendar(
+    @Param('businessId') businessId: string,
+    @Param('bookingId') bookingId: string,
+  ) {
+    const eventId = await this.calendar.syncBookingToCalendar(bookingId, businessId);
+    return { success: !!eventId, eventId };
   }
 }
