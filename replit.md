@@ -4,6 +4,14 @@
 KEYFLOWOS is an AI-powered operating system for service businesses that eliminates the "tool maze" by providing pre-built Playbooks for common workflows. Features a "Cockpit" dashboard with Flow Graph visualization, AI-driven Flow Feed, and comprehensive CRM as the intelligence layer.
 
 ## Recent Changes (Feb 2026)
+- **Gmail Integration for Quote Sending** - Send quotes directly from user's email
+  - OAuth 2.0 flow with Gmail sending permissions (gmail.send scope)
+  - Per-business Gmail connection stored in database (access/refresh tokens)
+  - Professional HTML email template with business branding
+  - Quote details, line items, tax/discount breakdown in email
+  - Auto-update quote status to SENT after successful email
+  - Connect/disconnect Gmail from the send quote modal
+  - Secure HMAC-signed OAuth state tokens for CSRF protection
 - **Quote-to-Invoice Workflow** - Complete quotation management with conversion
   - Create, edit, delete quotes with multi-item line items
   - Quote status flow: DRAFT → SENT → ACCEPTED/REJECTED

@@ -27,20 +27,37 @@ export class GmailService {
   private readonly clientId = process.env.GOOGLE_CLIENT_ID;
   private readonly clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   private readonly redirectUri = process.env.GMAIL_REDIRECT_URI || process.env.GOOGLE_REDIRECT_URI?.replace('/api/crm/google/callback', '/api/commerce/gmail/callback');
-  private readonly stateSecret = process.env.GOOGLE_STATE_SECRET || 'keyflow-oauth-state-secret';
+  private readonly stateSecret = process.env.GOOGLE_STATE_SECRET;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-  ) {}
+  ) {
+    if (!this.stateSecret) {
+      this.logger.warn('GOOGLE_STATE_SECRET not configured - Gmail OAuth will not be secure');
+    }
+  }
+
+  private ensureStateSecret(): string {
+    if (!this.stateSecret) {
+      throw new BadRequestException('Gmail OAuth state secret not configured');
+    }
+    return this.stateSecret;
+  }
 
   private signState(state: OAuthState): string {
+    const secret = this.ensureStateSecret();
     const payload = JSON.stringify(state);
-    const signature = createHmac('sha256', this.stateSecret).update(payload).digest('hex');
+    const signature = createHmac('sha256', secret).update(payload).digest('hex');
     return Buffer.from(`${payload}.${signature}`).toString('base64');
   }
 
   verifyState(signedState: string): OAuthState | null {
     try {
+      if (!this.stateSecret) {
+        this.logger.error('Cannot verify state: GOOGLE_STATE_SECRET not configured');
+        return null;
+      }
+      
       const decoded = Buffer.from(signedState, 'base64').toString('utf-8');
       const lastDotIndex = decoded.lastIndexOf('.');
       if (lastDotIndex === -1) return null;

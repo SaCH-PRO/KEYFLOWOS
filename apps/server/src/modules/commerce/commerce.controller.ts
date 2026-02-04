@@ -246,14 +246,14 @@ export class CommerceController {
   ) {
     const parsedState = this.gmail.verifyState(state);
     if (!parsedState) {
-      return res.redirect('/app/settings?gmail=error&reason=invalid_state');
+      return res.redirect('/app/commerce?gmail=error&reason=invalid_state');
     }
 
     try {
       await this.gmail.saveGmailCredentials(parsedState.businessId, code);
-      return res.redirect('/app/settings?gmail=success');
+      return res.redirect('/app/commerce?gmail=success');
     } catch {
-      return res.redirect('/app/settings?gmail=error');
+      return res.redirect('/app/commerce?gmail=error');
     }
   }
 

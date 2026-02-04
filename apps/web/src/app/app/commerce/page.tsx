@@ -46,6 +46,10 @@ import {
   updateQuoteStatus,
   deleteQuote,
   convertQuoteToInvoice,
+  getGmailStatus,
+  getGmailAuthUrl,
+  disconnectGmail,
+  sendQuoteEmail,
   Product,
   Invoice,
   Contact,
@@ -140,6 +144,8 @@ export default function CommercePage() {
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailForm, setEmailForm] = useState({ email: "", message: "" });
   const [sendingEmail, setSendingEmail] = useState(false);
+  const [gmailStatus, setGmailStatus] = useState<{ connected: boolean; email: string | null } | null>(null);
+  const [loadingGmail, setLoadingGmail] = useState(false);
   const [convertForm, setConvertForm] = useState({
     taxRate: "12.5",
     discountType: "PERCENT" as "PERCENT" | "FIXED",
@@ -206,16 +212,18 @@ export default function CommercePage() {
     const load = async () => {
       setLoading(true);
       try {
-        const [productsRes, invoicesRes, contactsRes, quotesRes] = await Promise.all([
+        const [productsRes, invoicesRes, contactsRes, quotesRes, gmailRes] = await Promise.all([
           fetchProducts(businessId),
           fetchInvoices(businessId),
           fetchContacts(businessId),
           listQuotes(businessId),
+          getGmailStatus(businessId),
         ]);
         setProducts((productsRes.data ?? []).map((p) => ({ ...p, currency: p.currency ?? "TTD" } as Product)));
         setInvoices(invoicesRes.data ?? []);
         setContacts(contactsRes.data ?? []);
         setQuotes(quotesRes.data ?? []);
+        if (gmailRes.data) setGmailStatus(gmailRes.data);
         if (productsRes.error) setError(productsRes.error);
         if (invoicesRes.error) setInvoiceError(invoicesRes.error);
       } catch (err) {
@@ -1578,67 +1586,136 @@ export default function CommercePage() {
                   <X className="w-4 h-4" />
                 </button>
               </div>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 block">Recipient Email</label>
-                  <input
-                    type="email"
-                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                    placeholder={selectedQuote.contact?.email || "client@example.com"}
-                    value={emailForm.email || selectedQuote.contact?.email || ""}
-                    onChange={(e) => setEmailForm((f) => ({ ...f, email: e.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 block">Message (optional)</label>
-                  <textarea
-                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 min-h-[80px]"
-                    placeholder="Please find attached your quotation..."
-                    value={emailForm.message}
-                    onChange={(e) => setEmailForm((f) => ({ ...f, message: e.target.value }))}
-                  />
-                </div>
-              </div>
-              <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
-                <div><span className="text-muted-foreground">Quote:</span> {selectedQuote.quoteNumber}</div>
-                <div><span className="text-muted-foreground">Amount:</span> ${selectedQuote.total.toFixed(2)} {selectedQuote.currency}</div>
-                <div><span className="text-muted-foreground">Expires:</span> {selectedQuote.expiryDate ? new Date(selectedQuote.expiryDate).toLocaleDateString() : "N/A"}</div>
-              </div>
-              <div className="flex gap-2 pt-2">
-                <button
-                  onClick={() => { setShowEmailModal(false); setEmailForm({ email: "", message: "" }); }}
-                  className="flex-1 rounded-xl border border-border py-2.5 text-sm hover:bg-muted"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={async () => {
-                    const targetEmail = emailForm.email || selectedQuote.contact?.email;
-                    if (!targetEmail) {
-                      alert("Please enter an email address");
-                      return;
-                    }
-                    setSendingEmail(true);
-                    // Update quote status to SENT if still in DRAFT
-                    if (selectedQuote.status === "DRAFT") {
-                      const res = await updateQuoteStatus(selectedQuote.id, "SENT");
-                      if (res.data) {
-                        setQuotes((q) => q.map((qItem) => qItem.id === selectedQuote.id ? res.data! : qItem));
+
+              {!gmailStatus?.connected ? (
+                <div className="space-y-4">
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4">
+                    <p className="text-sm text-amber-200">
+                      Connect your Gmail account to send quotes directly from your email address.
+                    </p>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      setLoadingGmail(true);
+                      try {
+                        const res = await getGmailAuthUrl(businessId ?? undefined);
+                        if (res.data?.url) {
+                          window.location.href = res.data.url;
+                        }
+                      } catch {
+                        alert("Failed to get Gmail authorization URL");
+                      } finally {
+                        setLoadingGmail(false);
                       }
-                    }
-                    // TODO: Implement actual email sending via backend
-                    // For now, just show success and close modal
-                    setSendingEmail(false);
-                    setShowEmailModal(false);
-                    setEmailForm({ email: "", message: "" });
-                    alert(`Quote sent to ${targetEmail}!`);
-                  }}
-                  disabled={sendingEmail}
-                  className="flex-1 rounded-xl bg-primary text-primary-foreground py-2.5 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {sendingEmail ? "Sending..." : <><Send className="w-4 h-4" /> Send Quote</>}
-                </button>
-              </div>
+                    }}
+                    disabled={loadingGmail}
+                    className="w-full rounded-xl bg-primary text-primary-foreground py-3 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {loadingGmail ? "Connecting..." : (
+                      <>
+                        <Mail className="w-4 h-4" />
+                        Connect Gmail Account
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => { setShowEmailModal(false); setEmailForm({ email: "", message: "" }); }}
+                    className="w-full rounded-xl border border-border py-2.5 text-sm hover:bg-muted"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-3 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="w-4 h-4 text-green-500" />
+                      <span className="text-sm text-green-200">Sending from: {gmailStatus.email}</span>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        if (confirm("Disconnect Gmail?")) {
+                          await disconnectGmail(businessId ?? undefined);
+                          setGmailStatus({ connected: false, email: null });
+                        }
+                      }}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      Disconnect
+                    </button>
+                  </div>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1.5 block">Recipient Email</label>
+                      <input
+                        type="email"
+                        className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        placeholder={selectedQuote.contact?.email || "client@example.com"}
+                        value={emailForm.email || selectedQuote.contact?.email || ""}
+                        onChange={(e) => setEmailForm((f) => ({ ...f, email: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1.5 block">Message (optional)</label>
+                      <textarea
+                        className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 min-h-[80px]"
+                        placeholder="Please find attached your quotation..."
+                        value={emailForm.message}
+                        onChange={(e) => setEmailForm((f) => ({ ...f, message: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
+                    <div><span className="text-muted-foreground">Quote:</span> {selectedQuote.quoteNumber}</div>
+                    <div><span className="text-muted-foreground">Amount:</span> ${selectedQuote.total.toFixed(2)} {selectedQuote.currency}</div>
+                    <div><span className="text-muted-foreground">Expires:</span> {selectedQuote.expiryDate ? new Date(selectedQuote.expiryDate).toLocaleDateString() : "N/A"}</div>
+                  </div>
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      onClick={() => { setShowEmailModal(false); setEmailForm({ email: "", message: "" }); }}
+                      className="flex-1 rounded-xl border border-border py-2.5 text-sm hover:bg-muted"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={async () => {
+                        const targetEmail = emailForm.email || selectedQuote.contact?.email;
+                        if (!targetEmail) {
+                          alert("Please enter an email address");
+                          return;
+                        }
+                        setSendingEmail(true);
+                        try {
+                          const res = await sendQuoteEmail({
+                            businessId: businessId ?? undefined,
+                            quoteId: selectedQuote.id,
+                            recipientEmail: targetEmail,
+                            message: emailForm.message || undefined,
+                          });
+                          if (res.data?.success) {
+                            setQuotes((q) => q.map((qItem) => 
+                              qItem.id === selectedQuote.id ? { ...qItem, status: "SENT" } : qItem
+                            ));
+                            setShowEmailModal(false);
+                            setEmailForm({ email: "", message: "" });
+                            alert(`Quote sent to ${targetEmail}!`);
+                          } else {
+                            alert(res.error || "Failed to send email");
+                          }
+                        } catch (err) {
+                          alert(err instanceof Error ? err.message : "Failed to send email");
+                        } finally {
+                          setSendingEmail(false);
+                        }
+                      }}
+                      disabled={sendingEmail}
+                      className="flex-1 rounded-xl bg-primary text-primary-foreground py-2.5 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {sendingEmail ? "Sending..." : <><Send className="w-4 h-4" /> Send Quote</>}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
