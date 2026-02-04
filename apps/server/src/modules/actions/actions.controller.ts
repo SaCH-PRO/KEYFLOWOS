@@ -1,11 +1,11 @@
-import { Body, Controller, Post, UseGuards, NotFoundException } from '@nestjs/common';
+import { Body, Controller, Inject, Post, UseGuards, NotFoundException } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Controller('actions')
 @UseGuards(AuthGuard)
 export class ActionsController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   @Post('send-receipt')
   async sendReceipt(@Body() body: { invoiceId: string; contactEmail?: string }) {

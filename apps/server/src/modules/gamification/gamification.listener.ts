@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { BookingCreatedPayload, InvoicePaidPayload, PostPublishedPayload } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -7,7 +7,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 export class GamificationListener {
   private readonly logger = new Logger(GamificationListener.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   @OnEvent('invoice.paid')
   async handleInvoicePaid(payload: InvoicePaidPayload) {

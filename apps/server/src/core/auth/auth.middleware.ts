@@ -1,4 +1,4 @@
-import { Injectable, Logger, NestMiddleware } from '@nestjs/common';
+import { Inject, Injectable, Logger, NestMiddleware } from '@nestjs/common';
 import { NextFunction, Request, Response } from 'express';
 import { SupabaseAuthService } from './supabase-auth.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -16,8 +16,8 @@ export class AuthMiddleware implements NestMiddleware {
   private supabaseAuthInstance: SupabaseAuthService | null = null;
 
   constructor(
-    private readonly supabaseAuth: SupabaseAuthService,
-    private readonly prisma: PrismaService,
+    @Inject(SupabaseAuthService) private readonly supabaseAuth: SupabaseAuthService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   private getSupabaseAuth(): SupabaseAuthService {

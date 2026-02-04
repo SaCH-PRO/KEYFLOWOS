@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import { parse } from 'csv-parse/sync';
 import { read, utils } from 'xlsx';
 import pdfParse from 'pdf-parse';
@@ -44,7 +44,10 @@ export class CrmImportService {
     group: 'tags',
   };
 
-  constructor(private readonly prisma: PrismaService, private readonly crm: CrmService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(CrmService) private readonly crm: CrmService,
+  ) {}
 
   private toParsedRow(raw: unknown): ParsedRow {
     if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
