@@ -65,6 +65,15 @@ export class CommerceController {
     return this.commerce.listInvoices(businessId);
   }
 
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/invoices')
+  createInvoice(
+    @Param('businessId') businessId: string,
+    @Body() body: { contactId?: string; items: { description: string; quantity: number; unitPrice: number }[]; currency?: string; dueDate?: string },
+  ) {
+    return this.commerce.createInvoice({ businessId, ...body });
+  }
+
   @UseGuards(AuthGuard)
   @Patch('quotes/:quoteId/status/:status')
   updateQuoteStatus(

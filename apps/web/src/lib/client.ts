@@ -724,6 +724,32 @@ export async function markInvoicePaid(invoiceId: string) {
   });
 }
 
+export async function createInvoice(input: {
+  businessId?: string;
+  contactId?: string;
+  items: { description: string; quantity: number; unitPrice: number }[];
+  currency?: string;
+  dueDate?: string;
+}) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<Invoice>({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/invoices`,
+    body: {
+      contactId: input.contactId,
+      items: input.items,
+      currency: input.currency ?? "TTD",
+      dueDate: input.dueDate,
+    },
+  });
+}
+
+export async function updateInvoiceStatus(invoiceId: string, status: "SENT" | "OVERDUE" | "VOID", options?: { dueDate?: string }) {
+  return apiPost<Invoice>({
+    path: `/commerce/invoices/${encodeURIComponent(invoiceId)}/status/${status.toLowerCase()}`,
+    body: options ?? {},
+  });
+}
+
 export type BootstrapIdentityResponse = {
   user: { id: string; email: string; name?: string | null; role: string };
   business: { id: string; name: string };
