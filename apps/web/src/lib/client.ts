@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { API_BASE, apiPost, getAuthHeaders } from "./api";
+import { API_BASE, apiPost, apiPatch, apiDelete, getAuthHeaders } from "./api";
 
 const DEFAULT_BUSINESS_ID = process.env.NEXT_PUBLIC_DEMO_BUSINESS_ID ?? "biz_demo";
 
@@ -92,6 +92,7 @@ const taskSchema = z.object({
 const productSchema = z.object({
   id: z.string(),
   name: z.string(),
+  description: z.string().nullable().optional(),
   price: z.number(),
   currency: z.string().default("TTD"),
 });
@@ -671,9 +672,9 @@ export async function deleteContact(contactId: string, businessId: string = DEFA
   });
 }
 
-export async function createProduct(input: { businessId?: string; name: string; price: number; currency?: string }) {
+export async function createProduct(input: { businessId?: string; name: string; price: number; currency?: string; description?: string }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
-  const body = { name: input.name, price: input.price, currency: input.currency ?? "TTD" };
+  const body = { name: input.name, price: input.price, currency: input.currency ?? "TTD", description: input.description };
 
   const res = await apiPost<Product>({
     path: `/commerce/businesses/${encodeURIComponent(businessId)}/products`,
@@ -685,10 +686,29 @@ export async function createProduct(input: { businessId?: string; name: string; 
   const synthesized: Product = {
     id: `pd_${Date.now()}`,
     name: input.name,
+    description: input.description ?? null,
     price: input.price,
     currency: input.currency ?? "TTD",
   };
   return { data: synthesized, error: res.error };
+}
+
+export async function updateProduct(input: { businessId?: string; productId: string; name?: string; price?: number; currency?: string; description?: string | null }) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const body: Record<string, unknown> = {};
+  if (input.name !== undefined) body.name = input.name;
+  if (input.price !== undefined) body.price = input.price;
+  if (input.currency !== undefined) body.currency = input.currency;
+  if (input.description !== undefined) body.description = input.description;
+
+  return apiPatch<Product>(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/products/${encodeURIComponent(input.productId)}`,
+    body,
+  );
+}
+
+export async function deleteProduct(productId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiDelete(`/commerce/businesses/${encodeURIComponent(businessId)}/products/${encodeURIComponent(productId)}`);
 }
 
 export async function createBooking(input: {
