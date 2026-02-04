@@ -744,7 +744,9 @@ export default function CommercePage() {
                             onChange={(e) => selectProductForItem(item.id, e.target.value)}
                           >
                             <option value="">Select item...</option>
-                            <option value="__NEW__">+ New item</option>
+                            <option value="__NEW__">
+                              {item.isNewItem && item.description ? `+ ${item.description}` : "+ New item"}
+                            </option>
                             {products.filter(p => p.isActive !== false).map((p) => (
                               <option key={p.id} value={p.id}>
                                 {p.name} - {p.currency} {Number(p.price).toLocaleString()}
