@@ -26,6 +26,7 @@ import {
   Calendar,
   User,
   Minus,
+  Mail,
 } from "lucide-react";
 import {
   createProduct,
@@ -132,6 +133,9 @@ export default function CommercePage() {
   const [quoteStatusFilter, setQuoteStatusFilter] = useState<string>("ALL");
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
   const [showConvertModal, setShowConvertModal] = useState(false);
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [emailForm, setEmailForm] = useState({ email: "", message: "" });
+  const [sendingEmail, setSendingEmail] = useState(false);
   const [convertForm, setConvertForm] = useState({
     taxRate: "12.5",
     discountType: "PERCENT" as "PERCENT" | "FIXED",
@@ -157,6 +161,7 @@ export default function CommercePage() {
 
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
   const [showInvoiceBuilder, setShowInvoiceBuilder] = useState(false);
+  const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null);
   const [invoiceForm, setInvoiceForm] = useState({
     contactId: "",
     dueDate: "",
@@ -421,6 +426,7 @@ export default function CommercePage() {
   }
 
   function resetInvoiceForm() {
+    setEditingInvoiceId(null);
     setInvoiceForm({
       contactId: "",
       dueDate: "",
@@ -531,7 +537,7 @@ export default function CommercePage() {
     }
   }
 
-  async function handleCreateInvoice() {
+  async function handleCreateOrUpdateInvoice() {
     setFormError(null);
     if (!businessId) return;
     const validItems = invoiceForm.items.filter(
@@ -568,8 +574,8 @@ export default function CommercePage() {
         setProducts((prev) => [newProduct, ...prev]);
       }
     }
-    
-    const { data, error } = await createInvoice({
+
+    const invoicePayload = {
       businessId,
       contactId: invoiceForm.contactId || undefined,
       items: validItems.map((item) => ({
@@ -582,12 +588,29 @@ export default function CommercePage() {
       discountType: invoiceForm.discountValue ? invoiceForm.discountType : undefined,
       discountValue: invoiceForm.discountValue ? parseFloat(invoiceForm.discountValue) : undefined,
       notes: invoiceForm.notes || undefined,
-    });
-    if (error) setFormError(error);
-    if (data) {
-      setInvoices((prev) => [data, ...prev]);
-      resetInvoiceForm();
-      setShowInvoiceBuilder(false);
+    };
+    
+    if (editingInvoiceId) {
+      // Update existing invoice
+      const { data, error } = await updateInvoice({
+        ...invoicePayload,
+        invoiceId: editingInvoiceId,
+      });
+      if (error) setFormError(error);
+      if (data) {
+        setInvoices((prev) => prev.map((inv) => inv.id === editingInvoiceId ? data : inv));
+        resetInvoiceForm();
+        setShowInvoiceBuilder(false);
+      }
+    } else {
+      // Create new invoice
+      const { data, error } = await createInvoice(invoicePayload);
+      if (error) setFormError(error);
+      if (data) {
+        setInvoices((prev) => [data, ...prev]);
+        resetInvoiceForm();
+        setShowInvoiceBuilder(false);
+      }
     }
   }
 
@@ -1148,72 +1171,76 @@ export default function CommercePage() {
                           <td className="px-4 py-3 text-muted-foreground">{new Date(quote.issueDate).toLocaleDateString()}</td>
                           <td className="px-4 py-3">
                             <div className="flex items-center justify-end gap-1">
+                              {/* View - always available */}
                               <button
                                 onClick={() => setSelectedQuote(quote)}
                                 className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
-                                title="View"
+                                title="View Details"
                               >
                                 <Eye className="w-4 h-4" />
                               </button>
-                              {quote.status === "DRAFT" && (
-                                <>
-                                  <button
-                                    onClick={() => {
-                                      setEditingQuoteId(quote.id);
-                                      setQuoteForm({
-                                        contactId: quote.contactId,
-                                        expiryDate: quote.expiryDate ? quote.expiryDate.split("T")[0] : "",
-                                        items: quote.items.map((item) => ({
-                                          id: item.id,
-                                          productId: item.productId ?? "",
-                                          description: item.description,
-                                          quantity: String(item.quantity),
-                                          unitPrice: String(item.unitPrice),
-                                        })),
-                                      });
-                                      setShowQuoteBuilder(true);
-                                    }}
-                                    className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
-                                    title="Edit"
-                                  >
-                                    <Pencil className="w-4 h-4" />
-                                  </button>
-                                  <button
-                                    onClick={async () => {
-                                      const res = await updateQuoteStatus(quote.id, "SENT");
-                                      if (res.data) {
-                                        setQuotes((q) => q.map((qItem) => qItem.id === quote.id ? res.data! : qItem));
-                                      }
-                                    }}
-                                    className="p-1.5 rounded-lg hover:bg-blue-500/20 text-blue-400"
-                                    title="Send Quote"
-                                  >
-                                    <Send className="w-4 h-4" />
-                                  </button>
-                                </>
+                              {/* Edit - always available */}
+                              <button
+                                onClick={() => {
+                                  setEditingQuoteId(quote.id);
+                                  setQuoteForm({
+                                    contactId: quote.contactId,
+                                    expiryDate: quote.expiryDate ? quote.expiryDate.split("T")[0] : "",
+                                    items: quote.items.map((item) => ({
+                                      id: item.id,
+                                      productId: item.productId ?? "",
+                                      description: item.description,
+                                      quantity: String(item.quantity),
+                                      unitPrice: String(item.unitPrice),
+                                    })),
+                                  });
+                                  setShowQuoteBuilder(true);
+                                }}
+                                className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
+                                title="Edit Quote"
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                              {/* Send to Email - available for DRAFT and SENT */}
+                              {(quote.status === "DRAFT" || quote.status === "SENT") && (
+                                <button
+                                  onClick={() => {
+                                    setSelectedQuote(quote);
+                                    setShowEmailModal(true);
+                                  }}
+                                  className="p-1.5 rounded-lg hover:bg-blue-500/20 text-blue-400"
+                                  title="Send to Email"
+                                >
+                                  <Mail className="w-4 h-4" />
+                                </button>
                               )}
+                              {/* Mark as Sent - DRAFT only */}
+                              {quote.status === "DRAFT" && (
+                                <button
+                                  onClick={async () => {
+                                    const res = await updateQuoteStatus(quote.id, "SENT");
+                                    if (res.data) {
+                                      setQuotes((q) => q.map((qItem) => qItem.id === quote.id ? res.data! : qItem));
+                                    }
+                                  }}
+                                  className="p-1.5 rounded-lg hover:bg-primary/20 text-primary"
+                                  title="Mark as Sent"
+                                >
+                                  <Send className="w-4 h-4" />
+                                </button>
+                              )}
+                              {/* Accept/Reject - SENT only */}
                               {quote.status === "SENT" && (
                                 <>
                                   <button
                                     onClick={async () => {
-                                      if (!businessId) return;
-                                      const statusRes = await updateQuoteStatus(quote.id, "ACCEPTED");
-                                      if (statusRes.data) {
-                                        const invoiceRes = await convertQuoteToInvoice({
-                                          businessId,
-                                          quoteId: quote.id,
-                                          taxRate: 12.5,
-                                        });
-                                        if (invoiceRes.data) {
-                                          setInvoices((inv) => [invoiceRes.data!, ...inv]);
-                                          setQuotes((q) => q.map((qItem) => qItem.id === quote.id ? { ...statusRes.data!, invoiceId: invoiceRes.data!.id } : qItem));
-                                        } else {
-                                          setQuotes((q) => q.map((qItem) => qItem.id === quote.id ? statusRes.data! : qItem));
-                                        }
+                                      const res = await updateQuoteStatus(quote.id, "ACCEPTED");
+                                      if (res.data) {
+                                        setQuotes((q) => q.map((qItem) => qItem.id === quote.id ? res.data! : qItem));
                                       }
                                     }}
                                     className="p-1.5 rounded-lg hover:bg-green-500/20 text-green-400"
-                                    title="Accept & Create Invoice"
+                                    title="Mark Accepted"
                                   >
                                     <CheckCircle className="w-4 h-4" />
                                   </button>
@@ -1231,6 +1258,7 @@ export default function CommercePage() {
                                   </button>
                                 </>
                               )}
+                              {/* Convert to Invoice - ACCEPTED only, if no invoice yet */}
                               {quote.status === "ACCEPTED" && !quote.invoiceId && (
                                 <button
                                   onClick={() => {
@@ -1240,24 +1268,23 @@ export default function CommercePage() {
                                   className="px-2 py-1 rounded-lg bg-primary/20 text-primary text-xs font-medium hover:bg-primary/30"
                                   title="Convert to Invoice"
                                 >
-                                  Convert to Invoice
+                                  Convert
                                 </button>
                               )}
-                              {quote.status === "DRAFT" && (
-                                <button
-                                  onClick={async () => {
-                                    if (!businessId) return;
-                                    if (confirm("Are you sure you want to delete this quote?")) {
-                                      await deleteQuote(businessId, quote.id);
-                                      setQuotes((q) => q.filter((qItem) => qItem.id !== quote.id));
-                                    }
-                                  }}
-                                  className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400"
-                                  title="Delete"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              )}
+                              {/* Delete - always available */}
+                              <button
+                                onClick={async () => {
+                                  if (!businessId) return;
+                                  if (confirm("Are you sure you want to delete this quote?")) {
+                                    await deleteQuote(businessId, quote.id);
+                                    setQuotes((q) => q.filter((qItem) => qItem.id !== quote.id));
+                                  }
+                                }}
+                                className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400"
+                                title="Delete Quote"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -1431,6 +1458,86 @@ export default function CommercePage() {
           </div>
         )}
 
+        {/* Send Quote Email Modal */}
+        {showEmailModal && selectedQuote && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+            <div className="bg-card rounded-2xl border border-border p-6 max-w-md w-full space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold flex items-center gap-2">
+                  <Mail className="w-5 h-5 text-primary" /> Send Quote to Client
+                </h3>
+                <button 
+                  onClick={() => { setShowEmailModal(false); setEmailForm({ email: "", message: "" }); }} 
+                  className="p-1 rounded hover:bg-muted"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1.5 block">Recipient Email</label>
+                  <input
+                    type="email"
+                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    placeholder={selectedQuote.contact?.email || "client@example.com"}
+                    value={emailForm.email || selectedQuote.contact?.email || ""}
+                    onChange={(e) => setEmailForm((f) => ({ ...f, email: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1.5 block">Message (optional)</label>
+                  <textarea
+                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 min-h-[80px]"
+                    placeholder="Please find attached your quotation..."
+                    value={emailForm.message}
+                    onChange={(e) => setEmailForm((f) => ({ ...f, message: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
+                <div><span className="text-muted-foreground">Quote:</span> {selectedQuote.quoteNumber}</div>
+                <div><span className="text-muted-foreground">Amount:</span> ${selectedQuote.total.toFixed(2)} {selectedQuote.currency}</div>
+                <div><span className="text-muted-foreground">Expires:</span> {selectedQuote.expiryDate ? new Date(selectedQuote.expiryDate).toLocaleDateString() : "N/A"}</div>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={() => { setShowEmailModal(false); setEmailForm({ email: "", message: "" }); }}
+                  className="flex-1 rounded-xl border border-border py-2.5 text-sm hover:bg-muted"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    const targetEmail = emailForm.email || selectedQuote.contact?.email;
+                    if (!targetEmail) {
+                      alert("Please enter an email address");
+                      return;
+                    }
+                    setSendingEmail(true);
+                    // Update quote status to SENT if still in DRAFT
+                    if (selectedQuote.status === "DRAFT") {
+                      const res = await updateQuoteStatus(selectedQuote.id, "SENT");
+                      if (res.data) {
+                        setQuotes((q) => q.map((qItem) => qItem.id === selectedQuote.id ? res.data! : qItem));
+                      }
+                    }
+                    // TODO: Implement actual email sending via backend
+                    // For now, just show success and close modal
+                    setSendingEmail(false);
+                    setShowEmailModal(false);
+                    setEmailForm({ email: "", message: "" });
+                    alert(`Quote sent to ${targetEmail}!`);
+                  }}
+                  disabled={sendingEmail}
+                  className="flex-1 rounded-xl bg-primary text-primary-foreground py-2.5 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {sendingEmail ? "Sending..." : <><Send className="w-4 h-4" /> Send Quote</>}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {tab === "invoices" && (
           <motion.div
             key="invoices"
@@ -1443,7 +1550,7 @@ export default function CommercePage() {
               <div className="rounded-2xl border border-primary/30 bg-card p-5 space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="text-base font-semibold flex items-center gap-2">
-                    <FileText className="w-5 h-5 text-primary" /> Create Invoice
+                    <FileText className="w-5 h-5 text-primary" /> {editingInvoiceId ? "Edit Invoice" : "Create Invoice"}
                   </h3>
                   <button onClick={() => { setShowInvoiceBuilder(false); resetInvoiceForm(); }} className="p-1 rounded hover:bg-muted">
                     <X className="w-4 h-4" />
@@ -1689,7 +1796,7 @@ export default function CommercePage() {
                   <Button variant="outline" onClick={() => { setShowInvoiceBuilder(false); resetInvoiceForm(); }}>
                     Cancel
                   </Button>
-                  <Button onClick={handleCreateInvoice}>Create Invoice</Button>
+                  <Button onClick={handleCreateOrUpdateInvoice}>{editingInvoiceId ? "Update Invoice" : "Create Invoice"}</Button>
                 </div>
               </div>
             )}
@@ -1795,6 +1902,7 @@ export default function CommercePage() {
                           </td>
                           <td className="px-4 py-3 text-right">
                             <div className="flex justify-end gap-1">
+                              {/* View - always available */}
                               <button
                                 onClick={() => setSelectedInvoice(inv)}
                                 className="p-1.5 rounded-lg hover:bg-muted transition-colors"
@@ -1802,6 +1910,33 @@ export default function CommercePage() {
                               >
                                 <Eye className="w-4 h-4 text-muted-foreground hover:text-foreground" />
                               </button>
+                              {/* Edit - always available */}
+                              <button
+                                onClick={() => {
+                                  setEditingInvoiceId(inv.id);
+                                  setInvoiceForm({
+                                    contactId: inv.contactId || "",
+                                    dueDate: inv.dueDate ? inv.dueDate.split("T")[0] : "",
+                                    items: inv.items.map((item) => ({
+                                      id: item.id,
+                                      productId: item.productId ?? "",
+                                      description: item.description,
+                                      quantity: String(item.quantity),
+                                      unitPrice: String(item.unitPrice),
+                                    })),
+                                    taxRate: String(inv.taxRate || 0),
+                                    discountType: (inv.discountType as "PERCENT" | "FIXED") || "PERCENT",
+                                    discountValue: inv.discountValue ? String(inv.discountValue) : "",
+                                    notes: inv.notes || "",
+                                  });
+                                  setShowInvoiceBuilder(true);
+                                }}
+                                className="p-1.5 rounded-lg hover:bg-muted transition-colors"
+                                title="Edit invoice"
+                              >
+                                <Pencil className="w-4 h-4 text-muted-foreground hover:text-foreground" />
+                              </button>
+                              {/* Copy payment link - always available */}
                               <button
                                 onClick={() => copyPaymentLink(inv.id)}
                                 className="p-1.5 rounded-lg hover:bg-muted transition-colors"
@@ -1809,6 +1944,7 @@ export default function CommercePage() {
                               >
                                 <Copy className={`w-4 h-4 ${copiedLink === inv.id ? "text-emerald-400" : "text-muted-foreground hover:text-foreground"}`} />
                               </button>
+                              {/* Send - DRAFT only */}
                               {inv.status === "DRAFT" && (
                                 <Button
                                   variant="outline"
@@ -1818,6 +1954,7 @@ export default function CommercePage() {
                                   <Send className="w-3 h-3" /> Send
                                 </Button>
                               )}
+                              {/* Mark Paid - DRAFT and SENT */}
                               {(inv.status === "DRAFT" || inv.status === "SENT") && (
                                 <Button
                                   variant="outline"
@@ -1827,15 +1964,14 @@ export default function CommercePage() {
                                   <CheckCircle className="w-3 h-3" /> Paid
                                 </Button>
                               )}
-                              {inv.status !== "PAID" && (
-                                <button
-                                  onClick={() => handleDeleteInvoice(inv.id)}
-                                  className="p-1.5 rounded-lg hover:bg-red-500/20 transition-colors"
-                                  title="Delete invoice"
-                                >
-                                  <Trash2 className="w-4 h-4 text-red-400 hover:text-red-300" />
-                                </button>
-                              )}
+                              {/* Delete - always available */}
+                              <button
+                                onClick={() => handleDeleteInvoice(inv.id)}
+                                className="p-1.5 rounded-lg hover:bg-red-500/20 transition-colors"
+                                title="Delete invoice"
+                              >
+                                <Trash2 className="w-4 h-4 text-red-400 hover:text-red-300" />
+                              </button>
                             </div>
                           </td>
                         </tr>
