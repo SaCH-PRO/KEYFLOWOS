@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, Users, User, Link2, Settings } from "lucide-react";
+import { Building2, Users, User, Link2, Settings, Palette } from "lucide-react";
 
 const navItems = [
   { href: "/app/settings", label: "General", icon: Settings },
   { href: "/app/settings/business", label: "Business", icon: Building2 },
   { href: "/app/settings/team", label: "Team", icon: Users },
   { href: "/app/settings/profile", label: "Profile", icon: User },
+  { href: "/app/settings/brand", label: "Brand & Theme", icon: Palette },
   { href: "/app/settings/connections", label: "Connections", icon: Link2 },
 ];
 
