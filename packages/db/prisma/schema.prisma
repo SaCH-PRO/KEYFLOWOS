@@ -293,6 +293,9 @@ model Product {
   description String?
   price       Float
   currency    String   @default("TTD") // Caribbean localization
+  category    String   @default("SERVICE") // SERVICE, PRODUCT, PACKAGE
+  duration    Int?     // Duration in minutes (for services)
+  isActive    Boolean  @default(true) @map("is_active")
 
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)

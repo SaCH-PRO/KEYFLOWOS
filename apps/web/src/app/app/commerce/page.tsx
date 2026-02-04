@@ -16,7 +16,10 @@ import {
   X,
   DollarSign,
   Search,
-  MoreVertical,
+  Clock,
+  Tag,
+  ToggleLeft,
+  ToggleRight,
 } from "lucide-react";
 import {
   createProduct,
@@ -46,7 +49,16 @@ type ProductForm = {
   name: string;
   description: string;
   price: string;
+  category: "SERVICE" | "PRODUCT" | "PACKAGE";
+  duration: string; // in minutes
+  isActive: boolean;
 };
+
+const CATEGORIES = [
+  { value: "SERVICE", label: "Service" },
+  { value: "PRODUCT", label: "Product" },
+  { value: "PACKAGE", label: "Package" },
+] as const;
 
 export default function CommercePage() {
   const [businessId, setBusinessId] = useState<string | null>(null);
@@ -62,7 +74,14 @@ export default function CommercePage() {
 
   const [showProductForm, setShowProductForm] = useState(false);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
-  const [productForm, setProductForm] = useState<ProductForm>({ name: "", description: "", price: "" });
+  const [productForm, setProductForm] = useState<ProductForm>({ 
+    name: "", 
+    description: "", 
+    price: "",
+    category: "SERVICE",
+    duration: "",
+    isActive: true,
+  });
   const [formError, setFormError] = useState<string | null>(null);
   const [productSearch, setProductSearch] = useState("");
 
@@ -129,7 +148,14 @@ export default function CommercePage() {
 
   function openAddProduct() {
     setEditingProductId(null);
-    setProductForm({ name: "", description: "", price: "" });
+    setProductForm({ 
+      name: "", 
+      description: "", 
+      price: "",
+      category: "SERVICE",
+      duration: "",
+      isActive: true,
+    });
     setFormError(null);
     setShowProductForm(true);
   }
@@ -140,6 +166,9 @@ export default function CommercePage() {
       name: product.name,
       description: product.description ?? "",
       price: String(product.price),
+      category: (product.category as "SERVICE" | "PRODUCT" | "PACKAGE") ?? "SERVICE",
+      duration: product.duration ? String(product.duration) : "",
+      isActive: product.isActive ?? true,
     });
     setFormError(null);
     setShowProductForm(true);
@@ -148,7 +177,14 @@ export default function CommercePage() {
   function closeProductForm() {
     setShowProductForm(false);
     setEditingProductId(null);
-    setProductForm({ name: "", description: "", price: "" });
+    setProductForm({ 
+      name: "", 
+      description: "", 
+      price: "",
+      category: "SERVICE",
+      duration: "",
+      isActive: true,
+    });
     setFormError(null);
   }
 
@@ -166,6 +202,8 @@ export default function CommercePage() {
 
     if (!businessId) return;
 
+    const durationValue = productForm.duration ? parseInt(productForm.duration) : null;
+
     if (editingProductId) {
       const { data, error } = await updateProduct({
         businessId,
@@ -173,6 +211,9 @@ export default function CommercePage() {
         name: parsed.data.name,
         price: parsed.data.price,
         description: parsed.data.description ?? null,
+        category: productForm.category,
+        duration: durationValue,
+        isActive: productForm.isActive,
       });
       if (error) {
         setFormError(error);
@@ -188,6 +229,9 @@ export default function CommercePage() {
         name: parsed.data.name,
         price: parsed.data.price,
         description: parsed.data.description,
+        category: productForm.category,
+        duration: durationValue,
+        isActive: productForm.isActive,
       });
       if (error) {
         setFormError(error);
@@ -384,14 +428,25 @@ export default function CommercePage() {
                     layout
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className="group relative rounded-2xl border border-border/60 bg-card hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 transition-all duration-200"
+                    className={`group relative rounded-2xl border bg-card hover:shadow-lg hover:shadow-primary/5 transition-all duration-200 ${
+                      product.isActive === false 
+                        ? "border-border/40 opacity-60" 
+                        : "border-border/60 hover:border-primary/40"
+                    }`}
                   >
                     <div className="p-5">
                       <div className="flex items-start justify-between gap-3 mb-3">
                         <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-base truncate">{product.name}</h3>
+                          <div className="flex items-center gap-2 mb-1">
+                            <h3 className="font-semibold text-base truncate">{product.name}</h3>
+                            {product.isActive === false && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground uppercase tracking-wide">
+                                Inactive
+                              </span>
+                            )}
+                          </div>
                           {product.description && (
-                            <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
+                            <p className="text-sm text-muted-foreground line-clamp-2">
                               {product.description}
                             </p>
                           )}
@@ -413,7 +468,25 @@ export default function CommercePage() {
                           </button>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-3 mt-3">
+                        <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium uppercase tracking-wide ${
+                          product.category === "SERVICE" 
+                            ? "bg-secondary/20 text-secondary" 
+                            : product.category === "PACKAGE"
+                            ? "bg-purple-500/20 text-purple-400"
+                            : "bg-blue-500/20 text-blue-400"
+                        }`}>
+                          <Tag className="w-3 h-3" />
+                          {product.category ?? "Service"}
+                        </span>
+                        {product.category === "SERVICE" && product.duration && (
+                          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                            <Clock className="w-3 h-3" />
+                            {product.duration} min
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border/40">
                         <DollarSign className="w-4 h-4 text-primary" />
                         <span className="text-lg font-bold text-primary">
                           {product.currency} {Number(product.price).toLocaleString()}
@@ -664,20 +737,68 @@ export default function CommercePage() {
                     className="w-full px-4 py-2.5 rounded-xl bg-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 resize-none"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1.5">Price (TTD) *</label>
-                  <div className="relative">
-                    <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                    <input
-                      type="number"
-                      value={productForm.price}
-                      onChange={(e) => setProductForm((f) => ({ ...f, price: e.target.value }))}
-                      placeholder="0.00"
-                      min="0"
-                      step="0.01"
-                      className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50"
-                    />
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5">Category *</label>
+                    <select
+                      value={productForm.category}
+                      onChange={(e) => setProductForm((f) => ({ ...f, category: e.target.value as "SERVICE" | "PRODUCT" | "PACKAGE" }))}
+                      className="w-full px-4 py-2.5 rounded-xl bg-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50"
+                    >
+                      {CATEGORIES.map((cat) => (
+                        <option key={cat.value} value={cat.value}>{cat.label}</option>
+                      ))}
+                    </select>
                   </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5">Price (TTD) *</label>
+                    <div className="relative">
+                      <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <input
+                        type="number"
+                        value={productForm.price}
+                        onChange={(e) => setProductForm((f) => ({ ...f, price: e.target.value }))}
+                        placeholder="0.00"
+                        min="0"
+                        step="0.01"
+                        className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50"
+                      />
+                    </div>
+                  </div>
+                </div>
+                {productForm.category === "SERVICE" && (
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5">Duration (minutes)</label>
+                    <div className="relative">
+                      <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <input
+                        type="number"
+                        value={productForm.duration}
+                        onChange={(e) => setProductForm((f) => ({ ...f, duration: e.target.value }))}
+                        placeholder="60"
+                        min="0"
+                        className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">How long does this service take?</p>
+                  </div>
+                )}
+                <div className="flex items-center justify-between p-3 rounded-xl bg-muted/30 border border-border/60">
+                  <div>
+                    <label className="block text-sm font-medium">Active</label>
+                    <p className="text-xs text-muted-foreground">Show this in your catalog</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setProductForm((f) => ({ ...f, isActive: !f.isActive }))}
+                    className={`p-1 rounded-lg transition-colors ${productForm.isActive ? "text-primary" : "text-muted-foreground"}`}
+                  >
+                    {productForm.isActive ? (
+                      <ToggleRight className="w-8 h-8" />
+                    ) : (
+                      <ToggleLeft className="w-8 h-8" />
+                    )}
+                  </button>
                 </div>
               </div>
               <div className="p-5 border-t border-border flex gap-3 justify-end">

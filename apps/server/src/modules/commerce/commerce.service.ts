@@ -22,7 +22,16 @@ export class CommerceService {
     });
   }
 
-  createProduct(input: { businessId: string; name: string; price: number; currency?: string; description?: string | null }) {
+  createProduct(input: { 
+    businessId: string; 
+    name: string; 
+    price: number; 
+    currency?: string; 
+    description?: string | null;
+    category?: string;
+    duration?: number | null;
+    isActive?: boolean;
+  }) {
     return this.prisma.client.product.create({
       data: {
         businessId: input.businessId,
@@ -30,11 +39,24 @@ export class CommerceService {
         price: input.price,
         currency: input.currency ?? 'TTD',
         description: input.description ?? null,
+        category: input.category ?? 'SERVICE',
+        duration: input.duration ?? null,
+        isActive: input.isActive ?? true,
       },
     });
   }
 
-  updateProduct(input: { businessId: string; productId: string; name?: string; price?: number; currency?: string; description?: string | null }) {
+  updateProduct(input: { 
+    businessId: string; 
+    productId: string; 
+    name?: string; 
+    price?: number; 
+    currency?: string; 
+    description?: string | null;
+    category?: string;
+    duration?: number | null;
+    isActive?: boolean;
+  }) {
     return this.prisma.client.product.update({
       where: { id: input.productId, businessId: input.businessId },
       data: {
@@ -42,6 +64,9 @@ export class CommerceService {
         ...(input.price !== undefined && { price: input.price }),
         ...(input.currency !== undefined && { currency: input.currency }),
         ...(input.description !== undefined && { description: input.description }),
+        ...(input.category !== undefined && { category: input.category }),
+        ...(input.duration !== undefined && { duration: input.duration }),
+        ...(input.isActive !== undefined && { isActive: input.isActive }),
       },
     });
   }
