@@ -1295,7 +1295,7 @@ export default function CommercePage() {
                                   setQuoteForm({
                                     contactId: quote.contactId,
                                     expiryDate: quote.expiryDate ? quote.expiryDate.split("T")[0] : "",
-                                    items: quote.items.map((item) => ({
+                                    items: (quote.items ?? []).map((item) => ({
                                       id: item.id,
                                       productId: item.productId ?? "",
                                       description: item.description,
@@ -1551,7 +1551,7 @@ export default function CommercePage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {selectedQuote.items.map((item) => (
+                      {(selectedQuote.items ?? []).map((item) => (
                         <tr key={item.id} className="border-t border-border/40">
                           <td className="px-3 py-2">{item.description}</td>
                           <td className="px-3 py-2 text-center">{item.quantity}</td>
@@ -2099,7 +2099,7 @@ export default function CommercePage() {
                                   setInvoiceForm({
                                     contactId: inv.contactId || "",
                                     dueDate: inv.dueDate ? inv.dueDate.split("T")[0] : "",
-                                    items: inv.items.map((item) => ({
+                                    items: (inv.items ?? []).map((item) => ({
                                       id: item.id,
                                       productId: item.productId ?? "",
                                       description: item.description,
