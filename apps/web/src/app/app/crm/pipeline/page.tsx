@@ -268,9 +268,10 @@ export default function ContactsPage() {
     }
   };
 
-  const handleEditContact = () => {
-    if (!selectedContactId || !contactDetail?.contact) return;
-    const c = contactDetail.contact;
+  const handleEditContact = (contact?: ContactCardData) => {
+    const c = contact || contactDetail?.contact;
+    if (!c) return;
+    setSelectedContactId(c.id);
     setEditingContact({
       firstName: c.firstName || "",
       lastName: c.lastName || "",
@@ -279,9 +280,9 @@ export default function ContactsPage() {
       companyName: c.companyName || "",
       jobTitle: c.jobTitle || "",
       status: c.status || "LEAD",
-      source: c.source || "",
-      preferredChannel: c.preferredChannel || "WhatsApp",
-      lifecycleStage: c.lifecycleStage || "",
+      source: "",
+      preferredChannel: "WhatsApp",
+      lifecycleStage: "",
       tags: Array.isArray(c.tags) ? c.tags.join(", ") : "",
       initialNote: "",
     });
@@ -290,12 +291,16 @@ export default function ContactsPage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const handleDeleteContact = async () => {
-    if (!selectedContactId || !businessId) return;
-    await deleteContact(selectedContactId, businessId);
-    setContacts((prev) => prev.filter((c) => c.id !== selectedContactId));
-    setSelectedContactId(null);
-    setContactDetail(null);
+  const handleDeleteContact = async (contact?: ContactCardData) => {
+    const id = contact?.id || selectedContactId;
+    if (!id || !businessId) return;
+    if (!confirm("Are you sure you want to delete this contact?")) return;
+    await deleteContact(id, businessId);
+    setContacts((prev) => prev.filter((c) => c.id !== id));
+    if (selectedContactId === id) {
+      setSelectedContactId(null);
+      setContactDetail(null);
+    }
     setShowMobileDetail(false);
   };
 
@@ -523,6 +528,8 @@ export default function ContactsPage() {
                   contact={contact as ContactCardData}
                   isSelected={selectedContactId === contact.id}
                   onClick={() => selectContact(contact.id)}
+                  onEdit={handleEditContact}
+                  onDelete={handleDeleteContact}
                   index={index}
                 />
               ))}
@@ -550,8 +557,8 @@ export default function ContactsPage() {
             onAddTask={handleAddTask}
             onCompleteTask={handleCompleteTask}
             onUpdateStatus={handleUpdateStatus}
-            onEdit={handleEditContact}
-            onDelete={handleDeleteContact}
+            onEdit={() => handleEditContact()}
+            onDelete={() => handleDeleteContact()}
           />
         </div>
       </div>
@@ -586,8 +593,8 @@ export default function ContactsPage() {
                   onAddTask={handleAddTask}
                   onCompleteTask={handleCompleteTask}
                   onUpdateStatus={handleUpdateStatus}
-                  onEdit={handleEditContact}
-                  onDelete={handleDeleteContact}
+                  onEdit={() => handleEditContact()}
+                  onDelete={() => handleDeleteContact()}
                 />
               </div>
             </motion.div>
