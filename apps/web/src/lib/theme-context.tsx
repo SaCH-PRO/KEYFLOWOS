@@ -15,8 +15,8 @@ type ThemeContextType = {
 };
 
 const DEFAULT_COLORS: ThemeColors = {
-  accent1: "#3B82F6",
-  accent2: "#EC4899",
+  accent1: "#F97316",
+  accent2: "#14B8A6",
 };
 
 const STORAGE_KEY = "kf_theme_colors";
@@ -25,7 +25,7 @@ const ThemeColorsContext = createContext<ThemeContextType | null>(null);
 
 function hexToHSL(hex: string): string {
   const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  if (!result) return "217 91% 60%";
+  if (!result) return "24 95% 53%";
   
   let r = parseInt(result[1], 16) / 255;
   let g = parseInt(result[2], 16) / 255;
@@ -81,22 +81,28 @@ export function ThemeColorsProvider({ children }: { children: ReactNode }) {
     applyColorsToDOM(colors);
   }, [colors]);
 
-  const updateColors = (newColors: ThemeColors) => {
-    setColors(newColors);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(newColors));
-    applyColorsToDOM(newColors);
-  };
+  useEffect(() => {
+    const initialColors = getInitialColors();
+    setColors(initialColors);
+    applyColorsToDOM(initialColors);
+  }, []);
 
   const setAccent1 = (color: string) => {
-    updateColors({ ...colors, accent1: color });
+    const newColors = { ...colors, accent1: color };
+    setColors(newColors);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(newColors));
   };
 
   const setAccent2 = (color: string) => {
-    updateColors({ ...colors, accent2: color });
+    const newColors = { ...colors, accent2: color };
+    setColors(newColors);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(newColors));
   };
 
   const resetToDefaults = () => {
-    updateColors(DEFAULT_COLORS);
+    setColors(DEFAULT_COLORS);
+    localStorage.removeItem(STORAGE_KEY);
+    applyColorsToDOM(DEFAULT_COLORS);
   };
 
   return (
@@ -109,12 +115,9 @@ export function ThemeColorsProvider({ children }: { children: ReactNode }) {
 export function useThemeColors() {
   const context = useContext(ThemeColorsContext);
   if (!context) {
-    return {
-      colors: DEFAULT_COLORS,
-      setAccent1: () => {},
-      setAccent2: () => {},
-      resetToDefaults: () => {},
-    };
+    throw new Error("useThemeColors must be used within ThemeColorsProvider");
   }
   return context;
 }
+
+export { DEFAULT_COLORS };
