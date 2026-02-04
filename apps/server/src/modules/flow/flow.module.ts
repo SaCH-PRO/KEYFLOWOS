@@ -1,11 +1,13 @@
 import { Module } from '@nestjs/common';
 import { FlowController } from './flow.controller';
 import { FlowListener } from './flow.listener';
+import { FlowService } from './flow.service';
 import { BookingsModule } from '../bookings/bookings.module';
 
 @Module({
   imports: [BookingsModule],
   controllers: [FlowController],
-  providers: [FlowListener],
+  providers: [FlowListener, FlowService],
+  exports: [FlowService],
 })
 export class FlowModule {}

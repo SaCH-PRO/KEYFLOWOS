@@ -1,28 +1,57 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { motion } from "framer-motion";
+import Link from "next/link";
 import { AchievementsStrip } from "@/components/cockpit/achievements-strip";
-import { FeedItem, FlowFeedPanel } from "@/components/cockpit/flow-feed-panel";
+import { FlowFeedPanel, FeedItem } from "@/components/cockpit/flow-feed-panel";
 import { FlowGraphPanel, Phase } from "@/components/cockpit/flow-graph-panel";
 import { FlowStatsRow } from "@/components/cockpit/flow-stats-row";
-import { fetchBookings, fetchContacts, fetchProducts, fetchInvoices, Invoice } from "@/lib/client";
+import { 
+  fetchCockpitSummary, 
+  fetchGamificationStats, 
+  CockpitSummary, 
+  GamificationStats,
+  updateStreak 
+} from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { apiPost } from "@/lib/api";
-import { Sparkles, FileText, Zap } from "lucide-react";
+import { 
+  Sparkles, 
+  FileText, 
+  Zap, 
+  TrendingUp, 
+  Users, 
+  Calendar,
+  AlertTriangle,
+  Package,
+  UserPlus,
+  Send,
+  ChevronRight,
+  Trophy,
+  Flame
+} from "lucide-react";
+
+const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
+  Package,
+  UserPlus,
+  Send,
+  AlertTriangle,
+  TrendingUp,
+  Zap,
+  Calendar,
+  Trophy,
+};
 
 export default function AppHome() {
   const [businessId, setBusinessId] = useState<string | null>(null);
-  const [stats, setStats] = useState({ mrr: "TTD --", conversionRate: "--", avgResponseTime: "--" });
+  const [cockpit, setCockpit] = useState<CockpitSummary | null>(null);
+  const [gamification, setGamification] = useState<GamificationStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [phases, setPhases] = useState<Phase[]>([]);
-  const [bottleneck, setBottleneck] = useState<string>("Quotes Sent");
-  const [momentum, setMomentum] = useState(0.35);
+  const [error, setError] = useState<string | null>(null);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
 
   useEffect(() => {
     const initWorkspace = async () => {
@@ -43,67 +72,103 @@ export default function AppHome() {
     if (!businessId) return;
     const load = async () => {
       setLoading(true);
-      const [{ data: contacts }, { data: bookings }, { data: products }, { data: invs }] = await Promise.all([
-        fetchContacts(businessId),
-        fetchBookings(businessId),
-        fetchProducts(businessId),
-        fetchInvoices(businessId),
-      ]);
-      const contactCount = Array.isArray(contacts) ? contacts.length : 0;
-      const bookingCount = Array.isArray(bookings) ? bookings.length : 0;
-      const productCount = Array.isArray(products) ? products.length : 0;
-      const invoiceCount = Array.isArray(invs) ? invs.length : 0;
-      const invoicesPaid = Array.isArray(invs) ? invs.filter((i) => i.status?.toUpperCase() === "PAID").length : 0;
+      setError(null);
+      try {
+        const [cockpitResult, gamificationResult] = await Promise.all([
+          fetchCockpitSummary(businessId),
+          fetchGamificationStats(businessId),
+        ]);
 
-      setStats({
-        mrr: `TTD ${Math.max(5000, bookingCount * 2000 + productCount * 1200).toLocaleString()}`,
-        conversionRate: `${Math.min(80, 20 + contactCount * 3)}%`,
-        avgResponseTime: `${Math.max(2, 6 - contactCount * 0.2).toFixed(1)}m`,
-      });
+        if (cockpitResult.error) {
+          console.error("Cockpit fetch error:", cockpitResult.error);
+        }
+        if (gamificationResult.error) {
+          console.error("Gamification fetch error:", gamificationResult.error);
+        }
 
-      const initialFeed = buildFeed({ contactsCount: contactCount, bookingCount, productCount, invoices: invs ?? [] });
-      setFeedItems(initialFeed);
+        if (cockpitResult.data) {
+          setCockpit(cockpitResult.data);
+        }
+        if (gamificationResult.data) {
+          setGamification(gamificationResult.data);
+        }
 
-      const phaseValues: Phase[] = [
-        { label: "Leads", value: Math.max(contactCount, 1) },
-        { label: "Quotes Sent", value: Math.max(invoiceCount, 1) },
-        { label: "Invoices Paid", value: Math.max(invoicesPaid, 1) },
-        { label: "Bookings", value: Math.max(bookingCount, 1) },
-      ];
-      setPhases(phaseValues);
-      const minPhase = phaseValues.reduce((a, b) => (b.value < a.value ? b : a), phaseValues[0]);
-      setBottleneck(minPhase.label);
+        if (!cockpitResult.data && !gamificationResult.data) {
+          setError("Unable to load dashboard data. Please try again.");
+        }
 
-      const momentumScore = Math.min(
-        1,
-        0.15 + bookingCount * 0.08 + productCount * 0.05 + contactCount * 0.03 + invoicesPaid * 0.06,
-      );
-      setMomentum(momentumScore);
-      setInvoices(invs ?? []);
+        void updateStreak(businessId);
+      } catch (err) {
+        console.error("Dashboard load error:", err);
+        setError("Failed to load dashboard. Please refresh the page.");
+      }
       setLoading(false);
     };
     void load();
 
     if (typeof window !== "undefined") {
-      const handler = (event: Event) => {
-        const detail = (event as CustomEvent).detail as { invoiceNumber?: string; total?: number; currency?: string; invoiceId?: string };
-        const newItem: FeedItem = {
-          type: "payment",
-          title: `${detail.invoiceNumber ?? "Invoice"} marked PAID`,
-          time: "just now",
-          description: `${detail.currency ?? "TTD"} ${Number(detail.total ?? 0).toLocaleString()}`,
-          suggestion: "Send receipt",
-          meta: detail.invoiceId ? { invoiceId: detail.invoiceId } : undefined,
-        };
-        setFeedItems((prev) => [newItem, ...prev].slice(0, 8));
+      const handler = () => void load();
+      window.addEventListener("kf:invoicePaid", handler);
+      window.addEventListener("kf:bookingCreated", handler);
+      return () => {
+        window.removeEventListener("kf:invoicePaid", handler);
+        window.removeEventListener("kf:bookingCreated", handler);
       };
-      window.addEventListener("kf:invoicePaid", handler as EventListener);
-      return () => window.removeEventListener("kf:invoicePaid", handler as EventListener);
     }
   }, [businessId]);
 
+  const stats = useMemo(() => {
+    if (!cockpit) return { mrr: "TTD --", conversionRate: "--", avgResponseTime: "--" };
+    const { stats: s } = cockpit;
+    return {
+      mrr: `TTD ${s.monthlyRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      conversionRate: s.totalContacts > 0 
+        ? `${Math.round((s.totalContacts - s.activeLeads) / s.totalContacts * 100)}%`
+        : "0%",
+      avgResponseTime: `${s.weeklyBookings} bookings/wk`,
+    };
+  }, [cockpit]);
+
+  const phases: Phase[] = useMemo(() => {
+    if (!cockpit) return [];
+    return cockpit.phases.map(p => ({ label: p.name, value: p.count }));
+  }, [cockpit]);
+
+  const bottleneck = cockpit?.bottleneck?.phase ?? "Leads";
+
+  const feedItems: FeedItem[] = useMemo(() => {
+    if (!cockpit) return [];
+    return cockpit.feed.map(f => {
+      let type: FeedItem["type"] = "message";
+      if (f.tone === "success") type = "payment";
+      else if (f.actionType === "booking") type = "booking";
+      else if (f.actionType === "event") type = "automation";
+      
+      return {
+        type,
+        title: f.text.split(" — ")[0] || f.text,
+        time: f.timestamp,
+        description: f.text.split(" — ")[1] || "",
+        suggestion: f.actionType === "invoice" ? "View invoice" : undefined,
+        meta: f.actionId ? { invoiceId: f.actionId } : undefined,
+      };
+    });
+  }, [cockpit]);
+
+  const achievedCount = gamification?.achievements.filter(a => a.achieved).length ?? 0;
+  const totalAchievements = gamification?.achievements.length ?? 0;
+
   return (
     <div className="space-y-6">
+      {error && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500"
+        >
+          {error}
+        </motion.div>
+      )}
       <motion.div 
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
@@ -118,6 +183,21 @@ export default function AppHome() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          {gamification && (
+            <div className="hidden md:flex items-center gap-2 px-3 py-2 rounded-xl bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20">
+              <Trophy className="w-4 h-4 text-amber-500" />
+              <span className="text-sm font-medium">Level {gamification.level}</span>
+              <span className="text-xs text-muted-foreground">
+                {gamification.currentXp}/{gamification.currentXp + gamification.xpToNextLevel} XP
+              </span>
+            </div>
+          )}
+          {gamification && gamification.streakDays > 0 && (
+            <div className="hidden md:flex items-center gap-2 px-3 py-2 rounded-xl bg-gradient-to-r from-orange-500/10 to-red-500/10 border border-orange-500/20">
+              <Flame className="w-4 h-4 text-orange-500" />
+              <span className="text-sm font-medium">{gamification.streakDays} day streak</span>
+            </div>
+          )}
           <button
             className="kf-btn-primary inline-flex items-center gap-2"
             onClick={async () => {
@@ -130,17 +210,12 @@ export default function AppHome() {
                 suggestion: "Summarize health",
               });
               setAiSuggestion(msg);
-              setActionMessage(msg);
               setAiLoading(false);
             }}
             disabled={aiLoading}
           >
             <Sparkles className="w-4 h-4" />
             {aiLoading ? "Analyzing..." : "AI Health Check"}
-          </button>
-          <button className="kf-btn-secondary inline-flex items-center gap-2">
-            <FileText className="w-4 h-4" />
-            <span className="hidden sm:inline">Export</span>
           </button>
         </div>
       </motion.div>
@@ -159,18 +234,70 @@ export default function AppHome() {
             <span className="text-sm font-medium">Momentum</span>
           </div>
           <span className="text-lg font-bold" style={{ color: "hsl(var(--kf-accent1))" }}>
-            {Math.round(momentum * 100)}%
+            {Math.round((cockpit?.momentum ?? 0) * 100)}%
           </span>
         </div>
         <div className="kf-momentum-bar">
-          <div className="kf-momentum-fill" style={{ width: `${momentum * 100}%` }} />
+          <div className="kf-momentum-fill" style={{ width: `${(cockpit?.momentum ?? 0) * 100}%` }} />
         </div>
         <p className="text-xs text-muted-foreground mt-2">
-          Keep the momentum going! Focus on {bottleneck.toLowerCase()} to boost your score.
+          {cockpit?.bottleneck 
+            ? cockpit.bottleneck.suggestion 
+            : "Great work! Keep the momentum going."}
         </p>
       </motion.div>
 
-      {!loading && <AchievementsStrip />}
+      {cockpit?.quickActions && cockpit.quickActions.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.25 }}
+          className="kf-card p-4"
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <Zap className="w-5 h-5" style={{ color: "hsl(var(--kf-accent2))" }} />
+            <span className="text-sm font-medium">Quick Actions</span>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {cockpit.quickActions.map(action => {
+              const IconComponent = iconMap[action.icon] || Zap;
+              return (
+                <Link
+                  key={action.id}
+                  href={action.href}
+                  className="flex items-center gap-3 p-3 rounded-xl border border-border/60 hover:border-border hover:bg-muted/50 transition-all group"
+                >
+                  <div 
+                    className="h-10 w-10 rounded-lg flex items-center justify-center flex-shrink-0 bg-orange-500/10"
+                  >
+                    <IconComponent className="w-5 h-5 text-orange-500" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium truncate">{action.label}</div>
+                    <div className="text-xs text-muted-foreground truncate">{action.description}</div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:translate-x-0.5 transition-transform" />
+                </Link>
+              );
+            })}
+          </div>
+        </motion.div>
+      )}
+
+      {!loading && gamification && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.3 }}
+        >
+          <AchievementsStrip 
+            achievements={gamification.achievements}
+            level={gamification.level}
+            currentXp={gamification.currentXp}
+            xpToNextLevel={gamification.xpToNextLevel}
+          />
+        </motion.div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <FlowFeedPanel
@@ -183,34 +310,33 @@ export default function AppHome() {
           }}
           onAction={(item) => {
             if (item.meta?.invoiceId) {
-              window.open(`/commerce/invoices/${item.meta.invoiceId}/receipt`, "_blank");
-              void sendAction("send-receipt", { invoiceId: item.meta.invoiceId }).then((msg) => setActionMessage(msg));
-              setTimeout(() => setActionMessage(null), 2000);
-            }
-            if (item.meta?.contactEmail) {
-              void sendAction("remind-contact", { contactEmail: item.meta.contactEmail }).then((msg) => setActionMessage(msg));
+              window.open(`/pay/${item.meta.invoiceId}`, "_blank");
             }
           }}
         />
         <div className="space-y-4">
           <FlowGraphPanel phases={phases} bottleneck={bottleneck} />
-          <button
-            className="w-full kf-btn-secondary inline-flex items-center justify-center gap-2"
-            onClick={async () => {
-              const msg = await requestAiSuggestion({
-                type: "automation",
-                title: "Fix bottleneck",
-                time: "now",
-                description: bottleneck,
-                suggestion: `Improve ${bottleneck}`,
-              });
-              setAiSuggestion(msg);
-              setActionMessage(msg);
-            }}
-          >
-            <Sparkles className="w-4 h-4" />
-            Ask AI to improve {bottleneck}
-          </button>
+          {cockpit?.bottleneck && (
+            <button
+              className="w-full kf-btn-secondary inline-flex items-center justify-center gap-2"
+              onClick={async () => {
+                setAiLoading(true);
+                const msg = await requestAiSuggestion({
+                  type: "automation",
+                  title: "Fix bottleneck",
+                  time: "now",
+                  description: cockpit.bottleneck?.phase ?? "",
+                  suggestion: cockpit.bottleneck?.suggestion ?? "",
+                });
+                setAiSuggestion(msg);
+                setAiLoading(false);
+              }}
+              disabled={aiLoading}
+            >
+              <Sparkles className="w-4 h-4" />
+              Ask AI to improve {cockpit.bottleneck.phase}
+            </button>
+          )}
         </div>
       </div>
 
@@ -227,95 +353,126 @@ export default function AppHome() {
             >
               <Sparkles className="w-4 h-4 text-white" />
             </div>
-            <div>
+            <div className="flex-1">
               <div className="text-sm font-medium mb-1">AI Suggestion</div>
               <p className="text-sm text-muted-foreground">{aiSuggestion}</p>
             </div>
+            <button 
+              onClick={() => setAiSuggestion(null)}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              &times;
+            </button>
           </div>
         </motion.div>
       )}
 
-      {actionMessage && !aiSuggestion && (
-        <div className="kf-badge kf-badge-muted text-sm">
-          {actionMessage}
-        </div>
-      )}
-
-      {invoices.length > 0 && (
+      {cockpit && cockpit.highlights.highPotential.length > 0 && (
         <motion.div 
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 0.3 }}
+          transition={{ delay: 0.4 }}
           className="kf-card p-4"
         >
-          <div className="text-sm font-medium mb-3">Recent Invoices</div>
+          <div className="flex items-center gap-2 mb-3">
+            <TrendingUp className="w-5 h-5" style={{ color: "hsl(var(--kf-accent2))" }} />
+            <span className="text-sm font-medium">High Potential Contacts</span>
+          </div>
           <div className="flex flex-wrap gap-2">
-            {invoices.slice(0, 4).map((inv) => (
-              <span
-                key={inv.id}
-                className="kf-badge kf-badge-muted gap-2 px-3 py-2 text-sm rounded-xl"
+            {cockpit.highlights.highPotential.slice(0, 5).map((contact) => (
+              <Link
+                key={contact.contactId}
+                href={`/app/crm/contacts/${contact.contactId}`}
+                className="flex items-center gap-2 px-3 py-2 rounded-xl border border-border/60 hover:border-border hover:bg-muted/50 transition-all"
               >
-                <span 
-                  className="h-2 w-2 rounded-full" 
-                  style={{ background: inv.status === "PAID" ? "hsl(var(--kf-accent2))" : "hsl(var(--kf-accent1))" }}
-                />
-                {inv.invoiceNumber ?? inv.id}
-                <span className="text-xs text-muted-foreground">{inv.status}</span>
-              </span>
+                <Users className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm">{contact.name}</span>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/10 text-green-500">
+                  Score {contact.score}
+                </span>
+              </Link>
             ))}
+          </div>
+        </motion.div>
+      )}
+
+      {cockpit && cockpit.highlights.overdueReminders.length > 0 && (
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.45 }}
+          className="kf-card p-4 border-amber-500/20"
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <AlertTriangle className="w-5 h-5 text-amber-500" />
+            <span className="text-sm font-medium">Needs Follow-up</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {cockpit.highlights.overdueReminders.slice(0, 5).map((contact) => (
+              <Link
+                key={contact.contactId}
+                href={`/app/crm/contacts/${contact.contactId}`}
+                className="flex items-center gap-2 px-3 py-2 rounded-xl border border-amber-500/20 hover:border-amber-500/40 hover:bg-amber-500/5 transition-all"
+              >
+                <Users className="w-4 h-4 text-amber-500" />
+                <span className="text-sm">{contact.name}</span>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500">
+                  {contact.daysSince}d ago
+                </span>
+              </Link>
+            ))}
+          </div>
+        </motion.div>
+      )}
+
+      {gamification && gamification.challenges.length > 0 && (
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.5 }}
+          className="kf-card p-4"
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <Trophy className="w-5 h-5 text-amber-500" />
+            <span className="text-sm font-medium">Active Challenges</span>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {gamification.challenges.map((challenge) => {
+              const progress = Math.min(100, (challenge.progress / challenge.target) * 100);
+              const IconComponent = iconMap[challenge.icon] || Trophy;
+              return (
+                <div
+                  key={challenge.id}
+                  className="p-3 rounded-xl border border-border/60 bg-muted/20"
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <IconComponent className="w-4 h-4 text-amber-500" />
+                    <span className="text-sm font-medium">{challenge.title}</span>
+                    <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground ml-auto">
+                      {challenge.type}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-2">{challenge.description}</p>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div 
+                        className="h-full rounded-full bg-amber-500 transition-all"
+                        style={{ width: `${progress}%` }}
+                      />
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      {challenge.progress}/{challenge.target}
+                    </span>
+                  </div>
+                  <div className="text-xs text-amber-500 mt-1">+{challenge.xpReward} XP</div>
+                </div>
+              );
+            })}
           </div>
         </motion.div>
       )}
     </div>
   );
-}
-
-function buildFeed(input: { contactsCount: number; bookingCount: number; productCount: number; invoices: Invoice[] }): FeedItem[] {
-  const minutesAgo = (n: number) => `${n} min ago`;
-  const items: FeedItem[] = [];
-
-  if (input.bookingCount > 0) {
-    items.push({
-      type: "booking",
-      title: "New booking confirmed",
-      time: minutesAgo(5),
-      description: "Client reserved a slot today.",
-      suggestion: "Send prep checklist",
-    });
-  }
-
-  if (input.productCount > 0) {
-    items.push({
-      type: "payment",
-      title: "Invoice paid",
-      time: minutesAgo(12),
-      description: "TTD 850.00 received via Stripe.",
-      suggestion: "Send review request",
-    });
-  }
-
-  if (input.invoices.length > 0) {
-    input.invoices.slice(0, 2).forEach((inv, idx) => {
-      items.push({
-        type: "payment",
-        title: `${inv.invoiceNumber ?? "Invoice"} ${inv.status}`,
-        time: minutesAgo(20 + idx * 3),
-        description: `${inv.currency} ${Number(inv.total).toLocaleString()} · ${inv.status}`,
-        suggestion: inv.status === "PAID" ? "Send receipt" : "Remind contact",
-        meta: { invoiceId: inv.id, contactEmail: inv.contact?.email ?? undefined },
-      });
-    });
-  }
-
-  items.push({
-    type: "message",
-    title: "New lead from social",
-    time: minutesAgo(28),
-    description: "Asked for pricing on Instagram DM.",
-    suggestion: "Send pricing & booking link",
-  });
-
-  return items;
 }
 
 async function requestAiSuggestion(item: FeedItem): Promise<string> {
@@ -324,15 +481,4 @@ async function requestAiSuggestion(item: FeedItem): Promise<string> {
     body: { title: item.title, type: item.type, suggestion: item.suggestion },
   });
   return data?.suggestion ?? error ?? "AI is thinking...";
-}
-
-async function sendAction(
-  type: "remind-contact" | "send-receipt",
-  payload: { contactEmail?: string; invoiceId?: string },
-): Promise<string> {
-  const { data, error } = await apiPost<{ message: string }>({
-    path: "/api/actions",
-    body: { type, ...payload },
-  });
-  return data?.message ?? error ?? "Action queued";
 }
