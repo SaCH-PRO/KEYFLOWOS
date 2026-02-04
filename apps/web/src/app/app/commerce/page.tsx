@@ -72,6 +72,9 @@ type InvoiceLineItem = {
   description: string;
   quantity: string;
   unitPrice: string;
+  isNewItem?: boolean;
+  newItemCategory?: "SERVICE" | "PRODUCT" | "PACKAGE";
+  addToCatalog?: boolean;
 };
 
 const INVOICE_STATUS_FILTERS = [
@@ -308,7 +311,7 @@ export default function CommercePage() {
     }));
   }
 
-  function updateInvoiceItem(itemId: string, field: keyof InvoiceLineItem, value: string) {
+  function updateInvoiceItem(itemId: string, field: keyof InvoiceLineItem, value: string | boolean) {
     setInvoiceForm((f) => ({
       ...f,
       items: f.items.map((item) =>
@@ -318,6 +321,25 @@ export default function CommercePage() {
   }
 
   function selectProductForItem(itemId: string, productId: string) {
+    if (productId === "__NEW__") {
+      setInvoiceForm((f) => ({
+        ...f,
+        items: f.items.map((item) =>
+          item.id === itemId
+            ? {
+                ...item,
+                productId: "__NEW__",
+                isNewItem: true,
+                newItemCategory: "SERVICE",
+                description: "",
+                unitPrice: "",
+                addToCatalog: false,
+              }
+            : item
+        ),
+      }));
+      return;
+    }
     const product = products.find((p) => p.id === productId);
     if (product) {
       setInvoiceForm((f) => ({
@@ -329,12 +351,26 @@ export default function CommercePage() {
                 productId,
                 description: product.name,
                 unitPrice: String(product.price),
+                isNewItem: false,
+                addToCatalog: false,
               }
             : item
         ),
       }));
     } else {
-      updateInvoiceItem(itemId, "productId", "");
+      setInvoiceForm((f) => ({
+        ...f,
+        items: f.items.map((item) =>
+          item.id === itemId
+            ? {
+                ...item,
+                productId: "",
+                isNewItem: false,
+                addToCatalog: false,
+              }
+            : item
+        ),
+      }));
     }
   }
 
@@ -368,6 +404,30 @@ export default function CommercePage() {
       setFormError("At least one item with description and price is required");
       return;
     }
+    
+    // First, create any new items that should be added to catalog
+    const itemsToAddToCatalog = validItems.filter(
+      (item) => item.isNewItem && item.addToCatalog
+    );
+    
+    for (const item of itemsToAddToCatalog) {
+      const { data: newProduct, error: productError } = await createProduct({
+        businessId,
+        name: item.description,
+        price: parseFloat(item.unitPrice),
+        category: item.newItemCategory || "SERVICE",
+        description: "",
+        isActive: true,
+      });
+      if (productError) {
+        setFormError(`Failed to add "${item.description}" to catalog: ${productError}`);
+        return;
+      }
+      if (newProduct) {
+        setProducts((prev) => [newProduct, ...prev]);
+      }
+    }
+    
     const { data, error } = await createInvoice({
       businessId,
       contactId: invoiceForm.contactId || undefined,
@@ -674,64 +734,95 @@ export default function CommercePage() {
                   </div>
                   
                   {invoiceForm.items.map((item, index) => (
-                    <div key={item.id} className="grid grid-cols-12 gap-2 items-end p-3 rounded-xl bg-muted/30 border border-border/40">
-                      <div className="col-span-12 md:col-span-3">
-                        <label className="text-xs text-muted-foreground mb-1 block">Product/Service</label>
-                        <select
-                          className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                          value={item.productId}
-                          onChange={(e) => selectProductForItem(item.id, e.target.value)}
-                        >
-                          <option value="">Custom item...</option>
-                          {products.filter(p => p.isActive !== false).map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.name} - {p.currency} {Number(p.price).toLocaleString()}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="col-span-12 md:col-span-4">
-                        <label className="text-xs text-muted-foreground mb-1 block">Description</label>
-                        <input
-                          className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                          placeholder="Item description"
-                          value={item.description}
-                          onChange={(e) => updateInvoiceItem(item.id, "description", e.target.value)}
-                        />
-                      </div>
-                      <div className="col-span-4 md:col-span-2">
-                        <label className="text-xs text-muted-foreground mb-1 block">Qty</label>
-                        <input
-                          className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                          placeholder="1"
-                          type="number"
-                          min="1"
-                          value={item.quantity}
-                          onChange={(e) => updateInvoiceItem(item.id, "quantity", e.target.value)}
-                        />
-                      </div>
-                      <div className="col-span-6 md:col-span-2">
-                        <label className="text-xs text-muted-foreground mb-1 block">Price (TTD)</label>
-                        <input
-                          className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                          placeholder="0.00"
-                          type="number"
-                          step="0.01"
-                          value={item.unitPrice}
-                          onChange={(e) => updateInvoiceItem(item.id, "unitPrice", e.target.value)}
-                        />
-                      </div>
-                      <div className="col-span-2 md:col-span-1 flex justify-center">
-                        {invoiceForm.items.length > 1 && (
-                          <button
-                            onClick={() => removeInvoiceItem(item.id)}
-                            className="p-2 rounded-lg hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors"
-                            title="Remove item"
+                    <div key={item.id} className="p-3 rounded-xl bg-muted/30 border border-border/40 space-y-2">
+                      <div className="grid grid-cols-12 gap-2 items-end">
+                        <div className="col-span-12 md:col-span-3">
+                          <label className="text-xs text-muted-foreground mb-1 block">Product/Service</label>
+                          <select
+                            className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                            value={item.productId}
+                            onChange={(e) => selectProductForItem(item.id, e.target.value)}
                           >
-                            <Minus className="w-4 h-4" />
-                          </button>
+                            <option value="">Select item...</option>
+                            <option value="__NEW__">+ New item</option>
+                            {products.filter(p => p.isActive !== false).map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name} - {p.currency} {Number(p.price).toLocaleString()}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        {item.isNewItem && (
+                          <div className="col-span-12 md:col-span-2">
+                            <label className="text-xs text-muted-foreground mb-1 block">Type</label>
+                            <select
+                              className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                              value={item.newItemCategory || "SERVICE"}
+                              onChange={(e) => updateInvoiceItem(item.id, "newItemCategory", e.target.value)}
+                            >
+                              {CATEGORIES.map((cat) => (
+                                <option key={cat.value} value={cat.value}>{cat.label}</option>
+                              ))}
+                            </select>
+                          </div>
                         )}
+                        <div className={`col-span-12 ${item.isNewItem ? "md:col-span-3" : "md:col-span-4"}`}>
+                          <label className="text-xs text-muted-foreground mb-1 block">Description</label>
+                          <input
+                            className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                            placeholder={item.isNewItem ? "New item name/description" : "Item description"}
+                            value={item.description}
+                            onChange={(e) => updateInvoiceItem(item.id, "description", e.target.value)}
+                          />
+                        </div>
+                        <div className="col-span-4 md:col-span-2">
+                          <label className="text-xs text-muted-foreground mb-1 block">Qty</label>
+                          <input
+                            className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                            placeholder="1"
+                            type="number"
+                            min="1"
+                            value={item.quantity}
+                            onChange={(e) => updateInvoiceItem(item.id, "quantity", e.target.value)}
+                          />
+                        </div>
+                        <div className="col-span-6 md:col-span-2">
+                          <label className="text-xs text-muted-foreground mb-1 block">Price (TTD)</label>
+                          <input
+                            className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                            placeholder="0.00"
+                            type="number"
+                            step="0.01"
+                            value={item.unitPrice}
+                            onChange={(e) => updateInvoiceItem(item.id, "unitPrice", e.target.value)}
+                          />
+                        </div>
+                        <div className="col-span-2 md:col-span-1 flex justify-center">
+                          {invoiceForm.items.length > 1 && (
+                            <button
+                              onClick={() => removeInvoiceItem(item.id)}
+                              className="p-2 rounded-lg hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors"
+                              title="Remove item"
+                            >
+                              <Minus className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </div>
+                      {item.isNewItem && (
+                        <div className="flex items-center gap-2 pt-1 pl-1">
+                          <input
+                            type="checkbox"
+                            id={`addToCatalog_${item.id}`}
+                            checked={item.addToCatalog || false}
+                            onChange={(e) => updateInvoiceItem(item.id, "addToCatalog", e.target.checked)}
+                            className="w-4 h-4 rounded border-border text-primary focus:ring-primary/50"
+                          />
+                          <label htmlFor={`addToCatalog_${item.id}`} className="text-xs text-muted-foreground cursor-pointer">
+                            Add this item to my product catalog
+                          </label>
+                        </div>
+                      )}
                     </div>
                   ))}
                   
