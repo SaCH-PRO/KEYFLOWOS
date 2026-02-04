@@ -525,7 +525,7 @@ export default function CommercePage() {
       contactId: "",
       expiryDate: "",
       items: [{ id: generateItemId(), productId: "", description: "", quantity: "1", unitPrice: "" }],
-      taxRate: businessProfile?.defaultTaxRate ? String(businessProfile.defaultTaxRate) : "12.5",
+      taxRate: "12.5",
       discountType: "PERCENT",
       discountValue: "",
       notes: "",
