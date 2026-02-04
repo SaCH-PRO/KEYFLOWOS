@@ -14,23 +14,26 @@ import {
   Download,
   CheckCircle2,
   AlertCircle,
+  Chrome,
 } from "lucide-react";
+import { getGoogleContactsAuthUrl } from "@/lib/client";
 
-type ImportMethod = "file" | "url" | "ocr";
-type FileType = "csv" | "xlsx";
+type ImportMethod = "file" | "url" | "ocr" | "google";
+type FileType = "csv" | "xlsx" | "vcf";
 
 interface ContactImportProps {
   onImportFile: (type: FileType | "image", file: File) => Promise<void>;
   onImportLink: (url: string) => Promise<void>;
   onImportOcr: (text: string) => Promise<void>;
   loading?: boolean;
+  businessId?: string;
 }
 
 const CSV_TEMPLATE = `firstName,lastName,email,phone,company,status
 John,Doe,john@example.com,+1868123456,Acme Corp,LEAD
 Jane,Smith,jane@example.com,+1868654321,Tech Inc,PROSPECT`;
 
-export function ContactImport({ onImportFile, onImportLink, onImportOcr, loading }: ContactImportProps) {
+export function ContactImport({ onImportFile, onImportLink, onImportOcr, loading, businessId }: ContactImportProps) {
   const [expanded, setExpanded] = useState(false);
   const [method, setMethod] = useState<ImportMethod>("file");
   const [fileType, setFileType] = useState<FileType>("csv");
@@ -39,7 +42,22 @@ export function ContactImport({ onImportFile, onImportLink, onImportOcr, loading
   const [ocrText, setOcrText] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleGoogleConnect = async () => {
+    setGoogleLoading(true);
+    try {
+      const result = await getGoogleContactsAuthUrl(businessId);
+      if (result?.url) {
+        window.location.href = result.url;
+      }
+    } catch (err) {
+      console.error("Failed to get Google auth URL:", err);
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
 
   const handleDragOver = (e: DragEvent) => {
     e.preventDefault();
@@ -59,6 +77,7 @@ export function ContactImport({ onImportFile, onImportLink, onImportOcr, loading
       const ext = droppedFile.name.split(".").pop()?.toLowerCase();
       if (ext === "csv") setFileType("csv");
       else if (ext === "xlsx" || ext === "xls") setFileType("xlsx");
+      else if (ext === "vcf") setFileType("vcf");
       setFile(droppedFile);
     }
   };
@@ -122,7 +141,7 @@ export function ContactImport({ onImportFile, onImportLink, onImportOcr, loading
           </div>
           <div className="text-left">
             <span className="font-medium">Import Contacts</span>
-            <p className="text-xs text-muted-foreground">CSV, Excel, URL, or Business Card</p>
+            <p className="text-xs text-muted-foreground">CSV, Excel, vCard, Google, or URL</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -148,16 +167,17 @@ export function ContactImport({ onImportFile, onImportLink, onImportOcr, loading
             exit={{ opacity: 0, height: 0 }}
             className="border-t border-border"
           >
-            <div className="flex border-b border-border">
+            <div className="flex border-b border-border overflow-x-auto">
               {[
                 { key: "file" as const, label: "Upload File", icon: FileSpreadsheet },
+                { key: "google" as const, label: "Google", icon: Chrome },
                 { key: "url" as const, label: "From URL", icon: Link2 },
                 { key: "ocr" as const, label: "Business Card", icon: ScanText },
               ].map(({ key, label, icon: Icon }) => (
                 <button
                   key={key}
                   onClick={() => setMethod(key)}
-                  className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-all border-b-2 ${
+                  className={`flex-1 flex items-center justify-center gap-2 px-3 py-3 text-sm font-medium transition-all border-b-2 whitespace-nowrap ${
                     method === key
                       ? "border-[hsl(var(--kf-accent1))] text-[hsl(var(--kf-accent1))] bg-[hsl(var(--kf-accent1))]/5"
                       : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30"
@@ -174,27 +194,32 @@ export function ContactImport({ onImportFile, onImportLink, onImportOcr, loading
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <div className="flex gap-2">
-                      {(["csv", "xlsx"] as const).map((type) => (
+                      {(["csv", "xlsx", "vcf"] as const).map((type) => (
                         <button
                           key={type}
-                          onClick={() => setFileType(type)}
+                          onClick={() => {
+                            setFileType(type);
+                            setFile(null);
+                          }}
                           className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${
                             fileType === type
                               ? "bg-[hsl(var(--kf-accent1))] text-white"
                               : "bg-muted text-muted-foreground hover:bg-muted/80"
                           }`}
                         >
-                          {type.toUpperCase()}
+                          {type === "vcf" ? "vCard" : type.toUpperCase()}
                         </button>
                       ))}
                     </div>
-                    <button
-                      onClick={downloadTemplate}
-                      className="flex items-center gap-1.5 text-xs text-[hsl(var(--kf-accent2))] hover:underline"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      Download Template
-                    </button>
+                    {fileType !== "vcf" && (
+                      <button
+                        onClick={downloadTemplate}
+                        className="flex items-center gap-1.5 text-xs text-[hsl(var(--kf-accent2))] hover:underline"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Download Template
+                      </button>
+                    )}
                   </div>
 
                   <div
@@ -213,7 +238,7 @@ export function ContactImport({ onImportFile, onImportLink, onImportOcr, loading
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept={fileType === "csv" ? ".csv" : ".xlsx,.xls"}
+                      accept={fileType === "csv" ? ".csv" : fileType === "xlsx" ? ".xlsx,.xls" : ".vcf"}
                       onChange={handleFileSelect}
                       className="hidden"
                     />
@@ -259,8 +284,17 @@ export function ContactImport({ onImportFile, onImportLink, onImportOcr, loading
                     <p className="text-xs text-muted-foreground flex items-start gap-2">
                       <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
                       <span>
-                        Your file should have columns: <strong>firstName</strong>, <strong>lastName</strong>, <strong>email</strong>, <strong>phone</strong>, <strong>company</strong>, <strong>status</strong>. 
-                        Download the template for the correct format.
+                        {fileType === "vcf" ? (
+                          <>
+                            <strong>vCard files</strong> (.vcf) are exported from your phone's Contacts app, Google Contacts, or Outlook. 
+                            They can contain single or multiple contacts.
+                          </>
+                        ) : (
+                          <>
+                            Your file should have columns: <strong>firstName</strong>, <strong>lastName</strong>, <strong>email</strong>, <strong>phone</strong>, <strong>company</strong>, <strong>status</strong>. 
+                            Download the template for the correct format.
+                          </>
+                        )}
                       </span>
                     </p>
                   </div>
@@ -272,6 +306,39 @@ export function ContactImport({ onImportFile, onImportLink, onImportOcr, loading
                   >
                     {loading ? "Importing..." : `Import ${file ? file.name.split(".")[0] : "Contacts"}`}
                   </button>
+                </div>
+              )}
+
+              {method === "google" && (
+                <div className="space-y-4">
+                  <div className="text-center py-4">
+                    <div className="mx-auto w-16 h-16 rounded-full bg-blue-500/10 flex items-center justify-center mb-4">
+                      <Chrome className="w-8 h-8 text-blue-500" />
+                    </div>
+                    <h3 className="font-semibold text-lg mb-2">Connect Google Contacts</h3>
+                    <p className="text-sm text-muted-foreground max-w-sm mx-auto">
+                      Securely import your contacts from Google. We only read your contact list - we never modify or delete anything.
+                    </p>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                    <p className="text-xs text-blue-600 dark:text-blue-400">
+                      <strong>What we import:</strong> Name, email, phone, company, and job title from your Google Contacts.
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={handleGoogleConnect}
+                    disabled={googleLoading}
+                    className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg bg-blue-500 text-white font-medium hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Chrome className="w-5 h-5" />
+                    {googleLoading ? "Connecting..." : "Connect Google Contacts"}
+                  </button>
+
+                  <p className="text-xs text-center text-muted-foreground">
+                    You'll be redirected to Google to authorize access.
+                  </p>
                 </div>
               )}
 
