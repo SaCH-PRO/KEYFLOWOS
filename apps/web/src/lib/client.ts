@@ -95,6 +95,9 @@ const productSchema = z.object({
   description: z.string().nullable().optional(),
   price: z.number(),
   currency: z.string().default("TTD"),
+  category: z.string().default("SERVICE"), // SERVICE, PRODUCT, PACKAGE
+  duration: z.number().nullable().optional(), // Duration in minutes
+  isActive: z.boolean().default(true),
 });
 
 const bookingSchema = z.object({
@@ -672,9 +675,26 @@ export async function deleteContact(contactId: string, businessId: string = DEFA
   });
 }
 
-export async function createProduct(input: { businessId?: string; name: string; price: number; currency?: string; description?: string }) {
+export async function createProduct(input: { 
+  businessId?: string; 
+  name: string; 
+  price: number; 
+  currency?: string; 
+  description?: string;
+  category?: string;
+  duration?: number | null;
+  isActive?: boolean;
+}) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
-  const body = { name: input.name, price: input.price, currency: input.currency ?? "TTD", description: input.description };
+  const body = { 
+    name: input.name, 
+    price: input.price, 
+    currency: input.currency ?? "TTD", 
+    description: input.description,
+    category: input.category ?? "SERVICE",
+    duration: input.duration,
+    isActive: input.isActive ?? true,
+  };
 
   const res = await apiPost<Product>({
     path: `/commerce/businesses/${encodeURIComponent(businessId)}/products`,
@@ -689,17 +709,33 @@ export async function createProduct(input: { businessId?: string; name: string; 
     description: input.description ?? null,
     price: input.price,
     currency: input.currency ?? "TTD",
+    category: input.category ?? "SERVICE",
+    duration: input.duration ?? null,
+    isActive: input.isActive ?? true,
   };
   return { data: synthesized, error: res.error };
 }
 
-export async function updateProduct(input: { businessId?: string; productId: string; name?: string; price?: number; currency?: string; description?: string | null }) {
+export async function updateProduct(input: { 
+  businessId?: string; 
+  productId: string; 
+  name?: string; 
+  price?: number; 
+  currency?: string; 
+  description?: string | null;
+  category?: string;
+  duration?: number | null;
+  isActive?: boolean;
+}) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   const body: Record<string, unknown> = {};
   if (input.name !== undefined) body.name = input.name;
   if (input.price !== undefined) body.price = input.price;
   if (input.currency !== undefined) body.currency = input.currency;
   if (input.description !== undefined) body.description = input.description;
+  if (input.category !== undefined) body.category = input.category;
+  if (input.duration !== undefined) body.duration = input.duration;
+  if (input.isActive !== undefined) body.isActive = input.isActive;
 
   return apiPatch<Product>(
     `/commerce/businesses/${encodeURIComponent(businessId)}/products/${encodeURIComponent(input.productId)}`,
