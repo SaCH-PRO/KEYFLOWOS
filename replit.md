@@ -4,6 +4,12 @@
 KEYFLOWOS is an AI-powered operating system for service businesses that eliminates the "tool maze" by providing pre-built Playbooks for common workflows. Features a "Cockpit" dashboard with Flow Graph visualization, AI-driven Flow Feed, and comprehensive CRM as the intelligence layer.
 
 ## Recent Changes (Feb 2026)
+- **Invoice Feature Enhancements** - Major upgrade to invoicing capabilities
+  - Multi-item invoices: Add/remove multiple line items per invoice with running total
+  - Product picker: Select from existing products/services to auto-fill item details
+  - Invoice detail modal: View full breakdown with items table, contact, dates
+  - Copy payment link: One-click copy of public payment URL for customers
+  - Status filters: Filter invoices by Draft/Sent/Paid/Overdue status
 - **Multi-Tenant BusinessId Fix** - All pages now properly use the logged-in user's businessId
   - Fixed Cockpit, Reports, Bookings, and Commerce pages to call refreshWorkspace() before fetching data
   - Removed hardcoded DEFAULT_BUSINESS_ID fallbacks that caused auth failures
