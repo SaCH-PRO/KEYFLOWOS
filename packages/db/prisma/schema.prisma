@@ -80,6 +80,12 @@ model Business {
   projectTemplates ProjectTemplate[]
   sites            Site[]
 
+  // Gmail Integration for sending quotes/invoices
+  gmailEmail        String?   @map("gmail_email")
+  gmailAccessToken  String?   @map("gmail_access_token")
+  gmailRefreshToken String?   @map("gmail_refresh_token")
+  gmailTokenExpiry  DateTime? @map("gmail_token_expiry")
+
   // Field for UI/UX: Gamification, Onboarding, etc.
   metaData  Json?     @default("{}") @map("meta_data")
 
