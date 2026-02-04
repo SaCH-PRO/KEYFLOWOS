@@ -39,7 +39,6 @@ import {
   fetchSegmentSummary,
   importContactsFromFile,
   importContactsFromLink,
-  createContactFromOcr,
   updateContact,
 } from "@/lib/client";
 import { ensureWorkspace, getStoredBusinessId } from "@/lib/workspace";
@@ -316,12 +315,6 @@ export default function ContactsPage() {
     void loadContacts();
   };
 
-  const handleImportOcr = async (text: string) => {
-    if (!businessId) return;
-    await createContactFromOcr({ businessId, ocrText: text });
-    void loadContacts();
-  };
-
   const stats = useMemo(
     () => [
       { label: "Total", value: contacts.length, icon: Users },
@@ -428,8 +421,8 @@ export default function ContactsPage() {
       <ContactImport
         onImportFile={handleImportFile}
         onImportLink={handleImportLink}
-        onImportOcr={handleImportOcr}
         loading={isPending}
+        businessId={businessId ?? undefined}
       />
 
       <div className="kf-card p-4 space-y-4">

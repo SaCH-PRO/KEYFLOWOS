@@ -5,7 +5,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Upload,
   Link2,
-  ScanText,
   FileSpreadsheet,
   ChevronDown,
   ChevronUp,
@@ -18,13 +17,12 @@ import {
 } from "lucide-react";
 import { getGoogleContactsAuthUrl } from "@/lib/client";
 
-type ImportMethod = "file" | "url" | "ocr" | "google";
+type ImportMethod = "file" | "url" | "google";
 type FileType = "csv" | "xlsx" | "vcf";
 
 interface ContactImportProps {
   onImportFile: (type: FileType | "image", file: File) => Promise<void>;
   onImportLink: (url: string) => Promise<void>;
-  onImportOcr: (text: string) => Promise<void>;
   loading?: boolean;
   businessId?: string;
 }
@@ -33,13 +31,12 @@ const CSV_TEMPLATE = `firstName,lastName,email,phone,company,status
 John,Doe,john@example.com,+1868123456,Acme Corp,LEAD
 Jane,Smith,jane@example.com,+1868654321,Tech Inc,PROSPECT`;
 
-export function ContactImport({ onImportFile, onImportLink, onImportOcr, loading, businessId }: ContactImportProps) {
+export function ContactImport({ onImportFile, onImportLink, loading, businessId }: ContactImportProps) {
   const [expanded, setExpanded] = useState(false);
   const [method, setMethod] = useState<ImportMethod>("file");
   const [fileType, setFileType] = useState<FileType>("csv");
   const [file, setFile] = useState<File | null>(null);
   const [link, setLink] = useState("");
-  const [ocrText, setOcrText] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
@@ -48,7 +45,7 @@ export function ContactImport({ onImportFile, onImportLink, onImportOcr, loading
   const handleGoogleConnect = async () => {
     setGoogleLoading(true);
     try {
-      const result = await getGoogleContactsAuthUrl(businessId);
+      const result = await getGoogleContactsAuthUrl(businessId) as { url?: string } | null;
       if (result?.url) {
         window.location.href = result.url;
       }
@@ -101,14 +98,6 @@ export function ContactImport({ onImportFile, onImportLink, onImportOcr, loading
     if (!link.trim()) return;
     await onImportLink(link.trim());
     setLink("");
-    setUploadSuccess(true);
-    setTimeout(() => setUploadSuccess(false), 3000);
-  };
-
-  const handleOcrImport = async () => {
-    if (!ocrText.trim()) return;
-    await onImportOcr(ocrText.trim());
-    setOcrText("");
     setUploadSuccess(true);
     setTimeout(() => setUploadSuccess(false), 3000);
   };
@@ -172,7 +161,6 @@ export function ContactImport({ onImportFile, onImportLink, onImportOcr, loading
                 { key: "file" as const, label: "Upload File", icon: FileSpreadsheet },
                 { key: "google" as const, label: "Google", icon: Chrome },
                 { key: "url" as const, label: "From URL", icon: Link2 },
-                { key: "ocr" as const, label: "Business Card", icon: ScanText },
               ].map(({ key, label, icon: Icon }) => (
                 <button
                   key={key}
@@ -371,43 +359,6 @@ export function ContactImport({ onImportFile, onImportLink, onImportOcr, loading
                     className="kf-btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {loading ? "Importing..." : "Import from URL"}
-                  </button>
-                </div>
-              )}
-
-              {method === "ocr" && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-sm font-medium mb-2 block">Extract from Business Card</label>
-                    <p className="text-xs text-muted-foreground mb-3">
-                      Use your phone's camera to scan a business card, then paste the extracted text below.
-                    </p>
-                  </div>
-
-                  <textarea
-                    placeholder={`John Doe
-Marketing Director
-Acme Corporation
-john.doe@acme.com
-+1 (868) 555-1234
-123 Business Ave, Port of Spain`}
-                    value={ocrText}
-                    onChange={(e) => setOcrText(e.target.value)}
-                    className="kf-input w-full min-h-[140px] resize-none font-mono text-sm"
-                  />
-
-                  <div className="p-3 rounded-lg bg-[hsl(var(--kf-accent2))]/10 border border-[hsl(var(--kf-accent2))]/20">
-                    <p className="text-xs text-[hsl(var(--kf-accent2))]">
-                      <strong>How it works:</strong> Our AI will automatically extract name, email, phone, company, and job title from the text.
-                    </p>
-                  </div>
-
-                  <button
-                    onClick={handleOcrImport}
-                    disabled={!ocrText.trim() || loading}
-                    className="kf-btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {loading ? "Extracting..." : "Create Contact from Text"}
                   </button>
                 </div>
               )}
