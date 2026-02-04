@@ -7,6 +7,9 @@ KEYFLOWOS is an AI-powered operating system for service businesses that eliminat
 - **Invoice Feature Enhancements** - Major upgrade to invoicing capabilities
   - Multi-item invoices: Add/remove multiple line items per invoice with running total
   - Product picker: Select from existing products/services to auto-fill item details
+  - New item creation: Add new products/services inline when creating invoices
+    - Select type (Service/Product/Package), enter description and price
+    - Option to add new item to product catalog for future use
   - Invoice detail modal: View full breakdown with items table, contact, dates
   - Copy payment link: One-click copy of public payment URL for customers
   - Status filters: Filter invoices by Draft/Sent/Paid/Overdue status
