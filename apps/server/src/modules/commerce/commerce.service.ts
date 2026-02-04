@@ -34,6 +34,25 @@ export class CommerceService {
     });
   }
 
+  updateProduct(input: { businessId: string; productId: string; name?: string; price?: number; currency?: string; description?: string | null }) {
+    return this.prisma.client.product.update({
+      where: { id: input.productId, businessId: input.businessId },
+      data: {
+        ...(input.name !== undefined && { name: input.name }),
+        ...(input.price !== undefined && { price: input.price }),
+        ...(input.currency !== undefined && { currency: input.currency }),
+        ...(input.description !== undefined && { description: input.description }),
+      },
+    });
+  }
+
+  deleteProduct(businessId: string, productId: string) {
+    return this.prisma.client.product.update({
+      where: { id: productId, businessId },
+      data: { deletedAt: new Date() },
+    });
+  }
+
   async createInvoiceForService(businessId: string, contactId: string, service: Service) {
     const total = service.price;
     return this.prisma.client.invoice.create({

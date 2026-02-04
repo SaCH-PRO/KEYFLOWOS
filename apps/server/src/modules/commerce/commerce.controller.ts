@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { CommerceService } from './commerce.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -27,6 +27,25 @@ export class CommerceController {
     @Body() body: CreateProductDto,
   ) {
     return this.commerce.createProduct({ businessId, ...body });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/products/:productId')
+  updateProduct(
+    @Param('businessId') businessId: string,
+    @Param('productId') productId: string,
+    @Body() body: Partial<CreateProductDto>,
+  ) {
+    return this.commerce.updateProduct({ businessId, productId, ...body });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/products/:productId')
+  deleteProduct(
+    @Param('businessId') businessId: string,
+    @Param('productId') productId: string,
+  ) {
+    return this.commerce.deleteProduct(businessId, productId);
   }
 
   @UseGuards(AuthGuard)
