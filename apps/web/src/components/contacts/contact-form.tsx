@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { X, User, Mail, Phone, Building2, Tag, Briefcase, MessageSquare, Camera, FileText, Upload } from "lucide-react";
+import { X, User, Mail, Phone, Building2, Tag, Briefcase, MessageSquare, FileText } from "lucide-react";
 
 const STATUSES = ["LEAD", "PROSPECT", "CLIENT", "LOST"] as const;
 const CHANNELS = ["WhatsApp", "Email", "SMS", "Call", "Instagram DM"] as const;
@@ -26,8 +26,6 @@ export interface ContactFormData {
   preferredChannel: string;
   lifecycleStage: string;
   initialNote: string;
-  photoFile: File | null;
-  photoPreview: string | null;
 }
 
 export function ContactForm({ onSubmit, onCancel, loading }: ContactFormProps) {
@@ -44,30 +42,10 @@ export function ContactForm({ onSubmit, onCancel, loading }: ContactFormProps) {
     preferredChannel: "WhatsApp",
     lifecycleStage: "",
     initialNote: "",
-    photoFile: null,
-    photoPreview: null,
   });
-
-  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] ?? null;
-    if (file) {
-      const url = URL.createObjectURL(file);
-      setForm((p) => ({ ...p, photoFile: file, photoPreview: url }));
-    }
-  };
-
-  const removePhoto = () => {
-    if (form.photoPreview) {
-      URL.revokeObjectURL(form.photoPreview);
-    }
-    setForm((p) => ({ ...p, photoFile: null, photoPreview: null }));
-  };
 
   const handleSubmit = async () => {
     await onSubmit(form);
-    if (form.photoPreview) {
-      URL.revokeObjectURL(form.photoPreview);
-    }
     setForm({
       firstName: "",
       lastName: "",
@@ -81,8 +59,6 @@ export function ContactForm({ onSubmit, onCancel, loading }: ContactFormProps) {
       preferredChannel: "WhatsApp",
       lifecycleStage: "",
       initialNote: "",
-      photoFile: null,
-      photoPreview: null,
     });
   };
 
@@ -99,66 +75,30 @@ export function ContactForm({ onSubmit, onCancel, loading }: ContactFormProps) {
         </button>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-4">
-        <div className="flex flex-col items-center gap-2">
-          <div className="relative">
-            {form.photoPreview ? (
-              <img
-                src={form.photoPreview}
-                alt="Preview"
-                className="h-20 w-20 rounded-full object-cover border-2 border-border"
-              />
-            ) : (
-              <div className="h-20 w-20 rounded-full bg-muted flex items-center justify-center border-2 border-dashed border-border">
-                <Camera className="w-6 h-6 text-muted-foreground" />
-              </div>
-            )}
-            <label className="absolute bottom-0 right-0 h-7 w-7 rounded-full bg-[hsl(var(--kf-accent1))] flex items-center justify-center cursor-pointer hover:brightness-110 transition-all">
-              <Upload className="w-3.5 h-3.5 text-white" />
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handlePhotoChange}
-                className="hidden"
-              />
-            </label>
-          </div>
-          {form.photoPreview && (
-            <button
-              type="button"
-              onClick={removePhoto}
-              className="text-xs text-muted-foreground hover:text-foreground"
-            >
-              Remove
-            </button>
-          )}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <label className="text-xs text-muted-foreground flex items-center gap-1">
+            <User className="w-3 h-3" /> First Name *
+          </label>
+          <input
+            type="text"
+            placeholder="John"
+            value={form.firstName}
+            onChange={(e) => setForm((p) => ({ ...p, firstName: e.target.value }))}
+            className="kf-input w-full"
+          />
         </div>
-
-        <div className="flex-1 grid gap-4 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <label className="text-xs text-muted-foreground flex items-center gap-1">
-              <User className="w-3 h-3" /> First Name *
-            </label>
-            <input
-              type="text"
-              placeholder="John"
-              value={form.firstName}
-              onChange={(e) => setForm((p) => ({ ...p, firstName: e.target.value }))}
-              className="kf-input w-full"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-xs text-muted-foreground flex items-center gap-1">
-              <User className="w-3 h-3" /> Last Name
-            </label>
-            <input
-              type="text"
-              placeholder="Doe"
-              value={form.lastName}
-              onChange={(e) => setForm((p) => ({ ...p, lastName: e.target.value }))}
-              className="kf-input w-full"
-            />
-          </div>
+        <div className="space-y-1.5">
+          <label className="text-xs text-muted-foreground flex items-center gap-1">
+            <User className="w-3 h-3" /> Last Name
+          </label>
+          <input
+            type="text"
+            placeholder="Doe"
+            value={form.lastName}
+            onChange={(e) => setForm((p) => ({ ...p, lastName: e.target.value }))}
+            className="kf-input w-full"
+          />
         </div>
       </div>
 
