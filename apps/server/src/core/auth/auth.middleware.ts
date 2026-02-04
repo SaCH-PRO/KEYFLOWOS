@@ -13,11 +13,20 @@ type DecodedJwt = {
 @Injectable()
 export class AuthMiddleware implements NestMiddleware {
   private readonly logger = new Logger(AuthMiddleware.name);
+  private supabaseAuthInstance: SupabaseAuthService | null = null;
 
   constructor(
     private readonly supabaseAuth: SupabaseAuthService,
     private readonly prisma: PrismaService,
   ) {}
+
+  private getSupabaseAuth(): SupabaseAuthService {
+    if (this.supabaseAuth) return this.supabaseAuth;
+    if (!this.supabaseAuthInstance) {
+      this.supabaseAuthInstance = new SupabaseAuthService();
+    }
+    return this.supabaseAuthInstance;
+  }
 
   async use(req: Request, _res: Response, next: NextFunction) {
     const header = req.headers['authorization'];
@@ -27,10 +36,9 @@ export class AuthMiddleware implements NestMiddleware {
         : undefined;
 
     this.logger.debug(`Auth header: ${header ? `${String(header).slice(0, 12)}...` : 'none'}`);
-    this.logger.debug(`SupabaseAuthService injected: ${this.supabaseAuth ? 'yes' : 'no'}`);
 
     try {
-      const supabaseAuth = this.supabaseAuth ?? new SupabaseAuthService();
+      const supabaseAuth = this.getSupabaseAuth();
       const user = await supabaseAuth.getUserFromToken(token);
       if (user?.id) {
         (req as any).user = await this.attachRole(user.id, user.email);
@@ -70,12 +78,14 @@ export class AuthMiddleware implements NestMiddleware {
   private async attachRole(userId: string, email?: string | null) {
     let role = 'USER';
     try {
-      const dbUser = await this.prisma.client.user.findUnique({
-        where: { id: userId },
-        select: { role: true },
-      });
-      if (dbUser?.role) {
-        role = dbUser.role;
+      if (this.prisma?.client) {
+        const dbUser = await this.prisma.client.user.findUnique({
+          where: { id: userId },
+          select: { role: true },
+        });
+        if (dbUser?.role) {
+          role = dbUser.role;
+        }
       }
     } catch (lookupErr) {
       this.logger.debug(`Role lookup failed: ${(lookupErr as Error).message}`);

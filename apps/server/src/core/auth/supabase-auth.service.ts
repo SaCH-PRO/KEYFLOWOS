@@ -17,8 +17,8 @@ export class SupabaseAuthService {
   private get supabase(): SupabaseClient | null {
     if (this.client) return this.client;
 
-    const url = process.env.SUPABASE_URL;
-    const anonKey = process.env.SUPABASE_ANON_KEY;
+    const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const anonKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
     if (!url || !anonKey) {
       this.logger.warn('Supabase env vars missing; auth will be treated as optional.');
