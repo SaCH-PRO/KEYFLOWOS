@@ -25,6 +25,7 @@ import {
 import { Button, Input, Card } from "@keyflow/ui";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { apiPatch, apiGet, apiPost, getAuthHeaders, API_BASE } from "@/lib/api";
+import { useThemeColors } from "@/lib/theme-context";
 
 type Business = {
   id: string;
@@ -114,6 +115,7 @@ export default function BusinessSettingsPage() {
   });
   const [activeTab, setActiveTab] = useState<"basic" | "social" | "branding">("basic");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { setAccent1, setAccent2 } = useThemeColors();
 
   useEffect(() => {
     const load = async () => {
@@ -146,11 +148,13 @@ export default function BusinessSettingsPage() {
           secondaryColor: res.data.secondaryColor || "#14B8A6",
           defaultTaxRate: (res.data.defaultTaxRate ?? 12.5).toString(),
         });
+        setAccent1(res.data.primaryColor || "#F97316");
+        setAccent2(res.data.secondaryColor || "#14B8A6");
       }
       setLoading(false);
     };
     load();
-  }, []);
+  }, [setAccent1, setAccent2]);
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -211,6 +215,8 @@ export default function BusinessSettingsPage() {
     } else {
       setStatus({ type: "success", message: "Business settings saved" });
       if (res.data) setBusiness(res.data as Business);
+      setAccent1(form.primaryColor);
+      setAccent2(form.secondaryColor);
     }
   };
 
