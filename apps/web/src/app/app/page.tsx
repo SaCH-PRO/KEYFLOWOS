@@ -106,7 +106,8 @@ export default function AppHome() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button
-            className="inline-flex items-center gap-2 rounded-full border border-primary/70 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 disabled:opacity-60 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium text-white transition-all hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed"
+            style={{ background: `linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))` }}
             onClick={async () => {
               setAiLoading(true);
               const msg = await requestAiSuggestion({
@@ -122,10 +123,10 @@ export default function AppHome() {
             }}
             disabled={aiLoading}
           >
-            <span className="h-1.5 w-1.5 rounded-full bg-primary animate-ping" />
+            <span className="h-1.5 w-1.5 rounded-full bg-white animate-ping" />
             {aiLoading ? "AI thinking..." : "Run AI Health Check"}
           </button>
-          <button className="hidden sm:inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:border-primary/60 hover:text-foreground">
+          <button className="hidden sm:inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-sm text-muted-foreground hover:bg-muted transition-colors">
             Export Report
           </button>
           <div className="hidden lg:flex flex-wrap gap-2">
@@ -191,22 +192,25 @@ export default function AppHome() {
       )}
 
       {actionMessage && (
-        <div className="rounded-2xl border border-border/70 bg-slate-900/60 px-4 py-2 text-xs text-muted-foreground">
+        <div className="rounded-2xl border border-border bg-card px-4 py-2 text-xs text-muted-foreground">
           {actionMessage}
         </div>
       )}
 
       {invoices.length > 0 && (
-        <div className="rounded-3xl border border-border/60 bg-slate-950/70 backdrop-blur px-4 py-3">
-          <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground mb-2">Recent invoices</div>
+        <div className="rounded-2xl border border-border bg-card p-4">
+          <div className="text-xs uppercase tracking-widest text-muted-foreground mb-3 font-medium">Recent invoices</div>
           <div className="flex flex-wrap gap-2">
             {invoices.slice(0, 4).map((inv) => (
               <span
                 key={inv.id}
-                className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-slate-900/60 px-3 py-1 text-xs text-muted-foreground"
+                className="inline-flex items-center gap-2 rounded-xl border border-border bg-muted px-3 py-1.5 text-xs"
               >
-                <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                {inv.invoiceNumber ?? inv.id} Â· {inv.status}
+                <span 
+                  className="h-2 w-2 rounded-full" 
+                  style={{ background: inv.status === "PAID" ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-accent2))" }}
+                />
+                {inv.invoiceNumber ?? inv.id} · {inv.status}
               </span>
             ))}
           </div>
