@@ -1,7 +1,9 @@
-import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Query, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Query, Redirect, Req, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { CrmGoogleService } from './crm-google.service';
 import { CrmImportService } from './crm-import.service';
 import { CrmPlaybookService } from './crm-playbook.service';
+import { CrmVisionService } from './crm-vision.service';
 import { CrmService } from './crm.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -10,7 +12,7 @@ import { CreateNoteDto } from './dto/create-note.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
 import { memoryStorage } from 'multer';
-import type { Express } from 'express';
+import type { Express, Response } from 'express';
 
 @Controller('crm')
 export class CrmController {
@@ -18,6 +20,8 @@ export class CrmController {
     @Inject(CrmService) private readonly crm: CrmService,
     @Inject(CrmImportService) private readonly crmImport: CrmImportService,
     @Inject(CrmPlaybookService) private readonly playbook: CrmPlaybookService,
+    @Inject(CrmVisionService) private readonly vision: CrmVisionService,
+    @Inject(CrmGoogleService) private readonly google: CrmGoogleService,
   ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -188,8 +192,8 @@ export class CrmController {
     if (!file || !file.buffer) {
       throw new BadRequestException('File is required');
     }
-    const allowed: Array<'csv' | 'xlsx' | 'pdf' | 'image'> = ['csv', 'xlsx', 'pdf', 'image'];
-    const sourceType = allowed.includes(type as any) ? (type as 'csv' | 'xlsx' | 'pdf' | 'image') : 'csv';
+    const allowed: Array<'csv' | 'xlsx' | 'pdf' | 'image' | 'vcf'> = ['csv', 'xlsx', 'pdf', 'image', 'vcf'];
+    const sourceType = allowed.includes(type as any) ? (type as 'csv' | 'xlsx' | 'pdf' | 'image' | 'vcf') : 'csv';
     return this.crmImport.createFileImport({
       businessId,
       sourceType,
@@ -282,6 +286,58 @@ export class CrmController {
       contactId,
       data: body.data,
       type: body.type,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/google/auth-url')
+  getGoogleAuthUrl(@Param('businessId') businessId: string) {
+    const url = this.google.getAuthUrl(businessId);
+    return { url };
+  }
+
+  @Get('google/callback')
+  async handleGoogleCallback(
+    @Query('code') code: string,
+    @Query('state') state: string,
+    @Res() res: Response,
+  ) {
+    if (!code || !state) {
+      return res.redirect('/app/crm/pipeline?google_error=missing_params');
+    }
+
+    const verifiedState = this.google.verifyState(state);
+    if (!verifiedState) {
+      return res.redirect('/app/crm/pipeline?google_error=invalid_state');
+    }
+
+    try {
+      const tokens = await this.google.exchangeCodeForTokens(code);
+      const result = await this.google.importGoogleContacts({
+        businessId: verifiedState.businessId,
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+      });
+
+      return res.redirect(`/app/crm/pipeline?google_success=true&imported=${result.imported}`);
+    } catch (err) {
+      return res.redirect(`/app/crm/pipeline?google_error=${encodeURIComponent((err as Error).message)}`);
+    }
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/google/import')
+  async importFromGoogle(
+    @Param('businessId') businessId: string,
+    @Body() body: { accessToken: string; refreshToken?: string },
+  ) {
+    if (!body.accessToken) {
+      throw new BadRequestException('accessToken is required');
+    }
+    return this.google.importGoogleContacts({
+      businessId,
+      accessToken: body.accessToken,
+      refreshToken: body.refreshToken,
     });
   }
 }

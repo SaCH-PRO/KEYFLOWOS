@@ -118,7 +118,7 @@ export type Contact = z.infer<typeof contactSchema> & { tags?: string[] };
 const contactImportSchema = z.object({
   id: z.string(),
   businessId: z.string(),
-  sourceType: z.enum(["csv", "xlsx", "pdf", "image", "link"]),
+  sourceType: z.enum(["csv", "xlsx", "pdf", "image", "link", "vcf"]),
   sourceUrl: z.string().nullable().optional(),
   originalName: z.string().nullable().optional(),
   status: z.string(),
@@ -570,7 +570,7 @@ export async function fetchImportJobs(businessId: string = DEFAULT_BUSINESS_ID) 
 
 export async function importContactsFromFile(input: {
   businessId?: string;
-  type: 'csv' | 'xlsx' | 'pdf' | 'image';
+  type: 'csv' | 'xlsx' | 'pdf' | 'image' | 'vcf';
   file: File;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
@@ -600,6 +600,10 @@ export async function importContactsFromLink(url: string, businessId: string = D
     path: `/crm/businesses/${encodeURIComponent(businessId)}/import/link`,
     body: { url },
   });
+}
+
+export async function getGoogleContactsAuthUrl(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGet(`/crm/businesses/${encodeURIComponent(businessId)}/google/auth-url`, z.object({ url: z.string() }));
 }
 
 export async function createContactFromOcr(params: {

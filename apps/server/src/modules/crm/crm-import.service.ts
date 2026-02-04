@@ -78,7 +78,7 @@ export class CrmImportService {
 
   async createFileImport(params: {
     businessId: string;
-    sourceType: 'csv' | 'xlsx' | 'pdf' | 'image';
+    sourceType: 'csv' | 'xlsx' | 'pdf' | 'image' | 'vcf';
     originalName?: string;
     sourceUrl?: string;
     fileBuffer?: Buffer;
@@ -354,7 +354,7 @@ export class CrmImportService {
     return contact;
   }
 
-  private async extractRows(type: 'csv' | 'xlsx' | 'pdf' | 'image', buffer?: Buffer, ocrText?: string): Promise<ParsedRow[]> {
+  private async extractRows(type: 'csv' | 'xlsx' | 'pdf' | 'image' | 'vcf', buffer?: Buffer, ocrText?: string): Promise<ParsedRow[]> {
     if (type === 'csv') {
       if (!buffer) throw new BadRequestException('File buffer required');
       return parse(buffer.toString('utf-8'), {
@@ -378,7 +378,101 @@ export class CrmImportService {
       if (!ocrText) return [];
       return [this.extractTextAsRecord(ocrText)];
     }
+    if (type === 'vcf') {
+      if (!buffer) throw new BadRequestException('File buffer required');
+      return this.parseVCard(buffer.toString('utf-8'));
+    }
     return [];
+  }
+
+  private unfoldVCardLines(content: string): string[] {
+    const rawLines = content.split(/\r?\n/);
+    const unfolded: string[] = [];
+    
+    for (const line of rawLines) {
+      if (line.startsWith(' ') || line.startsWith('\t')) {
+        if (unfolded.length > 0) {
+          unfolded[unfolded.length - 1] += line.substring(1);
+        }
+      } else {
+        unfolded.push(line);
+      }
+    }
+    
+    return unfolded;
+  }
+
+  private decodeVCardValue(value: string): string {
+    return value
+      .replace(/\\n/gi, '\n')
+      .replace(/\\,/g, ',')
+      .replace(/\\;/g, ';')
+      .replace(/\\\\/g, '\\');
+  }
+
+  private parseVCard(vcfContent: string): ParsedRow[] {
+    const contacts: ParsedRow[] = [];
+    const vcards = vcfContent.split(/(?=BEGIN:VCARD)/i).filter(v => v.trim());
+    
+    for (const vcard of vcards) {
+      const contact: ParsedRow = {};
+      const lines = this.unfoldVCardLines(vcard);
+      
+      let hasN = false;
+      const emails: string[] = [];
+      const phones: string[] = [];
+      
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('BEGIN:') || trimmed.startsWith('END:') || trimmed.startsWith('VERSION:')) continue;
+        
+        const colonIndex = trimmed.indexOf(':');
+        if (colonIndex === -1) continue;
+        
+        const keyPart = trimmed.substring(0, colonIndex).toUpperCase();
+        const key = keyPart.split(';')[0];
+        const rawValue = trimmed.substring(colonIndex + 1).trim();
+        const value = this.decodeVCardValue(rawValue);
+        
+        if (key === 'N') {
+          const parts = value.split(';');
+          contact.lastName = parts[0] || null;
+          contact.firstName = parts[1] || null;
+          hasN = true;
+        } else if (key === 'FN' && !hasN) {
+          const parts = value.split(' ');
+          contact.firstName = parts[0] || null;
+          contact.lastName = parts.slice(1).join(' ') || null;
+        } else if (key === 'EMAIL') {
+          if (!contact.email && value) {
+            contact.email = value;
+          }
+          emails.push(value);
+        } else if (key === 'TEL') {
+          if (!contact.phone && value) {
+            contact.phone = value;
+          }
+          phones.push(value);
+        } else if (key === 'ORG') {
+          contact.company = value.split(';')[0] || null;
+        } else if (key === 'TITLE') {
+          contact.jobTitle = value || null;
+        } else if (key === 'ADR') {
+          const adrParts = value.split(';');
+          contact.address = [adrParts[2], adrParts[3], adrParts[4], adrParts[5], adrParts[6]].filter(Boolean).join(', ') || null;
+        } else if (key === 'NOTE') {
+          contact.notes = value || null;
+        } else if (key === 'URL') {
+          contact.website = value || null;
+        }
+      }
+      
+      if (contact.firstName || contact.lastName || contact.email || contact.phone) {
+        contacts.push(contact);
+      }
+    }
+    
+    return contacts;
   }
 
   private extractTextAsRecord(text: string): ParsedRow {
