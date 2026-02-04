@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import { Button, Input, Table } from "@keyflow/ui";
-import { Calendar, Clock, User, Briefcase, Plus, Trash2 } from "lucide-react";
+import { Calendar, Clock, User, Briefcase, Plus, Trash2, Link2, Unlink } from "lucide-react";
 import {
   Booking,
   Service,
@@ -16,8 +16,13 @@ import {
   createStaff,
   deleteService,
   deleteStaff,
+  getCalendarAuthUrl,
+  getCalendarStatus,
+  disconnectCalendar,
+  syncBookingToCalendar,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
+import { useSearchParams } from "next/navigation";
 
 const bookingSchema = z.object({
   start: z.string().min(1, "Start time required"),
@@ -29,6 +34,7 @@ const bookingSchema = z.object({
 type Tab = "bookings" | "services" | "staff";
 
 export default function BookingsPage() {
+  const searchParams = useSearchParams();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("bookings");
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -41,6 +47,22 @@ export default function BookingsPage() {
   const [serviceForm, setServiceForm] = useState({ name: "", durationMins: "60", price: "" });
   const [staffForm, setStaffForm] = useState({ name: "", email: "" });
   const [formError, setFormError] = useState<string | null>(null);
+
+  const [calendarConnected, setCalendarConnected] = useState(false);
+  const [calendarEmail, setCalendarEmail] = useState<string | null>(null);
+  const [calendarLoading, setCalendarLoading] = useState(false);
+  const [calendarBanner, setCalendarBanner] = useState<string | null>(null);
+
+  useEffect(() => {
+    const calendarParam = searchParams?.get("calendar");
+    if (calendarParam === "success") {
+      setCalendarBanner("Google Calendar connected successfully!");
+      window.history.replaceState({}, "", "/app/bookings");
+    } else if (calendarParam === "error") {
+      setCalendarBanner("Failed to connect Google Calendar. Please try again.");
+      window.history.replaceState({}, "", "/app/bookings");
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     const initWorkspace = async () => {
@@ -61,14 +83,17 @@ export default function BookingsPage() {
     if (!businessId) return;
     const load = async () => {
       setLoading(true);
-      const [bookingsRes, servicesRes, staffRes] = await Promise.all([
+      const [bookingsRes, servicesRes, staffRes, calendarRes] = await Promise.all([
         fetchBookings(businessId),
         fetchServices(businessId),
         fetchStaff(businessId),
+        getCalendarStatus(businessId),
       ]);
       setBookings(bookingsRes.data ?? []);
       setServices(servicesRes.data ?? []);
       setStaff(staffRes.data ?? []);
+      setCalendarConnected(calendarRes.data?.connected ?? false);
+      setCalendarEmail(calendarRes.data?.email ?? null);
       if (bookingsRes.error || servicesRes.error || staffRes.error) {
         setError("Some data could not be loaded");
       }
@@ -76,6 +101,38 @@ export default function BookingsPage() {
     };
     void load();
   }, [businessId]);
+
+  async function handleConnectCalendar() {
+    if (!businessId) return;
+    setCalendarLoading(true);
+    const res = await getCalendarAuthUrl(businessId);
+    if (res.data?.url) {
+      window.location.href = res.data.url;
+    } else {
+      setCalendarBanner("Failed to start calendar connection.");
+    }
+    setCalendarLoading(false);
+  }
+
+  async function handleDisconnectCalendar() {
+    if (!businessId) return;
+    setCalendarLoading(true);
+    await disconnectCalendar(businessId);
+    setCalendarConnected(false);
+    setCalendarEmail(null);
+    setCalendarBanner("Google Calendar disconnected.");
+    setCalendarLoading(false);
+  }
+
+  async function handleSyncBooking(bookingId: string) {
+    if (!businessId) return;
+    const res = await syncBookingToCalendar(bookingId, businessId);
+    if (res.data?.success) {
+      setCalendarBanner("Booking synced to Google Calendar!");
+    } else {
+      setCalendarBanner("Failed to sync booking to calendar.");
+    }
+  }
 
   async function handleCreateBooking() {
     setFormError(null);
@@ -148,15 +205,53 @@ export default function BookingsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <div className="h-10 w-10 rounded-3xl bg-primary/20 border border-primary/40 flex items-center justify-center text-primary">
-          <Calendar className="w-5 h-5" />
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-3xl bg-primary/20 border border-primary/40 flex items-center justify-center text-primary">
+            <Calendar className="w-5 h-5" />
+          </div>
+          <div>
+            <h1 className="text-xl font-semibold">Bookings</h1>
+            <p className="text-sm text-muted-foreground">Schedule intelligence, services, and staff assignment.</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-xl font-semibold">Bookings</h1>
-          <p className="text-sm text-muted-foreground">Schedule intelligence, services, and staff assignment.</p>
+        
+        <div className="flex items-center gap-2">
+          {calendarConnected ? (
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
+                <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                <span className="text-xs text-emerald-400">Calendar: {calendarEmail}</span>
+              </div>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={handleDisconnectCalendar}
+                disabled={calendarLoading}
+                className="text-xs"
+              >
+                <Unlink className="w-3 h-3 mr-1" /> Disconnect
+              </Button>
+            </div>
+          ) : (
+            <Button
+              size="sm"
+              onClick={handleConnectCalendar}
+              disabled={calendarLoading}
+              className="text-xs"
+            >
+              <Link2 className="w-3 h-3 mr-1" /> Connect Google Calendar
+            </Button>
+          )}
         </div>
       </div>
+
+      {calendarBanner && (
+        <div className="rounded-xl border border-primary/40 bg-primary/10 px-3 py-2 text-xs text-primary flex items-center justify-between">
+          {calendarBanner}
+          <button onClick={() => setCalendarBanner(null)} className="text-primary/60 hover:text-primary">×</button>
+        </div>
+      )}
 
       <div className="flex gap-2 border-b border-border/60 pb-2">
         {(["bookings", "services", "staff"] as Tab[]).map((t) => (

@@ -4,6 +4,17 @@
 KEYFLOWOS is an AI-powered operating system for service businesses that eliminates the "tool maze" by providing pre-built Playbooks for common workflows. Features a "Cockpit" dashboard with Flow Graph visualization, AI-driven Flow Feed, and comprehensive CRM as the intelligence layer.
 
 ## Recent Changes (Feb 2026)
+- **Google Calendar Integration for Bookings** - Auto-sync bookings to Google Calendar
+  - OAuth 2.0 flow with calendar.events scope (read/write)
+  - Per-business calendar connection stored in database (access/refresh tokens)
+  - Connect/disconnect Google Calendar from the bookings page
+  - Automatic sync of booking details (service, staff, contact, time) to calendar
+  - Status banners for connection success/error feedback
+  - Token refresh with 5-minute expiry buffer
+- **Google Sign-In** - Continue with Google authentication
+  - Added "Continue with Google" buttons on login and signup pages
+  - Uses Supabase OAuth for secure authentication
+  - Redirects to /auth/callback for session handling
 - **Gmail Integration for Quote Sending** - Send quotes directly from user's email
   - OAuth 2.0 flow with Gmail sending permissions (gmail.send scope)
   - Per-business Gmail connection stored in database (access/refresh tokens)

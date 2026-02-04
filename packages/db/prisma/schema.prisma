@@ -86,6 +86,13 @@ model Business {
   gmailRefreshToken String?   @map("gmail_refresh_token")
   gmailTokenExpiry  DateTime? @map("gmail_token_expiry")
 
+  // Google Calendar Integration for syncing bookings
+  calendarEmail        String?   @map("calendar_email")
+  calendarAccessToken  String?   @map("calendar_access_token")
+  calendarRefreshToken String?   @map("calendar_refresh_token")
+  calendarTokenExpiry  DateTime? @map("calendar_token_expiry")
+  calendarId           String?   @map("calendar_id")
+
   // Field for UI/UX: Gamification, Onboarding, etc.
   metaData  Json?     @default("{}") @map("meta_data")
 
@@ -540,6 +547,8 @@ model Booking {
 
   invoiceId String?  @unique @map("invoice_id")
   invoice   Invoice? @relation(fields: [invoiceId], references: [id], onUpdate: NoAction, onDelete: NoAction) // DATA INTEGRITY
+
+  calendarEventId String? @map("calendar_event_id")
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
