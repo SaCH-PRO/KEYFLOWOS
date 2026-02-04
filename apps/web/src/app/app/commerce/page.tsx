@@ -432,6 +432,93 @@ export default function CommercePage() {
     });
   }
 
+  function addQuoteItem() {
+    setQuoteForm((f) => ({
+      ...f,
+      items: [...f.items, { id: generateItemId(), productId: "", description: "", quantity: "1", unitPrice: "" }],
+    }));
+  }
+
+  function removeQuoteItem(itemId: string) {
+    setQuoteForm((f) => ({
+      ...f,
+      items: f.items.filter((item) => item.id !== itemId),
+    }));
+  }
+
+  function updateQuoteItem(itemId: string, field: keyof InvoiceLineItem, value: string | boolean) {
+    setQuoteForm((f) => ({
+      ...f,
+      items: f.items.map((item) =>
+        item.id === itemId ? { ...item, [field]: value } : item
+      ),
+    }));
+  }
+
+  function selectProductForQuoteItem(itemId: string, productId: string) {
+    if (productId === "__NEW__") {
+      setQuoteForm((f) => ({
+        ...f,
+        items: f.items.map((item) =>
+          item.id === itemId
+            ? {
+                ...item,
+                productId: "__NEW__",
+                isNewItem: true,
+                newItemName: "",
+                newItemCategory: "SERVICE",
+                description: "",
+                unitPrice: "",
+                addToCatalog: false,
+              }
+            : item
+        ),
+      }));
+      return;
+    }
+    const product = products.find((p) => p.id === productId);
+    if (product) {
+      setQuoteForm((f) => ({
+        ...f,
+        items: f.items.map((item) =>
+          item.id === itemId
+            ? {
+                ...item,
+                productId,
+                description: product.name,
+                unitPrice: String(product.price),
+                isNewItem: false,
+                addToCatalog: false,
+              }
+            : item
+        ),
+      }));
+    } else {
+      setQuoteForm((f) => ({
+        ...f,
+        items: f.items.map((item) =>
+          item.id === itemId
+            ? {
+                ...item,
+                productId: "",
+                isNewItem: false,
+                addToCatalog: false,
+              }
+            : item
+        ),
+      }));
+    }
+  }
+
+  function resetQuoteForm() {
+    setQuoteForm({
+      contactId: "",
+      expiryDate: "",
+      items: [{ id: generateItemId(), productId: "", description: "", quantity: "1", unitPrice: "" }],
+    });
+    setEditingQuoteId(null);
+  }
+
   async function copyPaymentLink(invoiceId: string) {
     const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
     const link = `${baseUrl}/pay/${invoiceId}`;
@@ -785,7 +872,7 @@ export default function CommercePage() {
                   <h3 className="text-base font-semibold flex items-center gap-2">
                     <FileText className="w-5 h-5 text-primary" /> {editingQuoteId ? "Edit Quote" : "Create Quote"}
                   </h3>
-                  <button onClick={() => { setShowQuoteBuilder(false); setEditingQuoteId(null); }} className="p-1 rounded hover:bg-muted">
+                  <button onClick={() => { setShowQuoteBuilder(false); resetQuoteForm(); }} className="p-1 rounded hover:bg-muted">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
@@ -814,102 +901,114 @@ export default function CommercePage() {
                   />
                 </div>
 
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs text-muted-foreground">Line Items</label>
-                    <button
-                      type="button"
-                      onClick={() => setQuoteForm((f) => ({ ...f, items: [...f.items, { id: generateItemId(), productId: "", description: "", quantity: "1", unitPrice: "" }] }))}
-                      className="text-xs text-primary hover:underline flex items-center gap-1"
-                    >
+                    <label className="text-sm font-medium">Line Items</label>
+                    <Button variant="outline" onClick={addQuoteItem} className="text-xs gap-1 px-2 py-1">
                       <Plus className="w-3 h-3" /> Add Item
-                    </button>
+                    </Button>
                   </div>
-                  {quoteForm.items.map((item, idx) => (
-                    <div key={item.id} className="grid grid-cols-12 gap-2 items-start">
-                      <div className="col-span-5">
-                        <select
-                          className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm"
-                          value={item.productId}
-                          onChange={(e) => {
-                            const productId = e.target.value;
-                            const product = products.find((p) => p.id === productId);
-                            setQuoteForm((f) => {
-                              const items = [...f.items];
-                              items[idx] = {
-                                ...items[idx],
-                                productId,
-                                description: product?.name ?? "",
-                                unitPrice: product?.price?.toString() ?? "",
-                              };
-                              return { ...f, items };
-                            });
-                          }}
-                        >
-                          <option value="">Select product/service...</option>
-                          {products.map((p) => (
-                            <option key={p.id} value={p.id}>{p.name} - ${p.price} TTD</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="col-span-3">
-                        <input
-                          type="text"
-                          placeholder="Description"
-                          className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm"
-                          value={item.description}
-                          onChange={(e) => {
-                            setQuoteForm((f) => {
-                              const items = [...f.items];
-                              items[idx] = { ...items[idx], description: e.target.value };
-                              return { ...f, items };
-                            });
-                          }}
-                        />
-                      </div>
-                      <div className="col-span-1">
-                        <input
-                          type="number"
-                          min="1"
-                          placeholder="Qty"
-                          className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm text-center"
-                          value={item.quantity}
-                          onChange={(e) => {
-                            setQuoteForm((f) => {
-                              const items = [...f.items];
-                              items[idx] = { ...items[idx], quantity: e.target.value };
-                              return { ...f, items };
-                            });
-                          }}
-                        />
-                      </div>
-                      <div className="col-span-2">
-                        <input
-                          type="number"
-                          step="0.01"
-                          placeholder="Price"
-                          className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm"
-                          value={item.unitPrice}
-                          onChange={(e) => {
-                            setQuoteForm((f) => {
-                              const items = [...f.items];
-                              items[idx] = { ...items[idx], unitPrice: e.target.value };
-                              return { ...f, items };
-                            });
-                          }}
-                        />
-                      </div>
-                      <div className="col-span-1 flex justify-center">
-                        {quoteForm.items.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => setQuoteForm((f) => ({ ...f, items: f.items.filter((_, i) => i !== idx) }))}
-                            className="p-2 text-muted-foreground hover:text-red-400"
+                  
+                  {quoteForm.items.map((item) => (
+                    <div key={item.id} className="p-3 rounded-xl bg-muted/30 border border-border/40 space-y-2">
+                      <div className="grid grid-cols-12 gap-2 items-end">
+                        <div className="col-span-12 md:col-span-3">
+                          <label className="text-xs text-muted-foreground mb-1 block">Product/Service</label>
+                          <select
+                            className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                            value={item.productId}
+                            onChange={(e) => selectProductForQuoteItem(item.id, e.target.value)}
                           >
-                            <Minus className="w-4 h-4" />
-                          </button>
+                            <option value="">Select item...</option>
+                            <option value="__NEW__">
+                              {item.isNewItem && item.newItemName ? `+ ${item.newItemName}` : "+ New item"}
+                            </option>
+                            {products.filter(p => p.isActive !== false).map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name} - {p.currency} {Number(p.price).toLocaleString()}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        {item.isNewItem && (
+                          <>
+                            <div className="col-span-12 md:col-span-3">
+                              <label className="text-xs text-muted-foreground mb-1 block">Item Name</label>
+                              <input
+                                className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                placeholder="Enter name for new item"
+                                value={item.newItemName || ""}
+                                onChange={(e) => updateQuoteItem(item.id, "newItemName", e.target.value)}
+                              />
+                            </div>
+                            <div className="col-span-6 md:col-span-2">
+                              <label className="text-xs text-muted-foreground mb-1 block">Type</label>
+                              <select
+                                className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                value={item.newItemCategory || "SERVICE"}
+                                onChange={(e) => updateQuoteItem(item.id, "newItemCategory", e.target.value)}
+                              >
+                                {CATEGORIES.map((cat) => (
+                                  <option key={cat.value} value={cat.value}>{cat.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </>
                         )}
+                        <div className={`col-span-12 ${item.isNewItem ? "md:col-span-4" : "md:col-span-4"}`}>
+                          <label className="text-xs text-muted-foreground mb-1 block">Description</label>
+                          <input
+                            className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                            placeholder={item.isNewItem ? "New item name/description" : "Item description"}
+                            value={item.description}
+                            onChange={(e) => updateQuoteItem(item.id, "description", e.target.value)}
+                          />
+                        </div>
+                        <div className="col-span-4 md:col-span-2">
+                          <label className="text-xs text-muted-foreground mb-1 block">Qty</label>
+                          <input
+                            className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                            placeholder="1"
+                            type="number"
+                            min="1"
+                            value={item.quantity}
+                            onChange={(e) => updateQuoteItem(item.id, "quantity", e.target.value)}
+                          />
+                        </div>
+                        <div className="col-span-6 md:col-span-2">
+                          <label className="text-xs text-muted-foreground mb-1 block">Price (TTD)</label>
+                          <input
+                            className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                            placeholder="0.00"
+                            type="number"
+                            step="0.01"
+                            value={item.unitPrice}
+                            onChange={(e) => updateQuoteItem(item.id, "unitPrice", e.target.value)}
+                          />
+                        </div>
+                        <div className="col-span-2 md:col-span-1 flex justify-center">
+                          {quoteForm.items.length > 1 && (
+                            <button
+                              onClick={() => removeQuoteItem(item.id)}
+                              className="p-2 rounded-lg hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors"
+                              title="Remove item"
+                            >
+                              <Minus className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </div>
+                      {item.isNewItem && (
+                        <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={item.addToCatalog ?? false}
+                            onChange={(e) => updateQuoteItem(item.id, "addToCatalog", e.target.checked)}
+                            className="rounded border-border"
+                          />
+                          Add this item to my product catalog for future use
+                        </label>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -923,11 +1022,27 @@ export default function CommercePage() {
                   <Button
                     onClick={async () => {
                       if (!businessId || !quoteForm.contactId) return;
+                      
+                      for (const item of quoteForm.items) {
+                        if (item.isNewItem && item.addToCatalog && item.newItemName) {
+                          const newProduct = await createProduct({
+                            businessId,
+                            name: item.newItemName,
+                            description: item.description,
+                            category: item.newItemCategory || "SERVICE",
+                            price: parseFloat(item.unitPrice) || 0,
+                          });
+                          if (newProduct.data) {
+                            setProducts((prev) => [...prev, newProduct.data!]);
+                          }
+                        }
+                      }
+                      
                       const items = quoteForm.items.filter((item) => item.description && parseFloat(item.unitPrice) > 0).map((item) => ({
-                        description: item.description,
+                        description: item.isNewItem && item.newItemName ? item.newItemName : item.description,
                         quantity: parseInt(item.quantity) || 1,
                         unitPrice: parseFloat(item.unitPrice),
-                        productId: item.productId || undefined,
+                        productId: item.productId && item.productId !== "__NEW__" ? item.productId : undefined,
                       }));
                       if (items.length === 0) return;
                       
@@ -954,8 +1069,7 @@ export default function CommercePage() {
                         }
                       }
                       setShowQuoteBuilder(false);
-                      setEditingQuoteId(null);
-                      setQuoteForm({ contactId: "", expiryDate: "", items: [{ id: generateItemId(), productId: "", description: "", quantity: "1", unitPrice: "" }] });
+                      resetQuoteForm();
                     }}
                     className="gap-2"
                   >
