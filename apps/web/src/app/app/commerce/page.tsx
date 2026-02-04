@@ -1498,7 +1498,7 @@ export default function CommercePage() {
           </div>
         )}
 
-        {selectedQuote && !showConvertModal && (
+        {selectedQuote && !showConvertModal && !showEmailModal && (
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
             <div className="bg-card rounded-2xl border border-border p-6 max-w-lg w-full space-y-4 max-h-[80vh] overflow-y-auto">
               <div className="flex items-center justify-between">
