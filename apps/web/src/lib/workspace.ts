@@ -15,6 +15,12 @@ export function setStoredBusinessId(id: string) {
   window.localStorage.setItem(BUSINESS_ID_KEY, id);
 }
 
+export function clearStoredBusinessId() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(BUSINESS_ID_KEY);
+  window.localStorage.removeItem(TOKEN_KEY);
+}
+
 export async function ensureWorkspace(): Promise<string | null> {
   if (typeof window === "undefined") return null;
   const existing = getStoredBusinessId();

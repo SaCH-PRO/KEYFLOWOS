@@ -20,9 +20,11 @@ import {
   ChevronDown,
   LayoutDashboard,
   BarChart3,
-  Building2,
+  LogOut,
   Search,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { clearStoredBusinessId } from "@/lib/workspace";
 
 const navSections = [
   {
@@ -54,8 +56,14 @@ const navSections = [
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+
+  const handleLogout = () => {
+    clearStoredBusinessId();
+    router.push("/");
+  };
   // Temporary momentum value; could be wired to live data
   const momentumValue = 0.65;
 
@@ -176,9 +184,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <button className="inline-flex items-center justify-center h-9 w-9 rounded-full border border-border bg-slate-950/70 hover:border-primary/60 text-muted-foreground">
                 <Bell className="w-4 h-4" />
               </button>
-              <button className="hidden sm:inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:border-primary/60 hover:text-foreground">
-                <Building2 className="w-3.5 h-3.5" />
-                Switch Business
+              <button
+                onClick={handleLogout}
+                className="hidden sm:inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:border-red-500/60 hover:text-red-400 transition-colors"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                Log Out
               </button>
               <div className="h-8 w-8 rounded-full bg-gradient-to-br from-primary/60 to-slate-800 border border-primary/50 shadow-glow-primary flex items-center justify-center text-[10px] uppercase tracking-wide">
                 KF
