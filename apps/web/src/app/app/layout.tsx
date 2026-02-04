@@ -109,8 +109,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
             {!sidebarCollapsed && (
               <div className="flex-1 min-w-0">
-                <h1 className="text-lg font-bold tracking-tight">KeyFlow</h1>
-                <p className="text-xs text-muted-foreground truncate">Business OS</p>
+                <h1 className="text-lg font-bold tracking-tight">KEYFLOWOS</h1>
               </div>
             )}
           </div>
