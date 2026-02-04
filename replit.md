@@ -6,6 +6,10 @@ KEYFLOWOS is an AI-powered operating system for service businesses that eliminat
 ## Recent Changes (Feb 2026)
 - **Complete Design System Overhaul** - New unique KeyFlow identity with warm Caribbean-inspired palette
 - **Progressive Web App (PWA)** - Installable on any device with offline support
+- **Contacts Page Overhaul** - Modular component architecture with split-view layout
+  - New reusable components: ContactCard, ContactForm, ContactDetail, ContactImport
+  - Mobile-responsive bottom sheet for contact details on small screens
+  - Collapsible import panel supporting CSV, Excel, Image/OCR, and URL imports
 - Mobile-optimized bottom navigation bar for touch-friendly access
 - **New Color Palette**: Sunset Orange (#F97316) primary, Caribbean Teal (#14B8A6) secondary
 - Redesigned sidebar with icon-first navigation, collapsible width, and cleaner hierarchy
