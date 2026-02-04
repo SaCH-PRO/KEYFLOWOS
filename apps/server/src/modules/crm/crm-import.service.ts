@@ -158,13 +158,98 @@ export class CrmImportService {
   }
 
   async createLinkImport(params: { businessId: string; sourceUrl: string }) {
-    return this.prisma.client.contactImport.create({
+    const importRecord = await this.prisma.client.contactImport.create({
       data: {
         businessId: params.businessId,
         sourceType: 'link',
         sourceUrl: params.sourceUrl,
+        status: 'PROCESSING',
       },
     });
+
+    try {
+      const response = await fetch(params.sourceUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch URL: ${response.status} ${response.statusText}`);
+      }
+      
+      const contentType = response.headers.get('content-type') || '';
+      const text = await response.text();
+      
+      let rows: ParsedRow[] = [];
+      
+      try {
+        rows = parse(text, { columns: true, skip_empty_lines: true, relax_column_count: true }) as ParsedRow[];
+      } catch {
+        rows = [];
+      }
+
+      if (rows.length === 0) {
+        await this.prisma.client.contactImport.update({
+          where: { id: importRecord.id },
+          data: { status: 'FAILED', error: 'No valid rows found in the file' },
+        });
+        return importRecord;
+      }
+
+      const rawHeaders = Object.keys(rows[0] || {});
+      const mapping = this.inferFieldMapping(rawHeaders);
+
+      await this.prisma.client.contactImport.update({
+        where: { id: importRecord.id },
+        data: {
+          totalRows: rows.length,
+          headerMapping: mapping,
+        },
+      });
+
+      let created = 0;
+      for (const row of rows) {
+        const builtInput = this.buildContactInput(row, mapping);
+        const contactInput = {
+          ...builtInput,
+          source: 'import',
+          sourceDetail: 'link',
+        };
+
+        if (!builtInput.firstName && !builtInput.lastName && !builtInput.email && !builtInput.phone) {
+          continue;
+        }
+
+        await this.prisma.client.contactImportContact.create({
+          data: {
+            importId: importRecord.id,
+            rawData: row as Record<string, unknown>,
+            status: 'PENDING',
+          },
+        });
+
+        const contact = await this.crm.findOrCreateContact(params.businessId, contactInput);
+        if (contact) {
+          created++;
+        }
+      }
+
+      await this.prisma.client.contactImport.update({
+        where: { id: importRecord.id },
+        data: {
+          status: 'COMPLETED',
+          processedRows: created,
+          completedAt: new Date(),
+        },
+      });
+
+      return this.prisma.client.contactImport.findUnique({ where: { id: importRecord.id } });
+    } catch (err) {
+      await this.prisma.client.contactImport.update({
+        where: { id: importRecord.id },
+        data: {
+          status: 'FAILED',
+          error: (err as Error).message || 'Unknown error',
+        },
+      });
+      throw err;
+    }
   }
 
   async processImportRecord(params: {
