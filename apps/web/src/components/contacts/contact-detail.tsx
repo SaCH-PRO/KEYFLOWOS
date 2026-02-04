@@ -181,24 +181,30 @@ export function ContactDetail({
             )}
           </div>
         </div>
-        <div className="flex items-center gap-1">
-          {onEdit && (
-            <button
-              onClick={onEdit}
-              className="p-2 hover:bg-muted rounded-lg transition-colors"
-              title="Edit contact"
-            >
-              <Pencil className="w-4 h-4 text-muted-foreground" />
-            </button>
-          )}
-          {onDelete && (
-            <button
-              onClick={() => setDeleteConfirm(true)}
-              className="p-2 hover:bg-red-500/20 rounded-lg transition-colors"
-              title="Delete contact"
-            >
-              <Trash2 className="w-4 h-4 text-red-400" />
-            </button>
+        <div className="flex items-center gap-2">
+          {(onEdit || onDelete) && (
+            <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-1">
+              {onEdit && (
+                <button
+                  onClick={onEdit}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 hover:bg-[hsl(var(--kf-accent2))]/20 rounded-md transition-colors text-sm"
+                  title="Edit contact"
+                >
+                  <Pencil className="w-4 h-4 text-[hsl(var(--kf-accent2))]" />
+                  <span className="hidden sm:inline text-xs text-muted-foreground">Edit</span>
+                </button>
+              )}
+              {onDelete && (
+                <button
+                  onClick={() => setDeleteConfirm(true)}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 hover:bg-red-500/20 rounded-md transition-colors text-sm"
+                  title="Delete contact"
+                >
+                  <Trash2 className="w-4 h-4 text-red-400" />
+                  <span className="hidden sm:inline text-xs text-red-400">Delete</span>
+                </button>
+              )}
+            </div>
           )}
           {onClose && (
             <button onClick={onClose} className="p-1 hover:bg-muted rounded-lg transition-colors lg:hidden">
