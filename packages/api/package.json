@@ -2,7 +2,6 @@
   "name": "@keyflow/api",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "main": "./src/root.ts",
   "module": "./src/root.ts",
   "types": "./src/root.ts",

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, UseGuards, Delete } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, UseGuards, Delete } from '@nestjs/common';
 import { BookingsService } from './bookings.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -9,8 +9,8 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 @Controller('bookings')
 export class BookingsController {
   constructor(
-    private readonly bookings: BookingsService,
-    private readonly prisma: PrismaService,
+    @Inject(BookingsService) private readonly bookings: BookingsService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -67,15 +67,15 @@ export class BookingsController {
   @Post('businesses/:businessId/services')
   createService(
     @Param('businessId') businessId: string,
-    @Body() body: { name: string; durationMins: number; price: number; currency?: string },
+    @Body() body: { name: string; duration: number; price: number; description?: string },
   ) {
     return this.prisma.client.service.create({
       data: {
         businessId,
         name: body.name,
-        durationMins: body.durationMins,
+        duration: body.duration,
         price: body.price,
-        currency: body.currency ?? 'TTD',
+        description: body.description ?? null,
       },
     });
   }
@@ -103,13 +103,12 @@ export class BookingsController {
   @Post('businesses/:businessId/staff')
   createStaff(
     @Param('businessId') businessId: string,
-    @Body() body: { name: string; email?: string },
+    @Body() body: { name: string },
   ) {
     return this.prisma.client.staffMember.create({
       data: {
         businessId,
         name: body.name,
-        email: body.email,
       },
     });
   }

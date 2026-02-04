@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Patch, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, Patch, UseGuards } from '@nestjs/common';
 import { AutomationService } from './automation.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -7,8 +7,8 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 @Controller('automation')
 export class AutomationController {
   constructor(
-    private readonly automation: AutomationService,
-    private readonly prisma: PrismaService,
+    @Inject(AutomationService) private readonly automation: AutomationService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   @Get('health')
@@ -29,15 +29,14 @@ export class AutomationController {
   @Post('businesses/:businessId/playbooks')
   createPlaybook(
     @Param('businessId') businessId: string,
-    @Body() body: { name: string; triggerEvent: string; actions: any },
+    @Body() body: { name: string; trigger: string; actionData?: any },
   ) {
     return this.prisma.client.automation.create({
       data: {
         businessId,
         name: body.name,
-        triggerEvent: body.triggerEvent,
-        actions: body.actions,
-        enabled: false,
+        trigger: body.trigger,
+        actionData: body.actionData ?? null,
       },
     });
   }
@@ -47,7 +46,7 @@ export class AutomationController {
   updatePlaybook(
     @Param('businessId') businessId: string,
     @Param('playbookId') playbookId: string,
-    @Body() body: { name?: string; triggerEvent?: string; actions?: any; enabled?: boolean },
+    @Body() body: { name?: string; trigger?: string; actionData?: any },
   ) {
     return this.prisma.client.automation.update({
       where: { id: playbookId, businessId },

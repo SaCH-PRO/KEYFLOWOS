@@ -68,25 +68,28 @@ export class CommerceService {
     dueDate?: Date | string;
   }) {
     const total = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-    const invoice = await this.prisma.client.invoice.create({
-      data: {
-        businessId: input.businessId,
-        ...(input.contactId ? { contactId: input.contactId } : {}),
-        invoiceNumber: `INV-${Date.now()}`,
-        status: 'DRAFT',
-        issueDate: new Date(),
-        dueDate: input.dueDate ? new Date(input.dueDate) : null,
-        total,
-        currency: input.currency ?? 'TTD',
-        items: {
-          create: input.items.map((item) => ({
-            description: item.description,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            total: item.quantity * item.unitPrice,
-          })),
-        },
+    const data: any = {
+      businessId: input.businessId,
+      invoiceNumber: `INV-${Date.now()}`,
+      status: 'DRAFT',
+      issueDate: new Date(),
+      dueDate: input.dueDate ? new Date(input.dueDate) : null,
+      total,
+      currency: input.currency ?? 'TTD',
+      items: {
+        create: input.items.map((item) => ({
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          total: item.quantity * item.unitPrice,
+        })),
       },
+    };
+    if (input.contactId) {
+      data.contactId = input.contactId;
+    }
+    const invoice = await this.prisma.client.invoice.create({
+      data,
       include: { items: true, contact: true },
     });
     return invoice;
