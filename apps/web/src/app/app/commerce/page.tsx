@@ -73,6 +73,7 @@ type InvoiceLineItem = {
   quantity: string;
   unitPrice: string;
   isNewItem?: boolean;
+  newItemName?: string;
   newItemCategory?: "SERVICE" | "PRODUCT" | "PACKAGE";
   addToCatalog?: boolean;
 };
@@ -330,6 +331,7 @@ export default function CommercePage() {
                 ...item,
                 productId: "__NEW__",
                 isNewItem: true,
+                newItemName: "",
                 newItemCategory: "SERVICE",
                 description: "",
                 unitPrice: "",
@@ -398,10 +400,13 @@ export default function CommercePage() {
     setFormError(null);
     if (!businessId) return;
     const validItems = invoiceForm.items.filter(
-      (item) => item.description.trim() && item.unitPrice
+      (item) => {
+        const hasName = item.isNewItem ? (item.newItemName?.trim() || item.description.trim()) : item.description.trim();
+        return hasName && item.unitPrice;
+      }
     );
     if (validItems.length === 0) {
-      setFormError("At least one item with description and price is required");
+      setFormError("At least one item with name/description and price is required");
       return;
     }
     
@@ -411,16 +416,17 @@ export default function CommercePage() {
     );
     
     for (const item of itemsToAddToCatalog) {
+      const itemName = item.newItemName || item.description;
       const { data: newProduct, error: productError } = await createProduct({
         businessId,
-        name: item.description,
+        name: itemName,
         price: parseFloat(item.unitPrice),
         category: item.newItemCategory || "SERVICE",
-        description: "",
+        description: item.description || "",
         isActive: true,
       });
       if (productError) {
-        setFormError(`Failed to add "${item.description}" to catalog: ${productError}`);
+        setFormError(`Failed to add "${itemName}" to catalog: ${productError}`);
         return;
       }
       if (newProduct) {
@@ -432,7 +438,7 @@ export default function CommercePage() {
       businessId,
       contactId: invoiceForm.contactId || undefined,
       items: validItems.map((item) => ({
-        description: item.description,
+        description: item.isNewItem ? (item.newItemName || item.description) : item.description,
         quantity: parseInt(item.quantity) || 1,
         unitPrice: parseFloat(item.unitPrice),
       })),
@@ -745,7 +751,7 @@ export default function CommercePage() {
                           >
                             <option value="">Select item...</option>
                             <option value="__NEW__">
-                              {item.isNewItem && item.description ? `+ ${item.description}` : "+ New item"}
+                              {item.isNewItem && item.newItemName ? `+ ${item.newItemName}` : "+ New item"}
                             </option>
                             {products.filter(p => p.isActive !== false).map((p) => (
                               <option key={p.id} value={p.id}>
@@ -755,20 +761,31 @@ export default function CommercePage() {
                           </select>
                         </div>
                         {item.isNewItem && (
-                          <div className="col-span-12 md:col-span-2">
-                            <label className="text-xs text-muted-foreground mb-1 block">Type</label>
-                            <select
-                              className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                              value={item.newItemCategory || "SERVICE"}
-                              onChange={(e) => updateInvoiceItem(item.id, "newItemCategory", e.target.value)}
-                            >
-                              {CATEGORIES.map((cat) => (
-                                <option key={cat.value} value={cat.value}>{cat.label}</option>
-                              ))}
-                            </select>
-                          </div>
+                          <>
+                            <div className="col-span-12 md:col-span-3">
+                              <label className="text-xs text-muted-foreground mb-1 block">Item Name</label>
+                              <input
+                                className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                placeholder="Enter name for new item"
+                                value={item.newItemName || ""}
+                                onChange={(e) => updateInvoiceItem(item.id, "newItemName", e.target.value)}
+                              />
+                            </div>
+                            <div className="col-span-6 md:col-span-2">
+                              <label className="text-xs text-muted-foreground mb-1 block">Type</label>
+                              <select
+                                className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                value={item.newItemCategory || "SERVICE"}
+                                onChange={(e) => updateInvoiceItem(item.id, "newItemCategory", e.target.value)}
+                              >
+                                {CATEGORIES.map((cat) => (
+                                  <option key={cat.value} value={cat.value}>{cat.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </>
                         )}
-                        <div className={`col-span-12 ${item.isNewItem ? "md:col-span-3" : "md:col-span-4"}`}>
+                        <div className={`col-span-12 ${item.isNewItem ? "md:col-span-4" : "md:col-span-4"}`}>
                           <label className="text-xs text-muted-foreground mb-1 block">Description</label>
                           <input
                             className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
