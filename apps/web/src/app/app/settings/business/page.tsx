@@ -32,18 +32,18 @@ type Business = {
   slug: string | null;
   timezone: string;
   currency: string;
-  logo: string | null;
+  logoUrl: string | null;
   address: string | null;
   phone: string | null;
   email: string | null;
   website: string | null;
-  facebookHandle: string | null;
-  instagramHandle: string | null;
-  twitterHandle: string | null;
-  linkedinHandle: string | null;
-  tiktokHandle: string | null;
-  youtubeHandle: string | null;
-  whatsappNumber: string | null;
+  facebook: string | null;
+  instagram: string | null;
+  twitter: string | null;
+  linkedin: string | null;
+  tiktok: string | null;
+  youtube: string | null;
+  whatsapp: string | null;
   primaryColor: string | null;
   secondaryColor: string | null;
   defaultTaxRate: number | null;
@@ -68,18 +68,18 @@ type FormState = {
   slug: string;
   timezone: string;
   currency: string;
-  logo: string;
+  logoUrl: string;
   address: string;
   phone: string;
   email: string;
   website: string;
-  facebookHandle: string;
-  instagramHandle: string;
-  twitterHandle: string;
-  linkedinHandle: string;
-  tiktokHandle: string;
-  youtubeHandle: string;
-  whatsappNumber: string;
+  facebook: string;
+  instagram: string;
+  twitter: string;
+  linkedin: string;
+  tiktok: string;
+  youtube: string;
+  whatsapp: string;
   primaryColor: string;
   secondaryColor: string;
   defaultTaxRate: string;
@@ -96,18 +96,18 @@ export default function BusinessSettingsPage() {
     slug: "",
     timezone: "",
     currency: "",
-    logo: "",
+    logoUrl: "",
     address: "",
     phone: "",
     email: "",
     website: "",
-    facebookHandle: "",
-    instagramHandle: "",
-    twitterHandle: "",
-    linkedinHandle: "",
-    tiktokHandle: "",
-    youtubeHandle: "",
-    whatsappNumber: "",
+    facebook: "",
+    instagram: "",
+    twitter: "",
+    linkedin: "",
+    tiktok: "",
+    youtube: "",
+    whatsapp: "",
     primaryColor: "#F97316",
     secondaryColor: "#14B8A6",
     defaultTaxRate: "12.5",
@@ -130,18 +130,18 @@ export default function BusinessSettingsPage() {
           slug: res.data.slug || "",
           timezone: res.data.timezone || "America/Port_of_Spain",
           currency: res.data.currency || "TTD",
-          logo: res.data.logo || "",
+          logoUrl: res.data.logoUrl || "",
           address: res.data.address || "",
           phone: res.data.phone || "",
           email: res.data.email || "",
           website: res.data.website || "",
-          facebookHandle: res.data.facebookHandle || "",
-          instagramHandle: res.data.instagramHandle || "",
-          twitterHandle: res.data.twitterHandle || "",
-          linkedinHandle: res.data.linkedinHandle || "",
-          tiktokHandle: res.data.tiktokHandle || "",
-          youtubeHandle: res.data.youtubeHandle || "",
-          whatsappNumber: res.data.whatsappNumber || "",
+          facebook: res.data.facebook || "",
+          instagram: res.data.instagram || "",
+          twitter: res.data.twitter || "",
+          linkedin: res.data.linkedin || "",
+          tiktok: res.data.tiktok || "",
+          youtube: res.data.youtube || "",
+          whatsapp: res.data.whatsapp || "",
           primaryColor: res.data.primaryColor || "#F97316",
           secondaryColor: res.data.secondaryColor || "#14B8A6",
           defaultTaxRate: (res.data.defaultTaxRate ?? 12.5).toString(),
@@ -185,7 +185,7 @@ export default function BusinessSettingsPage() {
       
       if (!uploadRes.ok) throw new Error("Failed to upload file");
       
-      setForm((f) => ({ ...f, logo: objectPath }));
+      setForm((f) => ({ ...f, logoUrl: objectPath }));
       setStatus({ type: "success", message: "Logo uploaded successfully" });
     } catch (err) {
       setStatus({ type: "error", message: err instanceof Error ? err.message : "Upload failed" });
@@ -222,7 +222,7 @@ export default function BusinessSettingsPage() {
     return <div className="text-muted-foreground">No business found. Please set up your workspace first.</div>;
   }
 
-  const logoUrl = form.logo ? `${API_BASE}${form.logo}` : null;
+  const logoUrl = form.logoUrl ? `${API_BASE}${form.logoUrl}` : null;
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -368,8 +368,8 @@ export default function BusinessSettingsPage() {
                 </div>
                 <Input
                   type="tel"
-                  value={form.whatsappNumber}
-                  onChange={(e) => setForm((f) => ({ ...f, whatsappNumber: e.target.value }))}
+                  value={form.whatsapp}
+                  onChange={(e) => setForm((f) => ({ ...f, whatsapp: e.target.value }))}
                   placeholder="+1 (868) 555-0123"
                 />
               </label>
@@ -437,8 +437,8 @@ export default function BusinessSettingsPage() {
                   Facebook
                 </div>
                 <Input
-                  value={form.facebookHandle}
-                  onChange={(e) => setForm((f) => ({ ...f, facebookHandle: e.target.value }))}
+                  value={form.facebook}
+                  onChange={(e) => setForm((f) => ({ ...f, facebook: e.target.value }))}
                   placeholder="facebook.com/yourbusiness"
                 />
               </label>
@@ -449,8 +449,8 @@ export default function BusinessSettingsPage() {
                   Instagram
                 </div>
                 <Input
-                  value={form.instagramHandle}
-                  onChange={(e) => setForm((f) => ({ ...f, instagramHandle: e.target.value }))}
+                  value={form.instagram}
+                  onChange={(e) => setForm((f) => ({ ...f, instagram: e.target.value }))}
                   placeholder="@yourbusiness"
                 />
               </label>
@@ -461,8 +461,8 @@ export default function BusinessSettingsPage() {
                   Twitter / X
                 </div>
                 <Input
-                  value={form.twitterHandle}
-                  onChange={(e) => setForm((f) => ({ ...f, twitterHandle: e.target.value }))}
+                  value={form.twitter}
+                  onChange={(e) => setForm((f) => ({ ...f, twitter: e.target.value }))}
                   placeholder="@yourbusiness"
                 />
               </label>
@@ -473,8 +473,8 @@ export default function BusinessSettingsPage() {
                   LinkedIn
                 </div>
                 <Input
-                  value={form.linkedinHandle}
-                  onChange={(e) => setForm((f) => ({ ...f, linkedinHandle: e.target.value }))}
+                  value={form.linkedin}
+                  onChange={(e) => setForm((f) => ({ ...f, linkedin: e.target.value }))}
                   placeholder="linkedin.com/company/yourbusiness"
                 />
               </label>
@@ -487,8 +487,8 @@ export default function BusinessSettingsPage() {
                   TikTok
                 </div>
                 <Input
-                  value={form.tiktokHandle}
-                  onChange={(e) => setForm((f) => ({ ...f, tiktokHandle: e.target.value }))}
+                  value={form.tiktok}
+                  onChange={(e) => setForm((f) => ({ ...f, tiktok: e.target.value }))}
                   placeholder="@yourbusiness"
                 />
               </label>
@@ -499,8 +499,8 @@ export default function BusinessSettingsPage() {
                   YouTube
                 </div>
                 <Input
-                  value={form.youtubeHandle}
-                  onChange={(e) => setForm((f) => ({ ...f, youtubeHandle: e.target.value }))}
+                  value={form.youtube}
+                  onChange={(e) => setForm((f) => ({ ...f, youtube: e.target.value }))}
                   placeholder="youtube.com/@yourbusiness"
                 />
               </label>

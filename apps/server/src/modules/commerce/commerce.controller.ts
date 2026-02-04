@@ -91,7 +91,16 @@ export class CommerceController {
   @Post('businesses/:businessId/invoices')
   createInvoice(
     @Param('businessId') businessId: string,
-    @Body() body: { contactId?: string; items: { description: string; quantity: number; unitPrice: number }[]; currency?: string; dueDate?: string },
+    @Body() body: {
+      contactId?: string;
+      items: { description: string; quantity: number; unitPrice: number }[];
+      currency?: string;
+      dueDate?: string;
+      taxRate?: number;
+      discountType?: 'PERCENT' | 'FIXED';
+      discountValue?: number;
+      notes?: string;
+    },
   ) {
     return this.commerce.createInvoice({ businessId, ...body });
   }
@@ -114,5 +123,10 @@ export class CommerceController {
   @Get('invoices/:invoiceId/receipt')
   getReceipt(@Param('invoiceId') invoiceId: string) {
     return this.receipts.buildReceipt(invoiceId);
+  }
+
+  @Get('invoices/:invoiceId')
+  getInvoice(@Param('invoiceId') invoiceId: string) {
+    return this.commerce.getInvoiceWithBusiness(invoiceId, true);
   }
 }

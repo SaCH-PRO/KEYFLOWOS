@@ -4,6 +4,24 @@
 KEYFLOWOS is an AI-powered operating system for service businesses that eliminates the "tool maze" by providing pre-built Playbooks for common workflows. Features a "Cockpit" dashboard with Flow Graph visualization, AI-driven Flow Feed, and comprehensive CRM as the intelligence layer.
 
 ## Recent Changes (Feb 2026)
+- **Business Profile & Branding** - Comprehensive business profile management
+  - Logo upload with App Storage integration (presigned URL flow)
+  - Business info: name, address, phone, email, website, WhatsApp
+  - Social media handles: Facebook, Instagram, Twitter/X, LinkedIn, TikTok, YouTube
+  - Brand colors: Primary and secondary color customization
+  - Default tax rate setting for invoices
+  - Tabbed settings UI: Basic Info, Social Media, Branding
+- **Invoice Tax & Discount System** - Professional invoicing with calculations
+  - Editable tax rate (%) with configurable default from business profile
+  - Discount support: Percentage (%) or fixed amount (TTD)
+  - Live preview of subtotal, tax, discount, and total
+  - Invoice notes field for payment terms and messages
+- **Professional Invoice Template** - Branded public payment page
+  - Business logo and name with brand color theming
+  - Contact information (address, phone, email, website)
+  - Full line item breakdown with quantities and prices
+  - Subtotal, tax, discount, and total summary
+  - Responsive design with mobile optimization
 - **Invoice Feature Enhancements** - Major upgrade to invoicing capabilities
   - Multi-item invoices: Add/remove multiple line items per invoice with running total
   - Product picker: Select from existing products/services to auto-fill item details

@@ -817,6 +817,10 @@ export async function createInvoice(input: {
   items: { description: string; quantity: number; unitPrice: number }[];
   currency?: string;
   dueDate?: string;
+  taxRate?: number;
+  discountType?: "PERCENT" | "FIXED";
+  discountValue?: number;
+  notes?: string;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<Invoice>({
@@ -826,6 +830,10 @@ export async function createInvoice(input: {
       items: input.items,
       currency: input.currency ?? "TTD",
       dueDate: input.dueDate,
+      taxRate: input.taxRate,
+      discountType: input.discountType,
+      discountValue: input.discountValue,
+      notes: input.notes,
     },
   });
 }
