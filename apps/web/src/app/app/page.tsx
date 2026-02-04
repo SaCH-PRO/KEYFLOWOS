@@ -7,10 +7,12 @@ import { FeedItem, FlowFeedPanel } from "@/components/cockpit/flow-feed-panel";
 import { FlowGraphPanel, Phase } from "@/components/cockpit/flow-graph-panel";
 import { FlowStatsRow } from "@/components/cockpit/flow-stats-row";
 import { fetchBookings, fetchContacts, fetchProducts, fetchInvoices, Invoice } from "@/lib/client";
+import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { apiPost } from "@/lib/api";
 import { Sparkles, FileText, Zap } from "lucide-react";
 
 export default function AppHome() {
+  const [businessId, setBusinessId] = useState<string | null>(null);
   const [stats, setStats] = useState({ mrr: "TTD --", conversionRate: "--", avgResponseTime: "--" });
   const [loading, setLoading] = useState(true);
   const [phases, setPhases] = useState<Phase[]>([]);
@@ -23,13 +25,29 @@ export default function AppHome() {
   const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
 
   useEffect(() => {
+    const initWorkspace = async () => {
+      const fresh = await refreshWorkspace();
+      if (fresh) {
+        setBusinessId(fresh);
+        return;
+      }
+      const stored = getStoredBusinessId();
+      if (stored) {
+        setBusinessId(stored);
+      }
+    };
+    void initWorkspace();
+  }, []);
+
+  useEffect(() => {
+    if (!businessId) return;
     const load = async () => {
       setLoading(true);
       const [{ data: contacts }, { data: bookings }, { data: products }, { data: invs }] = await Promise.all([
-        fetchContacts(),
-        fetchBookings(),
-        fetchProducts(),
-        fetchInvoices(),
+        fetchContacts(businessId),
+        fetchBookings(businessId),
+        fetchProducts(businessId),
+        fetchInvoices(businessId),
       ]);
       const contactCount = Array.isArray(contacts) ? contacts.length : 0;
       const bookingCount = Array.isArray(bookings) ? bookings.length : 0;
@@ -82,7 +100,7 @@ export default function AppHome() {
       window.addEventListener("kf:invoicePaid", handler as EventListener);
       return () => window.removeEventListener("kf:invoicePaid", handler as EventListener);
     }
-  }, []);
+  }, [businessId]);
 
   return (
     <div className="space-y-6">

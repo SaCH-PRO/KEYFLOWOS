@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Card } from "@keyflow/ui";
 import { BarChart3, TrendingUp, Users, Calendar, DollarSign, FileText } from "lucide-react";
 import { fetchContacts, fetchBookings, fetchInvoices, fetchProducts, Booking, Invoice, Contact, Product } from "@/lib/client";
+import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 
 type ReportStats = {
   totalRevenue: number;
@@ -19,19 +20,36 @@ type ReportStats = {
 };
 
 export default function ReportsPage() {
+  const [businessId, setBusinessId] = useState<string | null>(null);
   const [stats, setStats] = useState<ReportStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [recentBookings, setRecentBookings] = useState<Booking[]>([]);
   const [recentInvoices, setRecentInvoices] = useState<Invoice[]>([]);
 
   useEffect(() => {
+    const initWorkspace = async () => {
+      const fresh = await refreshWorkspace();
+      if (fresh) {
+        setBusinessId(fresh);
+        return;
+      }
+      const stored = getStoredBusinessId();
+      if (stored) {
+        setBusinessId(stored);
+      }
+    };
+    void initWorkspace();
+  }, []);
+
+  useEffect(() => {
+    if (!businessId) return;
     const load = async () => {
       setLoading(true);
       const [contactsRes, bookingsRes, invoicesRes, productsRes] = await Promise.all([
-        fetchContacts(),
-        fetchBookings(),
-        fetchInvoices(),
-        fetchProducts(),
+        fetchContacts(businessId),
+        fetchBookings(businessId),
+        fetchInvoices(businessId),
+        fetchProducts(businessId),
       ]);
 
       const contacts = contactsRes.data ?? [];
@@ -66,7 +84,7 @@ export default function ReportsPage() {
       setLoading(false);
     };
     load();
-  }, []);
+  }, [businessId]);
 
   if (loading) {
     return (

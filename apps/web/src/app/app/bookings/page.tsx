@@ -17,6 +17,7 @@ import {
   deleteService,
   deleteStaff,
 } from "@/lib/client";
+import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 
 const bookingSchema = z.object({
   start: z.string().min(1, "Start time required"),
@@ -28,6 +29,7 @@ const bookingSchema = z.object({
 type Tab = "bookings" | "services" | "staff";
 
 export default function BookingsPage() {
+  const [businessId, setBusinessId] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("bookings");
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [services, setServices] = useState<Service[]>([]);
@@ -41,12 +43,28 @@ export default function BookingsPage() {
   const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
+    const initWorkspace = async () => {
+      const fresh = await refreshWorkspace();
+      if (fresh) {
+        setBusinessId(fresh);
+        return;
+      }
+      const stored = getStoredBusinessId();
+      if (stored) {
+        setBusinessId(stored);
+      }
+    };
+    void initWorkspace();
+  }, []);
+
+  useEffect(() => {
+    if (!businessId) return;
     const load = async () => {
       setLoading(true);
       const [bookingsRes, servicesRes, staffRes] = await Promise.all([
-        fetchBookings(),
-        fetchServices(),
-        fetchStaff(),
+        fetchBookings(businessId),
+        fetchServices(businessId),
+        fetchStaff(businessId),
       ]);
       setBookings(bookingsRes.data ?? []);
       setServices(servicesRes.data ?? []);
@@ -57,7 +75,7 @@ export default function BookingsPage() {
       setLoading(false);
     };
     void load();
-  }, []);
+  }, [businessId]);
 
   async function handleCreateBooking() {
     setFormError(null);
