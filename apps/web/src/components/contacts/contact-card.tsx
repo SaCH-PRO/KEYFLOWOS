@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Mail, Phone, Building2, Tag, Pencil, Trash2 } from "lucide-react";
+import { Mail, Phone, Building2, Tag, Trash2 } from "lucide-react";
 
 export type ContactCardData = {
   id: string;
@@ -30,20 +30,14 @@ interface ContactCardProps {
   contact: ContactCardData;
   isSelected?: boolean;
   onClick?: () => void;
-  onEdit?: (contact: ContactCardData) => void;
   onDelete?: (contact: ContactCardData) => void;
   index?: number;
 }
 
-export function ContactCard({ contact, isSelected, onClick, onEdit, onDelete, index = 0 }: ContactCardProps) {
+export function ContactCard({ contact, isSelected, onClick, onDelete, index = 0 }: ContactCardProps) {
   const fullName = `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "Unnamed";
   const initials = `${contact.firstName?.[0] ?? ""}${contact.lastName?.[0] ?? ""}`.toUpperCase() || "?";
   const statusColor = STATUS_COLORS[contact.status ?? ""] ?? STATUS_COLORS.LEAD;
-
-  const handleEdit = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onEdit?.(contact);
-  };
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -71,22 +65,13 @@ export function ContactCard({ contact, isSelected, onClick, onEdit, onDelete, in
           <div className="flex items-center justify-between gap-2">
             <h3 className="font-medium truncate">{fullName}</h3>
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button
-                  onClick={handleEdit}
-                  className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                  title="Edit contact"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={handleDelete}
-                  className="p-1.5 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors"
-                  title="Delete contact"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
+              <button
+                onClick={handleDelete}
+                className="p-1.5 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                title="Delete contact"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
               <span
                 className="text-[10px] font-medium px-2 py-0.5 rounded-full"
                 style={{ background: `${statusColor}20`, color: statusColor }}
