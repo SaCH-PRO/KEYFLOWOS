@@ -11,6 +11,7 @@ interface ContactFormProps {
   onSubmit: (data: ContactFormData) => Promise<void>;
   onCancel: () => void;
   loading?: boolean;
+  initialValues?: Partial<ContactFormData>;
 }
 
 export interface ContactFormData {
@@ -28,19 +29,20 @@ export interface ContactFormData {
   initialNote: string;
 }
 
-export function ContactForm({ onSubmit, onCancel, loading }: ContactFormProps) {
+export function ContactForm({ onSubmit, onCancel, loading, initialValues }: ContactFormProps) {
+  const isEditing = !!initialValues;
   const [form, setForm] = useState<ContactFormData>({
-    firstName: "",
-    lastName: "",
-    email: "",
-    phone: "",
-    status: "LEAD",
-    source: "",
-    tags: "",
-    companyName: "",
-    jobTitle: "",
-    preferredChannel: "WhatsApp",
-    lifecycleStage: "",
+    firstName: initialValues?.firstName || "",
+    lastName: initialValues?.lastName || "",
+    email: initialValues?.email || "",
+    phone: initialValues?.phone || "",
+    status: initialValues?.status || "LEAD",
+    source: initialValues?.source || "",
+    tags: initialValues?.tags || "",
+    companyName: initialValues?.companyName || "",
+    jobTitle: initialValues?.jobTitle || "",
+    preferredChannel: initialValues?.preferredChannel || "WhatsApp",
+    lifecycleStage: initialValues?.lifecycleStage || "",
     initialNote: "",
   });
 
@@ -69,7 +71,7 @@ export function ContactForm({ onSubmit, onCancel, loading }: ContactFormProps) {
       className="kf-card p-5 space-y-4"
     >
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Add New Contact</h3>
+        <h3 className="text-lg font-semibold">{isEditing ? "Edit Contact" : "Add New Contact"}</h3>
         <button onClick={onCancel} className="p-1 hover:bg-muted rounded-lg transition-colors">
           <X className="w-5 h-5 text-muted-foreground" />
         </button>
@@ -244,7 +246,7 @@ export function ContactForm({ onSubmit, onCancel, loading }: ContactFormProps) {
           disabled={loading || !form.firstName.trim()}
           className="kf-btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {loading ? "Saving..." : "Save Contact"}
+          {loading ? "Saving..." : isEditing ? "Update Contact" : "Save Contact"}
         </button>
         <button onClick={onCancel} disabled={loading} className="kf-btn-secondary disabled:opacity-50">
           Cancel
