@@ -4,6 +4,12 @@
 KEYFLOWOS is an AI-powered operating system for service businesses that eliminates the "tool maze" by providing pre-built Playbooks for common workflows. Features a "Cockpit" dashboard with Flow Graph visualization, AI-driven Flow Feed, and comprehensive CRM as the intelligence layer.
 
 ## Recent Changes (Feb 2026)
+- **Commerce Module Overhaul** - Complete product/service management with full CRUD
+  - Redesigned Commerce page with KeyFlow UI styling (cards, modals, tabs)
+  - Products/services now include description field and TTD pricing
+  - Add, edit, and delete products with confirmation dialogs
+  - Search/filter products, responsive grid layout
+  - Multi-tenant security: update/delete scoped by businessId
 - **Contact Import Enhancements** - Added vCard (.vcf) file import and Google Contacts OAuth sync
   - vCard parser handles RFC 6350 line folding, escaped characters, N vs FN precedence
   - Google OAuth with HMAC-signed state tokens (nonce + expiration) for CSRF protection
