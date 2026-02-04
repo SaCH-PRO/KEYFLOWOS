@@ -13,7 +13,7 @@ export default function AppHome() {
   const [stats, setStats] = useState({ mrr: "TTD --", conversionRate: "--", avgResponseTime: "--" });
   const [loading, setLoading] = useState(true);
   const [phases, setPhases] = useState<Phase[]>([]);
-  const [bottleneck, setBottleneck] = useState<string>("Quotes â†’ Paid");
+  const [bottleneck, setBottleneck] = useState<string>("Quotes Sent");
   const [momentum, setMomentum] = useState(0.35);
   const [streaks, setStreaks] = useState<string[]>([]);
   const [headerBadges, setHeaderBadges] = useState<string[]>([]);
