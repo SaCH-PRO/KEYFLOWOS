@@ -47,7 +47,7 @@ export function AchievementsStrip() {
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: 0.1 + index * 0.05 }}
-            className={`kf-card p-4 flex items-center gap-3 ${!ach.achieved ? "opacity-50" : ""}`}
+            className={`kf-card p-4 flex items-center gap-3 transition-all hover:scale-[1.02] ${!ach.achieved ? "opacity-50" : ""}`}
           >
             <div
               className="h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0"

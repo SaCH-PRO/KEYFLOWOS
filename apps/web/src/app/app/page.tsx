@@ -218,7 +218,7 @@ export default function AppHome() {
       )}
 
       {actionMessage && !aiSuggestion && (
-        <div className="kf-card p-3 text-sm text-muted-foreground">
+        <div className="kf-badge kf-badge-muted text-sm">
           {actionMessage}
         </div>
       )}
@@ -235,7 +235,7 @@ export default function AppHome() {
             {invoices.slice(0, 4).map((inv) => (
               <span
                 key={inv.id}
-                className="inline-flex items-center gap-2 rounded-xl border border-border bg-muted/50 px-3 py-2 text-sm"
+                className="kf-badge kf-badge-muted gap-2 px-3 py-2 text-sm rounded-xl"
               >
                 <span 
                   className="h-2 w-2 rounded-full" 

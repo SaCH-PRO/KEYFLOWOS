@@ -4,16 +4,15 @@
 KEYFLOWOS is an AI-powered operating system for service businesses that eliminates the "tool maze" by providing pre-built Playbooks for common workflows. Features a "Cockpit" dashboard with Flow Graph visualization, AI-driven Flow Feed, and comprehensive CRM as the intelligence layer.
 
 ## Recent Changes (Feb 2026)
-- **Progressive Web App (PWA)** - App can now be installed on any device (mobile, tablet, desktop)
-- Mobile-optimized with bottom navigation bar for touch-friendly access
-- Offline support with service worker caching
-- Comprehensive UI redesign with modern dual-theme system (light/dark modes)
-- New theming layer with ThemeColorsProvider for customizable accent colors
-- Brand & Theme settings page with color pickers and preset swatches
-- Revamped sidebar with solid accent colors (removed all gradients)
-- Updated all module pages with new styling and accent color integration
-- Light mode: white background (#FFFFFF), Dark mode: black background (#000000)
-- Default accent colors: blue (#3B82F6) and pink (#EC4899)
+- **Complete Design System Overhaul** - New unique KeyFlow identity with warm Caribbean-inspired palette
+- **Progressive Web App (PWA)** - Installable on any device with offline support
+- Mobile-optimized bottom navigation bar for touch-friendly access
+- **New Color Palette**: Sunset Orange (#F97316) primary, Caribbean Teal (#14B8A6) secondary
+- Redesigned sidebar with icon-first navigation, collapsible width, and cleaner hierarchy
+- New card component system with glass, accent, and stat card variants
+- Flow-themed animations and momentum indicators throughout
+- Unified component classes (kf-card, kf-btn-primary, kf-momentum-bar, etc.)
+- Light mode: warm cream background, Dark mode: rich brown-black (#0a0807)
 
 ## PWA Installation
 The app can be installed on any device:
