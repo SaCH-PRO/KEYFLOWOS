@@ -9,6 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@google-cloud/storage": "^7.18.0",
     "@keyflow/api": "workspace:*",
     "@keyflow/db": "workspace:*",
     "@nestjs/common": "^10.4.8",
@@ -22,6 +23,7 @@
     "class-validator": "^0.14.3",
     "csv-parse": "^5.4.0",
     "express": "^4.19.2",
+    "google-auth-library": "^10.5.0",
     "multer": "^2.0.2",
     "pdf-parse": "^1.1.1",
     "reflect-metadata": "^0.2.2",

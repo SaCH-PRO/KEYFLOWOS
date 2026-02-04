@@ -18,6 +18,7 @@ import { GamificationModule } from './modules/gamification/gamification.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { AuthMiddleware } from './core/auth/auth.middleware';
 import { ActionsModule } from './modules/actions/actions.module';
+import { UploadsModule } from './modules/uploads/uploads.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { ActionsModule } from './modules/actions/actions.module';
     GamificationModule,
     WebhooksModule,
     ActionsModule,
+    UploadsModule,
   ],
   controllers: [AppController],
   providers: [AppService, AuthMiddleware],
