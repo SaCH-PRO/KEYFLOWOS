@@ -4,6 +4,10 @@
 KEYFLOWOS is an AI-powered operating system for service businesses that eliminates the "tool maze" by providing pre-built Playbooks for common workflows. Features a "Cockpit" dashboard with Flow Graph visualization, AI-driven Flow Feed, and comprehensive CRM as the intelligence layer.
 
 ## Recent Changes (Feb 2026)
+- **Contact Import Enhancements** - Added vCard (.vcf) file import and Google Contacts OAuth sync
+  - vCard parser handles RFC 6350 line folding, escaped characters, N vs FN precedence
+  - Google OAuth with HMAC-signed state tokens (nonce + expiration) for CSRF protection
+  - Updated import UI with Google sync tab
 - **Backend Dependency Injection Fix** - Added @Inject decorators to all NestJS controllers and services for tsx/esbuild compatibility
 - **TypeScript Schema Fixes** - Fixed automation, bookings, and commerce modules to match Prisma schema
 - **Complete Design System Overhaul** - New unique KeyFlow identity with warm Caribbean-inspired palette
@@ -11,7 +15,7 @@ KEYFLOWOS is an AI-powered operating system for service businesses that eliminat
 - **Contacts Page Overhaul** - Modular component architecture with split-view layout
   - New reusable components: ContactCard, ContactForm, ContactDetail, ContactImport
   - Mobile-responsive bottom sheet for contact details on small screens
-  - Collapsible import panel supporting CSV, Excel, Image/OCR, and URL imports
+  - Collapsible import panel supporting CSV, Excel, vCard, and URL imports
 - Mobile-optimized bottom navigation bar for touch-friendly access
 - **New Color Palette**: Sunset Orange (#F97316) primary, Caribbean Teal (#14B8A6) secondary
 - Redesigned sidebar with icon-first navigation, collapsible width, and cleaner hierarchy
@@ -72,6 +76,10 @@ Key environment variables are configured in Replit secrets:
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase Auth key
 - `NEXT_PUBLIC_API_BASE_URL`: Backend API URL
 - `PORT`: Backend server port (3001)
+- `GOOGLE_CLIENT_ID`: Google OAuth client ID (for contact sync)
+- `GOOGLE_CLIENT_SECRET`: Google OAuth client secret
+- `GOOGLE_REDIRECT_URI`: OAuth callback URL (e.g., https://your-domain/api/crm/google/callback)
+- `GOOGLE_STATE_SECRET`: HMAC secret for OAuth state signing (required for production)
 
 ## Tech Stack
 - **Frontend**: Next.js 16, React 19, Tailwind CSS, Framer Motion
