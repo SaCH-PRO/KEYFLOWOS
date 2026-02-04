@@ -304,7 +304,7 @@ export default function ContactsPage() {
     setShowMobileDetail(false);
   };
 
-  const handleImportFile = async (type: "csv" | "xlsx" | "image", file: File) => {
+  const handleImportFile = async (type: "csv" | "xlsx" | "vcf" | "image", file: File) => {
     if (!businessId) return;
     await importContactsFromFile({ businessId, type, file });
     void loadContacts();
@@ -528,7 +528,6 @@ export default function ContactsPage() {
                   contact={contact as ContactCardData}
                   isSelected={selectedContactId === contact.id}
                   onClick={() => selectContact(contact.id)}
-                  onEdit={handleEditContact}
                   onDelete={handleDeleteContact}
                   index={index}
                 />
