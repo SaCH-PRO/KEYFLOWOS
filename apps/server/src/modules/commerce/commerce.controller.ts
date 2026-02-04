@@ -138,4 +138,90 @@ export class CommerceController {
   ) {
     return this.commerce.deleteInvoice(invoiceId, businessId);
   }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/invoices/:invoiceId')
+  updateInvoice(
+    @Param('businessId') businessId: string,
+    @Param('invoiceId') invoiceId: string,
+    @Body() body: {
+      contactId?: string;
+      items?: { description: string; quantity: number; unitPrice: number; productId?: string }[];
+      currency?: string;
+      dueDate?: string;
+      taxRate?: number;
+      discountType?: 'PERCENT' | 'FIXED' | null;
+      discountValue?: number | null;
+      notes?: string | null;
+    },
+  ) {
+    return this.commerce.updateInvoice({ invoiceId, businessId, ...body });
+  }
+
+  // ========== QUOTES ==========
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/quotes')
+  listQuotes(@Param('businessId') businessId: string) {
+    return this.commerce.listQuotes(businessId);
+  }
+
+  @Get('quotes/:quoteId')
+  getQuote(@Param('quoteId') quoteId: string) {
+    return this.commerce.getQuote(quoteId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/quotes')
+  createQuote(
+    @Param('businessId') businessId: string,
+    @Body() body: {
+      contactId: string;
+      items: { description: string; quantity: number; unitPrice: number; productId?: string }[];
+      currency?: string;
+      expiryDate?: string;
+    },
+  ) {
+    return this.commerce.createQuote({ businessId, ...body });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/quotes/:quoteId')
+  updateQuote(
+    @Param('businessId') businessId: string,
+    @Param('quoteId') quoteId: string,
+    @Body() body: {
+      contactId?: string;
+      items?: { description: string; quantity: number; unitPrice: number; productId?: string }[];
+      currency?: string;
+      expiryDate?: string | null;
+    },
+  ) {
+    return this.commerce.updateQuote({ quoteId, businessId, ...body });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/quotes/:quoteId')
+  deleteQuote(
+    @Param('businessId') businessId: string,
+    @Param('quoteId') quoteId: string,
+  ) {
+    return this.commerce.deleteQuote(quoteId, businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/quotes/:quoteId/convert')
+  convertQuoteToInvoice(
+    @Param('businessId') businessId: string,
+    @Param('quoteId') quoteId: string,
+    @Body() body: {
+      taxRate?: number;
+      discountType?: 'PERCENT' | 'FIXED';
+      discountValue?: number;
+      notes?: string;
+      dueDate?: string;
+    },
+  ) {
+    return this.commerce.convertQuoteToInvoice({ quoteId, businessId, ...body });
+  }
 }

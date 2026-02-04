@@ -384,4 +384,301 @@ export class CommerceService {
     }
     return invoice;
   }
+
+  // ========== QUOTES ==========
+
+  listQuotes(businessId: string) {
+    return this.prisma.client.quote.findMany({
+      where: { businessId, deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+      include: { contact: true, items: true, invoice: true },
+    });
+  }
+
+  async getQuote(quoteId: string) {
+    return this.prisma.client.quote.findUnique({
+      where: { id: quoteId },
+      include: { contact: true, items: true, invoice: true, business: true },
+    });
+  }
+
+  async createQuote(input: {
+    businessId: string;
+    contactId: string;
+    items: { description: string; quantity: number; unitPrice: number; productId?: string }[];
+    currency?: string;
+    expiryDate?: Date | string;
+  }) {
+    const total = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    const quote = await this.prisma.client.quote.create({
+      data: {
+        businessId: input.businessId,
+        contactId: input.contactId,
+        quoteNumber: `QT-${Date.now()}`,
+        status: 'DRAFT',
+        issueDate: new Date(),
+        expiryDate: input.expiryDate ? new Date(input.expiryDate) : null,
+        total,
+        currency: input.currency ?? 'TTD',
+        items: {
+          create: input.items.map((item) => ({
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            total: item.quantity * item.unitPrice,
+            productId: item.productId ?? null,
+          })),
+        },
+      },
+      include: { items: true, contact: true },
+    });
+    if (input.contactId) {
+      await this.crm.logContactEvent({
+        businessId: input.businessId,
+        contactId: input.contactId,
+        type: 'quote.created',
+        data: { quoteId: quote.id, total: quote.total, currency: quote.currency },
+        actorType: 'SYSTEM',
+        source: 'commerce',
+      });
+    }
+    return quote;
+  }
+
+  async updateQuote(input: {
+    quoteId: string;
+    businessId: string;
+    contactId?: string;
+    items?: { description: string; quantity: number; unitPrice: number; productId?: string }[];
+    currency?: string;
+    expiryDate?: Date | string | null;
+  }) {
+    const quote = await this.prisma.client.quote.findFirst({
+      where: { id: input.quoteId, businessId: input.businessId },
+    });
+    if (!quote) {
+      throw new Error('Quote not found');
+    }
+    if (quote.status === 'ACCEPTED' && quote.invoiceId) {
+      throw new Error('Cannot edit a quote that has been converted to an invoice');
+    }
+    
+    const updateData: any = {};
+    if (input.contactId) updateData.contactId = input.contactId;
+    if (input.currency) updateData.currency = input.currency;
+    if (input.expiryDate !== undefined) {
+      updateData.expiryDate = input.expiryDate ? new Date(input.expiryDate) : null;
+    }
+    
+    if (input.items) {
+      await this.prisma.client.quoteItem.deleteMany({ where: { quoteId: input.quoteId } });
+      const total = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+      updateData.total = total;
+      updateData.items = {
+        create: input.items.map((item) => ({
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          total: item.quantity * item.unitPrice,
+          productId: item.productId ?? null,
+        })),
+      };
+    }
+    
+    return this.prisma.client.quote.update({
+      where: { id: input.quoteId },
+      data: updateData,
+      include: { items: true, contact: true },
+    });
+  }
+
+  async deleteQuote(quoteId: string, businessId: string) {
+    const quote = await this.prisma.client.quote.findFirst({
+      where: { id: quoteId, businessId },
+    });
+    if (!quote) {
+      throw new Error('Quote not found');
+    }
+    if (quote.invoiceId) {
+      throw new Error('Cannot delete a quote that has been converted to an invoice');
+    }
+    return this.prisma.client.quote.update({
+      where: { id: quoteId },
+      data: { deletedAt: new Date() },
+    });
+  }
+
+  async convertQuoteToInvoice(input: {
+    quoteId: string;
+    businessId: string;
+    taxRate?: number;
+    discountType?: 'PERCENT' | 'FIXED';
+    discountValue?: number;
+    notes?: string;
+    dueDate?: Date | string;
+  }) {
+    const quote = await this.prisma.client.quote.findFirst({
+      where: { id: input.quoteId, businessId: input.businessId, deletedAt: null },
+      include: { items: true },
+    });
+    if (!quote) {
+      throw new Error('Quote not found');
+    }
+    if (quote.status !== 'ACCEPTED') {
+      throw new Error('Only accepted quotes can be converted to invoices');
+    }
+    if (quote.invoiceId) {
+      throw new Error('Quote has already been converted to an invoice');
+    }
+
+    const subtotal = quote.items.reduce((sum, item) => sum + item.total, 0);
+    const taxRate = input.taxRate ?? 0;
+    const taxAmount = (subtotal * taxRate) / 100;
+    let discountAmount = 0;
+    if (input.discountType === 'PERCENT' && input.discountValue) {
+      discountAmount = (subtotal * input.discountValue) / 100;
+    } else if (input.discountType === 'FIXED' && input.discountValue) {
+      discountAmount = input.discountValue;
+    }
+    const total = subtotal + taxAmount - discountAmount;
+
+    const invoice = await this.prisma.client.invoice.create({
+      data: {
+        businessId: quote.businessId,
+        contactId: quote.contactId,
+        invoiceNumber: `INV-${Date.now()}`,
+        status: 'DRAFT',
+        issueDate: new Date(),
+        dueDate: input.dueDate ? new Date(input.dueDate) : null,
+        subtotal,
+        taxRate,
+        taxAmount,
+        discountType: input.discountType ?? null,
+        discountValue: input.discountValue ?? null,
+        discountAmount,
+        total,
+        currency: quote.currency,
+        notes: input.notes ?? null,
+        items: {
+          create: quote.items.map((item) => ({
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            total: item.total,
+            productId: item.productId ?? null,
+          })),
+        },
+      },
+      include: { items: true, contact: true },
+    });
+
+    await this.prisma.client.quote.update({
+      where: { id: quote.id },
+      data: { invoiceId: invoice.id },
+    });
+
+    if (quote.contactId) {
+      await this.crm.logContactEvent({
+        businessId: quote.businessId,
+        contactId: quote.contactId,
+        type: 'invoice.created',
+        data: { invoiceId: invoice.id, quoteId: quote.id, total: invoice.total },
+        actorType: 'SYSTEM',
+        source: 'commerce',
+      });
+    }
+
+    return invoice;
+  }
+
+  // ========== UPDATE INVOICE ==========
+
+  async updateInvoice(input: {
+    invoiceId: string;
+    businessId: string;
+    contactId?: string;
+    items?: { description: string; quantity: number; unitPrice: number; productId?: string }[];
+    currency?: string;
+    dueDate?: Date | string | null;
+    taxRate?: number;
+    discountType?: 'PERCENT' | 'FIXED' | null;
+    discountValue?: number | null;
+    notes?: string | null;
+  }) {
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { id: input.invoiceId, businessId: input.businessId },
+    });
+    if (!invoice) {
+      throw new Error('Invoice not found');
+    }
+    if (invoice.status === 'PAID') {
+      throw new Error('Cannot edit a paid invoice');
+    }
+
+    const updateData: any = {};
+    if (input.contactId !== undefined) updateData.contactId = input.contactId;
+    if (input.currency !== undefined) updateData.currency = input.currency;
+    if (input.dueDate !== undefined) {
+      updateData.dueDate = input.dueDate ? new Date(input.dueDate) : null;
+    }
+    if (input.notes !== undefined) updateData.notes = input.notes;
+
+    if (input.items) {
+      await this.prisma.client.invoiceItem.deleteMany({ where: { invoiceId: input.invoiceId } });
+      const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+      const taxRate = input.taxRate ?? invoice.taxRate ?? 0;
+      const taxAmount = (subtotal * taxRate) / 100;
+      let discountAmount = 0;
+      const discountType = input.discountType !== undefined ? input.discountType : invoice.discountType;
+      const discountValue = input.discountValue !== undefined ? input.discountValue : invoice.discountValue;
+      if (discountType === 'PERCENT' && discountValue) {
+        discountAmount = (subtotal * discountValue) / 100;
+      } else if (discountType === 'FIXED' && discountValue) {
+        discountAmount = discountValue;
+      }
+      const total = subtotal + taxAmount - discountAmount;
+
+      updateData.subtotal = subtotal;
+      updateData.taxRate = taxRate;
+      updateData.taxAmount = taxAmount;
+      updateData.discountType = discountType;
+      updateData.discountValue = discountValue;
+      updateData.discountAmount = discountAmount;
+      updateData.total = total;
+      updateData.items = {
+        create: input.items.map((item) => ({
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          total: item.quantity * item.unitPrice,
+          productId: item.productId ?? null,
+        })),
+      };
+    } else if (input.taxRate !== undefined || input.discountType !== undefined || input.discountValue !== undefined) {
+      const subtotal = invoice.subtotal;
+      const taxRate = input.taxRate ?? invoice.taxRate ?? 0;
+      const taxAmount = (subtotal * taxRate) / 100;
+      let discountAmount = 0;
+      const discountType = input.discountType !== undefined ? input.discountType : invoice.discountType;
+      const discountValue = input.discountValue !== undefined ? input.discountValue : invoice.discountValue;
+      if (discountType === 'PERCENT' && discountValue) {
+        discountAmount = (subtotal * discountValue) / 100;
+      } else if (discountType === 'FIXED' && discountValue) {
+        discountAmount = discountValue;
+      }
+      const total = subtotal + taxAmount - discountAmount;
+      updateData.taxRate = taxRate;
+      updateData.taxAmount = taxAmount;
+      updateData.discountType = discountType;
+      updateData.discountValue = discountValue;
+      updateData.discountAmount = discountAmount;
+      updateData.total = total;
+    }
+
+    return this.prisma.client.invoice.update({
+      where: { id: input.invoiceId },
+      data: updateData,
+      include: { items: true, contact: true },
+    });
+  }
 }
