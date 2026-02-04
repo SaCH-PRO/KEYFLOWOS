@@ -110,16 +110,36 @@ export class CommerceService {
     items: { description: string; quantity: number; unitPrice: number }[];
     currency?: string;
     dueDate?: Date | string;
+    taxRate?: number;
+    discountType?: 'PERCENT' | 'FIXED';
+    discountValue?: number;
+    notes?: string;
   }) {
-    const total = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    const taxRate = input.taxRate ?? 0;
+    const taxAmount = (subtotal * taxRate) / 100;
+    let discountAmount = 0;
+    if (input.discountType === 'PERCENT' && input.discountValue) {
+      discountAmount = (subtotal * input.discountValue) / 100;
+    } else if (input.discountType === 'FIXED' && input.discountValue) {
+      discountAmount = input.discountValue;
+    }
+    const total = subtotal + taxAmount - discountAmount;
     const data: any = {
       businessId: input.businessId,
       invoiceNumber: `INV-${Date.now()}`,
       status: 'DRAFT',
       issueDate: new Date(),
       dueDate: input.dueDate ? new Date(input.dueDate) : null,
+      subtotal,
+      taxRate,
+      taxAmount,
+      discountType: input.discountType ?? null,
+      discountValue: input.discountValue ?? null,
+      discountAmount,
       total,
       currency: input.currency ?? 'TTD',
+      notes: input.notes ?? null,
       items: {
         create: input.items.map((item) => ({
           description: item.description,
@@ -145,6 +165,60 @@ export class CommerceService {
       orderBy: { createdAt: 'desc' },
       include: { contact: true, quote: true, payments: true, items: true },
     });
+  }
+
+  async getInvoiceWithBusiness(invoiceId: string, requireShareable = false) {
+    const invoice = await this.prisma.client.invoice.findUnique({
+      where: { id: invoiceId },
+      include: {
+        contact: {
+          select: {
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+        items: true,
+        business: {
+          select: {
+            id: true,
+            name: true,
+            logoUrl: true,
+            address: true,
+            phone: true,
+            email: true,
+            website: true,
+            primaryColor: true,
+            secondaryColor: true,
+            facebook: true,
+            instagram: true,
+            twitter: true,
+            whatsapp: true,
+          },
+        },
+      },
+    });
+
+    if (!invoice) return null;
+
+    if (requireShareable) {
+      const shareableStatuses = ['SENT', 'PAID', 'OVERDUE'];
+      if (!shareableStatuses.includes(invoice.status)) {
+        return null;
+      }
+    }
+
+    if ((!invoice.subtotal || invoice.subtotal === 0) && invoice.items?.length > 0) {
+      const computedSubtotal = invoice.items.reduce((sum, item) => sum + (item.total || 0), 0);
+      const computedTaxAmount = invoice.taxRate ? computedSubtotal * (invoice.taxRate / 100) : 0;
+      return {
+        ...invoice,
+        subtotal: computedSubtotal,
+        taxAmount: invoice.taxAmount ?? computedTaxAmount,
+      };
+    }
+
+    return invoice;
   }
 
   async markInvoicePaid(invoiceId: string, actorId?: string | null) {

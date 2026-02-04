@@ -123,6 +123,10 @@ export default function CommercePage() {
     contactId: "",
     dueDate: "",
     items: [{ id: generateItemId(), productId: "", description: "", quantity: "1", unitPrice: "" }] as InvoiceLineItem[],
+    taxRate: "12.5",
+    discountType: "PERCENT" as "PERCENT" | "FIXED",
+    discountValue: "",
+    notes: "",
   });
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<string>("ALL");
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
@@ -381,6 +385,10 @@ export default function CommercePage() {
       contactId: "",
       dueDate: "",
       items: [{ id: generateItemId(), productId: "", description: "", quantity: "1", unitPrice: "" }],
+      taxRate: "12.5",
+      discountType: "PERCENT",
+      discountValue: "",
+      notes: "",
     });
   }
 
@@ -443,6 +451,10 @@ export default function CommercePage() {
         unitPrice: parseFloat(item.unitPrice),
       })),
       dueDate: invoiceForm.dueDate || undefined,
+      taxRate: invoiceForm.taxRate ? parseFloat(invoiceForm.taxRate) : undefined,
+      discountType: invoiceForm.discountValue ? invoiceForm.discountType : undefined,
+      discountValue: invoiceForm.discountValue ? parseFloat(invoiceForm.discountValue) : undefined,
+      notes: invoiceForm.notes || undefined,
     });
     if (error) setFormError(error);
     if (data) {
@@ -731,6 +743,57 @@ export default function CommercePage() {
                   />
                 </div>
 
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-3 rounded-xl bg-muted/20 border border-border/40">
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1.5 block">Tax Rate (%)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      value={invoiceForm.taxRate}
+                      onChange={(e) => setInvoiceForm((f) => ({ ...f, taxRate: e.target.value }))}
+                      placeholder="12.5"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1.5 block">Discount Type</label>
+                    <select
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      value={invoiceForm.discountType}
+                      onChange={(e) => setInvoiceForm((f) => ({ ...f, discountType: e.target.value as "PERCENT" | "FIXED" }))}
+                    >
+                      <option value="PERCENT">Percentage (%)</option>
+                      <option value="FIXED">Fixed Amount (TTD)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1.5 block">
+                      Discount {invoiceForm.discountType === "PERCENT" ? "(%)" : "(TTD)"}
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      value={invoiceForm.discountValue}
+                      onChange={(e) => setInvoiceForm((f) => ({ ...f, discountValue: e.target.value }))}
+                      placeholder="0"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1.5 block">Notes (optional)</label>
+                    <input
+                      type="text"
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      value={invoiceForm.notes}
+                      onChange={(e) => setInvoiceForm((f) => ({ ...f, notes: e.target.value }))}
+                      placeholder="Payment terms, thank you message..."
+                    />
+                  </div>
+                </div>
+
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <label className="text-sm font-medium">Line Items</label>
@@ -845,17 +908,48 @@ export default function CommercePage() {
                     </div>
                   ))}
                   
-                  <div className="flex justify-end pt-2 border-t border-border/40">
-                    <div className="text-sm">
-                      <span className="text-muted-foreground">Total: </span>
-                      <span className="font-bold text-primary">
-                        TTD {invoiceForm.items.reduce((sum, item) => {
-                          const qty = parseInt(item.quantity) || 0;
-                          const price = parseFloat(item.unitPrice) || 0;
-                          return sum + (qty * price);
-                        }, 0).toLocaleString()}
-                      </span>
-                    </div>
+                  <div className="pt-4 border-t border-border/40 space-y-2">
+                    {(() => {
+                      const subtotal = invoiceForm.items.reduce((sum, item) => {
+                        const qty = parseInt(item.quantity) || 0;
+                        const price = parseFloat(item.unitPrice) || 0;
+                        return sum + (qty * price);
+                      }, 0);
+                      const taxRate = parseFloat(invoiceForm.taxRate) || 0;
+                      const taxAmount = (subtotal * taxRate) / 100;
+                      const discountValue = parseFloat(invoiceForm.discountValue) || 0;
+                      const discountAmount = invoiceForm.discountType === "PERCENT"
+                        ? (subtotal * discountValue) / 100
+                        : discountValue;
+                      const total = subtotal + taxAmount - discountAmount;
+                      
+                      return (
+                        <div className="flex justify-end">
+                          <div className="text-sm space-y-1 min-w-[200px]">
+                            <div className="flex justify-between text-muted-foreground">
+                              <span>Subtotal:</span>
+                              <span>TTD {subtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                            </div>
+                            {taxRate > 0 && (
+                              <div className="flex justify-between text-muted-foreground">
+                                <span>Tax ({taxRate}%):</span>
+                                <span>TTD {taxAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                              </div>
+                            )}
+                            {discountAmount > 0 && (
+                              <div className="flex justify-between text-emerald-400">
+                                <span>Discount {invoiceForm.discountType === "PERCENT" ? `(${discountValue}%)` : ""}:</span>
+                                <span>-TTD {discountAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between font-bold text-primary border-t border-border/40 pt-1">
+                              <span>Total:</span>
+                              <span>TTD {total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
 
