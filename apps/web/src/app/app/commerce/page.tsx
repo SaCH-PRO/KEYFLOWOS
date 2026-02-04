@@ -1196,13 +1196,24 @@ export default function CommercePage() {
                                 <>
                                   <button
                                     onClick={async () => {
-                                      const res = await updateQuoteStatus(quote.id, "ACCEPTED");
-                                      if (res.data) {
-                                        setQuotes((q) => q.map((qItem) => qItem.id === quote.id ? res.data! : qItem));
+                                      if (!businessId) return;
+                                      const statusRes = await updateQuoteStatus(quote.id, "ACCEPTED");
+                                      if (statusRes.data) {
+                                        const invoiceRes = await convertQuoteToInvoice({
+                                          businessId,
+                                          quoteId: quote.id,
+                                          taxRate: 12.5,
+                                        });
+                                        if (invoiceRes.data) {
+                                          setInvoices((inv) => [invoiceRes.data!, ...inv]);
+                                          setQuotes((q) => q.map((qItem) => qItem.id === quote.id ? { ...statusRes.data!, invoiceId: invoiceRes.data!.id } : qItem));
+                                        } else {
+                                          setQuotes((q) => q.map((qItem) => qItem.id === quote.id ? statusRes.data! : qItem));
+                                        }
                                       }
                                     }}
                                     className="p-1.5 rounded-lg hover:bg-green-500/20 text-green-400"
-                                    title="Mark Accepted"
+                                    title="Accept & Create Invoice"
                                   >
                                     <CheckCircle className="w-4 h-4" />
                                   </button>
