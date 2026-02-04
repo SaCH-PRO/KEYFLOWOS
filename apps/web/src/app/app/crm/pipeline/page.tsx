@@ -33,6 +33,7 @@ import {
   addContactTask,
   completeContactTask,
   createContact,
+  deleteContact,
   fetchContactDetail,
   fetchContacts,
   fetchSegmentSummary,
@@ -240,6 +241,20 @@ export default function ContactsPage() {
         contact: contactDetail.contact ? { ...contactDetail.contact, status } : null,
       });
     }
+  };
+
+  const handleEditContact = () => {
+    if (!selectedContactId || !contactDetail?.contact) return;
+    setShowAddForm(true);
+  };
+
+  const handleDeleteContact = async () => {
+    if (!selectedContactId || !businessId) return;
+    await deleteContact(selectedContactId, businessId);
+    setContacts((prev) => prev.filter((c) => c.id !== selectedContactId));
+    setSelectedContactId(null);
+    setContactDetail(null);
+    setShowMobileDetail(false);
   };
 
   const handleImportFile = async (type: "csv" | "xlsx" | "image", file: File) => {
@@ -489,6 +504,8 @@ export default function ContactsPage() {
             onAddTask={handleAddTask}
             onCompleteTask={handleCompleteTask}
             onUpdateStatus={handleUpdateStatus}
+            onEdit={handleEditContact}
+            onDelete={handleDeleteContact}
           />
         </div>
       </div>
@@ -523,6 +540,8 @@ export default function ContactsPage() {
                   onAddTask={handleAddTask}
                   onCompleteTask={handleCompleteTask}
                   onUpdateStatus={handleUpdateStatus}
+                  onEdit={handleEditContact}
+                  onDelete={handleDeleteContact}
                 />
               </div>
             </motion.div>
