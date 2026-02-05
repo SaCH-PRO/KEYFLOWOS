@@ -127,8 +127,8 @@ export class CommerceController {
       });
       this.logger.log(`Quote ${quoteId} status updated successfully`);
       return result;
-    } catch (error) {
-      this.logger.error(`Failed to update quote status: ${error.message}`, error.stack);
+    } catch (error: any) {
+      this.logger.error(`Failed to update quote status: ${error?.message}`, error?.stack);
       throw error;
     }
   }
