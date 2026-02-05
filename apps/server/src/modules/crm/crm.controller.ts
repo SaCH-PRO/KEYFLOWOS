@@ -302,13 +302,17 @@ export class CrmController {
     @Query('state') state: string,
     @Res() res: Response,
   ) {
+    const frontendUrl = process.env.REPLIT_DEV_DOMAIN 
+      ? `https://${process.env.REPLIT_DEV_DOMAIN}` 
+      : 'http://localhost:5000';
+
     if (!code || !state) {
-      return res.redirect('/app/crm/pipeline?google_error=missing_params');
+      return res.redirect(`${frontendUrl}/app/crm/pipeline?google_error=missing_params`);
     }
 
     const verifiedState = this.google.verifyState(state);
     if (!verifiedState) {
-      return res.redirect('/app/crm/pipeline?google_error=invalid_state');
+      return res.redirect(`${frontendUrl}/app/crm/pipeline?google_error=invalid_state`);
     }
 
     try {
@@ -319,9 +323,9 @@ export class CrmController {
         refreshToken: tokens.refresh_token,
       });
 
-      return res.redirect(`/app/crm/pipeline?google_success=true&imported=${result.imported}`);
+      return res.redirect(`${frontendUrl}/app/crm/pipeline?google_success=true&imported=${result.imported}`);
     } catch (err) {
-      return res.redirect(`/app/crm/pipeline?google_error=${encodeURIComponent((err as Error).message)}`);
+      return res.redirect(`${frontendUrl}/app/crm/pipeline?google_error=${encodeURIComponent((err as Error).message)}`);
     }
   }
 
