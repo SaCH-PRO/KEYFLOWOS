@@ -141,6 +141,13 @@ export default function CommercePage() {
   const [quoteStatusFilter, setQuoteStatusFilter] = useState<string>("ALL");
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
   const [showConvertModal, setShowConvertModal] = useState(false);
+  const [showAcceptPrompt, setShowAcceptPrompt] = useState(false);
+  const [autoConvertToInvoice, setAutoConvertToInvoice] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("kf_auto_convert_quote") === "true";
+    }
+    return false;
+  });
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailForm, setEmailForm] = useState({ email: "", message: "" });
   const [sendingEmail, setSendingEmail] = useState(false);
@@ -1276,6 +1283,22 @@ export default function CommercePage() {
                   </button>
                 ))}
               </div>
+              <button
+                onClick={() => {
+                  const newVal = !autoConvertToInvoice;
+                  setAutoConvertToInvoice(newVal);
+                  localStorage.setItem("kf_auto_convert_quote", String(newVal));
+                }}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs transition-colors border ${
+                  autoConvertToInvoice
+                    ? "bg-green-500/20 text-green-400 border-green-500/30"
+                    : "bg-muted/50 text-muted-foreground border-border/60 hover:bg-muted"
+                }`}
+                title="When enabled, accepting a quote will automatically open the invoice conversion dialog"
+              >
+                {autoConvertToInvoice ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
+                <span className="hidden sm:inline">Auto-convert</span>
+              </button>
             </div>
 
             {quotes.length === 0 ? (
@@ -1388,6 +1411,19 @@ export default function CommercePage() {
                                       const res = await updateQuoteStatus(quote.id, "ACCEPTED");
                                       if (res.data) {
                                         setQuotes((q) => q.map((qItem) => qItem.id === quote.id ? res.data! : qItem));
+                                        setSelectedQuote(res.data);
+                                        if (autoConvertToInvoice) {
+                                          setConvertForm({
+                                            taxRate: String(res.data.taxRate ?? 12.5),
+                                            discountType: (res.data.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
+                                            discountValue: res.data.discountValue ? String(res.data.discountValue) : "",
+                                            notes: res.data.notes ?? "",
+                                            dueDate: "",
+                                          });
+                                          setShowConvertModal(true);
+                                        } else {
+                                          setShowAcceptPrompt(true);
+                                        }
                                       }
                                     }}
                                     className="p-1.5 rounded-lg hover:bg-green-500/20 text-green-400"
@@ -1544,7 +1580,57 @@ export default function CommercePage() {
           </div>
         )}
 
-        {selectedQuote && !showConvertModal && !showEmailModal && (
+        {/* Accept Prompt Modal */}
+        {showAcceptPrompt && selectedQuote && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+            <div className="bg-card rounded-2xl border border-border p-6 max-w-md w-full space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold">Quote Accepted!</h3>
+                <button onClick={() => { setShowAcceptPrompt(false); setSelectedQuote(null); }} className="p-1 rounded hover:bg-muted">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="text-center py-4">
+                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-green-500/20 flex items-center justify-center">
+                  <CheckCircle className="w-8 h-8 text-green-500" />
+                </div>
+                <p className="text-muted-foreground mb-4">
+                  Quote <span className="font-mono text-foreground">{selectedQuote.quoteNumber}</span> has been marked as accepted.
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Would you like to convert this quote to an invoice now?
+                </p>
+              </div>
+              <div className="flex flex-col gap-2">
+                <Button
+                  onClick={() => {
+                    setConvertForm({
+                      taxRate: String(selectedQuote.taxRate ?? 12.5),
+                      discountType: (selectedQuote.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
+                      discountValue: selectedQuote.discountValue ? String(selectedQuote.discountValue) : "",
+                      notes: selectedQuote.notes ?? "",
+                      dueDate: "",
+                    });
+                    setShowAcceptPrompt(false);
+                    setShowConvertModal(true);
+                  }}
+                  className="w-full"
+                >
+                  Convert to Invoice
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => { setShowAcceptPrompt(false); setSelectedQuote(null); }}
+                  className="w-full"
+                >
+                  Maybe Later
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {selectedQuote && !showConvertModal && !showEmailModal && !showAcceptPrompt && (
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
             <div className="bg-card rounded-2xl border border-border p-6 max-w-lg w-full space-y-4 max-h-[80vh] overflow-y-auto">
               <div className="flex items-center justify-between">
