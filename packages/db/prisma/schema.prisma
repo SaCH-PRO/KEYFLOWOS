@@ -70,6 +70,7 @@ model Business {
   
   // Compliance & Health
   complianceStatus String?  @map("compliance_status")  // GREEN, YELLOW, RED
+  complianceData   Json?    @map("compliance_data")    // { itemId: boolean, ... }
   lastHealthCheck  DateTime? @map("last_health_check")
 
   // Module Relationships

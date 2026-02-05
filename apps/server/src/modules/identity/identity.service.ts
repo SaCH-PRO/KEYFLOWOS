@@ -59,6 +59,9 @@ export class IdentityService {
     primaryColor?: string;
     secondaryColor?: string;
     defaultTaxRate?: number;
+    complianceStatus?: string;
+    complianceData?: Record<string, boolean>;
+    lastHealthCheck?: string;
   }) {
     if (input.slug) {
       const existing = await this.prisma.client.business.findFirst({
@@ -66,9 +69,17 @@ export class IdentityService {
       });
       if (existing) throw new BadRequestException('Slug is already taken');
     }
+    
+    const { lastHealthCheck, ...rest } = input;
+    const data: Record<string, unknown> = { ...rest };
+    
+    if (lastHealthCheck) {
+      data.lastHealthCheck = new Date(lastHealthCheck);
+    }
+    
     return this.prisma.client.business.update({
       where: { id: businessId },
-      data: input,
+      data,
     });
   }
 

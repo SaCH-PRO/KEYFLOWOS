@@ -62,6 +62,9 @@ export class IdentityController {
       primaryColor?: string;
       secondaryColor?: string;
       defaultTaxRate?: number;
+      complianceStatus?: string;
+      complianceData?: Record<string, boolean>;
+      lastHealthCheck?: string;
     },
   ) {
     return this.identity.updateBusiness(businessId, body);
