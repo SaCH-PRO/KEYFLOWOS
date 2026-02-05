@@ -57,6 +57,21 @@ model Business {
   secondaryColor String?  @default("#14B8A6") @map("secondary_color")
   defaultTaxRate Float?   @default(0) @map("default_tax_rate")
 
+  // Business Autopilot Settings
+  businessIntent   String?  @map("business_intent")    // Free-text description of business idea
+  archetype        String?  @map("archetype")          // LOCAL_SERVICE, DIGITAL_PRODUCT, AGENCY, CLINIC, ECOMMERCE
+  industry         String?  @map("industry")           // Auto-inferred from intent
+  revenueModel     String?  @map("revenue_model")      // SUBSCRIPTION, ONE_TIME, RETAINER, USAGE_BASED
+  budgetRange      String?  @map("budget_range")       // LOW, MEDIUM, HIGH
+  timeCommitment   String?  @map("time_commitment")    // MINIMAL, PART_TIME, FULL_TIME
+  teamSize         String?  @map("team_size")          // SOLO, SMALL_TEAM, GROWING
+  autopilotEnabled Boolean  @default(true) @map("autopilot_enabled")
+  autopilotStage   String?  @map("autopilot_stage")    // SETUP, LAUNCHING, OPERATING, MAINTENANCE
+  
+  // Compliance & Health
+  complianceStatus String?  @map("compliance_status")  // GREEN, YELLOW, RED
+  lastHealthCheck  DateTime? @map("last_health_check")
+
   // Module Relationships
   members          Membership[]
   contacts         Contact[]
@@ -79,6 +94,7 @@ model Business {
   projectTasks     ProjectTask[]
   projectTemplates ProjectTemplate[]
   sites            Site[]
+  autopilotTasks   AutopilotTask[]
 
   // Gmail Integration for sending quotes/invoices
   gmailEmail        String?   @map("gmail_email")
@@ -690,4 +706,49 @@ model Site {
   deletedAt DateTime? @map("deleted_at") // Soft delete
 
   @@map("sites")
+}
+
+// ---
+// MODULE 8: BUSINESS AUTOPILOT
+// ---
+model AutopilotTask {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  
+  title       String
+  description String?
+  category    String   // SETUP, LEGAL, MARKETING, SALES, OPERATIONS, FINANCE
+  priority    String   @default("NORMAL") // LOW, NORMAL, HIGH, URGENT
+  status      String   @default("PENDING") // PENDING, IN_PROGRESS, AWAITING_APPROVAL, COMPLETED, SKIPPED, AUTO_EXECUTED
+  
+  // Autopilot execution
+  autoExecutable Boolean  @default(false) @map("auto_executable")
+  executedAt     DateTime? @map("executed_at")
+  executedBy     String?   @map("executed_by") // USER, SYSTEM, AI
+  
+  // Approval flow
+  requiresApproval Boolean  @default(false) @map("requires_approval")
+  approvalData     Json?    @map("approval_data") // What the user needs to approve
+  approvedAt       DateTime? @map("approved_at")
+  approvedBy       String?   @map("approved_by")
+  
+  // Scheduling
+  scheduledFor DateTime? @map("scheduled_for")
+  dueDate      DateTime? @map("due_date")
+  
+  // Linking to related entities
+  relatedType  String?  @map("related_type") // CONTACT, INVOICE, BOOKING, etc.
+  relatedId    String?  @map("related_id")
+  
+  // AI-generated context
+  aiContext    Json?    @map("ai_context")
+  
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt      @map("updated_at")
+  
+  @@index([businessId, status])
+  @@index([businessId, scheduledFor])
+  @@map("autopilot_tasks")
 }

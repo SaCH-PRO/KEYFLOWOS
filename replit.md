@@ -4,6 +4,18 @@
 KEYFLOWOS is an AI-powered operating system for service businesses that eliminates the "tool maze" by providing pre-built Playbooks for common workflows. Features a "Cockpit" dashboard with Flow Graph visualization, AI-driven Flow Feed, and comprehensive CRM as the intelligence layer.
 
 ## Recent Changes (Feb 2026)
+- **Business Autopilot System** - AI-powered autonomous business operations (80-90% automation)
+  - New Autopilot Quick Start: ≤3 min onboarding with free-text business intent
+  - Business Archetype inference (LOCAL_SERVICE, DIGITAL_PRODUCT, AGENCY, CLINIC, ECOMMERCE)
+  - Revenue model detection (ONE_TIME, SUBSCRIPTION, RETAINER, USAGE_BASED)
+  - Budget range and time commitment sliders for customization
+  - Team size selection (solo or team)
+  - Autopilot stages: SETUP → LAUNCHING → OPERATING → MAINTENANCE
+  - Task Orchestration Engine with max 3 tasks per day limit
+  - Auto-executable tasks vs. approval-required actions
+  - Critical alerts for compliance (GREEN/YELLOW/RED), overdue invoices, pending approvals
+  - Backend: AutopilotModule with full CRUD, approval flow, stats, and alert endpoints
+  - Frontend: client functions for getTodaysTasks, generateSetupTasks, approveTask, denyTask, getAutopilotStats, getCriticalAlerts
 - **Real-Time Cockpit Dashboard** - Live business intelligence with data-driven UI
   - FlowService backend aggregates CRM, invoices, bookings, and quotes in real-time
   - Momentum calculation based on business activity (revenue, bookings, tasks)
