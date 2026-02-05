@@ -19,6 +19,7 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { AuthMiddleware } from './core/auth/auth.middleware';
 import { ActionsModule } from './modules/actions/actions.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
+import { AutopilotModule } from './modules/autopilot/autopilot.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { UploadsModule } from './modules/uploads/uploads.module';
     WebhooksModule,
     ActionsModule,
     UploadsModule,
+    AutopilotModule,
   ],
   controllers: [AppController],
   providers: [AppService, AuthMiddleware],

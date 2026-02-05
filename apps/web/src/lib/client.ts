@@ -1469,4 +1469,137 @@ export async function updateStreak(businessId?: string) {
   });
 }
 
+export type AutopilotTask = {
+  id: string;
+  title: string;
+  description?: string | null;
+  category: string;
+  priority: string;
+  status: string;
+  autoExecutable: boolean;
+  requiresApproval: boolean;
+  approvalData?: Record<string, unknown> | null;
+  scheduledFor?: string | null;
+  dueDate?: string | null;
+  relatedType?: string | null;
+  relatedId?: string | null;
+  createdAt: string;
+};
+
+export type AutopilotAlert = {
+  type: string;
+  severity: string;
+  message: string;
+  action?: string;
+};
+
+export type AutopilotStats = {
+  pending: number;
+  completed: number;
+  autoExecuted: number;
+  total: number;
+  automationRate: number;
+};
+
+const autopilotTaskSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string().nullable().optional(),
+  category: z.string(),
+  priority: z.string(),
+  status: z.string(),
+  autoExecutable: z.boolean(),
+  requiresApproval: z.boolean(),
+  approvalData: z.unknown().nullable().optional(),
+  scheduledFor: z.string().nullable().optional(),
+  dueDate: z.string().nullable().optional(),
+  relatedType: z.string().nullable().optional(),
+  relatedId: z.string().nullable().optional(),
+  createdAt: z.string(),
+});
+
+const autopilotAlertSchema = z.object({
+  type: z.string(),
+  severity: z.string(),
+  message: z.string(),
+  action: z.string().optional(),
+});
+
+const autopilotStatsSchema = z.object({
+  pending: z.number(),
+  completed: z.number(),
+  autoExecuted: z.number(),
+  total: z.number(),
+  automationRate: z.number(),
+});
+
+export async function fetchTodaysTasks(businessId?: string, limit?: number) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const query = limit ? `?limit=${limit}` : '';
+  return apiGet(
+    `/autopilot/businesses/${encodeURIComponent(bid)}/tasks/today${query}`,
+    z.array(autopilotTaskSchema),
+    [],
+  );
+}
+
+export async function fetchAllAutopilotTasks(businessId?: string, status?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const query = status ? `?status=${status}` : '';
+  return apiGet(
+    `/autopilot/businesses/${encodeURIComponent(bid)}/tasks${query}`,
+    z.array(autopilotTaskSchema),
+    [],
+  );
+}
+
+export async function updateAutopilotTaskStatus(taskId: string, status: string, businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPatch<AutopilotTask>(
+    `/autopilot/businesses/${encodeURIComponent(bid)}/tasks/${encodeURIComponent(taskId)}/status`,
+    { status },
+  );
+}
+
+export async function approveAutopilotTask(taskId: string, approvedBy: string, businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AutopilotTask>({
+    path: `/autopilot/businesses/${encodeURIComponent(bid)}/tasks/${encodeURIComponent(taskId)}/approve`,
+    body: { approvedBy },
+  });
+}
+
+export async function denyAutopilotTask(taskId: string, businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AutopilotTask>({
+    path: `/autopilot/businesses/${encodeURIComponent(bid)}/tasks/${encodeURIComponent(taskId)}/deny`,
+    body: {},
+  });
+}
+
+export async function generateSetupTasks(businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AutopilotTask[]>({
+    path: `/autopilot/businesses/${encodeURIComponent(bid)}/tasks/generate-setup`,
+    body: {},
+  });
+}
+
+export async function fetchAutopilotStats(businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/autopilot/businesses/${encodeURIComponent(bid)}/stats`,
+    autopilotStatsSchema,
+  );
+}
+
+export async function fetchCriticalAlerts(businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/autopilot/businesses/${encodeURIComponent(bid)}/alerts`,
+    z.array(autopilotAlertSchema),
+    [],
+  );
+}
+
 export { DEFAULT_BUSINESS_ID };
