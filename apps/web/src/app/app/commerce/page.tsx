@@ -1407,23 +1407,34 @@ export default function CommercePage() {
                               {quote.status === "SENT" && (
                                 <>
                                   <button
-                                    onClick={async () => {
-                                      const res = await updateQuoteStatus(quote.id, "ACCEPTED");
-                                      if (res.data) {
-                                        setQuotes((q) => q.map((qItem) => qItem.id === quote.id ? res.data! : qItem));
-                                        setSelectedQuote(res.data);
-                                        if (autoConvertToInvoice) {
-                                          setConvertForm({
-                                            taxRate: String(res.data.taxRate ?? 12.5),
-                                            discountType: (res.data.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
-                                            discountValue: res.data.discountValue ? String(res.data.discountValue) : "",
-                                            notes: res.data.notes ?? "",
-                                            dueDate: "",
-                                          });
-                                          setShowConvertModal(true);
-                                        } else {
-                                          setShowAcceptPrompt(true);
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      console.log("[Accept] Clicking accept for quote:", quote.id);
+                                      try {
+                                        const res = await updateQuoteStatus(quote.id, "ACCEPTED");
+                                        console.log("[Accept] Response:", res);
+                                        if (res.data) {
+                                          setQuotes((q) => q.map((qItem) => qItem.id === quote.id ? res.data! : qItem));
+                                          setSelectedQuote(res.data);
+                                          if (autoConvertToInvoice) {
+                                            setConvertForm({
+                                              taxRate: String(res.data.taxRate ?? 12.5),
+                                              discountType: (res.data.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
+                                              discountValue: res.data.discountValue ? String(res.data.discountValue) : "",
+                                              notes: res.data.notes ?? "",
+                                              dueDate: "",
+                                            });
+                                            setShowConvertModal(true);
+                                          } else {
+                                            setShowAcceptPrompt(true);
+                                          }
+                                        } else if (res.error) {
+                                          console.error("[Accept] Error:", res.error);
+                                          alert("Failed to accept quote: " + res.error);
                                         }
+                                      } catch (err) {
+                                        console.error("[Accept] Exception:", err);
+                                        alert("Failed to accept quote");
                                       }
                                     }}
                                     className="p-1.5 rounded-lg hover:bg-green-500/20 text-green-400"
