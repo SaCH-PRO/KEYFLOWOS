@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, Users, User, Link2 } from "lucide-react";
+import { Building2, Users, User, Link2, Shield } from "lucide-react";
 
 const navItems = [
   { href: "/app/settings/profile", label: "Profile", icon: User },
   { href: "/app/settings/business", label: "Business", icon: Building2 },
   { href: "/app/settings/team", label: "Team", icon: Users },
   { href: "/app/settings/connections", label: "Connections", icon: Link2 },
+  { href: "/app/settings/compliance", label: "Compliance", icon: Shield },
 ];
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {

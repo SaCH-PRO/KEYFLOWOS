@@ -42,6 +42,8 @@ interface CockpitSummary {
     upcomingBookings: number;
     monthlyRevenue: number;
     weeklyBookings: number;
+    todayRevenue: number;
+    todayBookings: number;
   };
   highlights: {
     highPotential: { contactId: string; name: string; score: number }[];
@@ -57,6 +59,9 @@ export class FlowService {
 
   async getCockpitSummary(businessId: string): Promise<CockpitSummary> {
     const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const endOfDay = new Date(startOfDay);
+    endOfDay.setDate(endOfDay.getDate() + 1);
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfWeek = new Date(now);
     startOfWeek.setDate(now.getDate() - now.getDay());
@@ -133,7 +138,11 @@ export class FlowService {
     const paidInvoicesThisMonth = invoices.filter(i => i.status === 'PAID' && i.paidAt && new Date(i.paidAt) >= startOfMonth);
     const monthlyRevenue = paidInvoicesThisMonth.reduce((sum, i) => sum + i.total, 0);
 
+    const paidInvoicesToday = invoices.filter(i => i.status === 'PAID' && i.paidAt && new Date(i.paidAt) >= startOfDay && new Date(i.paidAt) < endOfDay);
+    const todayRevenue = paidInvoicesToday.reduce((sum, i) => sum + i.total, 0);
+
     const weeklyBookings = bookings.filter(b => new Date(b.createdAt) >= startOfWeek).length;
+    const todayBookings = bookings.filter(b => new Date(b.startTime) >= startOfDay && new Date(b.startTime) < endOfDay && b.status !== 'CANCELLED').length;
 
     const phases: FlowPhase[] = [
       { name: 'Leads', count: activeLeads, value: activeLeads * 100, trend: 'stable' },
@@ -329,6 +338,8 @@ export class FlowService {
         upcomingBookings,
         monthlyRevenue,
         weeklyBookings,
+        todayRevenue,
+        todayBookings,
       },
       highlights: {
         highPotential,

@@ -3,55 +3,84 @@
 import { useEffect, useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { AchievementsStrip } from "@/components/cockpit/achievements-strip";
-import { FlowFeedPanel, FeedItem } from "@/components/cockpit/flow-feed-panel";
-import { FlowGraphPanel, Phase } from "@/components/cockpit/flow-graph-panel";
-import { FlowStatsRow } from "@/components/cockpit/flow-stats-row";
 import { 
   fetchCockpitSummary, 
   fetchGamificationStats, 
   CockpitSummary, 
   GamificationStats,
-  updateStreak 
+  updateStreak,
+  fetchTodaysTasks,
+  updateAutopilotTaskStatus,
+  approveAutopilotTask,
+  denyAutopilotTask,
+  fetchCriticalAlerts,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
-import { apiPost } from "@/lib/api";
 import { 
-  Sparkles, 
-  FileText, 
-  Zap, 
-  TrendingUp, 
-  Users, 
-  Calendar,
+  CheckCircle2, 
+  Clock,
   AlertTriangle,
-  Package,
-  UserPlus,
-  Send,
+  AlertCircle,
+  Info,
+  DollarSign,
+  Calendar,
   ChevronRight,
-  Trophy,
-  Flame
+  Sparkles,
+  Play,
+  X,
+  Check,
+  Zap,
+  TrendingUp,
+  ShieldAlert,
+  FileWarning,
+  Bell,
 } from "lucide-react";
 
-const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
-  Package,
-  UserPlus,
-  Send,
-  AlertTriangle,
-  TrendingUp,
-  Zap,
-  Calendar,
-  Trophy,
+interface AutopilotTask {
+  id: string;
+  title: string;
+  description?: string;
+  category: string;
+  priority: string;
+  status: string;
+  autoExecutable: boolean;
+  requiresApproval: boolean;
+}
+
+interface CriticalAlert {
+  type: string;
+  severity: string;
+  message: string;
+  action?: string;
+}
+
+const severityStyles: Record<string, string> = {
+  CRITICAL: "bg-red-500/10 border-red-500/30 text-red-500",
+  WARNING: "bg-amber-500/10 border-amber-500/30 text-amber-500",
+  INFO: "bg-blue-500/10 border-blue-500/30 text-blue-500",
+};
+
+const severityIcons: Record<string, React.ReactNode> = {
+  CRITICAL: <AlertCircle className="w-5 h-5" />,
+  WARNING: <AlertTriangle className="w-5 h-5" />,
+  INFO: <Info className="w-5 h-5" />,
+};
+
+const alertTypeIcons: Record<string, React.ReactNode> = {
+  COMPLIANCE: <ShieldAlert className="w-5 h-5" />,
+  PAYMENT: <FileWarning className="w-5 h-5" />,
+  APPROVAL: <Bell className="w-5 h-5" />,
 };
 
 export default function AppHome() {
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [cockpit, setCockpit] = useState<CockpitSummary | null>(null);
   const [gamification, setGamification] = useState<GamificationStats | null>(null);
+  const [tasks, setTasks] = useState<AutopilotTask[]>([]);
+  const [alerts, setAlerts] = useState<CriticalAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [completingTask, setCompletingTask] = useState<string | null>(null);
 
   useEffect(() => {
     const initWorkspace = async () => {
@@ -74,28 +103,17 @@ export default function AppHome() {
       setLoading(true);
       setError(null);
       try {
-        const [cockpitResult, gamificationResult] = await Promise.all([
+        const [cockpitResult, gamificationResult, tasksResult, alertsResult] = await Promise.all([
           fetchCockpitSummary(businessId),
           fetchGamificationStats(businessId),
+          fetchTodaysTasks(businessId),
+          fetchCriticalAlerts(businessId),
         ]);
 
-        if (cockpitResult.error) {
-          console.error("Cockpit fetch error:", cockpitResult.error);
-        }
-        if (gamificationResult.error) {
-          console.error("Gamification fetch error:", gamificationResult.error);
-        }
-
-        if (cockpitResult.data) {
-          setCockpit(cockpitResult.data);
-        }
-        if (gamificationResult.data) {
-          setGamification(gamificationResult.data);
-        }
-
-        if (!cockpitResult.data && !gamificationResult.data) {
-          setError("Unable to load dashboard data. Please try again.");
-        }
+        if (cockpitResult.data) setCockpit(cockpitResult.data);
+        if (gamificationResult.data) setGamification(gamificationResult.data);
+        if (tasksResult.data) setTasks(tasksResult.data as AutopilotTask[]);
+        if (alertsResult.data) setAlerts(alertsResult.data as CriticalAlert[]);
 
         void updateStreak(businessId);
       } catch (err) {
@@ -110,56 +128,70 @@ export default function AppHome() {
       const handler = () => void load();
       window.addEventListener("kf:invoicePaid", handler);
       window.addEventListener("kf:bookingCreated", handler);
+      window.addEventListener("kf:taskCompleted", handler);
       return () => {
         window.removeEventListener("kf:invoicePaid", handler);
         window.removeEventListener("kf:bookingCreated", handler);
+        window.removeEventListener("kf:taskCompleted", handler);
       };
     }
   }, [businessId]);
 
-  const stats = useMemo(() => {
-    if (!cockpit) return { mrr: "TTD --", conversionRate: "--", avgResponseTime: "--" };
-    const { stats: s } = cockpit;
-    return {
-      mrr: `TTD ${s.monthlyRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-      conversionRate: s.totalContacts > 0 
-        ? `${Math.round((s.totalContacts - s.activeLeads) / s.totalContacts * 100)}%`
-        : "0%",
-      avgResponseTime: `${s.weeklyBookings} bookings/wk`,
-    };
-  }, [cockpit]);
+  const handleCompleteTask = async (taskId: string) => {
+    if (!businessId) return;
+    setCompletingTask(taskId);
+    try {
+      await updateAutopilotTaskStatus(taskId, "COMPLETED", businessId);
+      setTasks(prev => prev.filter(t => t.id !== taskId));
+      window.dispatchEvent(new CustomEvent("kf:taskCompleted"));
+    } catch (err) {
+      console.error("Failed to complete task:", err);
+    }
+    setCompletingTask(null);
+  };
 
-  const phases: Phase[] = useMemo(() => {
-    if (!cockpit) return [];
-    return cockpit.phases.map(p => ({ label: p.name, value: p.count }));
-  }, [cockpit]);
+  const handleApproveTask = async (taskId: string) => {
+    if (!businessId) return;
+    setCompletingTask(taskId);
+    try {
+      await approveAutopilotTask(taskId, "user", businessId);
+      setTasks(prev => prev.filter(t => t.id !== taskId));
+      window.dispatchEvent(new CustomEvent("kf:taskCompleted"));
+    } catch (err) {
+      console.error("Failed to approve task:", err);
+    }
+    setCompletingTask(null);
+  };
 
-  const bottleneck = cockpit?.bottleneck?.phase ?? "Leads";
+  const handleDenyTask = async (taskId: string) => {
+    if (!businessId) return;
+    setCompletingTask(taskId);
+    try {
+      await denyAutopilotTask(taskId, businessId);
+      setTasks(prev => prev.filter(t => t.id !== taskId));
+    } catch (err) {
+      console.error("Failed to deny task:", err);
+    }
+    setCompletingTask(null);
+  };
 
-  const feedItems: FeedItem[] = useMemo(() => {
-    if (!cockpit) return [];
-    return cockpit.feed.map(f => {
-      let type: FeedItem["type"] = "message";
-      if (f.tone === "success") type = "payment";
-      else if (f.actionType === "booking") type = "booking";
-      else if (f.actionType === "event") type = "automation";
-      
-      return {
-        type,
-        title: f.text.split(" — ")[0] || f.text,
-        time: f.timestamp,
-        description: f.text.split(" — ")[1] || "",
-        suggestion: f.actionType === "invoice" ? "View invoice" : undefined,
-        meta: f.actionId ? { invoiceId: f.actionId } : undefined,
-      };
-    });
-  }, [cockpit]);
+  const todayRevenue = cockpit?.stats?.todayRevenue ?? 0;
+  const monthlyRevenue = cockpit?.stats?.monthlyRevenue ?? 0;
+  const pendingInvoices = cockpit?.stats?.pendingInvoices ?? 0;
+  const todayBookings = cockpit?.stats?.todayBookings ?? 0;
 
-  const achievedCount = gamification?.achievements.filter(a => a.achieved).length ?? 0;
-  const totalAchievements = gamification?.achievements.length ?? 0;
+  const greeting = useMemo(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) return "Good morning";
+    if (hour < 17) return "Good afternoon";
+    return "Good evening";
+  }, []);
+
+  const completedToday = gamification?.dailyTasksCompleted ?? 0;
+  const tasksRemaining = tasks.length;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-4xl mx-auto">
       {error && (
         <motion.div
           initial={{ opacity: 0, y: -10 }}
@@ -169,316 +201,279 @@ export default function AppHome() {
           {error}
         </motion.div>
       )}
+
+      {alerts.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="space-y-2"
+        >
+          {alerts.map((alert, idx) => (
+            <Link
+              key={idx}
+              href={alert.action || "#"}
+              className={`flex items-center gap-3 p-4 rounded-xl border transition-all hover:scale-[1.01] ${severityStyles[alert.severity] || severityStyles.INFO}`}
+            >
+              <div className="flex-shrink-0">
+                {alertTypeIcons[alert.type] || severityIcons[alert.severity]}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">{alert.message}</p>
+              </div>
+              {alert.action && (
+                <ChevronRight className="w-5 h-5 flex-shrink-0 opacity-60" />
+              )}
+            </Link>
+          ))}
+        </motion.div>
+      )}
+
       <motion.div 
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
-        className="flex flex-col md:flex-row md:items-center md:justify-between gap-4"
+        className="text-center py-4"
       >
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
-            Welcome back
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Here's what's happening with your business today
-          </p>
+        <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
+          {greeting}
+        </h1>
+        <p className="text-muted-foreground mt-1">
+          {tasksRemaining > 0 
+            ? `You have ${tasksRemaining} task${tasksRemaining > 1 ? 's' : ''} for today`
+            : "All caught up for today!"}
+        </p>
+      </motion.div>
+
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+        className="grid grid-cols-2 gap-4"
+      >
+        <div className="kf-card p-4">
+          <div className="flex items-center gap-2 text-muted-foreground mb-1">
+            <DollarSign className="w-4 h-4" />
+            <span className="text-xs uppercase tracking-wider">Today</span>
+          </div>
+          <div className="text-2xl font-bold">
+            TTD {todayRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </div>
+          {pendingInvoices > 0 && (
+            <p className="text-xs text-muted-foreground mt-1">
+              {pendingInvoices} pending invoice{pendingInvoices > 1 ? 's' : ''}
+            </p>
+          )}
         </div>
-        <div className="flex items-center gap-3">
-          {gamification && (
-            <div className="hidden md:flex items-center gap-2 px-3 py-2 rounded-xl bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20">
-              <Trophy className="w-4 h-4 text-amber-500" />
-              <span className="text-sm font-medium">Level {gamification.level}</span>
-              <span className="text-xs text-muted-foreground">
-                {gamification.currentXp}/{gamification.currentXp + gamification.xpToNextLevel} XP
-              </span>
-            </div>
-          )}
-          {gamification && gamification.streakDays > 0 && (
-            <div className="hidden md:flex items-center gap-2 px-3 py-2 rounded-xl bg-gradient-to-r from-orange-500/10 to-red-500/10 border border-orange-500/20">
-              <Flame className="w-4 h-4 text-orange-500" />
-              <span className="text-sm font-medium">{gamification.streakDays} day streak</span>
-            </div>
-          )}
-          <button
-            className="kf-btn-primary inline-flex items-center gap-2"
-            onClick={async () => {
-              setAiLoading(true);
-              const msg = await requestAiSuggestion({
-                type: "automation",
-                title: "Health Check",
-                time: "now",
-                description: "AI health check",
-                suggestion: "Summarize health",
-              });
-              setAiSuggestion(msg);
-              setAiLoading(false);
-            }}
-            disabled={aiLoading}
-          >
-            <Sparkles className="w-4 h-4" />
-            {aiLoading ? "Analyzing..." : "AI Health Check"}
-          </button>
+
+        <div className="kf-card p-4">
+          <div className="flex items-center gap-2 text-muted-foreground mb-1">
+            <Calendar className="w-4 h-4" />
+            <span className="text-xs uppercase tracking-wider">Bookings</span>
+          </div>
+          <div className="text-2xl font-bold">{todayBookings}</div>
+          <p className="text-xs text-muted-foreground mt-1">
+            scheduled today
+          </p>
         </div>
       </motion.div>
 
-      <FlowStatsRow stats={stats} />
-      
       <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.2 }}
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.15 }}
         className="kf-card p-4"
       >
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2 text-muted-foreground mb-1">
+          <TrendingUp className="w-4 h-4" />
+          <span className="text-xs uppercase tracking-wider">This Month</span>
+        </div>
+        <div className="text-2xl font-bold">
+          TTD {monthlyRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </div>
+        <div className="mt-3">
+          <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+            <span>Momentum</span>
+            <span>{Math.round((cockpit?.momentum ?? 0) * 100)}%</span>
+          </div>
+          <div className="kf-momentum-bar">
+            <div 
+              className="kf-momentum-fill" 
+              style={{ width: `${(cockpit?.momentum ?? 0) * 100}%` }} 
+            />
+          </div>
+        </div>
+      </motion.div>
+
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2 }}
+      >
+        <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Zap className="w-5 h-5" style={{ color: "hsl(var(--kf-accent1))" }} />
-            <span className="text-sm font-medium">Momentum</span>
+            <h2 className="text-lg font-semibold">Today's Tasks</h2>
           </div>
-          <span className="text-lg font-bold" style={{ color: "hsl(var(--kf-accent1))" }}>
-            {Math.round((cockpit?.momentum ?? 0) * 100)}%
-          </span>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <CheckCircle2 className="w-4 h-4 text-green-500" />
+            <span>{completedToday} done</span>
+          </div>
         </div>
-        <div className="kf-momentum-bar">
-          <div className="kf-momentum-fill" style={{ width: `${(cockpit?.momentum ?? 0) * 100}%` }} />
-        </div>
-        <p className="text-xs text-muted-foreground mt-2">
-          {cockpit?.bottleneck 
-            ? cockpit.bottleneck.suggestion 
-            : "Great work! Keep the momentum going."}
-        </p>
+
+        {loading ? (
+          <div className="space-y-3">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="kf-card p-4 animate-pulse">
+                <div className="h-5 bg-muted rounded w-3/4 mb-2" />
+                <div className="h-4 bg-muted rounded w-1/2" />
+              </div>
+            ))}
+          </div>
+        ) : tasks.length === 0 ? (
+          <div className="kf-card p-8 text-center">
+            <CheckCircle2 className="w-12 h-12 mx-auto mb-3 text-green-500" />
+            <h3 className="text-lg font-semibold mb-1">All Done!</h3>
+            <p className="text-sm text-muted-foreground">
+              You've completed all your tasks for today. Great work!
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {tasks.map((task, idx) => (
+              <motion.div
+                key={task.id}
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.1 * idx }}
+                className="kf-card p-4 group"
+              >
+                <div className="flex items-start gap-4">
+                  <div className="flex-shrink-0 pt-0.5">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+                      task.priority === 'HIGH' 
+                        ? 'bg-orange-500/20 text-orange-500' 
+                        : 'bg-muted text-muted-foreground'
+                    }`}>
+                      {idx + 1}
+                    </div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-medium">{task.title}</h3>
+                    {task.description && (
+                      <p className="text-sm text-muted-foreground mt-0.5">{task.description}</p>
+                    )}
+                    <div className="flex items-center gap-2 mt-2">
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                        {task.category}
+                      </span>
+                      {task.autoExecutable && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500 flex items-center gap-1">
+                          <Sparkles className="w-3 h-3" />
+                          Auto
+                        </span>
+                      )}
+                      {task.requiresApproval && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500">
+                          Needs Approval
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex-shrink-0 flex items-center gap-2">
+                    {task.requiresApproval && task.status === 'AWAITING_APPROVAL' ? (
+                      <>
+                        <button
+                          onClick={() => handleDenyTask(task.id)}
+                          disabled={completingTask === task.id}
+                          className="p-2 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors disabled:opacity-50"
+                          title="Deny"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                        <button
+                          onClick={() => handleApproveTask(task.id)}
+                          disabled={completingTask === task.id}
+                          className="p-2 rounded-lg text-green-500 hover:bg-green-500/10 transition-colors disabled:opacity-50"
+                          title="Approve"
+                        >
+                          <Check className="w-5 h-5" />
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={() => handleCompleteTask(task.id)}
+                        disabled={completingTask === task.id}
+                        className="p-2 rounded-lg text-green-500 hover:bg-green-500/10 transition-colors disabled:opacity-50 opacity-0 group-hover:opacity-100"
+                        title="Mark as done"
+                      >
+                        {completingTask === task.id ? (
+                          <Clock className="w-5 h-5 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="w-5 h-5" />
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        )}
       </motion.div>
 
       {cockpit?.quickActions && cockpit.quickActions.length > 0 && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 0.25 }}
-          className="kf-card p-4"
+          transition={{ delay: 0.3 }}
         >
-          <div className="flex items-center gap-2 mb-3">
-            <Zap className="w-5 h-5" style={{ color: "hsl(var(--kf-accent2))" }} />
-            <span className="text-sm font-medium">Quick Actions</span>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {cockpit.quickActions.map(action => {
-              const IconComponent = iconMap[action.icon] || Zap;
-              return (
-                <Link
-                  key={action.id}
-                  href={action.href}
-                  className="flex items-center gap-3 p-3 rounded-xl border border-border/60 hover:border-border hover:bg-muted/50 transition-all group"
-                >
-                  <div 
-                    className="h-10 w-10 rounded-lg flex items-center justify-center flex-shrink-0 bg-orange-500/10"
-                  >
-                    <IconComponent className="w-5 h-5 text-orange-500" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium truncate">{action.label}</div>
-                    <div className="text-xs text-muted-foreground truncate">{action.description}</div>
-                  </div>
-                  <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:translate-x-0.5 transition-transform" />
-                </Link>
-              );
-            })}
+          <h2 className="text-lg font-semibold mb-4">Quick Actions</h2>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {cockpit.quickActions.slice(0, 4).map(action => (
+              <Link
+                key={action.id}
+                href={action.href}
+                className="kf-card p-4 flex items-center gap-3 hover:scale-[1.02] transition-all group"
+              >
+                <div className="h-10 w-10 rounded-lg flex items-center justify-center flex-shrink-0 bg-orange-500/10">
+                  <Play className="w-5 h-5 text-orange-500" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium truncate">{action.label}</div>
+                  <div className="text-xs text-muted-foreground truncate">{action.description}</div>
+                </div>
+                <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:translate-x-0.5 transition-transform" />
+              </Link>
+            ))}
           </div>
         </motion.div>
       )}
 
-      {!loading && gamification && (
+      {gamification && gamification.streakDays > 0 && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 0.3 }}
+          transition={{ delay: 0.35 }}
+          className="kf-card p-4 bg-gradient-to-r from-orange-500/10 to-red-500/10 border-orange-500/20"
         >
-          <AchievementsStrip 
-            achievements={gamification.achievements}
-            level={gamification.level}
-            currentXp={gamification.currentXp}
-            xpToNextLevel={gamification.xpToNextLevel}
-          />
-        </motion.div>
-      )}
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        <FlowFeedPanel
-          items={feedItems}
-          onAsk={(item) => {
-            void requestAiSuggestion(item).then((msg) => {
-              setAiSuggestion(msg);
-              setActionMessage(msg);
-            });
-          }}
-          onAction={(item) => {
-            if (item.meta?.invoiceId) {
-              window.open(`/pay/${item.meta.invoiceId}`, "_blank");
-            }
-          }}
-        />
-        <div className="space-y-4">
-          <FlowGraphPanel phases={phases} bottleneck={bottleneck} />
-          {cockpit?.bottleneck && (
-            <button
-              className="w-full kf-btn-secondary inline-flex items-center justify-center gap-2"
-              onClick={async () => {
-                setAiLoading(true);
-                const msg = await requestAiSuggestion({
-                  type: "automation",
-                  title: "Fix bottleneck",
-                  time: "now",
-                  description: cockpit.bottleneck?.phase ?? "",
-                  suggestion: cockpit.bottleneck?.suggestion ?? "",
-                });
-                setAiSuggestion(msg);
-                setAiLoading(false);
-              }}
-              disabled={aiLoading}
-            >
-              <Sparkles className="w-4 h-4" />
-              Ask AI to improve {cockpit.bottleneck.phase}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {aiSuggestion && (
-        <motion.div 
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="kf-card-accent p-4"
-        >
-          <div className="flex items-start gap-3">
-            <div 
-              className="h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0"
-              style={{ background: "hsl(var(--kf-accent1))" }}
-            >
-              <Sparkles className="w-4 h-4 text-white" />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-full bg-orange-500/20 flex items-center justify-center">
+                <span className="text-2xl">🔥</span>
+              </div>
+              <div>
+                <div className="font-semibold text-lg">{gamification.streakDays} Day Streak!</div>
+                <p className="text-sm text-muted-foreground">Keep it going to unlock bonus rewards</p>
+              </div>
             </div>
-            <div className="flex-1">
-              <div className="text-sm font-medium mb-1">AI Suggestion</div>
-              <p className="text-sm text-muted-foreground">{aiSuggestion}</p>
+            <div className="text-right">
+              <div className="text-sm text-muted-foreground">Level {gamification.level}</div>
+              <div className="text-xs text-muted-foreground">
+                {gamification.currentXp} / {gamification.currentXp + gamification.xpToNextLevel} XP
+              </div>
             </div>
-            <button 
-              onClick={() => setAiSuggestion(null)}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              &times;
-            </button>
-          </div>
-        </motion.div>
-      )}
-
-      {cockpit && cockpit.highlights.highPotential.length > 0 && (
-        <motion.div 
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.4 }}
-          className="kf-card p-4"
-        >
-          <div className="flex items-center gap-2 mb-3">
-            <TrendingUp className="w-5 h-5" style={{ color: "hsl(var(--kf-accent2))" }} />
-            <span className="text-sm font-medium">High Potential Contacts</span>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {cockpit.highlights.highPotential.slice(0, 5).map((contact) => (
-              <Link
-                key={contact.contactId}
-                href={`/app/crm/contacts/${contact.contactId}`}
-                className="flex items-center gap-2 px-3 py-2 rounded-xl border border-border/60 hover:border-border hover:bg-muted/50 transition-all"
-              >
-                <Users className="w-4 h-4 text-muted-foreground" />
-                <span className="text-sm">{contact.name}</span>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/10 text-green-500">
-                  Score {contact.score}
-                </span>
-              </Link>
-            ))}
-          </div>
-        </motion.div>
-      )}
-
-      {cockpit && cockpit.highlights.overdueReminders.length > 0 && (
-        <motion.div 
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.45 }}
-          className="kf-card p-4 border-amber-500/20"
-        >
-          <div className="flex items-center gap-2 mb-3">
-            <AlertTriangle className="w-5 h-5 text-amber-500" />
-            <span className="text-sm font-medium">Needs Follow-up</span>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {cockpit.highlights.overdueReminders.slice(0, 5).map((contact) => (
-              <Link
-                key={contact.contactId}
-                href={`/app/crm/contacts/${contact.contactId}`}
-                className="flex items-center gap-2 px-3 py-2 rounded-xl border border-amber-500/20 hover:border-amber-500/40 hover:bg-amber-500/5 transition-all"
-              >
-                <Users className="w-4 h-4 text-amber-500" />
-                <span className="text-sm">{contact.name}</span>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500">
-                  {contact.daysSince}d ago
-                </span>
-              </Link>
-            ))}
-          </div>
-        </motion.div>
-      )}
-
-      {gamification && gamification.challenges.length > 0 && (
-        <motion.div 
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.5 }}
-          className="kf-card p-4"
-        >
-          <div className="flex items-center gap-2 mb-3">
-            <Trophy className="w-5 h-5 text-amber-500" />
-            <span className="text-sm font-medium">Active Challenges</span>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {gamification.challenges.map((challenge) => {
-              const progress = Math.min(100, (challenge.progress / challenge.target) * 100);
-              const IconComponent = iconMap[challenge.icon] || Trophy;
-              return (
-                <div
-                  key={challenge.id}
-                  className="p-3 rounded-xl border border-border/60 bg-muted/20"
-                >
-                  <div className="flex items-center gap-2 mb-2">
-                    <IconComponent className="w-4 h-4 text-amber-500" />
-                    <span className="text-sm font-medium">{challenge.title}</span>
-                    <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground ml-auto">
-                      {challenge.type}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mb-2">{challenge.description}</p>
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                      <div 
-                        className="h-full rounded-full bg-amber-500 transition-all"
-                        style={{ width: `${progress}%` }}
-                      />
-                    </div>
-                    <span className="text-xs text-muted-foreground">
-                      {challenge.progress}/{challenge.target}
-                    </span>
-                  </div>
-                  <div className="text-xs text-amber-500 mt-1">+{challenge.xpReward} XP</div>
-                </div>
-              );
-            })}
           </div>
         </motion.div>
       )}
     </div>
   );
-}
-
-async function requestAiSuggestion(item: FeedItem): Promise<string> {
-  const { data, error } = await apiPost<{ suggestion: string }>({
-    path: "/api/ai/suggest",
-    body: { title: item.title, type: item.type, suggestion: item.suggestion },
-  });
-  return data?.suggestion ?? error ?? "AI is thinking...";
 }

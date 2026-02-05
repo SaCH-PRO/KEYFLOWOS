@@ -1078,6 +1078,26 @@ export async function bootstrapIdentity(input: { username?: string; email?: stri
   });
 }
 
+export type Business = {
+  id: string;
+  name: string;
+  slug?: string | null;
+  timezone?: string;
+  currency?: string;
+  logoUrl?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  website?: string | null;
+  complianceStatus?: string | null;
+  complianceData?: Record<string, boolean> | null;
+  lastHealthCheck?: string | null;
+};
+
+export async function getBusinessById(businessId: string) {
+  return apiGet<Business>(`/identity/businesses/${encodeURIComponent(businessId)}`);
+}
+
 export async function updateBusiness(input: { businessId: string; metaData?: Record<string, unknown>; [key: string]: unknown }) {
   const { businessId, ...data } = input;
   return apiPatch<{ id: string }>(
@@ -1328,6 +1348,8 @@ export interface CockpitSummary {
     upcomingBookings: number;
     monthlyRevenue: number;
     weeklyBookings: number;
+    todayRevenue: number;
+    todayBookings: number;
   };
   highlights: {
     highPotential: { contactId: string; name: string; score: number }[];
@@ -1370,6 +1392,8 @@ const cockpitSummarySchema = z.object({
     upcomingBookings: z.number(),
     monthlyRevenue: z.number(),
     weeklyBookings: z.number(),
+    todayRevenue: z.number(),
+    todayBookings: z.number(),
   }),
   highlights: z.object({
     highPotential: z.array(z.object({ contactId: z.string(), name: z.string(), score: z.number() })),
