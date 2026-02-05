@@ -16,6 +16,9 @@ KEYFLOWOS is an AI-powered operating system for service businesses that eliminat
   - Critical alerts for compliance (GREEN/YELLOW/RED), overdue invoices, pending approvals
   - Backend: AutopilotModule with full CRUD, approval flow, stats, and alert endpoints
   - Frontend: client functions for getTodaysTasks, generateSetupTasks, approveTask, denyTask, getAutopilotStats, getCriticalAlerts
+  - Legal & Compliance Module: Settings page with categorized checklist (Legal, Financial, Data, Operational)
+  - Compliance health indicator (GREEN: all required + 80% optional, YELLOW: 50-100% required, RED: <50% required)
+  - Backend persistence for complianceData (Json field) and complianceStatus
 - **Real-Time Cockpit Dashboard** - Live business intelligence with data-driven UI
   - FlowService backend aggregates CRM, invoices, bookings, and quotes in real-time
   - Momentum calculation based on business activity (revenue, bookings, tasks)
