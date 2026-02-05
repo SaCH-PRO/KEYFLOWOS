@@ -246,7 +246,7 @@ export class CommerceService {
       throw new Error('Invoice not found');
     }
     if (actorId) {
-      const membership = await this.prisma.client.businessMember.findFirst({
+      const membership = await this.prisma.client.membership.findFirst({
         where: { businessId: existingInvoice.businessId, userId: actorId },
       });
       if (!membership) {
@@ -307,7 +307,7 @@ export class CommerceService {
       throw new Error('Invoice not found');
     }
     if (actorId) {
-      const membership = await this.prisma.client.businessMember.findFirst({
+      const membership = await this.prisma.client.membership.findFirst({
         where: { businessId: existingInvoice.businessId, userId: actorId },
       });
       if (!membership) {
@@ -346,7 +346,7 @@ export class CommerceService {
       throw new Error('Quote not found');
     }
     if (params.actorId) {
-      const membership = await this.prisma.client.businessMember.findFirst({
+      const membership = await this.prisma.client.membership.findFirst({
         where: { businessId: existingQuote.businessId, userId: params.actorId },
       });
       if (!membership) {
@@ -387,7 +387,7 @@ export class CommerceService {
       throw new Error('Invoice not found');
     }
     if (params.actorId) {
-      const membership = await this.prisma.client.businessMember.findFirst({
+      const membership = await this.prisma.client.membership.findFirst({
         where: { businessId: existingInvoice.businessId, userId: params.actorId },
       });
       if (!membership) {
