@@ -244,16 +244,20 @@ export class CommerceController {
     @Query('state') state: string,
     @Res() res: Response,
   ) {
+    const frontendUrl = process.env.REPLIT_DEV_DOMAIN 
+      ? `https://${process.env.REPLIT_DEV_DOMAIN}` 
+      : 'http://localhost:5000';
+    
     const parsedState = this.gmail.verifyState(state);
     if (!parsedState) {
-      return res.redirect('/app/commerce?gmail=error&reason=invalid_state');
+      return res.redirect(`${frontendUrl}/app/commerce?gmail=error&reason=invalid_state`);
     }
 
     try {
       await this.gmail.saveGmailCredentials(parsedState.businessId, code);
-      return res.redirect('/app/commerce?gmail=success');
+      return res.redirect(`${frontendUrl}/app/commerce?gmail=success`);
     } catch {
-      return res.redirect('/app/commerce?gmail=error');
+      return res.redirect(`${frontendUrl}/app/commerce?gmail=error`);
     }
   }
 
