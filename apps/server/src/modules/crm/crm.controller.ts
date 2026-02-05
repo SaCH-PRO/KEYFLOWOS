@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Query, Redirect, Req, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { CrmFlowService } from './crm-flow.service';
 import { CrmGoogleService } from './crm-google.service';
 import { CrmImportService } from './crm-import.service';
 import { CrmPlaybookService } from './crm-playbook.service';
@@ -22,6 +23,7 @@ export class CrmController {
     @Inject(CrmPlaybookService) private readonly playbook: CrmPlaybookService,
     @Inject(CrmVisionService) private readonly vision: CrmVisionService,
     @Inject(CrmGoogleService) private readonly google: CrmGoogleService,
+    @Inject(CrmFlowService) private readonly flow: CrmFlowService,
   ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -343,5 +345,74 @@ export class CrmController {
       accessToken: body.accessToken,
       refreshToken: body.refreshToken,
     });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/flow-intelligence')
+  getFlowIntelligence(@Param('businessId') businessId: string) {
+    return this.flow.getFlowIntelligence(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/next-actions')
+  getNextActions(@Param('businessId') businessId: string) {
+    return this.flow.getNextActions(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/next-actions/:actionId/complete')
+  completeNextAction(
+    @Param('businessId') businessId: string,
+    @Param('actionId') actionId: string,
+  ) {
+    return this.flow.completeNextAction(businessId, actionId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/autopilot-actions')
+  getAutopilotActions(@Param('businessId') businessId: string) {
+    return this.flow.getAutopilotActions(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/predictive-revenue')
+  getPredictiveRevenue(@Param('businessId') businessId: string) {
+    return this.flow.getPredictiveRevenue(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/contacts/:contactId/health-metrics')
+  getContactHealthMetrics(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+  ) {
+    return this.flow.getContactHealthMetrics(businessId, contactId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/contacts/:contactId/journey')
+  getContactJourney(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+  ) {
+    return this.flow.getContactJourney(businessId, contactId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/contacts/:contactId/conversation-context')
+  getConversationContext(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+  ) {
+    return this.flow.getConversationContext(businessId, contactId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/contacts/:contactId/ai-insight')
+  getAiInsight(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+  ) {
+    return this.flow.generateAiInsight(businessId, contactId);
   }
 }

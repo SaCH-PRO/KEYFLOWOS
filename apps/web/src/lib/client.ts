@@ -1095,7 +1095,22 @@ export type Business = {
 };
 
 export async function getBusinessById(businessId: string) {
-  return apiGet<Business>(`/identity/businesses/${encodeURIComponent(businessId)}`);
+  const businessSchema = z.object({
+    id: z.string(),
+    name: z.string().optional(),
+    logoUrl: z.string().nullable().optional(),
+    address: z.string().nullable().optional(),
+    phone: z.string().nullable().optional(),
+    email: z.string().nullable().optional(),
+    website: z.string().nullable().optional(),
+    complianceStatus: z.string().nullable().optional(),
+    complianceData: z.record(z.boolean()).nullable().optional(),
+    lastHealthCheck: z.string().nullable().optional(),
+  });
+  return apiGet(
+    `/identity/businesses/${encodeURIComponent(businessId)}`,
+    businessSchema,
+  );
 }
 
 export async function updateBusiness(input: { businessId: string; metaData?: Record<string, unknown>; [key: string]: unknown }) {
@@ -1624,6 +1639,179 @@ export async function fetchCriticalAlerts(businessId?: string) {
     z.array(autopilotAlertSchema),
     [],
   );
+}
+
+const flowIntelligenceSchema = z.object({
+  totalContacts: z.number(),
+  leads: z.number(),
+  prospects: z.number(),
+  clients: z.number(),
+  lost: z.number(),
+  newThisWeek: z.number(),
+  conversionsThisWeek: z.number(),
+  contactsGoingCold: z.number(),
+  contactsReadyToAdvance: z.number(),
+  weeklyChange: z.number(),
+});
+
+export type FlowIntelligenceData = z.infer<typeof flowIntelligenceSchema>;
+
+const crmNextActionSchema = z.object({
+  id: z.string(),
+  type: z.enum(["follow_up", "send_quote", "call", "email", "payment_reminder", "task"]),
+  contactId: z.string(),
+  contactName: z.string(),
+  description: z.string(),
+  aiDraft: z.string().optional(),
+  estimatedTime: z.number(),
+  priority: z.enum(["urgent", "high", "medium", "low"]),
+  dueDate: z.string().optional(),
+  value: z.number().optional(),
+});
+
+export type CrmNextAction = z.infer<typeof crmNextActionSchema>;
+
+const autopilotActionSchema = z.object({
+  id: z.string(),
+  type: z.enum(["follow_up", "birthday", "payment_reminder", "check_in", "offer"]),
+  status: z.enum(["completed", "pending", "needs_approval"]),
+  contactName: z.string(),
+  contactId: z.string(),
+  description: z.string(),
+  scheduledAt: z.string().optional(),
+  completedAt: z.string().optional(),
+});
+
+export type AutopilotActionData = z.infer<typeof autopilotActionSchema>;
+
+const healthMetricsSchema = z.object({
+  engagement: z.number(),
+  payment: z.number(),
+  responsiveness: z.number(),
+  relationship: z.number(),
+});
+
+export type HealthMetrics = z.infer<typeof healthMetricsSchema>;
+
+const journeyMilestoneSchema = z.object({
+  id: z.string(),
+  type: z.enum(["first_contact", "call", "quote_sent", "quote_accepted", "payment", "booking", "completed", "milestone", "note"]),
+  title: z.string(),
+  description: z.string().optional(),
+  date: z.string(),
+  value: z.number().optional(),
+  isNext: z.boolean().optional(),
+});
+
+export type JourneyMilestone = z.infer<typeof journeyMilestoneSchema>;
+
+const revenueDataSchema = z.object({
+  fromActivePipeline: z.number(),
+  fromRecurringClients: z.number(),
+  fromColdLeads: z.number(),
+  expiringQuotes: z.object({ count: z.number(), value: z.number() }),
+  overdueInvoices: z.object({ count: z.number(), value: z.number() }),
+});
+
+export type RevenueData = z.infer<typeof revenueDataSchema>;
+
+const conversationContextSchema = z.object({
+  lastDiscussed: z.string().optional(),
+  concerns: z.array(z.string()).optional(),
+  preferences: z.array(z.string()).optional(),
+  decisionMaker: z.string().optional(),
+  budgetRange: z.object({ min: z.number(), max: z.number() }).optional(),
+  suggestedOpening: z.string().optional(),
+  sentiment: z.enum(["positive", "neutral", "negative"]).optional(),
+  engagementLevel: z.enum(["high", "medium", "low"]).optional(),
+});
+
+export type ConversationContextData = z.infer<typeof conversationContextSchema>;
+
+const aiInsightSchema = z.object({
+  summary: z.string(),
+  nextBestAction: z.string(),
+  reasoning: z.string().optional(),
+  confidence: z.number(),
+  suggestedMessage: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+});
+
+export type AiInsight = z.infer<typeof aiInsightSchema>;
+
+export async function fetchFlowIntelligence(businessId?: string): Promise<ApiResult<FlowIntelligenceData>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(bid)}/flow-intelligence`,
+    flowIntelligenceSchema,
+  );
+}
+
+export async function fetchNextActions(businessId?: string): Promise<ApiResult<CrmNextAction[]>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(bid)}/next-actions`,
+    z.array(crmNextActionSchema),
+    [],
+  );
+}
+
+export async function completeNextAction(actionId: string, businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost({
+    path: `/crm/businesses/${encodeURIComponent(bid)}/next-actions/${encodeURIComponent(actionId)}/complete`,
+    body: {},
+  });
+}
+
+export async function fetchAutopilotActionsForCrm(businessId?: string): Promise<ApiResult<AutopilotActionData[]>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(bid)}/autopilot-actions`,
+    z.array(autopilotActionSchema),
+    [],
+  );
+}
+
+export async function fetchContactHealthMetrics(contactId: string, businessId?: string): Promise<ApiResult<HealthMetrics>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/health`,
+    healthMetricsSchema,
+  );
+}
+
+export async function fetchContactJourney(contactId: string, businessId?: string): Promise<ApiResult<JourneyMilestone[]>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/journey`,
+    z.array(journeyMilestoneSchema),
+    [],
+  );
+}
+
+export async function fetchPredictiveRevenue(businessId?: string): Promise<ApiResult<RevenueData>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(bid)}/predictive-revenue`,
+    revenueDataSchema,
+  );
+}
+
+export async function fetchConversationContext(contactId: string, businessId?: string): Promise<ApiResult<ConversationContextData>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/context`,
+    conversationContextSchema,
+  );
+}
+
+export async function generateAiInsight(contactId: string, businessId?: string): Promise<ApiResult<AiInsight>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AiInsight>({
+    path: `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/ai-insight`,
+    body: {},
+  });
 }
 
 export { DEFAULT_BUSINESS_ID };
