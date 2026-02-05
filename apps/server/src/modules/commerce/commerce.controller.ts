@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Logger, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { CommerceService } from './commerce.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
@@ -12,6 +12,8 @@ import { buildQuoteEmailHtml } from './quote-email.template';
 
 @Controller('commerce')
 export class CommerceController {
+  private readonly logger = new Logger(CommerceController.name);
+
   constructor(
     @Inject(CommerceService) private readonly commerce: CommerceService,
     @Inject(ReceiptService) private readonly receipts: ReceiptService,
@@ -111,16 +113,24 @@ export class CommerceController {
 
   @UseGuards(AuthGuard)
   @Patch('quotes/:quoteId/status/:status')
-  updateQuoteStatus(
+  async updateQuoteStatus(
     @Param('quoteId') quoteId: string,
     @Param('status') status: string,
     @Req() req: any,
   ) {
-    return this.commerce.updateQuoteStatus({
-      quoteId,
-      status: status.toUpperCase() as UpdateQuoteStatusDto['status'],
-      actorId: req?.user?.id,
-    });
+    try {
+      this.logger.log(`Updating quote ${quoteId} to status ${status} by user ${req?.user?.id}`);
+      const result = await this.commerce.updateQuoteStatus({
+        quoteId,
+        status: status.toUpperCase() as UpdateQuoteStatusDto['status'],
+        actorId: req?.user?.id,
+      });
+      this.logger.log(`Quote ${quoteId} status updated successfully`);
+      return result;
+    } catch (error) {
+      this.logger.error(`Failed to update quote status: ${error.message}`, error.stack);
+      throw error;
+    }
   }
 
   @UseGuards(AuthGuard)
