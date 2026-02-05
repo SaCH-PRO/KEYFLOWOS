@@ -27,9 +27,9 @@ interface ContactImportProps {
   businessId?: string;
 }
 
-const CSV_TEMPLATE = `firstName,lastName,email,phone,company,status
-John,Doe,john@example.com,+1868123456,Acme Corp,LEAD
-Jane,Smith,jane@example.com,+1868654321,Tech Inc,PROSPECT`;
+const CSV_TEMPLATE = `firstName,lastName,email,phone,company,address,city,country,status
+John,Doe,john@example.com,+1868123456,Acme Corp,123 Main Street,Port of Spain,Trinidad,LEAD
+Jane,Smith,jane@example.com,+1868654321,Tech Inc,456 Oak Avenue,San Fernando,Trinidad,PROSPECT`;
 
 export function ContactImport({ onImportFile, onImportLink, loading, businessId }: ContactImportProps) {
   const [expanded, setExpanded] = useState(false);
@@ -279,7 +279,7 @@ export function ContactImport({ onImportFile, onImportLink, loading, businessId 
                           </>
                         ) : (
                           <>
-                            Your file should have columns: <strong>firstName</strong>, <strong>lastName</strong>, <strong>email</strong>, <strong>phone</strong>, <strong>company</strong>, <strong>status</strong>. 
+                            Your file should have columns: <strong>firstName</strong>, <strong>lastName</strong>, <strong>email</strong>, <strong>phone</strong>, <strong>company</strong>, <strong>address</strong>, <strong>city</strong>, <strong>country</strong>, <strong>status</strong>. 
                             Download the template for the correct format.
                           </>
                         )}

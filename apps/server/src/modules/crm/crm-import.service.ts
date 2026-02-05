@@ -12,6 +12,10 @@ type FieldMapping = {
   phone?: string;
   status?: string;
   tags?: string;
+  addressLine1?: string;
+  city?: string;
+  country?: string;
+  companyName?: string;
   custom?: string[];
 };
 
@@ -42,6 +46,19 @@ export class CrmImportService {
     tags: 'tags',
     labels: 'tags',
     group: 'tags',
+    address: 'addressLine1',
+    address_line_1: 'addressLine1',
+    addressline1: 'addressLine1',
+    street: 'addressLine1',
+    street_address: 'addressLine1',
+    city: 'city',
+    town: 'city',
+    country: 'country',
+    company: 'companyName',
+    company_name: 'companyName',
+    companyname: 'companyName',
+    organization: 'companyName',
+    org: 'companyName',
   };
 
   constructor(
@@ -64,7 +81,7 @@ export class CrmImportService {
     if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping)) return null;
     const record = mapping as Record<string, unknown>;
     const normalized: FieldMapping = { custom: [] };
-    const keys: Array<keyof Omit<FieldMapping, 'custom'>> = ['firstName', 'lastName', 'email', 'phone', 'status', 'tags'];
+    const keys: Array<keyof Omit<FieldMapping, 'custom'>> = ['firstName', 'lastName', 'email', 'phone', 'status', 'tags', 'addressLine1', 'city', 'country', 'companyName'];
     for (const key of keys) {
       if (typeof record[key] === 'string') {
         normalized[key] = record[key] as string;
@@ -391,6 +408,18 @@ export class CrmImportService {
           case 'status':
             mapping.status = header;
             break;
+          case 'addressLine1':
+            mapping.addressLine1 = header;
+            break;
+          case 'city':
+            mapping.city = header;
+            break;
+          case 'country':
+            mapping.country = header;
+            break;
+          case 'companyName':
+            mapping.companyName = header;
+            break;
           default:
             break;
         }
@@ -417,6 +446,18 @@ export class CrmImportService {
     }
     if (mapping.status && typeof row[mapping.status] === 'string' && row[mapping.status]) {
       contact.status = row[mapping.status];
+    }
+    if (mapping.addressLine1 && typeof row[mapping.addressLine1] === 'string' && row[mapping.addressLine1]) {
+      contact.addressLine1 = row[mapping.addressLine1];
+    }
+    if (mapping.city && typeof row[mapping.city] === 'string' && row[mapping.city]) {
+      contact.city = row[mapping.city];
+    }
+    if (mapping.country && typeof row[mapping.country] === 'string' && row[mapping.country]) {
+      contact.country = row[mapping.country];
+    }
+    if (mapping.companyName && typeof row[mapping.companyName] === 'string' && row[mapping.companyName]) {
+      contact.companyName = row[mapping.companyName];
     }
     const tagsValue = mapping.tags ? row[mapping.tags] : null;
     if (typeof tagsValue === 'string' && tagsValue) {
@@ -544,7 +585,11 @@ export class CrmImportService {
           contact.jobTitle = value || null;
         } else if (key === 'ADR') {
           const adrParts = value.split(';');
-          contact.address = [adrParts[2], adrParts[3], adrParts[4], adrParts[5], adrParts[6]].filter(Boolean).join(', ') || null;
+          contact.addressLine1 = adrParts[2] || null;
+          contact.city = adrParts[3] || null;
+          contact.state = adrParts[4] || null;
+          contact.postalCode = adrParts[5] || null;
+          contact.country = adrParts[6] || null;
         } else if (key === 'NOTE') {
           contact.notes = value || null;
         } else if (key === 'URL') {

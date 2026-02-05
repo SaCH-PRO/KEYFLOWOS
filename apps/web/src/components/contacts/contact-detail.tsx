@@ -20,6 +20,7 @@ import {
   History,
   Pencil,
   Trash2,
+  MapPin,
 } from "lucide-react";
 
 export type ContactDetailData = {
@@ -32,6 +33,9 @@ export type ContactDetailData = {
   jobTitle?: string | null;
   status?: string | null;
   tags?: string[];
+  addressLine1?: string | null;
+  city?: string | null;
+  country?: string | null;
   meta?: {
     leadScore?: number | null;
     outstandingBalance?: number | null;
@@ -269,6 +273,15 @@ export function ContactDetail({
           </a>
         )}
       </div>
+
+      {(contact.addressLine1 || contact.city || contact.country) && (
+        <div className="flex items-start gap-2 p-3 rounded-xl bg-muted/50 text-sm">
+          <MapPin className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: statusColor }} />
+          <span>
+            {[contact.addressLine1, contact.city, contact.country].filter(Boolean).join(", ")}
+          </span>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3 text-sm">
         <div className="kf-stat-card p-3">
