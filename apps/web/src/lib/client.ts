@@ -985,10 +985,10 @@ export async function updateQuote(input: {
 }
 
 export async function updateQuoteStatus(quoteId: string, status: "DRAFT" | "SENT" | "ACCEPTED" | "REJECTED") {
-  return apiPost<Quote>({
-    path: `/commerce/quotes/${encodeURIComponent(quoteId)}/status/${status.toLowerCase()}`,
-    body: {},
-  });
+  return apiPatch<Quote>(
+    `/commerce/quotes/${encodeURIComponent(quoteId)}/status/${status.toLowerCase()}`,
+    {},
+  );
 }
 
 export async function deleteQuote(businessId: string, quoteId: string) {
@@ -1062,10 +1062,10 @@ export async function bootstrapIdentity(input: { username?: string; email?: stri
 
 export async function updateBusiness(input: { businessId: string; metaData?: Record<string, unknown>; [key: string]: unknown }) {
   const { businessId, ...data } = input;
-  return apiPatch<{ id: string }>({
-    path: `/identity/businesses/${encodeURIComponent(businessId)}`,
-    body: data,
-  });
+  return apiPatch<{ id: string }>(
+    `/identity/businesses/${encodeURIComponent(businessId)}`,
+    data,
+  );
 }
 
 export type Service = {
