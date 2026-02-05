@@ -433,6 +433,12 @@ export async function createContact(input: {
   segment?: string;
   notesInternal?: string;
   preferredChannel?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   const body = {
@@ -451,6 +457,12 @@ export async function createContact(input: {
     segment: input.segment,
     notesInternal: input.notesInternal,
     preferredChannel: input.preferredChannel,
+    addressLine1: input.addressLine1,
+    addressLine2: input.addressLine2,
+    city: input.city,
+    state: input.state,
+    postalCode: input.postalCode,
+    country: input.country,
   };
 
   const res = await apiPost<Contact>({
@@ -694,6 +706,12 @@ export async function updateContact(input: {
   lifecycleStage?: string;
   segment?: string;
   notesInternal?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<Contact>({

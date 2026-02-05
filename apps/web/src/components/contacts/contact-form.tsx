@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { X, User, Mail, Phone, Building2, Tag, Briefcase, MessageSquare, FileText } from "lucide-react";
+import { X, User, Mail, Phone, Building2, Tag, Briefcase, MessageSquare, FileText, MapPin } from "lucide-react";
 
 const STATUSES = ["LEAD", "PROSPECT", "CLIENT", "LOST"] as const;
 const CHANNELS = ["WhatsApp", "Email", "SMS", "Call", "Instagram DM"] as const;
@@ -27,6 +27,9 @@ export interface ContactFormData {
   preferredChannel: string;
   lifecycleStage: string;
   initialNote: string;
+  addressLine1: string;
+  city: string;
+  country: string;
 }
 
 export function ContactForm({ onSubmit, onCancel, loading, initialValues }: ContactFormProps) {
@@ -44,6 +47,9 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
     preferredChannel: initialValues?.preferredChannel || "WhatsApp",
     lifecycleStage: initialValues?.lifecycleStage || "",
     initialNote: "",
+    addressLine1: initialValues?.addressLine1 || "",
+    city: initialValues?.city || "",
+    country: initialValues?.country || "Trinidad",
   });
 
   const handleSubmit = async () => {
@@ -61,6 +67,9 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
       preferredChannel: "WhatsApp",
       lifecycleStage: "",
       initialNote: "",
+      addressLine1: "",
+      city: "",
+      country: "Trinidad",
     });
   };
 
@@ -153,6 +162,46 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
             placeholder="Marketing Manager"
             value={form.jobTitle}
             onChange={(e) => setForm((p) => ({ ...p, jobTitle: e.target.value }))}
+            className="kf-input w-full"
+          />
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-xs text-muted-foreground flex items-center gap-1">
+          <MapPin className="w-3 h-3" /> Address
+        </label>
+        <input
+          type="text"
+          placeholder="123 Main Street, Apt 4B"
+          value={form.addressLine1}
+          onChange={(e) => setForm((p) => ({ ...p, addressLine1: e.target.value }))}
+          className="kf-input w-full"
+        />
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <label className="text-xs text-muted-foreground flex items-center gap-1">
+            <MapPin className="w-3 h-3" /> City
+          </label>
+          <input
+            type="text"
+            placeholder="Port of Spain"
+            value={form.city}
+            onChange={(e) => setForm((p) => ({ ...p, city: e.target.value }))}
+            className="kf-input w-full"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs text-muted-foreground flex items-center gap-1">
+            <MapPin className="w-3 h-3" /> Country
+          </label>
+          <input
+            type="text"
+            placeholder="Trinidad"
+            value={form.country}
+            onChange={(e) => setForm((p) => ({ ...p, country: e.target.value }))}
             className="kf-input w-full"
           />
         </div>

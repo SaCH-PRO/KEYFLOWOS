@@ -13,6 +13,9 @@ export type ContactCardData = {
   jobTitle?: string | null;
   status?: string | null;
   tags?: string[];
+  addressLine1?: string | null;
+  city?: string | null;
+  country?: string | null;
   meta?: {
     leadScore?: number | null;
     outstandingBalance?: number | null;

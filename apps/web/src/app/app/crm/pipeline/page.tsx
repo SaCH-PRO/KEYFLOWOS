@@ -205,6 +205,9 @@ export default function ContactsPage() {
         preferredChannel: formData.preferredChannel || undefined,
         lifecycleStage: formData.lifecycleStage || undefined,
         tags: tagsArray,
+        addressLine1: formData.addressLine1 || undefined,
+        city: formData.city || undefined,
+        country: formData.country || undefined,
       });
       setShowAddForm(false);
       setEditingContact(null);
@@ -224,6 +227,9 @@ export default function ContactsPage() {
         preferredChannel: formData.preferredChannel || undefined,
         lifecycleStage: formData.lifecycleStage || undefined,
         tags: tagsArray,
+        addressLine1: formData.addressLine1 || undefined,
+        city: formData.city || undefined,
+        country: formData.country || undefined,
       });
       if (data) {
         if (formData.initialNote.trim()) {
@@ -271,6 +277,7 @@ export default function ContactsPage() {
     const c = contact || contactDetail?.contact;
     if (!c) return;
     setSelectedContactId(c.id);
+    const extendedContact = c as ContactCardData & { addressLine1?: string | null; city?: string | null; country?: string | null };
     setEditingContact({
       firstName: c.firstName || "",
       lastName: c.lastName || "",
@@ -284,6 +291,9 @@ export default function ContactsPage() {
       lifecycleStage: "",
       tags: Array.isArray(c.tags) ? c.tags.join(", ") : "",
       initialNote: "",
+      addressLine1: extendedContact.addressLine1 || "",
+      city: extendedContact.city || "",
+      country: extendedContact.country || "Trinidad",
     });
     setShowMobileDetail(false);
     setShowAddForm(true);
