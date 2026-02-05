@@ -7,9 +7,6 @@ import {
   Search,
   Filter,
   Users,
-  TrendingUp,
-  Clock,
-  DollarSign,
   RefreshCw,
   ChevronDown,
   X,
@@ -25,7 +22,23 @@ import {
   ContactNote,
   ContactTask,
   ContactImport,
+  FlowIntelligence,
+  NextActionQueue,
+  AutopilotActions,
+  PredictiveRevenue,
+  ContactHealthScore,
+  RelationshipTimeline,
+  ConversationContext,
+  AiCopilot,
 } from "@/components/contacts";
+import type { FlowIntelligenceData } from "@/components/contacts/flow-intelligence";
+import type { NextAction as NextActionUI } from "@/components/contacts/next-action-queue";
+import type { AutopilotAction } from "@/components/contacts/autopilot-actions";
+import type { RevenueData } from "@/components/contacts/predictive-revenue";
+import type { HealthMetrics } from "@/components/contacts/contact-health-score";
+import type { JourneyMilestone } from "@/components/contacts/relationship-timeline";
+import type { ConversationContextData } from "@/components/contacts/conversation-context";
+import type { AiInsight } from "@/components/contacts/ai-copilot";
 import {
   Contact,
   ContactDetail as ContactDetailAPI,
@@ -40,6 +53,16 @@ import {
   importContactsFromFile,
   importContactsFromLink,
   updateContact,
+  fetchFlowIntelligence,
+  fetchNextActions,
+  completeNextAction,
+  fetchAutopilotActionsForCrm,
+  fetchPredictiveRevenue,
+  fetchContactHealthMetrics,
+  fetchContactJourney,
+  fetchConversationContext,
+  generateAiInsight,
+  CrmNextAction,
 } from "@/lib/client";
 import { ensureWorkspace, getStoredBusinessId } from "@/lib/workspace";
 
@@ -73,6 +96,17 @@ export default function ContactsPage() {
   const [showMobileDetail, setShowMobileDetail] = useState(false);
   const [isPending, startTransition] = useTransition();
 
+  const [flowIntelligence, setFlowIntelligence] = useState<FlowIntelligenceData | null>(null);
+  const [nextActions, setNextActions] = useState<NextActionUI[]>([]);
+  const [autopilotActions, setAutopilotActions] = useState<AutopilotAction[]>([]);
+  const [autopilotPaused, setAutopilotPaused] = useState(false);
+  const [revenueData, setRevenueData] = useState<RevenueData | null>(null);
+  const [healthMetrics, setHealthMetrics] = useState<HealthMetrics | null>(null);
+  const [journeyMilestones, setJourneyMilestones] = useState<JourneyMilestone[]>([]);
+  const [conversationContext, setConversationContext] = useState<ConversationContextData | null>(null);
+  const [aiInsight, setAiInsight] = useState<AiInsight | null>(null);
+  const [aiInsightLoading, setAiInsightLoading] = useState(false);
+
   useEffect(() => {
     const initWorkspace = async () => {
       const stored = getStoredBusinessId();
@@ -97,6 +131,35 @@ export default function ContactsPage() {
     const timeout = setTimeout(() => setSearch(searchInput.trim()), 300);
     return () => clearTimeout(timeout);
   }, [searchInput]);
+
+  const loadFlowData = useCallback(async () => {
+    if (!businessId) return;
+    const [flowRes, actionsRes, autopilotRes, revenueRes] = await Promise.all([
+      fetchFlowIntelligence(businessId),
+      fetchNextActions(businessId),
+      fetchAutopilotActionsForCrm(businessId),
+      fetchPredictiveRevenue(businessId),
+    ]);
+    
+    if (flowRes.data) setFlowIntelligence(flowRes.data);
+    if (actionsRes.data) {
+      const mapped: NextActionUI[] = actionsRes.data.map((a) => ({
+        id: a.id,
+        type: a.type,
+        contactId: a.contactId,
+        contactName: a.contactName,
+        description: a.description,
+        aiDraft: a.aiDraft,
+        estimatedTime: a.estimatedTime,
+        priority: a.priority,
+        dueDate: a.dueDate,
+        value: a.value,
+      }));
+      setNextActions(mapped);
+    }
+    if (autopilotRes.data) setAutopilotActions(autopilotRes.data);
+    if (revenueRes.data) setRevenueData(revenueRes.data);
+  }, [businessId]);
 
   const loadContacts = useCallback(
     async (opts?: { append?: boolean }) => {
@@ -145,6 +208,23 @@ export default function ContactsPage() {
     [businessId, search, statusFilter, nextOffset],
   );
 
+  const loadContactEnhancements = useCallback(
+    async (contactId: string) => {
+      if (!businessId) return;
+      const [healthRes, journeyRes, contextRes] = await Promise.all([
+        fetchContactHealthMetrics(contactId, businessId),
+        fetchContactJourney(contactId, businessId),
+        fetchConversationContext(contactId, businessId),
+      ]);
+      
+      if (healthRes.data) setHealthMetrics(healthRes.data);
+      if (journeyRes.data) setJourneyMilestones(journeyRes.data);
+      if (contextRes.data) setConversationContext(contextRes.data);
+      setAiInsight(null);
+    },
+    [businessId],
+  );
+
   const loadDetail = useCallback(
     async (contactId: string) => {
       if (!businessId) return;
@@ -152,8 +232,9 @@ export default function ContactsPage() {
       const { data } = await fetchContactDetail(contactId, businessId);
       setContactDetail(data ?? null);
       setDetailLoading(false);
+      void loadContactEnhancements(contactId);
     },
-    [businessId],
+    [businessId, loadContactEnhancements],
   );
 
   const selectContact = useCallback(
@@ -167,13 +248,22 @@ export default function ContactsPage() {
     [loadDetail],
   );
 
+  const handleGenerateAiInsight = useCallback(async () => {
+    if (!selectedContactId || !businessId) return;
+    setAiInsightLoading(true);
+    const { data } = await generateAiInsight(selectedContactId, businessId);
+    if (data) setAiInsight(data);
+    setAiInsightLoading(false);
+  }, [selectedContactId, businessId]);
+
   useEffect(() => {
     if (businessId) {
       startTransition(() => {
         void loadContacts();
+        void loadFlowData();
       });
     }
-  }, [businessId, search, statusFilter, loadContacts]);
+  }, [businessId, search, statusFilter, loadContacts, loadFlowData]);
 
   useEffect(() => {
     if (contacts.length > 0 && !selectedContactId) {
@@ -237,6 +327,7 @@ export default function ContactsPage() {
         }
         setShowAddForm(false);
         void loadContacts();
+        void loadFlowData();
       }
     }
   };
@@ -271,6 +362,7 @@ export default function ContactsPage() {
         contact: contactDetail.contact ? { ...contactDetail.contact, status } : null,
       });
     }
+    void loadFlowData();
   };
 
   const handleEditContact = (contact?: ContactCardData) => {
@@ -311,29 +403,32 @@ export default function ContactsPage() {
       setContactDetail(null);
     }
     setShowMobileDetail(false);
+    void loadFlowData();
   };
 
   const handleImportFile = async (type: "csv" | "xlsx" | "vcf" | "image", file: File) => {
     if (!businessId) return;
     await importContactsFromFile({ businessId, type, file });
     void loadContacts();
+    void loadFlowData();
   };
 
   const handleImportLink = async (url: string) => {
     if (!businessId) return;
     await importContactsFromLink(url, businessId);
     void loadContacts();
+    void loadFlowData();
   };
 
-  const stats = useMemo(
-    () => [
-      { label: "Total", value: contacts.length, icon: Users },
-      { label: "Leads", value: segments.lead ?? 0, icon: TrendingUp },
-      { label: "Clients", value: segments.client ?? 0, icon: DollarSign },
-      { label: "This Week", value: segments.newThisWeek ?? 0, icon: Clock },
-    ],
-    [contacts.length, segments],
-  );
+  const handleCompleteNextAction = async (actionId: string) => {
+    if (!businessId) return;
+    await completeNextAction(actionId, businessId);
+    setNextActions((prev) => prev.filter((a) => a.id !== actionId));
+  };
+
+  const handleDoAction = (action: NextAction) => {
+    selectContact(action.contactId);
+  };
 
   const selectedContact = useMemo(() => {
     if (!contactDetail?.contact) return null;
@@ -351,6 +446,10 @@ export default function ContactsPage() {
     status: t.status,
     dueDate: t.dueDate,
   }));
+
+  const contactName = selectedContact
+    ? `${selectedContact.firstName ?? ""} ${selectedContact.lastName ?? ""}`.trim() || "Contact"
+    : "Contact";
 
   if (workspaceLoading) {
     return (
@@ -385,7 +484,7 @@ export default function ContactsPage() {
       >
         <div>
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Contacts</h1>
-          <p className="text-muted-foreground mt-1">Manage your leads, prospects, and clients</p>
+          <p className="text-muted-foreground mt-1">Your AI-powered contact management system</p>
         </div>
         <button
           onClick={() => setShowAddForm(true)}
@@ -396,23 +495,45 @@ export default function ContactsPage() {
         </button>
       </motion.div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {stats.map(({ label, value, icon: Icon }, index) => (
-          <motion.div
-            key={label}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.05 }}
-            className="kf-stat-card p-4"
-          >
-            <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1">
-              <Icon className="w-4 h-4" />
-              {label}
-            </div>
-            <div className="text-2xl font-bold">{value}</div>
-          </motion.div>
-        ))}
+      {flowIntelligence && (
+        <FlowIntelligence
+          data={flowIntelligence}
+          onViewCold={() => setStatusFilter("LEAD")}
+          onViewReady={() => setStatusFilter("PROSPECT")}
+        />
+      )}
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <NextActionQueue
+          actions={nextActions}
+          onComplete={handleCompleteNextAction}
+          onViewContact={selectContact}
+          onDoAction={handleDoAction}
+        />
+
+        <AutopilotActions
+          actions={autopilotActions}
+          isPaused={autopilotPaused}
+          onTogglePause={() => setAutopilotPaused(!autopilotPaused)}
+          onApprove={async (id) => {
+            setAutopilotActions((prev) =>
+              prev.map((a) => (a.id === id ? { ...a, status: "completed" as const } : a)),
+            );
+          }}
+          onDeny={async (id) => {
+            setAutopilotActions((prev) => prev.filter((a) => a.id !== id));
+          }}
+          onViewContact={selectContact}
+        />
       </div>
+
+      {revenueData && (
+        <PredictiveRevenue
+          data={revenueData}
+          onViewExpiringQuotes={() => console.log("View expiring quotes")}
+          onViewOverdueInvoices={() => console.log("View overdue invoices")}
+        />
+      )}
 
       <AnimatePresence>
         {showAddForm && (
@@ -456,7 +577,10 @@ export default function ContactsPage() {
             <ChevronDown className={`w-4 h-4 transition-transform ${showFilters ? "rotate-180" : ""}`} />
           </button>
           <button
-            onClick={() => loadContacts()}
+            onClick={() => {
+              void loadContacts();
+              void loadFlowData();
+            }}
             disabled={loading}
             className="kf-btn-secondary inline-flex items-center gap-2"
           >
@@ -501,7 +625,7 @@ export default function ContactsPage() {
         </AnimatePresence>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr,400px]">
+      <div className="grid gap-6 lg:grid-cols-[1fr,450px]">
         <div className="space-y-3">
           {loading && contacts.length === 0 ? (
             <div className="kf-card p-8 text-center">
@@ -548,7 +672,7 @@ export default function ContactsPage() {
           )}
         </div>
 
-        <div className="hidden lg:block sticky top-4 h-fit">
+        <div className="hidden lg:block sticky top-4 h-fit space-y-4">
           <ContactDetail
             contact={selectedContact}
             events={detailEvents}
@@ -562,6 +686,56 @@ export default function ContactsPage() {
             onEdit={() => handleEditContact()}
             onDelete={() => handleDeleteContact()}
           />
+
+          {selectedContact && (
+            <>
+              <AiCopilot
+                contactName={contactName}
+                insight={aiInsight}
+                isLoading={aiInsightLoading}
+                onGenerateInsight={handleGenerateAiInsight}
+              />
+
+              {healthMetrics && (
+                <div className="kf-card p-5">
+                  <ContactHealthScore
+                    metrics={healthMetrics}
+                    tip={
+                      healthMetrics.relationship < 60
+                        ? "Schedule a personal check-in call to strengthen this relationship"
+                        : healthMetrics.engagement < 60
+                        ? "Send a personalized offer to re-engage this contact"
+                        : undefined
+                    }
+                  />
+                </div>
+              )}
+
+              {journeyMilestones.length > 0 && (
+                <div className="kf-card p-5">
+                  <RelationshipTimeline
+                    contactName={contactName}
+                    milestones={journeyMilestones}
+                  />
+                </div>
+              )}
+
+              {conversationContext && (
+                <div className="kf-card p-5">
+                  <ConversationContext
+                    data={conversationContext}
+                    contactName={contactName}
+                    onRefresh={async () => {
+                      if (selectedContactId && businessId) {
+                        const { data } = await fetchConversationContext(selectedContactId, businessId);
+                        if (data) setConversationContext(data);
+                      }
+                    }}
+                  />
+                </div>
+              )}
+            </>
+          )}
         </div>
       </div>
 
@@ -583,7 +757,7 @@ export default function ContactsPage() {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="w-12 h-1 bg-muted rounded-full mx-auto mt-3 mb-2" />
-              <div className="overflow-y-auto max-h-[calc(85vh-24px)]">
+              <div className="overflow-y-auto max-h-[calc(85vh-24px)] space-y-4 p-4">
                 <ContactDetail
                   contact={selectedContact}
                   events={detailEvents}
@@ -598,6 +772,30 @@ export default function ContactsPage() {
                   onEdit={() => handleEditContact()}
                   onDelete={() => handleDeleteContact()}
                 />
+
+                {selectedContact && (
+                  <>
+                    <AiCopilot
+                      contactName={contactName}
+                      insight={aiInsight}
+                      isLoading={aiInsightLoading}
+                      onGenerateInsight={handleGenerateAiInsight}
+                    />
+
+                    {healthMetrics && (
+                      <div className="kf-card p-5">
+                        <ContactHealthScore
+                          metrics={healthMetrics}
+                          tip={
+                            healthMetrics.relationship < 60
+                              ? "Schedule a personal check-in call to strengthen this relationship"
+                              : undefined
+                          }
+                        />
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </motion.div>
           </motion.div>
