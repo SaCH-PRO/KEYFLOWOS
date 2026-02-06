@@ -31,6 +31,7 @@ import {
   Save,
   Globe,
   Sparkles,
+  Link as LinkIcon,
 } from "lucide-react";
 import {
   Booking,
@@ -357,7 +358,8 @@ export default function BookingsPage() {
 
   function getPublicBookingUrl() {
     const domain = typeof window !== "undefined" ? window.location.origin : "";
-    return storeSlug ? `${domain}/book/${storeSlug}` : "";
+    const identifier = storeSlug || businessId;
+    return identifier ? `${domain}/book/${identifier}` : "";
   }
 
   function copyPublicLink() {
@@ -902,19 +904,45 @@ export default function BookingsPage() {
         <div className="space-y-6">
           {/* Public Link Section */}
           <div className="rounded-2xl border border-primary/30 bg-gradient-to-br from-primary/5 to-secondary/5 backdrop-blur p-5 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
-                <Globe className="w-5 h-5 text-primary" />
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+                  <Globe className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold">Public Booking Link</h3>
+                  <p className="text-xs text-muted-foreground">Share this link so customers can browse and book your services</p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-sm font-semibold">Public Booking Link</h3>
-                <p className="text-xs text-muted-foreground">Customers visit this link to browse your services and book online</p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={copyPublicLink}
+                  disabled={!getPublicBookingUrl()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 transition-colors disabled:opacity-40"
+                >
+                  {linkCopied ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  {linkCopied ? "Copied!" : "Copy Link"}
+                </button>
+                <a
+                  href={getPublicBookingUrl() || "#"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900/60 border border-border/60 hover:border-primary/40 transition-colors ${!getPublicBookingUrl() ? "opacity-40 pointer-events-none" : ""}`}
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> Open Store
+                </a>
               </div>
             </div>
+            {getPublicBookingUrl() && (
+              <div className="flex items-center gap-2 rounded-xl border border-border/40 bg-slate-950/60 px-3 py-2">
+                <LinkIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                <span className="text-xs text-slate-300 truncate">{getPublicBookingUrl()}</span>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <div className="flex-1 flex items-center rounded-xl border border-border/60 bg-slate-950/80 overflow-hidden">
                 <span className="px-3 py-2.5 text-xs text-muted-foreground bg-slate-900/50 border-r border-border/60 whitespace-nowrap">
-                  {typeof window !== "undefined" ? window.location.origin : ""}/book/
+                  Customize URL (optional):&nbsp; /book/
                 </span>
                 <input
                   type="text"
@@ -932,27 +960,6 @@ export default function BookingsPage() {
                 {slugSaving ? "Saving..." : "Save"}
               </button>
             </div>
-            {storeSlug ? (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={copyPublicLink}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900/60 border border-border/60 hover:border-primary/40 transition-colors"
-                >
-                  {linkCopied ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  {linkCopied ? "Copied!" : "Copy Link"}
-                </button>
-                <a
-                  href={getPublicBookingUrl()}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900/60 border border-border/60 hover:border-primary/40 transition-colors"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" /> Open Store
-                </a>
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground">Enter a custom URL above and click Save to generate your public booking link.</p>
-            )}
           </div>
 
           {/* Toggle: Preview / Edit */}

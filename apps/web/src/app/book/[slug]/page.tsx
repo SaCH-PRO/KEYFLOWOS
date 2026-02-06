@@ -66,7 +66,7 @@ export default function PublicBookingPage() {
       setLoading(true);
       let res = await apiGet<Business>(`/identity/businesses/slug/${encodeURIComponent(slug)}`);
       if (res.error || !res.data) {
-        res = await apiGet<Business>(`/identity/businesses/${encodeURIComponent(slug)}`);
+        res = await apiGet<Business>(`/identity/businesses/public/${encodeURIComponent(slug)}`);
       }
       if (res.error || !res.data) {
         setError("Business not found");
