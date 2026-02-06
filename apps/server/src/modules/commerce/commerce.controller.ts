@@ -20,6 +20,11 @@ export class CommerceController {
     @Inject(GmailService) private readonly gmail: GmailService,
   ) {}
 
+  @Get('public/businesses/:businessId/products')
+  listPublicProducts(@Param('businessId') businessId: string) {
+    return this.commerce.listPublicProducts(businessId);
+  }
+
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/products')
   listProducts(@Param('businessId') businessId: string) {

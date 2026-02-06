@@ -22,6 +22,13 @@ export class CommerceService {
     });
   }
 
+  async listPublicProducts(businessId: string) {
+    return this.prisma.client.product.findMany({
+      where: { businessId, deletedAt: null, isActive: true },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   createProduct(input: { 
     businessId: string; 
     name: string; 
