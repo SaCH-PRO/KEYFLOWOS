@@ -70,7 +70,7 @@ const STATUS_COLORS: Record<string, string> = {
   PENDING: "bg-amber-500/20 text-amber-300 border-amber-500/30",
   CONFIRMED: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
   CANCELLED: "bg-red-500/20 text-red-300 border-red-500/30",
-  COMPLETED: "bg-blue-500/20 text-blue-300 border-blue-500/30",
+  COMPLETED: "bg-secondary/20 text-secondary border-secondary/30",
 };
 
 function formatTime(dateStr: string) {
@@ -446,7 +446,7 @@ export default function BookingsPage() {
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={copyPublicLink}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border border-border/60 bg-slate-950/60 hover:bg-slate-900/80 transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border border-border/60 bg-background hover:bg-muted/50 transition-colors"
           >
             {linkCopied ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
             {linkCopied ? "Copied!" : "Public Booking Link"}
@@ -497,7 +497,7 @@ export default function BookingsPage() {
             { label: "Today", value: stats.todayCount, icon: CalendarDays, color: "from-primary/20 to-orange-600/10" },
             { label: "This Week", value: stats.weekCount, icon: Calendar, color: "from-secondary/20 to-teal-600/10" },
             { label: "Pending", value: stats.pendingCount, icon: AlertCircle, color: "from-amber-500/20 to-yellow-600/10" },
-            { label: "Total", value: stats.totalBookings, icon: Users, color: "from-blue-500/20 to-indigo-600/10" },
+            { label: "Total", value: stats.totalBookings, icon: Users, color: "from-secondary/20 to-teal-600/10" },
           ].map((stat) => (
             <div key={stat.label} className={`rounded-2xl border border-border/60 bg-gradient-to-br ${stat.color} p-4`}>
               <div className="flex items-center justify-between">
@@ -612,7 +612,7 @@ export default function BookingsPage() {
                   placeholder="Search bookings..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 pr-3 py-2 rounded-xl border border-border/60 bg-slate-950/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 w-56"
+                  className="pl-9 pr-3 py-2 rounded-xl border border-border/60 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 w-56"
                 />
               </div>
               <div className="flex gap-1">
@@ -905,7 +905,7 @@ export default function BookingsPage() {
                   href={getPublicBookingUrl() || "#"}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900/60 border border-border/60 hover:border-primary/40 transition-colors ${!getPublicBookingUrl() ? "opacity-40 pointer-events-none" : ""}`}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-background border border-border/60 hover:border-primary/40 transition-colors ${!getPublicBookingUrl() ? "opacity-40 pointer-events-none" : ""}`}
                 >
                   <ExternalLink className="w-3.5 h-3.5" /> Open Store
                 </a>
@@ -1038,14 +1038,14 @@ export default function BookingsPage() {
                         {packageItems.length > 0 && (
                           <div className="space-y-2">
                             <h3 className="text-xs uppercase tracking-wider text-white/40 flex items-center gap-2 px-1">
-                              <Package className="w-3.5 h-3.5 text-purple-400" /> Packages
+                              <Package className="w-3.5 h-3.5 text-secondary" /> Packages
                             </h3>
                             <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
                               {packageItems.map((p) => (
                                 <div key={p.id} className="flex-shrink-0 w-[220px] rounded-2xl border border-white/10 bg-white/[0.03] p-4 space-y-2">
                                   <div className="flex justify-between items-start">
                                     <h4 className="text-sm font-semibold text-white">{p.name}</h4>
-                                    <span className="text-sm font-bold text-purple-400">${p.price}</span>
+                                    <span className="text-sm font-bold text-secondary">${p.price}</span>
                                   </div>
                                   {p.description && <p className="text-xs text-white/40 line-clamp-2">{p.description}</p>}
                                   {p.duration && <span className="text-xs text-white/30 flex items-center gap-1"><Clock className="w-3 h-3" />{p.duration} min</span>}
@@ -1333,7 +1333,7 @@ export default function BookingsPage() {
                   <>
                     <button
                       onClick={() => handleStatusChange(selectedBooking.id, "COMPLETED")}
-                      className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium bg-blue-500/10 border border-blue-500/30 text-blue-300 hover:bg-blue-500/20 transition-colors"
+                      className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium bg-secondary/10 border border-secondary/30 text-secondary hover:bg-secondary/20 transition-colors"
                     >
                       <CheckCircle2 className="w-4 h-4" /> Complete
                     </button>
