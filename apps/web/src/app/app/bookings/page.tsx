@@ -395,6 +395,7 @@ export default function BookingsPage() {
         name: product.name,
         durationMins: product.duration ?? 30,
         price: product.price,
+        description: product.description ?? undefined,
       });
       if (res.error) {
         setBanner({ text: `Failed to add: ${res.error}`, type: "error" });
