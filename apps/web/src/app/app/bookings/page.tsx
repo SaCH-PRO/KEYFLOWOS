@@ -17,14 +17,12 @@ import {
   ChevronLeft,
   ChevronRight,
   Copy,
-  ExternalLink,
   CalendarDays,
   Users,
   DollarSign,
   AlertCircle,
   X,
   Search,
-  Filter,
   Phone,
   Mail,
 } from "lucide-react";
@@ -39,9 +37,7 @@ import {
   fetchServices,
   fetchStaff,
   fetchContacts,
-  createService,
   createStaff,
-  deleteService,
   deleteStaff,
   getCalendarAuthUrl,
   getCalendarStatus,
@@ -53,7 +49,7 @@ import {
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { useSearchParams } from "next/navigation";
 
-type Tab = "schedule" | "services" | "staff";
+type Tab = "schedule" | "staff";
 type StatusFilter = "ALL" | "PENDING" | "CONFIRMED" | "CANCELLED" | "COMPLETED";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -129,7 +125,6 @@ export default function BookingsPage() {
   const [bookingContactId, setBookingContactId] = useState("");
   const [contactSearch, setContactSearch] = useState("");
 
-  const [serviceForm, setServiceForm] = useState({ name: "", description: "", durationMins: "60", price: "" });
   const [staffForm, setStaffForm] = useState({ name: "", email: "" });
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -318,27 +313,6 @@ export default function BookingsPage() {
     else setBanner({ text: "Failed to sync booking.", type: "error" });
   }
 
-  async function handleCreateService() {
-    setFormError(null);
-    if (!serviceForm.name.trim() || !serviceForm.price) { setFormError("Name and price are required"); return; }
-    const { data, error } = await createService({
-      name: serviceForm.name,
-      durationMins: parseInt(serviceForm.durationMins) || 60,
-      price: parseFloat(serviceForm.price),
-    });
-    if (error) setFormError(error);
-    if (data) {
-      setServices((prev) => [...prev, data]);
-      setServiceForm({ name: "", description: "", durationMins: "60", price: "" });
-      setBanner({ text: "Service added!", type: "success" });
-    }
-  }
-
-  async function handleDeleteService(serviceId: string) {
-    const { error } = await deleteService(serviceId);
-    if (!error) setServices((prev) => prev.filter((s) => s.id !== serviceId));
-  }
-
   async function handleCreateStaff() {
     setFormError(null);
     if (!staffForm.name.trim()) { setFormError("Name is required"); return; }
@@ -460,7 +434,6 @@ export default function BookingsPage() {
       <div className="flex gap-2">
         {([
           { key: "schedule" as Tab, label: "Schedule", icon: Calendar },
-          { key: "services" as Tab, label: "Services", icon: Briefcase },
           { key: "staff" as Tab, label: "Staff", icon: User },
         ]).map((t) => (
           <button
@@ -474,7 +447,6 @@ export default function BookingsPage() {
           >
             <t.icon className="w-4 h-4" />
             {t.label}
-            {t.key === "services" && <span className="text-xs opacity-60">({services.length})</span>}
             {t.key === "staff" && <span className="text-xs opacity-60">({staff.length})</span>}
           </button>
         ))}
@@ -755,87 +727,6 @@ export default function BookingsPage() {
               ))
             )}
           </div>
-        </div>
-      )}
-
-      {/* ─── SERVICES TAB ─── */}
-      {tab === "services" && (
-        <div className="space-y-4">
-          <div className="rounded-2xl border border-border/60 bg-slate-950/60 backdrop-blur p-5 space-y-4">
-            <h3 className="text-sm font-semibold flex items-center gap-2">
-              <Plus className="w-4 h-4 text-primary" /> Add Service
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <Input
-                label="Service Name"
-                placeholder="e.g. Deep Tissue Massage"
-                value={serviceForm.name}
-                onChange={(e) => setServiceForm((f) => ({ ...f, name: e.target.value }))}
-              />
-              <Input
-                label="Description (optional)"
-                placeholder="Full body deep tissue massage"
-                value={serviceForm.description}
-                onChange={(e) => setServiceForm((f) => ({ ...f, description: e.target.value }))}
-              />
-              <Input
-                label="Duration (minutes)"
-                placeholder="60"
-                type="number"
-                value={serviceForm.durationMins}
-                onChange={(e) => setServiceForm((f) => ({ ...f, durationMins: e.target.value }))}
-              />
-              <Input
-                label="Price (TTD)"
-                placeholder="500"
-                type="number"
-                value={serviceForm.price}
-                onChange={(e) => setServiceForm((f) => ({ ...f, price: e.target.value }))}
-              />
-            </div>
-            <Button onClick={handleCreateService} className="kf-btn-primary gap-2">
-              <Plus className="w-4 h-4" /> Add Service
-            </Button>
-          </div>
-
-          {services.length === 0 ? (
-            <div className="rounded-2xl border border-border/60 bg-slate-950/50 p-6 text-center space-y-2">
-              <Briefcase className="w-8 h-8 text-muted-foreground/40 mx-auto" />
-              <p className="text-sm text-muted-foreground">
-                {loading ? "Loading services..." : "No services yet. Add your first service to start taking bookings."}
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {services.map((s) => (
-                <div key={s.id} className="rounded-2xl border border-border/60 bg-slate-950/60 p-4 space-y-3 group hover:border-primary/30 transition-colors">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-primary/20 to-secondary/10 border border-primary/20 flex items-center justify-center text-primary">
-                        <Briefcase className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-semibold">{s.name}</h4>
-                        <p className="text-[10px] text-muted-foreground mt-0.5">
-                          {s.currency} {s.price.toLocaleString()}
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleDeleteService(s.id)}
-                      className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-500/10 hover:text-red-400 transition-all"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {s.durationMins} min</span>
-                    <span className="flex items-center gap-1"><DollarSign className="w-3 h-3" /> {s.currency} {s.price}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       )}
 
