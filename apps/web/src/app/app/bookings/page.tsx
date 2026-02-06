@@ -1190,15 +1190,15 @@ export default function BookingsPage() {
                             key={p.id}
                             onClick={() => !alreadyAdded && handleQuickAddProduct(p)}
                             disabled={alreadyAdded}
-                            className={`w-full flex items-center justify-between rounded-xl px-4 py-3 text-left text-sm transition-colors ${alreadyAdded ? "opacity-40 cursor-not-allowed bg-muted/30" : "hover:bg-primary/10 hover:border-primary/20"}`}
+                            className={`w-full flex items-center justify-between rounded-xl px-4 py-3 text-left text-sm border transition-colors ${alreadyAdded ? "opacity-40 cursor-not-allowed bg-muted/20 border-border/30" : "bg-muted/10 border-border/40 hover:bg-primary/10 hover:border-primary/30"}`}
                           >
                             <div className="flex items-center gap-3">
-                              <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-secondary/10 to-primary/10 border border-secondary/20 flex items-center justify-center">
-                                <Briefcase className="w-3.5 h-3.5 text-secondary" />
+                              <div className="h-8 w-8 rounded-lg border border-primary/20 bg-primary/10 flex items-center justify-center">
+                                <Briefcase className="w-3.5 h-3.5 text-primary" />
                               </div>
                               <div>
-                                <span className="text-white font-medium">{p.name}</span>
-                                <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full border border-border/40 text-muted-foreground uppercase">{p.category}</span>
+                                <span className="text-foreground font-medium">{p.name}</span>
+                                <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full border border-primary/20 text-primary/70 uppercase">{p.category}</span>
                               </div>
                             </div>
                             <div className="flex items-center gap-2">
@@ -1206,7 +1206,7 @@ export default function BookingsPage() {
                               {alreadyAdded ? (
                                 <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                               ) : (
-                                <Plus className="w-4 h-4 text-secondary" />
+                                <Plus className="w-4 h-4 text-primary" />
                               )}
                             </div>
                           </button>
