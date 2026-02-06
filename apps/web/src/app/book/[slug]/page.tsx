@@ -235,9 +235,10 @@ export default function PublicBookingPage() {
     loadBusiness();
   }, [slug]);
 
-  const serviceProducts = products.filter((p) => p.category === "SERVICE");
-  const physicalProducts = products.filter((p) => p.category === "PRODUCT");
-  const packages = products.filter((p) => p.category === "PACKAGE");
+  const storeServiceNames = new Set(services.map((s) => s.name));
+  const serviceProducts = products.filter((p) => p.category === "SERVICE" && storeServiceNames.has(p.name));
+  const physicalProducts = products.filter((p) => p.category === "PRODUCT" && storeServiceNames.has(p.name));
+  const packages = products.filter((p) => p.category === "PACKAGE" && storeServiceNames.has(p.name));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
