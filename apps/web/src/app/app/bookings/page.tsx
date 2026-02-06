@@ -32,6 +32,9 @@ import {
   Globe,
   Sparkles,
   Link as LinkIcon,
+  MapPin,
+  ShoppingBag,
+  Package,
 } from "lucide-react";
 import {
   Booking,
@@ -57,6 +60,8 @@ import {
   updateService,
   createService,
   deleteService,
+  fetchProducts,
+  Product,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { useSearchParams } from "next/navigation";
@@ -159,6 +164,8 @@ export default function BookingsPage() {
   const [showAddService, setShowAddService] = useState(false);
   const [newServiceData, setNewServiceData] = useState({ name: "", duration: 30, price: 0, description: "" });
   const [storePreview, setStorePreview] = useState(true);
+  const [commerceProducts, setCommerceProducts] = useState<Product[]>([]);
+  const [showQuickAdd, setShowQuickAdd] = useState(false);
 
   const baseDate = useMemo(() => {
     const d = new Date();
@@ -194,7 +201,7 @@ export default function BookingsPage() {
     if (!businessId) return;
     setLoading(true);
     try {
-      const [bookingsRes, servicesRes, staffRes, calendarRes, contactsRes, statsRes, bizRes] = await Promise.all([
+      const [bookingsRes, servicesRes, staffRes, calendarRes, contactsRes, statsRes, bizRes, productsRes] = await Promise.all([
         fetchBookings(businessId),
         fetchServices(businessId),
         fetchStaff(businessId),
@@ -202,6 +209,7 @@ export default function BookingsPage() {
         fetchContacts(businessId, { take: 200 }),
         fetchBookingStats(businessId).catch(() => ({ data: null, error: null })),
         getBusinessById(businessId).catch(() => ({ data: null, error: null })),
+        fetchProducts(businessId).catch(() => ({ data: null, error: null })),
       ]);
       setBookings(bookingsRes.data ?? []);
       setServices(servicesRes.data ?? []);
@@ -210,6 +218,7 @@ export default function BookingsPage() {
       setStats(statsRes.data ?? null);
       setCalendarConnected((calendarRes.data as any)?.connected ?? false);
       setCalendarEmail((calendarRes.data as any)?.email ?? null);
+      setCommerceProducts((productsRes as any)?.data ?? []);
       if (bizRes.data) {
         setBusinessData(bizRes.data);
         setStoreSlug(bizRes.data.slug ?? "");
@@ -399,6 +408,26 @@ export default function BookingsPage() {
     }
     setEditingService(null);
   }
+
+  async function handleQuickAddProduct(product: Product) {
+    if (!businessId) return;
+    const res = await createService({
+      businessId,
+      name: product.name,
+      durationMins: product.duration ?? 30,
+      price: product.price,
+    });
+    if (res.error) {
+      setBanner({ text: `Failed to add: ${res.error}`, type: "error" });
+    } else {
+      setBanner({ text: `"${product.name}" added to store!`, type: "success" });
+      await loadData();
+    }
+  }
+
+  const quickAddableProducts = commerceProducts.filter(
+    (p) => p.category === "SERVICE" || p.category === "PACKAGE"
+  );
 
   async function handleAddNewService() {
     if (!businessId || !newServiceData.name.trim()) return;
@@ -987,72 +1016,137 @@ export default function BookingsPage() {
           {/* ─── CUSTOMER PREVIEW ─── */}
           {storePreview ? (
             <div className="rounded-2xl border border-border/60 overflow-hidden">
-              <div className="bg-gradient-to-br from-slate-950 via-black to-slate-950 p-8">
-                <div className="mx-auto max-w-2xl space-y-6">
-                  <div className="text-center space-y-2">
-                    {businessData?.logoUrl && (
-                      <img src={businessData.logoUrl} alt="Logo" className="h-14 w-14 rounded-2xl mx-auto object-cover border border-border/40" />
-                    )}
-                    <h2 className="text-2xl font-semibold text-white">{businessData?.name ?? "Your Business"}</h2>
-                    {businessData?.tagline && <p className="text-sm text-slate-400">{businessData.tagline}</p>}
-                    {!businessData?.tagline && <p className="text-sm text-slate-400">Book your appointment online</p>}
-                    {(businessData?.address || businessData?.phone || businessData?.email) && (
-                      <div className="flex items-center justify-center gap-4 text-xs text-slate-500 flex-wrap mt-1">
-                        {businessData?.address && (
-                          <span className="flex items-center gap-1"><Globe className="w-3 h-3" /> {businessData.address}</span>
-                        )}
-                        {businessData?.phone && (
-                          <span className="flex items-center gap-1"><Phone className="w-3 h-3" /> {businessData.phone}</span>
-                        )}
-                        {businessData?.email && (
-                          <span className="flex items-center gap-1"><Mail className="w-3 h-3" /> {businessData.email}</span>
-                        )}
-                      </div>
-                    )}
+              <div className="bg-[#0a0a0f] p-6">
+                <div className="mx-auto max-w-3xl space-y-8">
+                  {/* Hero */}
+                  <div className="text-center space-y-3 relative">
+                    <div
+                      className="absolute inset-0 opacity-[0.07] rounded-2xl"
+                      style={{ background: `radial-gradient(ellipse at 50% 0%, ${businessData?.primaryColor || "#F97316"}, transparent 70%)` }}
+                    />
+                    <div className="relative pt-4 pb-2">
+                      {businessData?.logoUrl && (
+                        <img src={businessData.logoUrl} alt="Logo" className="h-16 w-16 rounded-2xl mx-auto object-cover border-2 border-white/10 shadow-xl" />
+                      )}
+                      <h2 className="text-2xl font-bold text-white mt-3">{businessData?.name ?? "Your Business"}</h2>
+                      {businessData?.tagline ? <p className="text-sm text-white/50">{businessData.tagline}</p> : <p className="text-sm text-white/50">Book your appointment online</p>}
+                      {(businessData?.address || businessData?.phone || businessData?.email) && (
+                        <div className="flex items-center justify-center gap-4 text-xs text-white/40 flex-wrap mt-2">
+                          {businessData?.address && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {businessData.address}</span>}
+                          {businessData?.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" /> {businessData.phone}</span>}
+                          {businessData?.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" /> {businessData.email}</span>}
+                        </div>
+                      )}
+                    </div>
                   </div>
 
-                  {services.length === 0 ? (
-                    <div className="rounded-2xl border border-border/40 bg-slate-900/50 p-8 text-center space-y-3">
-                      <Sparkles className="w-8 h-8 text-muted-foreground/40 mx-auto" />
-                      <p className="text-sm text-slate-400">No services listed yet. Switch to Edit mode to add your first service.</p>
-                    </div>
-                  ) : (
-                    <div className="rounded-2xl border border-border/40 bg-slate-900/60 p-4 space-y-3">
-                      <div className="text-xs uppercase tracking-wide text-slate-500 flex items-center gap-2 px-1">
-                        <Briefcase className="w-3 h-3" /> Select a Service
+                  {/* Commerce Carousels */}
+                  {(() => {
+                    const serviceItems = commerceProducts.filter((p) => p.category === "SERVICE");
+                    const productItems = commerceProducts.filter((p) => p.category === "PRODUCT");
+                    const packageItems = commerceProducts.filter((p) => p.category === "PACKAGE");
+                    const hasAny = serviceItems.length > 0 || productItems.length > 0 || packageItems.length > 0;
+                    if (!hasAny) return null;
+                    return (
+                      <div className="space-y-6">
+                        {serviceItems.length > 0 && (
+                          <div className="space-y-2">
+                            <h3 className="text-xs uppercase tracking-wider text-white/40 flex items-center gap-2 px-1">
+                              <Briefcase className="w-3.5 h-3.5 text-primary" /> Services
+                            </h3>
+                            <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
+                              {serviceItems.map((p) => (
+                                <div key={p.id} className="flex-shrink-0 w-[220px] rounded-2xl border border-white/10 bg-white/[0.03] p-4 space-y-2">
+                                  <div className="flex justify-between items-start">
+                                    <h4 className="text-sm font-semibold text-white">{p.name}</h4>
+                                    <span className="text-sm font-bold text-primary">${p.price}</span>
+                                  </div>
+                                  {p.description && <p className="text-xs text-white/40 line-clamp-2">{p.description}</p>}
+                                  {p.duration && <span className="text-xs text-white/30 flex items-center gap-1"><Clock className="w-3 h-3" />{p.duration} min</span>}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {productItems.length > 0 && (
+                          <div className="space-y-2">
+                            <h3 className="text-xs uppercase tracking-wider text-white/40 flex items-center gap-2 px-1">
+                              <ShoppingBag className="w-3.5 h-3.5 text-secondary" /> Products
+                            </h3>
+                            <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
+                              {productItems.map((p) => (
+                                <div key={p.id} className="flex-shrink-0 w-[220px] rounded-2xl border border-white/10 bg-white/[0.03] p-4 space-y-2">
+                                  <div className="flex justify-between items-start">
+                                    <h4 className="text-sm font-semibold text-white">{p.name}</h4>
+                                    <span className="text-sm font-bold text-secondary">${p.price}</span>
+                                  </div>
+                                  {p.description && <p className="text-xs text-white/40 line-clamp-2">{p.description}</p>}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {packageItems.length > 0 && (
+                          <div className="space-y-2">
+                            <h3 className="text-xs uppercase tracking-wider text-white/40 flex items-center gap-2 px-1">
+                              <Package className="w-3.5 h-3.5 text-purple-400" /> Packages
+                            </h3>
+                            <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
+                              {packageItems.map((p) => (
+                                <div key={p.id} className="flex-shrink-0 w-[220px] rounded-2xl border border-white/10 bg-white/[0.03] p-4 space-y-2">
+                                  <div className="flex justify-between items-start">
+                                    <h4 className="text-sm font-semibold text-white">{p.name}</h4>
+                                    <span className="text-sm font-bold text-purple-400">${p.price}</span>
+                                  </div>
+                                  {p.description && <p className="text-xs text-white/40 line-clamp-2">{p.description}</p>}
+                                  {p.duration && <span className="text-xs text-white/30 flex items-center gap-1"><Clock className="w-3 h-3" />{p.duration} min</span>}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <div className="space-y-2">
+                    );
+                  })()}
+
+                  {/* Booking Services */}
+                  {services.length === 0 && commerceProducts.length === 0 ? (
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-8 text-center space-y-3">
+                      <Sparkles className="w-8 h-8 text-white/20 mx-auto" />
+                      <p className="text-sm text-white/40">No services listed yet. Switch to Edit mode to add your first service.</p>
+                    </div>
+                  ) : services.length > 0 && (
+                    <div className="space-y-3">
+                      <h3 className="text-xs uppercase tracking-wider text-white/40 flex items-center gap-2 px-1">
+                        <Sparkles className="w-3.5 h-3.5 text-primary" /> Book an Appointment
+                      </h3>
+                      <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
                         {services.map((service, i) => (
                           <div
                             key={service.id}
-                            className={`rounded-xl border p-4 transition-colors cursor-pointer ${i === 0 ? "border-primary/40 bg-primary/5" : "border-border/40 hover:border-primary/30"}`}
+                            className={`flex-shrink-0 w-[220px] rounded-2xl border p-4 space-y-2 transition-colors cursor-pointer ${i === 0 ? "border-primary/40 bg-primary/5" : "border-white/10 bg-white/[0.03] hover:border-white/20"}`}
                           >
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <div className="font-medium text-white">{service.name}</div>
-                                {service.description && <div className="text-xs text-slate-400 mt-0.5">{service.description}</div>}
-                              </div>
-                              <div className="text-right">
-                                <div className="text-sm font-semibold text-primary">TTD {service.price.toLocaleString()}</div>
-                                <div className="text-xs text-slate-500 flex items-center gap-1 justify-end">
-                                  <Clock className="w-3 h-3" /> {service.durationMins ?? service.duration ?? 30} min
-                                </div>
-                              </div>
+                            <div className="flex justify-between items-start">
+                              <h4 className="text-sm font-semibold text-white">{service.name}</h4>
+                              <span className="text-sm font-bold text-primary">TTD {service.price.toLocaleString()}</span>
                             </div>
+                            {service.description && <p className="text-xs text-white/40 line-clamp-2">{service.description}</p>}
+                            <span className="text-xs text-white/30 flex items-center gap-1"><Clock className="w-3 h-3" />{service.durationMins ?? service.duration ?? 30} min</span>
                           </div>
                         ))}
                       </div>
                     </div>
                   )}
 
+                  {/* Staff Preview */}
                   {staff.length > 0 && (
-                    <div className="rounded-2xl border border-border/40 bg-slate-900/60 p-4 space-y-3">
-                      <div className="text-xs uppercase tracking-wide text-slate-500 flex items-center gap-2 px-1">
-                        <User className="w-3 h-3" /> Select Staff (Optional)
-                      </div>
+                    <div className="space-y-3">
+                      <h3 className="text-xs uppercase tracking-wider text-white/40 flex items-center gap-2 px-1">
+                        <User className="w-3.5 h-3.5" /> Staff
+                      </h3>
                       <div className="flex gap-2 flex-wrap">
                         {staff.map((s) => (
-                          <div key={s.id} className="flex items-center gap-2 rounded-xl border border-border/40 bg-slate-900/50 px-3 py-2">
+                          <div key={s.id} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
                             <div className="h-7 w-7 rounded-full bg-secondary/10 border border-secondary/20 flex items-center justify-center text-xs font-bold text-secondary">
                               {s.name.charAt(0).toUpperCase()}
                             </div>
@@ -1063,34 +1157,29 @@ export default function BookingsPage() {
                     </div>
                   )}
 
-                  <div className="rounded-2xl border border-border/40 bg-slate-900/60 p-4 space-y-3">
+                  {/* Form Placeholder */}
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
                     <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-xs text-slate-500 mb-1.5 block">Date</label>
-                        <div className="rounded-xl border border-border/40 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-400">Select date...</div>
-                      </div>
-                      <div>
-                        <label className="text-xs text-slate-500 mb-1.5 block">Time</label>
-                        <div className="rounded-xl border border-border/40 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-400">Select time...</div>
-                      </div>
+                      <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm text-white/25">Select date...</div>
+                      <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm text-white/25">Select time...</div>
                     </div>
-                    <div className="border-t border-border/30 pt-3 space-y-3">
-                      <div className="text-xs uppercase tracking-wide text-slate-500">Your Details</div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="rounded-xl border border-border/40 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-400">First Name</div>
-                        <div className="rounded-xl border border-border/40 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-400">Last Name</div>
-                        <div className="rounded-xl border border-border/40 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-400">Email</div>
-                        <div className="rounded-xl border border-border/40 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-400">Phone</div>
-                      </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm text-white/25">First Name</div>
+                      <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm text-white/25">Last Name</div>
+                      <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm text-white/25">Email</div>
+                      <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm text-white/25">Phone</div>
                     </div>
                   </div>
 
-                  <button className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-medium text-sm opacity-80 cursor-default">
+                  <button
+                    className="w-full py-3 rounded-xl text-white font-semibold text-sm opacity-60 cursor-default"
+                    style={{ backgroundColor: businessData?.primaryColor || "#F97316" }}
+                  >
                     Book Appointment
                   </button>
 
-                  <div className="text-center text-xs text-slate-600">
-                    Powered by <span className="text-primary font-semibold">KeyFlowOS</span>
+                  <div className="text-center text-xs text-white/20">
+                    Powered by <span className="font-semibold" style={{ color: businessData?.primaryColor || "#F97316" }}>KeyFlowOS</span>
                   </div>
                 </div>
               </div>
@@ -1206,58 +1295,104 @@ export default function BookingsPage() {
                 <div className="rounded-2xl border border-primary/30 bg-slate-950/80 backdrop-blur p-5 space-y-4">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-semibold flex items-center gap-2">
-                      <Plus className="w-4 h-4 text-primary" /> Add New Service
+                      <Plus className="w-4 h-4 text-primary" /> Add to Store
                     </h3>
-                    <button onClick={() => setShowAddService(false)} className="p-1 rounded-lg hover:bg-muted/50">
+                    <button onClick={() => { setShowAddService(false); setShowQuickAdd(false); }} className="p-1 rounded-lg hover:bg-muted/50">
                       <X className="w-4 h-4" />
                     </button>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Service Name</label>
-                      <input
-                        type="text"
-                        value={newServiceData.name}
-                        onChange={(e) => setNewServiceData((d) => ({ ...d, name: e.target.value }))}
-                        placeholder="e.g. Haircut, Consultation"
-                        className="w-full rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                      />
+
+                  {quickAddableProducts.length > 0 && (
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => setShowQuickAdd(!showQuickAdd)}
+                        className="w-full flex items-center justify-between rounded-xl border border-secondary/30 bg-secondary/5 hover:bg-secondary/10 px-4 py-2.5 text-sm transition-colors"
+                      >
+                        <span className="flex items-center gap-2 text-secondary font-medium">
+                          <Briefcase className="w-4 h-4" /> Quick Add from Commerce ({quickAddableProducts.length})
+                        </span>
+                        <ChevronRight className={`w-4 h-4 text-secondary transition-transform ${showQuickAdd ? "rotate-90" : ""}`} />
+                      </button>
+                      {showQuickAdd && (
+                        <div className="grid grid-cols-1 gap-1.5 max-h-48 overflow-y-auto rounded-xl border border-border/40 bg-slate-950/60 p-2">
+                          {quickAddableProducts.map((p) => {
+                            const alreadyAdded = services.some((s) => s.name === p.name);
+                            return (
+                              <button
+                                key={p.id}
+                                onClick={() => !alreadyAdded && handleQuickAddProduct(p)}
+                                disabled={alreadyAdded}
+                                className={`flex items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-colors ${alreadyAdded ? "opacity-40 cursor-not-allowed" : "hover:bg-primary/10"}`}
+                              >
+                                <div>
+                                  <span className="text-white font-medium">{p.name}</span>
+                                  <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full border border-border/40 text-muted-foreground uppercase">{p.category}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs text-primary font-semibold">{p.currency} {p.price}</span>
+                                  {alreadyAdded ? (
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                                  ) : (
+                                    <Plus className="w-3.5 h-3.5 text-muted-foreground" />
+                                  )}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                    <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Description</label>
-                      <input
-                        type="text"
-                        value={newServiceData.description}
-                        onChange={(e) => setNewServiceData((d) => ({ ...d, description: e.target.value }))}
-                        placeholder="Brief description..."
-                        className="w-full rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                      />
+                  )}
+
+                  <div className="border-t border-border/30 pt-3">
+                    <p className="text-xs text-muted-foreground mb-3">Or create a new service manually:</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs text-muted-foreground mb-1 block">Service Name</label>
+                        <input
+                          type="text"
+                          value={newServiceData.name}
+                          onChange={(e) => setNewServiceData((d) => ({ ...d, name: e.target.value }))}
+                          placeholder="e.g. Haircut, Consultation"
+                          className="w-full rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground mb-1 block">Description</label>
+                        <input
+                          type="text"
+                          value={newServiceData.description}
+                          onChange={(e) => setNewServiceData((d) => ({ ...d, description: e.target.value }))}
+                          placeholder="Brief description..."
+                          className="w-full rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground mb-1 block">Duration (minutes)</label>
+                        <input
+                          type="number"
+                          value={newServiceData.duration}
+                          onChange={(e) => setNewServiceData((d) => ({ ...d, duration: parseInt(e.target.value) || 0 }))}
+                          className="w-full rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground mb-1 block">Price (TTD)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={newServiceData.price}
+                          onChange={(e) => setNewServiceData((d) => ({ ...d, price: parseFloat(e.target.value) || 0 }))}
+                          className="w-full rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        />
+                      </div>
                     </div>
-                    <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Duration (minutes)</label>
-                      <input
-                        type="number"
-                        value={newServiceData.duration}
-                        onChange={(e) => setNewServiceData((d) => ({ ...d, duration: parseInt(e.target.value) || 0 }))}
-                        className="w-full rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                      />
+                    <div className="flex gap-2 justify-end mt-3">
+                      <button onClick={() => { setShowAddService(false); setShowQuickAdd(false); }} className="px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground border border-border/60">Cancel</button>
+                      <Button onClick={handleAddNewService} className="kf-btn-primary gap-2 text-xs">
+                        <Plus className="w-3.5 h-3.5" /> Add Service
+                      </Button>
                     </div>
-                    <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Price (TTD)</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={newServiceData.price}
-                        onChange={(e) => setNewServiceData((d) => ({ ...d, price: parseFloat(e.target.value) || 0 }))}
-                        className="w-full rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex gap-2 justify-end">
-                    <button onClick={() => setShowAddService(false)} className="px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground border border-border/60">Cancel</button>
-                    <Button onClick={handleAddNewService} className="kf-btn-primary gap-2 text-xs">
-                      <Plus className="w-3.5 h-3.5" /> Add Service
-                    </Button>
                   </div>
                 </div>
               ) : (
