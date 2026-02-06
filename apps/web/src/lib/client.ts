@@ -105,6 +105,27 @@ const bookingSchema = z.object({
   startTime: z.string(),
   endTime: z.string(),
   status: z.string(),
+  contactId: z.string().nullable().optional(),
+  serviceId: z.string().nullable().optional(),
+  staffId: z.string().nullable().optional(),
+  calendarEventId: z.string().nullable().optional(),
+  contact: z.object({
+    id: z.string(),
+    firstName: z.string().nullable().optional(),
+    lastName: z.string().nullable().optional(),
+    email: z.string().nullable().optional(),
+    phone: z.string().nullable().optional(),
+  }).nullable().optional(),
+  service: z.object({
+    id: z.string(),
+    name: z.string(),
+    duration: z.number(),
+    price: z.number(),
+  }).nullable().optional(),
+  staff: z.object({
+    id: z.string(),
+    name: z.string(),
+  }).nullable().optional(),
 });
 
 const invoiceSummarySchema = z.object({
@@ -1320,6 +1341,34 @@ export async function syncBookingToCalendar(bookingId: string, businessId?: stri
     path: `/bookings/businesses/${encodeURIComponent(bid)}/bookings/${encodeURIComponent(bookingId)}/sync-calendar`,
     body: {},
   });
+}
+
+export async function updateBookingStatus(bookingId: string, status: string, businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<Booking>({
+    path: `/bookings/businesses/${encodeURIComponent(bid)}/bookings/${encodeURIComponent(bookingId)}/status`,
+    body: { status },
+  });
+}
+
+export type BookingStats = {
+  todayCount: number;
+  weekCount: number;
+  pendingCount: number;
+  totalBookings: number;
+};
+
+export async function fetchBookingStats(businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/bookings/businesses/${encodeURIComponent(bid)}/stats`,
+    z.object({
+      todayCount: z.number(),
+      weekCount: z.number(),
+      pendingCount: z.number(),
+      totalBookings: z.number(),
+    }),
+  );
 }
 
 export interface FlowPhase {
