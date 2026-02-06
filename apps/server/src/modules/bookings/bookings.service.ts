@@ -20,12 +20,86 @@ export class BookingsService {
     return this.prisma.client.booking.findMany({
       where: { businessId, deletedAt: null },
       orderBy: { startTime: 'desc' },
+      include: {
+        contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+        service: { select: { id: true, name: true, duration: true, price: true } },
+        staff: { select: { id: true, name: true } },
+      },
     });
+  }
+
+  async updateBookingStatus(businessId: string, bookingId: string, status: string) {
+    const booking = await this.prisma.client.booking.findFirst({
+      where: { id: bookingId, businessId, deletedAt: null },
+    });
+    if (!booking) {
+      const { NotFoundException } = await import('@nestjs/common');
+      throw new NotFoundException('Booking not found');
+    }
+    const allowed = ['PENDING', 'CONFIRMED', 'CANCELLED', 'COMPLETED'];
+    if (!allowed.includes(status)) {
+      const { BadRequestException } = await import('@nestjs/common');
+      throw new BadRequestException('Invalid status. Must be one of: PENDING, CONFIRMED, CANCELLED, COMPLETED');
+    }
+    const updated = await this.prisma.client.booking.update({
+      where: { id: bookingId },
+      data: { status },
+      include: {
+        contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+        service: { select: { id: true, name: true, duration: true, price: true } },
+        staff: { select: { id: true, name: true } },
+      },
+    });
+
+    if (status === 'CONFIRMED' && booking.contactId) {
+      this.events.emit('booking.confirmed', {
+        booking: updated,
+        contact: updated.contact ?? undefined,
+        businessId,
+        eventName: 'booking.confirmed',
+      });
+      await this.crm.logContactEvent({
+        businessId,
+        contactId: booking.contactId,
+        type: 'booking.confirmed',
+        data: { bookingId, status },
+        actorType: 'USER',
+        source: 'bookings',
+      });
+    }
+
+    return updated;
+  }
+
+  async getBookingStats(businessId: string) {
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
+    const startOfWeek = new Date(startOfDay);
+    startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
+    const endOfWeek = new Date(startOfWeek.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+    const [todayCount, weekCount, pendingCount, totalBookings] = await Promise.all([
+      this.prisma.client.booking.count({
+        where: { businessId, deletedAt: null, startTime: { gte: startOfDay, lt: endOfDay } },
+      }),
+      this.prisma.client.booking.count({
+        where: { businessId, deletedAt: null, startTime: { gte: startOfWeek, lt: endOfWeek } },
+      }),
+      this.prisma.client.booking.count({
+        where: { businessId, deletedAt: null, status: 'PENDING' },
+      }),
+      this.prisma.client.booking.count({
+        where: { businessId, deletedAt: null },
+      }),
+    ]);
+
+    return { todayCount, weekCount, pendingCount, totalBookings };
   }
 
   async createBooking(input: {
     businessId: string;
-    contactId: string;
+    contactId?: string;
     serviceId: string;
     staffId: string;
     startTime: Date;
@@ -34,7 +108,7 @@ export class BookingsService {
     const booking = await this.prisma.client.booking.create({
       data: {
         businessId: input.businessId,
-        contactId: input.contactId,
+        contactId: input.contactId ?? null,
         serviceId: input.serviceId,
         staffId: input.staffId,
         startTime: input.startTime,

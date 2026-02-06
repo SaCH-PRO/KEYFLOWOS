@@ -23,6 +23,22 @@ export class BookingsController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/stats')
+  getBookingStats(@Param('businessId') businessId: string) {
+    return this.bookings.getBookingStats(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/bookings/:bookingId/status')
+  updateBookingStatus(
+    @Param('businessId') businessId: string,
+    @Param('bookingId') bookingId: string,
+    @Body('status') status: string,
+  ) {
+    return this.bookings.updateBookingStatus(businessId, bookingId, status);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId')
   createBooking(
     @Param('businessId') businessId: string,
