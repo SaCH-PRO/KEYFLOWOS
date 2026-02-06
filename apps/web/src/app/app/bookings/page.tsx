@@ -1021,11 +1021,12 @@ export default function BookingsPage() {
                     </div>
                   </div>
 
-                  {/* Commerce Carousels */}
+                  {/* Commerce Carousels - only show items selected for store */}
                   {(() => {
-                    const serviceItems = commerceProducts.filter((p) => p.category === "SERVICE");
-                    const productItems = commerceProducts.filter((p) => p.category === "PRODUCT");
-                    const packageItems = commerceProducts.filter((p) => p.category === "PACKAGE");
+                    const storeNames = new Set(services.map((s) => s.name));
+                    const serviceItems = commerceProducts.filter((p) => p.category === "SERVICE" && storeNames.has(p.name));
+                    const productItems = commerceProducts.filter((p) => p.category === "PRODUCT" && storeNames.has(p.name));
+                    const packageItems = commerceProducts.filter((p) => p.category === "PACKAGE" && storeNames.has(p.name));
                     const hasAny = serviceItems.length > 0 || productItems.length > 0 || packageItems.length > 0;
                     if (!hasAny) return null;
                     return (
