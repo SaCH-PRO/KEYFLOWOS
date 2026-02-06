@@ -401,9 +401,7 @@ export default function BookingsPage() {
     }
   }
 
-  const quickAddableProducts = commerceProducts.filter(
-    (p) => p.category === "SERVICE" || p.category === "PACKAGE"
-  );
+  const quickAddableProducts = commerceProducts;
 
   async function handleDeleteServiceFromStore(serviceId: string) {
     if (!businessId) return;
@@ -1184,7 +1182,7 @@ export default function BookingsPage() {
                     <ChevronRight className={`w-4 h-4 text-secondary transition-transform ${showQuickAdd ? "rotate-90" : ""}`} />
                   </button>
                   {showQuickAdd && (
-                    <div className="rounded-2xl border border-border/40 bg-slate-950/60 p-3 space-y-1.5 max-h-64 overflow-y-auto">
+                    <div className="rounded-2xl border border-border/40 bg-background p-3 space-y-1.5 max-h-64 overflow-y-auto">
                       {quickAddableProducts.map((p) => {
                         const alreadyAdded = services.some((s) => s.name === p.name);
                         return (
@@ -1192,7 +1190,7 @@ export default function BookingsPage() {
                             key={p.id}
                             onClick={() => !alreadyAdded && handleQuickAddProduct(p)}
                             disabled={alreadyAdded}
-                            className={`w-full flex items-center justify-between rounded-xl px-4 py-3 text-left text-sm transition-colors ${alreadyAdded ? "opacity-40 cursor-not-allowed bg-slate-900/30" : "hover:bg-primary/10 hover:border-primary/20"}`}
+                            className={`w-full flex items-center justify-between rounded-xl px-4 py-3 text-left text-sm transition-colors ${alreadyAdded ? "opacity-40 cursor-not-allowed bg-muted/30" : "hover:bg-primary/10 hover:border-primary/20"}`}
                           >
                             <div className="flex items-center gap-3">
                               <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-secondary/10 to-primary/10 border border-secondary/20 flex items-center justify-center">
@@ -1218,8 +1216,8 @@ export default function BookingsPage() {
                   )}
                 </div>
               ) : (
-                <div className="rounded-2xl border border-dashed border-border/60 bg-slate-950/30 p-6 text-center space-y-2">
-                  <Briefcase className="w-6 h-6 text-muted-foreground mx-auto" />
+                <div className="rounded-2xl border border-dashed border-primary/20 bg-primary/5 p-6 text-center space-y-2">
+                  <Briefcase className="w-6 h-6 text-primary/40 mx-auto" />
                   <p className="text-sm text-muted-foreground">No services or packages in Commerce yet.</p>
                   <p className="text-xs text-muted-foreground">Add products in the <span className="text-primary font-medium">Commerce</span> page first, then come back here to add them to your store.</p>
                 </div>
