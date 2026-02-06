@@ -27,8 +27,6 @@ import {
   Mail,
   Store,
   ExternalLink,
-  Edit3,
-  Save,
   Globe,
   Sparkles,
   Link as LinkIcon,
@@ -57,7 +55,6 @@ import {
   fetchBookingStats,
   getBusinessById,
   updateBusiness,
-  updateService,
   createService,
   deleteService,
   fetchProducts,
@@ -159,10 +156,6 @@ export default function BookingsPage() {
   const [businessData, setBusinessData] = useState<{ name?: string; slug?: string | null; logoUrl?: string | null; tagline?: string | null; description?: string | null; address?: string | null; phone?: string | null; email?: string | null; website?: string | null; primaryColor?: string | null; secondaryColor?: string | null } | null>(null);
   const [storeSlug, setStoreSlug] = useState("");
   const [slugSaving, setSlugSaving] = useState(false);
-  const [editingService, setEditingService] = useState<string | null>(null);
-  const [editServiceData, setEditServiceData] = useState<{ name: string; duration: number; price: number; description: string }>({ name: "", duration: 30, price: 0, description: "" });
-  const [showAddService, setShowAddService] = useState(false);
-  const [newServiceData, setNewServiceData] = useState({ name: "", duration: 30, price: 0, description: "" });
   const [storePreview, setStorePreview] = useState(true);
   const [commerceProducts, setCommerceProducts] = useState<Product[]>([]);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
@@ -392,23 +385,6 @@ export default function BookingsPage() {
     setSlugSaving(false);
   }
 
-  async function handleSaveServiceEdit() {
-    if (!businessId || !editingService) return;
-    const res = await updateService(editingService, {
-      name: editServiceData.name,
-      duration: editServiceData.duration,
-      price: editServiceData.price,
-      description: editServiceData.description || undefined,
-    }, businessId);
-    if (res.error) {
-      setBanner({ text: `Failed to update service: ${res.error}`, type: "error" });
-    } else {
-      setBanner({ text: "Service updated!", type: "success" });
-      await loadData();
-    }
-    setEditingService(null);
-  }
-
   async function handleQuickAddProduct(product: Product) {
     if (!businessId) return;
     const res = await createService({
@@ -429,24 +405,6 @@ export default function BookingsPage() {
     (p) => p.category === "SERVICE" || p.category === "PACKAGE"
   );
 
-  async function handleAddNewService() {
-    if (!businessId || !newServiceData.name.trim()) return;
-    const res = await createService({
-      businessId,
-      name: newServiceData.name,
-      durationMins: newServiceData.duration,
-      price: newServiceData.price,
-    });
-    if (res.error) {
-      setBanner({ text: `Failed to add service: ${res.error}`, type: "error" });
-    } else {
-      setBanner({ text: "Service added!", type: "success" });
-      setNewServiceData({ name: "", duration: 30, price: 0, description: "" });
-      setShowAddService(false);
-      await loadData();
-    }
-  }
-
   async function handleDeleteServiceFromStore(serviceId: string) {
     if (!businessId) return;
     const res = await deleteService(serviceId, businessId);
@@ -458,15 +416,6 @@ export default function BookingsPage() {
     }
   }
 
-  function startEditService(service: Service) {
-    setEditingService(service.id);
-    setEditServiceData({
-      name: service.name,
-      duration: service.durationMins ?? service.duration ?? 30,
-      price: service.price,
-      description: service.description ?? "",
-    });
-  }
 
   if (!businessId && !loading) {
     return (
@@ -1191,217 +1140,89 @@ export default function BookingsPage() {
               {services.length === 0 ? (
                 <div className="rounded-2xl border border-border/60 bg-slate-950/50 p-8 text-center space-y-3">
                   <Briefcase className="w-8 h-8 text-muted-foreground/40 mx-auto" />
-                  <p className="text-sm text-muted-foreground">No services yet. Add services that customers can book.</p>
+                  <p className="text-sm text-muted-foreground">No items in your store yet. Use the button below to add services and packages from Commerce.</p>
                 </div>
               ) : (
                 <div className="space-y-2">
                   {services.map((service) => (
                     <div key={service.id} className="rounded-2xl border border-border/60 bg-slate-950/60 p-4 group hover:border-primary/30 transition-colors">
-                      {editingService === service.id ? (
-                        <div className="space-y-3">
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            <div>
-                              <label className="text-xs text-muted-foreground mb-1 block">Service Name</label>
-                              <input
-                                type="text"
-                                value={editServiceData.name}
-                                onChange={(e) => setEditServiceData((d) => ({ ...d, name: e.target.value }))}
-                                className="w-full rounded-xl border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-xs text-muted-foreground mb-1 block">Description</label>
-                              <input
-                                type="text"
-                                value={editServiceData.description}
-                                onChange={(e) => setEditServiceData((d) => ({ ...d, description: e.target.value }))}
-                                placeholder="Brief description..."
-                                className="w-full rounded-xl border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-xs text-muted-foreground mb-1 block">Duration (minutes)</label>
-                              <input
-                                type="number"
-                                value={editServiceData.duration}
-                                onChange={(e) => setEditServiceData((d) => ({ ...d, duration: parseInt(e.target.value) || 0 }))}
-                                className="w-full rounded-xl border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-xs text-muted-foreground mb-1 block">Price (TTD)</label>
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={editServiceData.price}
-                                onChange={(e) => setEditServiceData((d) => ({ ...d, price: parseFloat(e.target.value) || 0 }))}
-                                className="w-full rounded-xl border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                              />
-                            </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-primary/10 to-secondary/10 border border-primary/20 flex items-center justify-center">
+                            <Briefcase className="w-4 h-4 text-primary" />
                           </div>
-                          <div className="flex gap-2 justify-end">
-                            <button
-                              onClick={() => setEditingService(null)}
-                              className="px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground border border-border/60 transition-colors"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              onClick={handleSaveServiceEdit}
-                              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 transition-colors flex items-center gap-1"
-                            >
-                              <Save className="w-3 h-3" /> Save
-                            </button>
+                          <div>
+                            <div className="text-sm font-semibold">{service.name}</div>
+                            {service.description && <div className="text-xs text-muted-foreground mt-0.5">{service.description}</div>}
+                            <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
+                              <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {service.durationMins ?? service.duration ?? 30} min</span>
+                              <span className="flex items-center gap-1"><DollarSign className="w-3 h-3" /> TTD {service.price.toLocaleString()}</span>
+                            </div>
                           </div>
                         </div>
-                      ) : (
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-primary/10 to-secondary/10 border border-primary/20 flex items-center justify-center">
-                              <Briefcase className="w-4 h-4 text-primary" />
-                            </div>
-                            <div>
-                              <div className="text-sm font-semibold">{service.name}</div>
-                              {service.description && <div className="text-xs text-muted-foreground mt-0.5">{service.description}</div>}
-                              <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
-                                <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {service.durationMins ?? service.duration ?? 30} min</span>
-                                <span className="flex items-center gap-1"><DollarSign className="w-3 h-3" /> TTD {service.price.toLocaleString()}</span>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => startEditService(service)}
-                              className="p-2 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-primary/10 text-primary transition-all"
-                            >
-                              <Edit3 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteServiceFromStore(service.id)}
-                              className="p-2 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-500/10 text-red-400 transition-all"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      )}
+                        <button
+                          onClick={() => handleDeleteServiceFromStore(service.id)}
+                          className="p-2 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-500/10 text-red-400 transition-all"
+                          title="Remove from store"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
               )}
 
-              {/* Add New Service */}
-              {showAddService ? (
-                <div className="rounded-2xl border border-primary/30 bg-slate-950/80 backdrop-blur p-5 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold flex items-center gap-2">
-                      <Plus className="w-4 h-4 text-primary" /> Add to Store
-                    </h3>
-                    <button onClick={() => { setShowAddService(false); setShowQuickAdd(false); }} className="p-1 rounded-lg hover:bg-muted/50">
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  {quickAddableProducts.length > 0 && (
-                    <div className="space-y-2">
-                      <button
-                        onClick={() => setShowQuickAdd(!showQuickAdd)}
-                        className="w-full flex items-center justify-between rounded-xl border border-secondary/30 bg-secondary/5 hover:bg-secondary/10 px-4 py-2.5 text-sm transition-colors"
-                      >
-                        <span className="flex items-center gap-2 text-secondary font-medium">
-                          <Briefcase className="w-4 h-4" /> Quick Add from Commerce ({quickAddableProducts.length})
-                        </span>
-                        <ChevronRight className={`w-4 h-4 text-secondary transition-transform ${showQuickAdd ? "rotate-90" : ""}`} />
-                      </button>
-                      {showQuickAdd && (
-                        <div className="grid grid-cols-1 gap-1.5 max-h-48 overflow-y-auto rounded-xl border border-border/40 bg-slate-950/60 p-2">
-                          {quickAddableProducts.map((p) => {
-                            const alreadyAdded = services.some((s) => s.name === p.name);
-                            return (
-                              <button
-                                key={p.id}
-                                onClick={() => !alreadyAdded && handleQuickAddProduct(p)}
-                                disabled={alreadyAdded}
-                                className={`flex items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-colors ${alreadyAdded ? "opacity-40 cursor-not-allowed" : "hover:bg-primary/10"}`}
-                              >
-                                <div>
-                                  <span className="text-white font-medium">{p.name}</span>
-                                  <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full border border-border/40 text-muted-foreground uppercase">{p.category}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs text-primary font-semibold">{p.currency} {p.price}</span>
-                                  {alreadyAdded ? (
-                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                                  ) : (
-                                    <Plus className="w-3.5 h-3.5 text-muted-foreground" />
-                                  )}
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
+              {quickAddableProducts.length > 0 ? (
+                <div className="space-y-2">
+                  <button
+                    onClick={() => setShowQuickAdd(!showQuickAdd)}
+                    className="w-full rounded-2xl border border-dashed border-secondary/40 hover:border-secondary/60 bg-secondary/5 hover:bg-secondary/10 p-4 text-sm transition-all flex items-center justify-center gap-2"
+                  >
+                    <Plus className="w-4 h-4 text-secondary" />
+                    <span className="text-secondary font-medium">Add from Commerce ({quickAddableProducts.length} available)</span>
+                    <ChevronRight className={`w-4 h-4 text-secondary transition-transform ${showQuickAdd ? "rotate-90" : ""}`} />
+                  </button>
+                  {showQuickAdd && (
+                    <div className="rounded-2xl border border-border/40 bg-slate-950/60 p-3 space-y-1.5 max-h-64 overflow-y-auto">
+                      {quickAddableProducts.map((p) => {
+                        const alreadyAdded = services.some((s) => s.name === p.name);
+                        return (
+                          <button
+                            key={p.id}
+                            onClick={() => !alreadyAdded && handleQuickAddProduct(p)}
+                            disabled={alreadyAdded}
+                            className={`w-full flex items-center justify-between rounded-xl px-4 py-3 text-left text-sm transition-colors ${alreadyAdded ? "opacity-40 cursor-not-allowed bg-slate-900/30" : "hover:bg-primary/10 hover:border-primary/20"}`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-secondary/10 to-primary/10 border border-secondary/20 flex items-center justify-center">
+                                <Briefcase className="w-3.5 h-3.5 text-secondary" />
+                              </div>
+                              <div>
+                                <span className="text-white font-medium">{p.name}</span>
+                                <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full border border-border/40 text-muted-foreground uppercase">{p.category}</span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-primary font-semibold">{p.currency} {p.price}</span>
+                              {alreadyAdded ? (
+                                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                              ) : (
+                                <Plus className="w-4 h-4 text-secondary" />
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
-
-                  <div className="border-t border-border/30 pt-3">
-                    <p className="text-xs text-muted-foreground mb-3">Or create a new service manually:</p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">Service Name</label>
-                        <input
-                          type="text"
-                          value={newServiceData.name}
-                          onChange={(e) => setNewServiceData((d) => ({ ...d, name: e.target.value }))}
-                          placeholder="e.g. Haircut, Consultation"
-                          className="w-full rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">Description</label>
-                        <input
-                          type="text"
-                          value={newServiceData.description}
-                          onChange={(e) => setNewServiceData((d) => ({ ...d, description: e.target.value }))}
-                          placeholder="Brief description..."
-                          className="w-full rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">Duration (minutes)</label>
-                        <input
-                          type="number"
-                          value={newServiceData.duration}
-                          onChange={(e) => setNewServiceData((d) => ({ ...d, duration: parseInt(e.target.value) || 0 }))}
-                          className="w-full rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">Price (TTD)</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={newServiceData.price}
-                          onChange={(e) => setNewServiceData((d) => ({ ...d, price: parseFloat(e.target.value) || 0 }))}
-                          className="w-full rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                        />
-                      </div>
-                    </div>
-                    <div className="flex gap-2 justify-end mt-3">
-                      <button onClick={() => { setShowAddService(false); setShowQuickAdd(false); }} className="px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground border border-border/60">Cancel</button>
-                      <Button onClick={handleAddNewService} className="kf-btn-primary gap-2 text-xs">
-                        <Plus className="w-3.5 h-3.5" /> Add Service
-                      </Button>
-                    </div>
-                  </div>
                 </div>
               ) : (
-                <button
-                  onClick={() => setShowAddService(true)}
-                  className="w-full rounded-2xl border border-dashed border-border/60 hover:border-primary/40 bg-slate-950/30 p-4 text-sm text-muted-foreground hover:text-primary transition-all flex items-center justify-center gap-2"
-                >
-                  <Plus className="w-4 h-4" /> Add a Service
-                </button>
+                <div className="rounded-2xl border border-dashed border-border/60 bg-slate-950/30 p-6 text-center space-y-2">
+                  <Briefcase className="w-6 h-6 text-muted-foreground mx-auto" />
+                  <p className="text-sm text-muted-foreground">No services or packages in Commerce yet.</p>
+                  <p className="text-xs text-muted-foreground">Add products in the <span className="text-primary font-medium">Commerce</span> page first, then come back here to add them to your store.</p>
+                </div>
               )}
             </div>
           )}
