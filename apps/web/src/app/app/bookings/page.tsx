@@ -1171,55 +1171,101 @@ export default function BookingsPage() {
                 </div>
               )}
 
-              {quickAddableProducts.length > 0 ? (
-                <div className="space-y-2">
-                  <button
-                    onClick={() => setShowQuickAdd(!showQuickAdd)}
-                    className="w-full rounded-2xl border border-dashed border-secondary/40 hover:border-secondary/60 bg-secondary/5 hover:bg-secondary/10 p-4 text-sm transition-all flex items-center justify-center gap-2"
-                  >
-                    <Plus className="w-4 h-4 text-secondary" />
-                    <span className="text-secondary font-medium">Add from Commerce ({quickAddableProducts.length} available)</span>
-                    <ChevronRight className={`w-4 h-4 text-secondary transition-transform ${showQuickAdd ? "rotate-90" : ""}`} />
-                  </button>
-                  {showQuickAdd && (
-                    <div className="rounded-2xl border border-primary/20 bg-card p-3 space-y-1.5 max-h-64 overflow-y-auto">
-                      {quickAddableProducts.map((p) => {
-                        const alreadyAdded = services.some((s) => s.name === p.name);
-                        return (
-                          <button
-                            key={p.id}
-                            onClick={() => !alreadyAdded && handleQuickAddProduct(p)}
-                            disabled={alreadyAdded}
-                            className={`w-full flex items-center justify-between rounded-xl px-4 py-3 text-left text-sm border transition-colors ${alreadyAdded ? "opacity-40 cursor-not-allowed bg-muted/20 border-border/30" : "bg-muted/10 border-border/40 hover:bg-primary/10 hover:border-primary/30"}`}
-                          >
-                            <div className="flex items-center gap-3">
-                              <div className="h-8 w-8 rounded-lg border border-primary/20 bg-primary/10 flex items-center justify-center">
-                                <Briefcase className="w-3.5 h-3.5 text-primary" />
-                              </div>
-                              <div>
-                                <span className="text-foreground font-medium">{p.name}</span>
-                                <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full border border-primary/20 text-primary/70 uppercase">{p.category}</span>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs text-primary font-semibold">{p.currency} {p.price}</span>
-                              {alreadyAdded ? (
-                                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                              ) : (
-                                <Plus className="w-4 h-4 text-primary" />
-                              )}
-                            </div>
-                          </button>
-                        );
-                      })}
+              <button
+                onClick={() => setShowQuickAdd(true)}
+                className="w-full rounded-2xl border border-dashed border-primary/30 hover:border-primary/60 bg-primary/5 hover:bg-primary/10 p-4 text-sm transition-all flex items-center justify-center gap-2"
+              >
+                <Store className="w-4 h-4 text-primary" />
+                <span className="text-primary font-medium">Manage Store Items</span>
+              </button>
+
+              {showQuickAdd && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center">
+                  <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowQuickAdd(false)} />
+                  <div className="relative w-full max-w-lg mx-4 rounded-2xl border border-primary/20 bg-card shadow-2xl overflow-hidden">
+                    <div className="flex items-center justify-between px-5 py-4 border-b border-border/60">
+                      <div>
+                        <h3 className="text-base font-bold text-foreground">Manage Store Items</h3>
+                        <p className="text-xs text-muted-foreground mt-0.5">Select items from Commerce to display in your store</p>
+                      </div>
+                      <button onClick={() => setShowQuickAdd(false)} className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors">
+                        <X className="w-5 h-5 text-muted-foreground" />
+                      </button>
                     </div>
-                  )}
-                </div>
-              ) : (
-                <div className="rounded-2xl border border-dashed border-primary/20 bg-primary/5 p-6 text-center space-y-2">
-                  <Briefcase className="w-6 h-6 text-primary/40 mx-auto" />
-                  <p className="text-sm text-muted-foreground">No services or packages in Commerce yet.</p>
-                  <p className="text-xs text-muted-foreground">Add products in the <span className="text-primary font-medium">Commerce</span> page first, then come back here to add them to your store.</p>
+
+                    {commerceProducts.length > 0 ? (
+                      <>
+                        <div className="flex items-center justify-between px-5 py-3 border-b border-border/40">
+                          <span className="text-xs text-muted-foreground">{commerceProducts.length} item{commerceProducts.length !== 1 ? "s" : ""} in Commerce</span>
+                          <button
+                            onClick={async () => {
+                              const notAdded = commerceProducts.filter((p) => !services.some((s) => s.name === p.name));
+                              for (const p of notAdded) {
+                                await handleQuickAddProduct(p);
+                              }
+                            }}
+                            disabled={commerceProducts.every((p) => services.some((s) => s.name === p.name))}
+                            className="text-xs font-medium text-primary hover:text-primary/80 disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors"
+                          >
+                            Select All
+                          </button>
+                        </div>
+
+                        <div className="max-h-[400px] overflow-y-auto p-3 space-y-1.5">
+                          {commerceProducts.map((p) => {
+                            const alreadyAdded = services.some((s) => s.name === p.name);
+                            return (
+                              <button
+                                key={p.id}
+                                onClick={() => {
+                                  if (alreadyAdded) {
+                                    const matchedService = services.find((s) => s.name === p.name);
+                                    if (matchedService) handleDeleteServiceFromStore(matchedService.id);
+                                  } else {
+                                    handleQuickAddProduct(p);
+                                  }
+                                }}
+                                className={`w-full flex items-center gap-3 rounded-xl px-4 py-3 text-left text-sm border transition-all ${alreadyAdded ? "bg-primary/10 border-primary/30" : "bg-muted/10 border-border/40 hover:bg-primary/5 hover:border-primary/20"}`}
+                              >
+                                <div className={`h-5 w-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-colors ${alreadyAdded ? "bg-primary border-primary" : "border-muted-foreground/40 bg-transparent"}`}>
+                                  {alreadyAdded && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
+                                </div>
+                                <div className="h-9 w-9 rounded-lg border border-primary/20 bg-primary/10 flex items-center justify-center flex-shrink-0">
+                                  <Briefcase className="w-4 h-4 text-primary" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-foreground font-medium truncate">{p.name}</span>
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-primary/20 text-primary/70 uppercase flex-shrink-0">{p.category}</span>
+                                  </div>
+                                  <span className={`text-[10px] mt-0.5 ${alreadyAdded ? "text-emerald-400" : "text-muted-foreground"}`}>
+                                    {alreadyAdded ? "Displayed on store" : "Not on store"}
+                                  </span>
+                                </div>
+                                <span className="text-xs text-primary font-semibold flex-shrink-0">{p.currency} {p.price}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        <div className="flex items-center justify-between px-5 py-3 border-t border-border/60">
+                          <span className="text-xs text-muted-foreground">{services.length} of {commerceProducts.length} on store</span>
+                          <button
+                            onClick={() => setShowQuickAdd(false)}
+                            className="px-4 py-2 rounded-xl text-sm font-medium bg-primary text-white hover:bg-primary/90 transition-colors"
+                          >
+                            Done
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="p-8 text-center space-y-2">
+                        <Briefcase className="w-8 h-8 text-primary/30 mx-auto" />
+                        <p className="text-sm text-muted-foreground">No items in Commerce yet.</p>
+                        <p className="text-xs text-muted-foreground">Add products in the <span className="text-primary font-medium">Commerce</span> page first, then come back here.</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
