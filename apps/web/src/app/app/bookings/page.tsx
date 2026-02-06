@@ -1182,7 +1182,7 @@ export default function BookingsPage() {
                     <ChevronRight className={`w-4 h-4 text-secondary transition-transform ${showQuickAdd ? "rotate-90" : ""}`} />
                   </button>
                   {showQuickAdd && (
-                    <div className="rounded-2xl border border-border/40 bg-background p-3 space-y-1.5 max-h-64 overflow-y-auto">
+                    <div className="rounded-2xl border border-primary/20 bg-card p-3 space-y-1.5 max-h-64 overflow-y-auto">
                       {quickAddableProducts.map((p) => {
                         const alreadyAdded = services.some((s) => s.name === p.name);
                         return (
