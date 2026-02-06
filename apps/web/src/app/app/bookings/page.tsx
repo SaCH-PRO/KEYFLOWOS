@@ -25,6 +25,12 @@ import {
   Search,
   Phone,
   Mail,
+  Store,
+  ExternalLink,
+  Edit3,
+  Save,
+  Globe,
+  Sparkles,
 } from "lucide-react";
 import {
   Booking,
@@ -45,11 +51,16 @@ import {
   syncBookingToCalendar,
   updateBookingStatus,
   fetchBookingStats,
+  getBusinessById,
+  updateBusiness,
+  updateService,
+  createService,
+  deleteService,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { useSearchParams } from "next/navigation";
 
-type Tab = "schedule" | "staff";
+type Tab = "schedule" | "staff" | "store";
 type StatusFilter = "ALL" | "PENDING" | "CONFIRMED" | "CANCELLED" | "COMPLETED";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -139,6 +150,15 @@ export default function BookingsPage() {
   const [weekOffset, setWeekOffset] = useState(0);
   const [linkCopied, setLinkCopied] = useState(false);
 
+  const [businessData, setBusinessData] = useState<{ name?: string; slug?: string | null; logoUrl?: string | null; tagline?: string | null; description?: string | null; address?: string | null; phone?: string | null; email?: string | null; website?: string | null; primaryColor?: string | null; secondaryColor?: string | null } | null>(null);
+  const [storeSlug, setStoreSlug] = useState("");
+  const [slugSaving, setSlugSaving] = useState(false);
+  const [editingService, setEditingService] = useState<string | null>(null);
+  const [editServiceData, setEditServiceData] = useState<{ name: string; duration: number; price: number; description: string }>({ name: "", duration: 30, price: 0, description: "" });
+  const [showAddService, setShowAddService] = useState(false);
+  const [newServiceData, setNewServiceData] = useState({ name: "", duration: 30, price: 0, description: "" });
+  const [storePreview, setStorePreview] = useState(true);
+
   const baseDate = useMemo(() => {
     const d = new Date();
     d.setDate(d.getDate() + weekOffset * 7);
@@ -173,13 +193,14 @@ export default function BookingsPage() {
     if (!businessId) return;
     setLoading(true);
     try {
-      const [bookingsRes, servicesRes, staffRes, calendarRes, contactsRes, statsRes] = await Promise.all([
+      const [bookingsRes, servicesRes, staffRes, calendarRes, contactsRes, statsRes, bizRes] = await Promise.all([
         fetchBookings(businessId),
         fetchServices(businessId),
         fetchStaff(businessId),
         getCalendarStatus(businessId).catch(() => ({ data: null, error: null })),
         fetchContacts(businessId, { take: 200 }),
         fetchBookingStats(businessId).catch(() => ({ data: null, error: null })),
+        getBusinessById(businessId).catch(() => ({ data: null, error: null })),
       ]);
       setBookings(bookingsRes.data ?? []);
       setServices(servicesRes.data ?? []);
@@ -188,6 +209,10 @@ export default function BookingsPage() {
       setStats(statsRes.data ?? null);
       setCalendarConnected((calendarRes.data as any)?.connected ?? false);
       setCalendarEmail((calendarRes.data as any)?.email ?? null);
+      if (bizRes.data) {
+        setBusinessData(bizRes.data);
+        setStoreSlug(bizRes.data.slug ?? "");
+      }
       if (bookingsRes.error || servicesRes.error || staffRes.error) {
         setError("Some data could not be loaded");
       }
@@ -330,11 +355,86 @@ export default function BookingsPage() {
     if (!error) setStaff((prev) => prev.filter((s) => s.id !== staffId));
   }
 
-  function copyPublicLink() {
+  function getPublicBookingUrl() {
     const domain = typeof window !== "undefined" ? window.location.origin : "";
-    navigator.clipboard.writeText(`${domain}/book/${businessId}`);
+    return storeSlug ? `${domain}/book/${storeSlug}` : "";
+  }
+
+  function copyPublicLink() {
+    navigator.clipboard.writeText(getPublicBookingUrl());
     setLinkCopied(true);
     setTimeout(() => setLinkCopied(false), 2000);
+  }
+
+  async function handleSaveSlug() {
+    if (!businessId || !storeSlug.trim()) return;
+    setSlugSaving(true);
+    const slug = storeSlug.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-");
+    setStoreSlug(slug);
+    const res = await updateBusiness({ businessId, slug });
+    if (res.error) {
+      setBanner({ text: `Failed to save URL: ${res.error}`, type: "error" });
+    } else {
+      setBanner({ text: "Public booking URL saved!", type: "success" });
+      setBusinessData((prev) => prev ? { ...prev, slug } : prev);
+    }
+    setSlugSaving(false);
+  }
+
+  async function handleSaveServiceEdit() {
+    if (!businessId || !editingService) return;
+    const res = await updateService(editingService, {
+      name: editServiceData.name,
+      duration: editServiceData.duration,
+      price: editServiceData.price,
+      description: editServiceData.description || undefined,
+    }, businessId);
+    if (res.error) {
+      setBanner({ text: `Failed to update service: ${res.error}`, type: "error" });
+    } else {
+      setBanner({ text: "Service updated!", type: "success" });
+      await loadData();
+    }
+    setEditingService(null);
+  }
+
+  async function handleAddNewService() {
+    if (!businessId || !newServiceData.name.trim()) return;
+    const res = await createService({
+      businessId,
+      name: newServiceData.name,
+      durationMins: newServiceData.duration,
+      price: newServiceData.price,
+    });
+    if (res.error) {
+      setBanner({ text: `Failed to add service: ${res.error}`, type: "error" });
+    } else {
+      setBanner({ text: "Service added!", type: "success" });
+      setNewServiceData({ name: "", duration: 30, price: 0, description: "" });
+      setShowAddService(false);
+      await loadData();
+    }
+  }
+
+  async function handleDeleteServiceFromStore(serviceId: string) {
+    if (!businessId) return;
+    const res = await deleteService(serviceId, businessId);
+    if (res.error) {
+      setBanner({ text: `Failed to delete service: ${res.error}`, type: "error" });
+    } else {
+      setBanner({ text: "Service removed from store.", type: "info" });
+      await loadData();
+    }
+  }
+
+  function startEditService(service: Service) {
+    setEditingService(service.id);
+    setEditServiceData({
+      name: service.name,
+      duration: service.durationMins ?? service.duration ?? 30,
+      price: service.price,
+      description: service.description ?? "",
+    });
   }
 
   if (!businessId && !loading) {
@@ -435,6 +535,7 @@ export default function BookingsPage() {
         {([
           { key: "schedule" as Tab, label: "Schedule", icon: Calendar },
           { key: "staff" as Tab, label: "Staff", icon: User },
+          { key: "store" as Tab, label: "Store", icon: Store },
         ]).map((t) => (
           <button
             key={t.key}
@@ -448,6 +549,7 @@ export default function BookingsPage() {
             <t.icon className="w-4 h-4" />
             {t.label}
             {t.key === "staff" && <span className="text-xs opacity-60">({staff.length})</span>}
+            {t.key === "store" && <span className="text-xs opacity-60">({services.length})</span>}
           </button>
         ))}
       </div>
@@ -790,6 +892,375 @@ export default function BookingsPage() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── STORE TAB ─── */}
+      {tab === "store" && (
+        <div className="space-y-6">
+          {/* Public Link Section */}
+          <div className="rounded-2xl border border-primary/30 bg-gradient-to-br from-primary/5 to-secondary/5 backdrop-blur p-5 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+                <Globe className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold">Public Booking Link</h3>
+                <p className="text-xs text-muted-foreground">Customers visit this link to browse your services and book online</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 flex items-center rounded-xl border border-border/60 bg-slate-950/80 overflow-hidden">
+                <span className="px-3 py-2.5 text-xs text-muted-foreground bg-slate-900/50 border-r border-border/60 whitespace-nowrap">
+                  {typeof window !== "undefined" ? window.location.origin : ""}/book/
+                </span>
+                <input
+                  type="text"
+                  value={storeSlug}
+                  onChange={(e) => setStoreSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))}
+                  placeholder="your-business-name"
+                  className="flex-1 px-3 py-2.5 bg-transparent text-sm focus:outline-none"
+                />
+              </div>
+              <button
+                onClick={handleSaveSlug}
+                disabled={slugSaving || !storeSlug.trim()}
+                className="px-4 py-2.5 rounded-xl text-xs font-medium bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
+              >
+                {slugSaving ? "Saving..." : "Save"}
+              </button>
+            </div>
+            {storeSlug ? (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={copyPublicLink}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900/60 border border-border/60 hover:border-primary/40 transition-colors"
+                >
+                  {linkCopied ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  {linkCopied ? "Copied!" : "Copy Link"}
+                </button>
+                <a
+                  href={getPublicBookingUrl()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900/60 border border-border/60 hover:border-primary/40 transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> Open Store
+                </a>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">Enter a custom URL above and click Save to generate your public booking link.</p>
+            )}
+          </div>
+
+          {/* Toggle: Preview / Edit */}
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold flex items-center gap-2">
+              <Store className="w-4 h-4 text-primary" />
+              {storePreview ? "Customer View Preview" : "Edit Services"}
+            </h3>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setStorePreview(true)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${storePreview ? "bg-primary/20 text-primary border border-primary/30" : "text-muted-foreground border border-transparent hover:border-border/60"}`}
+              >
+                Preview
+              </button>
+              <button
+                onClick={() => setStorePreview(false)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${!storePreview ? "bg-primary/20 text-primary border border-primary/30" : "text-muted-foreground border border-transparent hover:border-border/60"}`}
+              >
+                Edit
+              </button>
+            </div>
+          </div>
+
+          {/* ─── CUSTOMER PREVIEW ─── */}
+          {storePreview ? (
+            <div className="rounded-2xl border border-border/60 overflow-hidden">
+              <div className="bg-gradient-to-br from-slate-950 via-black to-slate-950 p-8">
+                <div className="mx-auto max-w-2xl space-y-6">
+                  <div className="text-center space-y-2">
+                    {businessData?.logoUrl && (
+                      <img src={businessData.logoUrl} alt="Logo" className="h-14 w-14 rounded-2xl mx-auto object-cover border border-border/40" />
+                    )}
+                    <h2 className="text-2xl font-semibold text-white">{businessData?.name ?? "Your Business"}</h2>
+                    {businessData?.tagline && <p className="text-sm text-slate-400">{businessData.tagline}</p>}
+                    {!businessData?.tagline && <p className="text-sm text-slate-400">Book your appointment online</p>}
+                    {(businessData?.address || businessData?.phone || businessData?.email) && (
+                      <div className="flex items-center justify-center gap-4 text-xs text-slate-500 flex-wrap mt-1">
+                        {businessData?.address && (
+                          <span className="flex items-center gap-1"><Globe className="w-3 h-3" /> {businessData.address}</span>
+                        )}
+                        {businessData?.phone && (
+                          <span className="flex items-center gap-1"><Phone className="w-3 h-3" /> {businessData.phone}</span>
+                        )}
+                        {businessData?.email && (
+                          <span className="flex items-center gap-1"><Mail className="w-3 h-3" /> {businessData.email}</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {services.length === 0 ? (
+                    <div className="rounded-2xl border border-border/40 bg-slate-900/50 p-8 text-center space-y-3">
+                      <Sparkles className="w-8 h-8 text-muted-foreground/40 mx-auto" />
+                      <p className="text-sm text-slate-400">No services listed yet. Switch to Edit mode to add your first service.</p>
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-border/40 bg-slate-900/60 p-4 space-y-3">
+                      <div className="text-xs uppercase tracking-wide text-slate-500 flex items-center gap-2 px-1">
+                        <Briefcase className="w-3 h-3" /> Select a Service
+                      </div>
+                      <div className="space-y-2">
+                        {services.map((service, i) => (
+                          <div
+                            key={service.id}
+                            className={`rounded-xl border p-4 transition-colors cursor-pointer ${i === 0 ? "border-primary/40 bg-primary/5" : "border-border/40 hover:border-primary/30"}`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <div className="font-medium text-white">{service.name}</div>
+                                {service.description && <div className="text-xs text-slate-400 mt-0.5">{service.description}</div>}
+                              </div>
+                              <div className="text-right">
+                                <div className="text-sm font-semibold text-primary">TTD {service.price.toLocaleString()}</div>
+                                <div className="text-xs text-slate-500 flex items-center gap-1 justify-end">
+                                  <Clock className="w-3 h-3" /> {service.durationMins ?? service.duration ?? 30} min
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {staff.length > 0 && (
+                    <div className="rounded-2xl border border-border/40 bg-slate-900/60 p-4 space-y-3">
+                      <div className="text-xs uppercase tracking-wide text-slate-500 flex items-center gap-2 px-1">
+                        <User className="w-3 h-3" /> Select Staff (Optional)
+                      </div>
+                      <div className="flex gap-2 flex-wrap">
+                        {staff.map((s) => (
+                          <div key={s.id} className="flex items-center gap-2 rounded-xl border border-border/40 bg-slate-900/50 px-3 py-2">
+                            <div className="h-7 w-7 rounded-full bg-secondary/10 border border-secondary/20 flex items-center justify-center text-xs font-bold text-secondary">
+                              {s.name.charAt(0).toUpperCase()}
+                            </div>
+                            <span className="text-sm text-white">{s.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="rounded-2xl border border-border/40 bg-slate-900/60 p-4 space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs text-slate-500 mb-1.5 block">Date</label>
+                        <div className="rounded-xl border border-border/40 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-400">Select date...</div>
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-500 mb-1.5 block">Time</label>
+                        <div className="rounded-xl border border-border/40 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-400">Select time...</div>
+                      </div>
+                    </div>
+                    <div className="border-t border-border/30 pt-3 space-y-3">
+                      <div className="text-xs uppercase tracking-wide text-slate-500">Your Details</div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-xl border border-border/40 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-400">First Name</div>
+                        <div className="rounded-xl border border-border/40 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-400">Last Name</div>
+                        <div className="rounded-xl border border-border/40 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-400">Email</div>
+                        <div className="rounded-xl border border-border/40 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-400">Phone</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-medium text-sm opacity-80 cursor-default">
+                    Book Appointment
+                  </button>
+
+                  <div className="text-center text-xs text-slate-600">
+                    Powered by <span className="text-primary font-semibold">KeyFlowOS</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* ─── EDIT MODE ─── */
+            <div className="space-y-4">
+              {/* Service List - Editable */}
+              {services.length === 0 ? (
+                <div className="rounded-2xl border border-border/60 bg-slate-950/50 p-8 text-center space-y-3">
+                  <Briefcase className="w-8 h-8 text-muted-foreground/40 mx-auto" />
+                  <p className="text-sm text-muted-foreground">No services yet. Add services that customers can book.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {services.map((service) => (
+                    <div key={service.id} className="rounded-2xl border border-border/60 bg-slate-950/60 p-4 group hover:border-primary/30 transition-colors">
+                      {editingService === service.id ? (
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div>
+                              <label className="text-xs text-muted-foreground mb-1 block">Service Name</label>
+                              <input
+                                type="text"
+                                value={editServiceData.name}
+                                onChange={(e) => setEditServiceData((d) => ({ ...d, name: e.target.value }))}
+                                className="w-full rounded-xl border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-xs text-muted-foreground mb-1 block">Description</label>
+                              <input
+                                type="text"
+                                value={editServiceData.description}
+                                onChange={(e) => setEditServiceData((d) => ({ ...d, description: e.target.value }))}
+                                placeholder="Brief description..."
+                                className="w-full rounded-xl border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-xs text-muted-foreground mb-1 block">Duration (minutes)</label>
+                              <input
+                                type="number"
+                                value={editServiceData.duration}
+                                onChange={(e) => setEditServiceData((d) => ({ ...d, duration: parseInt(e.target.value) || 0 }))}
+                                className="w-full rounded-xl border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-xs text-muted-foreground mb-1 block">Price (TTD)</label>
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={editServiceData.price}
+                                onChange={(e) => setEditServiceData((d) => ({ ...d, price: parseFloat(e.target.value) || 0 }))}
+                                className="w-full rounded-xl border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex gap-2 justify-end">
+                            <button
+                              onClick={() => setEditingService(null)}
+                              className="px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground border border-border/60 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={handleSaveServiceEdit}
+                              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 transition-colors flex items-center gap-1"
+                            >
+                              <Save className="w-3 h-3" /> Save
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-primary/10 to-secondary/10 border border-primary/20 flex items-center justify-center">
+                              <Briefcase className="w-4 h-4 text-primary" />
+                            </div>
+                            <div>
+                              <div className="text-sm font-semibold">{service.name}</div>
+                              {service.description && <div className="text-xs text-muted-foreground mt-0.5">{service.description}</div>}
+                              <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
+                                <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {service.durationMins ?? service.duration ?? 30} min</span>
+                                <span className="flex items-center gap-1"><DollarSign className="w-3 h-3" /> TTD {service.price.toLocaleString()}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => startEditService(service)}
+                              className="p-2 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-primary/10 text-primary transition-all"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteServiceFromStore(service.id)}
+                              className="p-2 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-500/10 text-red-400 transition-all"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add New Service */}
+              {showAddService ? (
+                <div className="rounded-2xl border border-primary/30 bg-slate-950/80 backdrop-blur p-5 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold flex items-center gap-2">
+                      <Plus className="w-4 h-4 text-primary" /> Add New Service
+                    </h3>
+                    <button onClick={() => setShowAddService(false)} className="p-1 rounded-lg hover:bg-muted/50">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Service Name</label>
+                      <input
+                        type="text"
+                        value={newServiceData.name}
+                        onChange={(e) => setNewServiceData((d) => ({ ...d, name: e.target.value }))}
+                        placeholder="e.g. Haircut, Consultation"
+                        className="w-full rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Description</label>
+                      <input
+                        type="text"
+                        value={newServiceData.description}
+                        onChange={(e) => setNewServiceData((d) => ({ ...d, description: e.target.value }))}
+                        placeholder="Brief description..."
+                        className="w-full rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Duration (minutes)</label>
+                      <input
+                        type="number"
+                        value={newServiceData.duration}
+                        onChange={(e) => setNewServiceData((d) => ({ ...d, duration: parseInt(e.target.value) || 0 }))}
+                        className="w-full rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Price (TTD)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={newServiceData.price}
+                        onChange={(e) => setNewServiceData((d) => ({ ...d, price: parseFloat(e.target.value) || 0 }))}
+                        className="w-full rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 justify-end">
+                    <button onClick={() => setShowAddService(false)} className="px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground border border-border/60">Cancel</button>
+                    <Button onClick={handleAddNewService} className="kf-btn-primary gap-2 text-xs">
+                      <Plus className="w-3.5 h-3.5" /> Add Service
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowAddService(true)}
+                  className="w-full rounded-2xl border border-dashed border-border/60 hover:border-primary/40 bg-slate-950/30 p-4 text-sm text-muted-foreground hover:text-primary transition-all flex items-center justify-center gap-2"
+                >
+                  <Plus className="w-4 h-4" /> Add a Service
+                </button>
+              )}
             </div>
           )}
         </div>

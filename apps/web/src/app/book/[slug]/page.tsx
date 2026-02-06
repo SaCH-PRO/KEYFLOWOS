@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Button, Card, Input } from "@keyflow/ui";
 import { apiGet, apiPost, API_BASE } from "@/lib/api";
-import { Calendar, Clock, User, CheckCircle2, Loader2 } from "lucide-react";
+import { Calendar, Clock, User, CheckCircle2, Loader2, Briefcase, Phone, Mail, MapPin, Globe } from "lucide-react";
 
 type Business = {
   id: string;
@@ -12,14 +12,25 @@ type Business = {
   slug: string;
   timezone: string;
   currency: string;
+  logoUrl?: string | null;
+  tagline?: string | null;
+  description?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  website?: string | null;
+  primaryColor?: string | null;
+  secondaryColor?: string | null;
 };
 
 type Service = {
   id: string;
   name: string;
-  durationMins: number;
+  duration: number;
+  durationMins?: number;
   price: number;
-  currency: string;
+  currency?: string;
+  description?: string | null;
 };
 
 type Staff = {
@@ -53,7 +64,10 @@ export default function PublicBookingPage() {
   useEffect(() => {
     const loadBusiness = async () => {
       setLoading(true);
-      const res = await apiGet<Business>(`/identity/businesses/slug/${encodeURIComponent(slug)}`);
+      let res = await apiGet<Business>(`/identity/businesses/slug/${encodeURIComponent(slug)}`);
+      if (res.error || !res.data) {
+        res = await apiGet<Business>(`/identity/businesses/${encodeURIComponent(slug)}`);
+      }
       if (res.error || !res.data) {
         setError("Business not found");
         setLoading(false);
@@ -62,13 +76,12 @@ export default function PublicBookingPage() {
       setBusiness(res.data);
       
       const [servicesRes, staffRes] = await Promise.all([
-        apiGet<Service[]>(`/bookings/businesses/${res.data.id}/services`),
-        apiGet<Staff[]>(`/bookings/businesses/${res.data.id}/staff`),
+        apiGet<Service[]>(`/bookings/public/businesses/${res.data.id}/services`),
+        apiGet<Staff[]>(`/bookings/public/businesses/${res.data.id}/staff`),
       ]);
       setServices(servicesRes.data ?? []);
       setStaff(staffRes.data ?? []);
       if (servicesRes.data?.length) setSelectedService(servicesRes.data[0].id);
-      if (staffRes.data?.length) setSelectedStaff(staffRes.data[0].id);
       setLoading(false);
     };
     loadBusiness();
@@ -81,7 +94,8 @@ export default function PublicBookingPage() {
     setSubmitting(true);
     const startTime = new Date(`${selectedDate}T${selectedTime}`).toISOString();
     const service = services.find((s) => s.id === selectedService);
-    const endTime = new Date(new Date(startTime).getTime() + (service?.durationMins ?? 60) * 60000).toISOString();
+    const dur = service?.durationMins ?? service?.duration ?? 60;
+    const endTime = new Date(new Date(startTime).getTime() + dur * 60000).toISOString();
 
     const { data, error } = await apiPost<{ bookingId: string; invoiceId?: string; success: boolean }>({
       path: `/bookings/public/businesses/${business.id}`,
@@ -109,20 +123,21 @@ export default function PublicBookingPage() {
   if (loading) {
     return (
       <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
       </main>
     );
   }
 
   if (error && !business) {
     return (
-      <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white flex items-center justify-center">
-        <Card className="max-w-md bg-slate-900/80 border-red-500/40">
-          <div className="text-center p-6">
-            <h1 className="text-xl font-semibold text-red-400">Business Not Found</h1>
-            <p className="text-sm text-slate-400 mt-2">The booking page for "{slug}" could not be found.</p>
+      <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white flex items-center justify-center px-4">
+        <div className="max-w-md w-full rounded-2xl border border-red-500/40 bg-slate-900/80 backdrop-blur p-8 text-center space-y-3">
+          <div className="w-14 h-14 rounded-full bg-red-500/10 flex items-center justify-center mx-auto">
+            <Globe className="w-7 h-7 text-red-400" />
           </div>
-        </Card>
+          <h1 className="text-xl font-semibold text-red-400">Page Not Found</h1>
+          <p className="text-sm text-slate-400">The booking page for &ldquo;{slug}&rdquo; could not be found.</p>
+        </div>
       </main>
     );
   }
@@ -130,175 +145,246 @@ export default function PublicBookingPage() {
   if (success && bookingResult) {
     return (
       <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white flex items-center justify-center px-4">
-        <Card className="max-w-md bg-slate-900/80 border-emerald-500/40">
-          <div className="text-center p-6 space-y-4">
-            <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto">
-              <CheckCircle2 className="w-8 h-8 text-emerald-400" />
-            </div>
-            <h1 className="text-xl font-semibold text-emerald-400">Booking Confirmed!</h1>
-            <p className="text-sm text-slate-300">
-              Your appointment with {business?.name} has been scheduled.
-            </p>
-            <div className="text-xs text-slate-400 space-y-1">
-              <div>Booking ID: <code className="font-mono text-primary">{bookingResult.bookingId}</code></div>
-              {bookingResult.invoiceId && (
-                <div>Invoice ID: <code className="font-mono text-primary">{bookingResult.invoiceId}</code></div>
-              )}
-            </div>
-            {bookingResult.invoiceId && (
-              <Button
-                onClick={() => window.open(`${API_BASE}/commerce/invoices/${bookingResult.invoiceId}/receipt`, "_blank")}
-              >
-                View Invoice
-              </Button>
-            )}
+        <div className="max-w-md w-full rounded-2xl border border-emerald-500/40 bg-slate-900/80 backdrop-blur p-8 text-center space-y-5">
+          <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto">
+            <CheckCircle2 className="w-8 h-8 text-emerald-400" />
           </div>
-        </Card>
+          <h1 className="text-xl font-semibold text-emerald-400">Booking Confirmed!</h1>
+          <p className="text-sm text-slate-300">
+            Your appointment with <span className="font-medium text-white">{business?.name}</span> has been scheduled.
+          </p>
+          <div className="text-xs text-slate-400 space-y-1">
+            <div>Booking Reference: <code className="font-mono text-orange-400">{bookingResult.bookingId.slice(-8).toUpperCase()}</code></div>
+          </div>
+          {bookingResult.invoiceId && (
+            <button
+              onClick={() => window.open(`${API_BASE}/commerce/invoices/${bookingResult.invoiceId}/receipt`, "_blank")}
+              className="px-6 py-2.5 rounded-xl bg-orange-500 text-white font-medium text-sm hover:bg-orange-600 transition-colors"
+            >
+              View Invoice
+            </button>
+          )}
+        </div>
       </main>
     );
   }
 
   const selectedServiceData = services.find((s) => s.id === selectedService);
+  const serviceDuration = selectedServiceData?.durationMins ?? selectedServiceData?.duration ?? 0;
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white px-4 py-10">
       <div className="mx-auto max-w-2xl space-y-6">
-        <div className="text-center space-y-2">
+        {/* Header */}
+        <div className="text-center space-y-3">
+          {business?.logoUrl && (
+            <img src={business.logoUrl} alt={business.name} className="h-16 w-16 rounded-2xl mx-auto object-cover border border-slate-700/60" />
+          )}
           <h1 className="text-3xl font-semibold">{business?.name}</h1>
-          <p className="text-sm text-slate-400">Book your appointment online</p>
+          {business?.tagline && <p className="text-sm text-slate-400">{business.tagline}</p>}
+          {!business?.tagline && <p className="text-sm text-slate-400">Book your appointment online</p>}
+          {(business?.address || business?.phone || business?.email) && (
+            <div className="flex items-center justify-center gap-4 text-xs text-slate-500 flex-wrap">
+              {business?.address && (
+                <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {business.address}</span>
+              )}
+              {business?.phone && (
+                <span className="flex items-center gap-1"><Phone className="w-3 h-3" /> {business.phone}</span>
+              )}
+              {business?.email && (
+                <span className="flex items-center gap-1"><Mail className="w-3 h-3" /> {business.email}</span>
+              )}
+            </div>
+          )}
         </div>
 
-        <Card className="bg-slate-900/80 border-border/60">
-          <form onSubmit={handleSubmit} className="space-y-6 p-2">
+        {/* Booking Form */}
+        <div className="rounded-2xl border border-slate-700/60 bg-slate-900/60 backdrop-blur">
+          <form onSubmit={handleSubmit} className="p-5 space-y-6">
+            {/* Services */}
             <div className="space-y-3">
-              <label className="block text-sm">
-                <div className="flex items-center gap-2 text-muted-foreground mb-2">
-                  <Calendar className="w-4 h-4" /> Select Service
+              <div className="text-xs uppercase tracking-wide text-slate-500 flex items-center gap-2 px-1">
+                <Briefcase className="w-3 h-3" /> Select a Service
+              </div>
+              <div className="space-y-2">
+                {services.map((service) => (
+                  <button
+                    key={service.id}
+                    type="button"
+                    onClick={() => setSelectedService(service.id)}
+                    className={`w-full text-left rounded-xl border p-4 transition-all ${
+                      selectedService === service.id
+                        ? "border-orange-500/40 bg-orange-500/5 ring-1 ring-orange-500/20"
+                        : "border-slate-700/40 hover:border-orange-500/30"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-medium text-white">{service.name}</div>
+                        {service.description && <div className="text-xs text-slate-400 mt-0.5">{service.description}</div>}
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm font-semibold text-orange-400">
+                          {service.currency ?? "TTD"} {service.price.toLocaleString()}
+                        </div>
+                        <div className="text-xs text-slate-500 flex items-center gap-1 justify-end">
+                          <Clock className="w-3 h-3" /> {service.durationMins ?? service.duration} min
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Staff */}
+            {staff.length > 0 && (
+              <div className="space-y-3">
+                <div className="text-xs uppercase tracking-wide text-slate-500 flex items-center gap-2 px-1">
+                  <User className="w-3 h-3" /> Select Staff (Optional)
                 </div>
-                <div className="grid gap-2">
-                  {services.map((service) => (
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStaff("")}
+                    className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors ${
+                      !selectedStaff ? "border-orange-500/40 bg-orange-500/5" : "border-slate-700/40 hover:border-orange-500/30"
+                    }`}
+                  >
+                    <User className="w-4 h-4 text-slate-400" />
+                    <span className="text-white">Any available</span>
+                  </button>
+                  {staff.map((s) => (
                     <button
-                      key={service.id}
+                      key={s.id}
                       type="button"
-                      onClick={() => setSelectedService(service.id)}
-                      className={`text-left rounded-xl border p-3 transition-colors ${
-                        selectedService === service.id
-                          ? "border-primary bg-primary/10"
-                          : "border-border/60 hover:border-primary/40"
+                      onClick={() => setSelectedStaff(s.id)}
+                      className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors ${
+                        selectedStaff === s.id ? "border-orange-500/40 bg-orange-500/5" : "border-slate-700/40 hover:border-orange-500/30"
                       }`}
                     >
-                      <div className="font-medium">{service.name}</div>
-                      <div className="text-xs text-muted-foreground flex items-center gap-3 mt-1">
-                        <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {service.durationMins} min</span>
-                        <span>{service.currency} {service.price.toLocaleString()}</span>
+                      <div className="h-6 w-6 rounded-full bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-xs font-bold text-teal-400">
+                        {s.name.charAt(0).toUpperCase()}
                       </div>
+                      <span className="text-white">{s.name}</span>
                     </button>
                   ))}
                 </div>
-              </label>
-            </div>
-
-            {staff.length > 0 && (
-              <div className="space-y-3">
-                <label className="block text-sm">
-                  <div className="flex items-center gap-2 text-muted-foreground mb-2">
-                    <User className="w-4 h-4" /> Select Staff (Optional)
-                  </div>
-                  <select
-                    className="w-full rounded-xl border border-border/60 bg-slate-950 px-3 py-2 text-sm"
-                    value={selectedStaff}
-                    onChange={(e) => setSelectedStaff(e.target.value)}
-                  >
-                    <option value="">Any available</option>
-                    {staff.map((s) => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
-                </label>
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-3">
-              <Input
-                label="Date"
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                required
-              />
-              <Input
-                label="Time"
-                type="time"
-                value={selectedTime}
-                onChange={(e) => setSelectedTime(e.target.value)}
-                required
-              />
-            </div>
-
-            <div className="border-t border-border/60 pt-4 space-y-3">
-              <div className="text-xs uppercase tracking-wide text-muted-foreground">Your Details</div>
-              <div className="grid grid-cols-2 gap-3">
-                <Input
-                  label="First Name"
-                  value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
-                  required
-                />
-                <Input
-                  label="Last Name"
-                  value={lastName}
-                  onChange={(e) => setLastName(e.target.value)}
-                />
+            {/* Date & Time */}
+            <div className="space-y-3">
+              <div className="text-xs uppercase tracking-wide text-slate-500 flex items-center gap-2 px-1">
+                <Calendar className="w-3 h-3" /> Pick Date & Time
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <Input
-                  label="Email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
-                <Input
-                  label="Phone"
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+1 868 123 4567"
-                />
+                <div>
+                  <label className="text-xs text-slate-500 mb-1.5 block">Date</label>
+                  <input
+                    type="date"
+                    value={selectedDate}
+                    onChange={(e) => setSelectedDate(e.target.value)}
+                    required
+                    min={new Date().toISOString().split("T")[0]}
+                    className="w-full rounded-xl border border-slate-700/40 bg-slate-950/80 px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500/50"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 mb-1.5 block">Time</label>
+                  <input
+                    type="time"
+                    value={selectedTime}
+                    onChange={(e) => setSelectedTime(e.target.value)}
+                    required
+                    className="w-full rounded-xl border border-slate-700/40 bg-slate-950/80 px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500/50"
+                  />
+                </div>
               </div>
             </div>
 
+            {/* Customer Details */}
+            <div className="border-t border-slate-700/40 pt-5 space-y-3">
+              <div className="text-xs uppercase tracking-wide text-slate-500">Your Details</div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-500 mb-1.5 block">First Name</label>
+                  <input
+                    type="text"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    required
+                    className="w-full rounded-xl border border-slate-700/40 bg-slate-950/80 px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500/50"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 mb-1.5 block">Last Name</label>
+                  <input
+                    type="text"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    className="w-full rounded-xl border border-slate-700/40 bg-slate-950/80 px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500/50"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 mb-1.5 block">Email</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    className="w-full rounded-xl border border-slate-700/40 bg-slate-950/80 px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500/50"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 mb-1.5 block">Phone</label>
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="+1 868 123 4567"
+                    className="w-full rounded-xl border border-slate-700/40 bg-slate-950/80 px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500/50"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Summary */}
             {selectedServiceData && (
-              <div className="rounded-xl bg-primary/5 border border-primary/20 p-3 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Service:</span>
-                  <span>{selectedServiceData.name}</span>
+              <div className="rounded-xl bg-orange-500/5 border border-orange-500/20 p-4 space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-400">Service</span>
+                  <span className="text-white font-medium">{selectedServiceData.name}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Duration:</span>
-                  <span>{selectedServiceData.durationMins} min</span>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-400">Duration</span>
+                  <span className="text-white">{serviceDuration} min</span>
                 </div>
-                <div className="flex justify-between font-semibold text-primary">
-                  <span>Total:</span>
-                  <span>{selectedServiceData.currency} {selectedServiceData.price.toLocaleString()}</span>
+                <div className="flex justify-between text-sm font-semibold">
+                  <span className="text-orange-400">Total</span>
+                  <span className="text-orange-400">{selectedServiceData.currency ?? "TTD"} {selectedServiceData.price.toLocaleString()}</span>
                 </div>
               </div>
             )}
 
             {error && (
-              <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+              <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-2.5 text-sm text-red-300">
                 {error}
               </div>
             )}
 
-            <Button type="submit" className="w-full" disabled={submitting || !selectedService || !selectedDate || !selectedTime}>
+            <button
+              type="submit"
+              disabled={submitting || !selectedService || !selectedDate || !selectedTime}
+              className="w-full py-3 rounded-xl bg-orange-500 text-white font-medium text-sm hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               {submitting ? "Booking..." : "Book Appointment"}
-            </Button>
+            </button>
           </form>
-        </Card>
+        </div>
 
-        <div className="text-center text-xs text-muted-foreground">
-          Powered by <span className="text-primary font-semibold">KeyFlowOS</span>
+        <div className="text-center text-xs text-slate-600">
+          Powered by <span className="text-orange-500 font-semibold">KeyFlowOS</span>
         </div>
       </div>
     </main>

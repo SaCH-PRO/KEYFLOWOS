@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Post, UseGuards, Delete, Query, Res } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Post, UseGuards, Delete, Query, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { BookingsService } from './bookings.service';
 import { CalendarService } from './calendar.service';
@@ -54,6 +54,22 @@ export class BookingsController {
     });
   }
 
+  @Get('public/businesses/:businessId/services')
+  publicListServices(@Param('businessId') businessId: string) {
+    return this.prisma.client.service.findMany({
+      where: { businessId, deletedAt: null },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  @Get('public/businesses/:businessId/staff')
+  publicListStaff(@Param('businessId') businessId: string) {
+    return this.prisma.client.staffMember.findMany({
+      where: { businessId, deletedAt: null },
+      orderBy: { name: 'asc' },
+    });
+  }
+
   @Post('public/businesses/:businessId')
   publicCreateBooking(
     @Param('businessId') businessId: string,
@@ -95,6 +111,24 @@ export class BookingsController {
         duration: body.duration,
         price: body.price,
         description: body.description ?? null,
+      },
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/services/:serviceId')
+  updateService(
+    @Param('businessId') businessId: string,
+    @Param('serviceId') serviceId: string,
+    @Body() body: { name?: string; duration?: number; price?: number; description?: string },
+  ) {
+    return this.prisma.client.service.update({
+      where: { id: serviceId, businessId },
+      data: {
+        ...(body.name !== undefined && { name: body.name }),
+        ...(body.duration !== undefined && { duration: body.duration }),
+        ...(body.price !== undefined && { price: body.price }),
+        ...(body.description !== undefined && { description: body.description }),
       },
     });
   }
