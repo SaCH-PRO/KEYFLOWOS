@@ -159,6 +159,7 @@ export default function BookingsPage() {
   const [storePreview, setStorePreview] = useState(true);
   const [commerceProducts, setCommerceProducts] = useState<Product[]>([]);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const [processingItems, setProcessingItems] = useState<Set<string>>(new Set());
 
   const baseDate = useMemo(() => {
     const d = new Date();
@@ -387,30 +388,62 @@ export default function BookingsPage() {
 
   async function handleQuickAddProduct(product: Product) {
     if (!businessId) return;
-    const res = await createService({
-      businessId,
-      name: product.name,
-      durationMins: product.duration ?? 30,
-      price: product.price,
-    });
-    if (res.error) {
-      setBanner({ text: `Failed to add: ${res.error}`, type: "error" });
-    } else {
-      setBanner({ text: `"${product.name}" added to store!`, type: "success" });
-      await loadData();
+    setProcessingItems((prev) => new Set(prev).add(product.id));
+    try {
+      const res = await createService({
+        businessId,
+        name: product.name,
+        durationMins: product.duration ?? 30,
+        price: product.price,
+      });
+      if (res.error) {
+        setBanner({ text: `Failed to add: ${res.error}`, type: "error" });
+      } else {
+        setBanner({ text: `"${product.name}" added to store!`, type: "success" });
+        await loadData();
+      }
+    } finally {
+      setProcessingItems((prev) => { const n = new Set(prev); n.delete(product.id); return n; });
     }
   }
 
-  const quickAddableProducts = commerceProducts;
-
-  async function handleDeleteServiceFromStore(serviceId: string) {
+  async function handleDeleteServiceFromStore(serviceId: string, productName?: string) {
     if (!businessId) return;
-    const res = await deleteService(serviceId, businessId);
-    if (res.error) {
-      setBanner({ text: `Failed to delete service: ${res.error}`, type: "error" });
+    const matchedProduct = commerceProducts.find((p) => p.name === (productName ?? services.find((s) => s.id === serviceId)?.name));
+    if (matchedProduct) setProcessingItems((prev) => new Set(prev).add(matchedProduct.id));
+    try {
+      const res = await deleteService(serviceId, businessId);
+      if (res.error) {
+        setBanner({ text: `Failed to remove: ${res.error}`, type: "error" });
+      } else {
+        setBanner({ text: "Removed from store.", type: "info" });
+        await loadData();
+      }
+    } finally {
+      if (matchedProduct) setProcessingItems((prev) => { const n = new Set(prev); n.delete(matchedProduct.id); return n; });
+    }
+  }
+
+  async function handleToggleStoreItem(product: Product) {
+    const matchedService = services.find((s) => s.name === product.name);
+    if (matchedService) {
+      await handleDeleteServiceFromStore(matchedService.id, product.name);
     } else {
-      setBanner({ text: "Service removed from store.", type: "info" });
-      await loadData();
+      await handleQuickAddProduct(product);
+    }
+  }
+
+  async function handleSelectAll() {
+    const notAdded = commerceProducts.filter((p) => !services.some((s) => s.name === p.name));
+    for (const p of notAdded) {
+      await handleQuickAddProduct(p);
+    }
+  }
+
+  async function handleDeselectAll() {
+    const toRemove = services.filter((s) => commerceProducts.some((p) => p.name === s.name));
+    for (const s of toRemove) {
+      await handleDeleteServiceFromStore(s.id);
     }
   }
 
@@ -1180,15 +1213,18 @@ export default function BookingsPage() {
               </button>
 
               {showQuickAdd && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center">
-                  <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowQuickAdd(false)} />
-                  <div className="relative w-full max-w-lg mx-4 rounded-2xl border border-primary/20 bg-card shadow-2xl overflow-hidden">
-                    <div className="flex items-center justify-between px-5 py-4 border-b border-border/60">
+                <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ zIndex: 9999 }}>
+                  <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowQuickAdd(false)} />
+                  <div className="relative w-full max-w-lg mx-4 rounded-2xl border border-primary/30 shadow-2xl overflow-hidden" style={{ backgroundColor: "hsl(var(--card))" }}>
+                    <div className="flex items-center justify-between px-5 py-4 border-b border-primary/20">
                       <div>
-                        <h3 className="text-base font-bold text-foreground">Manage Store Items</h3>
-                        <p className="text-xs text-muted-foreground mt-0.5">Select items from Commerce to display in your store</p>
+                        <h3 className="text-base font-bold text-foreground flex items-center gap-2">
+                          <Store className="w-5 h-5 text-primary" />
+                          Manage Store Items
+                        </h3>
+                        <p className="text-xs text-muted-foreground mt-1">Toggle items on/off to control what appears in your online store</p>
                       </div>
-                      <button onClick={() => setShowQuickAdd(false)} className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors">
+                      <button onClick={() => setShowQuickAdd(false)} className="p-2 rounded-xl hover:bg-primary/10 transition-colors">
                         <X className="w-5 h-5 text-muted-foreground" />
                       </button>
                     </div>
@@ -1196,73 +1232,89 @@ export default function BookingsPage() {
                     {commerceProducts.length > 0 ? (
                       <>
                         <div className="flex items-center justify-between px-5 py-3 border-b border-border/40">
-                          <span className="text-xs text-muted-foreground">{commerceProducts.length} item{commerceProducts.length !== 1 ? "s" : ""} in Commerce</span>
-                          <button
-                            onClick={async () => {
-                              const notAdded = commerceProducts.filter((p) => !services.some((s) => s.name === p.name));
-                              for (const p of notAdded) {
-                                await handleQuickAddProduct(p);
-                              }
-                            }}
-                            disabled={commerceProducts.every((p) => services.some((s) => s.name === p.name))}
-                            className="text-xs font-medium text-primary hover:text-primary/80 disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors"
-                          >
-                            Select All
-                          </button>
+                          <span className="text-xs text-muted-foreground">
+                            {services.filter((s) => commerceProducts.some((p) => p.name === s.name)).length} of {commerceProducts.length} displayed on store
+                          </span>
+                          <div className="flex items-center gap-3">
+                            {services.filter((s) => commerceProducts.some((p) => p.name === s.name)).length > 0 && (
+                              <button
+                                onClick={() => handleDeselectAll()}
+                                className="text-xs font-medium text-red-400 hover:text-red-300 transition-colors"
+                              >
+                                Deselect All
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleSelectAll()}
+                              disabled={commerceProducts.every((p) => services.some((s) => s.name === p.name))}
+                              className="text-xs font-medium text-primary hover:text-primary/80 disabled:text-muted-foreground/40 disabled:cursor-not-allowed transition-colors"
+                            >
+                              Select All
+                            </button>
+                          </div>
                         </div>
 
-                        <div className="max-h-[400px] overflow-y-auto p-3 space-y-1.5">
+                        <div className="max-h-[400px] overflow-y-auto p-3 space-y-2">
                           {commerceProducts.map((p) => {
-                            const alreadyAdded = services.some((s) => s.name === p.name);
+                            const isOnStore = services.some((s) => s.name === p.name);
+                            const isProcessing = processingItems.has(p.id);
                             return (
-                              <button
+                              <div
                                 key={p.id}
-                                onClick={() => {
-                                  if (alreadyAdded) {
-                                    const matchedService = services.find((s) => s.name === p.name);
-                                    if (matchedService) handleDeleteServiceFromStore(matchedService.id);
-                                  } else {
-                                    handleQuickAddProduct(p);
-                                  }
-                                }}
-                                className={`w-full flex items-center gap-3 rounded-xl px-4 py-3 text-left text-sm border transition-all ${alreadyAdded ? "bg-primary/10 border-primary/30" : "bg-muted/10 border-border/40 hover:bg-primary/5 hover:border-primary/20"}`}
+                                onClick={() => !isProcessing && handleToggleStoreItem(p)}
+                                className={`w-full flex items-center gap-3 rounded-xl px-4 py-3.5 text-left text-sm border cursor-pointer transition-all ${isProcessing ? "opacity-60 pointer-events-none" : ""} ${isOnStore ? "bg-primary/10 border-primary/30 hover:bg-primary/15" : "bg-muted/5 border-border/40 hover:bg-muted/15 hover:border-border/60"}`}
                               >
-                                <div className={`h-5 w-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-colors ${alreadyAdded ? "bg-primary border-primary" : "border-muted-foreground/40 bg-transparent"}`}>
-                                  {alreadyAdded && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
+                                <div className={`h-5 w-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${isOnStore ? "bg-primary border-primary" : "border-muted-foreground/30"}`}>
+                                  {isProcessing ? (
+                                    <div className="w-3 h-3 border-2 border-primary/40 border-t-primary rounded-full animate-spin" />
+                                  ) : isOnStore ? (
+                                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                  ) : null}
                                 </div>
-                                <div className="h-9 w-9 rounded-lg border border-primary/20 bg-primary/10 flex items-center justify-center flex-shrink-0">
-                                  <Briefcase className="w-4 h-4 text-primary" />
+                                <div className="h-9 w-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: isOnStore ? "rgba(249,115,22,0.15)" : "rgba(255,255,255,0.05)", border: isOnStore ? "1px solid rgba(249,115,22,0.3)" : "1px solid rgba(255,255,255,0.1)" }}>
+                                  <Briefcase className="w-4 h-4" style={{ color: isOnStore ? "#F97316" : "rgba(255,255,255,0.4)" }} />
                                 </div>
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2">
-                                    <span className="text-foreground font-medium truncate">{p.name}</span>
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-primary/20 text-primary/70 uppercase flex-shrink-0">{p.category}</span>
+                                    <span className={`font-medium truncate ${isOnStore ? "text-foreground" : "text-muted-foreground"}`}>{p.name}</span>
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded-full uppercase flex-shrink-0" style={{ border: "1px solid rgba(249,115,22,0.2)", color: "rgba(249,115,22,0.7)" }}>{p.category}</span>
                                   </div>
-                                  <span className={`text-[10px] mt-0.5 ${alreadyAdded ? "text-emerald-400" : "text-muted-foreground"}`}>
-                                    {alreadyAdded ? "Displayed on store" : "Not on store"}
-                                  </span>
+                                  <div className="flex items-center gap-1.5 mt-0.5">
+                                    <span className={`text-[11px] font-medium ${isOnStore ? "text-emerald-400" : "text-muted-foreground/60"}`}>
+                                      {isProcessing ? "Processing..." : isOnStore ? "✓ On store" : "Not on store"}
+                                    </span>
+                                    {p.description && <span className="text-[10px] text-muted-foreground/40 truncate max-w-[150px]">· {p.description}</span>}
+                                  </div>
                                 </div>
-                                <span className="text-xs text-primary font-semibold flex-shrink-0">{p.currency} {p.price}</span>
-                              </button>
+                                <span className="text-xs font-semibold flex-shrink-0" style={{ color: "#F97316" }}>{p.currency} {p.price}</span>
+                              </div>
                             );
                           })}
                         </div>
 
-                        <div className="flex items-center justify-between px-5 py-3 border-t border-border/60">
-                          <span className="text-xs text-muted-foreground">{services.length} of {commerceProducts.length} on store</span>
+                        <div className="flex items-center justify-between px-5 py-3.5 border-t border-primary/20">
+                          <span className="text-xs text-muted-foreground">
+                            {services.filter((s) => commerceProducts.some((p) => p.name === s.name)).length} item{services.filter((s) => commerceProducts.some((p) => p.name === s.name)).length !== 1 ? "s" : ""} on store
+                          </span>
                           <button
                             onClick={() => setShowQuickAdd(false)}
-                            className="px-4 py-2 rounded-xl text-sm font-medium bg-primary text-white hover:bg-primary/90 transition-colors"
+                            className="px-5 py-2 rounded-xl text-sm font-medium text-white transition-colors" style={{ backgroundColor: "#F97316" }}
                           >
                             Done
                           </button>
                         </div>
                       </>
                     ) : (
-                      <div className="p-8 text-center space-y-2">
-                        <Briefcase className="w-8 h-8 text-primary/30 mx-auto" />
+                      <div className="p-8 text-center space-y-3">
+                        <Briefcase className="w-10 h-10 mx-auto" style={{ color: "rgba(249,115,22,0.3)" }} />
                         <p className="text-sm text-muted-foreground">No items in Commerce yet.</p>
-                        <p className="text-xs text-muted-foreground">Add products in the <span className="text-primary font-medium">Commerce</span> page first, then come back here.</p>
+                        <p className="text-xs text-muted-foreground">Add products in the <span className="font-medium" style={{ color: "#F97316" }}>Commerce</span> page first, then come back here to add them to your store.</p>
+                        <button
+                          onClick={() => setShowQuickAdd(false)}
+                          className="mt-2 px-4 py-2 rounded-xl text-sm font-medium text-white transition-colors" style={{ backgroundColor: "#F97316" }}
+                        >
+                          Close
+                        </button>
                       </div>
                     )}
                   </div>
