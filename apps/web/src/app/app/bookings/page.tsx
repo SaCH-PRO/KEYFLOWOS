@@ -1138,8 +1138,8 @@ export default function BookingsPage() {
             <div className="space-y-4">
               {/* Service List - Editable */}
               {services.length === 0 ? (
-                <div className="rounded-2xl border border-border/60 bg-slate-950/50 p-8 text-center space-y-3">
-                  <Briefcase className="w-8 h-8 text-muted-foreground/40 mx-auto" />
+                <div className="rounded-2xl border border-primary/20 bg-primary/5 p-8 text-center space-y-3">
+                  <Briefcase className="w-8 h-8 text-primary/40 mx-auto" />
                   <p className="text-sm text-muted-foreground">No items in your store yet. Use the button below to add services and packages from Commerce.</p>
                 </div>
               ) : (
