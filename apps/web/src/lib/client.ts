@@ -1119,11 +1119,16 @@ export async function getBusinessById(businessId: string) {
   const businessSchema = z.object({
     id: z.string(),
     name: z.string().optional(),
+    slug: z.string().nullable().optional(),
     logoUrl: z.string().nullable().optional(),
+    tagline: z.string().nullable().optional(),
+    description: z.string().nullable().optional(),
     address: z.string().nullable().optional(),
     phone: z.string().nullable().optional(),
     email: z.string().nullable().optional(),
     website: z.string().nullable().optional(),
+    primaryColor: z.string().nullable().optional(),
+    secondaryColor: z.string().nullable().optional(),
     complianceStatus: z.string().nullable().optional(),
     complianceData: z.record(z.boolean()).nullable().optional(),
     lastHealthCheck: z.string().nullable().optional(),
@@ -1145,9 +1150,11 @@ export async function updateBusiness(input: { businessId: string; metaData?: Rec
 export type Service = {
   id: string;
   name: string;
-  durationMins: number;
+  durationMins?: number;
+  duration?: number;
   price: number;
-  currency: string;
+  currency?: string;
+  description?: string | null;
 };
 
 export type StaffMember = {
@@ -1180,9 +1187,11 @@ export async function fetchServices(businessId: string = DEFAULT_BUSINESS_ID) {
     z.array(z.object({
       id: z.string(),
       name: z.string(),
-      durationMins: z.number(),
+      durationMins: z.number().optional(),
+      duration: z.number().optional(),
       price: z.number(),
-      currency: z.string(),
+      currency: z.string().optional(),
+      description: z.string().nullable().optional(),
     })),
     [],
   );
@@ -1194,6 +1203,13 @@ export async function createService(input: { businessId?: string; name: string; 
     path: `/bookings/businesses/${encodeURIComponent(businessId)}/services`,
     body: { name: input.name, durationMins: input.durationMins, price: input.price, currency: input.currency ?? "TTD" },
   });
+}
+
+export async function updateService(serviceId: string, data: { name?: string; duration?: number; price?: number; description?: string }, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPatch<Service>(
+    `/bookings/businesses/${encodeURIComponent(businessId)}/services/${encodeURIComponent(serviceId)}`,
+    data,
+  );
 }
 
 export async function deleteService(serviceId: string, businessId: string = DEFAULT_BUSINESS_ID) {

@@ -4,6 +4,16 @@
 KEYFLOWOS is an AI-powered operating system for service businesses that eliminates the "tool maze" by providing pre-built Playbooks for common workflows. Features a "Cockpit" dashboard with Flow Graph visualization, AI-driven Flow Feed, and comprehensive CRM as the intelligence layer.
 
 ## Recent Changes (Feb 2026)
+- **Store Tab & Public Booking Page** - Editable online store catalog with customer preview
+  - New "Store" tab in Bookings page with Preview/Edit toggle
+  - Preview mode shows exact customer view of the online booking page
+  - Edit mode allows adding, editing, deleting services with inline forms
+  - Public booking link with customizable slug (e.g., /book/your-business-name)
+  - Copy link and "Open Store" buttons for easy sharing
+  - Backend: updateService PATCH endpoint, public services/staff GET endpoints (no auth)
+  - Updated public booking page (/book/[slug]) with business branding (logo, tagline, address)
+  - Service descriptions displayed on both preview and public page
+  - Staff selection with avatar chips on public booking page
 - **Business Autopilot System** - AI-powered autonomous business operations (80-90% automation)
   - New Autopilot Quick Start: ≤3 min onboarding with free-text business intent
   - Business Archetype inference (LOCAL_SERVICE, DIGITAL_PRODUCT, AGENCY, CLINIC, ECOMMERCE)
