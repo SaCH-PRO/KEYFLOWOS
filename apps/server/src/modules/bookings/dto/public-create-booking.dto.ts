@@ -7,8 +7,8 @@ export class PublicCreateBookingDto {
   serviceId!: string;
 
   @IsString()
-  @IsNotEmpty()
-  staffId!: string;
+  @IsOptional()
+  staffId?: string | null;
 
   @IsISO8601()
   @Type(() => Date)

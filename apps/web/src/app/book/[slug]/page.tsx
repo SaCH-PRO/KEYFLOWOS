@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import { apiGet, apiPost, API_BASE } from "@/lib/api";
+import { formatPrice } from "@/lib/format";
 import {
   Calendar,
   Clock,
@@ -22,6 +23,9 @@ import {
   ArrowRight,
 } from "lucide-react";
 
+type DayHours = { open: string; close: string; closed: boolean };
+type BusinessHours = Record<string, DayHours>;
+
 type Business = {
   id: string;
   name: string;
@@ -37,6 +41,8 @@ type Business = {
   website?: string | null;
   primaryColor?: string | null;
   secondaryColor?: string | null;
+  businessHours?: BusinessHours | null;
+  storeEnabled?: boolean;
 };
 
 type Service = {
@@ -62,13 +68,14 @@ type CommerceProduct = {
   currency: string;
   category: string;
   duration?: number | null;
+  imageUrl?: string | null;
   isActive: boolean;
 };
 
 function Carousel({ title, icon, items, accentColor, onSelect, selectedId }: {
   title: string;
   icon: React.ReactNode;
-  items: { id: string; name: string; description?: string | null; price: number; currency: string; duration?: number | null }[];
+  items: { id: string; name: string; description?: string | null; price: number; currency: string; duration?: number | null; imageUrl?: string | null }[];
   accentColor: string;
   onSelect?: (id: string) => void;
   selectedId?: string;
@@ -108,6 +115,7 @@ function Carousel({ title, icon, items, accentColor, onSelect, selectedId }: {
           <button
             onClick={() => scroll("left")}
             disabled={!canScrollLeft}
+            aria-label="Scroll left"
             className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition-colors disabled:opacity-20 disabled:cursor-default"
           >
             <ChevronLeft className="w-4 h-4" />
@@ -115,6 +123,7 @@ function Carousel({ title, icon, items, accentColor, onSelect, selectedId }: {
           <button
             onClick={() => scroll("right")}
             disabled={!canScrollRight}
+            aria-label="Scroll right"
             className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition-colors disabled:opacity-20 disabled:cursor-default"
           >
             <ChevronRight className="w-4 h-4" />
@@ -123,6 +132,7 @@ function Carousel({ title, icon, items, accentColor, onSelect, selectedId }: {
       </div>
       <div
         ref={scrollRef}
+        role="list"
         className="flex gap-3 overflow-x-auto scrollbar-hide pb-2 snap-x snap-mandatory"
         style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
       >
@@ -131,6 +141,7 @@ function Carousel({ title, icon, items, accentColor, onSelect, selectedId }: {
           return (
             <div
               key={item.id}
+              role="listitem"
               onClick={() => onSelect?.(item.id)}
               className={`flex-shrink-0 w-[250px] snap-start rounded-2xl border p-4 backdrop-blur transition-all cursor-pointer group ${
                 isSelected
@@ -139,6 +150,11 @@ function Carousel({ title, icon, items, accentColor, onSelect, selectedId }: {
               }`}
               style={isSelected ? { borderColor: `${accentColor}60`, backgroundColor: `${accentColor}10`, boxShadow: `0 4px 20px ${accentColor}10`, ringColor: `${accentColor}30` } : {}}
             >
+              {item.imageUrl && (
+                <div className="w-full h-32 rounded-xl overflow-hidden mb-3 -mt-1">
+                  <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                </div>
+              )}
               <div className="space-y-3">
                 <div className="flex items-start justify-between">
                   <h4 className="font-semibold text-white text-sm leading-tight pr-2">{item.name}</h4>
@@ -146,7 +162,7 @@ function Carousel({ title, icon, items, accentColor, onSelect, selectedId }: {
                     className="text-sm font-bold whitespace-nowrap"
                     style={{ color: accentColor }}
                   >
-                    ${item.price}
+                    {formatPrice(item.price, item.currency)}
                   </div>
                 </div>
                 {item.description && (
@@ -207,6 +223,35 @@ export default function PublicBookingPage() {
   const primaryColor = business?.primaryColor || "#F97316";
   const secondaryColor = business?.secondaryColor || "#14B8A6";
 
+  const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  function getAvailableSlots(date: string): string[] {
+    if (!date) return [];
+    const d = new Date(date + 'T00:00:00');
+    const dayKey = dayKeys[d.getDay()];
+    const hours = business?.businessHours;
+    const dayHours = hours?.[dayKey];
+    if (dayHours?.closed) return [];
+    const open = dayHours?.open || '09:00';
+    const close = dayHours?.close || '17:00';
+    const [oh, om] = open.split(':').map(Number);
+    const [ch, cm] = close.split(':').map(Number);
+    const slots: string[] = [];
+    let t = oh * 60 + om;
+    const end = ch * 60 + cm;
+    while (t < end) {
+      const h = Math.floor(t / 60).toString().padStart(2, '0');
+      const m = (t % 60).toString().padStart(2, '0');
+      slots.push(`${h}:${m}`);
+      t += 30;
+    }
+    return slots;
+  }
+
+  const availableSlots = getAvailableSlots(selectedDate);
+  const selectedDayClosed = selectedDate && business?.businessHours
+    ? business.businessHours[dayKeys[new Date(selectedDate + 'T00:00:00').getDay()]]?.closed === true
+    : false;
+
   useEffect(() => {
     const loadBusiness = async () => {
       setLoading(true);
@@ -216,6 +261,11 @@ export default function PublicBookingPage() {
       }
       if (res.error || !res.data) {
         setError("Business not found");
+        setLoading(false);
+        return;
+      }
+      if (res.data.storeEnabled === false) {
+        setError("This store is currently unavailable. Please check back later.");
         setLoading(false);
         return;
       }
@@ -234,6 +284,24 @@ export default function PublicBookingPage() {
     };
     loadBusiness();
   }, [slug]);
+
+  useEffect(() => {
+    if (business) {
+      document.title = `Book with ${business.name} | KeyFlowOS`;
+    }
+  }, [business]);
+
+  useEffect(() => {
+    if (!business) return;
+    const description = business.tagline || `Book an appointment with ${business.name} online.`;
+    let meta = document.querySelector('meta[name="description"]');
+    if (!meta) {
+      meta = document.createElement("meta");
+      meta.setAttribute("name", "description");
+      document.head.appendChild(meta);
+    }
+    meta.setAttribute("content", description);
+  }, [business]);
 
   const storeServiceNames = new Set(services.map((s) => s.name));
   const serviceProducts = products.filter((p) => p.category === "SERVICE" && storeServiceNames.has(p.name));
@@ -315,6 +383,7 @@ export default function PublicBookingPage() {
           {bookingResult.invoiceId && (
             <button
               onClick={() => window.open(`${API_BASE}/commerce/invoices/${bookingResult.invoiceId}/receipt`, "_blank")}
+              aria-label="View invoice"
               className="px-6 py-3 rounded-xl font-medium text-sm text-white transition-all hover:scale-[1.02]"
               style={{ backgroundColor: primaryColor }}
             >
@@ -456,6 +525,7 @@ export default function PublicBookingPage() {
                       <button
                         type="button"
                         onClick={() => setSelectedStaff("")}
+                        aria-label="Select any available staff"
                         className={`flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm transition-all ${
                           !selectedStaff
                             ? "border-white/20 bg-white/10"
@@ -470,6 +540,7 @@ export default function PublicBookingPage() {
                           key={s.id}
                           type="button"
                           onClick={() => setSelectedStaff(s.id)}
+                          aria-label={`Select staff member ${s.name}`}
                           className={`flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm transition-all ${
                             selectedStaff === s.id
                               ? "border-white/20 bg-white/10"
@@ -494,29 +565,43 @@ export default function PublicBookingPage() {
                   <label className="text-xs uppercase tracking-wider text-white/40 flex items-center gap-2 px-1">
                     <Calendar className="w-3 h-3" /> Date & Time
                   </label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <input
-                        type="date"
-                        value={selectedDate}
-                        onChange={(e) => setSelectedDate(e.target.value)}
-                        required
-                        min={new Date().toISOString().split("T")[0]}
-                        className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 transition-all"
-                        style={{ focusRingColor: primaryColor }}
-                      />
-                    </div>
-                    <div>
-                      <input
-                        type="time"
-                        value={selectedTime}
-                        onChange={(e) => setSelectedTime(e.target.value)}
-                        required
-                        className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 transition-all"
-                        style={{ focusRingColor: primaryColor }}
-                      />
-                    </div>
+                  <div>
+                    <input
+                      type="date"
+                      value={selectedDate}
+                      onChange={(e) => { setSelectedDate(e.target.value); setSelectedTime(""); }}
+                      required
+                      min={new Date().toISOString().split("T")[0]}
+                      className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 transition-all"
+                      style={{ focusRingColor: primaryColor }}
+                    />
                   </div>
+                  {selectedDate && selectedDayClosed ? (
+                    <div className="rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3 text-sm text-red-300">
+                      This business is closed on {new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' })}s. Please select another date.
+                    </div>
+                  ) : selectedDate && availableSlots.length > 0 ? (
+                    <div className="space-y-2">
+                      <span className="text-xs text-white/40">Available Times</span>
+                      <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-[200px] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+                        {availableSlots.map((slot) => (
+                          <button
+                            key={slot}
+                            type="button"
+                            onClick={() => setSelectedTime(slot)}
+                            className={`px-2 py-2 rounded-lg text-xs font-medium border transition-all ${selectedTime === slot ? 'text-white border-transparent' : 'border-white/10 bg-white/[0.03] text-white/60 hover:border-white/20 hover:text-white'}`}
+                            style={selectedTime === slot ? { backgroundColor: primaryColor, borderColor: primaryColor } : {}}
+                          >
+                            {slot}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : selectedDate ? (
+                    <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/40">
+                      No time slots available for this date.
+                    </div>
+                  ) : null}
                 </div>
 
                 {/* Customer Info */}
@@ -585,7 +670,7 @@ export default function PublicBookingPage() {
                     <div className="border-t border-white/10 pt-3 flex justify-between text-base font-semibold">
                       <span style={{ color: primaryColor }}>Total</span>
                       <span style={{ color: primaryColor }}>
-                        {selectedServiceData.currency ?? "TTD"} {selectedServiceData.price.toLocaleString()}
+                        {formatPrice(selectedServiceData.price, selectedServiceData.currency ?? "TTD")}
                       </span>
                     </div>
                   </div>
@@ -600,6 +685,7 @@ export default function PublicBookingPage() {
                 <button
                   type="submit"
                   disabled={submitting || !selectedService || !selectedDate || !selectedTime}
+                  aria-label="Book appointment"
                   className="w-full py-3.5 rounded-xl text-white font-semibold text-sm transition-all hover:scale-[1.01] hover:shadow-lg disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100"
                   style={{ backgroundColor: primaryColor, boxShadow: `0 8px 32px ${primaryColor}30` }}
                 >
