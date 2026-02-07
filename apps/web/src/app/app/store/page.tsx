@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useEffect, useState, useCallback, useRef } from "react";
 import {
   Clock,
@@ -20,6 +21,8 @@ import {
   Package,
   Loader2,
   XCircle,
+  Search,
+  ShoppingCart,
 } from "lucide-react";
 import {
   Service,
@@ -497,153 +500,103 @@ export default function StorePage() {
                     </div>
                   </div>
 
-                  {/* Commerce Carousels - only show items selected for store */}
+                  {/* Unified Catalog Preview */}
                   {(() => {
+                    const pc = businessData?.primaryColor || "#F97316";
+                    const sc = businessData?.secondaryColor || "#14B8A6";
                     const storeNames = new Set(services.map((s) => s.name));
-                    const serviceItems = commerceProducts.filter((p) => p.category === "SERVICE" && storeNames.has(p.name));
-                    const productItems = commerceProducts.filter((p) => p.category === "PRODUCT" && storeNames.has(p.name));
-                    const packageItems = commerceProducts.filter((p) => p.category === "PACKAGE" && storeNames.has(p.name));
-                    const hasAny = serviceItems.length > 0 || productItems.length > 0 || packageItems.length > 0;
-                    if (!hasAny) return null;
+                    type PreviewItem = { id: string; name: string; description?: string | null; price: number; currency: string; duration?: number | null; imageUrl?: string | null; itemType: 'service' | 'product' | 'package' };
+                    const allItems: PreviewItem[] = [
+                      ...services.map((s) => ({ id: s.id, name: s.name, description: s.description, price: s.price, currency: s.currency ?? 'TTD', duration: (s as any).durationMins ?? s.duration, imageUrl: null as string | null, itemType: 'service' as const })),
+                      ...commerceProducts.filter((p) => p.category === "PRODUCT" && storeNames.has(p.name)).map((p) => ({ id: p.id, name: p.name, description: p.description, price: p.price, currency: p.currency ?? 'TTD', duration: null as number | null, imageUrl: (p as any).imageUrl ?? null, itemType: 'product' as const })),
+                      ...commerceProducts.filter((p) => p.category === "PACKAGE" && storeNames.has(p.name)).map((p) => ({ id: p.id, name: p.name, description: p.description, price: p.price, currency: p.currency ?? 'TTD', duration: (p as any).duration ?? null, imageUrl: (p as any).imageUrl ?? null, itemType: 'package' as const })),
+                    ];
+
+                    if (allItems.length === 0) {
+                      return (
+                        <div className="text-center py-6 space-y-2">
+                          <Store className="w-8 h-8 text-white/20 mx-auto" />
+                          <p className="text-sm text-white/40">Your store is empty. Switch to Edit mode to add items from Commerce.</p>
+                        </div>
+                      );
+                    }
+
+                    const typeBadge = (t: string) => {
+                      const map: Record<string, { icon: ReactNode; label: string; color: string }> = {
+                        service: { icon: <Briefcase className="w-2.5 h-2.5" />, label: 'Service', color: pc },
+                        product: { icon: <ShoppingBag className="w-2.5 h-2.5" />, label: 'Product', color: sc },
+                        package: { icon: <Package className="w-2.5 h-2.5" />, label: 'Package', color: '#a78bfa' },
+                      };
+                      const b = map[t] || map.service;
+                      return (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium" style={{ backgroundColor: `${b.color}20`, color: b.color }}>
+                          {b.icon} {b.label}
+                        </span>
+                      );
+                    };
+
+                    const hasServices = allItems.some((i) => i.itemType === 'service');
+                    const hasProducts = allItems.some((i) => i.itemType === 'product');
+                    const hasPackages = allItems.some((i) => i.itemType === 'package');
+                    const tabs = [
+                      { key: 'all', label: 'All' },
+                      ...(hasServices ? [{ key: 'service', label: 'Services' }] : []),
+                      ...(hasProducts ? [{ key: 'product', label: 'Products' }] : []),
+                      ...(hasPackages ? [{ key: 'package', label: 'Packages' }] : []),
+                    ];
+
                     return (
-                      <div className="space-y-6">
-                        {serviceItems.length > 0 && (
-                          <div className="space-y-2">
-                            <h3 className="text-xs uppercase tracking-wider text-white/40 flex items-center gap-2 px-1">
-                              <Briefcase className="w-3.5 h-3.5 text-primary" /> Services
-                            </h3>
-                            <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
-                              {serviceItems.map((p) => (
-                                <div key={p.id} className="flex-shrink-0 w-[220px] rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden">
-                                  {(p as any).imageUrl && <img src={(p as any).imageUrl} alt={p.name} className="w-full h-28 object-cover" />}
-                                  <div className="p-4 space-y-2">
-                                    <div className="flex justify-between items-start">
-                                      <h4 className="text-sm font-semibold text-white">{p.name}</h4>
-                                      <span className="text-sm font-bold text-primary">{formatPrice(p.price, p.currency)}</span>
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {tabs.map((tab) => (
+                            <span key={tab.key} className={`px-3 py-1.5 rounded-full text-xs font-medium cursor-default transition-all ${tab.key === 'all' ? 'text-white' : 'text-white/40 bg-white/[0.03]'}`} style={tab.key === 'all' ? { backgroundColor: `${pc}20`, color: pc } : {}}>
+                              {tab.label}
+                            </span>
+                          ))}
+                          <div className="flex-1" />
+                          <div className="relative">
+                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/30" />
+                            <div className="rounded-lg border border-white/10 bg-white/[0.03] pl-8 pr-3 py-1.5 text-xs text-white/25 w-36">Search...</div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          {allItems.map((item) => {
+                            const accentColor = item.itemType === 'service' ? pc : item.itemType === 'product' ? sc : '#a78bfa';
+                            return (
+                              <div key={item.id} className="rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden hover:border-white/20 transition-all">
+                                {item.imageUrl && <img src={item.imageUrl} alt={item.name} className="w-full h-24 object-cover" />}
+                                <div className="p-3 space-y-2">
+                                  <div className="flex items-start justify-between gap-1">
+                                    <div className="space-y-1 min-w-0">
+                                      {typeBadge(item.itemType)}
+                                      <h4 className="text-xs font-semibold text-white leading-tight truncate">{item.name}</h4>
                                     </div>
-                                    {p.description && <p className="text-xs text-white/40 line-clamp-2">{p.description}</p>}
-                                    {p.duration && <span className="text-xs text-white/30 flex items-center gap-1"><Clock className="w-3 h-3" />{p.duration} min</span>}
+                                    <span className="text-xs font-bold whitespace-nowrap" style={{ color: accentColor }}>{formatPrice(item.price, item.currency)}</span>
+                                  </div>
+                                  {item.description && <p className="text-[10px] text-white/40 line-clamp-2">{item.description}</p>}
+                                  <div className="flex items-center justify-between">
+                                    {item.duration ? <span className="text-[10px] text-white/30 flex items-center gap-1"><Clock className="w-2.5 h-2.5" />{item.duration} min</span> : <span />}
+                                    <span className="text-[10px] font-medium flex items-center gap-1 px-2 py-1 rounded-lg bg-white/5 text-white/50">
+                                      <ShoppingCart className="w-2.5 h-2.5" /> Add
+                                    </span>
                                   </div>
                                 </div>
-                              ))}
-                            </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <ShoppingCart className="w-4 h-4 text-white/40" />
+                            <span className="text-xs text-white/40">Cart preview</span>
                           </div>
-                        )}
-                        {productItems.length > 0 && (
-                          <div className="space-y-2">
-                            <h3 className="text-xs uppercase tracking-wider text-white/40 flex items-center gap-2 px-1">
-                              <ShoppingBag className="w-3.5 h-3.5 text-secondary" /> Products
-                            </h3>
-                            <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
-                              {productItems.map((p) => (
-                                <div key={p.id} className="flex-shrink-0 w-[220px] rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden">
-                                  {(p as any).imageUrl && <img src={(p as any).imageUrl} alt={p.name} className="w-full h-28 object-cover" />}
-                                  <div className="p-4 space-y-2">
-                                    <div className="flex justify-between items-start">
-                                      <h4 className="text-sm font-semibold text-white">{p.name}</h4>
-                                      <span className="text-sm font-bold text-secondary">{formatPrice(p.price, p.currency)}</span>
-                                    </div>
-                                    {p.description && <p className="text-xs text-white/40 line-clamp-2">{p.description}</p>}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        {packageItems.length > 0 && (
-                          <div className="space-y-2">
-                            <h3 className="text-xs uppercase tracking-wider text-white/40 flex items-center gap-2 px-1">
-                              <Package className="w-3.5 h-3.5 text-secondary" /> Packages
-                            </h3>
-                            <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
-                              {packageItems.map((p) => (
-                                <div key={p.id} className="flex-shrink-0 w-[220px] rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden">
-                                  {(p as any).imageUrl && <img src={(p as any).imageUrl} alt={p.name} className="w-full h-28 object-cover" />}
-                                  <div className="p-4 space-y-2">
-                                    <div className="flex justify-between items-start">
-                                      <h4 className="text-sm font-semibold text-white">{p.name}</h4>
-                                      <span className="text-sm font-bold" style={{ color: "#F97316" }}>{formatPrice(p.price, p.currency)}</span>
-                                    </div>
-                                    {p.description && <p className="text-xs text-white/40 line-clamp-2">{p.description}</p>}
-                                    {p.duration && <span className="text-xs text-white/30 flex items-center gap-1"><Clock className="w-3 h-3" />{p.duration} min</span>}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
+                          <span className="text-xs text-white/25">Items appear here on the live page</span>
+                        </div>
                       </div>
                     );
                   })()}
-
-                  {/* Booking Services Preview */}
-                  {services.length === 0 && storeItemCount === 0 ? (
-                    <div className="text-center py-6 space-y-2">
-                      <Store className="w-8 h-8 text-white/20 mx-auto" />
-                      <p className="text-sm text-white/40">Your store is empty. Switch to Edit mode to add items from Commerce.</p>
-                    </div>
-                  ) : services.length > 0 && (
-                    <div className="space-y-3">
-                      <h3 className="text-xs uppercase tracking-wider text-white/40 flex items-center gap-2 px-1">
-                        <Sparkles className="w-3.5 h-3.5 text-primary" /> Book an Appointment
-                      </h3>
-                      <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
-                        {services.map((service, i) => (
-                          <div
-                            key={service.id}
-                            className={`flex-shrink-0 w-[220px] rounded-2xl border p-4 space-y-2 transition-colors cursor-pointer ${i === 0 ? "border-primary/40 bg-primary/5" : "border-white/10 bg-white/[0.03] hover:border-white/20"}`}
-                          >
-                            <div className="flex justify-between items-start">
-                              <h4 className="text-sm font-semibold text-white">{service.name}</h4>
-                              <span className="text-sm font-bold text-primary">{formatPrice(service.price)}</span>
-                            </div>
-                            {service.description && <p className="text-xs text-white/40 line-clamp-2">{service.description}</p>}
-                            <span className="text-xs text-white/30 flex items-center gap-1"><Clock className="w-3 h-3" />{service.durationMins ?? service.duration ?? 30} min</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Staff Preview */}
-                  {staff.length > 0 && (
-                    <div className="space-y-3">
-                      <h3 className="text-xs uppercase tracking-wider text-white/40 flex items-center gap-2 px-1">
-                        <User className="w-3.5 h-3.5" /> Staff
-                      </h3>
-                      <div className="flex gap-2 flex-wrap">
-                        {staff.map((s) => (
-                          <div key={s.id} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
-                            <div className="h-7 w-7 rounded-full bg-secondary/10 border border-secondary/20 flex items-center justify-center text-xs font-bold text-secondary">
-                              {s.name.charAt(0).toUpperCase()}
-                            </div>
-                            <span className="text-sm text-white">{s.name}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Form Placeholder */}
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm text-white/25">Select date...</div>
-                      <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm text-white/25">Select time...</div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm text-white/25">First Name</div>
-                      <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm text-white/25">Last Name</div>
-                      <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm text-white/25">Email</div>
-                      <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm text-white/25">Phone</div>
-                    </div>
-                  </div>
-
-                  <button
-                    className="w-full py-3 rounded-xl text-white font-semibold text-sm opacity-60 cursor-default"
-                    style={{ backgroundColor: businessData?.primaryColor || "#F97316" }}
-                  >
-                    Book Appointment
-                  </button>
 
                   <div className="text-center text-xs text-white/20">
                     Powered by <span className="font-semibold" style={{ color: businessData?.primaryColor || "#F97316" }}>KeyFlowOS</span>
