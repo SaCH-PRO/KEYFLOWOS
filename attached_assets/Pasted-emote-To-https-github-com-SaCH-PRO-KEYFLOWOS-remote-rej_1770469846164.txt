@@ -1,0 +1,56 @@
+emote: 
+To https://github.com/SaCH-PRO/KEYFLOWOS
+ ! [remote rejected] main -> main (push declined due to repository rule violations)
+error: failed to push some refs to 'https://github.com/SaCH-PRO/KEYFLOWOS'
+~/workspace$ git rm --cached "attached_assets/client_secret_831350252742-0v1mcsnt0eodk06g00ig1b3r2of6s500.a_1770215243140.json"
+rm 'attached_assets/client_secret_831350252742-0v1mcsnt0eodk06g00ig1b3r2of6s500.a_1770215243140.json'
+~/workspace$ git add .gitignore && git commit -m "Remove secret file from tracking and fix gitignore"
+[main f67a44d] Remove secret file from tracking and fix gitignore
+ 1 file changed, 1 deletion(-)
+ delete mode 100644 attached_assets/client_secret_831350252742-0v1mcsnt0eodk06g00ig1b3r2of6s500.a_1770215243140.json
+~/workspace$ git push --force origin main
+Enumerating objects: 718, done.
+Counting objects: 100% (655/655), done.
+Delta compression using up to 8 threads
+Compressing objects: 100% (456/456), done.
+Writing objects: 100% (493/493), 267.23 KiB | 9.54 MiB/s, done.
+Total 493 (delta 331), reused 0 (delta 0), pack-reused 0 (from 0)
+remote: Resolving deltas: 100% (331/331), completed with 43 local objects.
+remote: error: GH013: Repository rule violations found for refs/heads/main.
+remote: 
+remote: - GITHUB PUSH PROTECTION
+remote:   —————————————————————————————————————————
+remote:     Resolve the following violations before pushing again
+remote: 
+remote:     - Push cannot contain secrets
+remote: 
+remote:     
+remote:      (?) Learn how to resolve a blocked push
+remote:      https://docs.github.com/code-security/secret-scanning/working-with-secret-scanning-and-push-protection/working-with-push-protection-from-the-command-line#resolving-a-blocked-push
+remote:     
+remote:      (?) This repository does not have Secret Scanning enabled, but is eligible. Enable Secret Scanning to view and manage detected secrets.
+remote:      Visit the repository settings page, https://github.com/SaCH-PRO/KEYFLOWOS/settings/security_analysis
+remote:     
+remote:     
+remote:       —— Google OAuth Client ID ————————————————————————————
+remote:        locations:
+remote:          - commit: 02d0b4305330124483212893227e802e76a5f64d
+remote:            path: attached_assets/client_secret_831350252742-0v1mcsnt0eodk06g00ig1b3r2of6s500.a_1770215243140.json:1
+remote:     
+remote:        (?) To push, remove secret from commit(s) or follow this URL to allow the secret.
+remote:        https://github.com/SaCH-PRO/KEYFLOWOS/security/secret-scanning/unblock-secret/39JnmnRdHE2rDoAUBchirrS8JCT
+remote:     
+remote:     
+remote:       —— Google OAuth Client Secret ————————————————————————
+remote:        locations:
+remote:          - commit: 02d0b4305330124483212893227e802e76a5f64d
+remote:            path: attached_assets/client_secret_831350252742-0v1mcsnt0eodk06g00ig1b3r2of6s500.a_1770215243140.json:1
+remote:     
+remote:        (?) To push, remove secret from commit(s) or follow this URL to allow the secret.
+remote:        https://github.com/SaCH-PRO/KEYFLOWOS/security/secret-scanning/unblock-secret/39JnmqI2wAkOvMsDRSanr7IKNPZ
+remote:     
+remote: 
+remote: 
+To https://github.com/SaCH-PRO/KEYFLOWOS
+ ! [remote rejected] main -> main (push declined due to repository rule violations)
+error: failed to push some refs to 'https://github.com/SaCH-PRO/KEYFLOWOS'
