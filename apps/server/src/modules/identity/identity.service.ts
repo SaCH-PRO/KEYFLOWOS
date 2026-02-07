@@ -30,6 +30,15 @@ export class IdentityService {
     return business;
   }
 
+  async checkSlugAvailability(slug: string, userId?: string) {
+    const existing = await this.prisma.client.business.findFirst({
+      where: { slug, deletedAt: null },
+    });
+    if (!existing) return { available: true, slug };
+    if (userId && existing.ownerId === userId) return { available: true, slug, ownedByYou: true };
+    return { available: false, slug };
+  }
+
   createBusiness(input: { name: string; ownerId?: string }) {
     return this.prisma.client.business.create({
       data: {
@@ -62,6 +71,8 @@ export class IdentityService {
     complianceStatus?: string;
     complianceData?: Record<string, boolean>;
     lastHealthCheck?: string;
+    storeEnabled?: boolean;
+    businessHours?: Record<string, { open: string; close: string; closed: boolean }>;
   }) {
     if (input.slug) {
       const existing = await this.prisma.client.business.findFirst({

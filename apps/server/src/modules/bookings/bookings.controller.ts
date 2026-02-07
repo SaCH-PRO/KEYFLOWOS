@@ -78,7 +78,7 @@ export class BookingsController {
     return this.bookings.publicCreateBooking({
       businessId,
       serviceId: body.serviceId,
-      staffId: body.staffId,
+      staffId: body.staffId || undefined,
       startTime: new Date(body.startTime),
       contact: {
         firstName: body.firstName,
@@ -141,6 +141,38 @@ export class BookingsController {
       data: { deletedAt: new Date() },
     });
     return { success: true };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/services/batch')
+  async batchServices(
+    @Param('businessId') businessId: string,
+    @Body() body: { add?: { name: string; duration: number; price: number; description?: string }[]; remove?: string[] },
+  ) {
+    const results: { added: number; removed: number; errors: string[] } = { added: 0, removed: 0, errors: [] };
+
+    if (body.remove?.length) {
+      await this.prisma.client.service.updateMany({
+        where: { id: { in: body.remove }, businessId },
+        data: { deletedAt: new Date() },
+      });
+      results.removed = body.remove.length;
+    }
+
+    if (body.add?.length) {
+      for (const item of body.add) {
+        try {
+          await this.prisma.client.service.create({
+            data: { businessId, name: item.name, duration: item.duration, price: item.price, description: item.description ?? null },
+          });
+          results.added++;
+        } catch (e) {
+          results.errors.push(`Failed to add ${item.name}`);
+        }
+      }
+    }
+
+    return results;
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

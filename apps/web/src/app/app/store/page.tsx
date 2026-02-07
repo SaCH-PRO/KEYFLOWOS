@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   Clock,
   User,
@@ -18,6 +18,8 @@ import {
   MapPin,
   ShoppingBag,
   Package,
+  Loader2,
+  XCircle,
 } from "lucide-react";
 import {
   Service,
@@ -28,10 +30,13 @@ import {
   updateBusiness,
   createService,
   deleteService,
+  updateService,
   fetchProducts,
   Product,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
+import { apiGet } from "@/lib/api";
+import { formatPrice } from "@/lib/format";
 
 export default function StorePage() {
   const [businessId, setBusinessId] = useState<string | null>(null);
@@ -39,19 +44,38 @@ export default function StorePage() {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [commerceProducts, setCommerceProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [banner, setBanner] = useState<{ text: string; type: "success" | "error" | "info" } | null>(null);
+  const [banner, setBanner] = useState<{ text: string; type: "success" | "error" | "info" | "warning" } | null>(null);
 
   const [businessData, setBusinessData] = useState<{
     name?: string; slug?: string | null; logoUrl?: string | null;
     tagline?: string | null; description?: string | null; address?: string | null;
     phone?: string | null; email?: string | null; website?: string | null;
     primaryColor?: string | null; secondaryColor?: string | null;
+    storeEnabled?: boolean;
   } | null>(null);
   const [storeSlug, setStoreSlug] = useState("");
   const [slugSaving, setSlugSaving] = useState(false);
   const [storePreview, setStorePreview] = useState(true);
   const [processingItems, setProcessingItems] = useState<Set<string>>(new Set());
   const [linkCopied, setLinkCopied] = useState(false);
+  const [slugStatus, setSlugStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle');
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [storeEnabled, setStoreEnabled] = useState(true);
+  type DayHours = { open: string; close: string; closed: boolean };
+  const defaultHours: Record<string, DayHours> = {
+    mon: { open: '09:00', close: '17:00', closed: false },
+    tue: { open: '09:00', close: '17:00', closed: false },
+    wed: { open: '09:00', close: '17:00', closed: false },
+    thu: { open: '09:00', close: '17:00', closed: false },
+    fri: { open: '09:00', close: '17:00', closed: false },
+    sat: { open: '10:00', close: '14:00', closed: false },
+    sun: { open: '10:00', close: '14:00', closed: true },
+  };
+  const [businessHours, setBusinessHours] = useState<Record<string, DayHours>>(defaultHours);
+  const [hoursSaving, setHoursSaving] = useState(false);
+  const [driftedItems, setDriftedItems] = useState<{ serviceId: string; serviceName: string; priceDiff: boolean; durationDiff: boolean; commercePrice: number; commerceDuration: number | null }[]>([]);
+  const [syncing, setSyncing] = useState(false);
+  const slugCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const initWorkspace = async () => {
@@ -73,13 +97,31 @@ export default function StorePage() {
         getBusinessById(businessId).catch(() => ({ data: null, error: null })),
         fetchProducts(businessId).catch(() => ({ data: null, error: null })),
       ]);
-      setServices(servicesRes.data ?? []);
+      const loadedServices = servicesRes.data ?? [];
+      const loadedProducts = (productsRes as any)?.data ?? [];
+      setServices(loadedServices);
       setStaff(staffRes.data ?? []);
-      setCommerceProducts((productsRes as any)?.data ?? []);
+      setCommerceProducts(loadedProducts);
       if (bizRes.data) {
         setBusinessData(bizRes.data);
         setStoreSlug(bizRes.data.slug ?? "");
+        setStoreEnabled((bizRes.data as any).storeEnabled ?? true);
+        if ((bizRes.data as any).businessHours) {
+          setBusinessHours({ ...defaultHours, ...(bizRes.data as any).businessHours });
+        }
       }
+      const drifts: typeof driftedItems = [];
+      for (const svc of loadedServices) {
+        const product = loadedProducts.find((p: Product) => p.name === svc.name);
+        if (!product) continue;
+        const priceDiff = Math.abs(svc.price - product.price) > 0.01;
+        const svcDuration = (svc as any).durationMins ?? (svc as any).duration ?? null;
+        const durationDiff = product.duration != null && svcDuration != null && svcDuration !== product.duration;
+        if (priceDiff || durationDiff) {
+          drifts.push({ serviceId: svc.id, serviceName: svc.name, priceDiff, durationDiff, commercePrice: product.price, commerceDuration: product.duration ?? null });
+        }
+      }
+      setDriftedItems(drifts);
     } catch (e) {
       console.error("Failed to load store data:", e);
     } finally {
@@ -88,6 +130,29 @@ export default function StorePage() {
   }, [businessId]);
 
   useEffect(() => { void loadData(); }, [loadData]);
+
+  useEffect(() => {
+    if (!storeSlug.trim()) {
+      setSlugStatus('idle');
+      return;
+    }
+    setSlugStatus('checking');
+    if (slugCheckTimer.current) clearTimeout(slugCheckTimer.current);
+    slugCheckTimer.current = setTimeout(async () => {
+      const slug = storeSlug.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-");
+      if (slug === businessData?.slug) {
+        setSlugStatus('available');
+        return;
+      }
+      const res = await apiGet<{ available: boolean }>(`/identity/businesses/slug-check/${encodeURIComponent(slug)}`);
+      if (res.data && res.data.available) {
+        setSlugStatus('available');
+      } else {
+        setSlugStatus('taken');
+      }
+    }, 500);
+    return () => { if (slugCheckTimer.current) clearTimeout(slugCheckTimer.current); };
+  }, [storeSlug, businessData?.slug]);
 
   function getPublicBookingUrl() {
     const domain = typeof window !== "undefined" ? window.location.origin : "";
@@ -116,8 +181,54 @@ export default function StorePage() {
     setSlugSaving(false);
   }
 
+  async function toggleStoreEnabled() {
+    if (!businessId) return;
+    const newValue = !storeEnabled;
+    const res = await updateBusiness({ businessId, storeEnabled: newValue } as any);
+    if (res.error) {
+      setBanner({ text: `Failed to update store status: ${res.error}`, type: "error" });
+    } else {
+      setStoreEnabled(newValue);
+      setBusinessData((prev) => prev ? { ...prev, storeEnabled: newValue } : prev);
+      setBanner({ text: newValue ? "Store is now published!" : "Store is now unpublished.", type: newValue ? "success" : "info" });
+    }
+  }
+
+  async function handleSaveHours() {
+    if (!businessId) return;
+    setHoursSaving(true);
+    const res = await updateBusiness({ businessId, businessHours } as any);
+    if (res.error) {
+      setBanner({ text: `Failed to save hours: ${res.error}`, type: "error" });
+    } else {
+      setBanner({ text: "Business hours saved!", type: "success" });
+    }
+    setHoursSaving(false);
+  }
+
+  async function syncDriftedItems() {
+    if (!businessId || driftedItems.length === 0) return;
+    setSyncing(true);
+    let synced = 0;
+    for (const drift of driftedItems) {
+      const data: { price?: number; duration?: number } = {};
+      if (drift.priceDiff) data.price = drift.commercePrice;
+      if (drift.durationDiff && drift.commerceDuration != null) data.duration = drift.commerceDuration;
+      const res = await updateService(drift.serviceId, data, businessId);
+      if (!res.error) synced++;
+    }
+    setBanner({ text: `Synced ${synced} item${synced !== 1 ? "s" : ""} with Commerce prices.`, type: "success" });
+    setSyncing(false);
+    await loadData();
+  }
+
   async function handleQuickAddProduct(product: Product) {
     if (!businessId) return;
+    const existingService = services.find((s) => s.name === product.name);
+    if (existingService) {
+      setBanner({ text: `A service named '${product.name}' already exists in your store.`, type: "warning" });
+      return;
+    }
     setProcessingItems((prev) => new Set(prev).add(product.id));
     try {
       const res = await createService({
@@ -141,6 +252,12 @@ export default function StorePage() {
   async function handleDeleteServiceFromStore(serviceId: string, productName?: string) {
     if (!businessId) return;
     const matchedProduct = commerceProducts.find((p) => p.name === (productName ?? services.find((s) => s.id === serviceId)?.name));
+    const productId = matchedProduct?.id;
+    if (productId && confirmRemove !== productId) {
+      setConfirmRemove(productId);
+      return;
+    }
+    setConfirmRemove(null);
     if (matchedProduct) setProcessingItems((prev) => new Set(prev).add(matchedProduct.id));
     try {
       const res = await deleteService(serviceId, businessId);
@@ -174,6 +291,7 @@ export default function StorePage() {
   async function handleDeselectAll() {
     const toRemove = services.filter((s) => commerceProducts.some((p) => p.name === s.name));
     for (const s of toRemove) {
+      setConfirmRemove(null);
       await handleDeleteServiceFromStore(s.id);
     }
   }
@@ -207,9 +325,16 @@ export default function StorePage() {
         </div>
         <div className="flex items-center gap-2">
           <button
+            onClick={toggleStoreEnabled}
+            className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium border transition-colors ${storeEnabled ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20" : "bg-yellow-500/10 border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/20"}`}
+          >
+            {storeEnabled ? 'Published' : 'Unpublished'}
+          </button>
+          <button
             onClick={copyPublicLink}
-            disabled={!getPublicBookingUrl()}
+            disabled={!getPublicBookingUrl() || !storeEnabled}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 transition-colors disabled:opacity-40"
+            aria-label="Copy public booking link"
           >
             {linkCopied ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
             {linkCopied ? "Copied!" : "Copy Link"}
@@ -218,16 +343,39 @@ export default function StorePage() {
             href={getPublicBookingUrl() || "#"}
             target="_blank"
             rel="noopener noreferrer"
-            className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium bg-background border border-border/60 hover:border-primary/40 transition-colors ${!getPublicBookingUrl() ? "opacity-40 pointer-events-none" : ""}`}
+            className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium bg-background border border-border/60 hover:border-primary/40 transition-colors ${!getPublicBookingUrl() || !storeEnabled ? "opacity-40 pointer-events-none" : ""}`}
+            aria-label="Open store in new tab"
           >
             <ExternalLink className="w-4 h-4" /> Open Store
           </a>
         </div>
       </div>
 
+      {/* Unpublished Banner */}
+      {!storeEnabled && (
+        <div role="status" className="rounded-xl border px-4 py-3 text-sm flex items-center gap-2 bg-yellow-500/10 border-yellow-500/30 text-yellow-300">
+          <AlertCircle className="w-4 h-4" />
+          Your store is currently unpublished. Customers cannot see your booking page.
+        </div>
+      )}
+
+      {driftedItems.length > 0 && (
+        <div role="status" className="rounded-xl border px-4 py-3 text-sm flex items-center gap-2 bg-amber-500/10 border-amber-500/30 text-amber-300">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <span>{driftedItems.length} store item{driftedItems.length !== 1 ? "s have" : " has"} outdated prices or durations compared to Commerce.</span>
+          <button
+            onClick={syncDriftedItems}
+            disabled={syncing}
+            className="ml-auto px-3 py-1 rounded-lg text-xs font-medium bg-amber-500/20 border border-amber-500/30 hover:bg-amber-500/30 transition-colors disabled:opacity-50"
+          >
+            {syncing ? "Syncing..." : "Sync All"}
+          </button>
+        </div>
+      )}
+
       {/* Banner */}
       {banner && (
-        <div className={`rounded-xl border px-4 py-3 text-sm flex items-center gap-2 ${banner.type === "success" ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300" : banner.type === "error" ? "bg-red-500/10 border-red-500/30 text-red-300" : "bg-primary/10 border-primary/30 text-primary"}`}>
+        <div role="status" className={`rounded-xl border px-4 py-3 text-sm flex items-center gap-2 ${banner.type === "success" ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300" : banner.type === "error" ? "bg-red-500/10 border-red-500/30 text-red-300" : banner.type === "warning" ? "bg-yellow-500/10 border-yellow-500/30 text-yellow-300" : "bg-primary/10 border-primary/30 text-primary"}`}>
           {banner.type === "success" ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
           {banner.text}
           <button onClick={() => setBanner(null)} className="ml-auto text-xs opacity-60 hover:opacity-100">Dismiss</button>
@@ -272,10 +420,25 @@ export default function StorePage() {
                   placeholder="your-business-name"
                   className="flex-1 px-3 py-2.5 bg-transparent text-sm focus:outline-none"
                 />
+                {slugStatus === 'checking' && (
+                  <div className="px-2 flex items-center gap-1 text-xs text-muted-foreground">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  </div>
+                )}
+                {slugStatus === 'available' && (
+                  <div className="px-2 flex items-center gap-1 text-xs text-emerald-400">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Available
+                  </div>
+                )}
+                {slugStatus === 'taken' && (
+                  <div className="px-2 flex items-center gap-1 text-xs text-red-400">
+                    <XCircle className="w-3.5 h-3.5" /> Already taken
+                  </div>
+                )}
               </div>
               <button
                 onClick={handleSaveSlug}
-                disabled={slugSaving || !storeSlug.trim()}
+                disabled={slugSaving || !storeSlug.trim() || slugStatus === 'taken'}
                 className="px-4 py-2.5 rounded-xl text-xs font-medium bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
               >
                 {slugSaving ? "Saving..." : "Save"}
@@ -292,12 +455,14 @@ export default function StorePage() {
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setStorePreview(true)}
+                aria-pressed={storePreview}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${storePreview ? "bg-primary/20 text-primary border border-primary/30" : "text-muted-foreground border border-transparent hover:border-border/60"}`}
               >
                 Preview
               </button>
               <button
                 onClick={() => setStorePreview(false)}
+                aria-pressed={!storePreview}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${!storePreview ? "bg-primary/20 text-primary border border-primary/30" : "text-muted-foreground border border-transparent hover:border-border/60"}`}
               >
                 Edit
@@ -349,13 +514,16 @@ export default function StorePage() {
                             </h3>
                             <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
                               {serviceItems.map((p) => (
-                                <div key={p.id} className="flex-shrink-0 w-[220px] rounded-2xl border border-white/10 bg-white/[0.03] p-4 space-y-2">
-                                  <div className="flex justify-between items-start">
-                                    <h4 className="text-sm font-semibold text-white">{p.name}</h4>
-                                    <span className="text-sm font-bold text-primary">${p.price}</span>
+                                <div key={p.id} className="flex-shrink-0 w-[220px] rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden">
+                                  {(p as any).imageUrl && <img src={(p as any).imageUrl} alt={p.name} className="w-full h-28 object-cover" />}
+                                  <div className="p-4 space-y-2">
+                                    <div className="flex justify-between items-start">
+                                      <h4 className="text-sm font-semibold text-white">{p.name}</h4>
+                                      <span className="text-sm font-bold text-primary">{formatPrice(p.price, p.currency)}</span>
+                                    </div>
+                                    {p.description && <p className="text-xs text-white/40 line-clamp-2">{p.description}</p>}
+                                    {p.duration && <span className="text-xs text-white/30 flex items-center gap-1"><Clock className="w-3 h-3" />{p.duration} min</span>}
                                   </div>
-                                  {p.description && <p className="text-xs text-white/40 line-clamp-2">{p.description}</p>}
-                                  {p.duration && <span className="text-xs text-white/30 flex items-center gap-1"><Clock className="w-3 h-3" />{p.duration} min</span>}
                                 </div>
                               ))}
                             </div>
@@ -368,12 +536,15 @@ export default function StorePage() {
                             </h3>
                             <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
                               {productItems.map((p) => (
-                                <div key={p.id} className="flex-shrink-0 w-[220px] rounded-2xl border border-white/10 bg-white/[0.03] p-4 space-y-2">
-                                  <div className="flex justify-between items-start">
-                                    <h4 className="text-sm font-semibold text-white">{p.name}</h4>
-                                    <span className="text-sm font-bold text-secondary">${p.price}</span>
+                                <div key={p.id} className="flex-shrink-0 w-[220px] rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden">
+                                  {(p as any).imageUrl && <img src={(p as any).imageUrl} alt={p.name} className="w-full h-28 object-cover" />}
+                                  <div className="p-4 space-y-2">
+                                    <div className="flex justify-between items-start">
+                                      <h4 className="text-sm font-semibold text-white">{p.name}</h4>
+                                      <span className="text-sm font-bold text-secondary">{formatPrice(p.price, p.currency)}</span>
+                                    </div>
+                                    {p.description && <p className="text-xs text-white/40 line-clamp-2">{p.description}</p>}
                                   </div>
-                                  {p.description && <p className="text-xs text-white/40 line-clamp-2">{p.description}</p>}
                                 </div>
                               ))}
                             </div>
@@ -386,13 +557,16 @@ export default function StorePage() {
                             </h3>
                             <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
                               {packageItems.map((p) => (
-                                <div key={p.id} className="flex-shrink-0 w-[220px] rounded-2xl border border-white/10 bg-white/[0.03] p-4 space-y-2">
-                                  <div className="flex justify-between items-start">
-                                    <h4 className="text-sm font-semibold text-white">{p.name}</h4>
-                                    <span className="text-sm font-bold" style={{ color: "#F97316" }}>${p.price}</span>
+                                <div key={p.id} className="flex-shrink-0 w-[220px] rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden">
+                                  {(p as any).imageUrl && <img src={(p as any).imageUrl} alt={p.name} className="w-full h-28 object-cover" />}
+                                  <div className="p-4 space-y-2">
+                                    <div className="flex justify-between items-start">
+                                      <h4 className="text-sm font-semibold text-white">{p.name}</h4>
+                                      <span className="text-sm font-bold" style={{ color: "#F97316" }}>{formatPrice(p.price, p.currency)}</span>
+                                    </div>
+                                    {p.description && <p className="text-xs text-white/40 line-clamp-2">{p.description}</p>}
+                                    {p.duration && <span className="text-xs text-white/30 flex items-center gap-1"><Clock className="w-3 h-3" />{p.duration} min</span>}
                                   </div>
-                                  {p.description && <p className="text-xs text-white/40 line-clamp-2">{p.description}</p>}
-                                  {p.duration && <span className="text-xs text-white/30 flex items-center gap-1"><Clock className="w-3 h-3" />{p.duration} min</span>}
                                 </div>
                               ))}
                             </div>
@@ -421,7 +595,7 @@ export default function StorePage() {
                           >
                             <div className="flex justify-between items-start">
                               <h4 className="text-sm font-semibold text-white">{service.name}</h4>
-                              <span className="text-sm font-bold text-primary">TTD {service.price.toLocaleString()}</span>
+                              <span className="text-sm font-bold text-primary">{formatPrice(service.price)}</span>
                             </div>
                             {service.description && <p className="text-xs text-white/40 line-clamp-2">{service.description}</p>}
                             <span className="text-xs text-white/30 flex items-center gap-1"><Clock className="w-3 h-3" />{service.durationMins ?? service.duration ?? 30} min</span>
@@ -480,6 +654,49 @@ export default function StorePage() {
           ) : (
             /* ─── EDIT MODE ─── */
             <div className="space-y-4">
+              {/* ─── Business Hours ─── */}
+              <div className="rounded-2xl border border-secondary/20 overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-4 border-b border-secondary/15" style={{ backgroundColor: "rgba(20,184,166,0.05)" }}>
+                  <div className="flex items-center gap-2.5">
+                    <Clock className="w-5 h-5 text-secondary" />
+                    <div>
+                      <h3 className="text-sm font-bold text-foreground">Business Hours</h3>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">Set when customers can book appointments</p>
+                    </div>
+                  </div>
+                  <button onClick={handleSaveHours} disabled={hoursSaving} className="px-4 py-2 rounded-xl text-xs font-medium bg-secondary/10 border border-secondary/30 text-secondary hover:bg-secondary/20 transition-colors disabled:opacity-50">
+                    {hoursSaving ? "Saving..." : "Save Hours"}
+                  </button>
+                </div>
+                <div className="p-3 space-y-1">
+                  {(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const).map((day) => {
+                    const label = { mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday', sun: 'Sunday' }[day];
+                    const h = businessHours[day];
+                    return (
+                      <div key={day} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-white/[0.02] transition-colors">
+                        <span className="text-sm font-medium w-24">{label}</span>
+                        <button
+                          type="button"
+                          onClick={() => setBusinessHours((prev) => ({ ...prev, [day]: { ...prev[day], closed: !prev[day].closed } }))}
+                          className={`w-10 h-5 rounded-full transition-colors relative flex-shrink-0 ${h.closed ? 'bg-muted-foreground/30' : 'bg-secondary'}`}
+                        >
+                          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${h.closed ? 'left-0.5' : 'left-[22px]'}`} />
+                        </button>
+                        {h.closed ? (
+                          <span className="text-xs text-muted-foreground">Closed</span>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <input type="time" value={h.open} onChange={(e) => setBusinessHours((prev) => ({ ...prev, [day]: { ...prev[day], open: e.target.value } }))} className="px-2 py-1 rounded-lg border border-border/40 bg-slate-950/60 text-xs focus:outline-none" />
+                            <span className="text-xs text-muted-foreground">to</span>
+                            <input type="time" value={h.close} onChange={(e) => setBusinessHours((prev) => ({ ...prev, [day]: { ...prev[day], close: e.target.value } }))} className="px-2 py-1 rounded-lg border border-border/40 bg-slate-950/60 text-xs focus:outline-none" />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* ─── Inline Store Items Manager ─── */}
               <div className="rounded-2xl border border-primary/20 overflow-hidden">
                 <div className="flex items-center justify-between px-5 py-4 border-b border-primary/15" style={{ backgroundColor: "rgba(249,115,22,0.05)" }}>
@@ -517,13 +734,38 @@ export default function StorePage() {
                     {commerceProducts.map((p) => {
                       const isOnStore = services.some((s) => s.name === p.name);
                       const isProcessing = processingItems.has(p.id);
+                      const isConfirming = confirmRemove === p.id;
                       return (
                         <div
                           key={p.id}
-                          onClick={() => !isProcessing && handleToggleStoreItem(p)}
-                          className={`w-full flex items-center gap-3 rounded-xl px-4 py-3.5 text-left text-sm border cursor-pointer transition-all ${isProcessing ? "opacity-60 pointer-events-none" : ""} ${isOnStore ? "border-primary/30 hover:border-primary/50" : "border-border/40 hover:border-border/60"}`}
+                          className={`relative w-full flex items-center gap-3 rounded-xl px-4 py-3.5 text-left text-sm border cursor-pointer transition-all ${isProcessing ? "opacity-60 pointer-events-none" : ""} ${isOnStore ? "border-primary/30 hover:border-primary/50" : "border-border/40 hover:border-border/60"}`}
                           style={{ backgroundColor: isOnStore ? "rgba(249,115,22,0.08)" : "rgba(255,255,255,0.02)" }}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (!isProcessing) handleToggleStoreItem(p); } }}
+                          onClick={() => !isProcessing && !isConfirming && handleToggleStoreItem(p)}
                         >
+                          {isConfirming && (
+                            <div className="absolute inset-0 rounded-xl bg-background/95 backdrop-blur-sm flex items-center justify-center gap-3 z-10 border border-red-500/30">
+                              <span className="text-sm font-medium text-red-400">Remove?</span>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setConfirmRemove(null); }}
+                                className="px-3 py-1.5 rounded-lg text-xs font-medium border border-border/60 text-muted-foreground hover:bg-muted transition-colors"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const matchedService = services.find((s) => s.name === p.name);
+                                  if (matchedService) handleDeleteServiceFromStore(matchedService.id, p.name);
+                                }}
+                                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/20 border border-red-500/30 text-red-400 hover:bg-red-500/30 transition-colors"
+                              >
+                                Confirm
+                              </button>
+                            </div>
+                          )}
                           <div className={`h-5 w-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${isOnStore ? "border-primary" : "border-muted-foreground/30"}`} style={isOnStore ? { backgroundColor: "#F97316", borderColor: "#F97316" } : {}}>
                             {isProcessing ? (
                               <div className="w-3 h-3 border-2 border-primary/40 border-t-primary rounded-full animate-spin" />
@@ -546,7 +788,7 @@ export default function StorePage() {
                               {p.description && <span className="text-[10px] text-muted-foreground/40 truncate max-w-[200px]">· {p.description}</span>}
                             </div>
                           </div>
-                          <span className="text-xs font-semibold flex-shrink-0" style={{ color: "#F97316" }}>{p.currency} {p.price}</span>
+                          <span className="text-xs font-semibold flex-shrink-0" style={{ color: "#F97316" }}>{formatPrice(p.price, p.currency)}</span>
                         </div>
                       );
                     })}

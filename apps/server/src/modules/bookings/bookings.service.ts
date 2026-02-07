@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BookingConfirmedPayload, BookingCreatedPayload } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -190,16 +190,44 @@ export class BookingsService {
   async publicCreateBooking(input: {
     businessId: string;
     serviceId: string;
-    staffId: string;
+    staffId?: string | null;
     startTime: Date;
     contact: { firstName?: string | null; lastName?: string | null; email?: string | null; phone?: string | null };
   }) {
+    const business = await this.prisma.client.business.findFirstOrThrow({
+      where: { id: input.businessId, deletedAt: null },
+    });
+
+    if ((business as any).storeEnabled === false) {
+      throw new BadRequestException('This store is currently unavailable.');
+    }
+
     const service = await this.prisma.client.service.findFirstOrThrow({
       where: { id: input.serviceId, businessId: input.businessId, deletedAt: null },
     });
 
     const start = new Date(input.startTime);
     const end = new Date(start.getTime() + service.duration * 60000);
+
+    const hours = (business as any).businessHours as Record<string, { open: string; close: string; closed: boolean }> | null;
+    if (hours) {
+      const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+      const dayKey = dayKeys[start.getDay()];
+      const dayHours = hours[dayKey];
+      if (dayHours?.closed) {
+        throw new BadRequestException('This business is closed on the selected day.');
+      }
+      if (dayHours) {
+        const [oh, om] = dayHours.open.split(':').map(Number);
+        const [ch, cm] = dayHours.close.split(':').map(Number);
+        const startMins = start.getHours() * 60 + start.getMinutes();
+        const openMins = oh * 60 + om;
+        const closeMins = ch * 60 + cm;
+        if (startMins < openMins || startMins >= closeMins) {
+          throw new BadRequestException('The selected time is outside business hours.');
+        }
+      }
+    }
 
     const contact = await this.crm.findOrCreateContact(input.businessId, {
       ...input.contact,
@@ -218,17 +246,16 @@ export class BookingsService {
         businessId: input.businessId,
         contactId: contact.id,
         serviceId: service.id,
-        staffId: input.staffId,
+        staffId: input.staffId || undefined,
         startTime: start,
         endTime: end,
         invoiceId: invoice?.id,
       },
-      include: { contact: true },
     });
 
     const payload: BookingCreatedPayload = {
       booking,
-      contact: booking.contact ?? undefined,
+      contact: undefined,
       businessId: booking.businessId,
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore

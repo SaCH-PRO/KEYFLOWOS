@@ -110,6 +110,12 @@ model Business {
   calendarTokenExpiry  DateTime? @map("calendar_token_expiry")
   calendarId           String?   @map("calendar_id")
 
+  // Store Settings
+  storeEnabled Boolean @default(true) @map("store_enabled")
+
+  // Business Hours (JSON: { "mon": { "open": "09:00", "close": "17:00", "closed": false }, ... })
+  businessHours Json? @map("business_hours")
+
   // Field for UI/UX: Gamification, Onboarding, etc.
   metaData  Json?     @default("{}") @map("meta_data")
 
@@ -350,6 +356,7 @@ model Product {
   currency    String   @default("TTD") // Caribbean localization
   category    String   @default("SERVICE") // SERVICE, PRODUCT, PACKAGE
   duration    Int?     // Duration in minutes (for services)
+  imageUrl    String?  @map("image_url")
   isActive    Boolean  @default(true) @map("is_active")
 
   businessId String   @map("business_id")

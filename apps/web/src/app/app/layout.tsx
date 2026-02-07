@@ -260,7 +260,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         {[
           { label: "Home", href: "/app", icon: Home },
           { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
-          { label: "Commerce", href: "/app/commerce", icon: CreditCard },
+          { label: "Store", href: "/app/store", icon: Store },
           { label: "Bookings", href: "/app/bookings", icon: Calendar },
           { label: "Settings", href: "/app/settings", icon: Settings },
         ].map((item) => {

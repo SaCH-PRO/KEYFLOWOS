@@ -95,8 +95,9 @@ const productSchema = z.object({
   description: z.string().nullable().optional(),
   price: z.number(),
   currency: z.string().default("TTD"),
-  category: z.string().default("SERVICE"), // SERVICE, PRODUCT, PACKAGE
-  duration: z.number().nullable().optional(), // Duration in minutes
+  category: z.string().default("SERVICE"),
+  duration: z.number().nullable().optional(),
+  imageUrl: z.string().nullable().optional(),
   isActive: z.boolean().default(true),
 });
 

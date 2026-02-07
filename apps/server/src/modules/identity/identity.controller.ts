@@ -28,6 +28,12 @@ export class IdentityController {
     return this.identity.getBusinessBySlug(slug);
   }
 
+  @Get('businesses/slug-check/:slug')
+  async checkSlugAvailability(@Param('slug') slug: string, @Req() req: Request) {
+    const user = (req as any).user as { id?: string } | undefined;
+    return this.identity.checkSlugAvailability(slug, user?.id);
+  }
+
   @Get('businesses/public/:businessId')
   getPublicBusiness(@Param('businessId') businessId: string) {
     return this.identity.getBusiness(businessId);
@@ -70,6 +76,8 @@ export class IdentityController {
       complianceStatus?: string;
       complianceData?: Record<string, boolean>;
       lastHealthCheck?: string;
+      storeEnabled?: boolean;
+      businessHours?: Record<string, { open: string; close: string; closed: boolean }>;
     },
   ) {
     return this.identity.updateBusiness(businessId, body);
