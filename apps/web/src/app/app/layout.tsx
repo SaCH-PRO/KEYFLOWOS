@@ -30,6 +30,7 @@ import {
   MessageCircle,
   PanelLeftClose,
   PanelLeft,
+  Store,
 } from "lucide-react";
 
 const navItems = [
@@ -37,6 +38,7 @@ const navItems = [
   { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
   { label: "Commerce", href: "/app/commerce", icon: CreditCard },
   { label: "Bookings", href: "/app/bookings", icon: Calendar },
+  { label: "Store", href: "/app/store", icon: Store },
   { label: "Social", href: "/app/social", icon: MessageCircle },
   { label: "Automations", href: "/app/automations", icon: Zap },
   { label: "Reports", href: "/app/reports", icon: BarChart3 },
