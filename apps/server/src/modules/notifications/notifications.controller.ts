@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Inject, Param, Patch, Query, UseGuards } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -6,7 +6,10 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 @Controller('notifications')
 @UseGuards(AuthGuard, BusinessGuard)
 export class NotificationsController {
-  constructor(private readonly notifications: NotificationsService) {}
+  constructor(
+    @Inject(NotificationsService)
+    private readonly notifications: NotificationsService,
+  ) {}
 
   @Get('businesses/:businessId')
   list(
