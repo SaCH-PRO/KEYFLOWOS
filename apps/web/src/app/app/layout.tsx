@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { CommandPalette } from "@/components/command-palette";
 import { clearStoredBusinessId, getStoredBusinessId } from "@/lib/workspace";
-import { apiGet } from "@/lib/api";
+import { apiGet, apiPatch } from "@/lib/api";
 import { useThemeColors } from "@/lib/theme-context";
 import {
   Activity,
@@ -57,6 +57,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const momentumValue = 0.52;
   const { setAccent1, setAccent2 } = useThemeColors();
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const notifRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const loadBrandColors = async () => {
@@ -71,6 +75,41 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     };
     loadBrandColors();
   }, [setAccent1, setAccent2]);
+
+  const fetchNotifications = useCallback(async () => {
+    const businessId = getStoredBusinessId();
+    if (!businessId) return;
+    const [listRes, countRes] = await Promise.all([
+      apiGet(`/notifications/businesses/${businessId}?unreadOnly=false`),
+      apiGet(`/notifications/businesses/${businessId}/unread-count`),
+    ]);
+    if (listRes.data) setNotifications(listRes.data as any[]);
+    if (countRes.data) setUnreadCount((countRes.data as any).count ?? 0);
+  }, []);
+
+  useEffect(() => {
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 30000);
+    return () => clearInterval(interval);
+  }, [fetchNotifications]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setNotifOpen(false);
+      }
+    };
+    if (notifOpen) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [notifOpen]);
+
+  const markAllRead = async () => {
+    const businessId = getStoredBusinessId();
+    if (!businessId) return;
+    await apiPatch(`/notifications/businesses/${businessId}/read-all`, {});
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    setUnreadCount(0);
+  };
 
   const handleLogout = () => {
     clearStoredBusinessId();
@@ -228,12 +267,55 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 )}
               </div>
 
-              <button className="relative p-2 rounded-xl border border-border bg-card hover:bg-muted transition-colors">
-                <Bell className="w-5 h-5 text-muted-foreground" />
-                <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full text-[10px] font-bold flex items-center justify-center text-white" style={{ background: "hsl(var(--kf-accent1))" }}>
-                  3
-                </span>
-              </button>
+              <div className="relative" ref={notifRef}>
+                <button 
+                  onClick={() => { setNotifOpen((v) => !v); }}
+                  className="relative p-2 rounded-xl border border-border bg-card hover:bg-muted transition-colors"
+                >
+                  <Bell className="w-5 h-5 text-muted-foreground" />
+                  {unreadCount > 0 && (
+                    <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full text-[10px] font-bold flex items-center justify-center text-white" style={{ background: "hsl(var(--kf-accent1))" }}>
+                      {unreadCount > 9 ? "9+" : unreadCount}
+                    </span>
+                  )}
+                </button>
+                {notifOpen && (
+                  <div className="absolute right-0 mt-2 w-80 max-h-96 overflow-y-auto rounded-xl border border-border bg-card shadow-xl z-50">
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+                      <span className="text-sm font-semibold">Notifications</span>
+                      {unreadCount > 0 && (
+                        <button onClick={markAllRead} className="text-xs hover:underline" style={{ color: "hsl(var(--kf-accent1))" }}>
+                          Mark all read
+                        </button>
+                      )}
+                    </div>
+                    {notifications.length === 0 ? (
+                      <div className="px-4 py-8 text-center text-sm text-muted-foreground">No notifications yet</div>
+                    ) : (
+                      notifications.slice(0, 20).map((n: any) => (
+                        <div
+                          key={n.id}
+                          className={cn(
+                            "px-4 py-3 border-b border-border last:border-0 hover:bg-muted/50 transition-colors",
+                            !n.read && "bg-muted/30"
+                          )}
+                        >
+                          <div className="flex items-start gap-2">
+                            <div className={cn("w-2 h-2 rounded-full mt-1.5 flex-shrink-0", n.read ? "bg-transparent" : "")} style={!n.read ? { background: "hsl(var(--kf-accent1))" } : {}} />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium">{n.title}</p>
+                              {n.body && <p className="text-xs text-muted-foreground mt-0.5 truncate">{n.body}</p>}
+                              <p className="text-[10px] text-muted-foreground mt-1">
+                                {new Date(n.createdAt).toLocaleString()}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
 
               <button
                 onClick={handleLogout}

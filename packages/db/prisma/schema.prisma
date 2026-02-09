@@ -96,6 +96,7 @@ model Business {
   projectTemplates ProjectTemplate[]
   sites            Site[]
   autopilotTasks   AutopilotTask[]
+  notifications    Notification[]
 
   // Gmail Integration for sending quotes/invoices
   gmailEmail        String?   @map("gmail_email")
@@ -566,8 +567,8 @@ model Booking {
   contact    Contact     @relation(fields: [contactId], references: [id], onDelete: NoAction) // DATA INTEGRITY
   serviceId  String      @map("service_id")
   service    Service     @relation(fields: [serviceId], references: [id], onDelete: NoAction) // DATA INTEGRITY
-  staffId    String      @map("staff_id")
-  staff      StaffMember @relation(fields: [staffId], references: [id], onDelete: NoAction) // DATA INTEGRITY
+  staffId    String?      @map("staff_id")
+  staff      StaffMember? @relation(fields: [staffId], references: [id], onDelete: NoAction) // DATA INTEGRITY
 
   invoiceId String?  @unique @map("invoice_id")
   invoice   Invoice? @relation(fields: [invoiceId], references: [id], onUpdate: NoAction, onDelete: NoAction) // DATA INTEGRITY
@@ -759,4 +760,22 @@ model AutopilotTask {
   @@index([businessId, status])
   @@index([businessId, scheduledFor])
   @@map("autopilot_tasks")
+}
+
+// ---
+// NOTIFICATIONS
+// ---
+model Notification {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  type       String
+  title      String
+  body       String?
+  data       Json?
+  read       Boolean  @default(false)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, read, createdAt])
+  @@map("notifications")
 }
