@@ -33,9 +33,10 @@ The project is structured as a monorepo containing a Next.js 16 frontend (`apps/
 - **Invoice Tax & Discount System:** Editable tax rates, percentage or fixed discounts, and live calculation previews.
 - **Professional Invoice Template:** Branded public payment page with business logo, contact info, and line item breakdown.
 - **Invoice Feature Enhancements:** Support for multi-item invoices, product picker, inline new item creation, and status filters.
-- **Multi-Tenant System:** Ensures data isolation by associating all operations with the logged-in user's `businessId`.
+- **Multi-Tenant System:** Ensures data isolation by associating all operations with the logged-in user's `businessId`. BusinessGuard enforces ownership/membership on all identity endpoints (IDOR prevention).
 - **Commerce Module Overhaul:** Redesigned interface for product and service management (CRUD operations, descriptions, pricing).
 - **Contacts Page Overhaul:** Modular component architecture with split-view layout, reusable components, and a collapsible import panel.
+- **Settings Feature (Production-Ready):** Modular business settings (6-file split: useBusinessSettings hook + BasicInfoTab + SocialTab + BrandingTab + LogoUploader + page). Profile page uses NestJS backend API (not Supabase direct). Public business endpoints with whitelisted fields. Form validation (email, URL, phone, slug) + unsaved changes warning. Confirmation dialogs for destructive actions (team removal). Real Google Calendar OAuth connect/disconnect. ARIA accessibility (dialog roles, tablist/tab/tabpanel, aria-labels).
 
 **Core Modules:**
 - **Identity:** User authentication, team, business settings.
