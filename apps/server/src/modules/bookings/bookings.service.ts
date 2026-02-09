@@ -105,21 +105,23 @@ export class BookingsService {
     startTime: Date;
     endTime: Date;
   }) {
+    const createData: any = {
+      businessId: input.businessId,
+      serviceId: input.serviceId,
+      startTime: input.startTime,
+      endTime: input.endTime,
+    };
+    if (input.contactId) createData.contactId = input.contactId;
+    if (input.staffId) createData.staffId = input.staffId;
+
     const booking = await this.prisma.client.booking.create({
-      data: {
-        businessId: input.businessId,
-        contactId: input.contactId ?? null,
-        serviceId: input.serviceId,
-        staffId: input.staffId,
-        startTime: input.startTime,
-        endTime: input.endTime,
-      },
+      data: createData,
       include: { contact: true },
     });
 
     const payload: BookingCreatedPayload = {
       booking,
-      contact: booking.contact ?? undefined,
+      contact: (booking as any).contact ?? undefined,
       businessId: booking.businessId,
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore
@@ -241,21 +243,23 @@ export class BookingsService {
     const invoice =
       service.price > 0 ? await this.commerce.createInvoiceForService(input.businessId, contact.id, service) : null;
 
+    const bookingData: any = {
+      businessId: input.businessId,
+      contactId: contact.id,
+      serviceId: service.id,
+      startTime: start,
+      endTime: end,
+    };
+    if (input.staffId) bookingData.staffId = input.staffId;
+    if (invoice?.id) bookingData.invoiceId = invoice.id;
+
     const booking = await this.prisma.client.booking.create({
-      data: {
-        businessId: input.businessId,
-        contactId: contact.id,
-        serviceId: service.id,
-        staffId: input.staffId || undefined,
-        startTime: start,
-        endTime: end,
-        invoiceId: invoice?.id,
-      },
+      data: bookingData,
     });
 
     const payload: BookingCreatedPayload = {
       booking,
-      contact: undefined,
+      contact: contact as any,
       businessId: booking.businessId,
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore

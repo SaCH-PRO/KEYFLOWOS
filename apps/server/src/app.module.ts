@@ -20,6 +20,7 @@ import { AuthMiddleware } from './core/auth/auth.middleware';
 import { ActionsModule } from './modules/actions/actions.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { AutopilotModule } from './modules/autopilot/autopilot.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { AutopilotModule } from './modules/autopilot/autopilot.module';
     ActionsModule,
     UploadsModule,
     AutopilotModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [AppService, AuthMiddleware],
