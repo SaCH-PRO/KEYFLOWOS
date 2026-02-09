@@ -141,6 +141,7 @@ export class IdentityService {
     description?: string;
     city?: string;
     country?: string;
+    metaData?: Record<string, any>;
   }) {
     if (input.slug) {
       const existing = await this.prisma.client.business.findFirst({
@@ -149,11 +150,20 @@ export class IdentityService {
       if (existing) throw new BadRequestException('Slug is already taken');
     }
     
-    const { lastHealthCheck, ...rest } = input;
+    const { lastHealthCheck, metaData, ...rest } = input;
     const data: Record<string, unknown> = { ...rest };
     
     if (lastHealthCheck) {
       data.lastHealthCheck = new Date(lastHealthCheck);
+    }
+
+    if (metaData) {
+      const existing = await this.prisma.client.business.findUnique({
+        where: { id: businessId },
+        select: { metaData: true },
+      });
+      const existingMeta = (existing?.metaData as Record<string, any>) || {};
+      data.metaData = { ...existingMeta, ...metaData };
     }
     
     return this.prisma.client.business.update({

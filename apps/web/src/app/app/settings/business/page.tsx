@@ -1,13 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { Building2, Globe, Palette, CheckCircle2, AlertCircle } from "lucide-react";
+import { Building2, Globe, Palette, CreditCard, CheckCircle2, AlertCircle } from "lucide-react";
 import { Button, Card } from "@keyflow/ui";
 import { useBusinessSettings } from "./use-business-settings";
 import { LogoUploader } from "./logo-uploader";
 import { BasicInfoTab } from "./basic-info-tab";
 import { SocialTab } from "./social-tab";
 import { BrandingTab } from "./branding-tab";
+import { PaymentsTab } from "./payments-tab";
 
 export default function BusinessSettingsPage() {
   const {
@@ -23,7 +24,7 @@ export default function BusinessSettingsPage() {
     fileInputRef,
     logoUrl,
   } = useBusinessSettings();
-  const [activeTab, setActiveTab] = useState<"basic" | "social" | "branding">("basic");
+  const [activeTab, setActiveTab] = useState<"basic" | "social" | "branding" | "payments">("basic");
 
   if (loading) {
     return <div className="text-muted-foreground">Loading...</div>;
@@ -62,6 +63,7 @@ export default function BusinessSettingsPage() {
             { key: "basic", label: "Basic Info", icon: Building2 },
             { key: "social", label: "Social Media", icon: Globe },
             { key: "branding", label: "Branding", icon: Palette },
+            { key: "payments", label: "Payments", icon: CreditCard },
           ].map(({ key, label, icon: Icon }) => (
             <button
               key={key}
@@ -83,6 +85,7 @@ export default function BusinessSettingsPage() {
         {activeTab === "basic" && <div role="tabpanel"><BasicInfoTab form={form} setField={setField} /></div>}
         {activeTab === "social" && <div role="tabpanel"><SocialTab form={form} setField={setField} /></div>}
         {activeTab === "branding" && <div role="tabpanel"><BrandingTab form={form} setField={setField} /></div>}
+        {activeTab === "payments" && <div role="tabpanel"><PaymentsTab /></div>}
 
         <div className="flex justify-end pt-6 mt-6 border-t border-border/40">
           <Button onClick={handleSave} disabled={saving}>

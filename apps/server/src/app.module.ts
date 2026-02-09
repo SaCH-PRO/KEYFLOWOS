@@ -21,6 +21,7 @@ import { ActionsModule } from './modules/actions/actions.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { AutopilotModule } from './modules/autopilot/autopilot.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     UploadsModule,
     AutopilotModule,
     NotificationsModule,
+    PaymentsModule,
   ],
   controllers: [AppController],
   providers: [AppService, AuthMiddleware],

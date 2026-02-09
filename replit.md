@@ -32,6 +32,7 @@ The project is structured as a monorepo containing a Next.js 16 frontend (`apps/
 - **Quote-to-Invoice Workflow:** Comprehensive quote management (create, edit, delete, status flow) with tax/discount calculations, product picker, and conversion to invoices.
 - **Invoice Tax & Discount System:** Editable tax rates, percentage or fixed discounts, and live calculation previews.
 - **Professional Invoice Template:** Branded public payment page with business logo, contact info, and line item breakdown.
+- **Multi-Gateway Payment System:** WiPay (Caribbean local/regional - TTD, JMD, BBD, GYD, XCD) + PayPal (international - USD). Stripe NOT available in T&T without US LLC. PaymentsModule with PaymentsService and PaymentsController. Gateway selection on public payment page. Business settings tab for configuring payment gateway credentials (WiPay API key/account number, PayPal client ID/secret). Credentials stored in Business.metaData JSON field with fallback to process.env. WiPay uses redirect-based checkout with MD5 hash verification. PayPal uses server-side order creation/capture via @paypal/paypal-server-sdk.
 - **Invoice Feature Enhancements:** Support for multi-item invoices, product picker, inline new item creation, and status filters.
 - **Multi-Tenant System:** Ensures data isolation by associating all operations with the logged-in user's `businessId`. BusinessGuard enforces ownership/membership on all identity endpoints (IDOR prevention).
 - **Commerce Module Overhaul:** Redesigned interface for product and service management (CRUD operations, descriptions, pricing).
@@ -56,5 +57,9 @@ The project is structured as a monorepo containing a Next.js 16 frontend (`apps/
     - Google Sign-In (via Supabase OAuth)
     - Gmail Integration for Quote Sending (OAuth 2.0 with `gmail.send` scope)
     - Google Contacts OAuth Sync
+- **Payment Gateways:**
+    - WiPay (Caribbean - TTD, JMD, BBD, GYD, XCD) - redirect-based checkout
+    - PayPal (International - USD) - @paypal/paypal-server-sdk v2.2.0
+    - Stripe NOT available in T&T without US LLC (deferred)
 - **Package Manager:** pnpm
 - **Storage:** App Storage (for logo uploads)
