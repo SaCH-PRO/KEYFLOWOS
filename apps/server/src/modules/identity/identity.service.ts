@@ -247,7 +247,7 @@ export class IdentityService {
       }
     }
 
-    const desiredName = input.username ?? input.name ?? input.email;
+    const desiredName = input.username ?? input.name;
 
     const existingUser = await this.prisma.client.user.findUnique({ where: { id: input.userId } });
     let user;
@@ -258,16 +258,15 @@ export class IdentityService {
     if (input.avatarUrl) userData.avatarUrl = input.avatarUrl;
 
     if (existingUser) {
-      const needsUpdate = existingUser.name !== desiredName ||
-        (input.firstName && existingUser.firstName !== input.firstName) ||
-        (input.lastName && existingUser.lastName !== input.lastName) ||
-        (input.phone && existingUser.phone !== input.phone) ||
-        (input.avatarUrl && existingUser.avatarUrl !== input.avatarUrl);
+      const updateData: Record<string, unknown> = { ...userData };
+      if (desiredName && existingUser.name !== desiredName) {
+        updateData.name = desiredName;
+      }
 
-      if (needsUpdate) {
+      if (Object.keys(updateData).length > 0) {
         user = await this.prisma.client.user.update({
           where: { id: input.userId },
-          data: { name: desiredName, ...userData },
+          data: updateData,
         });
       } else {
         user = existingUser;
@@ -277,7 +276,7 @@ export class IdentityService {
         data: {
           id: input.userId,
           email: input.email,
-          name: desiredName,
+          name: desiredName ?? input.email,
           role: 'USER',
           ...userData,
         },
