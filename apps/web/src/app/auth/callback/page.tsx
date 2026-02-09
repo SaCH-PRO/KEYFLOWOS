@@ -44,19 +44,34 @@ export default function AuthCallback() {
         
         const userInfo = await userInfoRes.json();
         const email = userInfo.email;
-        const name = userInfo.user_metadata?.full_name || userInfo.user_metadata?.name || "";
+        const fullName = userInfo.user_metadata?.full_name || userInfo.user_metadata?.name || "";
+        const avatarUrl = userInfo.user_metadata?.avatar_url || userInfo.user_metadata?.picture || "";
+        
+        const nameParts = fullName.split(" ");
+        const firstName = userInfo.user_metadata?.given_name || nameParts[0] || "";
+        const lastName = userInfo.user_metadata?.family_name || nameParts.slice(1).join(" ") || "";
         
         if (email) {
           window.localStorage.setItem("kf_email", email);
         }
 
+        const profileDraft = { firstName, lastName, username: "", company: "", phone: "" };
+        window.localStorage.setItem("kf_profile_draft", JSON.stringify(profileDraft));
+
         const bootstrap = await bootstrapIdentity({
           email,
-          name,
+          name: fullName,
+          firstName,
+          lastName,
+          avatarUrl,
         });
         
         if (bootstrap.data?.business?.id) {
           window.localStorage.setItem("kf_business_id", bootstrap.data.business.id);
+          if (bootstrap.data.user) {
+            window.localStorage.setItem("kf_user_cache", JSON.stringify(bootstrap.data.user));
+          }
+          window.localStorage.setItem("kf_business_cache", JSON.stringify(bootstrap.data.business));
         } else if (bootstrap.error) {
           throw new Error(bootstrap.error);
         } else {
@@ -76,28 +91,45 @@ export default function AuthCallback() {
 
   if (status === "error") {
     return (
-      <div className="landing">
-        <h1 className="landing-title text-3xl md:text-4xl font-semibold">Authentication Error</h1>
-        <div className="w-full max-w-md mx-auto bg-slate-900/40 border border-primary/30 rounded-3xl p-6 flex flex-col gap-4 text-center">
-          <p className="text-amber-400 text-sm">{error}</p>
-          <button
-            onClick={() => router.push("/auth/login")}
-            className="landing-button w-full"
-          >
-            Back to Sign In
-          </button>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "hsl(20 14% 4%)" }}>
+        <div className="w-full max-w-md mx-auto px-4 text-center">
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-4" style={{ background: "linear-gradient(135deg, hsl(24 95% 53%), hsl(173 58% 39%))" }}>
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2L2 7l10 5 10-5-10-5z" />
+              <path d="M2 17l10 5 10-5" />
+              <path d="M2 12l10 5 10-5" />
+            </svg>
+          </div>
+          <h1 className="text-2xl font-bold mb-2" style={{ color: "hsl(30 20% 98%)" }}>Authentication Error</h1>
+          <div className="rounded-2xl p-6 flex flex-col gap-4" style={{ background: "hsl(20 14% 7% / 0.9)", border: "1px solid hsl(20 10% 15%)" }}>
+            <p className="text-sm" style={{ color: "hsl(0 84% 70%)" }}>{error}</p>
+            <button
+              onClick={() => router.push("/auth/login")}
+              className="w-full py-3 rounded-xl font-semibold text-sm text-white transition-all hover:brightness-110"
+              style={{ background: "linear-gradient(135deg, hsl(24 95% 53%), hsl(24 95% 45%))" }}
+            >
+              Back to Sign In
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="landing">
-      <h1 className="landing-title text-3xl md:text-4xl font-semibold">Signing you in...</h1>
-      <div className="w-full max-w-md mx-auto bg-slate-900/40 border border-primary/30 rounded-3xl p-6 flex flex-col gap-4 text-center">
-        <div className="flex items-center justify-center gap-2">
-          <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-          <span className="text-muted-foreground">Setting up your workspace...</span>
+    <div className="min-h-screen flex items-center justify-center" style={{ background: "hsl(20 14% 4%)" }}>
+      <div className="w-full max-w-md mx-auto px-4 text-center">
+        <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-6" style={{ background: "linear-gradient(135deg, hsl(24 95% 53%), hsl(173 58% 39%))" }}>
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2L2 7l10 5 10-5-10-5z" />
+            <path d="M2 17l10 5 10-5" />
+            <path d="M2 12l10 5 10-5" />
+          </svg>
+        </div>
+        <h1 className="text-2xl font-bold mb-2" style={{ color: "hsl(30 20% 98%)" }}>Signing you in...</h1>
+        <div className="flex items-center justify-center gap-2 mt-4">
+          <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: "hsl(24 95% 53%)", borderTopColor: "transparent" }} />
+          <span className="text-sm" style={{ color: "hsl(30 10% 55%)" }}>Setting up your workspace...</span>
         </div>
       </div>
     </div>

@@ -239,8 +239,8 @@ export default function OnboardingPage() {
     await updateBusiness({
       businessId,
       autopilotStage: "LAUNCHING",
+      onboardingComplete: true,
       metaData: { 
-        onboardingComplete: true, 
         onboardingCompletedAt: new Date().toISOString() 
       },
     });
@@ -267,23 +267,29 @@ export default function OnboardingPage() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin h-8 w-8 border-2 border-orange-500 border-t-transparent rounded-full" />
+        <div
+          className="animate-spin h-8 w-8 border-2 border-t-transparent rounded-full"
+          style={{ borderColor: "hsl(var(--kf-accent1))", borderTopColor: "transparent" }}
+        />
       </div>
     );
   }
 
   if (phase === "autopilot") {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-background via-background to-orange-950/10 p-4 md:p-8">
+      <div className="min-h-screen bg-gradient-to-br from-background via-background to-background p-4 md:p-8">
         <div className="max-w-2xl mx-auto">
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             className="text-center mb-8"
           >
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-orange-500/10 border border-orange-500/20 mb-4">
-              <Bot className="w-4 h-4 text-orange-500" />
-              <span className="text-sm font-medium text-orange-500">Business Autopilot</span>
+            <div
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full border mb-4"
+              style={{ background: "hsl(var(--kf-accent1) / 0.1)", borderColor: "hsl(var(--kf-accent1) / 0.2)" }}
+            >
+              <Bot className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+              <span className="text-sm font-medium" style={{ color: "hsl(var(--kf-accent1))" }}>Business Autopilot</span>
             </div>
             <h1 className="text-3xl md:text-4xl font-bold mb-2">Tell Us About Your Business</h1>
             <p className="text-muted-foreground">
@@ -305,8 +311,11 @@ export default function OnboardingPage() {
                 value={businessIntent}
                 onChange={(e) => setBusinessIntent(e.target.value)}
                 placeholder="e.g., I want to start a mobile car wash service for busy professionals..."
-                className="w-full px-4 py-3 rounded-xl bg-muted/50 border border-border focus:border-orange-500 focus:ring-1 focus:ring-orange-500 outline-none transition-all resize-none"
+                className="w-full px-4 py-3 rounded-xl bg-muted/50 border border-border focus:ring-1 outline-none transition-all resize-none"
+                style={{ "--tw-ring-color": "hsl(var(--kf-accent1))" } as React.CSSProperties}
                 rows={3}
+                onFocus={(e) => { e.currentTarget.style.borderColor = "hsl(var(--kf-accent1))"; }}
+                onBlur={(e) => { e.currentTarget.style.borderColor = ""; }}
               />
               <p className="text-xs text-muted-foreground mt-1">
                 Be specific - KeyFlowOS will auto-configure your business based on this
@@ -322,7 +331,10 @@ export default function OnboardingPage() {
                 type="text"
                 value={location}
                 onChange={(e) => setLocation(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl bg-muted/50 border border-border focus:border-orange-500 focus:ring-1 focus:ring-orange-500 outline-none transition-all"
+                className="w-full px-4 py-3 rounded-xl bg-muted/50 border border-border focus:ring-1 outline-none transition-all"
+                style={{ "--tw-ring-color": "hsl(var(--kf-accent1))" } as React.CSSProperties}
+                onFocus={(e) => { e.currentTarget.style.borderColor = "hsl(var(--kf-accent1))"; }}
+                onBlur={(e) => { e.currentTarget.style.borderColor = ""; }}
               />
             </div>
 
@@ -342,9 +354,10 @@ export default function OnboardingPage() {
                     onClick={() => setBudgetRange(opt.id)}
                     className={`p-3 rounded-xl border text-center transition-all ${
                       budgetRange === opt.id
-                        ? "border-orange-500 bg-orange-500/10"
+                        ? ""
                         : "border-border hover:border-border/80"
                     }`}
+                    style={budgetRange === opt.id ? { borderColor: "hsl(var(--kf-accent1))", background: "hsl(var(--kf-accent1) / 0.1)" } : undefined}
                   >
                     <span className="font-medium block">{opt.label}</span>
                     <span className="text-xs text-muted-foreground">{opt.desc}</span>
@@ -369,9 +382,10 @@ export default function OnboardingPage() {
                     onClick={() => setTimeCommitment(opt.id)}
                     className={`p-3 rounded-xl border text-center transition-all ${
                       timeCommitment === opt.id
-                        ? "border-orange-500 bg-orange-500/10"
+                        ? ""
                         : "border-border hover:border-border/80"
                     }`}
+                    style={timeCommitment === opt.id ? { borderColor: "hsl(var(--kf-accent1))", background: "hsl(var(--kf-accent1) / 0.1)" } : undefined}
                   >
                     <span className="font-medium block">{opt.label}</span>
                     <span className="text-xs text-muted-foreground">{opt.desc}</span>
@@ -396,9 +410,10 @@ export default function OnboardingPage() {
                     onClick={() => setTeamSize(opt.id)}
                     className={`p-3 rounded-xl border text-center transition-all ${
                       teamSize === opt.id
-                        ? "border-orange-500 bg-orange-500/10"
+                        ? ""
                         : "border-border hover:border-border/80"
                     }`}
+                    style={teamSize === opt.id ? { borderColor: "hsl(var(--kf-accent1))", background: "hsl(var(--kf-accent1) / 0.1)" } : undefined}
                   >
                     <opt.icon className="w-5 h-5 mx-auto mb-1" />
                     <span className="font-medium text-sm block">{opt.label}</span>
@@ -411,9 +426,10 @@ export default function OnboardingPage() {
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
-                className="p-4 rounded-xl bg-teal-500/10 border border-teal-500/20"
+                className="p-4 rounded-xl border"
+                style={{ background: "hsl(var(--kf-accent2) / 0.1)", borderColor: "hsl(var(--kf-accent2) / 0.2)" }}
               >
-                <p className="text-sm text-teal-400 mb-2">
+                <p className="text-sm mb-2" style={{ color: "hsl(var(--kf-accent2))" }}>
                   <Sparkles className="w-4 h-4 inline mr-1" />
                   KeyFlowOS detected: <strong>{inferIndustry(businessIntent)}</strong>
                 </p>
@@ -447,7 +463,7 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-orange-950/10 p-4 md:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-background p-4 md:p-8">
       <div className="max-w-3xl mx-auto">
         <motion.div
           initial={{ opacity: 0, y: -20 }}
@@ -471,7 +487,8 @@ export default function OnboardingPage() {
           </div>
           <div className="h-2 rounded-full bg-muted overflow-hidden">
             <motion.div
-              className="h-full rounded-full bg-gradient-to-r from-orange-500 to-amber-500"
+              className="h-full rounded-full"
+              style={{ background: "linear-gradient(to right, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
               initial={{ width: 0 }}
               animate={{ width: `${progress * 100}%` }}
               transition={{ duration: 0.5 }}
@@ -491,11 +508,12 @@ export default function OnboardingPage() {
                 onClick={() => setCurrentStep(index)}
                 className={`flex items-center gap-2 px-4 py-2 rounded-xl border transition-all whitespace-nowrap ${
                   isCurrent
-                    ? "border-orange-500 bg-orange-500/10 text-orange-500"
+                    ? ""
                     : isCompleted
                     ? "border-green-500/50 bg-green-500/10 text-green-500"
                     : "border-border text-muted-foreground hover:border-border/80"
                 }`}
+                style={isCurrent ? { borderColor: "hsl(var(--kf-accent1))", background: "hsl(var(--kf-accent1) / 0.1)", color: "hsl(var(--kf-accent1))" } : undefined}
               >
                 {isCompleted ? (
                   <Check className="w-4 h-4" />
@@ -520,7 +538,10 @@ export default function OnboardingPage() {
             {currentStepData && (
               <>
                 <div className="flex items-start gap-4 mb-6">
-                  <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center flex-shrink-0">
+                  <div
+                    className="h-12 w-12 rounded-xl flex items-center justify-center flex-shrink-0"
+                    style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
+                  >
                     <currentStepData.icon className="w-6 h-6 text-white" />
                   </div>
                   <div>
@@ -535,9 +556,12 @@ export default function OnboardingPage() {
                     <span className="text-green-500 font-medium">This step is complete!</span>
                   </div>
                 ) : (
-                  <div className="flex items-center gap-3 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 mb-6">
-                    <Sparkles className="w-5 h-5 text-amber-500" />
-                    <span className="text-amber-500 font-medium">Complete this step to earn XP!</span>
+                  <div
+                    className="flex items-center gap-3 p-4 rounded-xl border mb-6"
+                    style={{ background: "hsl(var(--kf-accent2) / 0.1)", borderColor: "hsl(var(--kf-accent2) / 0.2)" }}
+                  >
+                    <Sparkles className="w-5 h-5" style={{ color: "hsl(var(--kf-accent2))" }} />
+                    <span className="font-medium" style={{ color: "hsl(var(--kf-accent2))" }}>Complete this step to earn XP!</span>
                   </div>
                 )}
 
@@ -576,7 +600,8 @@ export default function OnboardingPage() {
           {currentStep === DETAILED_STEPS.length - 1 ? (
             <button
               onClick={handleLaunchAutopilot}
-              className="inline-flex items-center gap-2 px-6 py-2 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-white font-medium hover:opacity-90 transition-opacity"
+              className="inline-flex items-center gap-2 px-6 py-2 rounded-xl text-white font-medium hover:opacity-90 transition-opacity"
+              style={{ background: "linear-gradient(to right, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
             >
               <Trophy className="w-4 h-4" />
               Launch Autopilot

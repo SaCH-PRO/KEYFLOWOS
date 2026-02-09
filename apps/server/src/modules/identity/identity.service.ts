@@ -73,6 +73,11 @@ export class IdentityService {
     lastHealthCheck?: string;
     storeEnabled?: boolean;
     businessHours?: Record<string, { open: string; close: string; closed: boolean }>;
+    onboardingComplete?: boolean;
+    tagline?: string;
+    description?: string;
+    city?: string;
+    country?: string;
   }) {
     if (input.slug) {
       const existing = await this.prisma.client.business.findFirst({
@@ -97,7 +102,7 @@ export class IdentityService {
   async listTeamMembers(businessId: string) {
     return this.prisma.client.membership.findMany({
       where: { businessId },
-      include: { user: { select: { id: true, email: true, name: true } } },
+      include: { user: { select: { id: true, email: true, name: true, firstName: true, lastName: true } } },
     });
   }
 
@@ -114,7 +119,7 @@ export class IdentityService {
     if (existing) throw new BadRequestException('User is already a team member');
     return this.prisma.client.membership.create({
       data: { userId: user.id, businessId, role },
-      include: { user: { select: { id: true, email: true, name: true } } },
+      include: { user: { select: { id: true, email: true, name: true, firstName: true, lastName: true } } },
     });
   }
 
@@ -145,12 +150,30 @@ export class IdentityService {
     return this.prisma.client.membership.update({
       where: { id: membershipId },
       data: { role },
-      include: { user: { select: { id: true, email: true, name: true } } },
+      include: { user: { select: { id: true, email: true, name: true, firstName: true, lastName: true } } },
     });
   }
 
-  async bootstrapUser(input: { userId: string; email: string; username?: string; name?: string }) {
-    // Enforce unique username (stored in User.name) when provided.
+  async getUser(userId: string) {
+    const user = await this.prisma.client.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, name: true, firstName: true, lastName: true, phone: true, avatarUrl: true, role: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    return user;
+  }
+
+  async bootstrapUser(input: {
+    userId: string;
+    email: string;
+    username?: string;
+    name?: string;
+    firstName?: string;
+    lastName?: string;
+    phone?: string;
+    avatarUrl?: string;
+    company?: string;
+  }) {
     if (input.username) {
       const usernameInUse = await this.prisma.client.user.findFirst({
         where: { name: input.username, NOT: { id: input.userId } },
@@ -163,14 +186,25 @@ export class IdentityService {
 
     const desiredName = input.username ?? input.name ?? input.email;
 
-    // Upsert user record based on Supabase user id.
     const existingUser = await this.prisma.client.user.findUnique({ where: { id: input.userId } });
     let user;
+    const userData: Record<string, unknown> = {};
+    if (input.firstName) userData.firstName = input.firstName;
+    if (input.lastName) userData.lastName = input.lastName;
+    if (input.phone) userData.phone = input.phone;
+    if (input.avatarUrl) userData.avatarUrl = input.avatarUrl;
+
     if (existingUser) {
-      if (existingUser.name !== desiredName) {
+      const needsUpdate = existingUser.name !== desiredName ||
+        (input.firstName && existingUser.firstName !== input.firstName) ||
+        (input.lastName && existingUser.lastName !== input.lastName) ||
+        (input.phone && existingUser.phone !== input.phone) ||
+        (input.avatarUrl && existingUser.avatarUrl !== input.avatarUrl);
+
+      if (needsUpdate) {
         user = await this.prisma.client.user.update({
           where: { id: input.userId },
-          data: { name: desiredName },
+          data: { name: desiredName, ...userData },
         });
       } else {
         user = existingUser;
@@ -182,26 +216,27 @@ export class IdentityService {
           email: input.email,
           name: desiredName,
           role: 'USER',
+          ...userData,
         },
       });
     }
 
-    // Ensure the user has a personal business (workspace).
     const existingBusiness = await this.prisma.client.business.findFirst({
       where: { ownerId: user.id, deletedAt: null },
       orderBy: { createdAt: 'asc' },
     });
 
+    const businessName = input.company || `${input.firstName || desiredName}'s Workspace`;
+
     const business =
       existingBusiness ||
       (await this.prisma.client.business.create({
         data: {
-          name: `${desiredName}'s Workspace`,
+          name: businessName,
           ownerId: user.id,
         },
       }));
 
-    // Link membership (owner).
     await this.prisma.client.membership.upsert({
       where: {
         userId_businessId: { userId: user.id, businessId: business.id },

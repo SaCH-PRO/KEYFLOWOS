@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { CommandPalette } from "@/components/command-palette";
-import { clearStoredBusinessId, getStoredBusinessId } from "@/lib/workspace";
+import { clearStoredBusinessId, getStoredBusinessId, getCachedUser, getUserDisplayName, getUserInitials, refreshWorkspace, getCachedBusiness } from "@/lib/workspace";
 import { apiGet, apiPatch } from "@/lib/api";
 import { useThemeColors } from "@/lib/theme-context";
 import {
@@ -61,20 +61,41 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifOpen, setNotifOpen] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
+  const [displayName, setDisplayName] = useState("");
+  const [initials, setInitials] = useState("KF");
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [onboardingChecked, setOnboardingChecked] = useState(false);
 
   useEffect(() => {
-    const loadBrandColors = async () => {
-      const businessId = getStoredBusinessId();
-      if (!businessId) return;
-      const res = await apiGet(`/identity/businesses/${businessId}`);
-      if (res.data) {
-        const data = res.data as { primaryColor?: string; secondaryColor?: string };
-        if (data.primaryColor) setAccent1(data.primaryColor);
-        if (data.secondaryColor) setAccent2(data.secondaryColor);
+    const init = async () => {
+      await refreshWorkspace();
+      const user = getCachedUser();
+      const business = getCachedBusiness();
+      
+      if (user) {
+        setDisplayName(getUserDisplayName());
+        setInitials(getUserInitials());
+        if (user.avatarUrl) setAvatarUrl(user.avatarUrl);
       }
+
+      const businessId = getStoredBusinessId();
+      if (businessId) {
+        const res = await apiGet(`/identity/businesses/${businessId}`);
+        if (res.data) {
+          const data = res.data as { primaryColor?: string; secondaryColor?: string; onboardingComplete?: boolean };
+          if (data.primaryColor) setAccent1(data.primaryColor);
+          if (data.secondaryColor) setAccent2(data.secondaryColor);
+          
+          if (data.onboardingComplete === false && !pathname.startsWith("/app/onboarding")) {
+            router.push("/app/onboarding");
+            return;
+          }
+        }
+      }
+      setOnboardingChecked(true);
     };
-    loadBrandColors();
-  }, [setAccent1, setAccent2]);
+    init();
+  }, [setAccent1, setAccent2, pathname, router]);
 
   const fetchNotifications = useCallback(async () => {
     const businessId = getStoredBusinessId();
@@ -325,11 +346,24 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <span>Log Out</span>
               </button>
 
-              <div 
-                className="h-10 w-10 rounded-xl flex items-center justify-center text-sm font-bold text-white"
-                style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
-              >
-                KF
+              <div className="flex items-center gap-2">
+                {displayName && (
+                  <span className="hidden sm:inline text-sm font-medium text-foreground">{displayName}</span>
+                )}
+                {avatarUrl ? (
+                  <img 
+                    src={avatarUrl} 
+                    alt={displayName || "User"} 
+                    className="h-10 w-10 rounded-xl object-cover"
+                  />
+                ) : (
+                  <div 
+                    className="h-10 w-10 rounded-xl flex items-center justify-center text-sm font-bold text-white"
+                    style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
+                  >
+                    {initials}
+                  </div>
+                )}
               </div>
             </div>
           </header>

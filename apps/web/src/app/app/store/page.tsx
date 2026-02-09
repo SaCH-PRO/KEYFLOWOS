@@ -609,7 +609,7 @@ export default function StorePage() {
             <div className="space-y-4">
               {/* ─── Business Hours ─── */}
               <div className="rounded-2xl border border-secondary/20 overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 border-b border-secondary/15" style={{ backgroundColor: "rgba(20,184,166,0.05)" }}>
+                <div className="flex items-center justify-between px-5 py-4 border-b border-secondary/15" style={{ backgroundColor: "hsla(var(--kf-accent2), 0.05)" }}>
                   <div className="flex items-center gap-2.5">
                     <Clock className="w-5 h-5 text-secondary" />
                     <div>
@@ -652,9 +652,9 @@ export default function StorePage() {
 
               {/* ─── Inline Store Items Manager ─── */}
               <div className="rounded-2xl border border-primary/20 overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 border-b border-primary/15" style={{ backgroundColor: "rgba(249,115,22,0.05)" }}>
+                <div className="flex items-center justify-between px-5 py-4 border-b border-primary/15" style={{ backgroundColor: "hsla(var(--kf-accent1), 0.05)" }}>
                   <div className="flex items-center gap-2.5">
-                    <Store className="w-5 h-5" style={{ color: "#F97316" }} />
+                    <Store className="w-5 h-5" style={{ color: "hsl(var(--kf-accent1))" }} />
                     <div>
                       <h3 className="text-sm font-bold text-foreground">Store Items</h3>
                       <p className="text-[11px] text-muted-foreground mt-0.5">Toggle items from Commerce to display in your online store</p>
@@ -674,7 +674,7 @@ export default function StorePage() {
                         onClick={() => handleSelectAll()}
                         disabled={commerceProducts.every((p) => services.some((s) => s.name === p.name))}
                         className="text-xs font-medium hover:opacity-80 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                        style={{ color: "#F97316" }}
+                        style={{ color: "hsl(var(--kf-accent1))" }}
                       >
                         Select All
                       </button>
@@ -692,7 +692,7 @@ export default function StorePage() {
                         <div
                           key={p.id}
                           className={`relative w-full flex items-center gap-3 rounded-xl px-4 py-3.5 text-left text-sm border cursor-pointer transition-all ${isProcessing ? "opacity-60 pointer-events-none" : ""} ${isOnStore ? "border-primary/30 hover:border-primary/50" : "border-border/40 hover:border-border/60"}`}
-                          style={{ backgroundColor: isOnStore ? "rgba(249,115,22,0.08)" : "rgba(255,255,255,0.02)" }}
+                          style={{ backgroundColor: isOnStore ? "hsla(var(--kf-accent1), 0.08)" : "rgba(255,255,255,0.02)" }}
                           role="button"
                           tabIndex={0}
                           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (!isProcessing) handleToggleStoreItem(p); } }}
@@ -719,20 +719,20 @@ export default function StorePage() {
                               </button>
                             </div>
                           )}
-                          <div className={`h-5 w-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${isOnStore ? "border-primary" : "border-muted-foreground/30"}`} style={isOnStore ? { backgroundColor: "#F97316", borderColor: "#F97316" } : {}}>
+                          <div className={`h-5 w-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${isOnStore ? "border-primary" : "border-muted-foreground/30"}`} style={isOnStore ? { backgroundColor: "hsl(var(--kf-accent1))", borderColor: "hsl(var(--kf-accent1))" } : {}}>
                             {isProcessing ? (
                               <div className="w-3 h-3 border-2 border-primary/40 border-t-primary rounded-full animate-spin" />
                             ) : isOnStore ? (
                               <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
                             ) : null}
                           </div>
-                          <div className="h-9 w-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: isOnStore ? "rgba(249,115,22,0.15)" : "rgba(255,255,255,0.05)", border: isOnStore ? "1px solid rgba(249,115,22,0.3)" : "1px solid rgba(255,255,255,0.1)" }}>
-                            <Briefcase className="w-4 h-4" style={{ color: isOnStore ? "#F97316" : "rgba(255,255,255,0.4)" }} />
+                          <div className="h-9 w-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: isOnStore ? "hsla(var(--kf-accent1), 0.15)" : "rgba(255,255,255,0.05)", border: isOnStore ? "1px solid hsla(var(--kf-accent1), 0.3)" : "1px solid rgba(255,255,255,0.1)" }}>
+                            <Briefcase className="w-4 h-4" style={{ color: isOnStore ? "hsl(var(--kf-accent1))" : "rgba(255,255,255,0.4)" }} />
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
                               <span className={`font-medium truncate ${isOnStore ? "text-foreground" : "text-muted-foreground"}`}>{p.name}</span>
-                              <span className="text-[10px] px-1.5 py-0.5 rounded-full uppercase flex-shrink-0" style={{ border: "1px solid rgba(249,115,22,0.2)", color: "rgba(249,115,22,0.7)" }}>{p.category}</span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full uppercase flex-shrink-0" style={{ border: "1px solid hsla(var(--kf-accent1), 0.2)", color: "hsla(var(--kf-accent1), 0.7)" }}>{p.category}</span>
                             </div>
                             <div className="flex items-center gap-1.5 mt-0.5">
                               <span className={`text-[11px] font-medium ${isOnStore ? "text-emerald-400" : "text-muted-foreground/60"}`}>
@@ -741,7 +741,7 @@ export default function StorePage() {
                               {p.description && <span className="text-[10px] text-muted-foreground/40 truncate max-w-[200px]">· {p.description}</span>}
                             </div>
                           </div>
-                          <span className="text-xs font-semibold flex-shrink-0" style={{ color: "#F97316" }}>{formatPrice(p.price, p.currency)}</span>
+                          <span className="text-xs font-semibold flex-shrink-0" style={{ color: "hsl(var(--kf-accent1))" }}>{formatPrice(p.price, p.currency)}</span>
                         </div>
                       );
                     })}
@@ -754,9 +754,9 @@ export default function StorePage() {
                   </div>
                 ) : (
                   <div className="p-8 text-center space-y-3">
-                    <Briefcase className="w-10 h-10 mx-auto" style={{ color: "rgba(249,115,22,0.3)" }} />
+                    <Briefcase className="w-10 h-10 mx-auto" style={{ color: "hsla(var(--kf-accent1), 0.3)" }} />
                     <p className="text-sm text-muted-foreground">No items in Commerce yet.</p>
-                    <p className="text-xs text-muted-foreground">Add products in the <span className="font-medium" style={{ color: "#F97316" }}>Commerce</span> page first, then come back here to add them to your store.</p>
+                    <p className="text-xs text-muted-foreground">Add products in the <span className="font-medium" style={{ color: "hsl(var(--kf-accent1))" }}>Commerce</span> page first, then come back here to add them to your store.</p>
                   </div>
                 )}
               </div>
