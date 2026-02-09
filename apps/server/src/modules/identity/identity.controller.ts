@@ -3,6 +3,7 @@ import { Request } from 'express';
 import { IdentityService } from './identity.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
+import { BusinessGuard } from '../../core/auth/business.guard';
 import { CreateBusinessDto } from './dto/create-business.dto';
 import { BootstrapDto } from './dto/bootstrap.dto';
 
@@ -19,13 +20,21 @@ export class IdentityController {
   }
 
   @UseGuards(AuthGuard)
+  @Patch('me')
+  async updateMe(@Req() req: Request, @Body() body: { firstName?: string; lastName?: string; phone?: string; name?: string }) {
+    const user = (req as any).user as { id?: string } | undefined;
+    if (!user?.id) throw new UnauthorizedException('Missing authenticated user');
+    return this.identity.updateUser(user.id, body);
+  }
+
+  @UseGuards(AuthGuard)
   @Get('businesses')
   listBusinesses(@Req() req: Request) {
     const user = (req as any).user as { id?: string } | undefined;
     return this.identity.listBusinesses(user?.id);
   }
 
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId')
   getBusiness(@Param('businessId') businessId: string) {
     return this.identity.getBusiness(businessId);
@@ -33,7 +42,7 @@ export class IdentityController {
 
   @Get('businesses/slug/:slug')
   getBusinessBySlug(@Param('slug') slug: string) {
-    return this.identity.getBusinessBySlug(slug);
+    return this.identity.getPublicBusiness(slug);
   }
 
   @Get('businesses/slug-check/:slug')
@@ -44,7 +53,7 @@ export class IdentityController {
 
   @Get('businesses/public/:businessId')
   getPublicBusiness(@Param('businessId') businessId: string) {
-    return this.identity.getBusiness(businessId);
+    return this.identity.getPublicBusinessById(businessId);
   }
 
   @UseGuards(AuthGuard)
@@ -57,7 +66,7 @@ export class IdentityController {
     });
   }
 
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, BusinessGuard)
   @Patch('businesses/:businessId')
   updateBusiness(
     @Param('businessId') businessId: string,
@@ -96,13 +105,13 @@ export class IdentityController {
     return this.identity.updateBusiness(businessId, body);
   }
 
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/team')
   listTeamMembers(@Param('businessId') businessId: string) {
     return this.identity.listTeamMembers(businessId);
   }
 
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/team')
   inviteTeamMember(
     @Param('businessId') businessId: string,
@@ -113,7 +122,7 @@ export class IdentityController {
     return this.identity.inviteTeamMember(businessId, body.email, body.role, user?.id ?? '');
   }
 
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, BusinessGuard)
   @Patch('businesses/:businessId/team/:membershipId')
   updateMemberRole(
     @Param('businessId') businessId: string,
@@ -123,7 +132,7 @@ export class IdentityController {
     return this.identity.updateMemberRole(businessId, membershipId, body.role);
   }
 
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, BusinessGuard)
   @Delete('businesses/:businessId/team/:membershipId')
   removeTeamMember(
     @Param('businessId') businessId: string,
