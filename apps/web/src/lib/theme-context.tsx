@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
 
 type ThemeColors = {
   accent1: string;
@@ -69,7 +69,6 @@ function getInitialColors(): ThemeColors {
       }
     }
   } catch {
-    // Ignore parse errors
   }
   return DEFAULT_COLORS;
 }
@@ -87,23 +86,29 @@ export function ThemeColorsProvider({ children }: { children: ReactNode }) {
     applyColorsToDOM(initialColors);
   }, []);
 
-  const setAccent1 = (color: string) => {
-    const newColors = { ...colors, accent1: color };
-    setColors(newColors);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(newColors));
-  };
+  const setAccent1 = useCallback((color: string) => {
+    setColors(prev => {
+      if (prev.accent1 === color) return prev;
+      const newColors = { ...prev, accent1: color };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(newColors));
+      return newColors;
+    });
+  }, []);
 
-  const setAccent2 = (color: string) => {
-    const newColors = { ...colors, accent2: color };
-    setColors(newColors);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(newColors));
-  };
+  const setAccent2 = useCallback((color: string) => {
+    setColors(prev => {
+      if (prev.accent2 === color) return prev;
+      const newColors = { ...prev, accent2: color };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(newColors));
+      return newColors;
+    });
+  }, []);
 
-  const resetToDefaults = () => {
+  const resetToDefaults = useCallback(() => {
     setColors(DEFAULT_COLORS);
     localStorage.removeItem(STORAGE_KEY);
     applyColorsToDOM(DEFAULT_COLORS);
-  };
+  }, []);
 
   return (
     <ThemeColorsContext.Provider value={{ colors, setAccent1, setAccent2, resetToDefaults }}>
