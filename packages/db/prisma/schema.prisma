@@ -13,10 +13,14 @@ datasource db {
 // MODULE 1: IDENTITY & ACCOUNTS
 // ---
 model User {
-  id    String @id @default(cuid()) // Corresponds to Supabase auth.users.id
-  email String @unique
-  name  String?
-  role  String @default("USER") // USER | SUPER_ADMIN
+  id        String  @id @default(cuid()) // Corresponds to Supabase auth.users.id
+  email     String  @unique
+  name      String?
+  firstName String? @map("first_name")
+  lastName  String? @map("last_name")
+  phone     String?
+  avatarUrl String? @map("avatar_url")
+  role      String  @default("USER") // USER | SUPER_ADMIN
 
   businesses Membership[]
   sessions   Session[]
@@ -112,7 +116,8 @@ model Business {
   calendarId           String?   @map("calendar_id")
 
   // Store Settings
-  storeEnabled Boolean @default(true) @map("store_enabled")
+  storeEnabled      Boolean @default(true) @map("store_enabled")
+  onboardingComplete Boolean @default(false) @map("onboarding_complete")
 
   // Business Hours (JSON: { "mon": { "open": "09:00", "close": "17:00", "closed": false }, ... })
   businessHours Json? @map("business_hours")

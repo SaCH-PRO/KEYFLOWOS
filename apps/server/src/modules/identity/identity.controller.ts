@@ -11,6 +11,14 @@ export class IdentityController {
   constructor(@Inject(IdentityService) private readonly identity: IdentityService) {}
 
   @UseGuards(AuthGuard)
+  @Get('me')
+  async getMe(@Req() req: Request) {
+    const user = (req as any).user as { id?: string } | undefined;
+    if (!user?.id) throw new UnauthorizedException('Missing authenticated user');
+    return this.identity.getUser(user.id);
+  }
+
+  @UseGuards(AuthGuard)
   @Get('businesses')
   listBusinesses(@Req() req: Request) {
     const user = (req as any).user as { id?: string } | undefined;
@@ -78,6 +86,11 @@ export class IdentityController {
       lastHealthCheck?: string;
       storeEnabled?: boolean;
       businessHours?: Record<string, { open: string; close: string; closed: boolean }>;
+      onboardingComplete?: boolean;
+      tagline?: string;
+      description?: string;
+      city?: string;
+      country?: string;
     },
   ) {
     return this.identity.updateBusiness(businessId, body);
@@ -135,6 +148,11 @@ export class IdentityController {
       email: body.email ?? user.email,
       username: body.username,
       name: body.name,
+      firstName: body.firstName,
+      lastName: body.lastName,
+      phone: body.phone,
+      avatarUrl: body.avatarUrl,
+      company: body.company,
     });
   }
 }

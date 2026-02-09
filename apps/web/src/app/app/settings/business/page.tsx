@@ -48,6 +48,10 @@ type Business = {
   primaryColor: string | null;
   secondaryColor: string | null;
   defaultTaxRate: number | null;
+  tagline: string | null;
+  description: string | null;
+  city: string | null;
+  country: string | null;
 };
 
 const TIMEZONES = [
@@ -84,6 +88,10 @@ type FormState = {
   primaryColor: string;
   secondaryColor: string;
   defaultTaxRate: string;
+  tagline: string;
+  description: string;
+  city: string;
+  country: string;
 };
 
 export default function BusinessSettingsPage() {
@@ -112,6 +120,10 @@ export default function BusinessSettingsPage() {
     primaryColor: "#F97316",
     secondaryColor: "#14B8A6",
     defaultTaxRate: "12.5",
+    tagline: "",
+    description: "",
+    city: "",
+    country: "",
   });
   const [activeTab, setActiveTab] = useState<"basic" | "social" | "branding">("basic");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -147,6 +159,10 @@ export default function BusinessSettingsPage() {
           primaryColor: res.data.primaryColor || "#F97316",
           secondaryColor: res.data.secondaryColor || "#14B8A6",
           defaultTaxRate: (res.data.defaultTaxRate ?? 12.5).toString(),
+          tagline: res.data.tagline || "",
+          description: res.data.description || "",
+          city: res.data.city || "",
+          country: res.data.country || "",
         });
         setAccent1(res.data.primaryColor || "#F97316");
         setAccent2(res.data.secondaryColor || "#14B8A6");
@@ -330,6 +346,18 @@ export default function BusinessSettingsPage() {
 
               <label className="block text-xs text-muted-foreground">
                 <div className="flex items-center gap-1 mb-1">
+                  <Building2 className="h-3 w-3" />
+                  Tagline
+                </div>
+                <Input
+                  value={form.tagline}
+                  onChange={(e) => setForm((f) => ({ ...f, tagline: e.target.value }))}
+                  placeholder="Your catchy one-liner"
+                />
+              </label>
+
+              <label className="block text-xs text-muted-foreground">
+                <div className="flex items-center gap-1 mb-1">
                   <Mail className="h-3 w-3" />
                   Business Email
                 </div>
@@ -377,6 +405,44 @@ export default function BusinessSettingsPage() {
                   value={form.whatsapp}
                   onChange={(e) => setForm((f) => ({ ...f, whatsapp: e.target.value }))}
                   placeholder="+1 (868) 555-0123"
+                />
+              </label>
+            </div>
+
+            <label className="block text-xs text-muted-foreground">
+              <div className="flex items-center gap-1 mb-1">
+                <Building2 className="h-3 w-3" />
+                Description
+              </div>
+              <textarea
+                className="w-full rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2 text-sm min-h-[80px] resize-none"
+                value={form.description}
+                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                placeholder="Tell your customers what you do..."
+              />
+            </label>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className="block text-xs text-muted-foreground">
+                <div className="flex items-center gap-1 mb-1">
+                  <MapPin className="h-3 w-3" />
+                  City
+                </div>
+                <Input
+                  value={form.city}
+                  onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}
+                  placeholder="Port of Spain"
+                />
+              </label>
+              <label className="block text-xs text-muted-foreground">
+                <div className="flex items-center gap-1 mb-1">
+                  <Globe className="h-3 w-3" />
+                  Country
+                </div>
+                <Input
+                  value={form.country}
+                  onChange={(e) => setForm((f) => ({ ...f, country: e.target.value }))}
+                  placeholder="Trinidad and Tobago"
                 />
               </label>
             </div>

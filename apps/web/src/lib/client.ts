@@ -1089,15 +1089,28 @@ export async function sendQuoteEmail(input: {
 }
 
 export type BootstrapIdentityResponse = {
-  user: { id: string; email: string; name?: string | null; role: string };
-  business: { id: string; name: string };
+  user: { id: string; email: string; name?: string | null; firstName?: string | null; lastName?: string | null; phone?: string | null; avatarUrl?: string | null; role: string };
+  business: { id: string; name: string; onboardingComplete?: boolean };
 };
 
-export async function bootstrapIdentity(input: { username?: string; email?: string; name?: string }) {
+export async function bootstrapIdentity(input: {
+  username?: string;
+  email?: string;
+  name?: string;
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  avatarUrl?: string;
+  company?: string;
+}) {
   return apiPost<BootstrapIdentityResponse>({
     path: `/identity/bootstrap`,
     body: input,
   });
+}
+
+export async function fetchMe() {
+  return apiGetSimple<{ id: string; email: string; name?: string | null; firstName?: string | null; lastName?: string | null; phone?: string | null; avatarUrl?: string | null; role: string }>(`/identity/me`);
 }
 
 export type Business = {
@@ -1114,6 +1127,13 @@ export type Business = {
   complianceStatus?: string | null;
   complianceData?: Record<string, boolean> | null;
   lastHealthCheck?: string | null;
+  onboardingComplete?: boolean;
+  primaryColor?: string | null;
+  secondaryColor?: string | null;
+  tagline?: string | null;
+  description?: string | null;
+  city?: string | null;
+  country?: string | null;
 };
 
 export async function getBusinessById(businessId: string) {

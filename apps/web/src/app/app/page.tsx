@@ -15,7 +15,7 @@ import {
   denyAutopilotTask,
   fetchCriticalAlerts,
 } from "@/lib/client";
-import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
+import { refreshWorkspace, getStoredBusinessId, getUserDisplayName } from "@/lib/workspace";
 import { 
   CheckCircle2, 
   Clock,
@@ -54,10 +54,10 @@ interface CriticalAlert {
   action?: string;
 }
 
-const severityStyles: Record<string, string> = {
-  CRITICAL: "bg-red-500/10 border-red-500/30 text-red-500",
-  WARNING: "bg-amber-500/10 border-amber-500/30 text-amber-500",
-  INFO: "bg-blue-500/10 border-blue-500/30 text-blue-500",
+const severityStyles: Record<string, { className: string; style: React.CSSProperties }> = {
+  CRITICAL: { className: "bg-red-500/10 border-red-500/30 text-red-500", style: {} },
+  WARNING: { className: "", style: { backgroundColor: "hsl(var(--kf-accent1) / 0.1)", borderColor: "hsl(var(--kf-accent1) / 0.3)", color: "hsl(var(--kf-accent1))" } },
+  INFO: { className: "bg-blue-500/10 border-blue-500/30 text-blue-500", style: {} },
 };
 
 const severityIcons: Record<string, React.ReactNode> = {
@@ -212,7 +212,8 @@ export default function AppHome() {
             <Link
               key={idx}
               href={alert.action || "#"}
-              className={`flex items-center gap-3 p-4 rounded-xl border transition-all hover:scale-[1.01] ${severityStyles[alert.severity] || severityStyles.INFO}`}
+              className={`flex items-center gap-3 p-4 rounded-xl border transition-all hover:scale-[1.01] ${(severityStyles[alert.severity] || severityStyles.INFO).className}`}
+              style={(severityStyles[alert.severity] || severityStyles.INFO).style}
             >
               <div className="flex-shrink-0">
                 {alertTypeIcons[alert.type] || severityIcons[alert.severity]}
@@ -234,7 +235,7 @@ export default function AppHome() {
         className="text-center py-4"
       >
         <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
-          {greeting}
+          {greeting}{getUserDisplayName() ? `, ${getUserDisplayName()}` : ""}
         </h1>
         <p className="text-muted-foreground mt-1">
           {tasksRemaining > 0 
@@ -348,11 +349,12 @@ export default function AppHome() {
               >
                 <div className="flex items-start gap-4">
                   <div className="flex-shrink-0 pt-0.5">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
-                      task.priority === 'HIGH' 
-                        ? 'bg-orange-500/20 text-orange-500' 
-                        : 'bg-muted text-muted-foreground'
-                    }`}>
+                    <div
+                      className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+                        task.priority === 'HIGH' ? '' : 'bg-muted text-muted-foreground'
+                      }`}
+                      style={task.priority === 'HIGH' ? { backgroundColor: "hsl(var(--kf-accent1) / 0.2)", color: "hsl(var(--kf-accent1))" } : undefined}
+                    >
                       {idx + 1}
                     </div>
                   </div>
@@ -372,7 +374,7 @@ export default function AppHome() {
                         </span>
                       )}
                       {task.requiresApproval && (
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500">
+                        <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: "hsl(var(--kf-accent1) / 0.1)", color: "hsl(var(--kf-accent1))" }}>
                           Needs Approval
                         </span>
                       )}
@@ -434,8 +436,8 @@ export default function AppHome() {
                 href={action.href}
                 className="kf-card p-4 flex items-center gap-3 hover:scale-[1.02] transition-all group"
               >
-                <div className="h-10 w-10 rounded-lg flex items-center justify-center flex-shrink-0 bg-orange-500/10">
-                  <Play className="w-5 h-5 text-orange-500" />
+                <div className="h-10 w-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: "hsl(var(--kf-accent1) / 0.1)" }}>
+                  <Play className="w-5 h-5" style={{ color: "hsl(var(--kf-accent1))" }} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="font-medium truncate">{action.label}</div>
@@ -453,11 +455,12 @@ export default function AppHome() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.35 }}
-          className="kf-card p-4 bg-gradient-to-r from-orange-500/10 to-red-500/10 border-orange-500/20"
+          className="kf-card p-4"
+          style={{ backgroundImage: "linear-gradient(to right, hsl(var(--kf-accent1) / 0.1), hsl(var(--kf-accent1) / 0.05))", borderColor: "hsl(var(--kf-accent1) / 0.2)" }}
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-orange-500/20 flex items-center justify-center">
+              <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ backgroundColor: "hsl(var(--kf-accent1) / 0.2)" }}>
                 <span className="text-2xl">🔥</span>
               </div>
               <div>
