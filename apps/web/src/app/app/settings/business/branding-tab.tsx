@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect } from "react";
 import { Palette, Percent, Eye } from "lucide-react";
 import { Input } from "@keyflow/ui";
 import { FormState } from "./use-business-settings";
@@ -14,13 +13,15 @@ type Props = {
 export function BrandingTab({ form, setField }: Props) {
   const { setAccent1, setAccent2 } = useThemeColors();
 
-  useEffect(() => {
-    if (form.primaryColor) setAccent1(form.primaryColor);
-  }, [form.primaryColor, setAccent1]);
+  const handlePrimaryChange = (value: string) => {
+    setField("primaryColor", value);
+    setAccent1(value);
+  };
 
-  useEffect(() => {
-    if (form.secondaryColor) setAccent2(form.secondaryColor);
-  }, [form.secondaryColor, setAccent2]);
+  const handleSecondaryChange = (value: string) => {
+    setField("secondaryColor", value);
+    setAccent2(value);
+  };
 
   return (
     <div className="space-y-6">
@@ -39,12 +40,12 @@ export function BrandingTab({ form, setField }: Props) {
               <input
                 type="color"
                 value={form.primaryColor}
-                onChange={(e) => setField("primaryColor", e.target.value)}
+                onChange={(e) => handlePrimaryChange(e.target.value)}
                 className="w-14 h-14 rounded-xl border-2 border-border/60 cursor-pointer bg-transparent"
               />
               <Input
                 value={form.primaryColor}
-                onChange={(e) => setField("primaryColor", e.target.value)}
+                onChange={(e) => handlePrimaryChange(e.target.value)}
                 placeholder="#F97316"
                 className="flex-1 font-mono"
               />
@@ -65,12 +66,12 @@ export function BrandingTab({ form, setField }: Props) {
               <input
                 type="color"
                 value={form.secondaryColor}
-                onChange={(e) => setField("secondaryColor", e.target.value)}
+                onChange={(e) => handleSecondaryChange(e.target.value)}
                 className="w-14 h-14 rounded-xl border-2 border-border/60 cursor-pointer bg-transparent"
               />
               <Input
                 value={form.secondaryColor}
-                onChange={(e) => setField("secondaryColor", e.target.value)}
+                onChange={(e) => handleSecondaryChange(e.target.value)}
                 placeholder="#14B8A6"
                 className="flex-1 font-mono"
               />

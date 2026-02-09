@@ -95,7 +95,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       setOnboardingChecked(true);
     };
     init();
-  }, [setAccent1, setAccent2, pathname, router]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname, router]);
 
   const fetchNotifications = useCallback(async () => {
     const businessId = getStoredBusinessId();
