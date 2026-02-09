@@ -4,9 +4,22 @@ import { useEffect, useState } from "react";
 import { User, Mail, Phone, Shield, CheckCircle2, AlertCircle, Eye, EyeOff, Moon, Sun } from "lucide-react";
 import { Button, Input, Card } from "@keyflow/ui";
 import { useTheme } from "next-themes";
+import { apiGet, apiPatch } from "@/lib/api";
+import { setCachedUser } from "@/lib/workspace";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+interface IdentityMe {
+  id: string;
+  email: string;
+  name?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  phone?: string | null;
+  avatarUrl?: string | null;
+  role?: string | null;
+}
 
 export default function ProfileSettingsPage() {
   const [loading, setLoading] = useState(true);
@@ -16,6 +29,8 @@ export default function ProfileSettingsPage() {
   const [form, setForm] = useState({
     email: "",
     name: "",
+    firstName: "",
+    lastName: "",
     phone: "",
   });
   const [passwordForm, setPasswordForm] = useState({
@@ -27,25 +42,17 @@ export default function ProfileSettingsPage() {
 
   useEffect(() => {
     const load = async () => {
-      const token = localStorage.getItem("kf_token");
-      if (!token || !SUPABASE_URL || !SUPABASE_ANON_KEY) {
-        setLoading(false);
-        return;
-      }
-
       try {
-        const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-          headers: {
-            apikey: SUPABASE_ANON_KEY,
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        if (res.ok) {
-          const user = await res.json();
+        const { data, error } = await apiGet<IdentityMe>("/identity/me");
+        if (error) {
+          console.error("Failed to load profile:", error);
+        } else if (data) {
           setForm({
-            email: user.email || "",
-            name: user.user_metadata?.name || "",
-            phone: user.phone || "",
+            email: data.email || "",
+            name: data.name || "",
+            firstName: data.firstName || "",
+            lastName: data.lastName || "",
+            phone: data.phone || "",
           });
         }
       } catch (e) {
@@ -57,30 +64,29 @@ export default function ProfileSettingsPage() {
   }, []);
 
   const handleSaveProfile = async () => {
-    const token = localStorage.getItem("kf_token");
-    if (!token || !SUPABASE_URL || !SUPABASE_ANON_KEY) return;
-
     setSaving(true);
     setStatus(null);
 
     try {
-      const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: SUPABASE_ANON_KEY,
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          data: { name: form.name },
-        }),
+      const { data, error } = await apiPatch<IdentityMe>("/identity/me", {
+        firstName: form.firstName,
+        lastName: form.lastName,
+        phone: form.phone,
+        name: form.name,
       });
 
-      if (res.ok) {
+      if (error) {
+        setStatus({ type: "error", message: error });
+      } else if (data) {
         setStatus({ type: "success", message: "Profile updated" });
-      } else {
-        const err = await res.json();
-        setStatus({ type: "error", message: err.message || "Failed to update" });
+        setCachedUser({
+          id: data.id,
+          email: data.email,
+          name: data.name,
+          firstName: data.firstName,
+          lastName: data.lastName,
+          avatarUrl: data.avatarUrl,
+        });
       }
     } catch (e) {
       setStatus({ type: "error", message: "Network error" });
@@ -180,6 +186,30 @@ export default function ProfileSettingsPage() {
               placeholder="you@example.com"
             />
             <p className="text-[11px] text-muted-foreground mt-1">Email cannot be changed here.</p>
+          </label>
+
+          <label className="block text-xs text-muted-foreground">
+            <div className="flex items-center gap-1 mb-1">
+              <User className="h-3 w-3" />
+              First Name
+            </div>
+            <Input
+              value={form.firstName}
+              onChange={(e) => setForm((f) => ({ ...f, firstName: e.target.value }))}
+              placeholder="John"
+            />
+          </label>
+
+          <label className="block text-xs text-muted-foreground">
+            <div className="flex items-center gap-1 mb-1">
+              <User className="h-3 w-3" />
+              Last Name
+            </div>
+            <Input
+              value={form.lastName}
+              onChange={(e) => setForm((f) => ({ ...f, lastName: e.target.value }))}
+              placeholder="Doe"
+            />
           </label>
 
           <label className="block text-xs text-muted-foreground">

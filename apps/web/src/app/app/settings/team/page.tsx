@@ -5,6 +5,7 @@ import { Users, UserPlus, Trash2, CheckCircle2, AlertCircle } from "lucide-react
 import { Button, Input, Card, Badge } from "@keyflow/ui";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { apiGet, apiPostSimple as apiPost, apiDelete, apiPatch } from "@/lib/api";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 type TeamMember = {
   id: string;
@@ -25,6 +26,7 @@ export default function TeamSettingsPage() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("STAFF");
   const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<{ membershipId: string; name: string } | null>(null);
 
   const loadMembers = async () => {
     const businessId = getStoredBusinessId();
@@ -117,11 +119,13 @@ export default function TeamSettingsPage() {
             value={inviteEmail}
             onChange={(e) => setInviteEmail(e.target.value)}
             placeholder="email@example.com"
+            aria-label="Team member email"
           />
           <select
             className="rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2 text-sm"
             value={inviteRole}
             onChange={(e) => setInviteRole(e.target.value)}
+            aria-label="Select role"
           >
             {ROLES.map((r) => (
               <option key={r} value={r}>{r}</option>
@@ -159,23 +163,30 @@ export default function TeamSettingsPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   {member.role === "OWNER" ? (
-                    <Badge variant="default">Owner</Badge>
+                    <Badge>Owner</Badge>
                   ) : (
                     <>
                       <select
                         className="rounded-lg border border-border/60 bg-slate-950/80 px-2 py-1 text-xs"
                         value={member.role}
                         onChange={(e) => handleRoleChange(member.id, e.target.value)}
+                        aria-label="Select role"
                       >
                         {ROLES.map((r) => (
                           <option key={r} value={r}>{r}</option>
                         ))}
                       </select>
                       <Button
-                        variant="ghost"
+                        variant="subtle"
                         size="sm"
-                        onClick={() => handleRemove(member.id)}
+                        onClick={() =>
+                          setConfirmRemove({
+                            membershipId: member.id,
+                            name: member.user.name || member.user.email.split("@")[0],
+                          })
+                        }
                         className="text-red-400 hover:text-red-300 hover:bg-red-900/20"
+                        aria-label="Remove team member"
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -187,6 +198,22 @@ export default function TeamSettingsPage() {
           )}
         </div>
       </Card>
+
+      <ConfirmDialog
+        open={!!confirmRemove}
+        title="Remove Team Member"
+        message={`Are you sure you want to remove ${confirmRemove?.name ?? "this member"} from your team? This action cannot be undone.`}
+        confirmLabel="Remove"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={() => {
+          if (confirmRemove) {
+            handleRemove(confirmRemove.membershipId);
+          }
+          setConfirmRemove(null);
+        }}
+        onCancel={() => setConfirmRemove(null)}
+      />
     </div>
   );
 }

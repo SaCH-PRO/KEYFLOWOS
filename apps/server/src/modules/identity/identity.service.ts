@@ -22,12 +22,75 @@ export class IdentityService {
     return business;
   }
 
+  private static readonly PUBLIC_BUSINESS_FIELDS = {
+    id: true,
+    name: true,
+    slug: true,
+    logoUrl: true,
+    tagline: true,
+    description: true,
+    address: true,
+    city: true,
+    country: true,
+    phone: true,
+    email: true,
+    website: true,
+    facebook: true,
+    instagram: true,
+    twitter: true,
+    linkedin: true,
+    tiktok: true,
+    youtube: true,
+    whatsapp: true,
+    primaryColor: true,
+    secondaryColor: true,
+    timezone: true,
+    currency: true,
+    storeEnabled: true,
+    businessHours: true,
+  } as const;
+
   async getBusinessBySlug(slug: string) {
     const business = await this.prisma.client.business.findFirst({
       where: { slug, deletedAt: null },
     });
     if (!business) throw new NotFoundException('Business not found');
     return business;
+  }
+
+  async getPublicBusiness(slug: string) {
+    const business = await this.prisma.client.business.findFirst({
+      where: { slug, deletedAt: null },
+      select: IdentityService.PUBLIC_BUSINESS_FIELDS,
+    });
+    if (!business) throw new NotFoundException('Business not found');
+    return business;
+  }
+
+  async getPublicBusinessById(businessId: string) {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: IdentityService.PUBLIC_BUSINESS_FIELDS,
+    });
+    if (!business) throw new NotFoundException('Business not found');
+    return business;
+  }
+
+  async updateUser(userId: string, input: { firstName?: string; lastName?: string; phone?: string; name?: string }) {
+    const user = await this.prisma.client.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const data: Record<string, unknown> = {};
+    if (input.firstName !== undefined) data.firstName = input.firstName;
+    if (input.lastName !== undefined) data.lastName = input.lastName;
+    if (input.phone !== undefined) data.phone = input.phone;
+    if (input.name !== undefined) data.name = input.name;
+
+    return this.prisma.client.user.update({
+      where: { id: userId },
+      data,
+      select: { id: true, email: true, name: true, firstName: true, lastName: true, phone: true, avatarUrl: true, role: true },
+    });
   }
 
   async checkSlugAvailability(slug: string, userId?: string) {
