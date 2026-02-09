@@ -29,4 +29,8 @@ export class PublicCreateBookingDto {
   @IsString()
   @IsOptional()
   phone?: string | null;
+
+  @IsString()
+  @IsOptional()
+  notes?: string | null;
 }

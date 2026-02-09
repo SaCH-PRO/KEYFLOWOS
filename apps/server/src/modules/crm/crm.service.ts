@@ -544,6 +544,25 @@ export class CrmService {
         });
       }
     }
+
+    if (!email && !phoneNormalized && input.firstName && input.lastName && input.sourceDetail) {
+      const recentMatch = await this.prisma.client.contact.findFirst({
+        where: {
+          businessId,
+          deletedAt: null,
+          firstName: input.firstName,
+          lastName: input.lastName,
+          source: input.source ?? 'manual',
+          sourceDetail: input.sourceDetail,
+          createdAt: { gte: new Date(Date.now() - 5 * 60 * 1000) },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (recentMatch) {
+        return recentMatch;
+      }
+    }
+
     return this.createContact({
       businessId,
       firstName: input.firstName,
