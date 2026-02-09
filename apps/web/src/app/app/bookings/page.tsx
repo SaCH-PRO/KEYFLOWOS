@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { z } from "zod";
 import { Button, Input } from "@keyflow/ui";
 import {
@@ -16,6 +17,7 @@ import {
   XCircle,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   CalendarDays,
   Users,
   DollarSign,
@@ -24,6 +26,8 @@ import {
   Search,
   Phone,
   Mail,
+  RefreshCw,
+  Filter,
 } from "lucide-react";
 import {
   Booking,
@@ -136,6 +140,7 @@ export default function BookingsPage() {
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
   const [businessData, setBusinessData] = useState<{ name?: string; slug?: string | null } | null>(null);
 
@@ -336,11 +341,12 @@ export default function BookingsPage() {
 
   if (!businessId && !loading) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
+      <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center space-y-3">
-          <AlertCircle className="w-12 h-12 text-primary/60 mx-auto" />
-          <h2 className="text-lg font-semibold text-primary">We could not find your workspace. Please sign in again.</h2>
-          <p className="text-sm text-muted-foreground">Try logging in again to create your workspace.</p>
+          <p className="text-lg font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>
+            We could not find your workspace. Please sign in again.
+          </p>
+          <p className="text-muted-foreground">Try logging in again to create your workspace.</p>
         </div>
       </div>
     );
@@ -348,18 +354,15 @@ export default function BookingsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-3">
-          <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-primary/20 to-secondary/20 border border-primary/30 flex items-center justify-center text-primary">
-            <Calendar className="w-5 h-5" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold">Bookings</h1>
-            <p className="text-sm text-muted-foreground">Schedule, manage services & staff</p>
-          </div>
+      <motion.div
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex flex-col md:flex-row md:items-center md:justify-between gap-4"
+      >
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Bookings</h1>
+          <p className="text-muted-foreground mt-1">Schedule, manage services & staff</p>
         </div>
-
         <div className="flex items-center gap-2 flex-wrap">
           {calendarConnected ? (
             <div className="flex items-center gap-2">
@@ -370,7 +373,7 @@ export default function BookingsPage() {
               <button
                 onClick={handleDisconnectCalendar}
                 disabled={calendarLoading}
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs border border-border/60 hover:border-red-500/40 hover:text-red-400 transition-colors"
+                className="kf-btn-secondary inline-flex items-center gap-1 text-xs"
               >
                 <Unlink className="w-3 h-3" /> Disconnect
               </button>
@@ -379,36 +382,54 @@ export default function BookingsPage() {
             <button
               onClick={handleConnectCalendar}
               disabled={calendarLoading}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-gradient-to-r from-primary/20 to-secondary/20 border border-primary/30 text-primary hover:from-primary/30 hover:to-secondary/30 transition-all"
+              className="kf-btn-secondary inline-flex items-center gap-1.5 text-xs"
             >
               <Link2 className="w-3.5 h-3.5" /> Connect Google Calendar
             </button>
           )}
+          <button
+            onClick={() => setShowCreateBooking(true)}
+            className="kf-btn-primary inline-flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            New Booking
+          </button>
         </div>
-      </div>
+      </motion.div>
 
-      {/* Banner */}
-      {banner && (
-        <div className={`rounded-xl border px-4 py-2.5 text-sm flex items-center justify-between ${
-          banner.type === "success" ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" :
-          banner.type === "error" ? "border-red-500/30 bg-red-500/10 text-red-300" :
-          "border-primary/30 bg-primary/10 text-primary"
-        }`}>
-          <span>{banner.text}</span>
-          <button onClick={() => setBanner(null)} className="opacity-60 hover:opacity-100 ml-2"><X className="w-4 h-4" /></button>
-        </div>
-      )}
+      <AnimatePresence>
+        {banner && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className={`kf-card rounded-xl px-4 py-2.5 text-sm flex items-center justify-between ${
+              banner.type === "success" ? "border-emerald-500/30 text-emerald-300" :
+              banner.type === "error" ? "border-red-500/30 text-red-300" :
+              "text-foreground"
+            }`}
+            style={{ borderColor: banner.type === "success" ? undefined : banner.type === "error" ? undefined : "hsl(var(--kf-accent1) / 0.3)" }}
+          >
+            <span>{banner.text}</span>
+            <button onClick={() => setBanner(null)} className="opacity-60 hover:opacity-100 ml-2"><X className="w-4 h-4" /></button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* Stats */}
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="grid grid-cols-2 md:grid-cols-4 gap-3"
+        >
           {[
-            { label: "Today", value: stats.todayCount, icon: CalendarDays, color: "from-primary/20 to-orange-600/10" },
-            { label: "This Week", value: stats.weekCount, icon: Calendar, color: "from-secondary/20 to-teal-600/10" },
-            { label: "Pending", value: stats.pendingCount, icon: AlertCircle, color: "from-amber-500/20 to-yellow-600/10" },
-            { label: "Total", value: stats.totalBookings, icon: Users, color: "from-secondary/20 to-teal-600/10" },
+            { label: "Today", value: stats.todayCount, icon: CalendarDays, color: "from-[hsl(var(--kf-accent1)/0.15)] to-[hsl(var(--kf-accent1)/0.05)]" },
+            { label: "This Week", value: stats.weekCount, icon: Calendar, color: "from-[hsl(var(--kf-accent2)/0.15)] to-[hsl(var(--kf-accent2)/0.05)]" },
+            { label: "Pending", value: stats.pendingCount, icon: AlertCircle, color: "from-amber-500/15 to-amber-600/5" },
+            { label: "Total", value: stats.totalBookings, icon: Users, color: "from-[hsl(var(--kf-accent2)/0.15)] to-[hsl(var(--kf-accent2)/0.05)]" },
           ].map((stat) => (
-            <div key={stat.label} className={`rounded-2xl border border-border/60 bg-gradient-to-br ${stat.color} p-4`}>
+            <div key={stat.label} className={`kf-card rounded-2xl bg-gradient-to-br ${stat.color} p-4`}>
               <div className="flex items-center justify-between">
                 <span className="text-xs text-muted-foreground font-medium">{stat.label}</span>
                 <stat.icon className="w-4 h-4 text-muted-foreground/60" />
@@ -416,10 +437,9 @@ export default function BookingsPage() {
               <div className="text-2xl font-bold mt-1">{stat.value}</div>
             </div>
           ))}
-        </div>
+        </motion.div>
       )}
 
-      {/* Tabs */}
       <div className="flex gap-2">
         {([
           { key: "schedule" as Tab, label: "Schedule", icon: Calendar },
@@ -428,10 +448,8 @@ export default function BookingsPage() {
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`px-5 py-2.5 text-sm font-medium rounded-xl transition-all flex items-center gap-2 ${
-              tab === t.key
-                ? "bg-gradient-to-r from-primary/20 to-secondary/20 text-primary border border-primary/30 shadow-lg shadow-primary/10"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted/50 border border-transparent"
+            className={`px-4 py-2 text-sm rounded-lg transition-all flex items-center gap-2 ${
+              tab === t.key ? "kf-btn-primary" : "kf-btn-secondary"
             }`}
           >
             <t.icon className="w-4 h-4" />
@@ -441,26 +459,35 @@ export default function BookingsPage() {
         ))}
       </div>
 
-      {formError && (
-        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm text-amber-200 flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 flex-shrink-0" /> {formError}
-        </div>
-      )}
+      <AnimatePresence>
+        {formError && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="kf-card rounded-xl border-amber-500/40 px-4 py-2 text-sm text-amber-200 flex items-center gap-2"
+          >
+            <AlertCircle className="w-4 h-4 flex-shrink-0" /> {formError}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* ─── SCHEDULE TAB ─── */}
       {tab === "schedule" && (
-        <div className="space-y-4">
-          {/* Week Calendar */}
-          <div className="rounded-2xl border border-border/60 bg-slate-950/60 backdrop-blur p-4 space-y-3">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="space-y-4"
+        >
+          <div className="kf-card p-4 space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold flex items-center gap-2">
-                <CalendarDays className="w-4 h-4 text-primary" /> Week View
+                <CalendarDays className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} /> Week View
               </h3>
               <div className="flex items-center gap-2">
                 <button onClick={() => setWeekOffset((w) => w - 1)} className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors">
                   <ChevronLeft className="w-4 h-4" />
                 </button>
-                <button onClick={() => setWeekOffset(0)} className="px-3 py-1 rounded-lg text-xs font-medium hover:bg-muted/50 transition-colors">
+                <button onClick={() => setWeekOffset(0)} className="kf-btn-secondary px-3 py-1 text-xs">
                   Today
                 </button>
                 <button onClick={() => setWeekOffset((w) => w + 1)} className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors">
@@ -478,13 +505,13 @@ export default function BookingsPage() {
                     key={key}
                     className={`rounded-xl border p-2 min-h-[100px] transition-colors ${
                       isToday
-                        ? "border-primary/40 bg-primary/5"
+                        ? "border-[hsl(var(--kf-accent1)/0.4)] bg-[hsl(var(--kf-accent1)/0.05)]"
                         : "border-border/40 hover:border-border/60"
                     }`}
                   >
-                    <div className={`text-xs font-medium mb-1 ${isToday ? "text-primary" : "text-muted-foreground"}`}>
+                    <div className={`text-xs font-medium mb-1 ${isToday ? "" : "text-muted-foreground"}`} style={isToday ? { color: "hsl(var(--kf-accent1))" } : undefined}>
                       {day.toLocaleDateString("en-TT", { weekday: "short" })}
-                      <span className={`ml-1 ${isToday ? "bg-primary text-primary-foreground px-1.5 py-0.5 rounded-full" : ""}`}>
+                      <span className={`ml-1 ${isToday ? "px-1.5 py-0.5 rounded-full text-white" : ""}`} style={isToday ? { background: "hsl(var(--kf-accent1))" } : undefined}>
                         {day.getDate()}
                       </span>
                     </div>
@@ -509,177 +536,232 @@ export default function BookingsPage() {
             </div>
           </div>
 
-          {/* Toolbar */}
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="relative">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <div className="kf-card p-4 space-y-4">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <input
                   type="text"
                   placeholder="Search bookings..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 pr-3 py-2 rounded-xl border border-border/60 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 w-56"
+                  className="kf-input w-full pl-10"
                 />
               </div>
-              <div className="flex gap-1">
-                {(["ALL", "PENDING", "CONFIRMED", "COMPLETED", "CANCELLED"] as StatusFilter[]).map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => setStatusFilter(s)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                      statusFilter === s
-                        ? "bg-primary/20 text-primary border border-primary/30"
-                        : "text-muted-foreground hover:text-foreground border border-transparent"
-                    }`}
-                  >
-                    {s === "ALL" ? "All" : s.charAt(0) + s.slice(1).toLowerCase()}
-                  </button>
-                ))}
-              </div>
+              <button
+                onClick={() => setShowFilters(!showFilters)}
+                className={`kf-btn-secondary inline-flex items-center gap-2 ${showFilters ? "ring-2 ring-[hsl(var(--kf-accent1))]" : ""}`}
+              >
+                <Filter className="w-4 h-4" />
+                Filters
+                <ChevronDown className={`w-4 h-4 transition-transform ${showFilters ? "rotate-180" : ""}`} />
+              </button>
+              <button
+                onClick={() => void loadData()}
+                disabled={loading}
+                className="kf-btn-secondary inline-flex items-center gap-2"
+              >
+                <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+                <span className="hidden sm:inline">Refresh</span>
+              </button>
             </div>
-            <Button onClick={() => setShowCreateBooking(true)} className="kf-btn-primary gap-2">
-              <Plus className="w-4 h-4" /> New Booking
-            </Button>
+
+            <AnimatePresence>
+              {showFilters && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="flex flex-wrap gap-2"
+                >
+                  {(["ALL", "PENDING", "CONFIRMED", "COMPLETED", "CANCELLED"] as StatusFilter[]).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setStatusFilter(s)}
+                      className={`px-3 py-1.5 text-sm rounded-lg transition-all ${
+                        statusFilter === s ? "kf-btn-primary" : "kf-btn-secondary"
+                      }`}
+                    >
+                      {s === "ALL" ? "All" : s.charAt(0) + s.slice(1).toLowerCase()}
+                    </button>
+                  ))}
+                  {statusFilter !== "ALL" && (
+                    <button
+                      onClick={() => {
+                        setStatusFilter("ALL");
+                        setSearchQuery("");
+                      }}
+                      className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1"
+                    >
+                      <X className="w-3 h-3" />
+                      Clear
+                    </button>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
-          {/* Create Booking Modal */}
-          {showCreateBooking && (
-            <div className="rounded-2xl border border-primary/30 bg-slate-950/80 backdrop-blur p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold flex items-center gap-2">
-                  <Plus className="w-4 h-4 text-primary" /> Create New Booking
-                </h3>
-                <button onClick={() => setShowCreateBooking(false)} className="p-1 rounded-lg hover:bg-muted/50">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 block font-medium">Date</label>
-                  <input
-                    type="date"
-                    value={bookingDate}
-                    onChange={(e) => setBookingDate(e.target.value)}
-                    className="w-full rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 block font-medium">Time</label>
-                  <input
-                    type="time"
-                    value={bookingTime}
-                    onChange={(e) => setBookingTime(e.target.value)}
-                    className="w-full rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 block font-medium">Service</label>
-                  <select
-                    value={bookingServiceId}
-                    onChange={(e) => setBookingServiceId(e.target.value)}
-                    className="w-full rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                  >
-                    <option value="">Select service...</option>
-                    {services.map((s) => (
-                      <option key={s.id} value={s.id}>{s.name} ({s.durationMins} min - {s.currency} {s.price})</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 block font-medium">Staff</label>
-                  <select
-                    value={bookingStaffId}
-                    onChange={(e) => setBookingStaffId(e.target.value)}
-                    className="w-full rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                  >
-                    <option value="">Select staff...</option>
-                    {staff.map((s) => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="md:col-span-2">
-                  <label className="text-xs text-muted-foreground mb-1.5 block font-medium">Contact (optional)</label>
-                  <div className="relative">
-                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                    <input
-                      type="text"
-                      placeholder="Search contacts..."
-                      value={contactSearch}
-                      onChange={(e) => { setContactSearch(e.target.value); setBookingContactId(""); }}
-                      className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-border/60 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                    />
+          <AnimatePresence>
+            {showCreateBooking && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+              >
+                <div className="kf-card-accent p-5 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold flex items-center gap-2">
+                      <Plus className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} /> Create New Booking
+                    </h3>
+                    <button onClick={() => setShowCreateBooking(false)} className="p-1 rounded-lg hover:bg-muted/50">
+                      <X className="w-4 h-4" />
+                    </button>
                   </div>
-                  {contactSearch.trim() && (
-                    <div className="mt-1 rounded-xl border border-border/60 bg-slate-950/90 max-h-40 overflow-y-auto">
-                      {filteredContacts.map((c) => (
-                        <button
-                          key={c.id}
-                          onClick={() => { setBookingContactId(c.id); setContactSearch(`${c.firstName ?? ""} ${c.lastName ?? ""}`.trim()); }}
-                          className={`w-full text-left px-3 py-2 text-sm hover:bg-muted/50 transition-colors flex items-center gap-2 ${
-                            bookingContactId === c.id ? "bg-primary/10 text-primary" : ""
-                          }`}
-                        >
-                          <User className="w-3.5 h-3.5 flex-shrink-0" />
-                          <span>{c.firstName} {c.lastName}</span>
-                          {c.email && <span className="text-xs text-muted-foreground ml-auto">{c.email}</span>}
-                        </button>
-                      ))}
-                      {filteredContacts.length === 0 && (
-                        <div className="px-3 py-2 text-sm text-muted-foreground">No contacts found</div>
-                      )}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1.5 block font-medium">Date</label>
+                      <input
+                        type="date"
+                        value={bookingDate}
+                        onChange={(e) => setBookingDate(e.target.value)}
+                        className="kf-input w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1.5 block font-medium">Time</label>
+                      <input
+                        type="time"
+                        value={bookingTime}
+                        onChange={(e) => setBookingTime(e.target.value)}
+                        className="kf-input w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1.5 block font-medium">Service</label>
+                      <select
+                        value={bookingServiceId}
+                        onChange={(e) => setBookingServiceId(e.target.value)}
+                        className="kf-input w-full"
+                      >
+                        <option value="">Select service...</option>
+                        {services.map((s) => (
+                          <option key={s.id} value={s.id}>{s.name} — {s.durationMins}min • {s.currency} {s.price}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1.5 block font-medium">Staff</label>
+                      <select
+                        value={bookingStaffId}
+                        onChange={(e) => setBookingStaffId(e.target.value)}
+                        className="kf-input w-full"
+                      >
+                        <option value="">Select staff...</option>
+                        {staff.map((s) => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="text-xs text-muted-foreground mb-1.5 block font-medium">Contact (optional)</label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          placeholder="Search contacts..."
+                          value={contactSearch}
+                          onChange={(e) => {
+                            setContactSearch(e.target.value);
+                            if (!e.target.value.trim()) setBookingContactId("");
+                          }}
+                          className="kf-input w-full"
+                        />
+                        {contactSearch.trim() && (
+                          <div className="absolute top-full left-0 right-0 mt-1 kf-card rounded-xl border border-border/60 max-h-48 overflow-y-auto z-10">
+                            {filteredContacts.length > 0 ? (
+                              filteredContacts.map((c) => (
+                                <button
+                                  key={c.id}
+                                  onClick={() => {
+                                    setBookingContactId(c.id);
+                                    setContactSearch(`${c.firstName ?? ""} ${c.lastName ?? ""}`.trim());
+                                  }}
+                                  className={`w-full text-left px-3 py-2 text-sm hover:bg-muted/50 transition-colors ${bookingContactId === c.id ? "bg-[hsl(var(--kf-accent1)/0.1)]" : ""}`}
+                                >
+                                  <div className="font-medium">{c.firstName} {c.lastName}</div>
+                                  {c.email && <div className="text-xs text-muted-foreground">{c.email}</div>}
+                                </button>
+                              ))
+                            ) : (
+                              <div className="px-3 py-2 text-sm text-muted-foreground">No contacts found</div>
+                            )}
+                          </div>
+                        )}
+                        {bookingContactId && !contactSearch.trim() && (
+                          <div className="mt-1 text-xs text-emerald-400">Contact selected</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  {selectedService && computedEndTime && (
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground kf-card rounded-xl p-3">
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>Duration: {selectedService.durationMins} min</span>
+                      <span>|</span>
+                      <span>Ends at: {formatTime(computedEndTime)}</span>
+                      <span>|</span>
+                      <DollarSign className="w-3.5 h-3.5" />
+                      <span>{selectedService.currency} {selectedService.price}</span>
                     </div>
                   )}
-                  {bookingContactId && !contactSearch.trim() && (
-                    <div className="mt-1 text-xs text-emerald-400">Contact selected</div>
-                  )}
+                  <div className="flex gap-2 justify-end">
+                    <button onClick={() => setShowCreateBooking(false)} className="kf-btn-secondary">Cancel</button>
+                    <button onClick={handleCreateBooking} className="kf-btn-primary">Create Booking</button>
+                  </div>
                 </div>
-              </div>
-              {selectedService && computedEndTime && (
-                <div className="flex items-center gap-3 text-xs text-muted-foreground bg-slate-900/50 rounded-xl p-3">
-                  <Clock className="w-3.5 h-3.5" />
-                  <span>Duration: {selectedService.durationMins} min</span>
-                  <span>|</span>
-                  <span>Ends at: {formatTime(computedEndTime)}</span>
-                  <span>|</span>
-                  <DollarSign className="w-3.5 h-3.5" />
-                  <span>{selectedService.currency} {selectedService.price}</span>
-                </div>
-              )}
-              <div className="flex gap-2 justify-end">
-                <Button variant="outline" onClick={() => setShowCreateBooking(false)}>Cancel</Button>
-                <Button onClick={handleCreateBooking} className="kf-btn-primary">Create Booking</Button>
-              </div>
-            </div>
-          )}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-          {/* Bookings List */}
-          <div className="space-y-2">
+          <div className="space-y-3">
             {loading && bookings.length === 0 ? (
-              <div className="rounded-2xl border border-border/60 bg-slate-950/50 p-6 text-center text-muted-foreground">
-                Loading bookings...
+              <div className="kf-card p-8 text-center">
+                <RefreshCw className="w-8 h-8 animate-spin mx-auto text-muted-foreground mb-3" />
+                <p className="text-muted-foreground">Loading bookings...</p>
               </div>
             ) : filteredBookings.length === 0 ? (
-              <div className="rounded-2xl border border-border/60 bg-slate-950/50 p-6 text-center space-y-2">
-                <Calendar className="w-8 h-8 text-muted-foreground/40 mx-auto" />
-                <p className="text-sm text-muted-foreground">
-                  {searchQuery || statusFilter !== "ALL" ? "No bookings match your filters." : "No bookings yet. Create your first booking to get started."}
+              <div className="kf-card p-8 text-center">
+                <Calendar className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
+                <p className="text-lg font-medium mb-1">No bookings yet</p>
+                <p className="text-muted-foreground mb-4">
+                  {searchQuery || statusFilter !== "ALL" ? "No bookings match your filters." : "Create your first booking to get started."}
                 </p>
+                {!searchQuery && statusFilter === "ALL" && (
+                  <button
+                    onClick={() => setShowCreateBooking(true)}
+                    className="kf-btn-primary inline-flex items-center gap-2"
+                  >
+                    <Plus className="w-4 h-4" />
+                    New Booking
+                  </button>
+                )}
               </div>
             ) : (
-              filteredBookings.map((b) => (
-                <button
+              filteredBookings.map((b, index) => (
+                <motion.button
                   key={b.id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.03 }}
                   onClick={() => setSelectedBooking(b)}
-                  className={`w-full text-left rounded-2xl border bg-slate-950/60 p-4 transition-all hover:border-primary/40 hover:bg-slate-900/60 ${
-                    selectedBooking?.id === b.id ? "border-primary/50 ring-1 ring-primary/20" : "border-border/60"
+                  className={`w-full text-left kf-card rounded-2xl p-4 transition-all hover:ring-1 hover:ring-[hsl(var(--kf-accent1)/0.3)] ${
+                    selectedBooking?.id === b.id ? "ring-1 ring-[hsl(var(--kf-accent1)/0.4)]" : ""
                   }`}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className="h-10 w-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary flex-shrink-0">
-                        <Calendar className="w-4 h-4" />
+                      <div className="h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "hsl(var(--kf-accent1) / 0.1)", borderColor: "hsl(var(--kf-accent1) / 0.2)", borderWidth: 1 }}>
+                        <Calendar className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
@@ -706,59 +788,75 @@ export default function BookingsPage() {
                         </div>
                       )}
                       {b.staff && (
-                        <div className="h-7 w-7 rounded-full bg-secondary/10 border border-secondary/20 flex items-center justify-center text-xs font-bold text-secondary">
+                        <div className="h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold" style={{ background: "hsl(var(--kf-accent2) / 0.1)", borderColor: "hsl(var(--kf-accent2) / 0.2)", borderWidth: 1, color: "hsl(var(--kf-accent2))" }}>
                           {b.staff.name.charAt(0).toUpperCase()}
                         </div>
                       )}
                     </div>
                   </div>
-                </button>
+                </motion.button>
               ))
             )}
           </div>
-        </div>
+        </motion.div>
       )}
 
-      {/* ─── STAFF TAB ─── */}
       {tab === "staff" && (
-        <div className="space-y-4">
-          <div className="rounded-2xl border border-border/60 bg-slate-950/60 backdrop-blur p-5 space-y-4">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="space-y-4"
+        >
+          <div className="kf-card-accent p-5 space-y-4">
             <h3 className="text-sm font-semibold flex items-center gap-2">
-              <Plus className="w-4 h-4 text-primary" /> Add Staff Member
+              <Plus className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} /> Add Staff Member
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <Input
-                label="Full Name"
-                placeholder="Jane Doe"
-                value={staffForm.name}
-                onChange={(e) => setStaffForm((f) => ({ ...f, name: e.target.value }))}
-              />
-              <Input
-                label="Email (optional)"
-                placeholder="jane@example.com"
-                value={staffForm.email}
-                onChange={(e) => setStaffForm((f) => ({ ...f, email: e.target.value }))}
-              />
+              <div>
+                <label className="text-xs text-muted-foreground mb-1.5 block font-medium">Full Name</label>
+                <input
+                  placeholder="Jane Doe"
+                  value={staffForm.name}
+                  onChange={(e) => setStaffForm((f) => ({ ...f, name: e.target.value }))}
+                  className="kf-input w-full"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1.5 block font-medium">Email (optional)</label>
+                <input
+                  placeholder="jane@example.com"
+                  value={staffForm.email}
+                  onChange={(e) => setStaffForm((f) => ({ ...f, email: e.target.value }))}
+                  className="kf-input w-full"
+                />
+              </div>
             </div>
-            <Button onClick={handleCreateStaff} className="kf-btn-primary gap-2">
+            <button onClick={handleCreateStaff} className="kf-btn-primary inline-flex items-center gap-2">
               <Plus className="w-4 h-4" /> Add Staff
-            </Button>
+            </button>
           </div>
 
           {staff.length === 0 ? (
-            <div className="rounded-2xl border border-border/60 bg-slate-950/50 p-6 text-center space-y-2">
-              <User className="w-8 h-8 text-muted-foreground/40 mx-auto" />
-              <p className="text-sm text-muted-foreground">
-                {loading ? "Loading staff..." : "No staff members yet. Add team members to assign them to bookings."}
+            <div className="kf-card p-8 text-center">
+              <User className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
+              <p className="text-lg font-medium mb-1">No staff members</p>
+              <p className="text-muted-foreground">
+                {loading ? "Loading staff..." : "Add team members to assign them to bookings."}
               </p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {staff.map((s) => (
-                <div key={s.id} className="rounded-2xl border border-border/60 bg-slate-950/60 p-4 group hover:border-secondary/30 transition-colors">
+              {staff.map((s, index) => (
+                <motion.div
+                  key={s.id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.05 }}
+                  className="kf-card p-4 group hover:ring-1 hover:ring-[hsl(var(--kf-accent2)/0.3)] transition-all"
+                >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-full bg-gradient-to-br from-secondary/20 to-teal-600/10 border border-secondary/20 flex items-center justify-center text-lg font-bold text-secondary">
+                      <div className="h-10 w-10 rounded-full flex items-center justify-center text-lg font-bold" style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent2) / 0.15), hsl(var(--kf-accent2) / 0.05))", borderColor: "hsl(var(--kf-accent2) / 0.2)", borderWidth: 1, color: "hsl(var(--kf-accent2))" }}>
                         {s.name.charAt(0).toUpperCase()}
                       </div>
                       <div>
@@ -777,147 +875,159 @@ export default function BookingsPage() {
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                </div>
+                </motion.div>
               ))}
             </div>
           )}
-        </div>
+        </motion.div>
       )}
 
-      {/* ─── BOOKING DETAIL PANEL ─── */}
-      {selectedBooking && (
-        <div className="fixed inset-0 z-50 flex items-start justify-end">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSelectedBooking(null)} />
-          <div className="relative w-full max-w-md h-full bg-slate-950 border-l border-border/60 overflow-y-auto p-6 space-y-5 animate-in slide-in-from-right">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-bold">Booking Details</h3>
-              <button onClick={() => setSelectedBooking(null)} className="p-1.5 rounded-lg hover:bg-muted/50">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium border ${STATUS_COLORS[selectedBooking.status] ?? "bg-slate-500/20 text-slate-300"}`}>
-              {selectedBooking.status}
-            </div>
-
-            <div className="space-y-4">
-              <div className="rounded-xl border border-border/60 bg-slate-900/50 p-4 space-y-3">
-                <div className="flex items-center gap-2 text-sm">
-                  <CalendarDays className="w-4 h-4 text-primary" />
-                  <span className="font-medium">{formatFullDate(selectedBooking.startTime)}</span>
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                  <Clock className="w-4 h-4 text-primary" />
-                  <span>{formatTime(selectedBooking.startTime)} – {formatTime(selectedBooking.endTime)}</span>
-                </div>
-              </div>
-
-              {selectedBooking.contact && (
-                <div className="rounded-xl border border-border/60 bg-slate-900/50 p-4 space-y-2">
-                  <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Client</div>
-                  <div className="flex items-center gap-3">
-                    <div className="h-9 w-9 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-sm font-bold text-primary">
-                      {(selectedBooking.contact.firstName?.charAt(0) ?? "?").toUpperCase()}
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium">{contactName(selectedBooking)}</div>
-                      {selectedBooking.contact.email && (
-                        <div className="text-xs text-muted-foreground flex items-center gap-1">
-                          <Mail className="w-3 h-3" /> {selectedBooking.contact.email}
-                        </div>
-                      )}
-                      {selectedBooking.contact.phone && (
-                        <div className="text-xs text-muted-foreground flex items-center gap-1">
-                          <Phone className="w-3 h-3" /> {selectedBooking.contact.phone}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {selectedBooking.service && (
-                <div className="rounded-xl border border-border/60 bg-slate-900/50 p-4 space-y-2">
-                  <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Service</div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Briefcase className="w-4 h-4 text-secondary" />
-                      <span className="text-sm font-medium">{selectedBooking.service.name}</span>
-                    </div>
-                    <span className="text-sm text-muted-foreground">{selectedBooking.service.duration} min</span>
-                  </div>
-                  <div className="text-sm font-semibold text-primary">
-                    TTD {selectedBooking.service.price.toLocaleString()}
-                  </div>
-                </div>
-              )}
-
-              {selectedBooking.staff && (
-                <div className="rounded-xl border border-border/60 bg-slate-900/50 p-4 space-y-2">
-                  <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Staff</div>
-                  <div className="flex items-center gap-2">
-                    <div className="h-7 w-7 rounded-full bg-secondary/10 border border-secondary/20 flex items-center justify-center text-xs font-bold text-secondary">
-                      {selectedBooking.staff.name.charAt(0).toUpperCase()}
-                    </div>
-                    <span className="text-sm font-medium">{selectedBooking.staff.name}</span>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-2 pt-2 border-t border-border/40">
-              <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-2">Actions</div>
-              <div className="grid grid-cols-2 gap-2">
-                {selectedBooking.status === "PENDING" && (
-                  <>
-                    <button
-                      onClick={() => handleStatusChange(selectedBooking.id, "CONFIRMED")}
-                      className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20 transition-colors"
-                    >
-                      <CheckCircle2 className="w-4 h-4" /> Confirm
-                    </button>
-                    <button
-                      onClick={() => handleStatusChange(selectedBooking.id, "CANCELLED")}
-                      className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium bg-red-500/10 border border-red-500/30 text-red-300 hover:bg-red-500/20 transition-colors"
-                    >
-                      <XCircle className="w-4 h-4" /> Cancel
-                    </button>
-                  </>
-                )}
-                {selectedBooking.status === "CONFIRMED" && (
-                  <>
-                    <button
-                      onClick={() => handleStatusChange(selectedBooking.id, "COMPLETED")}
-                      className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium bg-secondary/10 border border-secondary/30 text-secondary hover:bg-secondary/20 transition-colors"
-                    >
-                      <CheckCircle2 className="w-4 h-4" /> Complete
-                    </button>
-                    <button
-                      onClick={() => handleStatusChange(selectedBooking.id, "CANCELLED")}
-                      className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium bg-red-500/10 border border-red-500/30 text-red-300 hover:bg-red-500/20 transition-colors"
-                    >
-                      <XCircle className="w-4 h-4" /> Cancel
-                    </button>
-                  </>
-                )}
-                {(selectedBooking.status === "CANCELLED" || selectedBooking.status === "COMPLETED") && (
-                  <div className="col-span-2 text-center text-xs text-muted-foreground py-2">
-                    This booking is {selectedBooking.status.toLowerCase()}
-                  </div>
-                )}
-              </div>
-              {calendarConnected && selectedBooking.status !== "CANCELLED" && (
-                <button
-                  onClick={() => handleSyncBooking(selectedBooking.id)}
-                  className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium bg-slate-900/50 border border-border/60 hover:border-primary/30 transition-colors"
-                >
-                  <Link2 className="w-4 h-4" /> Sync to Google Calendar
+      <AnimatePresence>
+        {selectedBooking && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-start justify-end"
+          >
+            <div className="absolute inset-0 bg-black/50" onClick={() => setSelectedBooking(null)} />
+            <motion.div
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", damping: 25 }}
+              className="relative w-full max-w-md h-full bg-background border-l border-border/60 overflow-y-auto p-6 space-y-5"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-bold">Booking Details</h3>
+                <button onClick={() => setSelectedBooking(null)} className="p-1.5 rounded-lg hover:bg-muted/50">
+                  <X className="w-5 h-5" />
                 </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+              </div>
+
+              <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium border ${STATUS_COLORS[selectedBooking.status] ?? "bg-slate-500/20 text-slate-300"}`}>
+                {selectedBooking.status}
+              </div>
+
+              <div className="space-y-4">
+                <div className="kf-card p-4 space-y-3">
+                  <div className="flex items-center gap-2 text-sm">
+                    <CalendarDays className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+                    <span className="font-medium">{formatFullDate(selectedBooking.startTime)}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <Clock className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+                    <span>{formatTime(selectedBooking.startTime)} – {formatTime(selectedBooking.endTime)}</span>
+                  </div>
+                </div>
+
+                {selectedBooking.contact && (
+                  <div className="kf-card p-4 space-y-2">
+                    <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Client</div>
+                    <div className="flex items-center gap-3">
+                      <div className="h-9 w-9 rounded-full flex items-center justify-center text-sm font-bold" style={{ background: "hsl(var(--kf-accent1) / 0.1)", borderColor: "hsl(var(--kf-accent1) / 0.2)", borderWidth: 1, color: "hsl(var(--kf-accent1))" }}>
+                        {(selectedBooking.contact.firstName?.charAt(0) ?? "?").toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium">{contactName(selectedBooking)}</div>
+                        {selectedBooking.contact.email && (
+                          <div className="text-xs text-muted-foreground flex items-center gap-1">
+                            <Mail className="w-3 h-3" /> {selectedBooking.contact.email}
+                          </div>
+                        )}
+                        {selectedBooking.contact.phone && (
+                          <div className="text-xs text-muted-foreground flex items-center gap-1">
+                            <Phone className="w-3 h-3" /> {selectedBooking.contact.phone}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {selectedBooking.service && (
+                  <div className="kf-card p-4 space-y-2">
+                    <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Service</div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Briefcase className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
+                        <span className="text-sm font-medium">{selectedBooking.service.name}</span>
+                      </div>
+                      <span className="text-sm text-muted-foreground">{selectedBooking.service.duration} min</span>
+                    </div>
+                    <div className="text-sm font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>
+                      TTD {selectedBooking.service.price.toLocaleString()}
+                    </div>
+                  </div>
+                )}
+
+                {selectedBooking.staff && (
+                  <div className="kf-card p-4 space-y-2">
+                    <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Staff</div>
+                    <div className="flex items-center gap-2">
+                      <div className="h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold" style={{ background: "hsl(var(--kf-accent2) / 0.1)", borderColor: "hsl(var(--kf-accent2) / 0.2)", borderWidth: 1, color: "hsl(var(--kf-accent2))" }}>
+                        {selectedBooking.staff.name.charAt(0).toUpperCase()}
+                      </div>
+                      <span className="text-sm font-medium">{selectedBooking.staff.name}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2 pt-2 border-t border-border/40">
+                <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-2">Actions</div>
+                <div className="grid grid-cols-2 gap-2">
+                  {selectedBooking.status === "PENDING" && (
+                    <>
+                      <button
+                        onClick={() => handleStatusChange(selectedBooking.id, "CONFIRMED")}
+                        className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+                      >
+                        <CheckCircle2 className="w-4 h-4" /> Confirm
+                      </button>
+                      <button
+                        onClick={() => handleStatusChange(selectedBooking.id, "CANCELLED")}
+                        className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium bg-red-500/10 border border-red-500/30 text-red-300 hover:bg-red-500/20 transition-colors"
+                      >
+                        <XCircle className="w-4 h-4" /> Cancel
+                      </button>
+                    </>
+                  )}
+                  {selectedBooking.status === "CONFIRMED" && (
+                    <>
+                      <button
+                        onClick={() => handleStatusChange(selectedBooking.id, "COMPLETED")}
+                        className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium border transition-colors" style={{ background: "hsl(var(--kf-accent2) / 0.1)", borderColor: "hsl(var(--kf-accent2) / 0.3)", color: "hsl(var(--kf-accent2))" }}
+                      >
+                        <CheckCircle2 className="w-4 h-4" /> Complete
+                      </button>
+                      <button
+                        onClick={() => handleStatusChange(selectedBooking.id, "CANCELLED")}
+                        className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium bg-red-500/10 border border-red-500/30 text-red-300 hover:bg-red-500/20 transition-colors"
+                      >
+                        <XCircle className="w-4 h-4" /> Cancel
+                      </button>
+                    </>
+                  )}
+                  {(selectedBooking.status === "CANCELLED" || selectedBooking.status === "COMPLETED") && (
+                    <div className="col-span-2 text-center text-xs text-muted-foreground py-2">
+                      This booking is {selectedBooking.status.toLowerCase()}
+                    </div>
+                  )}
+                </div>
+                {calendarConnected && selectedBooking.status !== "CANCELLED" && (
+                  <button
+                    onClick={() => handleSyncBooking(selectedBooking.id)}
+                    className="w-full kf-btn-secondary flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm"
+                  >
+                    <Link2 className="w-4 h-4" /> Sync to Google Calendar
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
