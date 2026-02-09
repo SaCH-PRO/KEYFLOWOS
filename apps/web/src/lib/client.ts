@@ -1188,6 +1188,8 @@ export type SocialPost = {
   id: string;
   content: string;
   status: string;
+  scheduledAt?: string | null;
+  postedAt?: string | null;
   scheduledFor?: string | null;
   publishedAt?: string | null;
   createdAt: string;
@@ -1286,6 +1288,8 @@ export async function fetchPosts(businessId: string = DEFAULT_BUSINESS_ID) {
       id: z.string(),
       content: z.string(),
       status: z.string(),
+      scheduledAt: z.string().nullable().optional(),
+      postedAt: z.string().nullable().optional(),
       scheduledFor: z.string().nullable().optional(),
       publishedAt: z.string().nullable().optional(),
       createdAt: z.string(),
@@ -1300,6 +1304,19 @@ export async function createPost(input: { businessId?: string; content: string; 
     path: `/social/businesses/${encodeURIComponent(businessId)}/posts`,
     body: { content: input.content, mediaUrls: input.mediaUrls, scheduledFor: input.scheduledFor },
   });
+}
+
+export async function updatePost(postId: string, data: { content?: string; scheduledAt?: string | null }, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPatch<SocialPost>(
+    `/social/businesses/${encodeURIComponent(businessId)}/posts/${encodeURIComponent(postId)}`,
+    data,
+  );
+}
+
+export async function deletePost(postId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiDelete<SocialPost>(
+    `/social/businesses/${encodeURIComponent(businessId)}/posts/${encodeURIComponent(postId)}`,
+  );
 }
 
 export async function publishPost(postId: string, businessId: string = DEFAULT_BUSINESS_ID) {
