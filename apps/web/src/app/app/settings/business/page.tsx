@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Building2, Globe, Palette, CreditCard, CheckCircle2, AlertCircle } from "lucide-react";
+import { Building2, Globe, Palette, CreditCard, Crown, CheckCircle2, AlertCircle } from "lucide-react";
 import { Button, Card } from "@keyflow/ui";
 import { useBusinessSettings } from "./use-business-settings";
 import { LogoUploader } from "./logo-uploader";
@@ -9,6 +9,7 @@ import { BasicInfoTab } from "./basic-info-tab";
 import { SocialTab } from "./social-tab";
 import { BrandingTab } from "./branding-tab";
 import { PaymentsTab } from "./payments-tab";
+import { BillingTab } from "./billing-tab";
 
 export default function BusinessSettingsPage() {
   const {
@@ -24,7 +25,7 @@ export default function BusinessSettingsPage() {
     fileInputRef,
     logoUrl,
   } = useBusinessSettings();
-  const [activeTab, setActiveTab] = useState<"basic" | "social" | "branding" | "payments">("basic");
+  const [activeTab, setActiveTab] = useState<"basic" | "social" | "branding" | "payments" | "billing">("basic");
 
   if (loading) {
     return <div className="text-muted-foreground">Loading...</div>;
@@ -64,6 +65,7 @@ export default function BusinessSettingsPage() {
             { key: "social", label: "Social Media", icon: Globe },
             { key: "branding", label: "Branding", icon: Palette },
             { key: "payments", label: "Payments", icon: CreditCard },
+            { key: "billing", label: "Billing", icon: Crown },
           ].map(({ key, label, icon: Icon }) => (
             <button
               key={key}
@@ -86,6 +88,7 @@ export default function BusinessSettingsPage() {
         {activeTab === "social" && <div role="tabpanel"><SocialTab form={form} setField={setField} /></div>}
         {activeTab === "branding" && <div role="tabpanel"><BrandingTab form={form} setField={setField} /></div>}
         {activeTab === "payments" && <div role="tabpanel"><PaymentsTab /></div>}
+        {activeTab === "billing" && <div role="tabpanel"><BillingTab /></div>}
 
         <div className="flex justify-end pt-6 mt-6 border-t border-border/40">
           <Button onClick={handleSave} disabled={saving}>

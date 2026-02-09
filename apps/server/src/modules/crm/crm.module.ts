@@ -7,9 +7,10 @@ import { CrmPlaybookService } from './crm-playbook.service';
 import { CrmVisionService } from './crm-vision.service';
 import { CrmService } from './crm.service';
 import { AutomationModule } from '../automation/automation.module';
+import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 
 @Module({
-  imports: [forwardRef(() => AutomationModule)],
+  imports: [forwardRef(() => AutomationModule), SubscriptionsModule],
   controllers: [CrmController],
   providers: [CrmService, CrmImportService, CrmPlaybookService, CrmVisionService, CrmGoogleService, CrmFlowService],
   exports: [CrmService, CrmImportService, CrmPlaybookService, CrmVisionService, CrmGoogleService, CrmFlowService],

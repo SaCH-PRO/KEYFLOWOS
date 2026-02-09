@@ -1,10 +1,11 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InvoicePaidPayload, InvoiceStatusPayload } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { Service } from '@keyflow/db';
 import { CrmService } from '../crm/crm.service';
 import { AutomationService } from '../automation/automation.service';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
 @Injectable()
 export class CommerceService {
@@ -13,6 +14,7 @@ export class CommerceService {
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(CrmService) private readonly crm: CrmService,
     @Inject(AutomationService) private readonly automation: AutomationService,
+    @Inject(SubscriptionsService) private readonly subscriptions: SubscriptionsService,
   ) {}
 
   async listProducts(businessId: string) {
@@ -29,7 +31,7 @@ export class CommerceService {
     });
   }
 
-  createProduct(input: { 
+  async createProduct(input: { 
     businessId: string; 
     name: string; 
     price: number; 
@@ -39,6 +41,13 @@ export class CommerceService {
     duration?: number | null;
     isActive?: boolean;
   }) {
+    const limitCheck = await this.subscriptions.checkLimit(input.businessId, 'products');
+    if (!limitCheck.allowed) {
+      throw new ForbiddenException(
+        `Product limit reached (${limitCheck.current}/${limitCheck.limit}). Upgrade your plan to add more products.`,
+      );
+    }
+
     return this.prisma.client.product.create({
       data: {
         businessId: input.businessId,
@@ -122,6 +131,13 @@ export class CommerceService {
     discountValue?: number;
     notes?: string;
   }) {
+    const limitCheck = await this.subscriptions.checkLimit(input.businessId, 'invoices');
+    if (!limitCheck.allowed) {
+      throw new ForbiddenException(
+        `Monthly invoice limit reached (${limitCheck.current}/${limitCheck.limit}). Upgrade your plan to create more invoices.`,
+      );
+    }
+
     const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
     const taxRate = input.taxRate ?? 0;
     const taxAmount = (subtotal * taxRate) / 100;

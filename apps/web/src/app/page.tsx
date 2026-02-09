@@ -19,6 +19,9 @@ export default function Home() {
             <span className="text-xl font-bold">KEYFLOWOS</span>
           </div>
           <div className="flex items-center gap-4">
+            <Link href="/pricing" className="text-gray-400 hover:text-white transition-colors">
+              Pricing
+            </Link>
             <Link href="/auth/login" className="text-gray-400 hover:text-white transition-colors">
               Log in
             </Link>
