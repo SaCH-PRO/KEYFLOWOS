@@ -5,6 +5,10 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 export class NotificationsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private get notifModel() {
+    return (this.prisma.client as any).notification;
+  }
+
   async create(input: {
     businessId: string;
     type: string;
@@ -12,7 +16,7 @@ export class NotificationsService {
     body?: string;
     data?: Record<string, unknown>;
   }) {
-    return this.prisma.client.notification.create({
+    return this.notifModel.create({
       data: {
         businessId: input.businessId,
         type: input.type,
@@ -24,7 +28,7 @@ export class NotificationsService {
   }
 
   async listForBusiness(businessId: string, opts?: { unreadOnly?: boolean; limit?: number }) {
-    return this.prisma.client.notification.findMany({
+    return this.notifModel.findMany({
       where: {
         businessId,
         ...(opts?.unreadOnly ? { read: false } : {}),
@@ -35,20 +39,20 @@ export class NotificationsService {
   }
 
   async unreadCount(businessId: string) {
-    return this.prisma.client.notification.count({
+    return this.notifModel.count({
       where: { businessId, read: false },
     });
   }
 
   async markRead(id: string, businessId: string) {
-    return this.prisma.client.notification.updateMany({
+    return this.notifModel.updateMany({
       where: { id, businessId },
       data: { read: true },
     });
   }
 
   async markAllRead(businessId: string) {
-    return this.prisma.client.notification.updateMany({
+    return this.notifModel.updateMany({
       where: { businessId, read: false },
       data: { read: true },
     });
