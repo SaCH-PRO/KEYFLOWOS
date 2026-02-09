@@ -100,6 +100,7 @@ export class IdentityController {
       description?: string;
       city?: string;
       country?: string;
+      metaData?: Record<string, any>;
     },
   ) {
     return this.identity.updateBusiness(businessId, body);
