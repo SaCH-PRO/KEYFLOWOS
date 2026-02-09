@@ -1,17 +1,37 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { BookingCreatedPayload, BookingConfirmedPayload, InvoicePaidPayload, InvoiceStatusPayload } from '../../core/event-bus/events.types';
 import { BookingsService } from '../bookings/bookings.service';
-import { NotificationsService } from '../notifications/notifications.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Injectable()
 export class FlowListener {
   private readonly logger = new Logger(FlowListener.name);
 
   constructor(
-    private readonly bookingsService: BookingsService,
-    private readonly notifications: NotificationsService,
-  ) {}
+    @Inject(BookingsService) private readonly bookingsService: BookingsService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+  ) {
+    this.logger.log(`FlowListener created, prisma=${!!this.prisma}`);
+  }
+
+  private async createNotification(input: {
+    businessId: string;
+    type: string;
+    title: string;
+    body?: string;
+    data?: Record<string, unknown>;
+  }) {
+    return (this.prisma.client as any).notification.create({
+      data: {
+        businessId: input.businessId,
+        type: input.type,
+        title: input.title,
+        body: input.body,
+        data: input.data as any,
+      },
+    });
+  }
 
   @OnEvent('invoice.paid')
   async handleInvoicePaid(payload: InvoicePaidPayload) {
@@ -32,7 +52,7 @@ export class FlowListener {
       }),
     );
 
-    await this.notifications.create({
+    await this.createNotification({
       businessId: payload.businessId,
       type: 'invoice.paid',
       title: 'Invoice Paid',
@@ -43,31 +63,36 @@ export class FlowListener {
 
   @OnEvent('booking.created')
   async handleBookingCreated(payload: BookingCreatedPayload) {
-    this.logger.debug(`Flow observed booking.created`, payload as any);
+    this.logger.log(`[NOTIF] booking.created event received for business ${payload.businessId}`);
 
     const contactName = payload.contact
       ? [payload.contact.firstName, payload.contact.lastName].filter(Boolean).join(' ') || payload.contact.email || 'A customer'
       : 'A customer';
 
-    await this.notifications.create({
-      businessId: payload.businessId,
-      type: 'booking.created',
-      title: 'New Booking',
-      body: `${contactName} booked an appointment.`,
-      data: {
-        bookingId: payload.booking.id,
-        contactId: payload.contact?.id,
-        serviceId: payload.booking.serviceId,
-        startTime: payload.booking.startTime,
-      },
-    }).catch((e) => this.logger.error('Failed to create notification', e));
+    try {
+      await this.createNotification({
+        businessId: payload.businessId,
+        type: 'booking.created',
+        title: 'New Booking',
+        body: `${contactName} booked an appointment.`,
+        data: {
+          bookingId: payload.booking.id,
+          contactId: payload.contact?.id,
+          serviceId: payload.booking.serviceId,
+          startTime: payload.booking.startTime,
+        },
+      });
+      this.logger.log(`[NOTIF] Notification created for booking ${payload.booking.id}`);
+    } catch (e) {
+      this.logger.error(`[NOTIF] Failed to create notification for booking ${payload.booking.id}`, (e as Error).stack);
+    }
   }
 
   @OnEvent('booking.confirmed')
   async handleBookingConfirmed(payload: BookingConfirmedPayload) {
     this.logger.debug(`Flow observed booking.confirmed`, payload as any);
 
-    await this.notifications.create({
+    await this.createNotification({
       businessId: payload.businessId,
       type: 'booking.confirmed',
       title: 'Booking Confirmed',
@@ -80,7 +105,7 @@ export class FlowListener {
   async handleInvoiceOverdue(payload: InvoiceStatusPayload) {
     this.logger.debug(`Flow observed invoice.overdue`, payload as any);
 
-    await this.notifications.create({
+    await this.createNotification({
       businessId: payload.businessId,
       type: 'invoice.overdue',
       title: 'Invoice Overdue',
