@@ -41,13 +41,6 @@ export class CommerceService {
     duration?: number | null;
     isActive?: boolean;
   }) {
-    const limitCheck = await this.subscriptions.checkLimit(input.businessId, 'products');
-    if (!limitCheck.allowed) {
-      throw new ForbiddenException(
-        `Product limit reached (${limitCheck.current}/${limitCheck.limit}). Upgrade your plan to add more products.`,
-      );
-    }
-
     return this.prisma.client.product.create({
       data: {
         businessId: input.businessId,
@@ -131,13 +124,6 @@ export class CommerceService {
     discountValue?: number;
     notes?: string;
   }) {
-    const limitCheck = await this.subscriptions.checkLimit(input.businessId, 'invoices');
-    if (!limitCheck.allowed) {
-      throw new ForbiddenException(
-        `Monthly invoice limit reached (${limitCheck.current}/${limitCheck.limit}). Upgrade your plan to create more invoices.`,
-      );
-    }
-
     const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
     const taxRate = input.taxRate ?? 0;
     const taxAmount = (subtotal * taxRate) / 100;

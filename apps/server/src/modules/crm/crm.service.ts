@@ -422,13 +422,6 @@ export class CrmService {
     tags?: string[];
     custom?: any;
   } & ContactExtraAttributes) {
-    const limitCheck = await this.subscriptions.checkLimit(input.businessId, 'contacts');
-    if (!limitCheck.allowed) {
-      throw new ForbiddenException(
-        `Contact limit reached (${limitCheck.current}/${limitCheck.limit}). Upgrade your plan to add more contacts.`,
-      );
-    }
-
     const normalizeString = (value?: string | null) => {
       const trimmed = value?.trim();
       return trimmed ? trimmed : null;
