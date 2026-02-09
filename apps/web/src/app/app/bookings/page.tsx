@@ -503,15 +503,15 @@ export default function BookingsPage() {
                 return (
                   <div
                     key={key}
-                    className={`rounded-xl border p-2 min-h-[100px] transition-colors ${
+                    className={`rounded-xl border p-2.5 min-h-[100px] transition-colors ${
                       isToday
-                        ? "border-[hsl(var(--kf-accent1)/0.4)] bg-[hsl(var(--kf-accent1)/0.05)]"
-                        : "border-border/40 hover:border-border/60"
+                        ? "border-[hsl(var(--kf-accent1)/0.4)] bg-[hsl(var(--kf-accent1)/0.08)]"
+                        : "border-border/60 bg-muted/10 hover:border-border/80"
                     }`}
                   >
-                    <div className={`text-xs font-medium mb-1 ${isToday ? "" : "text-muted-foreground"}`} style={isToday ? { color: "hsl(var(--kf-accent1))" } : undefined}>
+                    <div className={`text-sm font-semibold mb-1.5 ${isToday ? "" : "text-foreground/80"}`} style={isToday ? { color: "hsl(var(--kf-accent1))" } : undefined}>
                       {day.toLocaleDateString("en-TT", { weekday: "short" })}
-                      <span className={`ml-1 ${isToday ? "px-1.5 py-0.5 rounded-full text-white" : ""}`} style={isToday ? { background: "hsl(var(--kf-accent1))" } : undefined}>
+                      <span className={`ml-1.5 ${isToday ? "px-1.5 py-0.5 rounded-full text-white" : "text-foreground/60"}`} style={isToday ? { background: "hsl(var(--kf-accent1))" } : undefined}>
                         {day.getDate()}
                       </span>
                     </div>
