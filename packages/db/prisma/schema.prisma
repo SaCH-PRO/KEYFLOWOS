@@ -101,6 +101,7 @@ model Business {
   sites            Site[]
   autopilotTasks   AutopilotTask[]
   notifications    Notification[]
+  subscriptions    Subscription[]
 
   // Gmail Integration for sending quotes/invoices
   gmailEmail        String?   @map("gmail_email")
@@ -783,4 +784,34 @@ model Notification {
 
   @@index([businessId, read, createdAt])
   @@map("notifications")
+}
+
+// ---
+// SUBSCRIPTIONS & BILLING
+// ---
+model Subscription {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  plan       String   @default("FREE") // FREE, FLOW, KEYFLOW
+  status     String   @default("ACTIVE") // ACTIVE, TRIALING, PAST_DUE, CANCELLED, EXPIRED
+  currency   String   @default("TTD") // TTD or USD
+
+  priceMonthly  Float    @default(0) @map("price_monthly")
+  trialEndsAt   DateTime? @map("trial_ends_at")
+  currentPeriodStart DateTime @default(now()) @map("current_period_start")
+  currentPeriodEnd   DateTime? @map("current_period_end")
+  cancelledAt   DateTime? @map("cancelled_at")
+
+  // Payment gateway info
+  gateway           String? // wipay, paypal
+  gatewaySubId      String? @map("gateway_sub_id")
+  gatewayCustomerId String? @map("gateway_customer_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId, status])
+  @@map("subscriptions")
 }

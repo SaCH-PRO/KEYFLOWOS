@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Contact, Prisma } from '@prisma/client';
 import {
@@ -8,6 +8,7 @@ import {
 } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AutomationService } from '../automation/automation.service';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
 type ContactMeta = {
   outstandingBalance: number;
@@ -154,6 +155,7 @@ export class CrmService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(forwardRef(() => AutomationService)) private readonly automation: AutomationService,
+    @Inject(SubscriptionsService) private readonly subscriptions: SubscriptionsService,
   ) {}
 
   private normalizeEmail(email?: string | null) {
@@ -420,6 +422,13 @@ export class CrmService {
     tags?: string[];
     custom?: any;
   } & ContactExtraAttributes) {
+    const limitCheck = await this.subscriptions.checkLimit(input.businessId, 'contacts');
+    if (!limitCheck.allowed) {
+      throw new ForbiddenException(
+        `Contact limit reached (${limitCheck.current}/${limitCheck.limit}). Upgrade your plan to add more contacts.`,
+      );
+    }
+
     const normalizeString = (value?: string | null) => {
       const trimmed = value?.trim();
       return trimmed ? trimmed : null;

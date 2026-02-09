@@ -1,10 +1,11 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BookingConfirmedPayload, BookingCreatedPayload } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
 import { AutomationService } from '../automation/automation.service';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
 @Injectable()
 export class BookingsService {
@@ -14,6 +15,7 @@ export class BookingsService {
     @Inject(CrmService) private readonly crm: CrmService,
     @Inject(CommerceService) private readonly commerce: CommerceService,
     @Inject(AutomationService) private readonly automation: AutomationService,
+    @Inject(SubscriptionsService) private readonly subscriptions: SubscriptionsService,
   ) {}
 
   listBookings(businessId: string) {
@@ -105,6 +107,13 @@ export class BookingsService {
     startTime: Date;
     endTime: Date;
   }) {
+    const limitCheck = await this.subscriptions.checkLimit(input.businessId, 'bookings');
+    if (!limitCheck.allowed) {
+      throw new ForbiddenException(
+        `Monthly booking limit reached (${limitCheck.current}/${limitCheck.limit}). Upgrade your plan to create more bookings.`,
+      );
+    }
+
     const createData: any = {
       businessId: input.businessId,
       serviceId: input.serviceId,
