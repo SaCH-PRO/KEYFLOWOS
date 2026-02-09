@@ -1,7 +1,6 @@
 "use client";
 
 import { Facebook, Instagram, MessageCircle, Lock } from "lucide-react";
-import { Button } from "@keyflow/ui";
 
 const CHANNELS = [
   {
@@ -38,8 +37,10 @@ export function ChannelsPanel() {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2 mb-1">
-        <Lock className="w-3.5 h-3.5 text-amber-400" />
-        <span className="text-[10px] text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-full border border-amber-400/20">Coming Soon</span>
+        <Lock className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+        <span className="text-[10px] px-2 py-0.5 rounded-full border" style={{ color: "hsl(var(--kf-accent1))", borderColor: "hsl(var(--kf-accent1) / 0.3)", background: "hsl(var(--kf-accent1) / 0.1)" }}>
+          Coming Soon
+        </span>
       </div>
 
       <p className="text-xs text-muted-foreground">
@@ -50,10 +51,7 @@ export function ChannelsPanel() {
         {CHANNELS.map((ch) => {
           const Icon = ch.icon;
           return (
-            <div
-              key={ch.name}
-              className="rounded-2xl border border-border/40 bg-slate-900/50 p-4 flex items-center gap-4 opacity-70"
-            >
+            <div key={ch.name} className="kf-card p-4 flex items-center gap-4 opacity-60">
               <div
                 className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
                 style={{ backgroundColor: `${ch.color}18` }}
@@ -61,12 +59,12 @@ export function ChannelsPanel() {
                 <Icon className="w-5 h-5" style={{ color: ch.color }} />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-foreground">{ch.name}</p>
+                <p className="text-sm font-medium">{ch.name}</p>
                 <p className="text-[11px] text-muted-foreground">{ch.description}</p>
               </div>
-              <Button variant="outline" disabled className="text-xs h-8 opacity-50">
+              <button className="kf-btn-secondary text-xs opacity-50 cursor-not-allowed" disabled>
                 Connect
-              </Button>
+              </button>
             </div>
           );
         })}
