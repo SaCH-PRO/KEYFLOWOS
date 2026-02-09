@@ -84,7 +84,7 @@ export default function BusinessSettingsPage() {
           ))}
         </div>
 
-        {activeTab === "basic" && <div role="tabpanel"><BasicInfoTab form={form} setField={setField} /></div>}
+        {activeTab === "basic" && <div role="tabpanel"><BasicInfoTab form={form} setField={setField} logoUrl={logoUrl} /></div>}
         {activeTab === "social" && <div role="tabpanel"><SocialTab form={form} setField={setField} /></div>}
         {activeTab === "branding" && <div role="tabpanel"><BrandingTab form={form} setField={setField} /></div>}
         {activeTab === "payments" && <div role="tabpanel"><PaymentsTab /></div>}
