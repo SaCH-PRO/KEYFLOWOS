@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { SocialService } from './social.service';
@@ -28,7 +28,23 @@ export class SocialController {
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/posts')
   createPost(@Param('businessId') businessId: string, @Body() body: { content: string; mediaUrls?: string[]; scheduledFor?: string }) {
-    return this.social.createDraft(businessId, body.content, body.mediaUrls ?? []);
+    return this.social.createDraft(businessId, body.content, body.mediaUrls ?? [], body.scheduledFor);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/posts/:postId')
+  updatePost(
+    @Param('businessId') businessId: string,
+    @Param('postId') postId: string,
+    @Body() body: { content?: string; scheduledAt?: string | null },
+  ) {
+    return this.social.updatePost(businessId, postId, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/posts/:postId')
+  deletePost(@Param('businessId') businessId: string, @Param('postId') postId: string) {
+    return this.social.deletePost(businessId, postId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
