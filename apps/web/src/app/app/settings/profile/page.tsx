@@ -306,7 +306,7 @@ export default function ProfileSettingsPage() {
               className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
                 theme === "light"
                   ? "bg-primary text-white"
-                  : "bg-secondary text-muted-foreground hover:bg-muted"
+                  : "bg-muted text-muted-foreground hover:bg-muted-foreground/15"
               }`}
             >
               <Sun className="h-4 w-4 inline mr-2" />
@@ -317,7 +317,7 @@ export default function ProfileSettingsPage() {
               className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
                 theme === "dark"
                   ? "bg-primary text-white"
-                  : "bg-secondary text-muted-foreground hover:bg-muted"
+                  : "bg-muted text-muted-foreground hover:bg-muted-foreground/15"
               }`}
             >
               <Moon className="h-4 w-4 inline mr-2" />

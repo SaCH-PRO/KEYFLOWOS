@@ -24,8 +24,8 @@
     --kf-primary: var(--kf-accent1);
     --kf-primary-foreground: 0 0% 100%;
 
-    --kf-secondary: 30 15% 95%;
-    --kf-secondary-foreground: 24 10% 10%;
+    --kf-secondary: var(--kf-accent2);
+    --kf-secondary-foreground: 0 0% 100%;
 
     --kf-muted: 30 10% 94%;
     --kf-muted-foreground: 24 5% 45%;
@@ -60,8 +60,8 @@
     --kf-primary: var(--kf-accent1);
     --kf-primary-foreground: 0 0% 100%;
 
-    --kf-secondary: 20 10% 12%;
-    --kf-secondary-foreground: 30 20% 98%;
+    --kf-secondary: var(--kf-accent2);
+    --kf-secondary-foreground: 0 0% 100%;
 
     --kf-muted: 20 10% 12%;
     --kf-muted-foreground: 30 10% 55%;
@@ -158,7 +158,7 @@
   }
   
   .kf-btn-secondary {
-    background: hsl(var(--kf-secondary));
+    background: hsl(var(--kf-muted));
     color: hsl(var(--kf-foreground));
     border: 1px solid hsl(var(--kf-border));
     border-radius: 0.75rem;
@@ -168,7 +168,8 @@
   }
   
   .kf-btn-secondary:hover {
-    background: hsl(var(--kf-muted));
+    background: hsl(var(--kf-muted-foreground) / 0.15);
+    border-color: hsl(var(--kf-accent1) / 0.3);
   }
   
   .kf-input {

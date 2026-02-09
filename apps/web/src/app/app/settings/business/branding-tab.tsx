@@ -1,8 +1,10 @@
 "use client";
 
-import { Palette, Percent } from "lucide-react";
+import { useEffect } from "react";
+import { Palette, Percent, Eye } from "lucide-react";
 import { Input } from "@keyflow/ui";
 import { FormState } from "./use-business-settings";
+import { useThemeColors } from "@/lib/theme-context";
 
 type Props = {
   form: FormState;
@@ -10,73 +12,105 @@ type Props = {
 };
 
 export function BrandingTab({ form, setField }: Props) {
+  const { setAccent1, setAccent2 } = useThemeColors();
+
+  useEffect(() => {
+    if (form.primaryColor) setAccent1(form.primaryColor);
+  }, [form.primaryColor, setAccent1]);
+
+  useEffect(() => {
+    if (form.secondaryColor) setAccent2(form.secondaryColor);
+  }, [form.secondaryColor, setAccent2]);
+
   return (
     <div className="space-y-6">
       <p className="text-sm text-muted-foreground">
-        Customize your brand colors and default tax rate for invoices.
+        Customize your brand accent colors. Changes preview live across the entire app and are saved when you click Save.
       </p>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <label className="block text-xs text-muted-foreground">
-          <div className="flex items-center gap-1 mb-2">
-            <Palette className="h-3 w-3" />
-            Primary Brand Color
-          </div>
-          <div className="flex items-center gap-3">
-            <input
-              type="color"
-              value={form.primaryColor}
-              onChange={(e) => setField("primaryColor", e.target.value)}
-              className="w-12 h-12 rounded-xl border border-border/60 cursor-pointer"
-            />
-            <Input
-              value={form.primaryColor}
-              onChange={(e) => setField("primaryColor", e.target.value)}
-              placeholder="#F97316"
-              className="flex-1"
-            />
-          </div>
-        </label>
+        <div className="space-y-2">
+          <label className="block text-xs text-muted-foreground">
+            <div className="flex items-center gap-1.5 mb-2 font-medium">
+              <Palette className="h-3.5 w-3.5" />
+              Primary Accent Color
+            </div>
+            <div className="flex items-center gap-3">
+              <input
+                type="color"
+                value={form.primaryColor}
+                onChange={(e) => setField("primaryColor", e.target.value)}
+                className="w-14 h-14 rounded-xl border-2 border-border/60 cursor-pointer bg-transparent"
+              />
+              <Input
+                value={form.primaryColor}
+                onChange={(e) => setField("primaryColor", e.target.value)}
+                placeholder="#F97316"
+                className="flex-1 font-mono"
+              />
+            </div>
+          </label>
+          <p className="text-[11px] text-muted-foreground">
+            Used for buttons, highlights, active states, and primary accents.
+          </p>
+        </div>
 
-        <label className="block text-xs text-muted-foreground">
-          <div className="flex items-center gap-1 mb-2">
-            <Palette className="h-3 w-3" />
-            Secondary Brand Color
-          </div>
-          <div className="flex items-center gap-3">
-            <input
-              type="color"
-              value={form.secondaryColor}
-              onChange={(e) => setField("secondaryColor", e.target.value)}
-              className="w-12 h-12 rounded-xl border border-border/60 cursor-pointer"
-            />
-            <Input
-              value={form.secondaryColor}
-              onChange={(e) => setField("secondaryColor", e.target.value)}
-              placeholder="#14B8A6"
-              className="flex-1"
-            />
-          </div>
-        </label>
+        <div className="space-y-2">
+          <label className="block text-xs text-muted-foreground">
+            <div className="flex items-center gap-1.5 mb-2 font-medium">
+              <Palette className="h-3.5 w-3.5" />
+              Secondary Accent Color
+            </div>
+            <div className="flex items-center gap-3">
+              <input
+                type="color"
+                value={form.secondaryColor}
+                onChange={(e) => setField("secondaryColor", e.target.value)}
+                className="w-14 h-14 rounded-xl border-2 border-border/60 cursor-pointer bg-transparent"
+              />
+              <Input
+                value={form.secondaryColor}
+                onChange={(e) => setField("secondaryColor", e.target.value)}
+                placeholder="#14B8A6"
+                className="flex-1 font-mono"
+              />
+            </div>
+          </label>
+          <p className="text-[11px] text-muted-foreground">
+            Used for secondary badges, staff avatars, and complementary accents.
+          </p>
+        </div>
       </div>
 
-      <div className="p-4 rounded-xl bg-slate-800/50 border border-border/40">
-        <h3 className="text-sm font-medium mb-3">Preview</h3>
+      <div className="kf-card p-5 space-y-4">
+        <h3 className="text-sm font-semibold flex items-center gap-2">
+          <Eye className="w-4 h-4" /> Live Preview
+        </h3>
         <div className="flex items-center gap-4">
           <div
-            className="w-16 h-16 rounded-xl flex items-center justify-center text-white font-bold text-lg"
+            className="w-14 h-14 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-lg"
             style={{ backgroundColor: form.primaryColor }}
           >
             {form.name?.charAt(0) || "K"}
           </div>
           <div>
-            <div className="font-semibold" style={{ color: form.primaryColor }}>
+            <div className="text-lg font-bold" style={{ color: form.primaryColor }}>
               {form.name || "Your Business"}
             </div>
-            <div className="text-sm" style={{ color: form.secondaryColor }}>
+            <div className="text-sm font-medium" style={{ color: form.secondaryColor }}>
               Professional Services
             </div>
           </div>
+        </div>
+        <div className="flex flex-wrap gap-3 pt-2">
+          <button className="kf-btn-primary text-sm">Primary Button</button>
+          <button className="kf-btn-secondary text-sm">Secondary Button</button>
+          <span className="kf-badge kf-badge-primary">Primary Badge</span>
+          <span className="kf-badge kf-badge-secondary">Secondary Badge</span>
+        </div>
+        <div className="flex gap-3 pt-1">
+          <div className="flex-1 kf-card-accent p-3 text-center text-sm font-medium">Accent Card</div>
+          <div className="flex-1 kf-card p-3 text-center text-sm font-medium">Standard Card</div>
         </div>
       </div>
 
