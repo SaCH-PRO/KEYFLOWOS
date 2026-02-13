@@ -1192,7 +1192,22 @@ export type SocialPost = {
   postedAt?: string | null;
   scheduledFor?: string | null;
   publishedAt?: string | null;
+  channelIds?: string[];
+  publishResults?: Record<string, unknown>[] | null;
   createdAt: string;
+};
+
+export type SocialConnection = {
+  id: string;
+  platform: string;
+  platformId?: string | null;
+  accountName?: string | null;
+  profilePicture?: string | null;
+  status: string;
+  scopes?: string | null;
+  expiresAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type Playbook = {
@@ -1292,6 +1307,8 @@ export async function fetchPosts(businessId: string = DEFAULT_BUSINESS_ID) {
       postedAt: z.string().nullable().optional(),
       scheduledFor: z.string().nullable().optional(),
       publishedAt: z.string().nullable().optional(),
+      channelIds: z.array(z.string()).optional(),
+      publishResults: z.array(z.record(z.unknown())).nullable().optional(),
       createdAt: z.string(),
     })),
     [],
@@ -1319,11 +1336,57 @@ export async function deletePost(postId: string, businessId: string = DEFAULT_BU
   );
 }
 
-export async function publishPost(postId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function publishPost(postId: string, channelIds?: string[], businessId: string = DEFAULT_BUSINESS_ID) {
   return apiPost<SocialPost>({
     path: `/social/businesses/${encodeURIComponent(businessId)}/posts/${encodeURIComponent(postId)}/publish`,
+    body: { channelIds },
+  });
+}
+
+export async function fetchSocialConnections(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGet(
+    `/social/businesses/${encodeURIComponent(businessId)}/connections`,
+    z.array(z.object({
+      id: z.string(),
+      platform: z.string(),
+      platformId: z.string().nullable().optional(),
+      accountName: z.string().nullable().optional(),
+      profilePicture: z.string().nullable().optional(),
+      status: z.string(),
+      scopes: z.string().nullable().optional(),
+      expiresAt: z.string().nullable().optional(),
+      createdAt: z.string(),
+      updatedAt: z.string(),
+    })),
+    [],
+  );
+}
+
+export async function startSocialOAuth(platform: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<{ url: string }>({
+    path: `/social/businesses/${encodeURIComponent(businessId)}/connections/${encodeURIComponent(platform)}/oauth/start`,
     body: {},
   });
+}
+
+export async function completeSocialOAuth(platform: string, code: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<SocialConnection>({
+    path: `/social/businesses/${encodeURIComponent(businessId)}/connections/${encodeURIComponent(platform)}/oauth/callback`,
+    body: { code },
+  });
+}
+
+export async function connectSocialManual(platform: string, data: { token: string; platformId?: string; accountName?: string }, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<SocialConnection>({
+    path: `/social/businesses/${encodeURIComponent(businessId)}/connections/${encodeURIComponent(platform)}/manual`,
+    body: data,
+  });
+}
+
+export async function disconnectSocial(platform: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiDelete<{ success: boolean }>(
+    `/social/businesses/${encodeURIComponent(businessId)}/connections/${encodeURIComponent(platform)}`,
+  );
 }
 
 export async function fetchPlaybooks(businessId: string = DEFAULT_BUSINESS_ID) {

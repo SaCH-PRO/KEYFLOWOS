@@ -2,7 +2,8 @@
 
 import { useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Clock, ImagePlus, Send, FileText, Sparkles, Hash, ChevronDown, Layers } from "lucide-react";
+import { X, Clock, ImagePlus, Send, FileText, Sparkles, Hash, ChevronDown, Layers, Globe } from "lucide-react";
+import { SocialConnection } from "@/lib/client";
 
 const MAX_CHARS = 2200;
 
@@ -20,18 +21,20 @@ const CONTENT_TEMPLATES: { label: string; text: string }[] = [
 ];
 
 type Props = {
-  onSubmit: (data: { content: string; scheduledFor?: string }) => Promise<void>;
+  onSubmit: (data: { content: string; scheduledFor?: string; channelIds?: string[] }) => Promise<void>;
   onClose: () => void;
   submitting?: boolean;
-  initial?: { content: string; scheduledFor?: string };
+  initial?: { content: string; scheduledFor?: string; channelIds?: string[] };
   mode?: "create" | "edit";
+  connections?: SocialConnection[];
 };
 
-export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "create" }: Props) {
+export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "create", connections = [] }: Props) {
   const [content, setContent] = useState(initial?.content ?? "");
   const [scheduledFor, setScheduledFor] = useState(initial?.scheduledFor ?? "");
   const [showSchedule, setShowSchedule] = useState(!!initial?.scheduledFor);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [selectedChannels, setSelectedChannels] = useState<Set<string>>(new Set(initial?.channelIds ?? []));
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const charCount = content.length;
@@ -65,9 +68,22 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
     setTimeout(() => textareaRef.current?.focus(), 0);
   }
 
+  function toggleChannel(platform: string) {
+    setSelectedChannels((prev) => {
+      const next = new Set(prev);
+      if (next.has(platform)) next.delete(platform);
+      else next.add(platform);
+      return next;
+    });
+  }
+
   async function handleSubmit() {
     if (!content.trim() || overLimit) return;
-    await onSubmit({ content, scheduledFor: showSchedule && scheduledFor ? scheduledFor : undefined });
+    await onSubmit({
+      content,
+      scheduledFor: showSchedule && scheduledFor ? scheduledFor : undefined,
+      channelIds: selectedChannels.size > 0 ? Array.from(selectedChannels) : undefined,
+    });
   }
 
   return (
@@ -163,6 +179,34 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
           ))}
         </div>
       </div>
+
+      {connections.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+            <Globe className="w-3 h-3" />
+            Publish to channels
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {connections.filter(c => c.status === "CONNECTED").map((conn) => {
+              const selected = selectedChannels.has(conn.platform);
+              return (
+                <button
+                  key={conn.platform}
+                  onClick={() => toggleChannel(conn.platform)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                    selected
+                      ? "border-[hsl(var(--kf-accent1)/0.5)] bg-[hsl(var(--kf-accent1)/0.12)] text-[hsl(var(--kf-accent1))]"
+                      : "border-[hsl(var(--kf-border))] text-muted-foreground hover:bg-[hsl(var(--kf-muted)/0.5)]"
+                  }`}
+                >
+                  {conn.platform.charAt(0) + conn.platform.slice(1).toLowerCase()}
+                  {conn.accountName ? ` · ${conn.accountName}` : ""}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center gap-2">
         <button

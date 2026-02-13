@@ -45,7 +45,7 @@ The project is structured as a monorepo containing a Next.js 16 frontend (`apps/
 - **CRM:** Contacts, timeline, lead scoring.
 - **Commerce:** Products, invoices, quotes, payments.
 - **Bookings:** Services, staff, availability, calendar.
-- **Social:** Posts, scheduling.
+- **Social:** Posts, scheduling, multi-platform channel integration (Facebook, Instagram, LinkedIn, Twitter). OAuth + manual token connect/disconnect. SocialConnectionsService for CRUD, SocialPublishingService orchestrator with platform-specific publishers. Channel selector in PostComposer for targeted publishing.
 - **Automations:** Playbooks, triggers, actions.
 - **Reports:** KPIs, analytics.
 - **Cockpit:** Flow Graph, Flow Feed, AI suggestions.
