@@ -495,6 +495,32 @@ export default function ContactsPage() {
         </button>
       </motion.div>
 
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.05 }}
+        className="grid grid-cols-2 md:grid-cols-4 gap-3"
+      >
+        {[
+          { label: "Total", value: contacts.length, color: "hsl(var(--kf-accent1))" },
+          { label: "Leads", value: segments["LEAD"] ?? contacts.filter(c => c.status === "LEAD").length, color: "hsl(var(--kf-accent2))" },
+          { label: "Prospects", value: segments["PROSPECT"] ?? contacts.filter(c => c.status === "PROSPECT").length, color: "hsl(200 70% 50%)" },
+          { label: "Clients", value: segments["CLIENT"] ?? contacts.filter(c => c.status === "CLIENT").length, color: "hsl(150 60% 40%)" },
+        ].map((kpi, i) => (
+          <motion.div
+            key={kpi.label}
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.05 + i * 0.05, type: "spring" as const, stiffness: 300, damping: 24 }}
+            className="kf-card p-4 text-center"
+            style={{ borderColor: `${kpi.color.replace(")", " / 0.2)")}` }}
+          >
+            <p className="text-2xl font-bold" style={{ color: kpi.color }}>{kpi.value}</p>
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">{kpi.label}</p>
+          </motion.div>
+        ))}
+      </motion.div>
+
       {flowIntelligence && (
         <FlowIntelligence
           data={flowIntelligence}

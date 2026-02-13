@@ -9,6 +9,9 @@ import {
   Store,
   LayoutGrid,
   Settings2,
+  ShoppingBag,
+  AlertTriangle,
+  TrendingUp,
 } from "lucide-react";
 import {
   Service,
@@ -39,6 +42,11 @@ type DriftedItem = {
   commercePrice: number;
   commerceDuration: number | null;
 };
+
+const VIEW_TABS = [
+  { key: "preview" as const, label: "Preview", icon: LayoutGrid },
+  { key: "edit" as const, label: "Edit Store", icon: Settings2 },
+];
 
 export default function StorePage() {
   const [businessId, setBusinessId] = useState<string | null>(null);
@@ -307,6 +315,43 @@ export default function StorePage() {
   const storeServiceNames = new Set(services.map((s) => s.name));
   const storeItemCount = services.filter((s) => commerceProducts.some((p) => p.name === s.name)).length;
 
+  const kpiCards = [
+    {
+      label: "Store Items",
+      value: services.length,
+      icon: Store,
+      color: "hsl(var(--kf-accent1))",
+      bg: "hsl(var(--kf-accent1) / 0.08)",
+      border: "hsl(var(--kf-accent1) / 0.2)",
+    },
+    {
+      label: "Commerce Products",
+      value: commerceProducts.length,
+      icon: ShoppingBag,
+      color: "hsl(var(--kf-accent2))",
+      bg: "hsl(var(--kf-accent2) / 0.08)",
+      border: "hsl(var(--kf-accent2) / 0.2)",
+    },
+    {
+      label: "Store Status",
+      value: storeEnabled ? "Published" : "Unpublished",
+      icon: TrendingUp,
+      color: storeEnabled ? "hsl(142 70% 55%)" : "hsl(40 90% 55%)",
+      bg: storeEnabled ? "hsl(142 70% 45% / 0.08)" : "hsl(40 90% 50% / 0.08)",
+      border: storeEnabled ? "hsl(142 70% 45% / 0.2)" : "hsl(40 90% 50% / 0.2)",
+      dot: storeEnabled ? "hsl(142 70% 55%)" : "hsl(40 90% 55%)",
+    },
+    {
+      label: "Price Drifts",
+      value: driftedItems.length,
+      icon: AlertTriangle,
+      color: driftedItems.length > 0 ? "hsl(30 90% 60%)" : "hsl(var(--kf-muted-foreground))",
+      bg: driftedItems.length > 0 ? "hsl(30 90% 50% / 0.08)" : "hsl(var(--kf-muted) / 0.3)",
+      border: driftedItems.length > 0 ? "hsl(30 90% 50% / 0.2)" : "hsl(var(--kf-border))",
+      warn: driftedItems.length > 0,
+    },
+  ];
+
   return (
     <div className="space-y-6">
       <StoreHeader
@@ -374,14 +419,69 @@ export default function StorePage() {
       </AnimatePresence>
 
       {loading ? (
-        <div className="flex items-center justify-center py-20">
-          <div className="text-center space-y-3">
-            <RefreshCw className="w-8 h-8 animate-spin mx-auto text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">Loading store...</p>
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {[1, 2, 3, 4].map((i) => (
+              <div
+                key={i}
+                className="h-24 rounded-2xl animate-pulse"
+                style={{ background: "hsl(var(--kf-muted) / 0.3)" }}
+              />
+            ))}
+          </div>
+          <div className="h-12 rounded-xl animate-pulse w-64" style={{ background: "hsl(var(--kf-muted) / 0.3)" }} />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {[1, 2, 3, 4].map((i) => (
+              <div
+                key={i}
+                className="h-32 rounded-2xl animate-pulse"
+                style={{ background: "hsl(var(--kf-muted) / 0.3)" }}
+              />
+            ))}
           </div>
         </div>
       ) : (
         <div className="space-y-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {kpiCards.map((kpi, idx) => {
+              const Icon = kpi.icon;
+              return (
+                <motion.div
+                  key={kpi.label}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: idx * 0.05 }}
+                  className="rounded-2xl p-4 relative overflow-hidden"
+                  style={{
+                    background: kpi.bg,
+                    border: `1px solid ${kpi.border}`,
+                    backdropFilter: "blur(20px)",
+                  }}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <Icon className="w-4 h-4" style={{ color: kpi.color }} />
+                    {(kpi as any).dot && (
+                      <span
+                        className="w-2 h-2 rounded-full animate-pulse"
+                        style={{ background: (kpi as any).dot }}
+                      />
+                    )}
+                    {(kpi as any).warn && (
+                      <span
+                        className="w-2 h-2 rounded-full animate-pulse"
+                        style={{ background: "hsl(30 90% 55%)" }}
+                      />
+                    )}
+                  </div>
+                  <p className="text-2xl font-bold" style={{ color: kpi.color }}>
+                    {kpi.value}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">{kpi.label}</p>
+                </motion.div>
+              );
+            })}
+          </div>
+
           <StoreSettings
             businessId={businessId!}
             slug={storeSlug}
@@ -392,62 +492,87 @@ export default function StorePage() {
             slugSaving={slugSaving}
           />
 
-          <div className="kf-card p-1 inline-flex gap-1">
-            <button
-              onClick={() => setActiveView("preview")}
-              className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                activeView === "preview"
-                  ? "text-[hsl(var(--kf-accent1))]"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-              style={activeView === "preview" ? { background: "hsl(var(--kf-accent1) / 0.1)" } : {}}
-            >
-              <LayoutGrid className="w-4 h-4" />
-              Preview
-            </button>
-            <button
-              onClick={() => setActiveView("edit")}
-              className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                activeView === "edit"
-                  ? "text-[hsl(var(--kf-accent1))]"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-              style={activeView === "edit" ? { background: "hsl(var(--kf-accent1) / 0.1)" } : {}}
-            >
-              <Settings2 className="w-4 h-4" />
-              Edit Store
-            </button>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {VIEW_TABS.map((t) => {
+              const Icon = t.icon;
+              return (
+                <button
+                  key={t.key}
+                  onClick={() => setActiveView(t.key)}
+                  className={`relative px-5 py-2.5 text-sm font-medium rounded-xl transition-all flex items-center gap-2 whitespace-nowrap ${
+                    activeView === t.key
+                      ? ""
+                      : "text-muted-foreground hover:text-foreground hover:bg-[hsl(var(--kf-muted)/0.5)]"
+                  }`}
+                >
+                  {activeView === t.key && (
+                    <motion.div
+                      layoutId="store-tab-pill"
+                      className="absolute inset-0 rounded-xl"
+                      style={{
+                        background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.15), hsl(var(--kf-accent2) / 0.1))",
+                        border: "1px solid hsl(var(--kf-accent1) / 0.25)",
+                        boxShadow: "0 2px 12px hsl(var(--kf-accent1) / 0.1)",
+                      }}
+                      transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
+                    />
+                  )}
+                  <span
+                    className="relative z-10 flex items-center gap-2"
+                    style={activeView === t.key ? { color: "hsl(var(--kf-accent1))" } : {}}
+                  >
+                    <Icon className="w-4 h-4" />
+                    {t.label}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
-          {activeView === "preview" ? (
-            <StorefrontPreview
-              businessData={businessData}
-              services={services}
-              commerceProducts={commerceProducts}
-            />
-          ) : (
-            <div className="space-y-6">
-              <HoursEditor
-                hours={businessHours}
-                onChange={setBusinessHours}
-                onSave={handleSaveHours}
-                saving={hoursSaving}
-              />
-              <CatalogManager
-                products={commerceProducts}
-                storeServiceNames={storeServiceNames}
-                storeItemCount={storeItemCount}
-                processingItems={processingItems}
-                confirmRemove={confirmRemove}
-                onToggleItem={handleToggleStoreItem}
-                onSelectAll={handleSelectAll}
-                onDeselectAll={handleDeselectAll}
-                onConfirmRemoveChange={setConfirmRemove}
-                onDeleteFromStore={handleDeleteServiceFromStore}
-                services={services.map((s) => ({ id: s.id, name: s.name }))}
-              />
-            </div>
-          )}
+          <AnimatePresence mode="wait">
+            {activeView === "preview" ? (
+              <motion.div
+                key="preview"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+              >
+                <StorefrontPreview
+                  businessData={businessData}
+                  services={services}
+                  commerceProducts={commerceProducts}
+                />
+              </motion.div>
+            ) : (
+              <motion.div
+                key="edit"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="space-y-6"
+              >
+                <HoursEditor
+                  hours={businessHours}
+                  onChange={setBusinessHours}
+                  onSave={handleSaveHours}
+                  saving={hoursSaving}
+                />
+                <CatalogManager
+                  products={commerceProducts}
+                  storeServiceNames={storeServiceNames}
+                  storeItemCount={storeItemCount}
+                  processingItems={processingItems}
+                  confirmRemove={confirmRemove}
+                  onToggleItem={handleToggleStoreItem}
+                  onSelectAll={handleSelectAll}
+                  onDeselectAll={handleDeselectAll}
+                  onConfirmRemoveChange={setConfirmRemove}
+                  onDeleteFromStore={handleDeleteServiceFromStore}
+                  services={services.map((s) => ({ id: s.id, name: s.name }))}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       )}
     </div>

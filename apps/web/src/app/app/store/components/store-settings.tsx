@@ -9,6 +9,8 @@ import {
   CheckCircle2,
   XCircle,
   MessageCircle,
+  QrCode,
+  ExternalLink,
 } from "lucide-react";
 import { apiGet } from "@/lib/api";
 
@@ -61,14 +63,31 @@ export function StoreSettings({
     window.open(`https://wa.me/?text=${text}`, "_blank");
   }
 
+  const domain = typeof window !== "undefined" ? window.location.origin : "";
+  const livePreviewUrl = slug.trim()
+    ? `${domain}/book/${slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-")}`
+    : "";
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.05 }}
-      className="kf-card-accent p-5 space-y-4"
+      className="rounded-2xl overflow-hidden"
+      style={{
+        background: "hsl(var(--kf-background) / 0.6)",
+        backdropFilter: "blur(20px)",
+        border: "1px solid hsl(var(--kf-accent1) / 0.15)",
+        boxShadow: "0 4px 24px hsl(var(--kf-accent1) / 0.05)",
+      }}
     >
-      <div className="flex items-center gap-3">
+      <div
+        className="flex items-center gap-3 px-5 py-4"
+        style={{
+          borderBottom: "1px solid hsl(var(--kf-accent1) / 0.1)",
+          background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.06), transparent)",
+        }}
+      >
         <div
           className="h-10 w-10 rounded-xl flex items-center justify-center"
           style={{ background: "hsl(var(--kf-accent1) / 0.15)" }}
@@ -81,61 +100,95 @@ export function StoreSettings({
         </div>
       </div>
 
-      {publicUrl && (
-        <div className="flex items-center gap-2 kf-card px-3 py-2">
-          <LinkIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-          <span className="text-xs text-muted-foreground truncate">{publicUrl}</span>
-        </div>
-      )}
+      <div className="p-5 space-y-4">
+        {livePreviewUrl && (
+          <div
+            className="flex items-center gap-2 rounded-xl px-3 py-2.5"
+            style={{
+              background: "hsl(var(--kf-muted) / 0.3)",
+              border: "1px solid hsl(var(--kf-border) / 0.5)",
+            }}
+          >
+            <LinkIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            <span className="text-xs text-muted-foreground truncate flex-1 font-mono">{livePreviewUrl}</span>
+            <a
+              href={livePreviewUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
+        )}
 
-      <div className="flex items-center gap-2">
-        <div className="flex-1 flex items-center kf-card overflow-hidden !rounded-xl">
-          <span className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap" style={{ borderRight: "1px solid hsl(var(--kf-border))" }}>
-            /book/
-          </span>
-          <input
-            type="text"
-            value={slug}
-            onChange={(e) => onSlugChange(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))}
-            placeholder="your-business-name"
-            className="flex-1 px-3 py-2.5 bg-transparent text-sm focus:outline-none"
-          />
-          {slugStatus === "checking" && (
-            <div className="px-2">
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />
-            </div>
-          )}
-          {slugStatus === "available" && (
-            <div className="px-2 flex items-center gap-1 text-xs text-emerald-400">
-              <CheckCircle2 className="w-3.5 h-3.5" /> Available
-            </div>
-          )}
-          {slugStatus === "taken" && (
-            <div className="px-2 flex items-center gap-1 text-xs text-red-400">
-              <XCircle className="w-3.5 h-3.5" /> Taken
-            </div>
-          )}
+        <div className="flex items-center gap-2">
+          <div
+            className="flex-1 flex items-center overflow-hidden rounded-xl"
+            style={{
+              background: "hsl(var(--kf-muted) / 0.2)",
+              border: slugStatus === "available"
+                ? "1px solid hsl(142 70% 45% / 0.4)"
+                : slugStatus === "taken"
+                ? "1px solid hsl(0 70% 50% / 0.4)"
+                : "1px solid hsl(var(--kf-border))",
+              transition: "border-color 0.2s ease",
+            }}
+          >
+            <span
+              className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap"
+              style={{ borderRight: "1px solid hsl(var(--kf-border))" }}
+            >
+              /book/
+            </span>
+            <input
+              type="text"
+              value={slug}
+              onChange={(e) => onSlugChange(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))}
+              placeholder="your-business-name"
+              className="flex-1 px-3 py-2.5 bg-transparent text-sm focus:outline-none"
+            />
+            {slugStatus === "checking" && (
+              <div className="px-2">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />
+              </div>
+            )}
+            {slugStatus === "available" && (
+              <div className="px-2 flex items-center gap-1 text-xs text-emerald-400">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Available
+              </div>
+            )}
+            {slugStatus === "taken" && (
+              <div className="px-2 flex items-center gap-1 text-xs text-red-400">
+                <XCircle className="w-3.5 h-3.5" /> Taken
+              </div>
+            )}
+          </div>
+          <button
+            onClick={onSaveSlug}
+            disabled={slugSaving || !slug.trim() || slugStatus === "taken"}
+            className="kf-btn-primary text-xs"
+            style={{ opacity: slugSaving || !slug.trim() || slugStatus === "taken" ? 0.5 : 1 }}
+          >
+            {slugSaving ? "Saving..." : "Save"}
+          </button>
         </div>
-        <button
-          onClick={onSaveSlug}
-          disabled={slugSaving || !slug.trim() || slugStatus === "taken"}
-          className="kf-btn-primary text-xs"
-          style={{ opacity: slugSaving || !slug.trim() || slugStatus === "taken" ? 0.5 : 1 }}
-        >
-          {slugSaving ? "Saving..." : "Save"}
-        </button>
-      </div>
 
-      <div className="flex items-center gap-2">
-        <button
-          onClick={handleWhatsAppShare}
-          disabled={!publicUrl}
-          className="kf-btn-secondary inline-flex items-center gap-1.5 text-xs"
-          style={{ opacity: !publicUrl ? 0.4 : 1 }}
-        >
-          <MessageCircle className="w-3.5 h-3.5" />
-          Share on WhatsApp
-        </button>
+        <div className="flex items-center gap-3 flex-wrap">
+          <button
+            onClick={handleWhatsAppShare}
+            disabled={!publicUrl}
+            className="kf-btn-secondary inline-flex items-center gap-1.5 text-xs"
+            style={{ opacity: !publicUrl ? 0.4 : 1 }}
+          >
+            <MessageCircle className="w-3.5 h-3.5" />
+            Share on WhatsApp
+          </button>
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground/60">
+            <QrCode className="w-3.5 h-3.5" />
+            Share your booking link easily
+          </div>
+        </div>
       </div>
     </motion.div>
   );

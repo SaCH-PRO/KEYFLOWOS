@@ -11,6 +11,8 @@ import {
   Filter,
   ChevronDown,
   X,
+  CheckCircle2,
+  AlertTriangle,
 } from "lucide-react";
 import { Product } from "@/lib/client";
 import { formatPrice } from "@/lib/format";
@@ -53,6 +55,10 @@ export function CatalogManager({
   const [searchInput, setSearchInput] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
   const [showFilters, setShowFilters] = useState(false);
+  const [bulkConfirm, setBulkConfirm] = useState<"add" | "remove" | null>(null);
+
+  const notAddedCount = products.filter((p) => !storeServiceNames.has(p.name)).length;
+  const inStoreCount = storeItemCount;
 
   const filteredProducts = products.filter((p) => {
     if (categoryFilter !== "ALL" && p.category !== categoryFilter) return false;
@@ -63,41 +69,78 @@ export function CatalogManager({
     return true;
   });
 
+  function handleBulkAdd() {
+    if (bulkConfirm === "add") {
+      onSelectAll();
+      setBulkConfirm(null);
+    } else {
+      setBulkConfirm("add");
+    }
+  }
+
+  function handleBulkRemove() {
+    if (bulkConfirm === "remove") {
+      onDeselectAll();
+      setBulkConfirm(null);
+    } else {
+      setBulkConfirm("remove");
+    }
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.15 }}
-      className="kf-card overflow-hidden"
+      className="rounded-2xl overflow-hidden"
+      style={{
+        background: "hsl(var(--kf-background) / 0.6)",
+        backdropFilter: "blur(20px)",
+        border: "1px solid hsl(var(--kf-accent1) / 0.15)",
+        boxShadow: "0 4px 24px hsl(var(--kf-accent1) / 0.05)",
+      }}
     >
       <div
         className="flex items-center justify-between px-5 py-4"
-        style={{ borderBottom: "1px solid hsl(var(--kf-accent1) / 0.15)", background: "hsl(var(--kf-accent1) / 0.05)" }}
+        style={{
+          borderBottom: "1px solid hsl(var(--kf-accent1) / 0.1)",
+          background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.06), transparent)",
+        }}
       >
         <div className="flex items-center gap-2.5">
-          <Store className="w-5 h-5" style={{ color: "hsl(var(--kf-accent1))" }} />
+          <div
+            className="h-10 w-10 rounded-xl flex items-center justify-center"
+            style={{ background: "hsl(var(--kf-accent1) / 0.15)" }}
+          >
+            <Store className="w-5 h-5" style={{ color: "hsl(var(--kf-accent1))" }} />
+          </div>
           <div>
-            <h3 className="text-sm font-semibold">Store Items</h3>
+            <h3 className="text-sm font-semibold">Store Catalog</h3>
             <p className="text-[11px] text-muted-foreground mt-0.5">Toggle items from Commerce to display in your store</p>
           </div>
         </div>
-        {products.length > 0 && (
-          <div className="flex items-center gap-3">
-            {storeItemCount > 0 && (
-              <button onClick={onDeselectAll} className="text-xs font-medium text-red-400 hover:text-red-300 transition-colors">
-                Deselect All
-              </button>
-            )}
-            <button
-              onClick={onSelectAll}
-              disabled={products.every((p) => storeServiceNames.has(p.name))}
-              className="text-xs font-medium hover:opacity-80 disabled:opacity-30 transition-colors"
-              style={{ color: "hsl(var(--kf-accent1))" }}
-            >
-              Select All
-            </button>
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          <span
+            className="px-2.5 py-1 rounded-full text-[10px] font-semibold"
+            style={{
+              background: "hsl(142 70% 45% / 0.15)",
+              color: "hsl(142 70% 60%)",
+              border: "1px solid hsl(142 70% 45% / 0.2)",
+            }}
+          >
+            {inStoreCount} In Store
+          </span>
+          <span
+            className="px-2.5 py-1 rounded-full text-[10px] font-semibold"
+            style={{
+              background: "hsl(var(--kf-muted) / 0.5)",
+              color: "hsl(var(--kf-muted-foreground))",
+              border: "1px solid hsl(var(--kf-border))",
+            }}
+          >
+            {notAddedCount} Not Added
+          </span>
+        </div>
       </div>
 
       {products.length > 0 && (
@@ -153,28 +196,69 @@ export function CatalogManager({
               </motion.div>
             )}
           </AnimatePresence>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={handleBulkAdd}
+              disabled={products.every((p) => storeServiceNames.has(p.name))}
+              className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-all ${
+                bulkConfirm === "add"
+                  ? "bg-emerald-500/20 border border-emerald-500/30 text-emerald-400"
+                  : "kf-btn-secondary"
+              }`}
+              style={{ opacity: products.every((p) => storeServiceNames.has(p.name)) ? 0.3 : 1 }}
+            >
+              <CheckCircle2 className="w-3 h-3 inline mr-1" />
+              {bulkConfirm === "add" ? "Confirm Add All?" : "Add All"}
+            </button>
+            {inStoreCount > 0 && (
+              <button
+                onClick={handleBulkRemove}
+                className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-all ${
+                  bulkConfirm === "remove"
+                    ? "bg-red-500/20 border border-red-500/30 text-red-400"
+                    : "kf-btn-secondary text-red-400"
+                }`}
+              >
+                <AlertTriangle className="w-3 h-3 inline mr-1" />
+                {bulkConfirm === "remove" ? "Confirm Remove All?" : "Remove All"}
+              </button>
+            )}
+            {bulkConfirm && (
+              <button
+                onClick={() => setBulkConfirm(null)}
+                className="text-xs text-muted-foreground hover:text-foreground"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
         </div>
       )}
 
       {filteredProducts.length > 0 ? (
         <div className="p-3 space-y-2">
-          {filteredProducts.map((p) => {
+          {filteredProducts.map((p, idx) => {
             const isOnStore = storeServiceNames.has(p.name);
             const isProcessing = processingItems.has(p.id);
             const isConfirming = confirmRemove === p.id;
             const Icon = CATEGORY_ICONS[p.category] || Briefcase;
 
             return (
-              <div
+              <motion.div
                 key={p.id}
-                className={`relative w-full flex items-center gap-3 rounded-xl px-4 py-3.5 text-left text-sm border cursor-pointer transition-all ${
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: idx * 0.03 }}
+                className={`relative w-full flex items-center gap-3 rounded-xl px-4 py-3.5 text-left text-sm cursor-pointer transition-all ${
                   isProcessing ? "opacity-60 pointer-events-none" : ""
-                } ${
-                  isOnStore
-                    ? "border-[hsl(var(--kf-accent1)/0.3)] hover:border-[hsl(var(--kf-accent1)/0.5)]"
-                    : "border-[hsl(var(--kf-border))] hover:border-[hsl(var(--kf-border))]"
                 }`}
-                style={{ backgroundColor: isOnStore ? "hsl(var(--kf-accent1) / 0.08)" : "hsl(var(--kf-muted) / 0.3)" }}
+                style={{
+                  backgroundColor: isOnStore ? "hsl(var(--kf-accent1) / 0.08)" : "hsl(var(--kf-muted) / 0.3)",
+                  border: isOnStore
+                    ? "1px solid hsl(var(--kf-accent1) / 0.25)"
+                    : "1px solid hsl(var(--kf-border) / 0.5)",
+                }}
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => {
@@ -186,8 +270,15 @@ export function CatalogManager({
                 onClick={() => !isProcessing && !isConfirming && onToggleItem(p)}
               >
                 {isConfirming && (
-                  <div className="absolute inset-0 rounded-xl bg-[hsl(var(--kf-background)/0.95)] backdrop-blur-sm flex items-center justify-center gap-3 z-10 border border-red-500/30">
-                    <span className="text-sm font-medium text-red-400">Remove?</span>
+                  <div
+                    className="absolute inset-0 rounded-xl flex items-center justify-center gap-3 z-10"
+                    style={{
+                      background: "hsl(var(--kf-background) / 0.95)",
+                      backdropFilter: "blur(8px)",
+                      border: "1px solid hsl(0 70% 50% / 0.3)",
+                    }}
+                  >
+                    <span className="text-sm font-medium text-red-400">Remove from store?</span>
                     <button
                       onClick={(e) => { e.stopPropagation(); onConfirmRemoveChange(null); }}
                       className="kf-btn-secondary text-xs"
@@ -256,7 +347,7 @@ export function CatalogManager({
                       {isProcessing ? "Processing..." : isOnStore ? "\u2713 On store" : "Not on store"}
                     </span>
                     {p.description && (
-                      <span className="text-[10px] text-muted-foreground/40 truncate max-w-[200px]">\u00b7 {p.description}</span>
+                      <span className="text-[10px] text-muted-foreground/40 truncate max-w-[200px]">&middot; {p.description}</span>
                     )}
                   </div>
                 </div>
@@ -264,7 +355,7 @@ export function CatalogManager({
                 <span className="text-xs font-semibold flex-shrink-0" style={{ color: "hsl(var(--kf-accent1))" }}>
                   {formatPrice(p.price, p.currency)}
                 </span>
-              </div>
+              </motion.div>
             );
           })}
 

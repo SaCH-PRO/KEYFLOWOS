@@ -14,6 +14,10 @@ import {
   Sparkles,
   BarChart3,
   RefreshCw,
+  FileText,
+  Clock,
+  CheckCircle2,
+  TrendingUp,
 } from "lucide-react";
 import {
   SocialPost,
@@ -28,7 +32,7 @@ import { PostsFeed } from "./components/posts-feed";
 import { ContentCalendar } from "./components/content-calendar";
 import { ChannelsPanel } from "./components/channels-panel";
 import { AIStudio } from "./components/ai-studio";
-import { AnalyticsStub } from "./components/analytics-stub";
+import { AnalyticsPanel } from "./components/analytics-stub";
 
 type Tab = "posts" | "calendar" | "channels" | "ai" | "analytics";
 
@@ -41,6 +45,16 @@ const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
 ];
 
 const STATUS_FILTERS = ["ALL", "DRAFT", "SCHEDULED", "POSTED"] as const;
+
+const stagger = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { staggerChildren: 0.08 } },
+};
+
+const fadeUp = {
+  hidden: { opacity: 0, y: 12 },
+  show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } },
+};
 
 export default function SocialPage() {
   const [posts, setPosts] = useState<SocialPost[]>([]);
@@ -144,6 +158,14 @@ export default function SocialPage() {
   const draftCount = posts.filter((p) => p.status === "DRAFT").length;
   const scheduledCount = posts.filter((p) => p.status === "SCHEDULED").length;
   const postedCount = posts.filter((p) => p.status === "POSTED").length;
+  const publishingRate = posts.length > 0 ? Math.round((postedCount / posts.length) * 100) : 0;
+
+  const kpiCards = [
+    { label: "Drafts", value: draftCount, icon: FileText, color: "hsl(var(--kf-muted-foreground))" },
+    { label: "Scheduled", value: scheduledCount, icon: Clock, color: "hsl(var(--kf-accent2))" },
+    { label: "Posted", value: postedCount, icon: CheckCircle2, color: "hsl(150 60% 45%)" },
+    { label: "Publishing Rate", value: `${publishingRate}%`, icon: TrendingUp, color: "hsl(var(--kf-accent1))" },
+  ];
 
   return (
     <div className="space-y-6">
@@ -166,23 +188,26 @@ export default function SocialPage() {
       </motion.div>
 
       <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.05 }}
-        className="grid grid-cols-3 gap-3"
+        variants={stagger}
+        initial="hidden"
+        animate="show"
+        className="grid grid-cols-2 md:grid-cols-4 gap-3"
       >
-        <div className="kf-card p-3 text-center">
-          <p className="text-lg font-bold">{draftCount}</p>
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Drafts</p>
-        </div>
-        <div className="kf-card p-3 text-center" style={{ borderColor: "hsl(var(--kf-accent2) / 0.3)" }}>
-          <p className="text-lg font-bold" style={{ color: "hsl(var(--kf-accent2))" }}>{scheduledCount}</p>
-          <p className="text-[10px] uppercase tracking-wider" style={{ color: "hsl(var(--kf-accent2) / 0.7)" }}>Scheduled</p>
-        </div>
-        <div className="kf-card p-3 text-center" style={{ borderColor: "hsl(150 60% 40% / 0.3)" }}>
-          <p className="text-lg font-bold text-emerald-400">{postedCount}</p>
-          <p className="text-[10px] text-emerald-400/70 uppercase tracking-wider">Posted</p>
-        </div>
+        {kpiCards.map((kpi) => {
+          const Icon = kpi.icon;
+          return (
+            <motion.div
+              key={kpi.label}
+              variants={fadeUp}
+              className="rounded-2xl border backdrop-blur-xl p-4 text-center space-y-1"
+              style={{ background: "hsl(var(--kf-card) / 0.7)", borderColor: "hsl(var(--kf-border))" }}
+            >
+              <Icon className="w-4 h-4 mx-auto" style={{ color: kpi.color }} />
+              <p className="text-xl font-bold" style={{ color: kpi.color }}>{kpi.value}</p>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{kpi.label}</p>
+            </motion.div>
+          );
+        })}
       </motion.div>
 
       {error && (
@@ -218,7 +243,13 @@ export default function SocialPage() {
         )}
       </AnimatePresence>
 
-      <div className="kf-card p-4 space-y-4">
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+        className="rounded-2xl border backdrop-blur-xl p-4 space-y-4"
+        style={{ background: "hsl(var(--kf-card) / 0.7)", borderColor: "hsl(var(--kf-border))" }}
+      >
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -279,28 +310,47 @@ export default function SocialPage() {
             </motion.div>
           )}
         </AnimatePresence>
-      </div>
+      </motion.div>
 
-      <div className="kf-card overflow-hidden">
-        <div className="flex border-b" style={{ borderColor: "hsl(var(--kf-border))" }}>
-          {TABS.map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              onClick={() => setActiveTab(key)}
-              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium whitespace-nowrap transition-all border-b-2 ${
-                activeTab === key
-                  ? "text-[hsl(var(--kf-accent1))]"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-              style={activeTab === key ? { borderColor: "hsl(var(--kf-accent1))" } : {}}
-            >
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {TABS.map(({ key, label, icon: Icon }) => (
+          <button
+            key={key}
+            onClick={() => setActiveTab(key)}
+            className={`relative px-5 py-2.5 text-sm font-medium rounded-xl transition-all flex items-center gap-2 whitespace-nowrap ${
+              activeTab === key
+                ? "text-[hsl(var(--kf-accent1))]"
+                : "text-muted-foreground hover:text-foreground hover:bg-[hsl(var(--kf-muted)/0.5)]"
+            }`}
+          >
+            {activeTab === key && (
+              <motion.div
+                layoutId="social-tab-pill"
+                className="absolute inset-0 rounded-xl border shadow-lg"
+                style={{
+                  background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.12), hsl(var(--kf-accent2) / 0.08))",
+                  borderColor: "hsl(var(--kf-accent1) / 0.3)",
+                  boxShadow: "0 4px 12px hsl(var(--kf-accent1) / 0.1)",
+                }}
+                transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
+              />
+            )}
+            <span className="relative z-10 flex items-center gap-2">
               <Icon className="w-4 h-4" />
               {label}
-            </button>
-          ))}
-        </div>
+            </span>
+          </button>
+        ))}
+      </div>
 
-        <div className="p-4">
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={activeTab}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -10 }}
+          transition={{ duration: 0.2 }}
+        >
           {activeTab === "posts" && (
             <PostsFeed
               posts={filteredPosts}
@@ -315,9 +365,9 @@ export default function SocialPage() {
           )}
           {activeTab === "channels" && <ChannelsPanel />}
           {activeTab === "ai" && <AIStudio />}
-          {activeTab === "analytics" && <AnalyticsStub />}
-        </div>
-      </div>
+          {activeTab === "analytics" && <AnalyticsPanel posts={posts} />}
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
 }
