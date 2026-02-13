@@ -151,12 +151,12 @@ export default function ComplianceSettingsPage() {
 
       if (bizId) {
         try {
-          const business = await getBusinessById(bizId);
-          if (business?.complianceData) {
-            const data = business.complianceData as Record<string, boolean>;
+          const result = await getBusinessById(bizId);
+          if (result?.data?.complianceData) {
+            const cd = result.data.complianceData as Record<string, boolean>;
             setItems(prev => prev.map(item => ({
               ...item,
-              completed: data[item.id] ?? false,
+              completed: cd[item.id] ?? false,
             })));
           }
         } catch (err) {

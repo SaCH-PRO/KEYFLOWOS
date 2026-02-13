@@ -1,7 +1,7 @@
 "use client";
 
 import { RefObject } from "react";
-import { Building2, Camera } from "lucide-react";
+import { Building2, Camera, Upload } from "lucide-react";
 
 type Props = {
   logoUrl: string | null;
@@ -13,24 +13,26 @@ type Props = {
 
 export function LogoUploader({ logoUrl, name, uploading, fileInputRef, onUpload }: Props) {
   return (
-    <div className="flex items-center gap-6 mb-6">
-      <div className="relative">
-        <div className="w-24 h-24 rounded-2xl bg-slate-800 border border-border/60 flex items-center justify-center overflow-hidden">
+    <div className="flex items-center gap-5">
+      <div className="relative group">
+        <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] border-2 border-border/30 flex items-center justify-center overflow-hidden shadow-lg">
           {logoUrl ? (
             <img src={logoUrl} alt="Business logo" className="w-full h-full object-cover" />
           ) : (
-            <Building2 className="h-10 w-10 text-muted-foreground" />
+            <span className="text-2xl font-bold text-white">
+              {name?.charAt(0)?.toUpperCase() || "K"}
+            </span>
           )}
         </div>
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
-          className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors disabled:opacity-50"
+          className="absolute inset-0 rounded-2xl bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity cursor-pointer"
         >
           {uploading ? (
-            <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+            <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
           ) : (
-            <Camera className="h-4 w-4" />
+            <Camera className="h-5 w-5 text-white" />
           )}
         </button>
         <input
@@ -42,8 +44,8 @@ export function LogoUploader({ logoUrl, name, uploading, fileInputRef, onUpload 
         />
       </div>
       <div>
-        <h2 className="text-xl font-semibold">{name || "Your Business"}</h2>
-        <p className="text-sm text-muted-foreground">Click the camera icon to upload your logo</p>
+        <h2 className="text-lg font-semibold">{name || "Your Business"}</h2>
+        <p className="text-sm text-muted-foreground">Hover over logo to change it</p>
       </div>
     </div>
   );

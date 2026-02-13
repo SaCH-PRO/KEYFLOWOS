@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { motion } from "framer-motion";
 import { Building2, Globe, Palette, CreditCard, Crown, CheckCircle2, AlertCircle } from "lucide-react";
-import { Button, Card } from "@keyflow/ui";
+import { Button } from "@keyflow/ui";
 import { useBusinessSettings } from "./use-business-settings";
 import { LogoUploader } from "./logo-uploader";
 import { BasicInfoTab } from "./basic-info-tab";
@@ -11,91 +12,152 @@ import { BrandingTab } from "./branding-tab";
 import { PaymentsTab } from "./payments-tab";
 import { BillingTab } from "./billing-tab";
 
+const tabs = [
+  { key: "basic", label: "Basic Info", icon: Building2 },
+  { key: "social", label: "Social Media", icon: Globe },
+  { key: "branding", label: "Branding", icon: Palette },
+  { key: "payments", label: "Payments", icon: CreditCard },
+  { key: "billing", label: "Billing", icon: Crown },
+] as const;
+
+type TabKey = (typeof tabs)[number]["key"];
+
+function SkeletonBusiness() {
+  return (
+    <div className="space-y-6 max-w-3xl animate-pulse">
+      <div className="flex items-center gap-6">
+        <div className="w-24 h-24 rounded-2xl bg-muted/40" />
+        <div className="space-y-2">
+          <div className="h-5 w-40 bg-muted/40 rounded-lg" />
+          <div className="h-3 w-56 bg-muted/30 rounded-lg" />
+        </div>
+      </div>
+      <div className="flex gap-2">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <div key={i} className="h-10 w-24 bg-muted/30 rounded-xl" />
+        ))}
+      </div>
+      <div className="kf-card p-6 space-y-4">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="h-12 bg-muted/20 rounded-xl" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function BusinessSettingsPage() {
   const {
-    form,
-    setField,
-    loading,
-    saving,
-    uploading,
-    status,
-    business,
-    handleSave,
-    handleLogoUpload,
-    fileInputRef,
-    logoUrl,
+    form, setField, loading, saving, uploading, status,
+    business, handleSave, handleLogoUpload, fileInputRef, logoUrl,
+    isDirty,
   } = useBusinessSettings();
-  const [activeTab, setActiveTab] = useState<"basic" | "social" | "branding" | "payments" | "billing">("basic");
+  const [activeTab, setActiveTab] = useState<TabKey>("basic");
 
-  if (loading) {
-    return <div className="text-muted-foreground">Loading...</div>;
-  }
+  if (loading) return <SkeletonBusiness />;
 
   if (!business) {
-    return <div className="text-muted-foreground">No business found. Please set up your workspace first.</div>;
+    return (
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="kf-card p-8 text-center max-w-md mx-auto">
+        <Building2 className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
+        <h3 className="text-lg font-semibold mb-1">No Business Found</h3>
+        <p className="text-sm text-muted-foreground">Please set up your workspace first through the onboarding wizard.</p>
+      </motion.div>
+    );
   }
 
+  const isFormTab = activeTab === "basic" || activeTab === "social" || activeTab === "branding";
+
   return (
-    <div className="space-y-6 max-w-3xl">
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="space-y-6 max-w-3xl"
+    >
       {status && (
-        <div
-          className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs ${
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm ${
             status.type === "success"
-              ? "border border-emerald-400/40 bg-emerald-900/30 text-emerald-200"
-              : "border border-red-400/40 bg-red-900/30 text-red-200"
+              ? "border border-emerald-400/40 bg-emerald-900/20 text-emerald-200"
+              : "border border-red-400/40 bg-red-900/20 text-red-200"
           }`}
         >
-          {status.type === "success" ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+          {status.type === "success" ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
           {status.message}
-        </div>
+        </motion.div>
       )}
 
-      <Card className="p-6">
-        <LogoUploader
-          logoUrl={logoUrl}
-          name={form.name}
-          uploading={uploading}
-          fileInputRef={fileInputRef}
-          onUpload={handleLogoUpload}
-        />
+      <LogoUploader
+        logoUrl={logoUrl}
+        name={form.name}
+        uploading={uploading}
+        fileInputRef={fileInputRef}
+        onUpload={handleLogoUpload}
+      />
 
-        <div className="flex gap-2 mb-6 border-b border-border/40" role="tablist">
-          {[
-            { key: "basic", label: "Basic Info", icon: Building2 },
-            { key: "social", label: "Social Media", icon: Globe },
-            { key: "branding", label: "Branding", icon: Palette },
-            { key: "payments", label: "Payments", icon: CreditCard },
-            { key: "billing", label: "Billing", icon: Crown },
-          ].map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              onClick={() => setActiveTab(key as typeof activeTab)}
-              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === key
-                  ? "border-primary text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-              role="tab"
-              aria-selected={activeTab === key}
-            >
+      <div className="flex gap-1 p-1 rounded-2xl bg-muted/30 backdrop-blur-sm border border-border/40 overflow-x-auto scrollbar-none" role="tablist">
+        {tabs.map(({ key, label, icon: Icon }) => (
+          <button
+            key={key}
+            onClick={() => setActiveTab(key)}
+            className={`relative flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-xl transition-all shrink-0 ${
+              activeTab === key
+                ? "text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground/80"
+            }`}
+            role="tab"
+            aria-selected={activeTab === key}
+          >
+            {activeTab === key && (
+              <motion.div
+                layoutId="business-tab-bg"
+                className="absolute inset-0 rounded-xl bg-background border border-border/60 shadow-sm"
+                transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
+              />
+            )}
+            <span className="relative flex items-center gap-2">
               <Icon className="h-4 w-4" />
-              {label}
-            </button>
-          ))}
-        </div>
+              <span className="hidden sm:inline">{label}</span>
+            </span>
+          </button>
+        ))}
+      </div>
 
-        {activeTab === "basic" && <div role="tabpanel"><BasicInfoTab form={form} setField={setField} logoUrl={logoUrl} /></div>}
-        {activeTab === "social" && <div role="tabpanel"><SocialTab form={form} setField={setField} /></div>}
-        {activeTab === "branding" && <div role="tabpanel"><BrandingTab form={form} setField={setField} /></div>}
-        {activeTab === "payments" && <div role="tabpanel"><PaymentsTab /></div>}
-        {activeTab === "billing" && <div role="tabpanel"><BillingTab /></div>}
+      <motion.div
+        key={activeTab}
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2 }}
+        className="kf-card p-6"
+      >
+        {activeTab === "basic" && <BasicInfoTab form={form} setField={setField} logoUrl={logoUrl ?? undefined} />}
+        {activeTab === "social" && <SocialTab form={form} setField={setField} />}
+        {activeTab === "branding" && <BrandingTab form={form} setField={setField} />}
+        {activeTab === "payments" && <PaymentsTab />}
+        {activeTab === "billing" && <BillingTab />}
+      </motion.div>
 
-        <div className="flex justify-end pt-6 mt-6 border-t border-border/40">
-          <Button onClick={handleSave} disabled={saving}>
+      {isFormTab && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="flex items-center justify-between"
+        >
+          {isDirty ? (
+            <p className="text-xs text-amber-400 flex items-center gap-1">
+              <AlertCircle className="h-3 w-3" />
+              You have unsaved changes
+            </p>
+          ) : (
+            <div />
+          )}
+          <Button onClick={handleSave} disabled={saving || !isDirty}>
             {saving ? "Saving..." : "Save Changes"}
           </Button>
-        </div>
-      </Card>
-    </div>
+        </motion.div>
+      )}
+    </motion.div>
   );
 }
