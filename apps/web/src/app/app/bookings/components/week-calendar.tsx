@@ -59,7 +59,8 @@ export default function WeekCalendar({ bookings, weekOffset, setWeekOffset, onSe
           </button>
         </div>
       </div>
-      <div className="grid grid-cols-7 gap-1.5">
+      <div className="overflow-x-auto -mx-4 px-4 pb-1">
+      <div className="grid grid-cols-7 gap-1.5 min-w-[600px]">
         {weekDays.map((day) => {
           const key = day.toISOString().split("T")[0];
           const dayBookings = bookingsByDay.get(key) ?? [];
@@ -97,6 +98,7 @@ export default function WeekCalendar({ bookings, weekOffset, setWeekOffset, onSe
             </div>
           );
         })}
+      </div>
       </div>
     </div>
   );
