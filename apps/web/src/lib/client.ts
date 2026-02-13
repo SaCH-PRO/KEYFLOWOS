@@ -1981,4 +1981,132 @@ export async function generateAiInsight(contactId: string, businessId?: string):
   });
 }
 
+export type ActivityItem = {
+  id: string;
+  module: string;
+  action: string;
+  entityType: string;
+  entityId?: string;
+  title: string;
+  detail?: string;
+  icon?: string;
+  tone?: string;
+  data?: Record<string, unknown>;
+  contactId?: string;
+  createdAt: string;
+};
+
+export async function fetchActivityFeed(
+  businessId: string,
+  opts?: { module?: string; limit?: number; cursor?: string },
+): Promise<ApiResult<ActivityItem[]>> {
+  const params = new URLSearchParams();
+  if (opts?.module) params.set("module", opts.module);
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  if (opts?.cursor) params.set("cursor", opts.cursor);
+  const qs = params.toString();
+  const path = `/flow/businesses/${encodeURIComponent(businessId)}/activity${qs ? `?${qs}` : ""}`;
+  return apiGetSimple<ActivityItem[]>(path);
+}
+
+export type UniversalSearchResult = {
+  contacts: Array<{ id: string; firstName?: string; lastName?: string; displayName?: string; email?: string; status?: string }>;
+  invoices: Array<{ id: string; invoiceNumber?: string; total?: number; currency?: string; status?: string }>;
+  bookings: Array<{ id: string; startTime: string; status: string; service?: { name: string }; contact?: { firstName?: string; lastName?: string } }>;
+  products: Array<{ id: string; name: string; price?: number; currency?: string }>;
+  projects: Array<{ id: string; name: string; status?: string; priority?: string }>;
+};
+
+export async function universalSearch(businessId: string, query: string): Promise<ApiResult<UniversalSearchResult>> {
+  return apiGetSimple<UniversalSearchResult>(
+    `/flow/businesses/${encodeURIComponent(businessId)}/search?q=${encodeURIComponent(query)}`,
+  );
+}
+
+export type Project = {
+  id: string;
+  name: string;
+  description?: string;
+  status: string;
+  priority: string;
+  color?: string;
+  contactId?: string;
+  invoiceId?: string;
+  bookingId?: string;
+  dueDate?: string;
+  createdAt: string;
+  updatedAt: string;
+  tasks: ProjectTask[];
+};
+
+export type ProjectTask = {
+  id: string;
+  title: string;
+  description?: string;
+  isCompleted: boolean;
+  priority: string;
+  sortOrder: number;
+  dueDate?: string;
+  assigneeId?: string;
+};
+
+export async function fetchProjects(businessId: string): Promise<ApiResult<Project[]>> {
+  return apiGetSimple<Project[]>(`/projects/businesses/${encodeURIComponent(businessId)}`);
+}
+
+export async function createProject(
+  businessId: string,
+  data: { name: string; description?: string; status?: string; priority?: string; color?: string; contactId?: string; dueDate?: string },
+): Promise<ApiResult<Project>> {
+  return apiPost<Project>({
+    path: `/projects/businesses/${encodeURIComponent(businessId)}`,
+    body: data,
+  });
+}
+
+export async function updateProject(
+  businessId: string,
+  projectId: string,
+  data: Partial<{ name: string; description: string; status: string; priority: string; color: string; dueDate: string | null }>,
+): Promise<ApiResult<Project>> {
+  return apiPatch<Project>(
+    `/projects/businesses/${encodeURIComponent(businessId)}/projects/${encodeURIComponent(projectId)}`,
+    data,
+  );
+}
+
+export async function deleteProject(businessId: string, projectId: string): Promise<ApiResult<unknown>> {
+  return apiDelete<unknown>(
+    `/projects/businesses/${encodeURIComponent(businessId)}/projects/${encodeURIComponent(projectId)}`,
+  );
+}
+
+export async function createProjectTask(
+  businessId: string,
+  projectId: string,
+  data: { title: string; description?: string; priority?: string; dueDate?: string },
+): Promise<ApiResult<ProjectTask>> {
+  return apiPost<ProjectTask>({
+    path: `/projects/businesses/${encodeURIComponent(businessId)}/projects/${encodeURIComponent(projectId)}/tasks`,
+    body: data,
+  });
+}
+
+export async function updateProjectTask(
+  businessId: string,
+  taskId: string,
+  data: Partial<{ title: string; isCompleted: boolean; priority: string; sortOrder: number; dueDate: string | null }>,
+): Promise<ApiResult<ProjectTask>> {
+  return apiPatch<ProjectTask>(
+    `/projects/businesses/${encodeURIComponent(businessId)}/tasks/${encodeURIComponent(taskId)}`,
+    data,
+  );
+}
+
+export async function deleteProjectTask(businessId: string, taskId: string): Promise<ApiResult<unknown>> {
+  return apiDelete<unknown>(
+    `/projects/businesses/${encodeURIComponent(businessId)}/tasks/${encodeURIComponent(taskId)}`,
+  );
+}
+
 export { DEFAULT_BUSINESS_ID };

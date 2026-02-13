@@ -18,39 +18,78 @@ export class AutomationController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/playbooks')
-  listPlaybooks(@Param('businessId') businessId: string) {
-    return this.prisma.client.automation.findMany({
+  async listPlaybooks(@Param('businessId') businessId: string) {
+    const rows = await this.prisma.client.automation.findMany({
       where: { businessId, deletedAt: null },
       orderBy: { createdAt: 'desc' },
     });
+    return rows.map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      triggerEvent: r.trigger,
+      actions: r.actionData ?? [],
+      enabled: r.enabled ?? true,
+      lastRunAt: r.lastRunAt,
+      runCount: r.runCount ?? 0,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    }));
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/playbooks')
-  createPlaybook(
+  async createPlaybook(
     @Param('businessId') businessId: string,
-    @Body() body: { name: string; trigger: string; actionData?: any },
+    @Body() body: { name: string; triggerEvent?: string; trigger?: string; actions?: any; actionData?: any },
   ) {
-    return this.prisma.client.automation.create({
+    const row = await this.prisma.client.automation.create({
       data: {
         businessId,
         name: body.name,
-        trigger: body.trigger,
-        actionData: body.actionData ?? null,
+        trigger: body.triggerEvent || body.trigger || '',
+        actionData: body.actions || body.actionData || null,
       },
     });
+    return {
+      id: row.id,
+      name: row.name,
+      triggerEvent: row.trigger,
+      actions: row.actionData ?? [],
+      enabled: (row as any).enabled ?? true,
+      lastRunAt: (row as any).lastRunAt,
+      runCount: (row as any).runCount ?? 0,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Patch('businesses/:businessId/playbooks/:playbookId')
-  updatePlaybook(
+  async updatePlaybook(
     @Param('businessId') businessId: string,
     @Param('playbookId') playbookId: string,
-    @Body() body: { name?: string; trigger?: string; actionData?: any },
+    @Body() body: { name?: string; triggerEvent?: string; trigger?: string; actions?: any; actionData?: any; enabled?: boolean },
   ) {
-    return this.prisma.client.automation.update({
+    const updateData: any = {};
+    if (body.name !== undefined) updateData.name = body.name;
+    if (body.triggerEvent !== undefined || body.trigger !== undefined) updateData.trigger = body.triggerEvent || body.trigger;
+    if (body.actions !== undefined || body.actionData !== undefined) updateData.actionData = body.actions || body.actionData;
+    if (body.enabled !== undefined) updateData.enabled = body.enabled;
+
+    const row = await this.prisma.client.automation.update({
       where: { id: playbookId, businessId },
-      data: body,
+      data: updateData,
     });
+    return {
+      id: row.id,
+      name: row.name,
+      triggerEvent: row.trigger,
+      actions: row.actionData ?? [],
+      enabled: (row as any).enabled ?? true,
+      lastRunAt: (row as any).lastRunAt,
+      runCount: (row as any).runCount ?? 0,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
   }
 }

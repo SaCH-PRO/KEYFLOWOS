@@ -46,9 +46,11 @@ The project is structured as a monorepo containing a Next.js 16 frontend (`apps/
 - **Commerce:** Products, invoices, quotes, payments.
 - **Bookings:** Services, staff, availability, calendar.
 - **Social:** Posts, scheduling, multi-platform channel integration (Facebook, Instagram, LinkedIn, Twitter). OAuth + manual token connect/disconnect. SocialConnectionsService for CRUD, SocialPublishingService orchestrator with platform-specific publishers. Channel selector in PostComposer for targeted publishing.
-- **Automations:** Playbooks, triggers, actions.
+- **Automations:** Playbooks, triggers, actions. AutomationExecutorService subscribes to business events and executes enabled playbooks (create_task, add_tag, update_status, send_email, send_whatsapp, LOG_EVENT). Field mapping: frontend sends triggerEvent/actions, backend stores as trigger/actionData.
+- **Projects:** Full CRUD for projects with tasks. Kanban board UI with 4 status columns (Active, In Progress, Completed, On Hold). Tasks with completion tracking, priority, sort order. Projects linkable to contacts/invoices/bookings for cross-module workflows.
+- **Flow (Activity & Search):** ActivityService logs unified timeline events across all modules. AutomationExecutorService listens for contact.created, contact.updated, booking.created, booking.confirmed, invoice.paid, invoice.sent, invoice.overdue, post.published events. Universal search endpoint searches across contacts, invoices, bookings, products, projects. Activity feed polls every 30s for real-time updates.
 - **Reports:** KPIs, analytics.
-- **Cockpit:** Flow Graph, Flow Feed, AI suggestions.
+- **Cockpit:** Flow Graph, Flow Feed wired to real activity data (not mock), live momentum bar calculated from actual business signals, universal search via Cmd+K command palette searching all modules.
 
 ## External Dependencies
 - **Database:** PostgreSQL (Replit built-in)

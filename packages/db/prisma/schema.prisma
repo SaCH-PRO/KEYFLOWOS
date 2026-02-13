@@ -102,6 +102,7 @@ model Business {
   autopilotTasks   AutopilotTask[]
   notifications    Notification[]
   subscriptions    Subscription[]
+  activities       Activity[]
 
   // Gmail Integration for sending quotes/invoices
   gmailEmail        String?   @map("gmail_email")
@@ -641,47 +642,84 @@ model SocialPost {
 // MODULE 6: MARKETING AUTOMATION & PROJECTS
 // ---
 model Automation {
-  id      String @id @default(cuid())
+  id      String  @id @default(cuid())
   name    String
-  trigger String // "invoice.paid", "booking.created"
+  trigger String  // "invoice.paid", "booking.created"
+  enabled Boolean @default(true)
 
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
-  // MVP: Simple JSON for form-based actions
-  // e.g., { "actionType": "SEND_WHATSAPP", "templateId": "abc", "contactField": "booking.contact" }
   actionData Json? @map("action_data")
+  lastRunAt  DateTime? @map("last_run_at")
+  runCount   Int       @default(0) @map("run_count")
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
-  deletedAt DateTime? @map("deleted_at") // Soft delete
+  deletedAt DateTime? @map("deleted_at")
 
   @@index([businessId, trigger])
   @@map("automations")
 }
 
+model Activity {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  module     String   // "crm", "commerce", "bookings", "social", "automation"
+  action     String   // "created", "updated", "paid", "published", "executed"
+  entityType String   @map("entity_type") // "contact", "invoice", "booking", "post", "playbook"
+  entityId   String?  @map("entity_id")
+  title      String
+  detail     String?
+  icon       String?
+  tone       String?  // "success", "info", "warning", "danger"
+  data       Json?
+  contactId  String?  @map("contact_id")
+
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, createdAt])
+  @@index([businessId, module])
+  @@map("activities")
+}
+
 model Project {
-  id     String @id @default(cuid())
-  name   String
-  status String @default("ACTIVE") // ACTIVE, COMPLETED, ARCHIVED
+  id          String @id @default(cuid())
+  name        String
+  description String?
+  status      String @default("ACTIVE") // ACTIVE, IN_PROGRESS, COMPLETED, ARCHIVED
+  priority    String @default("NORMAL") // LOW, NORMAL, HIGH, URGENT
+  color       String?
 
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   tasks      ProjectTask[]
 
+  contactId  String?  @map("contact_id")
+  invoiceId  String?  @map("invoice_id")
+  bookingId  String?  @map("booking_id")
+  dueDate    DateTime? @map("due_date")
+
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
-  deletedAt DateTime? @map("deleted_at") // Soft delete
+  deletedAt DateTime? @map("deleted_at")
 
   @@index([businessId])
+  @@index([businessId, status])
   @@map("projects")
 }
 
 model ProjectTask {
   id          String   @id @default(cuid())
   title       String
+  description String?
   isCompleted Boolean  @default(false) @map("is_completed")
   dueDate     DateTime? @map("due_date")
+  priority    String   @default("NORMAL")
+  sortOrder   Int      @default(0) @map("sort_order")
+  assigneeId  String?  @map("assignee_id")
 
   projectId String   @map("project_id")
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
