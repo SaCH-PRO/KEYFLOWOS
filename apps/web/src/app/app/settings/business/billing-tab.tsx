@@ -1,17 +1,12 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { motion } from "framer-motion";
 import { apiGet, apiPost } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import {
-  Crown,
-  Zap,
-  Check,
-  Sparkles,
-  ArrowUpRight,
-  Clock,
-  AlertTriangle,
-  CreditCard,
+  Crown, Zap, Check, Sparkles, ArrowUpRight, Clock,
+  AlertTriangle, CreditCard, Shield, Star,
 } from "lucide-react";
 
 interface SubscriptionInfo {
@@ -32,21 +27,21 @@ interface SubscriptionInfo {
   trialExpired?: boolean;
 }
 
-const planDetails: Record<string, { icon: typeof Zap; color: string; gradient: string }> = {
-  FREE: { icon: Zap, color: "text-gray-400", gradient: "from-gray-500/20 to-gray-600/20" },
-  FLOW: { icon: Sparkles, color: "text-orange-400", gradient: "from-orange-500/20 to-teal-500/20" },
-  KEYFLOW: { icon: Crown, color: "text-amber-400", gradient: "from-amber-500/20 to-orange-500/20" },
+const planDetails: Record<string, { icon: typeof Zap; color: string; gradient: string; glow: string }> = {
+  FREE: { icon: Zap, color: "text-gray-400", gradient: "from-gray-500/10 to-gray-600/10", glow: "shadow-gray-500/5" },
+  FLOW: { icon: Sparkles, color: "text-orange-400", gradient: "from-orange-500/15 to-teal-500/15", glow: "shadow-orange-500/10" },
+  KEYFLOW: { icon: Crown, color: "text-amber-400", gradient: "from-amber-500/15 to-orange-500/15", glow: "shadow-amber-500/10" },
 };
 
 const planFeatures: Record<string, string[]> = {
-  FREE: ["50 contacts", "5 invoices/month", "10 bookings/month", "1 staff", "Basic CRM"],
+  FREE: ["50 contacts", "5 invoices/month", "10 bookings/month", "1 staff member", "Basic CRM"],
   FLOW: [
-    "500 contacts", "Unlimited invoices", "100 bookings/month", "5 staff",
+    "500 contacts", "Unlimited invoices", "100 bookings/month", "5 staff members",
     "Quotes & proposals", "5 automations", "Online store", "Custom branding",
   ],
   KEYFLOW: [
     "Unlimited everything", "AI Autopilot", "Unlimited automations",
-    "Priority support", "Advanced analytics",
+    "Priority support", "Advanced analytics", "Custom integrations",
   ],
 };
 
@@ -56,12 +51,16 @@ const planPricing: Record<string, { ttd: number; usd: number }> = {
   KEYFLOW: { ttd: 249, usd: 39 },
 };
 
+const fadeUp = {
+  hidden: { opacity: 0, y: 10 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.25 } },
+};
+
 export function BillingTab() {
   const [sub, setSub] = useState<SubscriptionInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [upgrading, setUpgrading] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [selectedCurrency, setSelectedCurrency] = useState<"TTD" | "USD">("TTD");
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -75,9 +74,7 @@ export function BillingTab() {
     setLoading(false);
   }, [businessId]);
 
-  useEffect(() => {
-    loadSubscription();
-  }, [loadSubscription]);
+  useEffect(() => { loadSubscription(); }, [loadSubscription]);
 
   const handleStartTrial = async (plan: string) => {
     if (!businessId) return;
@@ -94,7 +91,6 @@ export function BillingTab() {
       await loadSubscription();
     }
     setUpgrading(false);
-    setSelectedPlan(null);
   };
 
   const handleActivate = async (plan: string) => {
@@ -112,7 +108,6 @@ export function BillingTab() {
       await loadSubscription();
     }
     setUpgrading(false);
-    setSelectedPlan(null);
   };
 
   const handleCancel = async () => {
@@ -132,7 +127,17 @@ export function BillingTab() {
     setCancelling(false);
   };
 
-  if (loading) return <div className="text-muted-foreground text-sm py-8">Loading subscription...</div>;
+  if (loading) {
+    return (
+      <div className="space-y-4 animate-pulse">
+        <div className="h-40 rounded-2xl bg-muted/20" />
+        <div className="grid grid-cols-2 gap-4">
+          <div className="h-64 rounded-xl bg-muted/20" />
+          <div className="h-64 rounded-xl bg-muted/20" />
+        </div>
+      </div>
+    );
+  }
 
   const currentPlan = sub?.plan || "FREE";
   const currentStatus = sub?.status || "ACTIVE";
@@ -140,28 +145,33 @@ export function BillingTab() {
   const Icon = detail.icon;
 
   return (
-    <div className="space-y-6">
+    <motion.div variants={{ show: { transition: { staggerChildren: 0.06 } } }} initial="hidden" animate="show" className="space-y-6">
       {message && (
-        <div
-          className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs ${
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm ${
             message.type === "success"
-              ? "border border-emerald-400/40 bg-emerald-900/30 text-emerald-200"
-              : "border border-red-400/40 bg-red-900/30 text-red-200"
+              ? "border border-emerald-400/40 bg-emerald-900/20 text-emerald-200"
+              : "border border-red-400/40 bg-red-900/20 text-red-200"
           }`}
         >
           {message.text}
-        </div>
+        </motion.div>
       )}
 
-      <div className={`rounded-2xl border border-border/40 bg-gradient-to-br ${detail.gradient} p-6`}>
-        <div className="flex items-center justify-between mb-4">
+      <motion.div variants={fadeUp} className={`rounded-2xl border border-border/40 bg-gradient-to-br ${detail.gradient} p-6 shadow-lg ${detail.glow}`}>
+        <div className="flex items-center justify-between mb-5">
           <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 rounded-xl bg-background/50 flex items-center justify-center`}>
-              <Icon className={`w-5 h-5 ${detail.color}`} />
+            <div className="w-12 h-12 rounded-xl bg-background/60 backdrop-blur-sm flex items-center justify-center border border-border/30">
+              <Icon className={`w-6 h-6 ${detail.color}`} />
             </div>
             <div>
-              <h3 className="font-semibold text-lg">{currentPlan} Plan</h3>
-              <p className="text-xs text-muted-foreground">
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-xl">{currentPlan}</h3>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-background/40 text-muted-foreground">Plan</span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-0.5">
                 {currentStatus === "TRIALING" ? (
                   <span className="flex items-center gap-1 text-orange-400">
                     <Clock className="w-3 h-3" />
@@ -170,64 +180,64 @@ export function BillingTab() {
                       : "soon"}
                   </span>
                 ) : currentStatus === "ACTIVE" && currentPlan !== "FREE" ? (
-                  <span className="text-emerald-400">Active</span>
+                  <span className="flex items-center gap-1 text-emerald-400">
+                    <Check className="w-3 h-3" /> Active subscription
+                  </span>
                 ) : (
-                  <span>Free tier</span>
+                  <span>Free tier - limited features</span>
                 )}
               </p>
             </div>
           </div>
           {currentPlan !== "FREE" && (
             <div className="text-right">
-              <p className="text-2xl font-bold">
+              <p className="text-3xl font-bold">
                 {sub?.subscription?.currency === "USD" ? "US" : "TT"}$
                 {sub?.subscription?.priceMonthly || 0}
               </p>
-              <p className="text-xs text-muted-foreground">/month</p>
+              <p className="text-xs text-muted-foreground">per month</p>
             </div>
           )}
         </div>
 
         <div className="flex flex-wrap gap-2">
           {planFeatures[currentPlan]?.map((f) => (
-            <span key={f} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-background/30 text-xs">
+            <span key={f} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-background/40 backdrop-blur-sm text-xs border border-border/20">
               <Check className="w-3 h-3 text-emerald-400" />
               {f}
             </span>
           ))}
         </div>
-      </div>
+      </motion.div>
 
       {sub?.trialExpired && (
-        <div className="flex items-center gap-2 rounded-xl border border-amber-400/40 bg-amber-900/20 px-4 py-3 text-sm text-amber-200">
-          <AlertTriangle className="w-4 h-4" />
+        <motion.div variants={fadeUp} className="flex items-center gap-2 rounded-xl border border-amber-400/40 bg-amber-900/20 px-4 py-3 text-sm text-amber-200">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
           Your trial has expired. Upgrade to continue using premium features.
-        </div>
+        </motion.div>
       )}
 
       {currentPlan !== "KEYFLOW" && (
-        <div>
-          <h4 className="text-sm font-semibold mb-3">Upgrade Your Plan</h4>
-
-          <div className="flex items-center gap-2 mb-4">
-            <span className="text-xs text-muted-foreground">Currency:</span>
-            <div className="inline-flex items-center gap-1 p-0.5 rounded-lg bg-muted/30 border border-border/40">
-              <button
-                onClick={() => setSelectedCurrency("TTD")}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
-                  selectedCurrency === "TTD" ? "bg-primary text-primary-foreground" : "text-muted-foreground"
-                }`}
-              >
-                TTD
-              </button>
-              <button
-                onClick={() => setSelectedCurrency("USD")}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
-                  selectedCurrency === "USD" ? "bg-primary text-primary-foreground" : "text-muted-foreground"
-                }`}
-              >
-                USD
-              </button>
+        <motion.div variants={fadeUp}>
+          <div className="flex items-center justify-between mb-4">
+            <h4 className="text-sm font-semibold flex items-center gap-2">
+              <Star className="h-4 w-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+              Upgrade Your Plan
+            </h4>
+            <div className="inline-flex items-center gap-1 p-0.5 rounded-xl bg-muted/30 border border-border/40">
+              {(["TTD", "USD"] as const).map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setSelectedCurrency(c)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    selectedCurrency === c
+                      ? "bg-background text-foreground shadow-sm border border-border/60"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {c}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -241,34 +251,41 @@ export function BillingTab() {
                 const price = selectedCurrency === "TTD" ? planPricing[planId].ttd : planPricing[planId].usd;
                 const pd = planDetails[planId];
                 const PIcon = pd.icon;
+                const isPopular = planId === "FLOW";
 
                 return (
                   <div
                     key={planId}
-                    className={`rounded-xl border border-border/40 p-5 transition-all ${
-                      selectedPlan === planId ? "ring-2 ring-primary bg-primary/5" : "hover:border-primary/30"
+                    className={`relative rounded-xl border p-5 transition-all hover:shadow-md ${
+                      isPopular ? "border-[hsl(var(--kf-accent1))]/40 ring-1 ring-[hsl(var(--kf-accent1))]/20" : "border-border/40"
                     }`}
                   >
-                    <div className="flex items-center gap-2 mb-2">
-                      <PIcon className={`w-4 h-4 ${pd.color}`} />
-                      <span className="font-semibold">{planId}</span>
-                      {planId === "FLOW" && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-500/20 text-orange-400 font-medium">
-                          Popular
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-2xl font-bold mb-1">
-                      {selectedCurrency === "TTD" ? "TT" : "US"}${price}
-                      <span className="text-xs font-normal text-muted-foreground">/mo</span>
-                    </p>
-                    <p className="text-xs text-orange-400 mb-3">1-day free trial</p>
+                    {isPopular && (
+                      <div className="absolute -top-2.5 left-4 px-2.5 py-0.5 rounded-full bg-[hsl(var(--kf-accent1))] text-white text-[10px] font-semibold">
+                        Most Popular
+                      </div>
+                    )}
 
-                    <ul className="space-y-1.5 mb-4">
-                      {planFeatures[planId].slice(0, 5).map((f) => (
-                        <li key={f} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <Check className="w-3 h-3 text-emerald-400" />
-                          {f}
+                    <div className="flex items-center gap-2 mb-3">
+                      <PIcon className={`w-5 h-5 ${pd.color}`} />
+                      <span className="font-bold text-lg">{planId}</span>
+                    </div>
+
+                    <div className="mb-4">
+                      <span className="text-3xl font-bold">
+                        {selectedCurrency === "TTD" ? "TT" : "US"}${price}
+                      </span>
+                      <span className="text-sm text-muted-foreground">/mo</span>
+                      <p className="text-xs text-orange-400 mt-1 flex items-center gap-1">
+                        <Zap className="w-3 h-3" /> 1-day free trial included
+                      </p>
+                    </div>
+
+                    <ul className="space-y-2 mb-5">
+                      {planFeatures[planId].slice(0, 6).map((f) => (
+                        <li key={f} className="flex items-center gap-2 text-xs">
+                          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span className="text-muted-foreground">{f}</span>
                         </li>
                       ))}
                     </ul>
@@ -277,7 +294,7 @@ export function BillingTab() {
                       <button
                         onClick={() => handleStartTrial(planId)}
                         disabled={upgrading}
-                        className="flex-1 flex items-center justify-center gap-1 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50 transition-all"
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-[hsl(var(--kf-accent1))] text-white text-xs font-semibold hover:opacity-90 disabled:opacity-50 transition-all shadow-sm"
                       >
                         {upgrading ? "..." : "Start Trial"}
                         <ArrowUpRight className="w-3 h-3" />
@@ -285,7 +302,7 @@ export function BillingTab() {
                       <button
                         onClick={() => handleActivate(planId)}
                         disabled={upgrading}
-                        className="flex-1 flex items-center justify-center gap-1 py-2 rounded-lg border border-border/40 text-xs font-medium hover:bg-muted/20 disabled:opacity-50 transition-all"
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-border/60 text-xs font-medium hover:bg-muted/20 disabled:opacity-50 transition-all"
                       >
                         <CreditCard className="w-3 h-3" />
                         Pay Now
@@ -295,11 +312,15 @@ export function BillingTab() {
                 );
               })}
           </div>
-        </div>
+        </motion.div>
       )}
 
       {currentPlan !== "FREE" && (
-        <div className="border-t border-border/40 pt-4">
+        <motion.div variants={fadeUp} className="flex items-center justify-between border-t border-border/40 pt-4">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Shield className="w-4 h-4" />
+            <span>Cancel anytime, no questions asked</span>
+          </div>
           <button
             onClick={handleCancel}
             disabled={cancelling}
@@ -307,8 +328,8 @@ export function BillingTab() {
           >
             {cancelling ? "Cancelling..." : "Cancel subscription"}
           </button>
-        </div>
+        </motion.div>
       )}
-    </div>
+    </motion.div>
   );
 }

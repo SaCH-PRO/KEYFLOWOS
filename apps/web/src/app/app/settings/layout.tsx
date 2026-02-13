@@ -2,41 +2,80 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, Users, User, Link2, Shield } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Building2, Users, User, Link2, Shield, Settings } from "lucide-react";
 
 const navItems = [
-  { href: "/app/settings/profile", label: "Profile", icon: User },
-  { href: "/app/settings/business", label: "Business", icon: Building2 },
-  { href: "/app/settings/team", label: "Team", icon: Users },
-  { href: "/app/settings/connections", label: "Connections", icon: Link2 },
-  { href: "/app/settings/compliance", label: "Compliance", icon: Shield },
+  { href: "/app/settings/profile", label: "Profile", icon: User, description: "Your account" },
+  { href: "/app/settings/business", label: "Business", icon: Building2, description: "Company info" },
+  { href: "/app/settings/team", label: "Team", icon: Users, description: "Staff & roles" },
+  { href: "/app/settings/connections", label: "Connections", icon: Link2, description: "Integrations" },
+  { href: "/app/settings/compliance", label: "Compliance", icon: Shield, description: "Legal & tax" },
 ];
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   return (
-    <div className="space-y-6">
-      <div className="flex gap-2 border-b border-border pb-3 overflow-x-auto">
+    <div className="max-w-5xl mx-auto space-y-6">
+      <motion.div
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex items-center gap-3"
+      >
+        <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white shadow-lg">
+          <Settings className="w-5 h-5" />
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+          <p className="text-sm text-muted-foreground">Manage your account, business, and preferences</p>
+        </div>
+      </motion.div>
+
+      <motion.nav
+        initial={{ opacity: 0, y: 5 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.05 }}
+        className="flex gap-1 p-1 rounded-2xl bg-muted/30 backdrop-blur-sm border border-border/40 overflow-x-auto scrollbar-none"
+        role="tablist"
+      >
         {navItems.map((item) => {
           const isActive = pathname === item.href || (item.href !== "/app/settings" && pathname.startsWith(item.href));
           return (
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-colors shrink-0 ${
+              role="tab"
+              aria-selected={isActive}
+              className={`relative flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all duration-200 shrink-0 ${
                 isActive
-                  ? "bg-primary/10 text-primary"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  ? "text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground/80"
               }`}
             >
-              <item.icon className="h-4 w-4" />
-              {item.label}
+              {isActive && (
+                <motion.div
+                  layoutId="settings-tab-bg"
+                  className="absolute inset-0 rounded-xl bg-background border border-border/60 shadow-sm"
+                  transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
+                />
+              )}
+              <span className="relative flex items-center gap-2">
+                <item.icon className="h-4 w-4" />
+                <span className="hidden sm:inline">{item.label}</span>
+              </span>
             </Link>
           );
         })}
-      </div>
-      <div>{children}</div>
+      </motion.nav>
+
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+      >
+        {children}
+      </motion.div>
     </div>
   );
 }
