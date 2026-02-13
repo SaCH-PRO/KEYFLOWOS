@@ -594,14 +594,24 @@ model Booking {
 // MODULE 5: SOCIAL INTELLIGENCE
 // ---
 model SocialConnection {
-  id         String   @id @default(cuid())
-  platform   String // "FACEBOOK", "INSTAGRAM", "WHATSAPP"
-  platformId String?  @map("platform_id")
-  token      String // Encrypted access token
+  id             String   @id @default(cuid())
+  platform       String // "FACEBOOK", "INSTAGRAM", "LINKEDIN", "TWITTER"
+  platformId     String?  @map("platform_id")
+  accountName    String?  @map("account_name")
+  profilePicture String?  @map("profile_picture")
+  token          String
+  refreshToken   String?  @map("refresh_token")
+  expiresAt      DateTime? @map("expires_at")
+  scopes         String?
+  status         String   @default("CONNECTED") // CONNECTED, EXPIRED, ERROR
 
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@unique([businessId, platform])
   @@index([businessId])
   @@map("social_connections")
 }
@@ -613,6 +623,8 @@ model SocialPost {
   status      String   @default("DRAFT") // DRAFT, SCHEDULED, POSTED, FAILED
   scheduledAt DateTime? @map("scheduled_at")
   postedAt    DateTime? @map("posted_at")
+  channelIds  String[] @default([]) @map("channel_ids")
+  publishResults Json?  @map("publish_results")
 
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)

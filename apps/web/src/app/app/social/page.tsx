@@ -21,11 +21,13 @@ import {
 } from "lucide-react";
 import {
   SocialPost,
+  SocialConnection,
   fetchPosts,
   createPost,
   updatePost,
   deletePost,
   publishPost,
+  fetchSocialConnections,
 } from "@/lib/client";
 import { PostComposer } from "./components/post-composer";
 import { PostsFeed } from "./components/posts-feed";
@@ -53,7 +55,7 @@ const stagger = {
 
 const fadeUp = {
   hidden: { opacity: 0, y: 12 },
-  show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } },
+  show: { opacity: 1, y: 0, transition: { type: "spring" as const, stiffness: 300, damping: 24 } },
 };
 
 export default function SocialPage() {
@@ -64,6 +66,8 @@ export default function SocialPage() {
   const [showComposer, setShowComposer] = useState(false);
   const [editingPost, setEditingPost] = useState<SocialPost | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const [connections, setConnections] = useState<SocialConnection[]>([]);
 
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
@@ -83,9 +87,15 @@ export default function SocialPage() {
     setLoading(false);
   }, []);
 
+  const loadConnections = useCallback(async () => {
+    const { data } = await fetchSocialConnections();
+    if (data) setConnections(data);
+  }, []);
+
   useEffect(() => {
     void loadPosts();
-  }, [loadPosts]);
+    void loadConnections();
+  }, [loadPosts, loadConnections]);
 
   const filteredPosts = posts.filter((p) => {
     if (statusFilter !== "ALL" && p.status !== statusFilter) return false;
@@ -224,6 +234,7 @@ export default function SocialPage() {
               onClose={() => setShowComposer(false)}
               submitting={submitting}
               mode="create"
+              connections={connections}
             />
           </motion.div>
         )}
@@ -236,8 +247,9 @@ export default function SocialPage() {
               onSubmit={handleUpdate}
               onClose={() => setEditingPost(null)}
               submitting={submitting}
-              initial={{ content: editingPost.content, scheduledFor: editingPost.scheduledAt || editingPost.scheduledFor || "" }}
+              initial={{ content: editingPost.content, scheduledFor: editingPost.scheduledAt || editingPost.scheduledFor || "", channelIds: editingPost.channelIds }}
               mode="edit"
+              connections={connections}
             />
           </motion.div>
         )}
