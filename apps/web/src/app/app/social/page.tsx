@@ -103,12 +103,13 @@ export default function SocialPage() {
     return true;
   });
 
-  async function handleCreate(data: { content: string; scheduledFor?: string }) {
+  async function handleCreate(data: { content: string; scheduledFor?: string; channelIds?: string[] }) {
     setSubmitting(true);
     setError(null);
     const { data: post, error } = await createPost({
       content: data.content,
       scheduledFor: data.scheduledFor,
+      channelIds: data.channelIds,
     });
     if (error) setError(error);
     if (post) {
@@ -118,13 +119,14 @@ export default function SocialPage() {
     setSubmitting(false);
   }
 
-  async function handleUpdate(data: { content: string; scheduledFor?: string }) {
+  async function handleUpdate(data: { content: string; scheduledFor?: string; channelIds?: string[] }) {
     if (!editingPost) return;
     setSubmitting(true);
     setError(null);
     const { data: updated, error } = await updatePost(editingPost.id, {
       content: data.content,
       scheduledAt: data.scheduledFor || null,
+      channelIds: data.channelIds,
     });
     if (error) setError(error);
     if (updated) {
@@ -136,10 +138,13 @@ export default function SocialPage() {
 
   async function handlePublish(postId: string) {
     setError(null);
-    const { data, error } = await publishPost(postId);
+    const post = posts.find((p) => p.id === postId);
+    const channelIds = post?.channelIds && post.channelIds.length > 0 ? post.channelIds : undefined;
+    const { data, error } = await publishPost(postId, channelIds);
     if (error) setError(error);
     if (data) {
-      setPosts((prev) => prev.map((p) => (p.id === postId ? data : p)));
+      const updated = (data as any).post || data;
+      setPosts((prev) => prev.map((p) => (p.id === postId ? updated : p)));
     }
   }
 

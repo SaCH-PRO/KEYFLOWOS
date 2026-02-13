@@ -1315,15 +1315,15 @@ export async function fetchPosts(businessId: string = DEFAULT_BUSINESS_ID) {
   );
 }
 
-export async function createPost(input: { businessId?: string; content: string; mediaUrls?: string[]; scheduledFor?: string }) {
+export async function createPost(input: { businessId?: string; content: string; mediaUrls?: string[]; scheduledFor?: string; channelIds?: string[] }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<SocialPost>({
     path: `/social/businesses/${encodeURIComponent(businessId)}/posts`,
-    body: { content: input.content, mediaUrls: input.mediaUrls, scheduledFor: input.scheduledFor },
+    body: { content: input.content, mediaUrls: input.mediaUrls, scheduledFor: input.scheduledFor, channelIds: input.channelIds },
   });
 }
 
-export async function updatePost(postId: string, data: { content?: string; scheduledAt?: string | null }, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function updatePost(postId: string, data: { content?: string; scheduledAt?: string | null; channelIds?: string[] }, businessId: string = DEFAULT_BUSINESS_ID) {
   return apiPatch<SocialPost>(
     `/social/businesses/${encodeURIComponent(businessId)}/posts/${encodeURIComponent(postId)}`,
     data,
@@ -1363,7 +1363,7 @@ export async function fetchSocialConnections(businessId: string = DEFAULT_BUSINE
 }
 
 export async function startSocialOAuth(platform: string, businessId: string = DEFAULT_BUSINESS_ID) {
-  return apiPost<{ url: string }>({
+  return apiPost<{ authUrl: string; redirectUri: string; codeVerifier?: string; state?: string }>({
     path: `/social/businesses/${encodeURIComponent(businessId)}/connections/${encodeURIComponent(platform)}/oauth/start`,
     body: {},
   });

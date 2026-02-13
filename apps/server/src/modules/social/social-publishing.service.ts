@@ -70,13 +70,13 @@ export class SocialPublishingService {
     }
 
     const anySuccess = results.some((r) => r.success);
-    const usedChannelIds = connections.map((c: any) => c.id);
+    const usedPlatforms = connections.map((c: any) => c.platform);
 
     await this.prisma.client.socialPost.update({
       where: { id: post.id },
       data: {
         publishResults: results as any,
-        channelIds: usedChannelIds,
+        channelIds: usedPlatforms,
         status: anySuccess ? 'POSTED' : 'FAILED',
         postedAt: anySuccess ? new Date() : undefined,
       },

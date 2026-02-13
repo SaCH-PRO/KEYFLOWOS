@@ -26,7 +26,7 @@ export class SocialService {
     });
   }
 
-  async updatePost(businessId: string, postId: string, data: { content?: string; scheduledAt?: string | null }) {
+  async updatePost(businessId: string, postId: string, data: { content?: string; scheduledAt?: string | null; channelIds?: string[] }) {
     const post = await this.prisma.client.socialPost.findFirst({
       where: { id: postId, businessId, deletedAt: null },
     });
@@ -38,6 +38,7 @@ export class SocialService {
       updateData.scheduledAt = data.scheduledAt ? new Date(data.scheduledAt) : null;
       updateData.status = data.scheduledAt ? 'SCHEDULED' : 'DRAFT';
     }
+    if (data.channelIds !== undefined) updateData.channelIds = data.channelIds;
 
     return this.prisma.client.socialPost.update({
       where: { id: post.id },
