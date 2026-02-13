@@ -119,7 +119,8 @@ export function ContentCalendar({ posts, onSelectPost }: Props) {
       </div>
 
       {view === "month" ? (
-        <div className="grid grid-cols-7 gap-px rounded-xl overflow-hidden" style={{ border: "1px solid hsl(var(--kf-border))", background: "hsl(var(--kf-border))" }}>
+        <div className="overflow-x-auto -mx-4 px-4 pb-1">
+        <div className="grid grid-cols-7 gap-px rounded-xl overflow-hidden min-w-[500px]" style={{ border: "1px solid hsl(var(--kf-border))", background: "hsl(var(--kf-border))" }}>
           {DAYS.map((d) => (
             <div key={d} className="px-1 py-2 text-center text-[10px] uppercase tracking-wider text-muted-foreground font-medium" style={{ background: "hsl(var(--kf-muted))" }}>
               {d}
@@ -167,8 +168,10 @@ export function ContentCalendar({ posts, onSelectPost }: Props) {
             );
           })}
         </div>
+        </div>
       ) : (
-        <div className="rounded-xl border overflow-hidden" style={{ borderColor: "hsl(var(--kf-border))" }}>
+        <div className="overflow-x-auto -mx-4 px-4 pb-1">
+        <div className="rounded-xl border overflow-hidden min-w-[600px]" style={{ borderColor: "hsl(var(--kf-border))" }}>
           <div className="grid grid-cols-[60px_repeat(7,1fr)] gap-px" style={{ background: "hsl(var(--kf-border))" }}>
             <div className="p-2" style={{ background: "hsl(var(--kf-muted))" }} />
             {weekDays.map((d) => {
@@ -229,6 +232,7 @@ export function ContentCalendar({ posts, onSelectPost }: Props) {
               </>
             ))}
           </div>
+        </div>
         </div>
       )}
     </div>
