@@ -422,6 +422,32 @@ export default function AppHome() {
         )}
       </motion.div>
 
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.25 }}
+      >
+        <h2 className="text-lg font-semibold mb-4">Quick Links</h2>
+        <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
+          {[
+            { label: "Contacts", href: "/app/crm/pipeline", icon: "👥", color: "hsl(var(--kf-accent1))" },
+            { label: "Bookings", href: "/app/bookings", icon: "📅", color: "hsl(var(--kf-accent2))" },
+            { label: "Commerce", href: "/app/commerce", icon: "💰", color: "hsl(150 60% 40%)" },
+            { label: "Social", href: "/app/social", icon: "📱", color: "hsl(200 70% 50%)" },
+          ].map((link, i) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className="kf-card p-4 text-center hover:scale-[1.03] transition-all group"
+              style={{ borderColor: `${link.color.replace(")", " / 0.2)")}` }}
+            >
+              <div className="text-2xl mb-2">{link.icon}</div>
+              <div className="text-sm font-medium group-hover:text-[hsl(var(--kf-accent1))] transition-colors">{link.label}</div>
+            </Link>
+          ))}
+        </div>
+      </motion.div>
+
       {cockpit?.quickActions && cockpit.quickActions.length > 0 && (
         <motion.div
           initial={{ opacity: 0 }}

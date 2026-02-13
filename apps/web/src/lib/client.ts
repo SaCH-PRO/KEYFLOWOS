@@ -1556,6 +1556,7 @@ export interface GamificationStats {
   xpToNextLevel: number;
   totalXp: number;
   streakDays: number;
+  dailyTasksCompleted?: number;
   achievements: Achievement[];
   challenges: Challenge[];
   recentXpGains: { action: string; xp: number; timestamp: string }[];
