@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import {
   AchievementCapsule,
   Badge,
@@ -14,14 +14,8 @@ import {
   MomentumBar,
   Shell,
 } from "@keyflow/ui";
-import { Contact, fetchContacts, fetchCrmHighlights, FlowHighlights } from "@/lib/client";
+import { Contact, fetchContacts, fetchCrmHighlights, fetchCockpitSummary, fetchActivityFeed, ActivityItem, FlowHighlights } from "@/lib/client";
 import { ensureWorkspace, getStoredBusinessId } from "@/lib/workspace";
-
-const mockFeed = [
-  { id: "1", icon: "💸", text: "Invoice #004 paid — confirming booking…", timestamp: "08:24", tone: "success" as const },
-  { id: "2", icon: "🗓️", text: "Booking created for Sarah — 3:00 PM", timestamp: "08:21" },
-  { id: "3", icon: "⚡", text: "Automation executed: Review Request Flow", timestamp: "08:18", tone: "info" as const },
-];
 
 const emptyHighlights: FlowHighlights = {
   highlights: { highPotential: [], overdueReminders: [], serviceAffinity: [] },
@@ -45,24 +39,38 @@ const toneByType = (type: string, title: string) => {
   return "default" as const;
 };
 
+const iconByModule = (module: string, action?: string) => {
+  switch (module) {
+    case "commerce": return action === "paid" ? "💸" : "📄";
+    case "bookings": return "🗓️";
+    case "crm": return action === "created" ? "👤" : "✏️";
+    case "social": return "📣";
+    case "automation": return "⚡";
+    default: return "📌";
+  }
+};
+
 const iconByType = (type: string) => {
   switch (type) {
-    case "invoice":
-      return "💸";
-    case "booking":
-      return "🗓️";
-    case "task":
-      return "✅";
-    case "note":
-      return "📝";
-    default:
-      return "⚡";
+    case "invoice": return "💸";
+    case "booking": return "🗓️";
+    case "task": return "✅";
+    case "note": return "📝";
+    default: return "⚡";
   }
 };
 
 const formatTime = (value?: string) => {
   if (!value) return "";
-  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const d = new Date(value);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "Just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
 };
 
 export default function CockpitPage() {
@@ -73,6 +81,8 @@ export default function CockpitPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Contact[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [activityFeed, setActivityFeed] = useState<ActivityItem[]>([]);
+  const [cockpitData, setCockpitData] = useState<any>(null);
 
   useEffect(() => {
     const initWorkspace = async () => {
@@ -90,11 +100,17 @@ export default function CockpitPage() {
   useEffect(() => {
     if (!businessId) return;
     let cancelled = false;
-    const loadHighlights = async () => {
+    const loadData = async () => {
       try {
-        const result = await fetchCrmHighlights(businessId);
+        const [highlightsRes, activityRes, cockpitRes] = await Promise.all([
+          fetchCrmHighlights(businessId),
+          fetchActivityFeed(businessId, { limit: 20 }),
+          fetchCockpitSummary(businessId),
+        ]);
         if (!cancelled) {
-          setHighlights(result.data ?? emptyHighlights);
+          setHighlights(highlightsRes.data ?? emptyHighlights);
+          setActivityFeed(activityRes.data ?? []);
+          setCockpitData(cockpitRes.data ?? null);
         }
       } catch {
         if (!cancelled) {
@@ -106,9 +122,15 @@ export default function CockpitPage() {
         }
       }
     };
-    void loadHighlights();
+    void loadData();
+    const interval = setInterval(() => {
+      fetchActivityFeed(businessId, { limit: 20 }).then((res) => {
+        if (!cancelled && res.data) setActivityFeed(res.data);
+      }).catch(() => {});
+    }, 30000);
     return () => {
       cancelled = true;
+      clearInterval(interval);
     };
   }, [businessId]);
 
@@ -116,7 +138,6 @@ export default function CockpitPage() {
     if (!businessId) return;
     const query = searchQuery.trim();
     if (!query) {
-      // Clear results asynchronously via microtask to avoid sync setState warning
       queueMicrotask(() => setSearchResults([]));
       return;
     }
@@ -138,18 +159,49 @@ export default function CockpitPage() {
   }, [businessId, searchQuery]);
 
   const summary = highlights ?? emptyHighlights;
+
   const feedItems = useMemo(() => {
-    if (!highlights || highlights.timeline.length === 0) return mockFeed;
-    return highlights.timeline.slice(0, 6).map((entry) => ({
-      id: entry.id,
-      icon: iconByType(entry.type),
-      text: `${entry.title}${entry.contactName ? ` · ${entry.contactName}` : ""}${
-        entry.description ? ` — ${entry.description}` : ""
-      }`,
-      timestamp: formatTime(entry.timestamp),
-      tone: toneByType(entry.type, entry.title),
-    }));
-  }, [highlights]);
+    if (activityFeed.length > 0) {
+      return activityFeed.slice(0, 8).map((item) => ({
+        id: item.id,
+        icon: iconByModule(item.module, item.action),
+        text: `${item.title}${item.detail ? ` — ${item.detail}` : ""}`,
+        timestamp: formatTime(item.createdAt),
+        tone: (item.tone || "default") as any,
+      }));
+    }
+    if (summary.timeline.length > 0) {
+      return summary.timeline.slice(0, 6).map((entry) => ({
+        id: entry.id,
+        icon: iconByType(entry.type),
+        text: `${entry.title}${entry.contactName ? ` · ${entry.contactName}` : ""}${entry.description ? ` — ${entry.description}` : ""}`,
+        timestamp: formatTime(entry.timestamp),
+        tone: toneByType(entry.type, entry.title),
+      }));
+    }
+    return [
+      { id: "empty", icon: "📌", text: "No activity yet — start adding contacts, bookings or invoices", timestamp: "", tone: "default" as const },
+    ];
+  }, [activityFeed, summary.timeline]);
+
+  const momentum = useMemo(() => {
+    if (cockpitData?.momentum != null) return cockpitData.momentum;
+    const signals = summary.timeline.length;
+    const paid = summary.timeline.filter((e) => e.type === "invoice" && e.title.includes("PAID")).length;
+    const booked = summary.timeline.filter((e) => e.type === "booking").length;
+    const base = Math.min((signals * 3 + paid * 10 + booked * 8) / 100, 1);
+    return base || 0.15;
+  }, [cockpitData, summary.timeline]);
+
+  const streaks = useMemo(() => {
+    const s: string[] = [];
+    const paidCount = summary.timeline.filter((e) => e.type === "invoice" && e.title.includes("PAID")).length;
+    if (paidCount > 0) s.push(`${paidCount} invoices paid`);
+    const bookingCount = summary.timeline.filter((e) => e.type === "booking").length;
+    if (bookingCount > 0) s.push(`${bookingCount} bookings`);
+    if (activityFeed.length > 0) s.push(`${activityFeed.length} recent activities`);
+    return s.length > 0 ? s : ["Getting started"];
+  }, [summary.timeline, activityFeed]);
 
   const integrationStats = useMemo(() => {
     const invoicePaid = summary.timeline.filter((entry) => entry.type === "invoice" && entry.title.includes("PAID")).length;
@@ -160,8 +212,9 @@ export default function CockpitPage() {
       invoicePaid,
       bookingPending,
       timelineSignals: summary.timeline.length,
+      activitySignals: activityFeed.length,
     };
-  }, [summary.timeline]);
+  }, [summary.timeline, activityFeed]);
 
   return (
     <Shell
@@ -169,18 +222,25 @@ export default function CockpitPage() {
         <div className="p-4 space-y-3 text-sm text-slate-200">
           <div className="uppercase text-xs tracking-[0.08em] text-slate-400 mb-2">Command</div>
           <div className="space-y-1">
-            {["Flow Feed", "Live Graph", "Cmd+K", "Automations", "Billing"].map((item) => (
-              <div
-                key={item}
-                className="cursor-pointer rounded-lg px-3 py-2 text-slate-100 hover:bg-[rgba(78,168,255,0.08)] hover:text-[var(--kf-electric)] transition-colors"
+            {[
+              { label: "Flow Feed", href: "#" },
+              { label: "Projects", href: "/app/projects" },
+              { label: "Automations", href: "/app/automations" },
+              { label: "Reports", href: "/app/reports" },
+              { label: "Settings", href: "/app/settings" },
+            ].map((item) => (
+              <Link
+                key={item.label}
+                href={item.href}
+                className="block cursor-pointer rounded-lg px-3 py-2 text-slate-100 hover:bg-[rgba(78,168,255,0.08)] hover:text-[var(--kf-electric)] transition-colors"
               >
-                {item}
-              </div>
+                {item.label}
+              </Link>
             ))}
           </div>
         </div>
       }
-      topbar={<MomentumBar value={0.62} streaks={["Follow-up streak 3d", "7 invoices confirmed"]} />}
+      topbar={<MomentumBar value={momentum} streaks={streaks} />}
     >
       <div className="space-y-4">
         <Card
@@ -281,6 +341,26 @@ export default function CockpitPage() {
           </div>
           <div className="space-y-4">
             <FlowFeed items={feedItems} />
+            <Card title="Live activity" badge={`${activityFeed.length} events`}>
+              <div className="space-y-2">
+                {activityFeed.length === 0 ? (
+                  <div className="text-xs text-muted-foreground">Activity will appear as you use KeyFlowOS.</div>
+                ) : (
+                  activityFeed.slice(0, 6).map((item) => (
+                    <div key={item.id} className="flex items-start gap-2 rounded-xl border border-border/60 bg-slate-950/50 px-3 py-2">
+                      <span className="text-base flex-shrink-0">{iconByModule(item.module, item.action)}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-semibold truncate">{item.title}</div>
+                        {item.detail && (
+                          <div className="text-[11px] text-muted-foreground truncate">{item.detail}</div>
+                        )}
+                        <div className="text-[10px] text-muted-foreground mt-0.5">{formatTime(item.createdAt)}</div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </Card>
             <Card title="High potential spotlight" badge={`${summary.highlights.highPotential.length} contacts`}>
               <div className="space-y-2">
                 {summary.highlights.highPotential.slice(0, 4).map((contact) => (
@@ -340,19 +420,6 @@ export default function CockpitPage() {
                 </div>
               )}
             </Card>
-            <Card title="AI next actions (stub)" badge={`${summary.aiNextActions.length} hooks`}>
-              <div className="space-y-2 text-xs text-muted-foreground">
-                {summary.aiNextActions.map((stub) => (
-                  <div key={stub.id} className="rounded-xl border border-border/60 bg-slate-950/50 px-3 py-2">
-                    <div className="font-semibold text-sm text-white">{stub.title}</div>
-                    <div>{stub.detail}</div>
-                  </div>
-                ))}
-                {summary.aiNextActions.length === 0 && (
-                  <div className="text-xs text-muted-foreground">AI hooks will appear once automation is wired.</div>
-                )}
-              </div>
-            </Card>
             <Card title="Integration cues" badge={loading ? "Syncing" : "Live"}>
               <div className="grid gap-2 text-xs text-muted-foreground">
                 <div className="flex items-center justify-between">
@@ -362,6 +429,10 @@ export default function CockpitPage() {
                 <div className="flex items-center justify-between">
                   <span>Bookings pending</span>
                   <Badge tone="warning">{integrationStats.bookingPending}</Badge>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Activity signals</span>
+                  <Badge tone="info">{integrationStats.activitySignals}</Badge>
                 </div>
                 <div className="flex items-center justify-between">
                   <span>CRM timeline signals</span>
@@ -374,8 +445,8 @@ export default function CockpitPage() {
                 <Badge tone="success">First Sale Completed</Badge>
                 <Badge tone="info">Automation Executed</Badge>
                 <AchievementCapsule
-                  title="🔥 Momentum Rising"
-                  description="10 bookings this week. Animations speed slightly increased."
+                  title="Momentum Rising"
+                  description="Your business activity is building momentum."
                 />
               </div>
             </Card>

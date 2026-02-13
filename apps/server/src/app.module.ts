@@ -23,6 +23,7 @@ import { AutopilotModule } from './modules/autopilot/autopilot.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
+import { ProjectsModule } from './modules/projects/projects.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { SubscriptionsModule } from './modules/subscriptions/subscriptions.modul
     NotificationsModule,
     PaymentsModule,
     SubscriptionsModule,
+    ProjectsModule,
   ],
   controllers: [AppController],
   providers: [AppService, AuthMiddleware],
