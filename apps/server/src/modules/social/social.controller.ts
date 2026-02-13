@@ -42,7 +42,7 @@ export class SocialController {
   updatePost(
     @Param('businessId') businessId: string,
     @Param('postId') postId: string,
-    @Body() body: { content?: string; scheduledAt?: string | null },
+    @Body() body: { content?: string; scheduledAt?: string | null; channelIds?: string[] },
   ) {
     return this.social.updatePost(businessId, postId, body);
   }

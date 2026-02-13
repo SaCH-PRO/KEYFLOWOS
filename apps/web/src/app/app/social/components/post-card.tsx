@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
-import { Send, Pencil, Trash2, MoreHorizontal, Clock, CheckCircle2, FileText, AlertTriangle, BookOpen, Hash } from "lucide-react";
+import { Send, Pencil, Trash2, MoreHorizontal, Clock, CheckCircle2, FileText, AlertTriangle, BookOpen, Hash, Facebook, Instagram, Linkedin, Twitter, XCircle } from "lucide-react";
 import type { SocialPost } from "@/lib/client";
 
 type Props = {
@@ -18,6 +18,13 @@ const STATUS_CONFIG: Record<string, { label: string; icon: React.ElementType; gr
   SCHEDULED: { label: "Scheduled", icon: Clock, gradient: "from-blue-500/20 to-blue-600/10", bg: "bg-blue-500/15", text: "text-blue-400", border: "border-blue-500/30" },
   POSTED: { label: "Posted", icon: CheckCircle2, gradient: "from-emerald-500/20 to-emerald-600/10", bg: "bg-emerald-500/15", text: "text-emerald-400", border: "border-emerald-500/30" },
   FAILED: { label: "Failed", icon: AlertTriangle, gradient: "from-red-500/20 to-red-600/10", bg: "bg-red-500/15", text: "text-red-400", border: "border-red-500/30" },
+};
+
+const PLATFORM_ICONS: Record<string, { icon: React.ElementType; color: string }> = {
+  FACEBOOK: { icon: Facebook, color: "#1877F2" },
+  INSTAGRAM: { icon: Instagram, color: "#E4405F" },
+  LINKEDIN: { icon: Linkedin, color: "#0A66C2" },
+  TWITTER: { icon: Twitter, color: "#1DA1F2" },
 };
 
 function extractHashtags(content: string): string[] {
@@ -49,6 +56,9 @@ export function PostCard({ post, onPublish, onEdit, onDelete, listView }: Props)
     : scheduledDate
     ? `Scheduled ${new Date(scheduledDate).toLocaleDateString("en-TT", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`
     : `Created ${new Date(post.createdAt).toLocaleDateString("en-TT", { month: "short", day: "numeric" })}`;
+
+  const channelIds = post.channelIds ?? [];
+  const publishResults = (post.publishResults ?? []) as Array<{ platform: string; success: boolean; error?: string }>;
 
   return (
     <motion.div
@@ -118,6 +128,49 @@ export function PostCard({ post, onPublish, onEdit, onDelete, listView }: Props)
           </div>
         )}
 
+        {channelIds.length > 0 && post.status !== "POSTED" && (
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-muted-foreground">Targeting:</span>
+            <div className="flex items-center gap-1">
+              {channelIds.map((ch) => {
+                const plt = PLATFORM_ICONS[ch.toUpperCase()];
+                if (!plt) return null;
+                const PIcon = plt.icon;
+                return (
+                  <span key={ch} className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px]" style={{ borderColor: `${plt.color}40`, color: plt.color }}>
+                    <PIcon className="w-3 h-3" />
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {publishResults.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {publishResults.map((r, i) => {
+              const plt = PLATFORM_ICONS[r.platform?.toUpperCase()];
+              if (!plt) return null;
+              const PIcon = plt.icon;
+              return (
+                <span
+                  key={i}
+                  className="inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[10px] font-medium"
+                  style={{
+                    borderColor: r.success ? "hsl(150 60% 40% / 0.3)" : "hsl(0 60% 40% / 0.3)",
+                    background: r.success ? "hsl(150 60% 40% / 0.1)" : "hsl(0 60% 40% / 0.1)",
+                    color: r.success ? "hsl(150 60% 60%)" : "hsl(0 60% 65%)",
+                  }}
+                  title={r.error || "Published successfully"}
+                >
+                  <PIcon className="w-3 h-3" style={{ color: plt.color }} />
+                  {r.success ? <CheckCircle2 className="w-2.5 h-2.5" /> : <XCircle className="w-2.5 h-2.5" />}
+                </span>
+              );
+            })}
+          </div>
+        )}
+
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-3">
             <span className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-0.5 text-[11px] font-medium ${cfg.bg} ${cfg.text} ${cfg.border}`}>
@@ -132,7 +185,7 @@ export function PostCard({ post, onPublish, onEdit, onDelete, listView }: Props)
           <span className="text-[11px] text-muted-foreground">{dateLabel}</span>
         </div>
 
-        {post.status === "DRAFT" && (
+        {(post.status === "DRAFT" || post.status === "SCHEDULED") && (
           <button
             className="kf-btn-secondary w-full text-xs inline-flex items-center justify-center gap-1.5"
             onClick={() => onPublish(post.id)}
