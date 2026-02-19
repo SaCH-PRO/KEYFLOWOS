@@ -6,6 +6,7 @@ import { FacebookPublisher } from './publishers/facebook-publisher';
 import { InstagramPublisher } from './publishers/instagram-publisher';
 import { LinkedInPublisher } from './publishers/linkedin-publisher';
 import { TwitterPublisher } from './publishers/twitter-publisher';
+import { TikTokPublisher } from './publishers/tiktok-publisher';
 
 @Injectable()
 export class SocialPublishingService {
@@ -19,6 +20,7 @@ export class SocialPublishingService {
     INSTAGRAM: new InstagramPublisher(),
     LINKEDIN: new LinkedInPublisher(),
     TWITTER: new TwitterPublisher(),
+    TIKTOK: new TikTokPublisher(),
   };
 
   async publishToChannels(
