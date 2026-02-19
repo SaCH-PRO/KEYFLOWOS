@@ -1389,6 +1389,97 @@ export async function disconnectSocial(platform: string, businessId: string = DE
   );
 }
 
+export type SocialAnalytics = {
+  totalLikes: number;
+  totalComments: number;
+  totalShares: number;
+  totalReach: number;
+  totalImpressions: number;
+  platformBreakdown: {
+    platform: string;
+    likes: number;
+    comments: number;
+    shares: number;
+    reach: number;
+    impressions: number;
+    saves?: number;
+    views?: number;
+    followers?: number;
+    engagementRate?: number;
+  }[];
+  postEngagements: {
+    postId: string;
+    platformPostId: string;
+    platform: string;
+    likes: number;
+    comments: number;
+    shares: number;
+    reach: number;
+    impressions: number;
+    saves?: number;
+    views?: number;
+    fetchedAt: string;
+  }[];
+  connectedPlatforms: string[];
+  lastUpdated: string;
+};
+
+export async function fetchSocialAnalytics(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGet<SocialAnalytics>(
+    `/social/businesses/${encodeURIComponent(businessId)}/analytics`,
+    z.object({
+      totalLikes: z.number(),
+      totalComments: z.number(),
+      totalShares: z.number(),
+      totalReach: z.number(),
+      totalImpressions: z.number(),
+      platformBreakdown: z.array(z.object({
+        platform: z.string(),
+        likes: z.number(),
+        comments: z.number(),
+        shares: z.number(),
+        reach: z.number(),
+        impressions: z.number(),
+        saves: z.number().optional(),
+        views: z.number().optional(),
+        followers: z.number().optional(),
+        engagementRate: z.number().optional(),
+      })),
+      postEngagements: z.array(z.object({
+        postId: z.string(),
+        platformPostId: z.string(),
+        platform: z.string(),
+        likes: z.number(),
+        comments: z.number(),
+        shares: z.number(),
+        reach: z.number(),
+        impressions: z.number(),
+        saves: z.number().optional(),
+        views: z.number().optional(),
+        fetchedAt: z.string(),
+      })),
+      connectedPlatforms: z.array(z.string()),
+      lastUpdated: z.string(),
+    }),
+  );
+}
+
+export async function fetchAccountMetrics(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGet<{ platform: string; likes: number; comments: number; shares: number; reach: number; impressions: number; followers?: number }[]>(
+    `/social/businesses/${encodeURIComponent(businessId)}/account-metrics`,
+    z.array(z.object({
+      platform: z.string(),
+      likes: z.number(),
+      comments: z.number(),
+      shares: z.number(),
+      reach: z.number(),
+      impressions: z.number(),
+      followers: z.number().optional(),
+    })),
+    [],
+  );
+}
+
 export async function fetchPlaybooks(businessId: string = DEFAULT_BUSINESS_ID) {
   return apiGet(
     `/automation/businesses/${encodeURIComponent(businessId)}/playbooks`,

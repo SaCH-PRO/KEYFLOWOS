@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Facebook, Instagram, Linkedin, Twitter, CheckCircle2, XCircle, Loader2, Link2, Unlink, Key, ChevronDown, Globe, AlertCircle, RefreshCw, ExternalLink } from "lucide-react";
+import { Facebook, Instagram, Linkedin, Twitter, CheckCircle2, XCircle, Loader2, Link2, Unlink, Key, ChevronDown, Globe, AlertCircle, RefreshCw, ExternalLink, Music2 } from "lucide-react";
 import { fetchSocialConnections, startSocialOAuth, completeSocialOAuth, connectSocialManual, disconnectSocial, SocialConnection } from "@/lib/client";
 
 const PLATFORMS = [
@@ -41,6 +41,15 @@ const PLATFORMS = [
     description: "Tweets & threads",
     gradient: "from-sky-400/15 to-blue-500/15",
     helpText: "Enter your Bearer Token from the Twitter Developer Portal.",
+  },
+  {
+    key: "TIKTOK",
+    name: "TikTok",
+    icon: Music2,
+    color: "#00F2EA",
+    description: "Videos, photos & text posts",
+    gradient: "from-cyan-400/15 to-pink-500/15",
+    helpText: "Connect via OAuth or enter your TikTok access token.",
   },
 ];
 

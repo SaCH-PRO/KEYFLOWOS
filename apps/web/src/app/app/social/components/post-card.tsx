@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
-import { Send, Pencil, Trash2, MoreHorizontal, Clock, CheckCircle2, FileText, AlertTriangle, BookOpen, Hash, Facebook, Instagram, Linkedin, Twitter, XCircle } from "lucide-react";
+import { Send, Pencil, Trash2, MoreHorizontal, Clock, CheckCircle2, FileText, AlertTriangle, BookOpen, Hash, Facebook, Instagram, Linkedin, Twitter, XCircle, Music2 } from "lucide-react";
 import type { SocialPost } from "@/lib/client";
 
 type Props = {
@@ -25,6 +25,7 @@ const PLATFORM_ICONS: Record<string, { icon: React.ElementType; color: string }>
   INSTAGRAM: { icon: Instagram, color: "#E4405F" },
   LINKEDIN: { icon: Linkedin, color: "#0A66C2" },
   TWITTER: { icon: Twitter, color: "#1DA1F2" },
+  TIKTOK: { icon: Music2, color: "#00F2EA" },
 };
 
 function extractHashtags(content: string): string[] {

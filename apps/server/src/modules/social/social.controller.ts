@@ -4,6 +4,7 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { SocialService } from './social.service';
 import { SocialConnectionsService } from './social-connections.service';
+import { SocialAnalyticsService } from './social-analytics.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Controller('social')
@@ -11,6 +12,7 @@ export class SocialController {
   constructor(
     @Inject(SocialService) private readonly social: SocialService,
     @Inject(SocialConnectionsService) private readonly connections: SocialConnectionsService,
+    @Inject(SocialAnalyticsService) private readonly analytics: SocialAnalyticsService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
@@ -105,6 +107,11 @@ export class SocialController {
         const stateToken = randomBytes(16).toString('hex');
         authUrl = `https://twitter.com/i/oauth2/authorize?client_id=${creds.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=tweet.write%20tweet.read%20users.read&response_type=code&code_challenge=${codeChallenge}&code_challenge_method=S256&state=${stateToken}`;
         return { authUrl, redirectUri, codeVerifier, state: stateToken };
+      }
+      case 'TIKTOK': {
+        const csrfState = randomBytes(16).toString('hex');
+        authUrl = `https://www.tiktok.com/v2/auth/authorize/?client_key=${creds.clientId}&response_type=code&scope=user.info.basic,video.publish,video.upload&redirect_uri=${encodeURIComponent(redirectUri)}&state=${csrfState}`;
+        return { authUrl, redirectUri, state: csrfState };
       }
       default:
         throw new BadRequestException(`Unsupported platform: ${platform}`);
@@ -236,12 +243,61 @@ export class SocialController {
 
           return { success: true, connection };
         }
+        case 'TIKTOK': {
+          const tokenRes = await fetch('https://open.tiktokapis.com/v2/oauth/token/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+              client_key: creds.clientId,
+              client_secret: creds.clientSecret,
+              code: body.code,
+              grant_type: 'authorization_code',
+              redirect_uri: redirectUri,
+            }).toString(),
+          });
+          tokenData = await tokenRes.json() as any;
+
+          if (tokenData.error || !tokenData.access_token) {
+            throw new Error(tokenData.error_description || tokenData.message || 'Failed to exchange TikTok code');
+          }
+
+          const profileRes = await fetch('https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name,avatar_url', {
+            headers: { 'Authorization': `Bearer ${tokenData.access_token}` },
+          });
+          const profileData = await profileRes.json() as any;
+          const tiktokUser = profileData?.data?.user;
+
+          const tiktokConnection = await this.connections.upsertConnection(businessId, {
+            platform: 'TIKTOK',
+            platformId: tiktokUser?.open_id || tokenData.open_id,
+            accountName: tiktokUser?.display_name || 'TikTok User',
+            profilePicture: tiktokUser?.avatar_url,
+            token: tokenData.access_token,
+            refreshToken: tokenData.refresh_token,
+            expiresAt: tokenData.expires_in ? new Date(Date.now() + tokenData.expires_in * 1000) : undefined,
+            scopes: 'user.info.basic,video.publish,video.upload',
+          });
+
+          return { success: true, connection: tiktokConnection };
+        }
         default:
           throw new BadRequestException(`Unsupported platform: ${platform}`);
       }
     } catch (err) {
       return { success: false, error: (err as Error).message };
     }
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/analytics')
+  getAnalytics(@Param('businessId') businessId: string) {
+    return this.analytics.getAnalyticsOverview(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/account-metrics')
+  getAccountMetrics(@Param('businessId') businessId: string) {
+    return this.analytics.getAccountMetrics(businessId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
