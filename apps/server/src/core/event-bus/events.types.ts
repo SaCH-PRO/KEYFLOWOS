@@ -32,6 +32,12 @@ export class BookingConfirmedPayload {
   businessId!: string;
 }
 
+export class BookingCompletedPayload {
+  booking!: Booking;
+  contact?: Partial<Contact>;
+  businessId!: string;
+}
+
 // Payload for when an invoice is paid
 export class InvoicePaidPayload {
   invoice!: Invoice & { items?: InvoiceItem[]; contact?: Contact; bookingId?: string | null };
@@ -56,6 +62,7 @@ export interface KeyFlowEventMap {
   'contact.merged': ContactMergedPayload;
   'booking.created': BookingCreatedPayload;
   'booking.confirmed': BookingConfirmedPayload;
+  'booking.completed': BookingCompletedPayload;
   'invoice.paid': InvoicePaidPayload;
   'invoice.sent': InvoiceStatusPayload;
   'invoice.overdue': InvoiceStatusPayload;

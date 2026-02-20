@@ -11,7 +11,9 @@ import {
   Filter,
   ChevronDown,
   X,
+  MessageCircle,
 } from "lucide-react";
+import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 import type { Booking, StatusFilter } from "./bookings-types";
 import { STATUS_COLORS, formatTime, formatDate, contactName } from "./bookings-types";
 
@@ -168,6 +170,24 @@ export default function BookingList({
                   </div>
                 </div>
                 <div className="flex items-center gap-3 flex-shrink-0">
+                  {(() => {
+                    const waPhone = b.contact ? getContactPhone(b.contact) : null;
+                    if (!waPhone) return null;
+                    const name = contactName(b);
+                    const serviceName = b.service?.name ?? "upcoming";
+                    return (
+                      <a
+                        href={buildWhatsAppLink(waPhone, `Hi ${name}, regarding your ${serviceName} appointment...`)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label="Message on WhatsApp"
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] -m-2 p-2 rounded-lg hover:bg-emerald-500/10 transition-colors"
+                      >
+                        <MessageCircle className="w-4 h-4 text-emerald-500" />
+                      </a>
+                    );
+                  })()}
                   {b.service && (
                     <div className="text-right hidden sm:block">
                       <div className="text-xs font-medium">{b.service.name}</div>

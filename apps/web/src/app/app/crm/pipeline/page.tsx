@@ -426,7 +426,7 @@ export default function ContactsPage() {
     setNextActions((prev) => prev.filter((a) => a.id !== actionId));
   };
 
-  const handleDoAction = (action: NextAction) => {
+  const handleDoAction = (action: NextActionUI) => {
     selectContact(action.contactId);
   };
 
