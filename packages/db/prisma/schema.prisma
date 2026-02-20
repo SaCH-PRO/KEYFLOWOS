@@ -118,6 +118,7 @@ model Business {
   cohorts          Cohort[]
   cohortMembers    CohortMember[]
   landingPages     LandingPage[]
+  webhooks         Webhook[]
 
   // Gmail Integration for sending quotes/invoices
   gmailEmail        String?   @map("gmail_email")
@@ -1229,4 +1230,21 @@ model CommunityComment {
 
   @@index([postId])
   @@map("community_comments")
+}
+
+// ---
+// MODULE 17: WEBHOOKS
+// ---
+model Webhook {
+  id         String   @id @default(uuid())
+  businessId String   @map("business_id")
+  name       String   @default("Webhook")
+  url        String
+  events     String[]
+  secret     String
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  business   Business @relation(fields: [businessId], references: [id])
+  @@map("webhooks")
 }

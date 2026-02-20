@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Building2, Users, User, Link2, Shield, Settings } from "lucide-react";
+import { Building2, Users, User, Link2, Shield, Settings, Webhook } from "lucide-react";
 
 const navItems = [
   { href: "/app/settings/profile", label: "Profile", icon: User, description: "Your account" },
@@ -11,6 +11,7 @@ const navItems = [
   { href: "/app/settings/team", label: "Team", icon: Users, description: "Staff & roles" },
   { href: "/app/settings/connections", label: "Connections", icon: Link2, description: "Integrations" },
   { href: "/app/settings/compliance", label: "Compliance", icon: Shield, description: "Legal & tax" },
+  { href: "/app/settings/webhooks", label: "Webhooks", icon: Webhook, description: "Event hooks" },
 ];
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {

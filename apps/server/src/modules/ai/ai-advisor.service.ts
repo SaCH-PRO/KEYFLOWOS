@@ -410,4 +410,89 @@ Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
       projectionDays: days,
     };
   }
+
+  async simulateScenario(businessId: string, scenario: string, variables?: Record<string, any>) {
+    const context = await this.getBusinessContext(businessId);
+    const prompt = `You are a business simulation engine. Using the business context below, simulate the following scenario and provide detailed projected outcomes.
+
+BUSINESS CONTEXT:
+${JSON.stringify(context, null, 2)}
+
+SCENARIO TO SIMULATE:
+${scenario}
+
+${variables ? `VARIABLES: ${JSON.stringify(variables)}` : ''}
+
+Provide your simulation results in this exact format:
+1. **Scenario Summary** - Brief restatement of what's being simulated
+2. **Projected Outcomes** (3-6 months):
+   - Revenue Impact: estimated % and dollar change
+   - Cash Flow Impact: how this affects monthly cash flow
+   - Risk Assessment: LOW/MEDIUM/HIGH with explanation
+3. **Key Assumptions** - What assumptions drive this simulation
+4. **Recommended Actions** - 3-5 specific steps if proceeding
+5. **Alternative Scenarios** - 2 variations to consider
+
+Use the business's actual data to make projections realistic. Currency should match the business currency.`;
+
+    try {
+      const completion = await this.openai.chat.completions.create({
+        model: this.model,
+        messages: [
+          { role: 'system', content: 'You are KeyFlow AI, a business simulation engine that provides detailed what-if analysis based on real business data.' },
+          { role: 'user', content: prompt },
+        ],
+        max_tokens: 2000,
+      });
+      return { simulation: completion.choices[0]?.message?.content || 'Unable to run simulation.' };
+    } catch (e) {
+      this.logger.error('Simulation failed: ' + (e as Error).message);
+      return { simulation: 'Simulation service temporarily unavailable. Please try again.' };
+    }
+  }
+
+  async scoreSEO(page: { title?: string; description?: string; content?: string; url?: string }) {
+    let score = 0;
+    const issues: string[] = [];
+    const suggestions: string[] = [];
+
+    if (page.title) {
+      if (page.title.length >= 30 && page.title.length <= 60) { score += 20; }
+      else if (page.title.length > 0) { score += 10; issues.push('Title should be 30-60 characters'); }
+    } else { issues.push('Missing page title'); }
+
+    if (page.description) {
+      if (page.description.length >= 120 && page.description.length <= 160) { score += 20; }
+      else if (page.description.length > 0) { score += 10; issues.push('Meta description should be 120-160 characters'); }
+    } else { issues.push('Missing meta description'); suggestions.push('Add a compelling meta description to improve click-through rates'); }
+
+    if (page.content) {
+      const wordCount = page.content.split(/\s+/).length;
+      if (wordCount >= 300) { score += 20; }
+      else if (wordCount >= 100) { score += 10; issues.push('Content should be at least 300 words for good SEO'); }
+      else { score += 5; issues.push('Very thin content - aim for 300+ words'); }
+
+      if (page.content.includes('#') || /<h[1-6]/i.test(page.content)) { score += 10; }
+      else { suggestions.push('Add headings (H1, H2) to structure your content'); }
+
+      if (page.content.includes('http') || page.content.includes('href')) { score += 5; }
+      else { suggestions.push('Add internal or external links to improve authority'); }
+    } else { issues.push('No content to analyze'); score += 0; }
+
+    if (page.url) {
+      if (page.url.length < 75 && !page.url.includes(' ') && page.url === page.url.toLowerCase()) { score += 10; }
+      else { issues.push('URL should be short, lowercase, and contain no spaces'); }
+    }
+
+    if (page.title && page.content) {
+      const titleWords = page.title.toLowerCase().split(/\s+/);
+      const contentLower = page.content.toLowerCase();
+      const keywordPresent = titleWords.some(w => w.length > 3 && contentLower.includes(w));
+      if (keywordPresent) { score += 15; } else { suggestions.push('Include your title keywords in the page content'); }
+    }
+
+    const grade = score >= 80 ? 'A' : score >= 60 ? 'B' : score >= 40 ? 'C' : score >= 20 ? 'D' : 'F';
+
+    return { score: Math.min(score, 100), grade, issues, suggestions };
+  }
 }

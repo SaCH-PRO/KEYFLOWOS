@@ -20,7 +20,13 @@ import {
   User,
   UsersRound,
   Loader2,
-  Bot
+  Bot,
+  Scale,
+  FileCheck,
+  Globe,
+  CreditCard,
+  Shield,
+  BadgeCheck
 } from "lucide-react";
 import { refreshWorkspace, getStoredBusinessId, getCachedBusiness } from "@/lib/workspace";
 import { 
@@ -87,6 +93,15 @@ const ARCHETYPES = [
   { id: "ECOMMERCE", label: "E-commerce", icon: Wallet, desc: "Physical products, retail" },
 ];
 
+const LAUNCHFLOW_CHECKLIST = [
+  { id: "entity", label: "Choose Business Entity Type", desc: "Sole Proprietorship, LLC, Corporation — we help you pick the right one", icon: Scale, status: "ready" as const },
+  { id: "register", label: "Register Your Business", desc: "File with your local business registry (Trinidad & Tobago BIR/Companies Registry)", icon: FileCheck, status: "ready" as const },
+  { id: "taxid", label: "Get Your Tax ID (BIR Number)", desc: "Required for invoicing and tax compliance in Trinidad & Tobago", icon: BadgeCheck, status: "ready" as const },
+  { id: "banking", label: "Set Up Business Banking", desc: "Separate business and personal finances — recommended banks for T&T businesses", icon: CreditCard, status: "coming_soon" as const },
+  { id: "domain", label: "Claim Your Online Presence", desc: "Domain name, social media handles, and Google Business Profile", icon: Globe, status: "coming_soon" as const },
+  { id: "compliance", label: "Legal & Compliance Setup", desc: "Insurance, licenses, and permits for your industry", icon: Shield, status: "coming_soon" as const },
+];
+
 export default function OnboardingPage() {
   const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
@@ -102,6 +117,17 @@ export default function OnboardingPage() {
   const [timeCommitment, setTimeCommitment] = useState("PART_TIME");
   const [teamSize, setTeamSize] = useState("SOLO");
   const [selectedArchetype, setSelectedArchetype] = useState<string | null>(null);
+  const [showFormation, setShowFormation] = useState(false);
+  const [formationChecks, setFormationChecks] = useState<Set<string>>(new Set());
+
+  const toggleFormationCheck = (id: string) => {
+    setFormationChecks(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   useEffect(() => {
     const init = async () => {
@@ -438,6 +464,72 @@ export default function OnboardingPage() {
                 </p>
               </motion.div>
             )}
+
+            {/* LaunchFlow Formation Checklist */}
+            <div className="mt-6">
+              <button
+                onClick={() => setShowFormation(!showFormation)}
+                className="w-full flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-xl hover:bg-white/[0.08] transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg, #f59e0b, #ef4444)" }}>
+                    <Rocket className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="text-left">
+                    <h3 className="text-sm font-semibold">LaunchFlow Formation Checklist</h3>
+                    <p className="text-xs text-muted-foreground">{formationChecks.size} of {LAUNCHFLOW_CHECKLIST.filter(i => i.status === "ready").length} steps completed</p>
+                  </div>
+                </div>
+                <ChevronRight className={`w-5 h-5 text-muted-foreground transition-transform ${showFormation ? "rotate-90" : ""}`} />
+              </button>
+
+              <AnimatePresence>
+                {showFormation && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="mt-3 space-y-2">
+                      {LAUNCHFLOW_CHECKLIST.map((item) => {
+                        const Icon = item.icon;
+                        const checked = formationChecks.has(item.id);
+                        const isSoon = item.status === "coming_soon";
+                        return (
+                          <div
+                            key={item.id}
+                            onClick={() => !isSoon && toggleFormationCheck(item.id)}
+                            className={`flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer ${
+                              isSoon
+                                ? "border-white/5 bg-white/[0.02] opacity-50 cursor-not-allowed"
+                                : checked
+                                ? "border-green-500/30 bg-green-500/5"
+                                : "border-white/10 bg-white/5 hover:bg-white/[0.08]"
+                            }`}
+                          >
+                            <div className={`h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                              checked ? "bg-green-500/20" : "bg-white/10"
+                            }`}>
+                              {checked ? <Check className="w-4 h-4 text-green-400" /> : <Icon className="w-4 h-4 text-muted-foreground" />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <h4 className="text-sm font-medium">{item.label}</h4>
+                                {isSoon && (
+                                  <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400">Coming Soon</span>
+                                )}
+                              </div>
+                              <p className="text-xs text-muted-foreground mt-0.5">{item.desc}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
 
             <button
               onClick={handleAutopilotSubmit}
