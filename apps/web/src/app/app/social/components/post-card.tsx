@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
-import { Send, Pencil, Trash2, MoreHorizontal, Clock, CheckCircle2, FileText, AlertTriangle, BookOpen, Hash, Facebook, Instagram, Linkedin, Twitter, XCircle, Music2 } from "lucide-react";
+import { Send, Pencil, Trash2, MoreHorizontal, Clock, CheckCircle2, FileText, AlertTriangle, BookOpen, Hash, Facebook, Instagram, Linkedin, Twitter, XCircle, Music2, Image as ImageIcon } from "lucide-react";
 import type { SocialPost } from "@/lib/client";
 
 type Props = {
@@ -114,6 +114,21 @@ export function PostCard({ post, onPublish, onEdit, onDelete, listView }: Props)
             )}
           </div>
         </div>
+
+        {post.mediaUrls && post.mediaUrls.length > 0 && (
+          <div className="flex gap-2 flex-wrap">
+            {post.mediaUrls.slice(0, 4).map((url, i) => (
+              <div key={i} className="w-16 h-16 rounded-lg border overflow-hidden" style={{ borderColor: "hsl(var(--kf-border))" }}>
+                <img src={url} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+              </div>
+            ))}
+            {post.mediaUrls.length > 4 && (
+              <div className="w-16 h-16 rounded-lg border flex items-center justify-center text-xs text-muted-foreground" style={{ borderColor: "hsl(var(--kf-border))", background: "hsl(var(--kf-muted)/0.3)" }}>
+                <ImageIcon className="w-4 h-4 mr-0.5" />+{post.mediaUrls.length - 4}
+              </div>
+            )}
+          </div>
+        )}
 
         {hashtags.length > 0 && (
           <div className="flex flex-wrap gap-1.5">

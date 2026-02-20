@@ -1193,6 +1193,7 @@ export type SocialPost = {
   scheduledFor?: string | null;
   publishedAt?: string | null;
   channelIds?: string[];
+  mediaUrls?: string[];
   publishResults?: Record<string, unknown>[] | null;
   createdAt: string;
 };
@@ -1323,7 +1324,7 @@ export async function createPost(input: { businessId?: string; content: string; 
   });
 }
 
-export async function updatePost(postId: string, data: { content?: string; scheduledAt?: string | null; channelIds?: string[] }, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function updatePost(postId: string, data: { content?: string; scheduledAt?: string | null; channelIds?: string[]; mediaUrls?: string[] }, businessId: string = DEFAULT_BUSINESS_ID) {
   return apiPatch<SocialPost>(
     `/social/businesses/${encodeURIComponent(businessId)}/posts/${encodeURIComponent(postId)}`,
     data,
