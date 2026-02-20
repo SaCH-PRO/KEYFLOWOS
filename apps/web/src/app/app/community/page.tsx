@@ -85,7 +85,9 @@ export default function CommunityPage() {
     try {
       const params = filterType !== "ALL" ? { type: filterType } : undefined;
       const res = await fetchCommunityPosts(params);
-      if (res.data) setPosts(res.data);
+      if (Array.isArray(res.data)) setPosts(res.data);
+      else if (res.data && Array.isArray((res.data as any).data)) setPosts((res.data as any).data);
+      else setPosts([]);
     } catch {}
     setLoading(false);
   }, [filterType]);
