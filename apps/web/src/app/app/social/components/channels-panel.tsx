@@ -106,6 +106,24 @@ export function ChannelsPanel() {
   }, [loadConnections]);
 
   useEffect(() => {
+    function handleVisibility() {
+      if (document.visibilityState === "visible") loadConnections();
+    }
+    function handleFocus() { loadConnections(); }
+    function handleStorageChange(e: StorageEvent) {
+      if (e.key === "social-connection-changed") loadConnections();
+    }
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("storage", handleStorageChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("storage", handleStorageChange);
+    };
+  }, [loadConnections]);
+
+  useEffect(() => {
     if (success) {
       const t = setTimeout(() => setSuccess(null), 4000);
       return () => clearTimeout(t);
@@ -130,6 +148,7 @@ export function ChannelsPanel() {
         const name = PLATFORMS.find((p) => p.key === platform)?.name || platform;
         setSuccess(`${name} connected successfully!`);
         setActionLoading(null);
+        try { localStorage.setItem("social-connection-changed", Date.now().toString()); } catch {}
       }
 
       if (type === "social-oauth-error" && platform) {
@@ -239,6 +258,7 @@ export function ChannelsPanel() {
       setManualPlatformId("");
       setManualAccountName("");
       setSuccess(`${PLATFORMS.find((p) => p.key === platform)?.name || platform} connected!`);
+      try { localStorage.setItem("social-connection-changed", Date.now().toString()); } catch {}
     }
     setActionLoading(null);
   }

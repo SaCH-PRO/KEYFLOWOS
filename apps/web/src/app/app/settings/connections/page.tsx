@@ -161,6 +161,7 @@ export default function ConnectionsSettingsPage() {
         const name = SOCIAL_PLATFORMS.find((p) => p.key === platform)?.name || platform;
         setSuccess(`${name} connected successfully!`);
         setSocialActionLoading(null);
+        try { localStorage.setItem("social-connection-changed", Date.now().toString()); } catch {}
       }
 
       if (type === "social-oauth-error" && platform) {
@@ -304,6 +305,7 @@ export default function ConnectionsSettingsPage() {
       setExpandedSocial(null);
       setManualToken(""); setManualPlatformId(""); setManualAccountName("");
       setSuccess(`${SOCIAL_PLATFORMS.find((p) => p.key === platform)?.name} connected!`);
+      try { localStorage.setItem("social-connection-changed", Date.now().toString()); } catch {}
     }
     setSocialActionLoading(null);
   }
@@ -319,6 +321,7 @@ export default function ConnectionsSettingsPage() {
       setSocialConnections((prev) => prev.filter((c) => c.platform !== platform));
       setSocialTestResults((prev) => { const n = { ...prev }; delete n[platform]; return n; });
       setSuccess(`${name} disconnected.`);
+      try { localStorage.setItem("social-connection-changed", Date.now().toString()); } catch {}
     }
     setSocialActionLoading(null);
   }
