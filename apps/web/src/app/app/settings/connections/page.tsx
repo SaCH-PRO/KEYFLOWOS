@@ -5,10 +5,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Calendar, CheckCircle2, Loader2, AlertCircle, Link2, Zap, ArrowRight,
   Facebook, Instagram, Linkedin, Twitter, Music2, Wifi, WifiOff,
-  Key, Unlink, ExternalLink, ChevronDown, ChevronUp,
+  Key, Unlink, ExternalLink, ChevronDown, ChevronUp, Mail,
 } from "lucide-react";
 import { Button, Badge } from "@keyflow/ui";
-import { apiGet, apiPostSimple } from "@/lib/api";
+import { apiGet, apiPostSimple, apiDelete } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import {
   fetchSocialConnections, connectSocialManual, disconnectSocial,
@@ -16,6 +16,7 @@ import {
 } from "@/lib/client";
 
 type CalendarStatus = { connected: boolean; email?: string };
+type GmailStatus = { connected: boolean; email: string | null };
 
 const fadeUp = {
   hidden: { opacity: 0, y: 10 },
@@ -84,9 +85,12 @@ function SkeletonConnections() {
 
 export default function ConnectionsSettingsPage() {
   const [calendarStatus, setCalendarStatus] = useState<CalendarStatus | null>(null);
+  const [gmailStatus, setGmailStatus] = useState<GmailStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [gmailConnecting, setGmailConnecting] = useState(false);
+  const [gmailDisconnecting, setGmailDisconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -106,12 +110,12 @@ export default function ConnectionsSettingsPage() {
     if (!businessId) { setLoading(false); return; }
     setLoading(true);
     setError(null);
-    const res = await apiGet<CalendarStatus>(`/bookings/businesses/${businessId}/calendar/status`);
-    if (res.error) {
-      setError(res.error);
-    } else if (res.data) {
-      setCalendarStatus(res.data);
-    }
+    const [calRes, gmailRes] = await Promise.all([
+      apiGet<CalendarStatus>(`/bookings/businesses/${businessId}/calendar/status`),
+      apiGet<GmailStatus>(`/commerce/businesses/${businessId}/gmail/status`),
+    ]);
+    if (calRes.data) setCalendarStatus(calRes.data);
+    if (gmailRes.data) setGmailStatus(gmailRes.data);
     setLoading(false);
   }, [businessId]);
 
@@ -151,6 +155,29 @@ export default function ConnectionsSettingsPage() {
       setCalendarStatus({ connected: false });
     }
     setDisconnecting(false);
+  };
+
+  const handleGmailConnect = async () => {
+    if (!businessId) return;
+    setGmailConnecting(true);
+    setError(null);
+    const res = await apiGet<{ url: string }>(`/commerce/businesses/${businessId}/gmail/auth-url`);
+    if (res.error) { setError(res.error); setGmailConnecting(false); return; }
+    if (res.data?.url) window.location.href = res.data.url;
+  };
+
+  const handleGmailDisconnect = async () => {
+    if (!businessId) return;
+    setGmailDisconnecting(true);
+    setError(null);
+    const res = await apiDelete<{ success: boolean }>(`/commerce/businesses/${businessId}/gmail`);
+    if (res.error) {
+      setError(res.error);
+    } else {
+      setGmailStatus({ connected: false, email: null });
+      setSuccess("Gmail disconnected.");
+    }
+    setGmailDisconnecting(false);
   };
 
   function getSocialConnection(platform: string) {
@@ -323,6 +350,59 @@ export default function ConnectionsSettingsPage() {
                 aria-label="Connect Google Calendar"
               >
                 {connecting ? <Loader2 className="h-3 w-3 animate-spin mr-1.5" /> : null}
+                Connect
+              </Button>
+            )}
+          </div>
+        </div>
+
+        <div className={`rounded-xl border p-4 transition-all mt-2 ${
+          gmailStatus?.connected
+            ? "border-emerald-500/30 bg-emerald-500/5"
+            : "border-border/40"
+        }`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="h-11 w-11 rounded-xl bg-gradient-to-br from-red-500/20 to-orange-500/20 border border-red-500/20 flex items-center justify-center">
+                <Mail className="h-5 w-5 text-red-400" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">Gmail</span>
+                  {gmailStatus?.connected && (
+                    <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      <CheckCircle2 className="h-3 w-3" />
+                      Connected
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {gmailStatus?.connected && gmailStatus.email
+                    ? gmailStatus.email
+                    : "Send quotes and invoices directly from your business email"}
+                </p>
+              </div>
+            </div>
+            {gmailStatus?.connected ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleGmailDisconnect}
+                disabled={gmailDisconnecting}
+                aria-label="Disconnect Gmail"
+              >
+                {gmailDisconnecting ? <Loader2 className="h-3 w-3 animate-spin mr-1.5" /> : null}
+                Disconnect
+              </Button>
+            ) : (
+              <Button
+                variant="default"
+                size="sm"
+                onClick={handleGmailConnect}
+                disabled={gmailConnecting}
+                aria-label="Connect Gmail"
+              >
+                {gmailConnecting ? <Loader2 className="h-3 w-3 animate-spin mr-1.5" /> : null}
                 Connect
               </Button>
             )}
