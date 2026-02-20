@@ -14,7 +14,15 @@ import {
   Star,
   Clock,
   CheckSquare,
+  ArrowUpDown,
+  Tag,
+  Flame,
+  AlertTriangle,
+  CalendarPlus,
+  TrendingUp,
+  UserCheck,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import {
   ContactCard,
   ContactCardData,
@@ -36,6 +44,7 @@ import {
   AiCopilot,
   BroadcastDrawer,
 } from "@/components/contacts";
+import type { QuickActionType } from "@/components/contacts";
 import type { FlowIntelligenceData } from "@/components/contacts/flow-intelligence";
 import type { NextAction as NextActionUI } from "@/components/contacts/next-action-queue";
 import type { AutopilotAction } from "@/components/contacts/autopilot-actions";
@@ -79,6 +88,24 @@ const PAGE_SIZE = 50;
 const PINNED_KEY = "kf_pinned_contacts";
 const RECENT_KEY = "kf_recent_contacts";
 const MAX_RECENT = 8;
+
+type SortOption = "name" | "newest" | "oldest" | "revenue" | "score";
+const SORT_OPTIONS: { value: SortOption; label: string }[] = [
+  { value: "name", label: "Name A-Z" },
+  { value: "newest", label: "Newest First" },
+  { value: "oldest", label: "Oldest First" },
+  { value: "revenue", label: "Highest Revenue" },
+  { value: "score", label: "Highest Score" },
+];
+
+type SmartSegment = "high-value" | "needs-followup" | "new-this-week" | "at-risk" | "stale";
+const SMART_SEGMENTS: { key: SmartSegment; label: string; icon: typeof Flame; color: string }[] = [
+  { key: "high-value", label: "High Value", icon: TrendingUp, color: "hsl(142 76% 36%)" },
+  { key: "needs-followup", label: "Needs Follow-up", icon: AlertTriangle, color: "hsl(var(--kf-accent1))" },
+  { key: "new-this-week", label: "New This Week", icon: CalendarPlus, color: "hsl(var(--kf-accent2))" },
+  { key: "at-risk", label: "At Risk", icon: Flame, color: "hsl(0 70% 55%)" },
+  { key: "stale", label: "No Activity 30d", icon: Clock, color: "hsl(var(--kf-muted-foreground))" },
+];
 
 type ContactWithTags = Omit<Contact, "tags"> & { tags?: string[]; source?: string | null; sourceDetail?: string | null; preferredChannel?: string | null; createdAt?: string | null };
 
@@ -141,6 +168,13 @@ export default function ContactsPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBroadcast, setShowBroadcast] = useState(false);
   const [activeListTab, setActiveListTab] = useState<"all" | "pinned" | "recent">("all");
+  const [sortBy, setSortBy] = useState<SortOption>("newest");
+  const [showSort, setShowSort] = useState(false);
+  const [activeSegment, setActiveSegment] = useState<SmartSegment | null>(null);
+  const [bulkStatus, setBulkStatus] = useState<string | null>(null);
+  const [bulkTagInput, setBulkTagInput] = useState("");
+  const [showBulkTag, setShowBulkTag] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     setPinnedIdsState(getPinnedIds());
@@ -456,6 +490,51 @@ export default function ContactsPage() {
     selectContact(action.contactId);
   };
 
+  const handleQuickAction = useCallback((contactId: string, action: QuickActionType) => {
+    switch (action) {
+      case "create-invoice":
+        router.push(`/app/commerce?tab=invoices&contactId=${contactId}`);
+        break;
+      case "book-appointment":
+        router.push(`/app/bookings?contactId=${contactId}`);
+        break;
+      case "send-quote":
+        router.push(`/app/commerce?tab=quotes&contactId=${contactId}`);
+        break;
+    }
+  }, [router]);
+
+  const handleBulkStatusChange = useCallback(async (newStatus: string) => {
+    if (!businessId || selectedIds.size === 0) return;
+    const promises = Array.from(selectedIds).map((id) =>
+      updateContact({ businessId, contactId: id, status: newStatus })
+    );
+    await Promise.all(promises);
+    setContacts((prev) => prev.map((c) => selectedIds.has(c.id) ? { ...c, status: newStatus } : c));
+    setSelectedIds(new Set());
+    setSelectMode(false);
+    setBulkStatus(null);
+  }, [businessId, selectedIds]);
+
+  const handleBulkTag = useCallback(async (tag: string) => {
+    if (!businessId || selectedIds.size === 0 || !tag.trim()) return;
+    const tagTrimmed = tag.trim();
+    const promises = Array.from(selectedIds).map((id) => {
+      const contact = contacts.find((c) => c.id === id);
+      const existingTags = contact?.tags ?? [];
+      if (existingTags.includes(tagTrimmed)) return Promise.resolve();
+      return updateContact({ businessId, contactId: id, tags: [...existingTags, tagTrimmed] });
+    });
+    await Promise.all(promises);
+    setContacts((prev) => prev.map((c) => {
+      if (!selectedIds.has(c.id)) return c;
+      const tags = c.tags ?? [];
+      return tags.includes(tagTrimmed) ? c : { ...c, tags: [...tags, tagTrimmed] };
+    }));
+    setBulkTagInput("");
+    setShowBulkTag(false);
+  }, [businessId, selectedIds, contacts]);
+
   const selectedContact = useMemo(() => {
     if (!contactDetail?.contact) return null;
     return { ...contactDetail.contact, tags: contactDetail.contact.tags ?? [] } as ContactDetailData;
@@ -476,11 +555,64 @@ export default function ContactsPage() {
     return recentIds.map((id) => contacts.find((c) => c.id === id)).filter(Boolean) as ContactWithTags[];
   }, [contacts, recentIds]);
 
+  const segmentCounts = useMemo(() => {
+    const now = new Date();
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const counts: Record<SmartSegment, number> = { "high-value": 0, "needs-followup": 0, "new-this-week": 0, "at-risk": 0, "stale": 0 };
+    for (const c of contacts) {
+      const meta = (c as any).meta;
+      if (meta?.totalRevenue > 500 || meta?.invoiceCount > 3) counts["high-value"]++;
+      if (meta?.overdueTasks > 0 || meta?.unpaidInvoices > 0) counts["needs-followup"]++;
+      if (c.createdAt && new Date(c.createdAt) > weekAgo) counts["new-this-week"]++;
+      if (c.status === "CLIENT" && meta?.lastInteractionAt && new Date(meta.lastInteractionAt) < thirtyDaysAgo) counts["at-risk"]++;
+      if (meta?.lastInteractionAt && new Date(meta.lastInteractionAt) < thirtyDaysAgo) counts["stale"]++;
+    }
+    return counts;
+  }, [contacts]);
+
   const displayContacts = useMemo(() => {
-    if (activeListTab === "pinned") return pinnedContacts;
-    if (activeListTab === "recent") return recentContacts;
-    return contacts;
-  }, [activeListTab, contacts, pinnedContacts, recentContacts]);
+    let list: ContactWithTags[];
+    if (activeListTab === "pinned") list = pinnedContacts;
+    else if (activeListTab === "recent") list = recentContacts;
+    else list = [...contacts];
+
+    if (activeSegment) {
+      const now = new Date();
+      const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      list = list.filter((c) => {
+        const meta = (c as any).meta;
+        switch (activeSegment) {
+          case "high-value": return meta?.totalRevenue > 500 || meta?.invoiceCount > 3;
+          case "needs-followup": return meta?.overdueTasks > 0 || meta?.unpaidInvoices > 0;
+          case "new-this-week": return c.createdAt && new Date(c.createdAt) > weekAgo;
+          case "at-risk": return c.status === "CLIENT" && meta?.lastInteractionAt && new Date(meta.lastInteractionAt) < thirtyDaysAgo;
+          case "stale": return meta?.lastInteractionAt && new Date(meta.lastInteractionAt) < thirtyDaysAgo;
+          default: return true;
+        }
+      });
+    }
+
+    list.sort((a, b) => {
+      const metaA = (a as any).meta;
+      const metaB = (b as any).meta;
+      switch (sortBy) {
+        case "name": {
+          const nameA = `${a.firstName ?? ""} ${a.lastName ?? ""}`.trim().toLowerCase();
+          const nameB = `${b.firstName ?? ""} ${b.lastName ?? ""}`.trim().toLowerCase();
+          return nameA.localeCompare(nameB);
+        }
+        case "newest": return new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime();
+        case "oldest": return new Date(a.createdAt ?? 0).getTime() - new Date(b.createdAt ?? 0).getTime();
+        case "revenue": return (metaB?.totalRevenue ?? 0) - (metaA?.totalRevenue ?? 0);
+        case "score": return (metaB?.leadScore ?? 0) - (metaA?.leadScore ?? 0);
+        default: return 0;
+      }
+    });
+
+    return list;
+  }, [activeListTab, contacts, pinnedContacts, recentContacts, activeSegment, sortBy]);
 
   const selectedContactsForBroadcast = useMemo(
     () => contacts.filter((c) => selectedIds.has(c.id)) as ContactCardData[],
@@ -516,13 +648,67 @@ export default function ContactsPage() {
         title="Contacts"
         subtitle="Your AI-powered contact management hub"
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {selectMode ? (
               <>
                 <span className="text-sm text-muted-foreground">{selectedIds.size} selected</span>
                 <button onClick={handleSelectAll} className="kf-btn-secondary text-sm px-3 py-1.5">
                   {selectedIds.size === contacts.length ? "Deselect All" : "Select All"}
                 </button>
+                <div className="relative">
+                  <button
+                    onClick={() => setBulkStatus(bulkStatus ? null : "open")}
+                    disabled={selectedIds.size === 0}
+                    className="kf-btn-secondary inline-flex items-center gap-1.5 text-sm disabled:opacity-50"
+                  >
+                    <UserCheck className="w-4 h-4" />
+                    Status
+                    <ChevronDown className="w-3 h-3" />
+                  </button>
+                  {bulkStatus === "open" && (
+                    <div className="absolute top-full mt-1 right-0 z-50 kf-card border border-border shadow-xl rounded-xl py-1 w-36">
+                      {(["LEAD", "PROSPECT", "CLIENT", "LOST"] as const).map((s) => (
+                        <button
+                          key={s}
+                          onClick={() => handleBulkStatusChange(s)}
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-muted/50 transition-colors"
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="relative">
+                  <button
+                    onClick={() => setShowBulkTag(!showBulkTag)}
+                    disabled={selectedIds.size === 0}
+                    className="kf-btn-secondary inline-flex items-center gap-1.5 text-sm disabled:opacity-50"
+                  >
+                    <Tag className="w-4 h-4" />
+                    Tag
+                  </button>
+                  {showBulkTag && (
+                    <div className="absolute top-full mt-1 right-0 z-50 kf-card border border-border shadow-xl rounded-xl p-3 w-52">
+                      <input
+                        type="text"
+                        placeholder="Enter tag name..."
+                        value={bulkTagInput}
+                        onChange={(e) => setBulkTagInput(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") handleBulkTag(bulkTagInput); }}
+                        className="kf-input w-full text-sm mb-2"
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => handleBulkTag(bulkTagInput)}
+                        disabled={!bulkTagInput.trim()}
+                        className="kf-btn-primary w-full text-sm disabled:opacity-50"
+                      >
+                        Apply Tag
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <button
                   onClick={() => { setShowBroadcast(true); }}
                   disabled={selectedIds.size === 0}
@@ -532,7 +718,7 @@ export default function ContactsPage() {
                   Broadcast
                 </button>
                 <button
-                  onClick={() => { setSelectMode(false); setSelectedIds(new Set()); }}
+                  onClick={() => { setSelectMode(false); setSelectedIds(new Set()); setBulkStatus(null); setShowBulkTag(false); }}
                   className="kf-btn-secondary text-sm px-3 py-1.5"
                 >
                   Cancel
@@ -644,6 +830,28 @@ export default function ContactsPage() {
             Filters
             <ChevronDown className={`w-4 h-4 transition-transform ${showFilters ? "rotate-180" : ""}`} />
           </button>
+          <div className="relative">
+            <button
+              onClick={() => setShowSort(!showSort)}
+              className={`kf-btn-secondary inline-flex items-center gap-2 ${showSort ? "ring-2 ring-[hsl(var(--kf-accent1))]" : ""}`}
+            >
+              <ArrowUpDown className="w-4 h-4" />
+              <span className="hidden sm:inline">Sort</span>
+            </button>
+            {showSort && (
+              <div className="absolute top-full mt-1 right-0 z-50 kf-card border border-border shadow-xl rounded-xl py-1 w-44">
+                {SORT_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => { setSortBy(opt.value); setShowSort(false); }}
+                    className={`w-full text-left px-3 py-2 text-sm hover:bg-muted/50 transition-colors ${sortBy === opt.value ? "text-[hsl(var(--kf-accent1))] font-medium" : ""}`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             onClick={() => { void loadContacts(); void loadFlowData(); }}
             disabled={loading}
@@ -652,6 +860,45 @@ export default function ContactsPage() {
             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
             <span className="hidden sm:inline">Refresh</span>
           </button>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {SMART_SEGMENTS.map(({ key, label, icon: SIcon, color }) => {
+            const count = segmentCounts[key];
+            const isActive = activeSegment === key;
+            return (
+              <button
+                key={key}
+                onClick={() => setActiveSegment(isActive ? null : key)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-all border ${
+                  isActive
+                    ? "border-[hsl(var(--kf-accent1))] bg-[hsl(var(--kf-accent1))]/10"
+                    : "border-border hover:border-muted-foreground/30 bg-muted/30"
+                }`}
+                style={isActive ? { color } : undefined}
+              >
+                <SIcon className="w-3 h-3" style={{ color }} />
+                {label}
+                {count > 0 && (
+                  <span
+                    className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                    style={{ background: `${color}20`, color }}
+                  >
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+          {activeSegment && (
+            <button
+              onClick={() => setActiveSegment(null)}
+              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+            >
+              <X className="w-3 h-3" />
+              Clear
+            </button>
+          )}
         </div>
 
         <AnimatePresence>
@@ -750,6 +997,7 @@ export default function ContactsPage() {
                   onTogglePin={handleTogglePin}
                   onClick={() => selectContact(contact.id)}
                   onDelete={handleDeleteContact}
+                  onQuickAction={handleQuickAction}
                   index={index}
                 />
               ))}

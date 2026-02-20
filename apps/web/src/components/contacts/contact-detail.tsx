@@ -30,6 +30,8 @@ import {
   UserPlus,
   Upload,
   Star,
+  Receipt,
+  FileSignature,
 } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 
@@ -82,6 +84,8 @@ export type ContactTask = {
   dueDate?: string | null;
 };
 
+export type DetailQuickAction = "create-invoice" | "book-appointment" | "send-quote";
+
 interface ContactDetailProps {
   contact: ContactDetailData | null;
   events?: ContactEvent[];
@@ -97,6 +101,7 @@ interface ContactDetailProps {
   onUpdateStatus?: (status: string) => Promise<void>;
   onEdit?: () => void;
   onDelete?: () => Promise<void>;
+  onQuickAction?: (contactId: string, action: DetailQuickAction) => void;
 }
 
 const STATUSES = ["LEAD", "PROSPECT", "CLIENT", "LOST"] as const;
@@ -156,6 +161,7 @@ export function ContactDetail({
   onUpdateStatus,
   onEdit,
   onDelete,
+  onQuickAction,
 }: ContactDetailProps) {
   const [activeTab, setActiveTab] = useState<"timeline" | "notes" | "tasks" | "compose">("timeline");
   const [newNote, setNewNote] = useState("");
@@ -460,6 +466,32 @@ export function ContactDetail({
               <p className="text-[10px] text-muted-foreground">Bookings</p>
             </div>
           </div>
+        </div>
+      )}
+
+      {onQuickAction && (
+        <div className="grid grid-cols-3 gap-2">
+          <button
+            onClick={() => onQuickAction(contact.id, "create-invoice")}
+            className="flex items-center justify-center gap-1.5 p-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-medium transition-colors"
+          >
+            <Receipt className="w-3.5 h-3.5" />
+            Invoice
+          </button>
+          <button
+            onClick={() => onQuickAction(contact.id, "book-appointment")}
+            className="flex items-center justify-center gap-1.5 p-2.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 text-xs font-medium transition-colors"
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            Book
+          </button>
+          <button
+            onClick={() => onQuickAction(contact.id, "send-quote")}
+            className="flex items-center justify-center gap-1.5 p-2.5 rounded-xl bg-violet-500/10 hover:bg-violet-500/20 text-violet-400 text-xs font-medium transition-colors"
+          >
+            <FileSignature className="w-3.5 h-3.5" />
+            Quote
+          </button>
         </div>
       )}
 

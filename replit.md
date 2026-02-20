@@ -97,6 +97,11 @@ The project is structured as a monorepo containing a Next.js 16 frontend (`apps/
   - Enhanced LaunchFlow onboarding with business formation checklist (entity type, tax ID, banking, compliance)
   - Built Webhook Management in Settings (CRUD, event subscriptions, secret management)
   - Added Webhook model to Prisma schema
+- **CRM Contacts Utility Enhancements:**
+  - Smart Segments: 5 one-click filters (High Value, Needs Follow-up, New This Week, At Risk, Stale 30d) with live count badges and color-coded chips
+  - Sort Options: 5-way sort dropdown (Name A-Z, Newest, Oldest, Revenue, Lead Score) applied after tab/segment filters
+  - Enhanced Bulk Actions: bulk status change (LEAD/PROSPECT/CLIENT/LOST dropdown), bulk tag application (inline input), broadcast messaging
+  - Quick Actions: ContactCard menu items (Create Invoice, Book Appointment, Send Quote) now route to Commerce/Bookings pages with contact pre-filled
 - Previous: Expanded Prisma schema with 9+ new modules, built 8 NestJS backend modules, 8 frontend pages, AI module with Co-Founder chat and cash flow forecasting
 
 ## External Dependencies
