@@ -181,11 +181,11 @@ export class CrmFlowService {
         where: {
           businessId,
           status: 'SENT',
-          expiresAt: { gt: now },
+          expiryDate: { gt: now },
         },
         include: { contact: true },
         take: 5,
-        orderBy: { expiresAt: 'asc' },
+        orderBy: { expiryDate: 'asc' },
       }),
       this.db.invoice.findMany({
         where: {
@@ -341,7 +341,7 @@ export class CrmFlowService {
         where: {
           businessId,
           status: 'SENT',
-          expiresAt: { lte: sevenDaysFromNow, gte: now },
+          expiryDate: { lte: sevenDaysFromNow, gte: now },
         },
         select: { total: true },
       }),
