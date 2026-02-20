@@ -5,11 +5,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Facebook, Instagram, Linkedin, Twitter, CheckCircle2, XCircle, Loader2,
   Key, Globe, AlertCircle, RefreshCw, ExternalLink, Music2, Unlink, Wifi, WifiOff,
-  ChevronDown, ChevronUp,
+  ChevronDown, ChevronUp, Settings2,
 } from "lucide-react";
 import {
   fetchSocialConnections, startSocialOAuth, connectSocialManual,
-  disconnectSocial, testSocialConnection, SocialConnection,
+  disconnectSocial, testSocialConnection, fetchOAuthAvailability,
+  SocialConnection,
 } from "@/lib/client";
 
 const PLATFORMS = [
@@ -20,7 +21,7 @@ const PLATFORMS = [
     color: "#1877F2",
     description: "Pages, posts & stories",
     gradient: "from-blue-500/15 to-sky-500/15",
-    helpText: "Requires a Facebook Page. Enter your Page Access Token and Page ID.",
+    helpText: "Paste your Page Access Token and Page ID from the Facebook Developer Portal.",
   },
   {
     key: "INSTAGRAM",
@@ -38,7 +39,7 @@ const PLATFORMS = [
     color: "#0A66C2",
     description: "Professional posts & articles",
     gradient: "from-blue-600/15 to-indigo-500/15",
-    helpText: "Enter your LinkedIn access token and your person URN (e.g., urn:li:person:abc123).",
+    helpText: "Paste your LinkedIn access token and person URN (e.g. urn:li:person:abc123).",
   },
   {
     key: "TWITTER",
@@ -47,7 +48,7 @@ const PLATFORMS = [
     color: "#1DA1F2",
     description: "Tweets & threads",
     gradient: "from-sky-400/15 to-blue-500/15",
-    helpText: "Enter your Bearer Token from the Twitter Developer Portal.",
+    helpText: "Paste your Bearer Token from the Twitter Developer Portal.",
   },
   {
     key: "TIKTOK",
@@ -56,7 +57,7 @@ const PLATFORMS = [
     color: "#00F2EA",
     description: "Videos, photos & text posts",
     gradient: "from-cyan-400/15 to-pink-500/15",
-    helpText: "Connect via OAuth or enter your TikTok access token.",
+    helpText: "Paste your TikTok access token from the TikTok Developer Portal.",
   },
 ];
 
@@ -84,12 +85,17 @@ export function ChannelsPanel() {
   const [manualToken, setManualToken] = useState("");
   const [manualPlatformId, setManualPlatformId] = useState("");
   const [manualAccountName, setManualAccountName] = useState("");
+  const [oauthAvailability, setOauthAvailability] = useState<Record<string, boolean>>({});
 
   const loadConnections = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await fetchSocialConnections();
-    if (data) setConnections(data);
-    if (error) setError(error);
+    const [connRes, availRes] = await Promise.all([
+      fetchSocialConnections(),
+      fetchOAuthAvailability(),
+    ]);
+    if (connRes.data) setConnections(connRes.data);
+    if (connRes.error) setError(connRes.error);
+    if (availRes.data) setOauthAvailability(availRes.data);
     setLoading(false);
   }, []);
 
@@ -104,16 +110,85 @@ export function ChannelsPanel() {
     }
   }, [success]);
 
+  useEffect(() => {
+    function handleOAuthMessage(event: MessageEvent) {
+      if (event.origin !== window.location.origin) return;
+      const { type, platform, connection, error: oauthError } = event.data || {};
+
+      if (type === "social-oauth-success" && platform) {
+        if (connection) {
+          setConnections((prev) => {
+            const idx = prev.findIndex((c) => c.platform === platform);
+            if (idx >= 0) { const next = [...prev]; next[idx] = connection; return next; }
+            return [...prev, connection];
+          });
+        } else {
+          loadConnections();
+        }
+        const name = PLATFORMS.find((p) => p.key === platform)?.name || platform;
+        setSuccess(`${name} connected successfully!`);
+        setActionLoading(null);
+      }
+
+      if (type === "social-oauth-error" && platform) {
+        setError(oauthError || `Failed to connect ${platform}`);
+        setActionLoading(null);
+      }
+    }
+
+    window.addEventListener("message", handleOAuthMessage);
+    return () => window.removeEventListener("message", handleOAuthMessage);
+  }, [loadConnections]);
+
   function getConnection(platform: string): SocialConnection | undefined {
     return connections.find((c) => c.platform === platform);
+  }
+
+  async function handleOAuthConnect(platform: string) {
+    setActionLoading(platform);
+    setError(null);
+    const { data, error: startErr } = await startSocialOAuth(platform);
+    if (startErr) {
+      setError(startErr);
+      setActionLoading(null);
+      return;
+    }
+    if (data?.authUrl) {
+      const width = 600;
+      const height = 700;
+      const left = window.screenX + (window.innerWidth - width) / 2;
+      const top = window.screenY + (window.innerHeight - height) / 2;
+      const popup = window.open(
+        data.authUrl,
+        `social_oauth_${platform}`,
+        `width=${width},height=${height},left=${left},top=${top},toolbar=no,menubar=no,scrollbars=yes`,
+      );
+
+      if (!popup || popup.closed) {
+        window.location.href = data.authUrl;
+        return;
+      }
+
+      const pollTimer = setInterval(() => {
+        if (popup.closed) {
+          clearInterval(pollTimer);
+          setTimeout(() => {
+            setActionLoading((current) => (current === platform ? null : current));
+          }, 2000);
+        }
+      }, 500);
+    } else {
+      setError("Could not generate authorization URL. Please try again.");
+      setActionLoading(null);
+    }
   }
 
   async function handleTestConnection(platform: string) {
     setTestLoading(platform);
     setTestResults((prev) => ({ ...prev, [platform]: undefined as any }));
-    const { data, error } = await testSocialConnection(platform);
-    if (error) {
-      setTestResults((prev) => ({ ...prev, [platform]: { platform, success: false, error } }));
+    const { data, error: testErr } = await testSocialConnection(platform);
+    if (testErr) {
+      setTestResults((prev) => ({ ...prev, [platform]: { platform, success: false, error: testErr } }));
     } else if (data) {
       setTestResults((prev) => ({
         ...prev,
@@ -133,32 +208,17 @@ export function ChannelsPanel() {
     setTestLoading(null);
   }
 
-  async function handleOAuthConnect(platform: string) {
-    setActionLoading(platform);
-    setError(null);
-    const { data, error } = await startSocialOAuth(platform);
-    if (error) {
-      setError(error);
-      setActionLoading(null);
-      return;
-    }
-    if (data?.authUrl) {
-      window.open(data.authUrl, "_blank", "width=600,height=700");
-    }
-    setActionLoading(null);
-  }
-
   async function handleManualConnect(platform: string) {
     if (!manualToken.trim()) return;
     setActionLoading(platform);
     setError(null);
-    const { data, error } = await connectSocialManual(platform, {
+    const { data, error: connErr } = await connectSocialManual(platform, {
       token: manualToken.trim(),
       platformId: manualPlatformId.trim() || undefined,
       accountName: manualAccountName.trim() || undefined,
     });
-    if (error) {
-      setError(error);
+    if (connErr) {
+      setError(connErr);
     } else if (data) {
       setConnections((prev) => {
         const idx = prev.findIndex((c) => c.platform === platform);
@@ -183,9 +243,9 @@ export function ChannelsPanel() {
     if (!confirm(`Disconnect ${platformName}? You won't be able to publish to this platform until reconnected.`)) return;
     setActionLoading(platform);
     setError(null);
-    const { error } = await disconnectSocial(platform);
-    if (error) {
-      setError(error);
+    const { error: discErr } = await disconnectSocial(platform);
+    if (discErr) {
+      setError(discErr);
     } else {
       setConnections((prev) => prev.filter((c) => c.platform !== platform));
       setTestResults((prev) => {
@@ -289,6 +349,7 @@ export function ChannelsPanel() {
             const testResult = testResults[platform.key];
             const Icon = platform.icon;
             const isExpanded = expandedPlatform === platform.key;
+            const hasOAuth = oauthAvailability[platform.key] === true;
 
             return (
               <motion.div
@@ -351,7 +412,7 @@ export function ChannelsPanel() {
                           {isConnected && conn?.accountName
                             ? conn.accountName
                             : isExpired
-                            ? "Token expired -- reconnect to continue publishing"
+                            ? "Token expired \u2014 reconnect to continue publishing"
                             : platform.description}
                         </p>
                       </div>
@@ -389,23 +450,35 @@ export function ChannelsPanel() {
                         </>
                       )}
                       {!isConnected && !isExpired && (
-                        <button
-                          onClick={() => toggleExpand(platform.key)}
-                          className="kf-btn-primary text-xs inline-flex items-center gap-1.5"
-                        >
-                          <Key className="w-3 h-3" />
-                          Connect
-                          {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                        </button>
+                        <>
+                          {hasOAuth ? (
+                            <button
+                              onClick={() => handleOAuthConnect(platform.key)}
+                              disabled={isLoading}
+                              className="kf-btn-primary text-xs inline-flex items-center gap-1.5"
+                            >
+                              {isLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <ExternalLink className="w-3 h-3" />}
+                              Connect
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => toggleExpand(platform.key)}
+                              className="kf-btn-primary text-xs inline-flex items-center gap-1.5"
+                            >
+                              <Key className="w-3 h-3" />
+                              Connect
+                            </button>
+                          )}
+                        </>
                       )}
                       {(isConnected || isExpired) && (
                         <button
                           onClick={() => toggleExpand(platform.key)}
                           className="text-xs inline-flex items-center gap-1 rounded-lg px-2 py-2 border transition-all hover:bg-white/5"
                           style={{ borderColor: "hsl(var(--kf-border))", color: "hsl(var(--kf-accent1))" }}
-                          title={isExpanded ? "Collapse" : "Update token"}
+                          title={isExpanded ? "Collapse" : "Reconnect or update token"}
                         >
-                          {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                          {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <Settings2 className="w-3.5 h-3.5" />}
                         </button>
                       )}
                     </div>
@@ -437,7 +510,7 @@ export function ChannelsPanel() {
                               Connection verified
                               {testResult.accountName && (
                                 <span className="text-muted-foreground ml-1">
-                                  — {testResult.accountName}
+                                  {"\u2014"} {testResult.accountName}
                                 </span>
                               )}
                             </>
@@ -474,56 +547,64 @@ export function ChannelsPanel() {
                       className="border-t px-4 py-4 space-y-3"
                       style={{ borderColor: "hsl(var(--kf-border) / 0.5)", background: "hsl(var(--kf-card) / 0.3)" }}
                     >
-                      <p className="text-[11px] text-muted-foreground">{platform.helpText}</p>
-
-                      <div className="grid gap-2">
-                        <input
-                          className="kf-input w-full text-xs"
-                          placeholder="Access Token *"
-                          value={manualToken}
-                          onChange={(e) => setManualToken(e.target.value)}
-                          type="password"
-                          autoFocus
-                        />
-                        <input
-                          className="kf-input w-full text-xs"
-                          placeholder="Platform ID (page ID, person URN, etc.)"
-                          value={manualPlatformId}
-                          onChange={(e) => setManualPlatformId(e.target.value)}
-                        />
-                        <input
-                          className="kf-input w-full text-xs"
-                          placeholder="Display Name (optional)"
-                          value={manualAccountName}
-                          onChange={(e) => setManualAccountName(e.target.value)}
-                        />
-                      </div>
-
-                      <div className="flex items-center gap-2">
+                      {hasOAuth && (isConnected || isExpired) && (
                         <button
-                          onClick={() => handleManualConnect(platform.key)}
-                          disabled={!manualToken.trim() || isLoading}
-                          className="kf-btn-primary flex-1 text-xs inline-flex items-center justify-center gap-1.5"
-                          style={{ opacity: !manualToken.trim() || isLoading ? 0.5 : 1 }}
-                        >
-                          {isLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
-                          {isConnected || isExpired ? "Update Connection" : "Save & Connect"}
-                        </button>
-                        <button
-                          onClick={() => handleOAuthConnect(platform.key)}
+                          onClick={() => { setExpandedPlatform(null); handleOAuthConnect(platform.key); }}
                           disabled={isLoading}
-                          className="kf-btn-secondary text-xs inline-flex items-center justify-center gap-1.5"
-                          title="Connect via OAuth (requires API credentials in Settings)"
+                          className="kf-btn-primary w-full text-xs inline-flex items-center justify-center gap-1.5"
                         >
-                          <ExternalLink className="w-3 h-3" />
-                          OAuth
+                          {isLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <ExternalLink className="w-3 h-3" />}
+                          Reconnect with {platform.name}
                         </button>
-                        <button
-                          onClick={() => setExpandedPlatform(null)}
-                          className="kf-btn-secondary text-xs"
-                        >
-                          Cancel
-                        </button>
+                      )}
+
+                      <div className="space-y-2">
+                        <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                          <Key className="w-3 h-3" />
+                          {hasOAuth ? "Or enter token manually:" : "Enter token manually:"}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">{platform.helpText}</p>
+
+                        <div className="grid gap-2">
+                          <input
+                            className="kf-input w-full text-xs"
+                            placeholder="Access Token *"
+                            value={manualToken}
+                            onChange={(e) => setManualToken(e.target.value)}
+                            type="password"
+                            autoFocus
+                          />
+                          <input
+                            className="kf-input w-full text-xs"
+                            placeholder="Platform ID (page ID, person URN, etc.)"
+                            value={manualPlatformId}
+                            onChange={(e) => setManualPlatformId(e.target.value)}
+                          />
+                          <input
+                            className="kf-input w-full text-xs"
+                            placeholder="Display Name (optional)"
+                            value={manualAccountName}
+                            onChange={(e) => setManualAccountName(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleManualConnect(platform.key)}
+                            disabled={!manualToken.trim() || isLoading}
+                            className="kf-btn-primary flex-1 text-xs inline-flex items-center justify-center gap-1.5"
+                            style={{ opacity: !manualToken.trim() || isLoading ? 0.5 : 1 }}
+                          >
+                            {isLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                            {isConnected || isExpired ? "Update Connection" : "Save & Connect"}
+                          </button>
+                          <button
+                            onClick={() => setExpandedPlatform(null)}
+                            className="kf-btn-secondary text-xs"
+                          >
+                            Cancel
+                          </button>
+                        </div>
                       </div>
                     </motion.div>
                   )}
@@ -538,16 +619,17 @@ export function ChannelsPanel() {
         <p className="text-xs font-medium">How to connect your accounts:</p>
         <ol className="text-[11px] text-muted-foreground space-y-1 list-decimal list-inside">
           <li>Click <strong>Connect</strong> on any platform above</li>
-          <li>Paste your API access token from the platform's developer portal</li>
-          <li>Add your page/account ID to target the right account</li>
+          <li>If OAuth is configured, sign in directly with the platform</li>
+          <li>Otherwise, paste your API access token from the platform's developer portal</li>
           <li>Click <strong>Test</strong> to verify the connection is working</li>
           <li>Once connected, select platforms when composing posts to auto-publish</li>
         </ol>
         <p className="text-[11px] text-muted-foreground mt-2">
-          For OAuth, configure your API credentials in{" "}
-          <a href="/app/settings" className="font-medium hover:underline" style={{ color: "hsl(var(--kf-accent1))" }}>
-            Settings
-          </a>
+          Configure OAuth credentials in{" "}
+          <a href="/app/settings/connections" className="font-medium hover:underline" style={{ color: "hsl(var(--kf-accent1))" }}>
+            Settings &gt; Connections
+          </a>{" "}
+          for one-click connect
         </p>
       </motion.div>
     </motion.div>

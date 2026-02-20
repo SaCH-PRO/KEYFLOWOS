@@ -72,6 +72,18 @@ export class SocialController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/connections/oauth-availability')
+  async oauthAvailability(@Param('businessId') businessId: string) {
+    const platforms = ['FACEBOOK', 'INSTAGRAM', 'LINKEDIN', 'TWITTER', 'TIKTOK'];
+    const result: Record<string, boolean> = {};
+    for (const p of platforms) {
+      const creds = await this.connections.getPlatformCredentials(businessId, p);
+      result[p] = !!creds;
+    }
+    return result;
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Delete('businesses/:businessId/connections/:platform')
   deleteConnection(@Param('businessId') businessId: string, @Param('platform') platform: string) {
     return this.connections.deleteConnection(businessId, platform);
@@ -82,42 +94,45 @@ export class SocialController {
   async oauthStart(@Param('businessId') businessId: string, @Param('platform') platform: string) {
     const creds = await this.connections.getPlatformCredentials(businessId, platform);
     if (!creds) {
-      throw new BadRequestException(`No OAuth credentials configured for ${platform}. Set them in business metaData.socialCredentials.${platform.toUpperCase()}`);
+      throw new BadRequestException(`No OAuth credentials configured for ${platform}. Add ${platform.toUpperCase()} app credentials in Settings or as environment variables.`);
     }
 
     const domain = process.env.REPLIT_DEV_DOMAIN || process.env.REPLIT_DOMAINS?.split(',')[0] || '';
     const redirectUri = `https://${domain}/app/social/oauth/${platform.toLowerCase()}/callback`;
-
     const platformUpper = platform.toUpperCase();
+    const stateToken = randomBytes(16).toString('hex');
     let authUrl: string;
 
     switch (platformUpper) {
       case 'FACEBOOK':
-        authUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${creds.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=pages_manage_posts,pages_read_engagement&response_type=code`;
+        authUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${creds.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=pages_manage_posts,pages_read_engagement&response_type=code&state=${stateToken}`;
+        this.connections.storeOAuthSession(stateToken, { platform: platformUpper, businessId });
         break;
       case 'INSTAGRAM':
-        authUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${creds.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=instagram_basic,instagram_content_publish,pages_show_list&response_type=code`;
+        authUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${creds.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=instagram_basic,instagram_content_publish,pages_show_list&response_type=code&state=${stateToken}`;
+        this.connections.storeOAuthSession(stateToken, { platform: platformUpper, businessId });
         break;
       case 'LINKEDIN':
-        authUrl = `https://www.linkedin.com/oauth/v2/authorization?client_id=${creds.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=w_member_social&response_type=code`;
+        authUrl = `https://www.linkedin.com/oauth/v2/authorization?client_id=${creds.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=w_member_social&response_type=code&state=${stateToken}`;
+        this.connections.storeOAuthSession(stateToken, { platform: platformUpper, businessId });
         break;
       case 'TWITTER': {
         const codeVerifier = randomBytes(32).toString('base64url');
         const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
-        const stateToken = randomBytes(16).toString('hex');
         authUrl = `https://twitter.com/i/oauth2/authorize?client_id=${creds.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=tweet.write%20tweet.read%20users.read&response_type=code&code_challenge=${codeChallenge}&code_challenge_method=S256&state=${stateToken}`;
-        return { authUrl, redirectUri, codeVerifier, state: stateToken };
+        this.connections.storeOAuthSession(stateToken, { codeVerifier, platform: platformUpper, businessId });
+        break;
       }
       case 'TIKTOK': {
-        const csrfState = randomBytes(16).toString('hex');
-        authUrl = `https://www.tiktok.com/v2/auth/authorize/?client_key=${creds.clientId}&response_type=code&scope=user.info.basic,video.publish,video.upload&redirect_uri=${encodeURIComponent(redirectUri)}&state=${csrfState}`;
-        return { authUrl, redirectUri, state: csrfState };
+        authUrl = `https://www.tiktok.com/v2/auth/authorize/?client_key=${creds.clientId}&response_type=code&scope=user.info.basic,video.publish,video.upload&redirect_uri=${encodeURIComponent(redirectUri)}&state=${stateToken}`;
+        this.connections.storeOAuthSession(stateToken, { platform: platformUpper, businessId });
+        break;
       }
       default:
         throw new BadRequestException(`Unsupported platform: ${platform}`);
     }
 
-    return { authUrl, redirectUri };
+    return { authUrl, redirectUri, state: stateToken };
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -125,11 +140,23 @@ export class SocialController {
   async oauthCallback(
     @Param('businessId') businessId: string,
     @Param('platform') platform: string,
-    @Body() body: { code: string; codeVerifier?: string },
+    @Body() body: { code: string; state: string },
   ) {
     if (!body.code) {
       throw new BadRequestException('Authorization code is required');
     }
+    if (!body.state) {
+      throw new BadRequestException('OAuth state parameter is required for CSRF protection');
+    }
+
+    const session = this.connections.consumeOAuthSession(body.state);
+    if (!session) {
+      throw new BadRequestException('Invalid or expired OAuth state. Please try connecting again.');
+    }
+    if (session.businessId !== businessId || session.platform !== platform.toUpperCase()) {
+      throw new BadRequestException('OAuth state mismatch. Please try connecting again.');
+    }
+    const codeVerifier = session.codeVerifier;
 
     const creds = await this.connections.getPlatformCredentials(businessId, platform);
     if (!creds) {
@@ -155,8 +182,52 @@ export class SocialController {
             throw new Error(tokenData.error.message || 'Failed to exchange code');
           }
 
+          if (platformUpper === 'FACEBOOK') {
+            const pagesRes = await fetch(`https://graph.facebook.com/v19.0/me/accounts?access_token=${tokenData.access_token}`);
+            const pagesData = await pagesRes.json() as any;
+            const page = pagesData?.data?.[0];
+
+            if (page) {
+              const connection = await this.connections.upsertConnection(businessId, {
+                platform: 'FACEBOOK',
+                platformId: page.id,
+                accountName: page.name,
+                token: page.access_token,
+                scopes: 'pages_manage_posts,pages_read_engagement',
+              });
+              return { success: true, connection };
+            }
+          }
+
           const profileRes = await fetch(`https://graph.facebook.com/v19.0/me?access_token=${tokenData.access_token}&fields=id,name,picture`);
           const profile = await profileRes.json() as any;
+
+          if (platformUpper === 'INSTAGRAM') {
+            const pagesRes = await fetch(`https://graph.facebook.com/v19.0/me/accounts?access_token=${tokenData.access_token}`);
+            const pagesData = await pagesRes.json() as any;
+            const page = pagesData?.data?.[0];
+
+            if (page) {
+              const igRes = await fetch(`https://graph.facebook.com/v19.0/${page.id}?fields=instagram_business_account&access_token=${page.access_token}`);
+              const igData = await igRes.json() as any;
+              const igAccountId = igData?.instagram_business_account?.id;
+
+              if (igAccountId) {
+                const igProfileRes = await fetch(`https://graph.facebook.com/v19.0/${igAccountId}?fields=id,name,username,profile_picture_url&access_token=${page.access_token}`);
+                const igProfile = await igProfileRes.json() as any;
+
+                const connection = await this.connections.upsertConnection(businessId, {
+                  platform: 'INSTAGRAM',
+                  platformId: igAccountId,
+                  accountName: igProfile.username ? `@${igProfile.username}` : igProfile.name || page.name,
+                  profilePicture: igProfile.profile_picture_url,
+                  token: page.access_token,
+                  scopes: 'instagram_basic,instagram_content_publish',
+                });
+                return { success: true, connection };
+              }
+            }
+          }
 
           const connection = await this.connections.upsertConnection(businessId, {
             platform: platformUpper,
@@ -188,15 +259,16 @@ export class SocialController {
             throw new Error(tokenData.error_description || 'Failed to exchange code');
           }
 
-          const profileRes = await fetch('https://api.linkedin.com/v2/me', {
+          const profileRes = await fetch('https://api.linkedin.com/v2/userinfo', {
             headers: { 'Authorization': `Bearer ${tokenData.access_token}` },
           });
           const profile = await profileRes.json() as any;
 
           const connection = await this.connections.upsertConnection(businessId, {
             platform: 'LINKEDIN',
-            platformId: `urn:li:person:${profile.id}`,
-            accountName: `${profile.localizedFirstName || ''} ${profile.localizedLastName || ''}`.trim(),
+            platformId: profile.sub ? `urn:li:person:${profile.sub}` : undefined,
+            accountName: profile.name || `${profile.given_name || ''} ${profile.family_name || ''}`.trim(),
+            profilePicture: profile.picture,
             token: tokenData.access_token,
             refreshToken: tokenData.refresh_token,
             expiresAt: tokenData.expires_in ? new Date(Date.now() + tokenData.expires_in * 1000) : undefined,
@@ -206,6 +278,9 @@ export class SocialController {
           return { success: true, connection };
         }
         case 'TWITTER': {
+          if (!codeVerifier) {
+            throw new BadRequestException('Missing PKCE code verifier. Please try connecting again.');
+          }
           const tokenRes = await fetch('https://api.twitter.com/2/oauth2/token', {
             method: 'POST',
             headers: {
@@ -216,7 +291,7 @@ export class SocialController {
               grant_type: 'authorization_code',
               code: body.code,
               redirect_uri: redirectUri,
-              code_verifier: body.codeVerifier || 'challenge',
+              code_verifier: codeVerifier,
             }).toString(),
           });
           tokenData = await tokenRes.json() as any;
@@ -228,13 +303,13 @@ export class SocialController {
           const profileRes = await fetch('https://api.twitter.com/2/users/me', {
             headers: { 'Authorization': `Bearer ${tokenData.access_token}` },
           });
-          const profile = await profileRes.json() as any;
+          const twitterProfile = await profileRes.json() as any;
 
           const connection = await this.connections.upsertConnection(businessId, {
             platform: 'TWITTER',
-            platformId: profile.data?.id,
-            accountName: profile.data?.username ? `@${profile.data.username}` : undefined,
-            profilePicture: profile.data?.profile_image_url,
+            platformId: twitterProfile.data?.id,
+            accountName: twitterProfile.data?.username ? `@${twitterProfile.data.username}` : undefined,
+            profilePicture: twitterProfile.data?.profile_image_url,
             token: tokenData.access_token,
             refreshToken: tokenData.refresh_token,
             expiresAt: tokenData.expires_in ? new Date(Date.now() + tokenData.expires_in * 1000) : undefined,
@@ -267,7 +342,7 @@ export class SocialController {
           const profileData = await profileRes.json() as any;
           const tiktokUser = profileData?.data?.user;
 
-          const tiktokConnection = await this.connections.upsertConnection(businessId, {
+          const connection = await this.connections.upsertConnection(businessId, {
             platform: 'TIKTOK',
             platformId: tiktokUser?.open_id || tokenData.open_id,
             accountName: tiktokUser?.display_name || 'TikTok User',
@@ -278,7 +353,7 @@ export class SocialController {
             scopes: 'user.info.basic,video.publish,video.upload',
           });
 
-          return { success: true, connection: tiktokConnection };
+          return { success: true, connection };
         }
         default:
           throw new BadRequestException(`Unsupported platform: ${platform}`);
