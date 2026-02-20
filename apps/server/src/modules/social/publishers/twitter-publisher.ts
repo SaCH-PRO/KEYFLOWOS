@@ -3,12 +3,26 @@ import { BasePublisher, PublishResult } from './base-publisher';
 export class TwitterPublisher extends BasePublisher {
   platform = 'TWITTER';
 
-  async publish(connection: any, content: string, _mediaUrls?: string[]): Promise<PublishResult> {
+  async publish(connection: any, content: string, mediaUrls?: string[]): Promise<PublishResult> {
     try {
       const accessToken = connection.token;
 
       if (!accessToken) {
         return { platform: this.platform, success: false, error: 'Missing Twitter access token' };
+      }
+
+      let tweetText = content;
+      if (mediaUrls && mediaUrls.length > 0) {
+        const urlsToAppend = mediaUrls
+          .filter(u => !content.includes(u))
+          .slice(0, 4);
+        if (urlsToAppend.length > 0) {
+          tweetText = `${content}\n\n${urlsToAppend.join('\n')}`;
+        }
+      }
+
+      if (tweetText.length > 280) {
+        tweetText = tweetText.slice(0, 277) + '...';
       }
 
       const url = 'https://api.twitter.com/2/tweets';
@@ -19,7 +33,7 @@ export class TwitterPublisher extends BasePublisher {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ text: content }),
+        body: JSON.stringify({ text: tweetText }),
       });
 
       const data = await response.json() as any;

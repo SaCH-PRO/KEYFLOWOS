@@ -4,7 +4,7 @@ import { useState, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X, Clock, ImagePlus, Send, FileText, Hash, ChevronDown, Layers, Globe,
-  Trash2, Image as ImageIcon, Loader2, Eye, Calendar,
+  Trash2, Image as ImageIcon, Loader2, Eye, Calendar, Link2, Plus,
 } from "lucide-react";
 import { SocialConnection } from "@/lib/client";
 
@@ -65,6 +65,19 @@ function getAuthToken(): string | null {
   return window.localStorage?.getItem("kf_token");
 }
 
+function normalizeMediaUrl(url: string): string {
+  const trimmed = url.trim();
+  const driveMatch = trimmed.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (driveMatch) {
+    return `https://drive.google.com/uc?export=download&id=${driveMatch[1]}`;
+  }
+  const driveOpen = trimmed.match(/drive\.google\.com\/open\?id=([a-zA-Z0-9_-]+)/);
+  if (driveOpen) {
+    return `https://drive.google.com/uc?export=download&id=${driveOpen[1]}`;
+  }
+  return trimmed;
+}
+
 export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "create", connections = [] }: Props) {
   const [content, setContent] = useState(initial?.content ?? "");
   const [scheduledFor, setScheduledFor] = useState(initial?.scheduledFor ?? "");
@@ -75,6 +88,8 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
     (initial?.mediaUrls ?? []).map((url, i) => ({ id: `existing-${i}`, url, objectPath: url }))
   );
   const [showPreview, setShowPreview] = useState(false);
+  const [showUrlInput, setShowUrlInput] = useState(false);
+  const [urlInput, setUrlInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -179,6 +194,16 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
       if (item?.preview) URL.revokeObjectURL(item.preview);
       return prev.filter(m => m.id !== id);
     });
+  }
+
+  function addMediaUrl() {
+    const raw = urlInput.trim();
+    if (!raw) return;
+    const url = normalizeMediaUrl(raw);
+    const id = `url-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setMediaFiles(prev => [...prev, { id, url, objectPath: url, preview: url }]);
+    setUrlInput("");
+    setShowUrlInput(false);
   }
 
   async function handleSubmit(action: "draft" | "schedule" | "publish") {
@@ -407,7 +432,7 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
           </div>
         )}
 
-        <div className="flex items-center gap-2 border-t pt-3" style={{ borderColor: "hsl(var(--kf-border))" }}>
+        <div className="flex flex-wrap items-center gap-2 border-t pt-3" style={{ borderColor: "hsl(var(--kf-border))" }}>
           <input
             ref={fileInputRef}
             type="file"
@@ -420,9 +445,18 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
             onClick={() => fileInputRef.current?.click()}
             disabled={isUploading}
             className="kf-btn-secondary inline-flex items-center gap-1.5 text-xs py-2.5 sm:py-2"
+            aria-label="Upload media files"
           >
             {isUploading ? <Loader2 className="w-4 h-4 sm:w-3.5 sm:h-3.5 animate-spin" /> : <ImagePlus className="w-4 h-4 sm:w-3.5 sm:h-3.5" />}
-            Media
+            Upload
+          </button>
+          <button
+            onClick={() => setShowUrlInput(!showUrlInput)}
+            className={`kf-btn-secondary inline-flex items-center gap-1.5 text-xs py-2.5 sm:py-2 ${showUrlInput ? "ring-2 ring-[hsl(var(--kf-accent2))]" : ""}`}
+            aria-label="Add media from URL"
+          >
+            <Link2 className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+            Paste URL
           </button>
           <button
             className={`kf-btn-secondary inline-flex items-center gap-1.5 text-xs py-2.5 sm:py-2 ${showSchedule ? "ring-2 ring-[hsl(var(--kf-accent1))]" : ""}`}
@@ -432,6 +466,55 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
             Schedule
           </button>
         </div>
+
+        <AnimatePresence>
+          {showUrlInput && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+            >
+              <div
+                className="rounded-xl border p-3 space-y-2"
+                style={{ background: "hsl(var(--kf-accent2) / 0.04)", borderColor: "hsl(var(--kf-accent2) / 0.2)" }}
+              >
+                <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                  <Link2 className="w-3 h-3" />
+                  Paste an image URL (Google Drive, Dropbox, or any public link)
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="url"
+                    className="kf-input flex-1 text-sm"
+                    placeholder="https://drive.google.com/file/d/... or any image URL"
+                    value={urlInput}
+                    onChange={(e) => setUrlInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addMediaUrl(); } }}
+                    autoFocus
+                  />
+                  <button
+                    onClick={addMediaUrl}
+                    disabled={!urlInput.trim()}
+                    className="kf-btn-primary inline-flex items-center gap-1 text-xs !px-3 !py-2"
+                    style={{ opacity: !urlInput.trim() ? 0.5 : 1 }}
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add
+                  </button>
+                  <button
+                    onClick={() => { setShowUrlInput(false); setUrlInput(""); }}
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <p className="text-[10px] text-muted-foreground leading-relaxed">
+                  Tip: For Google Drive, right-click your file → Share → set to "Anyone with the link" → copy the link
+                </p>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <AnimatePresence>
           {showSchedule && (
