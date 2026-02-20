@@ -10,6 +10,10 @@ import {
   RefreshCw,
   ChevronDown,
   X,
+  Send,
+  Star,
+  Clock,
+  CheckSquare,
 } from "lucide-react";
 import {
   ContactCard,
@@ -30,6 +34,7 @@ import {
   RelationshipTimeline,
   ConversationContext,
   AiCopilot,
+  BroadcastDrawer,
 } from "@/components/contacts";
 import type { FlowIntelligenceData } from "@/components/contacts/flow-intelligence";
 import type { NextAction as NextActionUI } from "@/components/contacts/next-action-queue";
@@ -39,6 +44,9 @@ import type { HealthMetrics } from "@/components/contacts/contact-health-score";
 import type { JourneyMilestone } from "@/components/contacts/relationship-timeline";
 import type { ConversationContextData } from "@/components/contacts/conversation-context";
 import type { AiInsight } from "@/components/contacts/ai-copilot";
+import { PageHeader } from "@/components/ui/page-header";
+import { TabNav } from "@/components/ui/tab-nav";
+import { StatCards } from "@/components/ui/stat-cards";
 import {
   Contact,
   ContactDetail as ContactDetailAPI,
@@ -68,8 +76,28 @@ import { ensureWorkspace, getStoredBusinessId } from "@/lib/workspace";
 
 const STATUSES = ["ALL", "LEAD", "PROSPECT", "CLIENT", "LOST"] as const;
 const PAGE_SIZE = 50;
+const PINNED_KEY = "kf_pinned_contacts";
+const RECENT_KEY = "kf_recent_contacts";
+const MAX_RECENT = 8;
 
-type ContactWithTags = Omit<Contact, "tags"> & { tags?: string[] };
+type ContactWithTags = Omit<Contact, "tags"> & { tags?: string[]; source?: string | null; sourceDetail?: string | null; preferredChannel?: string | null; createdAt?: string | null };
+
+function getPinnedIds(): string[] {
+  if (typeof window === "undefined") return [];
+  try { return JSON.parse(localStorage.getItem(PINNED_KEY) || "[]"); } catch { return []; }
+}
+function setPinnedIds(ids: string[]) {
+  localStorage.setItem(PINNED_KEY, JSON.stringify(ids));
+}
+function getRecentIds(): string[] {
+  if (typeof window === "undefined") return [];
+  try { return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]"); } catch { return []; }
+}
+function addRecentId(id: string) {
+  const ids = getRecentIds().filter((i) => i !== id);
+  ids.unshift(id);
+  localStorage.setItem(RECENT_KEY, JSON.stringify(ids.slice(0, MAX_RECENT)));
+}
 
 export default function ContactsPage() {
   const [businessId, setBusinessId] = useState<string | null>(null);
@@ -107,6 +135,18 @@ export default function ContactsPage() {
   const [aiInsight, setAiInsight] = useState<AiInsight | null>(null);
   const [aiInsightLoading, setAiInsightLoading] = useState(false);
 
+  const [pinnedIds, setPinnedIdsState] = useState<string[]>([]);
+  const [recentIds, setRecentIds] = useState<string[]>([]);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showBroadcast, setShowBroadcast] = useState(false);
+  const [activeListTab, setActiveListTab] = useState<"all" | "pinned" | "recent">("all");
+
+  useEffect(() => {
+    setPinnedIdsState(getPinnedIds());
+    setRecentIds(getRecentIds());
+  }, []);
+
   useEffect(() => {
     const initWorkspace = async () => {
       const stored = getStoredBusinessId();
@@ -140,20 +180,12 @@ export default function ContactsPage() {
       fetchAutopilotActionsForCrm(businessId),
       fetchPredictiveRevenue(businessId),
     ]);
-    
     if (flowRes.data) setFlowIntelligence(flowRes.data);
     if (actionsRes.data) {
       const mapped: NextActionUI[] = actionsRes.data.map((a) => ({
-        id: a.id,
-        type: a.type,
-        contactId: a.contactId,
-        contactName: a.contactName,
-        description: a.description,
-        aiDraft: a.aiDraft,
-        estimatedTime: a.estimatedTime,
-        priority: a.priority,
-        dueDate: a.dueDate,
-        value: a.value,
+        id: a.id, type: a.type, contactId: a.contactId, contactName: a.contactName,
+        description: a.description, aiDraft: a.aiDraft, estimatedTime: a.estimatedTime,
+        priority: a.priority, dueDate: a.dueDate, value: a.value,
       }));
       setNextActions(mapped);
     }
@@ -165,15 +197,11 @@ export default function ContactsPage() {
     async (opts?: { append?: boolean }) => {
       if (!businessId) return;
       const append = opts?.append ?? false;
-
-      if (append) setLoading(true);
-      else setLoading(true);
-
+      setLoading(true);
       try {
         if (append) {
           const { data } = await fetchContacts(businessId, {
-            take: PAGE_SIZE,
-            skip: nextOffset,
+            take: PAGE_SIZE, skip: nextOffset,
             search: search || undefined,
             status: statusFilter !== "ALL" ? statusFilter : undefined,
             includeStats: true,
@@ -185,8 +213,7 @@ export default function ContactsPage() {
         } else {
           const [{ data: contactData }, { data: segmentData }] = await Promise.all([
             fetchContacts(businessId, {
-              take: PAGE_SIZE,
-              skip: 0,
+              take: PAGE_SIZE, skip: 0,
               search: search || undefined,
               status: statusFilter !== "ALL" ? statusFilter : undefined,
               includeStats: true,
@@ -216,7 +243,6 @@ export default function ContactsPage() {
         fetchContactJourney(contactId, businessId),
         fetchConversationContext(contactId, businessId),
       ]);
-      
       if (healthRes.data) setHealthMetrics(healthRes.data);
       if (journeyRes.data) setJourneyMilestones(journeyRes.data);
       if (contextRes.data) setConversationContext(contextRes.data);
@@ -240,6 +266,8 @@ export default function ContactsPage() {
   const selectContact = useCallback(
     (contactId: string) => {
       setSelectedContactId(contactId);
+      addRecentId(contactId);
+      setRecentIds(getRecentIds());
       void loadDetail(contactId);
       if (window.innerWidth < 1024) {
         setShowMobileDetail(true);
@@ -272,31 +300,43 @@ export default function ContactsPage() {
     }
   }, [contacts, selectedContactId, loadDetail]);
 
+  const handleTogglePin = useCallback((id: string) => {
+    setPinnedIdsState((prev) => {
+      const next = prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id];
+      setPinnedIds(next);
+      return next;
+    });
+  }, []);
+
+  const handleToggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleSelectAll = useCallback(() => {
+    if (selectedIds.size === contacts.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(contacts.map((c) => c.id)));
+    }
+  }, [contacts, selectedIds.size]);
+
   const handleSubmitContact = async (formData: ContactFormData) => {
     if (!businessId) return;
-
-    const tagsArray = formData.tags
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean);
-
+    const tagsArray = formData.tags.split(",").map((t) => t.trim()).filter(Boolean);
     if (editingContact && selectedContactId) {
       await updateContact({
-        businessId,
-        contactId: selectedContactId,
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        email: formData.email || undefined,
-        phone: formData.phone || undefined,
-        status: formData.status,
-        source: formData.source || undefined,
-        companyName: formData.companyName || undefined,
-        jobTitle: formData.jobTitle || undefined,
+        businessId, contactId: selectedContactId,
+        firstName: formData.firstName, lastName: formData.lastName,
+        email: formData.email || undefined, phone: formData.phone || undefined,
+        status: formData.status, source: formData.source || undefined,
+        companyName: formData.companyName || undefined, jobTitle: formData.jobTitle || undefined,
         preferredChannel: formData.preferredChannel || undefined,
-        lifecycleStage: formData.lifecycleStage || undefined,
-        tags: tagsArray,
-        addressLine1: formData.addressLine1 || undefined,
-        city: formData.city || undefined,
+        lifecycleStage: formData.lifecycleStage || undefined, tags: tagsArray,
+        addressLine1: formData.addressLine1 || undefined, city: formData.city || undefined,
         country: formData.country || undefined,
       });
       setShowAddForm(false);
@@ -305,20 +345,13 @@ export default function ContactsPage() {
       void loadDetail(selectedContactId);
     } else {
       const { data } = await createContact({
-        businessId,
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        email: formData.email,
-        phone: formData.phone,
-        status: formData.status,
-        source: formData.source || undefined,
-        companyName: formData.companyName || undefined,
-        jobTitle: formData.jobTitle || undefined,
+        businessId, firstName: formData.firstName, lastName: formData.lastName,
+        email: formData.email, phone: formData.phone, status: formData.status,
+        source: formData.source || "manual",
+        companyName: formData.companyName || undefined, jobTitle: formData.jobTitle || undefined,
         preferredChannel: formData.preferredChannel || undefined,
-        lifecycleStage: formData.lifecycleStage || undefined,
-        tags: tagsArray,
-        addressLine1: formData.addressLine1 || undefined,
-        city: formData.city || undefined,
+        lifecycleStage: formData.lifecycleStage || undefined, tags: tagsArray,
+        addressLine1: formData.addressLine1 || undefined, city: formData.city || undefined,
         country: formData.country || undefined,
       });
       if (data) {
@@ -353,9 +386,7 @@ export default function ContactsPage() {
   const handleUpdateStatus = async (status: string) => {
     if (!selectedContactId || !businessId) return;
     await updateContact({ businessId, contactId: selectedContactId, status });
-    setContacts((prev) =>
-      prev.map((c) => (c.id === selectedContactId ? { ...c, status } : c)),
-    );
+    setContacts((prev) => prev.map((c) => (c.id === selectedContactId ? { ...c, status } : c)));
     if (contactDetail) {
       setContactDetail({
         ...contactDetail,
@@ -371,16 +402,11 @@ export default function ContactsPage() {
     setSelectedContactId(c.id);
     const extendedContact = c as ContactCardData & { addressLine1?: string | null; city?: string | null; country?: string | null };
     setEditingContact({
-      firstName: c.firstName || "",
-      lastName: c.lastName || "",
-      email: c.email || "",
-      phone: c.phone || "",
-      companyName: c.companyName || "",
-      jobTitle: c.jobTitle || "",
-      status: c.status || "LEAD",
-      source: "",
-      preferredChannel: "WhatsApp",
-      lifecycleStage: "",
+      firstName: c.firstName || "", lastName: c.lastName || "",
+      email: c.email || "", phone: c.phone || "",
+      companyName: c.companyName || "", jobTitle: c.jobTitle || "",
+      status: c.status || "LEAD", source: "",
+      preferredChannel: "WhatsApp", lifecycleStage: "",
       tags: Array.isArray(c.tags) ? c.tags.join(", ") : "",
       initialNote: "",
       addressLine1: extendedContact.addressLine1 || "",
@@ -432,24 +458,34 @@ export default function ContactsPage() {
 
   const selectedContact = useMemo(() => {
     if (!contactDetail?.contact) return null;
-    return {
-      ...contactDetail.contact,
-      tags: contactDetail.contact.tags ?? [],
-    } as ContactDetailData;
+    return { ...contactDetail.contact, tags: contactDetail.contact.tags ?? [] } as ContactDetailData;
   }, [contactDetail]);
 
   const detailEvents: ContactEvent[] = contactDetail?.events ?? [];
   const detailNotes: ContactNote[] = contactDetail?.notes ?? [];
   const detailTasks: ContactTask[] = (contactDetail?.tasks ?? []).map((t) => ({
-    id: t.id,
-    title: t.title,
-    status: t.status,
-    dueDate: t.dueDate,
+    id: t.id, title: t.title, status: t.status, dueDate: t.dueDate,
   }));
 
   const contactName = selectedContact
     ? `${selectedContact.firstName ?? ""} ${selectedContact.lastName ?? ""}`.trim() || "Contact"
     : "Contact";
+
+  const pinnedContacts = useMemo(() => contacts.filter((c) => pinnedIds.includes(c.id)), [contacts, pinnedIds]);
+  const recentContacts = useMemo(() => {
+    return recentIds.map((id) => contacts.find((c) => c.id === id)).filter(Boolean) as ContactWithTags[];
+  }, [contacts, recentIds]);
+
+  const displayContacts = useMemo(() => {
+    if (activeListTab === "pinned") return pinnedContacts;
+    if (activeListTab === "recent") return recentContacts;
+    return contacts;
+  }, [activeListTab, contacts, pinnedContacts, recentContacts]);
+
+  const selectedContactsForBroadcast = useMemo(
+    () => contacts.filter((c) => selectedIds.has(c.id)) as ContactCardData[],
+    [contacts, selectedIds],
+  );
 
   if (workspaceLoading) {
     return (
@@ -466,9 +502,7 @@ export default function ContactsPage() {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center space-y-3">
-          <p className="text-lg font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>
-            {workspaceError}
-          </p>
+          <p className="text-lg font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>{workspaceError}</p>
           <p className="text-muted-foreground">Try logging in again to create your workspace.</p>
         </div>
       </div>
@@ -477,49 +511,63 @@ export default function ContactsPage() {
 
   return (
     <div className="space-y-6">
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex flex-col md:flex-row md:items-center md:justify-between gap-4"
-      >
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Contacts</h1>
-          <p className="text-muted-foreground mt-1">Your AI-powered contact management system</p>
-        </div>
-        <button
-          onClick={() => setShowAddForm(true)}
-          className="kf-btn-primary inline-flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" />
-          Add Contact
-        </button>
-      </motion.div>
+      <PageHeader
+        icon={Users}
+        title="Contacts"
+        subtitle="Your AI-powered contact management hub"
+        action={
+          <div className="flex items-center gap-2">
+            {selectMode ? (
+              <>
+                <span className="text-sm text-muted-foreground">{selectedIds.size} selected</span>
+                <button onClick={handleSelectAll} className="kf-btn-secondary text-sm px-3 py-1.5">
+                  {selectedIds.size === contacts.length ? "Deselect All" : "Select All"}
+                </button>
+                <button
+                  onClick={() => { setShowBroadcast(true); }}
+                  disabled={selectedIds.size === 0}
+                  className="kf-btn-primary inline-flex items-center gap-2 text-sm disabled:opacity-50"
+                >
+                  <Send className="w-4 h-4" />
+                  Broadcast
+                </button>
+                <button
+                  onClick={() => { setSelectMode(false); setSelectedIds(new Set()); }}
+                  className="kf-btn-secondary text-sm px-3 py-1.5"
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => setSelectMode(true)}
+                  className="kf-btn-secondary inline-flex items-center gap-2 text-sm"
+                >
+                  <CheckSquare className="w-4 h-4" />
+                  <span className="hidden sm:inline">Select</span>
+                </button>
+                <button
+                  onClick={() => setShowAddForm(true)}
+                  className="kf-btn-primary inline-flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Contact
+                </button>
+              </>
+            )}
+          </div>
+        }
+      />
 
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.05 }}
-        className="grid grid-cols-2 md:grid-cols-4 gap-3"
-      >
-        {[
+      <StatCards
+        stats={[
           { label: "Total", value: contacts.length, color: "hsl(var(--kf-accent1))" },
-          { label: "Leads", value: segments["LEAD"] ?? contacts.filter(c => c.status === "LEAD").length, color: "hsl(var(--kf-accent2))" },
-          { label: "Prospects", value: segments["PROSPECT"] ?? contacts.filter(c => c.status === "PROSPECT").length, color: "hsl(200 70% 50%)" },
-          { label: "Clients", value: segments["CLIENT"] ?? contacts.filter(c => c.status === "CLIENT").length, color: "hsl(150 60% 40%)" },
-        ].map((kpi, i) => (
-          <motion.div
-            key={kpi.label}
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.05 + i * 0.05, type: "spring" as const, stiffness: 300, damping: 24 }}
-            className="kf-card p-4 text-center"
-            style={{ borderColor: `${kpi.color.replace(")", " / 0.2)")}` }}
-          >
-            <p className="text-2xl font-bold" style={{ color: kpi.color }}>{kpi.value}</p>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">{kpi.label}</p>
-          </motion.div>
-        ))}
-      </motion.div>
+          { label: "Leads", value: segments["LEAD"] ?? contacts.filter((c) => c.status === "LEAD").length, color: "hsl(var(--kf-accent2))" },
+          { label: "Prospects", value: segments["PROSPECT"] ?? contacts.filter((c) => c.status === "PROSPECT").length, color: "hsl(200 70% 50%)" },
+          { label: "Clients", value: segments["CLIENT"] ?? contacts.filter((c) => c.status === "CLIENT").length, color: "hsl(150 60% 40%)" },
+        ]}
+      />
 
       {flowIntelligence && (
         <FlowIntelligence
@@ -536,15 +584,12 @@ export default function ContactsPage() {
           onViewContact={selectContact}
           onDoAction={handleDoAction}
         />
-
         <AutopilotActions
           actions={autopilotActions}
           isPaused={autopilotPaused}
           onTogglePause={() => setAutopilotPaused(!autopilotPaused)}
           onApprove={async (id) => {
-            setAutopilotActions((prev) =>
-              prev.map((a) => (a.id === id ? { ...a, status: "completed" as const } : a)),
-            );
+            setAutopilotActions((prev) => prev.map((a) => (a.id === id ? { ...a, status: "completed" as const } : a)));
           }}
           onDeny={async (id) => {
             setAutopilotActions((prev) => prev.filter((a) => a.id !== id));
@@ -556,8 +601,8 @@ export default function ContactsPage() {
       {revenueData && (
         <PredictiveRevenue
           data={revenueData}
-          onViewExpiringQuotes={() => console.log("View expiring quotes")}
-          onViewOverdueInvoices={() => console.log("View overdue invoices")}
+          onViewExpiringQuotes={() => {}}
+          onViewOverdueInvoices={() => {}}
         />
       )}
 
@@ -565,10 +610,7 @@ export default function ContactsPage() {
         {showAddForm && (
           <ContactForm
             onSubmit={handleSubmitContact}
-            onCancel={() => {
-              setShowAddForm(false);
-              setEditingContact(null);
-            }}
+            onCancel={() => { setShowAddForm(false); setEditingContact(null); }}
             loading={isPending}
             initialValues={editingContact || undefined}
           />
@@ -588,7 +630,7 @@ export default function ContactsPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search contacts..."
+              placeholder="Search contacts by name, email, phone, company..."
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               className="kf-input w-full pl-10"
@@ -603,10 +645,7 @@ export default function ContactsPage() {
             <ChevronDown className={`w-4 h-4 transition-transform ${showFilters ? "rotate-180" : ""}`} />
           </button>
           <button
-            onClick={() => {
-              void loadContacts();
-              void loadFlowData();
-            }}
+            onClick={() => { void loadContacts(); void loadFlowData(); }}
             disabled={loading}
             className="kf-btn-secondary inline-flex items-center gap-2"
           >
@@ -627,19 +666,14 @@ export default function ContactsPage() {
                 <button
                   key={s}
                   onClick={() => setStatusFilter(s)}
-                  className={`px-3 py-1.5 text-sm rounded-lg transition-all ${
-                    statusFilter === s ? "kf-btn-primary" : "kf-btn-secondary"
-                  }`}
+                  className={`px-3 py-1.5 text-sm rounded-lg transition-all ${statusFilter === s ? "kf-btn-primary" : "kf-btn-secondary"}`}
                 >
                   {s}
                 </button>
               ))}
               {statusFilter !== "ALL" && (
                 <button
-                  onClick={() => {
-                    setStatusFilter("ALL");
-                    setSearchInput("");
-                  }}
+                  onClick={() => { setStatusFilter("ALL"); setSearchInput(""); }}
                   className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1"
                 >
                   <X className="w-3 h-3" />
@@ -649,6 +683,27 @@ export default function ContactsPage() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        <div className="flex gap-1 border-b border-border">
+          {[
+            { key: "all", label: `All (${contacts.length})`, icon: Users },
+            { key: "pinned", label: `Pinned (${pinnedContacts.length})`, icon: Star },
+            { key: "recent", label: `Recent (${recentContacts.length})`, icon: Clock },
+          ].map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              onClick={() => setActiveListTab(key as typeof activeListTab)}
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm transition-colors border-b-2 -mb-px ${
+                activeListTab === key
+                  ? "border-[hsl(var(--kf-accent1))] text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr,450px]">
@@ -658,34 +713,47 @@ export default function ContactsPage() {
               <RefreshCw className="w-8 h-8 animate-spin mx-auto text-muted-foreground mb-3" />
               <p className="text-muted-foreground">Loading contacts...</p>
             </div>
-          ) : contacts.length === 0 ? (
+          ) : displayContacts.length === 0 ? (
             <div className="kf-card p-8 text-center">
               <Users className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
-              <p className="text-lg font-medium mb-1">No contacts yet</p>
-              <p className="text-muted-foreground mb-4">
-                Add your first contact to get started
+              <p className="text-lg font-medium mb-1">
+                {activeListTab === "pinned" ? "No pinned contacts" : activeListTab === "recent" ? "No recent contacts" : "No contacts yet"}
               </p>
-              <button
-                onClick={() => setShowAddForm(true)}
-                className="kf-btn-primary inline-flex items-center gap-2"
-              >
-                <Plus className="w-4 h-4" />
-                Add Contact
-              </button>
+              <p className="text-muted-foreground mb-4">
+                {activeListTab === "pinned"
+                  ? "Pin your most important contacts for quick access"
+                  : activeListTab === "recent"
+                  ? "Your recently viewed contacts will appear here"
+                  : "Add your first contact to get started"}
+              </p>
+              {activeListTab === "all" && (
+                <button
+                  onClick={() => setShowAddForm(true)}
+                  className="kf-btn-primary inline-flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Contact
+                </button>
+              )}
             </div>
           ) : (
             <>
-              {contacts.map((contact, index) => (
+              {displayContacts.map((contact, index) => (
                 <ContactCard
                   key={contact.id}
                   contact={contact as ContactCardData}
                   isSelected={selectedContactId === contact.id}
+                  selectable={selectMode}
+                  selected={selectedIds.has(contact.id)}
+                  onToggleSelect={handleToggleSelect}
+                  isPinned={pinnedIds.includes(contact.id)}
+                  onTogglePin={handleTogglePin}
                   onClick={() => selectContact(contact.id)}
                   onDelete={handleDeleteContact}
                   index={index}
                 />
               ))}
-              {hasMore && (
+              {activeListTab === "all" && hasMore && (
                 <button
                   onClick={() => loadContacts({ append: true })}
                   disabled={loading}
@@ -705,6 +773,8 @@ export default function ContactsPage() {
             notes={detailNotes}
             tasks={detailTasks}
             loading={detailLoading}
+            isPinned={selectedContactId ? pinnedIds.includes(selectedContactId) : false}
+            onTogglePin={handleTogglePin}
             onAddNote={handleAddNote}
             onAddTask={handleAddTask}
             onCompleteTask={handleCompleteTask}
@@ -739,10 +809,7 @@ export default function ContactsPage() {
 
               {journeyMilestones.length > 0 && (
                 <div className="kf-card p-5">
-                  <RelationshipTimeline
-                    contactName={contactName}
-                    milestones={journeyMilestones}
-                  />
+                  <RelationshipTimeline contactName={contactName} milestones={journeyMilestones} />
                 </div>
               )}
 
@@ -790,6 +857,8 @@ export default function ContactsPage() {
                   notes={detailNotes}
                   tasks={detailTasks}
                   loading={detailLoading}
+                  isPinned={selectedContactId ? pinnedIds.includes(selectedContactId) : false}
+                  onTogglePin={handleTogglePin}
                   onClose={() => setShowMobileDetail(false)}
                   onAddNote={handleAddNote}
                   onAddTask={handleAddTask}
@@ -800,33 +869,25 @@ export default function ContactsPage() {
                 />
 
                 {selectedContact && (
-                  <>
-                    <AiCopilot
-                      contactName={contactName}
-                      insight={aiInsight}
-                      isLoading={aiInsightLoading}
-                      onGenerateInsight={handleGenerateAiInsight}
-                    />
-
-                    {healthMetrics && (
-                      <div className="kf-card p-5">
-                        <ContactHealthScore
-                          metrics={healthMetrics}
-                          tip={
-                            healthMetrics.relationship < 60
-                              ? "Schedule a personal check-in call to strengthen this relationship"
-                              : undefined
-                          }
-                        />
-                      </div>
-                    )}
-                  </>
+                  <AiCopilot
+                    contactName={contactName}
+                    insight={aiInsight}
+                    isLoading={aiInsightLoading}
+                    onGenerateInsight={handleGenerateAiInsight}
+                  />
                 )}
               </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      <BroadcastDrawer
+        isOpen={showBroadcast}
+        onClose={() => setShowBroadcast(false)}
+        selectedContacts={selectedContactsForBroadcast}
+        onDeselectAll={() => { setSelectedIds(new Set()); setSelectMode(false); }}
+      />
     </div>
   );
 }

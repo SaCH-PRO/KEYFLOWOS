@@ -21,6 +21,9 @@ type ContactMeta = {
   overdueBookings: number;
   bookingsRecent: number;
   leadScore: number;
+  totalRevenue: number;
+  invoiceCount: number;
+  bookingCount: number;
 };
 
 type ContactWithStats = Contact & {
@@ -340,6 +343,9 @@ export class CrmService {
         overdueBookings: 0,
         bookingsRecent: 0,
         leadScore: 50,
+        totalRevenue: 0,
+        invoiceCount: 0,
+        bookingCount: 0,
       });
     }
 
@@ -347,6 +353,7 @@ export class CrmService {
     invoices.forEach((inv) => {
       const stats = statsMap.get(inv.contactId);
       if (!stats) return;
+      stats.invoiceCount += 1;
       if (['SENT', 'OVERDUE'].includes(inv.status)) {
         stats.outstandingBalance += Number(inv.total ?? 0);
         stats.unpaidInvoices += 1;
@@ -359,6 +366,7 @@ export class CrmService {
       }
       if (inv.status === 'PAID') {
         stats.paidInvoices += 1;
+        stats.totalRevenue += Number(inv.total ?? 0);
       }
     });
 
@@ -386,6 +394,7 @@ export class CrmService {
     bookings.forEach((booking) => {
       const stats = statsMap.get(booking.contactId);
       if (!stats) return;
+      stats.bookingCount += 1;
       if (booking.status === 'COMPLETED' && booking.startTime > recentCutoff) stats.bookingsRecent += 1;
       if (booking.status === 'PENDING' && booking.startTime < now) stats.overdueBookings += 1;
       if (booking.startTime > stats.lastInteractionAt) stats.lastInteractionAt = booking.startTime;
@@ -817,6 +826,9 @@ export class CrmService {
       overdueBookings: 0,
       bookingsRecent: 0,
       leadScore: 50,
+      totalRevenue: 0,
+      invoiceCount: 0,
+      bookingCount: 0,
     };
 
     const now = new Date();
@@ -824,6 +836,7 @@ export class CrmService {
     recentCutoff.setDate(recentCutoff.getDate() - 14);
 
     for (const inv of invoices) {
+      meta.invoiceCount += 1;
       if (['SENT', 'OVERDUE'].includes(inv.status)) {
         meta.outstandingBalance += Number(inv.total ?? 0);
         meta.unpaidInvoices += 1;
@@ -836,6 +849,7 @@ export class CrmService {
       }
       if (inv.status === 'PAID') {
         meta.paidInvoices += 1;
+        meta.totalRevenue += Number(inv.total ?? 0);
       }
     }
 
@@ -855,6 +869,7 @@ export class CrmService {
       if (note.createdAt > meta.lastInteractionAt) meta.lastInteractionAt = note.createdAt;
     }
     for (const booking of bookings) {
+      meta.bookingCount += 1;
       if (booking.status === 'COMPLETED' && booking.startTime > recentCutoff) meta.bookingsRecent += 1;
       if (booking.status === 'PENDING' && booking.startTime < now) meta.overdueBookings += 1;
       if (booking.startTime > meta.lastInteractionAt) meta.lastInteractionAt = booking.startTime;

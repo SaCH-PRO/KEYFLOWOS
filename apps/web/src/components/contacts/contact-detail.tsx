@@ -21,7 +21,17 @@ import {
   Pencil,
   Trash2,
   MapPin,
+  MessageCircle,
+  Send,
+  Copy,
+  Globe,
+  FileText,
+  CalendarCheck,
+  UserPlus,
+  Upload,
+  Star,
 } from "lucide-react";
+import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 
 export type ContactDetailData = {
   id: string;
@@ -32,13 +42,20 @@ export type ContactDetailData = {
   companyName?: string | null;
   jobTitle?: string | null;
   status?: string | null;
+  source?: string | null;
+  sourceDetail?: string | null;
+  preferredChannel?: string | null;
   tags?: string[];
   addressLine1?: string | null;
   city?: string | null;
   country?: string | null;
+  createdAt?: string | null;
   meta?: {
     leadScore?: number | null;
     outstandingBalance?: number | null;
+    totalRevenue?: number | null;
+    invoiceCount?: number | null;
+    bookingCount?: number | null;
     lastInteractionAt?: string | null;
     nextDueTaskAt?: string | null;
   } | null;
@@ -71,6 +88,8 @@ interface ContactDetailProps {
   notes?: ContactNote[];
   tasks?: ContactTask[];
   loading?: boolean;
+  isPinned?: boolean;
+  onTogglePin?: (id: string) => void;
   onClose?: () => void;
   onAddNote?: (body: string) => Promise<void>;
   onAddTask?: (title: string, dueDate?: string) => Promise<void>;
@@ -89,12 +108,47 @@ const STATUS_COLORS: Record<string, string> = {
   LOST: "hsl(var(--kf-muted-foreground))",
 };
 
+const SOURCE_CONFIG: Record<string, { label: string; icon: typeof Globe }> = {
+  booking: { label: "Booking", icon: CalendarCheck },
+  store: { label: "Store", icon: Globe },
+  "lead-form": { label: "Lead Form", icon: FileText },
+  import: { label: "Import", icon: Upload },
+  manual: { label: "Manual", icon: UserPlus },
+  google: { label: "Google", icon: Globe },
+};
+
+const QUICK_TEMPLATES = [
+  { label: "Follow-up", message: "Hi {name}, just following up on our last conversation. How can I help?" },
+  { label: "Thank you", message: "Hi {name}, thank you for your business! We truly appreciate it." },
+  { label: "Appointment", message: "Hi {name}, this is a reminder about your upcoming appointment. See you soon!" },
+  { label: "Payment", message: "Hi {name}, just a friendly reminder about your outstanding balance. Let me know if you have any questions." },
+  { label: "Promo", message: "Hi {name}, we have a special offer just for you! Reply to learn more." },
+];
+
+const EVENT_LABELS: Record<string, string> = {
+  "contact.created": "Contact created",
+  "contact.updated": "Contact updated",
+  "invoice.created": "Invoice created",
+  "invoice.paid": "Invoice paid",
+  "booking.created": "Booking made",
+  "booking.completed": "Booking completed",
+  "quote.created": "Quote sent",
+  "quote.accepted": "Quote accepted",
+  "note.added": "Note added",
+  "task.created": "Task created",
+  "task.completed": "Task completed",
+  "email.sent": "Email sent",
+  "form.submitted": "Form submitted",
+};
+
 export function ContactDetail({
   contact,
   events = [],
   notes = [],
   tasks = [],
   loading,
+  isPinned,
+  onTogglePin,
   onClose,
   onAddNote,
   onAddTask,
@@ -103,13 +157,16 @@ export function ContactDetail({
   onEdit,
   onDelete,
 }: ContactDetailProps) {
-  const [activeTab, setActiveTab] = useState<"timeline" | "notes" | "tasks">("timeline");
+  const [activeTab, setActiveTab] = useState<"timeline" | "notes" | "tasks" | "compose">("timeline");
   const [newNote, setNewNote] = useState("");
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskDue, setNewTaskDue] = useState("");
   const [noteLoading, setNoteLoading] = useState(false);
+  const [taskLoading, setTaskLoading] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [composeMessage, setComposeMessage] = useState("");
+  const [copied, setCopied] = useState(false);
 
   const handleDelete = async () => {
     if (!onDelete) return;
@@ -118,7 +175,6 @@ export function ContactDetail({
     setDeleting(false);
     setDeleteConfirm(false);
   };
-  const [taskLoading, setTaskLoading] = useState(false);
 
   if (loading) {
     return (
@@ -142,6 +198,10 @@ export function ContactDetail({
   const fullName = `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "Unnamed";
   const initials = `${contact.firstName?.[0] ?? ""}${contact.lastName?.[0] ?? ""}`.toUpperCase() || "?";
   const statusColor = STATUS_COLORS[contact.status ?? ""] ?? STATUS_COLORS.LEAD;
+  const waPhone = getContactPhone(contact);
+  const sourceKey = (contact.source || "manual").toLowerCase().replace(/[_\s]/g, "-");
+  const sourceInfo = SOURCE_CONFIG[sourceKey] || { label: contact.source || "Unknown", icon: Globe };
+  const SourceIcon = sourceInfo.icon;
 
   const handleAddNote = async () => {
     if (!newNote.trim() || !onAddNote) return;
@@ -160,11 +220,33 @@ export function ContactDetail({
     setTaskLoading(false);
   };
 
+  const applyTemplate = (template: string) => {
+    setComposeMessage(template.replace("{name}", contact.firstName || "there"));
+  };
+
+  const handleCopyMessage = () => {
+    navigator.clipboard.writeText(composeMessage);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleSendWhatsApp = () => {
+    if (!waPhone) return;
+    window.open(buildWhatsAppLink(waPhone, composeMessage), "_blank");
+  };
+
+  const handleSendEmail = () => {
+    if (!contact.email) return;
+    const subject = encodeURIComponent("Following up");
+    const body = encodeURIComponent(composeMessage);
+    window.open(`mailto:${contact.email}?subject=${subject}&body=${body}`, "_blank");
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
-      className="kf-card p-5 space-y-5 h-full overflow-y-auto"
+      className="kf-card p-5 space-y-4 h-full overflow-y-auto"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -175,7 +257,18 @@ export function ContactDetail({
             {initials}
           </div>
           <div>
-            <h2 className="text-xl font-semibold">{fullName}</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-semibold">{fullName}</h2>
+              {onTogglePin && (
+                <button
+                  onClick={() => onTogglePin(contact.id)}
+                  className={`p-0.5 rounded transition-colors ${isPinned ? "text-yellow-400" : "text-muted-foreground hover:text-yellow-400"}`}
+                  title={isPinned ? "Unpin" : "Pin contact"}
+                >
+                  <Star className={`w-4 h-4 ${isPinned ? "fill-current" : ""}`} />
+                </button>
+              )}
+            </div>
             {(contact.companyName || contact.jobTitle) && (
               <p className="text-sm text-muted-foreground">
                 {contact.jobTitle && contact.companyName
@@ -183,6 +276,17 @@ export function ContactDetail({
                   : contact.companyName || contact.jobTitle}
               </p>
             )}
+            <div className="flex items-center gap-2 mt-1">
+              <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground">
+                <SourceIcon className="w-2.5 h-2.5" />
+                {sourceInfo.label}
+              </span>
+              {contact.createdAt && (
+                <span className="text-[10px] text-muted-foreground">
+                  Added {new Date(contact.createdAt).toLocaleDateString()}
+                </span>
+              )}
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -253,50 +357,63 @@ export function ContactDetail({
         ))}
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="flex items-center gap-2 p-3 rounded-xl bg-muted/30 border border-border/50">
         {contact.email && (
           <a
             href={`mailto:${contact.email}`}
-            className="flex items-center gap-2 p-3 rounded-xl bg-muted/50 hover:bg-muted transition-colors text-sm"
+            className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg hover:bg-blue-500/10 transition-colors text-sm"
+            title={`Email ${contact.email}`}
           >
-            <Mail className="w-4 h-4" style={{ color: statusColor }} />
-            <span className="truncate">{contact.email}</span>
+            <Mail className="w-4 h-4 text-blue-400" />
+            <span className="hidden sm:inline text-blue-400 text-xs">Email</span>
           </a>
         )}
         {contact.phone && (
           <a
             href={`tel:${contact.phone}`}
-            className="flex items-center gap-2 p-3 rounded-xl bg-muted/50 hover:bg-muted transition-colors text-sm"
+            className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg hover:bg-violet-500/10 transition-colors text-sm"
+            title={`Call ${contact.phone}`}
           >
-            <Phone className="w-4 h-4" style={{ color: statusColor }} />
-            <span>{contact.phone}</span>
+            <Phone className="w-4 h-4 text-violet-400" />
+            <span className="hidden sm:inline text-violet-400 text-xs">Call</span>
           </a>
         )}
+        {waPhone && (
+          <a
+            href={buildWhatsAppLink(waPhone, `Hi ${contact.firstName || ""},`)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg hover:bg-emerald-500/10 transition-colors text-sm"
+            title="WhatsApp"
+          >
+            <MessageCircle className="w-4 h-4 text-emerald-500" />
+            <span className="hidden sm:inline text-emerald-500 text-xs">WhatsApp</span>
+          </a>
+        )}
+        <button
+          onClick={() => setActiveTab("compose")}
+          className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg transition-colors text-sm ${activeTab === "compose" ? "bg-[hsl(var(--kf-accent1))]/10" : "hover:bg-[hsl(var(--kf-accent1))]/10"}`}
+          title="Quick compose"
+        >
+          <Send className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+          <span className="hidden sm:inline text-xs" style={{ color: "hsl(var(--kf-accent1))" }}>Compose</span>
+        </button>
       </div>
 
-      {(contact.addressLine1 || contact.city || contact.country) && (
-        <div className="flex items-start gap-2 p-3 rounded-xl bg-muted/50 text-sm">
-          <MapPin className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: statusColor }} />
-          <span>
-            {[contact.addressLine1, contact.city, contact.country].filter(Boolean).join(", ")}
-          </span>
-        </div>
-      )}
-
-      <div className="grid grid-cols-2 gap-3 text-sm">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
         <div className="kf-stat-card p-3">
           <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1">
             <TrendingUp className="w-3 h-3" />
             Lead Score
           </div>
-          <div className="text-xl font-semibold">{contact.meta?.leadScore ?? "-"}</div>
+          <div className="text-lg font-semibold">{contact.meta?.leadScore ?? "-"}</div>
         </div>
         <div className="kf-stat-card p-3">
           <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1">
             <DollarSign className="w-3 h-3" />
             Outstanding
           </div>
-          <div className="text-xl font-semibold" style={{ color: (contact.meta?.outstandingBalance ?? 0) > 0 ? "hsl(var(--kf-accent1))" : undefined }}>
+          <div className="text-lg font-semibold" style={{ color: (contact.meta?.outstandingBalance ?? 0) > 0 ? "hsl(var(--kf-accent1))" : undefined }}>
             {contact.meta?.outstandingBalance ? `TTD ${contact.meta.outstandingBalance.toLocaleString()}` : "-"}
           </div>
         </div>
@@ -305,7 +422,7 @@ export function ContactDetail({
             <Clock className="w-3 h-3" />
             Last Activity
           </div>
-          <div className="text-sm font-medium">
+          <div className="text-xs font-medium">
             {contact.meta?.lastInteractionAt
               ? new Date(contact.meta.lastInteractionAt).toLocaleDateString()
               : "No activity"}
@@ -316,13 +433,44 @@ export function ContactDetail({
             <Calendar className="w-3 h-3" />
             Next Task
           </div>
-          <div className="text-sm font-medium">
+          <div className="text-xs font-medium">
             {contact.meta?.nextDueTaskAt
               ? new Date(contact.meta.nextDueTaskAt).toLocaleDateString()
               : "None"}
           </div>
         </div>
       </div>
+
+      {(contact.meta?.totalRevenue || contact.meta?.invoiceCount || contact.meta?.bookingCount) && (
+        <div className="p-3 rounded-xl bg-muted/30 border border-border/50">
+          <p className="text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wider">Financial Summary</p>
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div>
+              <p className="text-lg font-semibold" style={{ color: "hsl(var(--kf-accent2))" }}>
+                TTD {(contact.meta?.totalRevenue ?? 0).toLocaleString()}
+              </p>
+              <p className="text-[10px] text-muted-foreground">Total Revenue</p>
+            </div>
+            <div>
+              <p className="text-lg font-semibold">{contact.meta?.invoiceCount ?? 0}</p>
+              <p className="text-[10px] text-muted-foreground">Invoices</p>
+            </div>
+            <div>
+              <p className="text-lg font-semibold">{contact.meta?.bookingCount ?? 0}</p>
+              <p className="text-[10px] text-muted-foreground">Bookings</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {(contact.addressLine1 || contact.city || contact.country) && (
+        <div className="flex items-start gap-2 p-3 rounded-xl bg-muted/50 text-sm">
+          <MapPin className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: statusColor }} />
+          <span>
+            {[contact.addressLine1, contact.city, contact.country].filter(Boolean).join(", ")}
+          </span>
+        </div>
+      )}
 
       {contact.tags && contact.tags.length > 0 && (
         <div className="flex flex-wrap gap-1">
@@ -337,16 +485,17 @@ export function ContactDetail({
         </div>
       )}
 
-      <div className="flex border-b border-border">
+      <div className="flex border-b border-border overflow-x-auto">
         {[
           { key: "timeline", label: "Timeline", icon: History },
           { key: "notes", label: "Notes", icon: MessageSquare },
           { key: "tasks", label: "Tasks", icon: ListTodo },
+          { key: "compose", label: "Compose", icon: Send },
         ].map(({ key, label, icon: Icon }) => (
           <button
             key={key}
             onClick={() => setActiveTab(key as typeof activeTab)}
-            className={`flex items-center gap-1.5 px-4 py-2 text-sm transition-colors border-b-2 -mb-px ${
+            className={`flex items-center gap-1.5 px-4 py-2 text-sm transition-colors border-b-2 -mb-px whitespace-nowrap ${
               activeTab === key
                 ? "border-[hsl(var(--kf-accent1))] text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground"
@@ -359,21 +508,78 @@ export function ContactDetail({
       </div>
 
       <div className="space-y-3">
+        {activeTab === "compose" && (
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-1.5">
+              {QUICK_TEMPLATES.map((t) => (
+                <button
+                  key={t.label}
+                  onClick={() => applyTemplate(t.message)}
+                  className="text-xs px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <textarea
+              placeholder={`Write a message to ${contact.firstName || "this contact"}...`}
+              value={composeMessage}
+              onChange={(e) => setComposeMessage(e.target.value)}
+              className="kf-input w-full min-h-[100px] resize-none"
+            />
+            <div className="flex gap-2">
+              {waPhone && (
+                <button
+                  onClick={handleSendWhatsApp}
+                  disabled={!composeMessage.trim()}
+                  className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm transition-colors disabled:opacity-50"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  Send via WhatsApp
+                </button>
+              )}
+              {contact.email && (
+                <button
+                  onClick={handleSendEmail}
+                  disabled={!composeMessage.trim()}
+                  className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm transition-colors disabled:opacity-50"
+                >
+                  <Mail className="w-4 h-4" />
+                  Send via Email
+                </button>
+              )}
+              <button
+                onClick={handleCopyMessage}
+                disabled={!composeMessage.trim()}
+                className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-muted hover:bg-muted/80 text-sm transition-colors disabled:opacity-50"
+              >
+                <Copy className="w-4 h-4" />
+                {copied ? "Copied!" : "Copy"}
+              </button>
+            </div>
+          </div>
+        )}
+
         {activeTab === "timeline" && (
           <>
             {events.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-4">No events yet</p>
             ) : (
-              events.slice(0, 10).map((event) => (
-                <div key={event.id} className="p-3 rounded-xl bg-muted/30 border border-border/50">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="font-medium">{event.type}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {new Date(event.createdAt).toLocaleDateString()}
-                    </span>
+              <div className="relative pl-4 border-l-2 border-border/50 space-y-3">
+                {events.slice(0, 20).map((event) => (
+                  <div key={event.id} className="relative">
+                    <div className="absolute -left-[21px] top-2 w-2.5 h-2.5 rounded-full border-2 border-border bg-background" />
+                    <div className="p-3 rounded-xl bg-muted/30 border border-border/50">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="font-medium">{EVENT_LABELS[event.type] || event.type}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(event.createdAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))
+                ))}
+              </div>
             )}
           </>
         )}
@@ -399,12 +605,19 @@ export function ContactDetail({
             {notes.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-4">No notes yet</p>
             ) : (
-              notes.slice(0, 10).map((note) => (
+              notes.slice(0, 20).map((note) => (
                 <div key={note.id} className="p-3 rounded-xl bg-muted/30 border border-border/50">
-                  <p className="text-sm">{note.body}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {new Date(note.createdAt).toLocaleDateString()}
-                  </p>
+                  <p className="text-sm whitespace-pre-wrap">{note.body}</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(note.createdAt).toLocaleDateString()}
+                    </p>
+                    {note.source && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                        {note.source}
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))
             )}
@@ -439,13 +652,13 @@ export function ContactDetail({
             {tasks.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-4">No tasks yet</p>
             ) : (
-              tasks.slice(0, 10).map((task) => (
+              tasks.slice(0, 20).map((task) => (
                 <div
                   key={task.id}
                   className="p-3 rounded-xl bg-muted/30 border border-border/50 flex items-center justify-between"
                 >
                   <div>
-                    <p className="text-sm font-medium">{task.title}</p>
+                    <p className={`text-sm font-medium ${task.status === "DONE" ? "line-through text-muted-foreground" : ""}`}>{task.title}</p>
                     {task.dueDate && (
                       <p className="text-xs text-muted-foreground">
                         Due: {new Date(task.dueDate).toLocaleDateString()}
