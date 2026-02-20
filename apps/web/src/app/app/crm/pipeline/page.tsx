@@ -562,10 +562,10 @@ export default function ContactsPage() {
 
       <StatCards
         items={[
-          { label: "Total", value: contacts.length, color: "hsl(var(--kf-accent1))" },
-          { label: "Leads", value: segments["LEAD"] ?? contacts.filter((c) => c.status === "LEAD").length, color: "hsl(var(--kf-accent2))" },
-          { label: "Prospects", value: segments["PROSPECT"] ?? contacts.filter((c) => c.status === "PROSPECT").length, color: "hsl(200 70% 50%)" },
-          { label: "Clients", value: segments["CLIENT"] ?? contacts.filter((c) => c.status === "CLIENT").length, color: "hsl(150 60% 40%)" },
+          { label: "Total", value: contacts.length, icon: Users, color: "hsl(var(--kf-accent1))" },
+          { label: "Leads", value: segments["LEAD"] ?? contacts.filter((c) => c.status === "LEAD").length, icon: Star, color: "hsl(var(--kf-accent2))" },
+          { label: "Prospects", value: segments["PROSPECT"] ?? contacts.filter((c) => c.status === "PROSPECT").length, icon: Filter, color: "hsl(200 70% 50%)" },
+          { label: "Clients", value: segments["CLIENT"] ?? contacts.filter((c) => c.status === "CLIENT").length, icon: CheckSquare, color: "hsl(150 60% 40%)" },
         ]}
       />
 
