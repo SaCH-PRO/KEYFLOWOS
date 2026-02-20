@@ -103,6 +103,21 @@ model Business {
   notifications    Notification[]
   subscriptions    Subscription[]
   activities       Activity[]
+  expenses         Expense[]
+  expenseCategories ExpenseCategory[]
+  recurringInvoices RecurringInvoice[]
+  emailCampaigns   EmailCampaign[]
+  emailContacts    EmailCampaignContact[]
+  leadForms        LeadForm[]
+  leadSubmissions  LeadFormSubmission[]
+  businessTemplates BusinessTemplateUsage[]
+  courses          Course[]
+  courseEnrollments CourseEnrollment[]
+  communityPosts   CommunityPost[]
+  communityComments CommunityComment[]
+  cohorts          Cohort[]
+  cohortMembers    CohortMember[]
+  landingPages     LandingPage[]
 
   // Gmail Integration for sending quotes/invoices
   gmailEmail        String?   @map("gmail_email")
@@ -212,6 +227,7 @@ model Contact {
     importRecords ContactImportContact[]
     media         ContactMedia[]
     playbooks     ContactPlaybook[]
+    recurringInvoices RecurringInvoice[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
@@ -864,4 +880,353 @@ model Subscription {
 
   @@index([businessId, status])
   @@map("subscriptions")
+}
+
+// ---
+// MODULE 9: EXPENSE TRACKING (ProfitLens)
+// ---
+model ExpenseCategory {
+  id         String   @id @default(cuid())
+  name       String
+  icon       String?
+  color      String?
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  expenses   Expense[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([businessId, name])
+  @@index([businessId])
+  @@map("expense_categories")
+}
+
+model Expense {
+  id          String   @id @default(cuid())
+  description String
+  amount      Float
+  currency    String   @default("TTD")
+  date        DateTime @default(now())
+  vendor      String?
+  receiptUrl  String?  @map("receipt_url")
+  notes       String?
+  isRecurring Boolean  @default(false) @map("is_recurring")
+  recurringFrequency String? @map("recurring_frequency")
+
+  categoryId String?          @map("category_id")
+  category   ExpenseCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt      @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([businessId, date])
+  @@index([businessId, categoryId])
+  @@map("expenses")
+}
+
+// ---
+// MODULE 10: RECURRING INVOICES
+// ---
+model RecurringInvoice {
+  id          String   @id @default(cuid())
+  name        String
+  frequency   String   // WEEKLY, BIWEEKLY, MONTHLY, QUARTERLY, YEARLY
+  nextRunDate DateTime @map("next_run_date")
+  lastRunDate DateTime? @map("last_run_date")
+  endDate     DateTime? @map("end_date")
+  isActive    Boolean  @default(true) @map("is_active")
+  runCount    Int      @default(0) @map("run_count")
+
+  contactId  String   @map("contact_id")
+  contact    Contact  @relation(fields: [contactId], references: [id], onDelete: NoAction)
+
+  lineItems  Json     @map("line_items")
+  subtotal   Float    @default(0)
+  taxRate    Float?   @default(0) @map("tax_rate")
+  discountType  String?  @map("discount_type")
+  discountValue Float?   @default(0) @map("discount_value")
+  total      Float
+  currency   String   @default("TTD")
+  notes      String?
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt      @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([businessId, isActive])
+  @@index([businessId, nextRunDate])
+  @@map("recurring_invoices")
+}
+
+// ---
+// MODULE 11: EMAIL MARKETING
+// ---
+model EmailCampaign {
+  id          String   @id @default(cuid())
+  name        String
+  subject     String
+  body        String
+  status      String   @default("DRAFT") // DRAFT, SCHEDULED, SENDING, SENT, FAILED
+  scheduledAt DateTime? @map("scheduled_at")
+  sentAt      DateTime? @map("sent_at")
+
+  segmentFilter Json?   @map("segment_filter")
+  totalRecipients Int   @default(0) @map("total_recipients")
+  sentCount       Int   @default(0) @map("sent_count")
+  openCount       Int   @default(0) @map("open_count")
+  clickCount      Int   @default(0) @map("click_count")
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  recipients EmailCampaignContact[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt      @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([businessId, status])
+  @@map("email_campaigns")
+}
+
+model EmailCampaignContact {
+  id         String   @id @default(cuid())
+  campaignId String   @map("campaign_id")
+  campaign   EmailCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contactId  String   @map("contact_id")
+  email      String
+  status     String   @default("PENDING") // PENDING, SENT, OPENED, CLICKED, BOUNCED
+  sentAt     DateTime? @map("sent_at")
+  openedAt   DateTime? @map("opened_at")
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, contactId])
+  @@index([businessId])
+  @@map("email_campaign_contacts")
+}
+
+// ---
+// MODULE 12: LEAD CAPTURE FORMS
+// ---
+model LeadForm {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  fields      Json     // Array of field definitions
+  settings    Json?    // Redirect URL, thank you message, etc.
+  isActive    Boolean  @default(true) @map("is_active")
+  embedCode   String?  @map("embed_code")
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  submissions LeadFormSubmission[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt      @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([businessId])
+  @@map("lead_forms")
+}
+
+model LeadFormSubmission {
+  id        String   @id @default(cuid())
+  formId    String   @map("form_id")
+  form      LeadForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  data      Json
+  contactId String?  @map("contact_id")
+  source    String?
+  ipAddress String?  @map("ip_address")
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([formId])
+  @@index([businessId, createdAt])
+  @@map("lead_form_submissions")
+}
+
+// ---
+// MODULE 13: BUSINESS TEMPLATES & VERTICAL MODES
+// ---
+model BusinessTemplate {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  displayName String   @map("display_name")
+  description String
+  icon        String?
+  industry    String
+  archetype   String
+  config      Json     // Pre-seeded products, services, hours, automations, etc.
+  isPublished Boolean  @default(true) @map("is_published")
+
+  usages BusinessTemplateUsage[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@map("business_templates")
+}
+
+model BusinessTemplateUsage {
+  id         String   @id @default(cuid())
+  templateId String   @map("template_id")
+  template   BusinessTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  appliedAt DateTime @default(now()) @map("applied_at")
+
+  @@unique([businessId, templateId])
+  @@map("business_template_usages")
+}
+
+// ---
+// MODULE 14: LANDING PAGES
+// ---
+model LandingPage {
+  id          String   @id @default(cuid())
+  title       String
+  slug        String
+  template    String   @default("default")
+  sections    Json
+  settings    Json?
+  isPublished Boolean  @default(false) @map("is_published")
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt      @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@unique([businessId, slug])
+  @@index([businessId])
+  @@map("landing_pages")
+}
+
+// ---
+// MODULE 15: MASTERCLASS (EDUCATION)
+// ---
+model Course {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  thumbnail   String?
+  category    String
+  difficulty  String   @default("BEGINNER") // BEGINNER, INTERMEDIATE, ADVANCED
+  duration    Int?     // Total minutes
+  lessons     Json     // Array of lesson objects with title, content, videoUrl, order
+  isPublished Boolean  @default(false) @map("is_published")
+  isFree      Boolean  @default(true) @map("is_free")
+  price       Float?
+
+  businessId  String?  @map("business_id")
+  business    Business? @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  enrollments CourseEnrollment[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt      @map("updated_at")
+
+  @@index([category])
+  @@map("courses")
+}
+
+model CourseEnrollment {
+  id           String   @id @default(cuid())
+  courseId      String   @map("course_id")
+  course       Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  businessId   String   @map("business_id")
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  progress     Json?    // { lessonId: completed boolean }
+  completedAt  DateTime? @map("completed_at")
+  certificateId String? @map("certificate_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@unique([courseId, businessId])
+  @@map("course_enrollments")
+}
+
+// ---
+// MODULE 16: COMMUNITY & COHORTS
+// ---
+model Cohort {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  maxMembers  Int      @default(10) @map("max_members")
+  industry    String?
+  isActive    Boolean  @default(true) @map("is_active")
+
+  businessId  String?  @map("business_id")
+  business    Business? @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  members     CohortMember[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@map("cohorts")
+}
+
+model CohortMember {
+  id        String   @id @default(cuid())
+  cohortId  String   @map("cohort_id")
+  cohort    Cohort   @relation(fields: [cohortId], references: [id], onDelete: Cascade)
+  businessId String  @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  role       String  @default("MEMBER") // MEMBER, LEADER, MENTOR
+  joinedAt   DateTime @default(now()) @map("joined_at")
+
+  @@unique([cohortId, businessId])
+  @@map("cohort_members")
+}
+
+model CommunityPost {
+  id         String   @id @default(cuid())
+  title      String?
+  content    String
+  type       String   @default("DISCUSSION") // DISCUSSION, QUESTION, WIN, RESOURCE
+  tags       String[] @default([])
+  likes      Int      @default(0)
+  isPinned   Boolean  @default(false) @map("is_pinned")
+
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  comments   CommunityComment[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt      @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([businessId, createdAt])
+  @@map("community_posts")
+}
+
+model CommunityComment {
+  id         String   @id @default(cuid())
+  content    String
+  postId     String   @map("post_id")
+  post       CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  likes      Int      @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([postId])
+  @@map("community_comments")
 }
