@@ -343,15 +343,15 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
           )}
         </AnimatePresence>
 
-        <div className="flex flex-wrap items-center gap-1.5">
-          <div className="flex items-center gap-1 text-[10px] text-muted-foreground mr-1">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-hide">
+          <div className="flex items-center gap-1 text-[10px] text-muted-foreground mr-0.5 flex-shrink-0">
             <Hash className="w-3 h-3" />
           </div>
           {HASHTAG_SUGGESTIONS.map((tag) => (
             <button
               key={tag}
               onClick={() => insertHashtag(tag)}
-              className="px-2 py-0.5 rounded-lg text-[10px] font-medium border transition-all hover:scale-105"
+              className="px-2.5 py-1 sm:px-2 sm:py-0.5 rounded-lg text-[10px] font-medium border transition-all hover:scale-105 flex-shrink-0 active:scale-95"
               style={{
                 background: "hsl(var(--kf-accent1) / 0.08)",
                 borderColor: "hsl(var(--kf-accent1) / 0.2)",
@@ -419,16 +419,16 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={isUploading}
-            className="kf-btn-secondary inline-flex items-center gap-1.5 text-xs"
+            className="kf-btn-secondary inline-flex items-center gap-1.5 text-xs py-2.5 sm:py-2"
           >
-            {isUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ImagePlus className="w-3.5 h-3.5" />}
+            {isUploading ? <Loader2 className="w-4 h-4 sm:w-3.5 sm:h-3.5 animate-spin" /> : <ImagePlus className="w-4 h-4 sm:w-3.5 sm:h-3.5" />}
             Media
           </button>
           <button
-            className={`kf-btn-secondary inline-flex items-center gap-1.5 text-xs ${showSchedule ? "ring-2 ring-[hsl(var(--kf-accent1))]" : ""}`}
+            className={`kf-btn-secondary inline-flex items-center gap-1.5 text-xs py-2.5 sm:py-2 ${showSchedule ? "ring-2 ring-[hsl(var(--kf-accent1))]" : ""}`}
             onClick={() => setShowSchedule(!showSchedule)}
           >
-            <Clock className="w-3.5 h-3.5" />
+            <Clock className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
             Schedule
           </button>
         </div>
@@ -500,24 +500,24 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
           )}
         </AnimatePresence>
 
-        <div className="flex items-center justify-between gap-2 pt-1">
-          <button className="kf-btn-secondary text-xs" onClick={onClose} disabled={submitting}>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-1">
+          <button className="kf-btn-secondary text-xs py-2.5 sm:py-2 order-last sm:order-first" onClick={onClose} disabled={submitting}>
             Cancel
           </button>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <button
-              className="kf-btn-secondary inline-flex items-center gap-1.5 text-xs"
+              className="kf-btn-secondary inline-flex items-center justify-center gap-1.5 text-xs py-2.5 sm:py-2"
               onClick={() => handleSubmit("draft")}
               disabled={!canPublish}
               style={{ opacity: !canPublish ? 0.5 : 1 }}
               title="Save as draft"
             >
-              <FileText className="w-3.5 h-3.5" />
+              <FileText className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
               {submitting ? "Saving..." : "Save Draft"}
             </button>
             {showSchedule && scheduledFor && (
               <button
-                className="inline-flex items-center gap-1.5 text-xs font-medium px-4 py-2 rounded-xl border transition-all"
+                className="inline-flex items-center justify-center gap-1.5 text-xs font-medium px-4 py-2.5 sm:py-2 rounded-xl border transition-all"
                 onClick={() => handleSubmit("schedule")}
                 disabled={!canSchedule}
                 style={{
@@ -528,18 +528,18 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
                 }}
                 title="Schedule for later"
               >
-                <Clock className="w-3.5 h-3.5" />
+                <Clock className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
                 Schedule
               </button>
             )}
             <button
-              className="kf-btn-primary inline-flex items-center gap-1.5 text-xs"
+              className="kf-btn-primary inline-flex items-center justify-center gap-1.5 text-xs py-2.5 sm:py-2"
               onClick={() => handleSubmit("publish")}
               disabled={!canPublish}
               style={{ opacity: !canPublish ? 0.5 : 1 }}
               title={selectedChannels.size > 0 ? "Publish now to selected channels" : "Save and mark ready"}
             >
-              <Send className="w-3.5 h-3.5" />
+              <Send className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
               {submitting ? "Publishing..." : "Publish Now"}
             </button>
           </div>

@@ -31,7 +31,10 @@ function formatHour(h: number) {
 
 export function ContentCalendar({ posts, onSelectPost }: Props) {
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [view, setView] = useState<"month" | "week">("month");
+  const [view, setView] = useState<"month" | "week">(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 640) return "week";
+    return "month";
+  });
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
 
