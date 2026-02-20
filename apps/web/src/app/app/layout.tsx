@@ -28,26 +28,37 @@ import {
   Zap,
   Home,
   MessageCircle,
+  Brain,
   PanelLeftClose,
   PanelLeft,
   Store,
+  Layout,
   Menu,
   X,
   MoreHorizontal,
+  Receipt,
+  Megaphone,
+  GraduationCap,
 } from "lucide-react";
 
 const navItems = [
   { label: "Cockpit", href: "/app", icon: Home },
+  { label: "KeyFlow AI", href: "/app/advisor", icon: Brain },
   { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
   { label: "Commerce", href: "/app/commerce", icon: CreditCard },
   { label: "Bookings", href: "/app/bookings", icon: Calendar },
   { label: "Store", href: "/app/store", icon: Store },
+  { label: "Pages", href: "/app/pages", icon: Layout },
   { label: "Social", href: "/app/social", icon: MessageCircle },
+  { label: "Marketing", href: "/app/marketing", icon: Megaphone },
+  { label: "Expenses", href: "/app/expenses", icon: Receipt },
   { label: "Automations", href: "/app/automations", icon: Zap },
   { label: "Reports", href: "/app/reports", icon: BarChart3 },
 ];
 
 const bottomNavItems = [
+  { label: "Learn", href: "/app/learn", icon: GraduationCap },
+  { label: "Community", href: "/app/community", icon: Users },
   { label: "Studio", href: "/app/studio", icon: Sparkles },
   { label: "Settings", href: "/app/settings", icon: Settings },
 ];

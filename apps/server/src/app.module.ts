@@ -24,6 +24,13 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { PaymentsModule } from './modules/payments/payments.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 import { ProjectsModule } from './modules/projects/projects.module';
+import { ExpensesModule } from './modules/expenses/expenses.module';
+import { EmailMarketingModule } from './modules/email-marketing/email-marketing.module';
+import { LeadFormsModule } from './modules/lead-forms/lead-forms.module';
+import { TemplatesModule } from './modules/templates/templates.module';
+import { EducationModule } from './modules/education/education.module';
+import { CommunityModule } from './modules/community/community.module';
+import { LandingPagesModule } from './modules/landing-pages/landing-pages.module';
 
 @Module({
   imports: [
@@ -52,6 +59,13 @@ import { ProjectsModule } from './modules/projects/projects.module';
     PaymentsModule,
     SubscriptionsModule,
     ProjectsModule,
+    ExpensesModule,
+    EmailMarketingModule,
+    LeadFormsModule,
+    TemplatesModule,
+    EducationModule,
+    CommunityModule,
+    LandingPagesModule,
   ],
   controllers: [AppController],
   providers: [AppService, AuthMiddleware],

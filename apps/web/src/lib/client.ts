@@ -2355,4 +2355,344 @@ export async function trackStoreEvent(businessId: string, type: string, itemId?:
   }).catch(() => {});
 }
 
+// ---
+// EXPENSE TRACKING
+// ---
+export interface ExpenseCategory {
+  id: string;
+  name: string;
+  icon?: string;
+  color?: string;
+  _count?: { expenses: number };
+}
+export interface Expense {
+  id: string;
+  description: string;
+  amount: number;
+  currency: string;
+  date: string;
+  vendor?: string;
+  receiptUrl?: string;
+  notes?: string;
+  isRecurring: boolean;
+  recurringFrequency?: string;
+  categoryId?: string;
+  category?: ExpenseCategory;
+  createdAt: string;
+}
+export interface ExpenseSummary {
+  total: number;
+  count: number;
+  byCategory: { name: string; total: number; count: number; color?: string }[];
+  monthlyTrend: { month: string; total: number }[];
+}
+export async function fetchExpenses(businessId: string, params?: { startDate?: string; endDate?: string; categoryId?: string }): Promise<ApiResult<Expense[]>> {
+  const q = new URLSearchParams();
+  if (params?.startDate) q.set('startDate', params.startDate);
+  if (params?.endDate) q.set('endDate', params.endDate);
+  if (params?.categoryId) q.set('categoryId', params.categoryId);
+  return apiGetSimple<Expense[]>(`/expenses/businesses/${encodeURIComponent(businessId)}/expenses?${q}`);
+}
+export async function createExpense(businessId: string, data: Partial<Expense>): Promise<ApiResult<Expense>> {
+  return apiPost<Expense>(`/expenses/businesses/${encodeURIComponent(businessId)}/expenses`, data);
+}
+export async function updateExpense(businessId: string, expenseId: string, data: Partial<Expense>): Promise<ApiResult<Expense>> {
+  return apiPatch<Expense>(`/expenses/businesses/${encodeURIComponent(businessId)}/expenses/${expenseId}`, data);
+}
+export async function deleteExpense(businessId: string, expenseId: string): Promise<ApiResult<void>> {
+  return apiDelete<void>(`/expenses/businesses/${encodeURIComponent(businessId)}/expenses/${expenseId}`);
+}
+export async function fetchExpenseCategories(businessId: string): Promise<ApiResult<ExpenseCategory[]>> {
+  return apiGetSimple<ExpenseCategory[]>(`/expenses/businesses/${encodeURIComponent(businessId)}/expense-categories`);
+}
+export async function createExpenseCategory(businessId: string, data: { name: string; icon?: string; color?: string }): Promise<ApiResult<ExpenseCategory>> {
+  return apiPost<ExpenseCategory>(`/expenses/businesses/${encodeURIComponent(businessId)}/expense-categories`, data);
+}
+export async function deleteExpenseCategory(businessId: string, categoryId: string): Promise<ApiResult<void>> {
+  return apiDelete<void>(`/expenses/businesses/${encodeURIComponent(businessId)}/expense-categories/${categoryId}`);
+}
+export async function fetchExpenseSummary(businessId: string, period = '30d'): Promise<ApiResult<ExpenseSummary>> {
+  return apiGetSimple<ExpenseSummary>(`/expenses/businesses/${encodeURIComponent(businessId)}/expenses/summary?period=${period}`);
+}
+
+// ---
+// RECURRING INVOICES
+// ---
+export interface RecurringInvoice {
+  id: string;
+  name: string;
+  frequency: string;
+  nextRunDate: string;
+  lastRunDate?: string;
+  endDate?: string;
+  isActive: boolean;
+  runCount: number;
+  contactId: string;
+  contact?: { id: string; firstName?: string; lastName?: string; email?: string };
+  lineItems: { description: string; quantity: number; unitPrice: number; total: number }[];
+  subtotal: number;
+  taxRate?: number;
+  discountType?: string;
+  discountValue?: number;
+  total: number;
+  currency: string;
+  notes?: string;
+  createdAt: string;
+}
+export async function fetchRecurringInvoices(businessId: string): Promise<ApiResult<RecurringInvoice[]>> {
+  return apiGetSimple<RecurringInvoice[]>(`/commerce/businesses/${encodeURIComponent(businessId)}/recurring-invoices`);
+}
+export async function createRecurringInvoice(businessId: string, data: Partial<RecurringInvoice>): Promise<ApiResult<RecurringInvoice>> {
+  return apiPost<RecurringInvoice>(`/commerce/businesses/${encodeURIComponent(businessId)}/recurring-invoices`, data);
+}
+export async function updateRecurringInvoice(businessId: string, id: string, data: Partial<RecurringInvoice>): Promise<ApiResult<RecurringInvoice>> {
+  return apiPatch<RecurringInvoice>(`/commerce/businesses/${encodeURIComponent(businessId)}/recurring-invoices/${id}`, data);
+}
+export async function deleteRecurringInvoice(businessId: string, id: string): Promise<ApiResult<void>> {
+  return apiDelete<void>(`/commerce/businesses/${encodeURIComponent(businessId)}/recurring-invoices/${id}`);
+}
+export async function toggleRecurringInvoice(businessId: string, id: string): Promise<ApiResult<RecurringInvoice>> {
+  return apiPost<RecurringInvoice>(`/commerce/businesses/${encodeURIComponent(businessId)}/recurring-invoices/${id}/toggle`, {});
+}
+
+// ---
+// AI ADVISOR
+// ---
+export interface AiChatResponse { reply: string }
+export interface AiBriefing { summary: string; highlights: string[]; priorities: string[]; cashFlow: { revenue: number; expenses: number; net: number }; suggestion: string }
+export interface CashFlowForecast { currentBalance: number; projectedBalance: number; daysUntilNegative: number | null; trend: string; alerts: string[]; dailyRevenueRate: number; dailyExpenseRate: number }
+export async function sendAiChat(businessId: string, message: string, history?: { role: string; content: string }[]): Promise<ApiResult<AiChatResponse>> {
+  return apiPost<AiChatResponse>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/chat`, { message, history });
+}
+export async function fetchAiBriefing(businessId: string): Promise<ApiResult<AiBriefing>> {
+  return apiGetSimple<AiBriefing>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/briefing`);
+}
+export async function fetchCashFlowForecast(businessId: string, days = 30): Promise<ApiResult<CashFlowForecast>> {
+  return apiGetSimple<CashFlowForecast>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/cash-flow-forecast?days=${days}`);
+}
+
+// ---
+// EMAIL MARKETING
+// ---
+export interface EmailCampaign {
+  id: string;
+  name: string;
+  subject: string;
+  body: string;
+  status: string;
+  scheduledAt?: string;
+  sentAt?: string;
+  totalRecipients: number;
+  sentCount: number;
+  openCount: number;
+  clickCount: number;
+  segmentFilter?: { tags?: string[]; status?: string };
+  createdAt: string;
+}
+export async function fetchCampaigns(businessId: string): Promise<ApiResult<EmailCampaign[]>> {
+  return apiGetSimple<EmailCampaign[]>(`/businesses/${encodeURIComponent(businessId)}/campaigns`);
+}
+export async function createCampaign(businessId: string, data: Partial<EmailCampaign>): Promise<ApiResult<EmailCampaign>> {
+  return apiPost<EmailCampaign>(`/businesses/${encodeURIComponent(businessId)}/campaigns`, data);
+}
+export async function updateCampaign(businessId: string, id: string, data: Partial<EmailCampaign>): Promise<ApiResult<EmailCampaign>> {
+  return apiPatch<EmailCampaign>(`/businesses/${encodeURIComponent(businessId)}/campaigns/${id}`, data);
+}
+export async function deleteCampaign(businessId: string, id: string): Promise<ApiResult<void>> {
+  return apiDelete<void>(`/businesses/${encodeURIComponent(businessId)}/campaigns/${id}`);
+}
+export async function sendCampaign(businessId: string, id: string): Promise<ApiResult<EmailCampaign>> {
+  return apiPost<EmailCampaign>(`/businesses/${encodeURIComponent(businessId)}/campaigns/${id}/send`, {});
+}
+
+// ---
+// LEAD FORMS
+// ---
+export interface LeadForm {
+  id: string;
+  name: string;
+  description?: string;
+  fields: { name: string; type: string; label: string; required: boolean }[];
+  settings?: { thankYouMessage?: string; redirectUrl?: string };
+  isActive: boolean;
+  _count?: { submissions: number };
+  createdAt: string;
+}
+export interface LeadFormSubmission {
+  id: string;
+  formId: string;
+  data: Record<string, string>;
+  contactId?: string;
+  source?: string;
+  createdAt: string;
+}
+export async function fetchLeadForms(businessId: string): Promise<ApiResult<LeadForm[]>> {
+  return apiGetSimple<LeadForm[]>(`/businesses/${encodeURIComponent(businessId)}/lead-forms`);
+}
+export async function createLeadForm(businessId: string, data: Partial<LeadForm>): Promise<ApiResult<LeadForm>> {
+  return apiPost<LeadForm>(`/businesses/${encodeURIComponent(businessId)}/lead-forms`, data);
+}
+export async function updateLeadForm(businessId: string, id: string, data: Partial<LeadForm>): Promise<ApiResult<LeadForm>> {
+  return apiPatch<LeadForm>(`/businesses/${encodeURIComponent(businessId)}/lead-forms/${id}`, data);
+}
+export async function deleteLeadForm(businessId: string, id: string): Promise<ApiResult<void>> {
+  return apiDelete<void>(`/businesses/${encodeURIComponent(businessId)}/lead-forms/${id}`);
+}
+export async function fetchLeadFormSubmissions(businessId: string, formId: string): Promise<ApiResult<LeadFormSubmission[]>> {
+  return apiGetSimple<LeadFormSubmission[]>(`/businesses/${encodeURIComponent(businessId)}/lead-forms/${formId}/submissions`);
+}
+
+// ---
+// BUSINESS TEMPLATES
+// ---
+export interface BusinessTemplate {
+  id: string;
+  name: string;
+  displayName: string;
+  description: string;
+  icon?: string;
+  industry: string;
+  archetype: string;
+  config: Record<string, unknown>;
+}
+export async function fetchTemplates(): Promise<ApiResult<BusinessTemplate[]>> {
+  return apiGetSimple<BusinessTemplate[]>(`/templates`);
+}
+export async function applyTemplate(businessId: string, templateId: string): Promise<ApiResult<{ message: string }>> {
+  return apiPost<{ message: string }>(`/businesses/${encodeURIComponent(businessId)}/templates/${templateId}/apply`, {});
+}
+
+// ---
+// EDUCATION / MASTERCLASS
+// ---
+export interface Course {
+  id: string;
+  title: string;
+  description?: string;
+  thumbnail?: string;
+  category: string;
+  difficulty: string;
+  duration?: number;
+  lessons: { id: string; title: string; content: string; order: number }[];
+  isPublished: boolean;
+  isFree: boolean;
+  price?: number;
+  _count?: { enrollments: number };
+}
+export interface CourseEnrollment {
+  id: string;
+  courseId: string;
+  course?: Course;
+  progress?: Record<string, boolean>;
+  completedAt?: string;
+  certificateId?: string;
+}
+export async function fetchCourses(): Promise<ApiResult<Course[]>> {
+  return apiGetSimple<Course[]>(`/education/courses`);
+}
+export async function fetchCourse(id: string): Promise<ApiResult<Course>> {
+  return apiGetSimple<Course>(`/education/courses/${id}`);
+}
+export async function enrollInCourse(businessId: string, courseId: string): Promise<ApiResult<CourseEnrollment>> {
+  return apiPost<CourseEnrollment>(`/businesses/${encodeURIComponent(businessId)}/education/enroll/${courseId}`, {});
+}
+export async function updateCourseProgress(businessId: string, courseId: string, lessonId: string, completed: boolean): Promise<ApiResult<CourseEnrollment>> {
+  return apiPatch<CourseEnrollment>(`/businesses/${encodeURIComponent(businessId)}/education/progress/${courseId}`, { lessonId, completed });
+}
+export async function fetchMyEnrollments(businessId: string): Promise<ApiResult<CourseEnrollment[]>> {
+  return apiGetSimple<CourseEnrollment[]>(`/businesses/${encodeURIComponent(businessId)}/education/enrollments`);
+}
+
+// ---
+// COMMUNITY
+// ---
+export interface CommunityPost {
+  id: string;
+  title?: string;
+  content: string;
+  type: string;
+  tags: string[];
+  likes: number;
+  isPinned: boolean;
+  businessId: string;
+  business?: { name: string; logoUrl?: string };
+  _count?: { comments: number };
+  createdAt: string;
+}
+export interface CommunityComment {
+  id: string;
+  content: string;
+  postId: string;
+  businessId: string;
+  business?: { name: string };
+  likes: number;
+  createdAt: string;
+}
+export interface Cohort {
+  id: string;
+  name: string;
+  description?: string;
+  maxMembers: number;
+  industry?: string;
+  isActive: boolean;
+  _count?: { members: number };
+}
+export async function fetchCommunityPosts(params?: { type?: string }): Promise<ApiResult<CommunityPost[]>> {
+  const q = params?.type ? `?type=${params.type}` : '';
+  return apiGetSimple<CommunityPost[]>(`/community/posts${q}`);
+}
+export async function createCommunityPost(businessId: string, data: { title?: string; content: string; type?: string; tags?: string[] }): Promise<ApiResult<CommunityPost>> {
+  return apiPost<CommunityPost>(`/businesses/${encodeURIComponent(businessId)}/community/posts`, data);
+}
+export async function likeCommunityPost(postId: string): Promise<ApiResult<CommunityPost>> {
+  return apiPost<CommunityPost>(`/community/posts/${postId}/like`, {});
+}
+export async function fetchCommunityPost(postId: string): Promise<ApiResult<CommunityPost & { comments: CommunityComment[] }>> {
+  return apiGetSimple<CommunityPost & { comments: CommunityComment[] }>(`/community/posts/${postId}`);
+}
+export async function addCommunityComment(businessId: string, postId: string, content: string): Promise<ApiResult<CommunityComment>> {
+  return apiPost<CommunityComment>(`/businesses/${encodeURIComponent(businessId)}/community/posts/${postId}/comments`, { content });
+}
+export async function fetchCohorts(): Promise<ApiResult<Cohort[]>> {
+  return apiGetSimple<Cohort[]>(`/community/cohorts`);
+}
+export async function joinCohort(businessId: string, cohortId: string): Promise<ApiResult<void>> {
+  return apiPost<void>(`/businesses/${encodeURIComponent(businessId)}/community/cohorts/${cohortId}/join`, {});
+}
+export async function leaveCohort(businessId: string, cohortId: string): Promise<ApiResult<void>> {
+  return apiDelete<void>(`/businesses/${encodeURIComponent(businessId)}/community/cohorts/${cohortId}/leave`);
+}
+export async function fetchMyCohorts(businessId: string): Promise<ApiResult<Cohort[]>> {
+  return apiGetSimple<Cohort[]>(`/businesses/${encodeURIComponent(businessId)}/community/my-cohorts`);
+}
+
+// ---
+// LANDING PAGES
+// ---
+export interface LandingPage {
+  id: string;
+  title: string;
+  slug: string;
+  template: string;
+  sections: { type: string; content: Record<string, unknown> }[];
+  settings?: Record<string, unknown>;
+  isPublished: boolean;
+  createdAt: string;
+}
+export async function fetchLandingPages(businessId: string): Promise<ApiResult<LandingPage[]>> {
+  return apiGetSimple<LandingPage[]>(`/businesses/${encodeURIComponent(businessId)}/landing-pages`);
+}
+export async function createLandingPage(businessId: string, data: Partial<LandingPage>): Promise<ApiResult<LandingPage>> {
+  return apiPost<LandingPage>(`/businesses/${encodeURIComponent(businessId)}/landing-pages`, data);
+}
+export async function updateLandingPage(businessId: string, id: string, data: Partial<LandingPage>): Promise<ApiResult<LandingPage>> {
+  return apiPatch<LandingPage>(`/businesses/${encodeURIComponent(businessId)}/landing-pages/${id}`, data);
+}
+export async function deleteLandingPage(businessId: string, id: string): Promise<ApiResult<void>> {
+  return apiDelete<void>(`/businesses/${encodeURIComponent(businessId)}/landing-pages/${id}`);
+}
+export async function toggleLandingPagePublish(businessId: string, id: string): Promise<ApiResult<LandingPage>> {
+  return apiPost<LandingPage>(`/businesses/${encodeURIComponent(businessId)}/landing-pages/${id}/toggle-publish`, {});
+}
+
 export { DEFAULT_BUSINESS_ID };
