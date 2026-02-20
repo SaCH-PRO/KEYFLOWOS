@@ -12,6 +12,15 @@ import {
   ShoppingBag,
   AlertTriangle,
   TrendingUp,
+  BarChart3,
+  Palette,
+  Clock,
+  Star,
+  Plus,
+  Trash2,
+  Save,
+  Loader2,
+  MessageSquareQuote,
 } from "lucide-react";
 import {
   Service,
@@ -25,6 +34,9 @@ import {
   updateService,
   fetchProducts,
   Product,
+  StorefrontConfig,
+  fetchStorefrontConfig,
+  updateStorefrontConfig,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { StoreHeader } from "./components/store-header";
@@ -32,6 +44,9 @@ import { StoreSettings } from "./components/store-settings";
 import { HoursEditor, DEFAULT_HOURS, type BusinessHoursMap } from "./components/hours-editor";
 import { CatalogManager } from "./components/catalog-manager";
 import { StorefrontPreview } from "./components/storefront-preview";
+import { AppearanceCustomizer } from "./components/appearance-customizer";
+import { MerchandisingPanel } from "./components/merchandising-panel";
+import { StoreAnalyticsDashboard } from "./components/store-analytics";
 
 type Banner = { text: string; type: "success" | "error" | "info" | "warning" };
 type DriftedItem = {
@@ -43,10 +58,17 @@ type DriftedItem = {
   commerceDuration: number | null;
 };
 
-const VIEW_TABS = [
-  { key: "preview" as const, label: "Preview", icon: LayoutGrid },
-  { key: "edit" as const, label: "Edit Store", icon: Settings2 },
+type TabKey = "overview" | "customize" | "products" | "hours" | "settings";
+
+const VIEW_TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
+  { key: "overview", label: "Overview", icon: BarChart3 },
+  { key: "customize", label: "Customize", icon: Palette },
+  { key: "products", label: "Products", icon: ShoppingBag },
+  { key: "hours", label: "Hours", icon: Clock },
+  { key: "settings", label: "Settings", icon: Settings2 },
 ];
+
+type Testimonial = { id: string; name: string; text: string; rating: number; date: string };
 
 export default function StorePage() {
   const [businessId, setBusinessId] = useState<string | null>(null);
@@ -73,7 +95,7 @@ export default function StorePage() {
 
   const [storeSlug, setStoreSlug] = useState("");
   const [slugSaving, setSlugSaving] = useState(false);
-  const [activeView, setActiveView] = useState<"preview" | "edit">("preview");
+  const [activeView, setActiveView] = useState<TabKey>("overview");
   const [processingItems, setProcessingItems] = useState<Set<string>>(new Set());
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const [storeEnabled, setStoreEnabled] = useState(true);
@@ -81,6 +103,19 @@ export default function StorePage() {
   const [hoursSaving, setHoursSaving] = useState(false);
   const [driftedItems, setDriftedItems] = useState<DriftedItem[]>([]);
   const [syncing, setSyncing] = useState(false);
+
+  const [storefrontConfig, setStorefrontConfig] = useState<StorefrontConfig>({
+    hero: {},
+    appearance: {},
+    merchandising: {},
+    promotions: {},
+    socialProof: {},
+    seo: {},
+  });
+  const [configSaving, setConfigSaving] = useState(false);
+
+  const [showTestimonialForm, setShowTestimonialForm] = useState(false);
+  const [newTestimonial, setNewTestimonial] = useState({ name: "", text: "", rating: 5 });
 
   useEffect(() => {
     const initWorkspace = async () => {
@@ -137,6 +172,9 @@ export default function StorePage() {
         }
       }
       setDriftedItems(drifts);
+
+      const configRes = await fetchStorefrontConfig(businessId).catch(() => ({ data: null, error: null }));
+      if (configRes.data) setStorefrontConfig(configRes.data);
     } catch (e) {
       console.error("Failed to load store data:", e);
     } finally {
@@ -298,6 +336,45 @@ export default function StorePage() {
     }
   }
 
+  function handleConfigChange(section: string, updates: Record<string, any>) {
+    setStorefrontConfig((prev) => ({
+      ...prev,
+      [section]: { ...(prev as any)[section], ...updates },
+    }));
+  }
+
+  async function handleSaveConfig() {
+    if (!businessId) return;
+    setConfigSaving(true);
+    const res = await updateStorefrontConfig(businessId, storefrontConfig);
+    if (res.error) {
+      setBanner({ text: "Failed to save storefront config", type: "error" });
+    } else {
+      setBanner({ text: "Storefront saved!", type: "success" });
+    }
+    setConfigSaving(false);
+  }
+
+  function addTestimonial() {
+    if (!newTestimonial.name.trim() || !newTestimonial.text.trim()) return;
+    const testimonial: Testimonial = {
+      id: `t_${Date.now()}`,
+      name: newTestimonial.name.trim(),
+      text: newTestimonial.text.trim(),
+      rating: newTestimonial.rating,
+      date: new Date().toISOString().split("T")[0],
+    };
+    const current = storefrontConfig.socialProof?.testimonials ?? [];
+    handleConfigChange("socialProof", { testimonials: [...current, testimonial] });
+    setNewTestimonial({ name: "", text: "", rating: 5 });
+    setShowTestimonialForm(false);
+  }
+
+  function deleteTestimonial(id: string) {
+    const current = storefrontConfig.socialProof?.testimonials ?? [];
+    handleConfigChange("socialProof", { testimonials: current.filter((t) => t.id !== id) });
+  }
+
   if (!businessId && !loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -351,6 +428,8 @@ export default function StorePage() {
       warn: driftedItems.length > 0,
     },
   ];
+
+  const testimonials = storefrontConfig.socialProof?.testimonials ?? [];
 
   return (
     <div className="space-y-6">
@@ -442,56 +521,6 @@ export default function StorePage() {
         </div>
       ) : (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {kpiCards.map((kpi, idx) => {
-              const Icon = kpi.icon;
-              return (
-                <motion.div
-                  key={kpi.label}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: idx * 0.05 }}
-                  className="rounded-2xl p-4 relative overflow-hidden"
-                  style={{
-                    background: kpi.bg,
-                    border: `1px solid ${kpi.border}`,
-                    backdropFilter: "blur(20px)",
-                  }}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <Icon className="w-4 h-4" style={{ color: kpi.color }} />
-                    {(kpi as any).dot && (
-                      <span
-                        className="w-2 h-2 rounded-full animate-pulse"
-                        style={{ background: (kpi as any).dot }}
-                      />
-                    )}
-                    {(kpi as any).warn && (
-                      <span
-                        className="w-2 h-2 rounded-full animate-pulse"
-                        style={{ background: "hsl(30 90% 55%)" }}
-                      />
-                    )}
-                  </div>
-                  <p className="text-2xl font-bold" style={{ color: kpi.color }}>
-                    {kpi.value}
-                  </p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">{kpi.label}</p>
-                </motion.div>
-              );
-            })}
-          </div>
-
-          <StoreSettings
-            businessId={businessId!}
-            slug={storeSlug}
-            currentSlug={businessData?.slug ?? null}
-            publicUrl={getPublicBookingUrl()}
-            onSlugChange={setStoreSlug}
-            onSaveSlug={handleSaveSlug}
-            slugSaving={slugSaving}
-          />
-
           <div className="flex gap-2 overflow-x-auto pb-1">
             {VIEW_TABS.map((t) => {
               const Icon = t.icon;
@@ -530,33 +559,89 @@ export default function StorePage() {
           </div>
 
           <AnimatePresence mode="wait">
-            {activeView === "preview" ? (
+            {activeView === "overview" && (
               <motion.div
-                key="preview"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-              >
-                <StorefrontPreview
-                  businessData={businessData}
-                  services={services}
-                  commerceProducts={commerceProducts}
-                />
-              </motion.div>
-            ) : (
-              <motion.div
-                key="edit"
+                key="overview"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 className="space-y-6"
               >
-                <HoursEditor
-                  hours={businessHours}
-                  onChange={setBusinessHours}
-                  onSave={handleSaveHours}
-                  saving={hoursSaving}
-                />
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {kpiCards.map((kpi, idx) => {
+                    const Icon = kpi.icon;
+                    return (
+                      <motion.div
+                        key={kpi.label}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: idx * 0.05 }}
+                        className="rounded-2xl p-4 relative overflow-hidden"
+                        style={{
+                          background: kpi.bg,
+                          border: `1px solid ${kpi.border}`,
+                          backdropFilter: "blur(20px)",
+                        }}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <Icon className="w-4 h-4" style={{ color: kpi.color }} />
+                          {(kpi as any).dot && (
+                            <span
+                              className="w-2 h-2 rounded-full animate-pulse"
+                              style={{ background: (kpi as any).dot }}
+                            />
+                          )}
+                          {(kpi as any).warn && (
+                            <span
+                              className="w-2 h-2 rounded-full animate-pulse"
+                              style={{ background: "hsl(30 90% 55%)" }}
+                            />
+                          )}
+                        </div>
+                        <p className="text-2xl font-bold" style={{ color: kpi.color }}>
+                          {kpi.value}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">{kpi.label}</p>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+
+                <StoreAnalyticsDashboard businessId={businessId!} />
+              </motion.div>
+            )}
+
+            {activeView === "customize" && (
+              <motion.div
+                key="customize"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+              >
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <AppearanceCustomizer
+                    config={storefrontConfig}
+                    onConfigChange={handleConfigChange}
+                    onSave={handleSaveConfig}
+                    saving={configSaving}
+                  />
+                  <StorefrontPreview
+                    businessData={businessData}
+                    services={services}
+                    commerceProducts={commerceProducts}
+                  />
+                </div>
+              </motion.div>
+            )}
+
+            {activeView === "products" && (
+              <motion.div
+                key="products"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="space-y-6"
+              >
                 <CatalogManager
                   products={commerceProducts}
                   storeServiceNames={storeServiceNames}
@@ -570,6 +655,278 @@ export default function StorePage() {
                   onDeleteFromStore={handleDeleteServiceFromStore}
                   services={services.map((s) => ({ id: s.id, name: s.name }))}
                 />
+                <MerchandisingPanel
+                  config={storefrontConfig}
+                  products={commerceProducts}
+                  services={services}
+                  onConfigChange={handleConfigChange}
+                  onSave={handleSaveConfig}
+                  saving={configSaving}
+                />
+              </motion.div>
+            )}
+
+            {activeView === "hours" && (
+              <motion.div
+                key="hours"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+              >
+                <HoursEditor
+                  hours={businessHours}
+                  onChange={setBusinessHours}
+                  onSave={handleSaveHours}
+                  saving={hoursSaving}
+                />
+              </motion.div>
+            )}
+
+            {activeView === "settings" && (
+              <motion.div
+                key="settings"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="space-y-6"
+              >
+                <StoreSettings
+                  businessId={businessId!}
+                  slug={storeSlug}
+                  currentSlug={businessData?.slug ?? null}
+                  publicUrl={getPublicBookingUrl()}
+                  onSlugChange={setStoreSlug}
+                  onSaveSlug={handleSaveSlug}
+                  slugSaving={slugSaving}
+                />
+
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1 }}
+                  className="rounded-2xl overflow-hidden"
+                  style={{
+                    background: "hsl(var(--kf-background) / 0.6)",
+                    backdropFilter: "blur(20px)",
+                    border: "1px solid hsl(var(--kf-accent2) / 0.15)",
+                    boxShadow: "0 4px 24px hsl(var(--kf-accent2) / 0.05)",
+                  }}
+                >
+                  <div
+                    className="flex items-center justify-between px-5 py-4"
+                    style={{
+                      borderBottom: "1px solid hsl(var(--kf-accent2) / 0.1)",
+                      background: "linear-gradient(135deg, hsl(var(--kf-accent2) / 0.06), transparent)",
+                    }}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div
+                        className="h-10 w-10 rounded-xl flex items-center justify-center"
+                        style={{ background: "hsl(var(--kf-accent2) / 0.15)" }}
+                      >
+                        <MessageSquareQuote className="w-5 h-5" style={{ color: "hsl(var(--kf-accent2))" }} />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-semibold">Social Proof</h3>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">Testimonials and trust signals</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleSaveConfig}
+                      disabled={configSaving}
+                      className="kf-btn-primary text-xs inline-flex items-center gap-1.5"
+                      style={{ opacity: configSaving ? 0.6 : 1 }}
+                    >
+                      {configSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                      {configSaving ? "Saving..." : "Save"}
+                    </button>
+                  </div>
+
+                  <div className="p-5 space-y-5">
+                    <div
+                      className="rounded-xl p-3 space-y-1"
+                      style={{ background: "hsl(var(--kf-muted) / 0.2)", border: "1px solid hsl(var(--kf-border) / 0.3)" }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handleConfigChange("socialProof", { showBookingCount: !(storefrontConfig.socialProof?.showBookingCount ?? false) })}
+                        className="flex items-center justify-between w-full py-2 group"
+                      >
+                        <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">Show Booking Count</span>
+                        <div
+                          className="w-10 h-5 rounded-full transition-colors relative flex-shrink-0"
+                          style={{ background: storefrontConfig.socialProof?.showBookingCount ? "hsl(var(--kf-accent2))" : "hsl(var(--kf-muted-foreground) / 0.3)" }}
+                        >
+                          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${storefrontConfig.socialProof?.showBookingCount ? "left-[22px]" : "left-0.5"}`} />
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleConfigChange("socialProof", { showRating: !(storefrontConfig.socialProof?.showRating ?? false) })}
+                        className="flex items-center justify-between w-full py-2 group"
+                      >
+                        <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">Show Rating</span>
+                        <div
+                          className="w-10 h-5 rounded-full transition-colors relative flex-shrink-0"
+                          style={{ background: storefrontConfig.socialProof?.showRating ? "hsl(var(--kf-accent2))" : "hsl(var(--kf-muted-foreground) / 0.3)" }}
+                        >
+                          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${storefrontConfig.socialProof?.showRating ? "left-[22px]" : "left-0.5"}`} />
+                        </div>
+                      </button>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Guarantee Text</label>
+                      <input
+                        type="text"
+                        value={storefrontConfig.socialProof?.guaranteeText ?? ""}
+                        onChange={(e) => handleConfigChange("socialProof", { guaranteeText: e.target.value })}
+                        placeholder="e.g. 100% satisfaction guaranteed"
+                        className="kf-input w-full text-sm"
+                      />
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-sm font-semibold">Testimonials</h4>
+                        <button
+                          onClick={() => setShowTestimonialForm(true)}
+                          className="kf-btn-secondary text-xs inline-flex items-center gap-1.5"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          Add Testimonial
+                        </button>
+                      </div>
+
+                      <AnimatePresence>
+                        {showTestimonialForm && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="overflow-hidden"
+                          >
+                            <div
+                              className="rounded-xl p-4 space-y-3"
+                              style={{ background: "hsl(var(--kf-accent2) / 0.06)", border: "1px solid hsl(var(--kf-accent2) / 0.15)" }}
+                            >
+                              <div>
+                                <label className="text-xs font-medium text-muted-foreground mb-1 block">Name</label>
+                                <input
+                                  type="text"
+                                  value={newTestimonial.name}
+                                  onChange={(e) => setNewTestimonial((p) => ({ ...p, name: e.target.value }))}
+                                  placeholder="Customer name"
+                                  className="kf-input w-full text-sm"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-xs font-medium text-muted-foreground mb-1 block">Rating</label>
+                                <div className="flex gap-1">
+                                  {[1, 2, 3, 4, 5].map((r) => (
+                                    <button
+                                      key={r}
+                                      type="button"
+                                      onClick={() => setNewTestimonial((p) => ({ ...p, rating: r }))}
+                                      className="p-0.5"
+                                    >
+                                      <Star
+                                        className="w-5 h-5 transition-colors"
+                                        style={{
+                                          color: r <= newTestimonial.rating ? "hsl(45 93% 55%)" : "hsl(var(--kf-muted-foreground) / 0.3)",
+                                          fill: r <= newTestimonial.rating ? "hsl(45 93% 55%)" : "transparent",
+                                        }}
+                                      />
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              <div>
+                                <label className="text-xs font-medium text-muted-foreground mb-1 block">Testimonial</label>
+                                <textarea
+                                  value={newTestimonial.text}
+                                  onChange={(e) => setNewTestimonial((p) => ({ ...p, text: e.target.value }))}
+                                  placeholder="What did the customer say?"
+                                  className="kf-input w-full text-sm min-h-[60px] resize-none"
+                                  rows={2}
+                                />
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={addTestimonial}
+                                  disabled={!newTestimonial.name.trim() || !newTestimonial.text.trim()}
+                                  className="kf-btn-primary text-xs"
+                                  style={{ opacity: !newTestimonial.name.trim() || !newTestimonial.text.trim() ? 0.5 : 1 }}
+                                >
+                                  Add
+                                </button>
+                                <button
+                                  onClick={() => { setShowTestimonialForm(false); setNewTestimonial({ name: "", text: "", rating: 5 }); }}
+                                  className="kf-btn-secondary text-xs"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+
+                      {testimonials.length === 0 ? (
+                        <div
+                          className="text-center py-6 rounded-xl"
+                          style={{ background: "hsl(var(--kf-muted) / 0.2)", border: "1px dashed hsl(var(--kf-border) / 0.5)" }}
+                        >
+                          <MessageSquareQuote className="w-8 h-8 mx-auto mb-2" style={{ color: "hsl(var(--kf-muted-foreground) / 0.3)" }} />
+                          <p className="text-xs text-muted-foreground">No testimonials yet. Add one to build trust.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {testimonials.map((t) => (
+                            <motion.div
+                              key={t.id}
+                              layout
+                              initial={{ opacity: 0, x: -10 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              className="rounded-xl px-4 py-3"
+                              style={{
+                                background: "hsl(var(--kf-accent2) / 0.04)",
+                                border: "1px solid hsl(var(--kf-accent2) / 0.12)",
+                              }}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className="text-sm font-medium truncate">{t.name}</span>
+                                    <div className="flex gap-0.5">
+                                      {[1, 2, 3, 4, 5].map((r) => (
+                                        <Star
+                                          key={r}
+                                          className="w-3 h-3"
+                                          style={{
+                                            color: r <= t.rating ? "hsl(45 93% 55%)" : "hsl(var(--kf-muted-foreground) / 0.2)",
+                                            fill: r <= t.rating ? "hsl(45 93% 55%)" : "transparent",
+                                          }}
+                                        />
+                                      ))}
+                                    </div>
+                                  </div>
+                                  <p className="text-xs text-muted-foreground line-clamp-2">{t.text}</p>
+                                </div>
+                                <button
+                                  onClick={() => deleteTestimonial(t.id)}
+                                  className="p-1.5 rounded-lg hover:bg-red-500/20 transition-colors flex-shrink-0"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                                </button>
+                              </div>
+                            </motion.div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </motion.div>
               </motion.div>
             )}
           </AnimatePresence>

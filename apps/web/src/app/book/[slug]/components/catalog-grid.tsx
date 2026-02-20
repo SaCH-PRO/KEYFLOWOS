@@ -21,6 +21,16 @@ type Props = {
   isInCart: (itemId: string, itemType: string) => boolean;
   addToCart: (item: CatalogItem) => void;
   removeFromCart: (itemId: string, itemType: string) => void;
+  badges?: Record<string, string>;
+  featuredItemIds?: string[];
+  onItemClick?: (item: CatalogItem) => void;
+};
+
+const catalogBadgeConfig: Record<string, { label: string; bg: string; text: string }> = {
+  popular: { label: "Popular", bg: "bg-amber-500/20", text: "text-amber-400" },
+  new: { label: "New", bg: "bg-emerald-500/20", text: "text-emerald-400" },
+  best_seller: { label: "Best Seller", bg: "bg-violet-500/20", text: "text-violet-400" },
+  limited: { label: "Limited", bg: "bg-red-500/20", text: "text-red-400" },
 };
 
 function ItemPlaceholder({ name, color }: { name: string; color: string }) {
@@ -44,6 +54,9 @@ export function CatalogGrid({
   isInCart,
   addToCart,
   removeFromCart,
+  badges,
+  featuredItemIds,
+  onItemClick,
 }: Props) {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
@@ -54,8 +67,18 @@ export function CatalogGrid({
   const hasProducts = catalogItems.some((i) => i.itemType === "product");
   const hasPackages = catalogItems.some((i) => i.itemType === "package");
 
+  const sortedCatalog = (() => {
+    if (!featuredItemIds || featuredItemIds.length === 0) return catalogItems;
+    const featuredSet = new Set(featuredItemIds);
+    return [...catalogItems].sort((a, b) => {
+      const aF = featuredSet.has(a.id) ? 0 : 1;
+      const bF = featuredSet.has(b.id) ? 0 : 1;
+      return aF - bF;
+    });
+  })();
+
   const filteredItems = (() => {
-    let items = activeTab === "all" ? catalogItems : catalogItems.filter((i) => i.itemType === activeTab);
+    let items = activeTab === "all" ? sortedCatalog : sortedCatalog.filter((i) => i.itemType === activeTab);
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       items = items.filter(
@@ -157,19 +180,29 @@ export function CatalogGrid({
             return (
               <div
                 key={`${item.id}_${item.itemType}`}
-                className={`rounded-2xl border backdrop-blur transition-all group ${
+                className={`rounded-2xl border backdrop-blur transition-all group cursor-pointer ${
                   inCart
                     ? "border-white/20 bg-white/[0.06]"
                     : "border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.06]"
                 }`}
+                onClick={() => onItemClick?.(item)}
               >
-                {item.imageUrl ? (
-                  <div className="w-full h-40 rounded-t-2xl overflow-hidden">
-                    <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                  </div>
-                ) : (
-                  <ItemPlaceholder name={item.name} color={accentColor} />
-                )}
+                <div className="relative">
+                  {item.imageUrl ? (
+                    <div className="w-full h-40 rounded-t-2xl overflow-hidden">
+                      <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                    </div>
+                  ) : (
+                    <ItemPlaceholder name={item.name} color={accentColor} />
+                  )}
+                  {badges?.[item.id] && catalogBadgeConfig[badges[item.id]] && (
+                    <span
+                      className={`absolute top-2 right-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${catalogBadgeConfig[badges[item.id]].bg} ${catalogBadgeConfig[badges[item.id]].text} backdrop-blur-sm`}
+                    >
+                      {catalogBadgeConfig[badges[item.id]].label}
+                    </span>
+                  )}
+                </div>
                 <div className="p-4 space-y-3">
                   <div className="flex items-center gap-2">
                     <span
@@ -198,14 +231,14 @@ export function CatalogGrid({
                     )}
                     {inCart ? (
                       <button
-                        onClick={() => removeFromCart(item.id, item.itemType)}
+                        onClick={(e) => { e.stopPropagation(); removeFromCart(item.id, item.itemType); }}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all text-emerald-400 bg-emerald-400/10 hover:bg-red-400/10 hover:text-red-400"
                       >
                         <CheckCircle2 className="w-3.5 h-3.5" /> In Cart
                       </button>
                     ) : (
                       <button
-                        onClick={() => addToCart(item)}
+                        onClick={(e) => { e.stopPropagation(); addToCart(item); }}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:scale-105"
                         style={{ backgroundColor: `${primaryColor}20`, color: primaryColor }}
                       >
