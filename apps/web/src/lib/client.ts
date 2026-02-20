@@ -1389,6 +1389,13 @@ export async function disconnectSocial(platform: string, businessId: string = DE
   );
 }
 
+export async function testSocialConnection(platform: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<{ success: boolean; error?: string; status?: string; account?: { id: string; name: string } }>({
+    path: `/social/businesses/${encodeURIComponent(businessId)}/connections/${encodeURIComponent(platform)}/test`,
+    body: {},
+  });
+}
+
 export type SocialAnalytics = {
   totalLikes: number;
   totalComments: number;

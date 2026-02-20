@@ -1,15 +1,19 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
-  CreditCard, MessageSquare, Instagram, Calendar,
-  CheckCircle2, Loader2, AlertCircle, Link2, Zap, ArrowRight,
-  Mail,
+  Calendar, CheckCircle2, Loader2, AlertCircle, Link2, Zap, ArrowRight,
+  Facebook, Instagram, Linkedin, Twitter, Music2, Wifi, WifiOff,
+  Key, Unlink, ExternalLink, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { Button, Badge } from "@keyflow/ui";
 import { apiGet, apiPostSimple } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
+import {
+  fetchSocialConnections, connectSocialManual, disconnectSocial,
+  testSocialConnection, startSocialOAuth, SocialConnection,
+} from "@/lib/client";
 
 type CalendarStatus = { connected: boolean; email?: string };
 
@@ -18,35 +22,55 @@ const fadeUp = {
   show: { opacity: 1, y: 0, transition: { duration: 0.25 } },
 };
 
-const comingSoonItems = [
+const SOCIAL_PLATFORMS = [
   {
-    id: "whatsapp",
-    name: "WhatsApp Business",
-    description: "Send automated messages, booking confirmations, and payment reminders",
-    icon: MessageSquare,
-    category: "Messaging",
-    color: "#25D366",
-    gradient: "from-green-500/15 to-emerald-500/15",
+    key: "FACEBOOK",
+    name: "Facebook",
+    icon: Facebook,
+    color: "#1877F2",
+    description: "Publish posts and stories to your Facebook Page",
+    gradient: "from-blue-500/15 to-sky-500/15",
+    helpText: "Enter your Page Access Token and Page ID from the Facebook Developer Portal.",
   },
   {
-    id: "instagram",
+    key: "INSTAGRAM",
     name: "Instagram",
-    description: "Schedule and publish posts, sync your feed to your store",
     icon: Instagram,
-    category: "Social Media",
     color: "#E4405F",
+    description: "Schedule and publish feed posts and reels",
     gradient: "from-pink-500/15 to-purple-500/15",
+    helpText: "Requires an Instagram Business/Creator account linked to a Facebook Page.",
   },
   {
-    id: "gmail",
-    name: "Gmail",
-    description: "Send quotes and invoices directly from your business email",
-    icon: Mail,
-    category: "Email",
-    color: "#EA4335",
-    gradient: "from-red-500/15 to-orange-500/15",
+    key: "LINKEDIN",
+    name: "LinkedIn",
+    icon: Linkedin,
+    color: "#0A66C2",
+    description: "Share professional posts and articles",
+    gradient: "from-blue-600/15 to-indigo-500/15",
+    helpText: "Enter your LinkedIn access token and person URN.",
+  },
+  {
+    key: "TWITTER",
+    name: "Twitter / X",
+    icon: Twitter,
+    color: "#1DA1F2",
+    description: "Post tweets and threads to your account",
+    gradient: "from-sky-400/15 to-blue-500/15",
+    helpText: "Enter your Bearer Token from the Twitter Developer Portal.",
+  },
+  {
+    key: "TIKTOK",
+    name: "TikTok",
+    icon: Music2,
+    color: "#00F2EA",
+    description: "Publish videos, photos and text posts",
+    gradient: "from-cyan-400/15 to-pink-500/15",
+    helpText: "Enter your TikTok access token or connect via OAuth.",
   },
 ];
+
+type TestResult = { success: boolean; error?: string; accountName?: string };
 
 function SkeletonConnections() {
   return (
@@ -64,6 +88,17 @@ export default function ConnectionsSettingsPage() {
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  const [socialConnections, setSocialConnections] = useState<SocialConnection[]>([]);
+  const [socialLoading, setSocialLoading] = useState(true);
+  const [socialActionLoading, setSocialActionLoading] = useState<string | null>(null);
+  const [socialTestLoading, setSocialTestLoading] = useState<string | null>(null);
+  const [socialTestResults, setSocialTestResults] = useState<Record<string, TestResult>>({});
+  const [expandedSocial, setExpandedSocial] = useState<string | null>(null);
+  const [manualToken, setManualToken] = useState("");
+  const [manualPlatformId, setManualPlatformId] = useState("");
+  const [manualAccountName, setManualAccountName] = useState("");
 
   const businessId = getStoredBusinessId();
 
@@ -80,7 +115,21 @@ export default function ConnectionsSettingsPage() {
     setLoading(false);
   }, [businessId]);
 
-  useEffect(() => { fetchCalendarStatus(); }, [fetchCalendarStatus]);
+  const fetchSocial = useCallback(async () => {
+    setSocialLoading(true);
+    const { data } = await fetchSocialConnections();
+    if (data) setSocialConnections(data);
+    setSocialLoading(false);
+  }, []);
+
+  useEffect(() => { fetchCalendarStatus(); fetchSocial(); }, [fetchCalendarStatus, fetchSocial]);
+
+  useEffect(() => {
+    if (success) {
+      const t = setTimeout(() => setSuccess(null), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [success]);
 
   const handleConnect = async () => {
     if (!businessId) return;
@@ -104,7 +153,83 @@ export default function ConnectionsSettingsPage() {
     setDisconnecting(false);
   };
 
-  if (loading) return <SkeletonConnections />;
+  function getSocialConnection(platform: string) {
+    return socialConnections.find((c) => c.platform === platform);
+  }
+
+  async function handleSocialTest(platform: string) {
+    setSocialTestLoading(platform);
+    const { data, error } = await testSocialConnection(platform);
+    if (error) {
+      setSocialTestResults((prev) => ({ ...prev, [platform]: { success: false, error } }));
+    } else if (data) {
+      setSocialTestResults((prev) => ({
+        ...prev,
+        [platform]: { success: data.success, error: data.error, accountName: data.account?.name },
+      }));
+      if (!data.success && data.status === "EXPIRED") {
+        setSocialConnections((prev) =>
+          prev.map((c) => (c.platform === platform ? { ...c, status: "EXPIRED" } : c))
+        );
+      }
+    }
+    setSocialTestLoading(null);
+  }
+
+  async function handleSocialManualConnect(platform: string) {
+    if (!manualToken.trim()) return;
+    setSocialActionLoading(platform);
+    const { data, error } = await connectSocialManual(platform, {
+      token: manualToken.trim(),
+      platformId: manualPlatformId.trim() || undefined,
+      accountName: manualAccountName.trim() || undefined,
+    });
+    if (error) {
+      setError(error);
+    } else if (data) {
+      setSocialConnections((prev) => {
+        const idx = prev.findIndex((c) => c.platform === platform);
+        if (idx >= 0) { const next = [...prev]; next[idx] = data; return next; }
+        return [...prev, data];
+      });
+      setExpandedSocial(null);
+      setManualToken(""); setManualPlatformId(""); setManualAccountName("");
+      setSuccess(`${SOCIAL_PLATFORMS.find((p) => p.key === platform)?.name} connected!`);
+    }
+    setSocialActionLoading(null);
+  }
+
+  async function handleSocialDisconnect(platform: string) {
+    const name = SOCIAL_PLATFORMS.find((p) => p.key === platform)?.name || platform;
+    if (!confirm(`Disconnect ${name}?`)) return;
+    setSocialActionLoading(platform);
+    const { error } = await disconnectSocial(platform);
+    if (error) { setError(error); }
+    else {
+      setSocialConnections((prev) => prev.filter((c) => c.platform !== platform));
+      setSocialTestResults((prev) => { const n = { ...prev }; delete n[platform]; return n; });
+      setSuccess(`${name} disconnected.`);
+    }
+    setSocialActionLoading(null);
+  }
+
+  async function handleSocialOAuth(platform: string) {
+    setSocialActionLoading(platform);
+    const { data, error } = await startSocialOAuth(platform);
+    if (error) setError(error);
+    else if (data?.authUrl) window.open(data.authUrl, "_blank", "width=600,height=700");
+    setSocialActionLoading(null);
+  }
+
+  function toggleSocialExpand(platform: string) {
+    if (expandedSocial === platform) setExpandedSocial(null);
+    else {
+      setExpandedSocial(platform);
+      setManualToken(""); setManualPlatformId(""); setManualAccountName("");
+    }
+  }
+
+  if (loading && socialLoading) return <SkeletonConnections />;
 
   return (
     <motion.div
@@ -119,20 +244,36 @@ export default function ConnectionsSettingsPage() {
         </p>
       </motion.div>
 
-      {error && (
-        <motion.div
-          initial={{ opacity: 0, y: -8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-900/20 border border-red-500/20 text-red-300 text-sm"
-        >
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          {error}
-        </motion.div>
-      )}
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-900/20 border border-red-500/20 text-red-300 text-sm"
+          >
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            {error}
+            <button onClick={() => setError(null)} className="ml-auto text-xs hover:underline">Dismiss</button>
+          </motion.div>
+        )}
+        {success && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm"
+            style={{ background: "hsl(150 60% 40% / 0.15)", color: "hsl(150 60% 70%)", border: "1px solid hsl(150 60% 40% / 0.3)" }}
+          >
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
+            {success}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <motion.div variants={fadeUp}>
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
-          <Zap className="h-3 w-3" /> Active Integrations
+          <Zap className="h-3 w-3" /> Google Services
         </h3>
 
         <div className={`rounded-xl border p-4 transition-all ${
@@ -191,39 +332,203 @@ export default function ConnectionsSettingsPage() {
 
       <motion.div variants={fadeUp}>
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
-          <ArrowRight className="h-3 w-3" /> Coming Soon
+          <Link2 className="h-3 w-3" /> Social Media Channels
         </h3>
 
         <div className="space-y-2">
-          {comingSoonItems.map((item) => (
-            <div
-              key={item.id}
-              className="rounded-xl border border-border/30 p-4 opacity-70 hover:opacity-90 transition-opacity"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`h-11 w-11 rounded-xl bg-gradient-to-br ${item.gradient} border flex items-center justify-center`}
-                    style={{ borderColor: `${item.color}30` }}
-                  >
-                    <item.icon className="h-5 w-5" style={{ color: item.color }} />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium">{item.name}</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted/40 text-muted-foreground border border-border/40">
-                        Coming Soon
-                      </span>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">{item.description}</p>
-                  </div>
-                </div>
-                <Button variant="outline" size="sm" disabled className="opacity-50">
-                  Connect
-                </Button>
-              </div>
+          {socialLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
             </div>
-          ))}
+          ) : (
+            SOCIAL_PLATFORMS.map((platform) => {
+              const conn = getSocialConnection(platform.key);
+              const isConnected = conn?.status === "CONNECTED";
+              const isExpired = conn?.status === "EXPIRED";
+              const isActionLoading = socialActionLoading === platform.key;
+              const isTesting = socialTestLoading === platform.key;
+              const testResult = socialTestResults[platform.key];
+              const Icon = platform.icon;
+              const isExpanded = expandedSocial === platform.key;
+
+              return (
+                <div
+                  key={platform.key}
+                  className={`rounded-xl border p-4 transition-all ${
+                    isConnected
+                      ? "border-emerald-500/30 bg-emerald-500/5"
+                      : isExpired
+                      ? "border-amber-500/30 bg-amber-500/5"
+                      : "border-border/40"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`h-11 w-11 rounded-xl bg-gradient-to-br ${platform.gradient} border flex items-center justify-center`}
+                        style={{ borderColor: `${platform.color}30` }}
+                      >
+                        <Icon className="h-5 w-5" style={{ color: platform.color }} />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium">{platform.name}</span>
+                          {isConnected && (
+                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                              <CheckCircle2 className="h-3 w-3" />
+                              Connected
+                            </span>
+                          )}
+                          {isExpired && (
+                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                              Expired
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {isConnected && conn?.accountName ? conn.accountName : platform.description}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {(isConnected || isExpired) && (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleSocialTest(platform.key)}
+                            disabled={isTesting}
+                          >
+                            {isTesting ? <Loader2 className="h-3 w-3 animate-spin mr-1.5" /> : <Wifi className="h-3 w-3 mr-1.5" />}
+                            Test
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleSocialDisconnect(platform.key)}
+                            disabled={isActionLoading}
+                            className="text-red-400 border-red-500/30 hover:bg-red-500/10"
+                          >
+                            {isActionLoading ? <Loader2 className="h-3 w-3 animate-spin mr-1.5" /> : <Unlink className="h-3 w-3 mr-1.5" />}
+                            Disconnect
+                          </Button>
+                        </>
+                      )}
+                      {!isConnected && !isExpired && (
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={() => toggleSocialExpand(platform.key)}
+                        >
+                          <Key className="h-3 w-3 mr-1.5" />
+                          Connect
+                        </Button>
+                      )}
+                      {(isConnected || isExpired) && (
+                        <Button
+                          variant="subtle"
+                          size="sm"
+                          onClick={() => toggleSocialExpand(platform.key)}
+                          title="Update token"
+                        >
+                          {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  <AnimatePresence>
+                    {testResult && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="mt-3"
+                      >
+                        <div
+                          className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs"
+                          style={{
+                            background: testResult.success ? "hsl(150 60% 40% / 0.1)" : "hsl(0 60% 40% / 0.1)",
+                            border: `1px solid ${testResult.success ? "hsl(150 60% 40% / 0.25)" : "hsl(0 60% 40% / 0.25)"}`,
+                            color: testResult.success ? "hsl(150 60% 65%)" : "hsl(0 60% 70%)",
+                          }}
+                        >
+                          {testResult.success ? (
+                            <>
+                              <Wifi className="w-3.5 h-3.5 flex-shrink-0" />
+                              Connection verified{testResult.accountName && ` — ${testResult.accountName}`}
+                            </>
+                          ) : (
+                            <>
+                              <WifiOff className="w-3.5 h-3.5 flex-shrink-0" />
+                              Failed: {testResult.error || "Unknown error"}
+                            </>
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  <AnimatePresence>
+                    {isExpanded && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="mt-3 pt-3 border-t border-border/30 space-y-2"
+                      >
+                        <p className="text-[11px] text-muted-foreground">{platform.helpText}</p>
+                        <input
+                          className="kf-input w-full text-xs"
+                          placeholder="Access Token *"
+                          value={manualToken}
+                          onChange={(e) => setManualToken(e.target.value)}
+                          type="password"
+                          autoFocus
+                        />
+                        <input
+                          className="kf-input w-full text-xs"
+                          placeholder="Platform ID (page ID, person URN, etc.)"
+                          value={manualPlatformId}
+                          onChange={(e) => setManualPlatformId(e.target.value)}
+                        />
+                        <input
+                          className="kf-input w-full text-xs"
+                          placeholder="Display Name (optional)"
+                          value={manualAccountName}
+                          onChange={(e) => setManualAccountName(e.target.value)}
+                        />
+                        <div className="flex gap-2">
+                          <Button
+                            variant="default"
+                            size="sm"
+                            onClick={() => handleSocialManualConnect(platform.key)}
+                            disabled={!manualToken.trim() || isActionLoading}
+                            className="flex-1"
+                          >
+                            {isActionLoading ? <Loader2 className="h-3 w-3 animate-spin mr-1.5" /> : <CheckCircle2 className="h-3 w-3 mr-1.5" />}
+                            {isConnected || isExpired ? "Update" : "Save & Connect"}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleSocialOAuth(platform.key)}
+                            disabled={isActionLoading}
+                          >
+                            <ExternalLink className="h-3 w-3 mr-1.5" />
+                            OAuth
+                          </Button>
+                          <Button variant="subtle" size="sm" onClick={() => setExpandedSocial(null)}>
+                            Cancel
+                          </Button>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              );
+            })
+          )}
         </div>
       </motion.div>
 
