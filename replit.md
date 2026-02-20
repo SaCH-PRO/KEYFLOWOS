@@ -69,6 +69,12 @@ The project is structured as a monorepo containing a Next.js 16 frontend (`apps/
     - **Landing Pages:** Page builder with section types, public serving, and SEO scoring.
 
 ## Recent Changes (Feb 20, 2026)
+- **UI Standardization Sprint:**
+  - Created 4 shared UI components: PageHeader, TabNav, StatCards, EmptyState in `apps/web/src/components/ui/`
+  - Updated 12+ pages (Expenses, Social, Bookings, Marketing, MasterClass, Advisor, Automations, Community, Projects, Reports, Commerce, Pages) to use shared components
+  - Fixed color inconsistencies: standardized purple accents to orange/teal brand colors across Advisor and MasterClass
+  - Redesigned MasterClass page: removed gradient hero, applied dark glassmorphism with accent strips on course cards
+  - All pages now follow consistent pattern: PageHeader (icon+title+subtitle+action), TabNav, StatCards, EmptyState
 - **Production Readiness Sprint:**
   - Fixed critical CRM flow service bugs: `expiresAt` → `expiryDate` on Quote queries (3 occurrences), restored `deletedAt: null` soft-delete filters on Contact queries (19 occurrences)
   - Enhanced PWA manifest for app store installability: added `id`, `scope`, `lang`, `dir`, `prefer_related_applications` fields, removed non-existent screenshot references
