@@ -63,7 +63,6 @@ export class FlowController {
             { displayName: containsFilter },
             { email: containsFilter },
             { phone: containsFilter },
-            { company: containsFilter },
           ],
         },
         select: { id: true, firstName: true, lastName: true, displayName: true, email: true, status: true },

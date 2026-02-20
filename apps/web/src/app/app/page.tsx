@@ -8,6 +8,8 @@ import {
   fetchGamificationStats, 
   CockpitSummary, 
   GamificationStats,
+  PriorityItem,
+  RevenueInsights,
   updateStreak,
   fetchTodaysTasks,
   updateAutopilotTaskStatus,
@@ -34,6 +36,21 @@ import {
   ShieldAlert,
   FileWarning,
   Bell,
+  Package,
+  UserPlus,
+  Send,
+  MessageCircle,
+  Users,
+  Target,
+  Repeat,
+  BarChart3,
+  Percent,
+  Award,
+  FileText,
+  CalendarCheck,
+  PenTool,
+  ArrowUpRight,
+  ArrowDownRight,
 } from "lucide-react";
 
 interface AutopilotTask {
@@ -71,6 +88,162 @@ const alertTypeIcons: Record<string, React.ReactNode> = {
   PAYMENT: <FileWarning className="w-5 h-5" />,
   APPROVAL: <Bell className="w-5 h-5" />,
 };
+
+const urgencyBorderStyles: Record<string, { borderColor: string; bgColor: string; textColor: string }> = {
+  critical: { borderColor: "rgb(239 68 68 / 0.5)", bgColor: "rgb(239 68 68 / 0.05)", textColor: "rgb(239 68 68)" },
+  high: { borderColor: "hsl(var(--kf-accent1) / 0.5)", bgColor: "hsl(var(--kf-accent1) / 0.05)", textColor: "hsl(var(--kf-accent1))" },
+  medium: { borderColor: "rgb(234 179 8 / 0.5)", bgColor: "rgb(234 179 8 / 0.05)", textColor: "rgb(234 179 8)" },
+  low: { borderColor: "rgb(59 130 246 / 0.5)", bgColor: "rgb(59 130 246 / 0.05)", textColor: "rgb(59 130 246)" },
+};
+
+const urgencyLabels: Record<string, string> = {
+  critical: "Critical",
+  high: "High",
+  medium: "Medium",
+  low: "Low",
+};
+
+const quickActionIconMap: Record<string, React.ReactNode> = {
+  Package: <Package className="w-5 h-5" />,
+  UserPlus: <UserPlus className="w-5 h-5" />,
+  Send: <Send className="w-5 h-5" />,
+  AlertTriangle: <AlertTriangle className="w-5 h-5" />,
+  TrendingUp: <TrendingUp className="w-5 h-5" />,
+  Calendar: <Calendar className="w-5 h-5" />,
+  Zap: <Zap className="w-5 h-5" />,
+};
+
+function formatTTD(value: number): string {
+  return `TTD ${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function PriorityCard({ priority, index }: { priority: PriorityItem; index: number }) {
+  const styles = urgencyBorderStyles[priority.urgency] || urgencyBorderStyles.low;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ delay: 0.05 * index }}
+      className="kf-card p-4"
+      style={{ borderColor: styles.borderColor, backgroundColor: styles.bgColor }}
+    >
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span
+              className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+              style={{ backgroundColor: styles.borderColor, color: "#fff" }}
+            >
+              {urgencyLabels[priority.urgency]}
+            </span>
+            {priority.contactName && (
+              <span className="text-xs text-muted-foreground truncate">
+                {priority.contactName}
+              </span>
+            )}
+          </div>
+          <h4 className="font-medium text-sm">{priority.title}</h4>
+          <p className="text-xs text-muted-foreground mt-0.5">{priority.description}</p>
+          {priority.amount != null && (
+            <p className="text-sm font-semibold mt-1" style={{ color: styles.textColor }}>
+              {formatTTD(priority.amount)}
+            </p>
+          )}
+          {priority.daysSince != null && (
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {priority.daysSince} day{priority.daysSince !== 1 ? 's' : ''} ago
+            </p>
+          )}
+        </div>
+        <div className="flex flex-col gap-2 flex-shrink-0">
+          <Link
+            href={priority.actionHref}
+            className="text-xs font-medium px-3 py-1.5 rounded-lg transition-all hover:scale-105"
+            style={{ backgroundColor: styles.borderColor, color: "#fff" }}
+          >
+            {priority.actionLabel}
+          </Link>
+          {priority.whatsappLink && (
+            <a
+              href={priority.whatsappLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-medium px-3 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-all hover:scale-105 flex items-center gap-1"
+            >
+              <MessageCircle className="w-3 h-3" />
+              WhatsApp
+            </a>
+          )}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function RevenueInsightsCard({ insights }: { insights: RevenueInsights }) {
+  const growthPositive = insights.revenueGrowth >= 0;
+  const stats = [
+    { label: "Avg Client Spend", value: formatTTD(insights.avgClientSpend), icon: <DollarSign className="w-4 h-4" /> },
+    { label: "Avg Invoice", value: formatTTD(insights.avgInvoiceValue), icon: <FileText className="w-4 h-4" /> },
+    { label: "Lead Conversion", value: `${(insights.leadConversionRate * 100).toFixed(1)}%`, icon: <Target className="w-4 h-4" /> },
+    { label: "Client Retention", value: `${(insights.clientRetentionRate * 100).toFixed(1)}%`, icon: <Repeat className="w-4 h-4" /> },
+    { label: "Revenue Growth", value: `${growthPositive ? '+' : ''}${(insights.revenueGrowth * 100).toFixed(1)}%`, icon: growthPositive ? <ArrowUpRight className="w-4 h-4 text-green-500" /> : <ArrowDownRight className="w-4 h-4 text-red-500" /> },
+    { label: "Total Clients", value: String(insights.totalClients), icon: <Users className="w-4 h-4" /> },
+    { label: "Repeat Clients", value: String(insights.repeatClients), icon: <Award className="w-4 h-4" /> },
+    { label: "Collection Rate", value: `${(insights.collectionRate * 100).toFixed(1)}%`, icon: <Percent className="w-4 h-4" /> },
+  ];
+
+  const targetProgress = insights.monthlyTarget > 0 ? Math.min(insights.monthlyProgress / insights.monthlyTarget, 1) : 0;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.2 }}
+      className="kf-card p-5"
+    >
+      <div className="flex items-center gap-2 mb-4">
+        <BarChart3 className="w-5 h-5" style={{ color: "hsl(var(--kf-accent2))" }} />
+        <h2 className="text-lg font-semibold">Revenue Insights</h2>
+      </div>
+
+      {insights.topService && (
+        <div className="mb-4 p-3 rounded-lg" style={{ backgroundColor: "hsl(var(--kf-accent2) / 0.1)", borderLeft: "3px solid hsl(var(--kf-accent2))" }}>
+          <p className="text-xs text-muted-foreground uppercase tracking-wider">Top Service</p>
+          <p className="font-semibold">{insights.topService.name}</p>
+          <p className="text-sm text-muted-foreground">
+            {formatTTD(insights.topService.revenue)} · {insights.topService.count} booking{insights.topService.count !== 1 ? 's' : ''}
+          </p>
+        </div>
+      )}
+
+      {insights.monthlyTarget > 0 && (
+        <div className="mb-4">
+          <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+            <span>Monthly Target</span>
+            <span>{formatTTD(insights.monthlyProgress)} / {formatTTD(insights.monthlyTarget)}</span>
+          </div>
+          <div className="kf-momentum-bar">
+            <div className="kf-momentum-fill" style={{ width: `${targetProgress * 100}%` }} />
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {stats.map((stat) => (
+          <div key={stat.label} className="p-3 rounded-lg bg-muted/30">
+            <div className="flex items-center gap-1.5 text-muted-foreground mb-1">
+              {stat.icon}
+              <span className="text-[10px] uppercase tracking-wider">{stat.label}</span>
+            </div>
+            <div className="text-sm font-bold">{stat.value}</div>
+          </div>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
 
 export default function AppHome() {
   const [businessId, setBusinessId] = useState<string | null>(null);
@@ -110,7 +283,7 @@ export default function AppHome() {
           fetchCriticalAlerts(businessId),
         ]);
 
-        if (cockpitResult.data) setCockpit(cockpitResult.data);
+        if (cockpitResult.data) setCockpit(cockpitResult.data as CockpitSummary);
         if (gamificationResult.data) setGamification(gamificationResult.data);
         if (tasksResult.data) setTasks(tasksResult.data as AutopilotTask[]);
         if (alertsResult.data) setAlerts(alertsResult.data as CriticalAlert[]);
@@ -179,6 +352,9 @@ export default function AppHome() {
   const monthlyRevenue = cockpit?.stats?.monthlyRevenue ?? 0;
   const pendingInvoices = cockpit?.stats?.pendingInvoices ?? 0;
   const todayBookings = cockpit?.stats?.todayBookings ?? 0;
+  const completedBookingsToday = cockpit?.stats?.completedBookingsToday ?? 0;
+  const draftPosts = cockpit?.stats?.draftPosts ?? 0;
+  const scheduledPosts = cockpit?.stats?.scheduledPosts ?? 0;
 
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
@@ -189,6 +365,9 @@ export default function AppHome() {
 
   const completedToday = gamification?.dailyTasksCompleted ?? 0;
   const tasksRemaining = tasks.length;
+
+  const priorities = cockpit?.priorities ?? [];
+  const revenueInsights = cockpit?.revenueInsights;
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
@@ -256,7 +435,7 @@ export default function AppHome() {
             <span className="text-xs uppercase tracking-wider">Today</span>
           </div>
           <div className="text-2xl font-bold">
-            TTD {todayRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {formatTTD(todayRevenue)}
           </div>
           {pendingInvoices > 0 && (
             <p className="text-xs text-muted-foreground mt-1">
@@ -280,6 +459,38 @@ export default function AppHome() {
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.12 }}
+        className="grid grid-cols-3 gap-3"
+      >
+        <div className="kf-card p-3">
+          <div className="flex items-center gap-1.5 text-muted-foreground mb-1">
+            <CalendarCheck className="w-3.5 h-3.5" />
+            <span className="text-[10px] uppercase tracking-wider">Completed</span>
+          </div>
+          <div className="text-lg font-bold">{completedBookingsToday}</div>
+          <p className="text-[10px] text-muted-foreground">bookings today</p>
+        </div>
+        <div className="kf-card p-3">
+          <div className="flex items-center gap-1.5 text-muted-foreground mb-1">
+            <PenTool className="w-3.5 h-3.5" />
+            <span className="text-[10px] uppercase tracking-wider">Drafts</span>
+          </div>
+          <div className="text-lg font-bold">{draftPosts}</div>
+          <p className="text-[10px] text-muted-foreground">draft posts</p>
+        </div>
+        <div className="kf-card p-3">
+          <div className="flex items-center gap-1.5 text-muted-foreground mb-1">
+            <Send className="w-3.5 h-3.5" />
+            <span className="text-[10px] uppercase tracking-wider">Scheduled</span>
+          </div>
+          <div className="text-lg font-bold">{scheduledPosts}</div>
+          <p className="text-[10px] text-muted-foreground">scheduled posts</p>
+        </div>
+      </motion.div>
+
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.15 }}
         className="kf-card p-4"
       >
@@ -288,7 +499,7 @@ export default function AppHome() {
           <span className="text-xs uppercase tracking-wider">This Month</span>
         </div>
         <div className="text-2xl font-bold">
-          TTD {monthlyRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          {formatTTD(monthlyRevenue)}
         </div>
         <div className="mt-3">
           <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
@@ -304,6 +515,29 @@ export default function AppHome() {
         </div>
       </motion.div>
 
+      {priorities.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.17 }}
+        >
+          <div className="flex items-center gap-2 mb-4">
+            <AlertTriangle className="w-5 h-5" style={{ color: "hsl(var(--kf-accent1))" }} />
+            <h2 className="text-lg font-semibold">Today&apos;s Priorities</h2>
+            <span className="ml-auto text-xs text-muted-foreground">{priorities.length} item{priorities.length !== 1 ? 's' : ''}</span>
+          </div>
+          <div className="space-y-3">
+            {priorities.map((priority, idx) => (
+              <PriorityCard key={priority.id} priority={priority} index={idx} />
+            ))}
+          </div>
+        </motion.div>
+      )}
+
+      {revenueInsights && (
+        <RevenueInsightsCard insights={revenueInsights} />
+      )}
+
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
@@ -312,7 +546,7 @@ export default function AppHome() {
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Zap className="w-5 h-5" style={{ color: "hsl(var(--kf-accent1))" }} />
-            <h2 className="text-lg font-semibold">Today's Tasks</h2>
+            <h2 className="text-lg font-semibold">Today&apos;s Tasks</h2>
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <CheckCircle2 className="w-4 h-4 text-green-500" />
@@ -434,7 +668,7 @@ export default function AppHome() {
             { label: "Bookings", href: "/app/bookings", icon: "📅", color: "hsl(var(--kf-accent2))" },
             { label: "Commerce", href: "/app/commerce", icon: "💰", color: "hsl(150 60% 40%)" },
             { label: "Social", href: "/app/social", icon: "📱", color: "hsl(200 70% 50%)" },
-          ].map((link, i) => (
+          ].map((link) => (
             <Link
               key={link.href}
               href={link.href}
@@ -454,16 +688,25 @@ export default function AppHome() {
           animate={{ opacity: 1 }}
           transition={{ delay: 0.3 }}
         >
-          <h2 className="text-lg font-semibold mb-4">Quick Actions</h2>
+          <div className="flex items-center gap-2 mb-4">
+            <Zap className="w-5 h-5" style={{ color: "hsl(var(--kf-accent2))" }} />
+            <h2 className="text-lg font-semibold">Quick Actions</h2>
+          </div>
           <div className="grid gap-3 sm:grid-cols-2">
-            {cockpit.quickActions.slice(0, 4).map(action => (
+            {cockpit.quickActions.slice(0, 6).map(action => (
               <Link
                 key={action.id}
                 href={action.href}
                 className="kf-card p-4 flex items-center gap-3 hover:scale-[1.02] transition-all group"
+                style={{ borderColor: "hsl(var(--kf-accent2) / 0.2)" }}
               >
-                <div className="h-10 w-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: "hsl(var(--kf-accent1) / 0.1)" }}>
-                  <Play className="w-5 h-5" style={{ color: "hsl(var(--kf-accent1))" }} />
+                <div
+                  className="h-10 w-10 rounded-lg flex items-center justify-center flex-shrink-0"
+                  style={{ backgroundColor: "hsl(var(--kf-accent2) / 0.15)" }}
+                >
+                  <span style={{ color: "hsl(var(--kf-accent2))" }}>
+                    {quickActionIconMap[action.icon] || <Play className="w-5 h-5" />}
+                  </span>
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="font-medium truncate">{action.label}</div>

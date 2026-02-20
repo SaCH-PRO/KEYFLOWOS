@@ -1,7 +1,8 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Mail, Phone, Building2, Tag, Trash2 } from "lucide-react";
+import { Mail, Phone, Building2, Tag, Trash2, MessageCircle } from "lucide-react";
+import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 
 export type ContactCardData = {
   id: string;
@@ -108,6 +109,23 @@ export function ContactCard({ contact, isSelected, onClick, onDelete, index = 0 
                 <span>{contact.phone}</span>
               </div>
             )}
+            {(() => {
+              const waPhone = getContactPhone(contact);
+              if (!waPhone) return null;
+              const firstName = contact.firstName || "";
+              return (
+                <a
+                  href={buildWhatsAppLink(waPhone, `Hi ${firstName}, `)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Message on WhatsApp"
+                  onClick={(e) => e.stopPropagation()}
+                  className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] -m-2 p-2 rounded-lg hover:bg-emerald-500/10 transition-colors"
+                >
+                  <MessageCircle className="w-4 h-4 text-emerald-500" />
+                </a>
+              );
+            })()}
           </div>
 
           {contact.tags && contact.tags.length > 0 && (

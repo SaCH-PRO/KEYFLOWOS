@@ -1,6 +1,6 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { BookingConfirmedPayload, BookingCreatedPayload } from '../../core/event-bus/events.types';
+import { BookingCompletedPayload, BookingConfirmedPayload, BookingCreatedPayload } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
@@ -9,6 +9,8 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
 @Injectable()
 export class BookingsService {
+  private readonly logger = new Logger(BookingsService.name);
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
@@ -64,6 +66,34 @@ export class BookingsService {
         businessId,
         contactId: booking.contactId,
         type: 'booking.confirmed',
+        data: { bookingId, status },
+        actorType: 'USER',
+        source: 'bookings',
+      });
+    }
+
+    if (status === 'COMPLETED' && booking.contactId) {
+      this.events.emit('booking.completed', {
+        booking: updated,
+        contact: updated.contact ?? undefined,
+        businessId,
+      } as BookingCompletedPayload);
+      await this.crm.logContactEvent({
+        businessId,
+        contactId: booking.contactId,
+        type: 'booking.completed',
+        data: { bookingId, status, serviceName: updated.service?.name },
+        actorType: 'USER',
+        source: 'bookings',
+      });
+      await this.autoGenerateInvoiceForCompletedBooking(updated, businessId);
+    }
+
+    if (status === 'CANCELLED' && booking.contactId) {
+      await this.crm.logContactEvent({
+        businessId,
+        contactId: booking.contactId,
+        type: 'booking.cancelled',
         data: { bookingId, status },
         actorType: 'USER',
         source: 'bookings',
@@ -288,5 +318,31 @@ export class BookingsService {
     }
 
     return { success: true, bookingId: booking.id, invoiceId: invoice?.id };
+  }
+
+  private async autoGenerateInvoiceForCompletedBooking(booking: any, businessId: string) {
+    try {
+      if (booking.invoiceId) {
+        this.logger.log(`Booking ${booking.id} already has invoice ${booking.invoiceId}, skipping auto-invoice`);
+        return;
+      }
+      if (!booking.contactId || !booking.serviceId) return;
+
+      const service = await this.prisma.client.service.findFirst({
+        where: { id: booking.serviceId, businessId, deletedAt: null },
+      });
+      if (!service || service.price <= 0) return;
+
+      const invoice = await this.commerce.createInvoiceForService(businessId, booking.contactId, service as any);
+      if (invoice) {
+        await this.prisma.client.booking.update({
+          where: { id: booking.id },
+          data: { invoiceId: invoice.id },
+        });
+        this.logger.log(`Auto-generated invoice ${invoice.id} for completed booking ${booking.id}`);
+      }
+    } catch (err) {
+      this.logger.error(`Failed to auto-generate invoice for booking ${booking.id}: ${(err as Error).message}`);
+    }
   }
 }

@@ -1619,6 +1619,35 @@ export interface QuickAction {
   priority: number;
 }
 
+export interface PriorityItem {
+  id: string;
+  type: 'overdue_invoice' | 'unconfirmed_booking' | 'stale_lead' | 'draft_post' | 'follow_up' | 'unpaid_invoice';
+  title: string;
+  description: string;
+  urgency: 'critical' | 'high' | 'medium' | 'low';
+  actionLabel: string;
+  actionHref: string;
+  amount?: number;
+  currency?: string;
+  contactName?: string;
+  daysSince?: number;
+  whatsappLink?: string;
+}
+
+export interface RevenueInsights {
+  avgClientSpend: number;
+  topService: { name: string; revenue: number; count: number } | null;
+  leadConversionRate: number;
+  clientRetentionRate: number;
+  revenueGrowth: number;
+  totalClients: number;
+  repeatClients: number;
+  avgInvoiceValue: number;
+  collectionRate: number;
+  monthlyTarget: number;
+  monthlyProgress: number;
+}
+
 export interface CockpitSummary {
   momentum: number;
   streaks: string[];
@@ -1626,6 +1655,8 @@ export interface CockpitSummary {
   bottleneck: { phase: string; suggestion: string } | null;
   feed: FeedItem[];
   quickActions: QuickAction[];
+  priorities: PriorityItem[];
+  revenueInsights: RevenueInsights;
   stats: {
     totalContacts: number;
     activeLeads: number;
@@ -1636,6 +1667,9 @@ export interface CockpitSummary {
     weeklyBookings: number;
     todayRevenue: number;
     todayBookings: number;
+    completedBookingsToday: number;
+    draftPosts: number;
+    scheduledPosts: number;
   };
   highlights: {
     highPotential: { contactId: string; name: string; score: number }[];
@@ -1670,6 +1704,33 @@ const cockpitSummarySchema = z.object({
     href: z.string(),
     priority: z.number(),
   })),
+  priorities: z.array(z.object({
+    id: z.string(),
+    type: z.string(),
+    title: z.string(),
+    description: z.string(),
+    urgency: z.enum(['critical', 'high', 'medium', 'low']),
+    actionLabel: z.string(),
+    actionHref: z.string(),
+    amount: z.number().optional(),
+    currency: z.string().optional(),
+    contactName: z.string().optional(),
+    daysSince: z.number().optional(),
+    whatsappLink: z.string().optional(),
+  })).optional().default([]),
+  revenueInsights: z.object({
+    avgClientSpend: z.number(),
+    topService: z.object({ name: z.string(), revenue: z.number(), count: z.number() }).nullable(),
+    leadConversionRate: z.number(),
+    clientRetentionRate: z.number(),
+    revenueGrowth: z.number(),
+    totalClients: z.number(),
+    repeatClients: z.number(),
+    avgInvoiceValue: z.number(),
+    collectionRate: z.number(),
+    monthlyTarget: z.number(),
+    monthlyProgress: z.number(),
+  }).optional().default({ avgClientSpend: 0, topService: null, leadConversionRate: 0, clientRetentionRate: 0, revenueGrowth: 0, totalClients: 0, repeatClients: 0, avgInvoiceValue: 0, collectionRate: 0, monthlyTarget: 0, monthlyProgress: 0 }),
   stats: z.object({
     totalContacts: z.number(),
     activeLeads: z.number(),
@@ -1680,6 +1741,9 @@ const cockpitSummarySchema = z.object({
     weeklyBookings: z.number(),
     todayRevenue: z.number(),
     todayBookings: z.number(),
+    completedBookingsToday: z.number().optional().default(0),
+    draftPosts: z.number().optional().default(0),
+    scheduledPosts: z.number().optional().default(0),
   }),
   highlights: z.object({
     highPotential: z.array(z.object({ contactId: z.string(), name: z.string(), score: z.number() })),
