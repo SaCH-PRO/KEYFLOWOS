@@ -128,7 +128,7 @@ export default function SocialOAuthCallbackPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+    <div className="h-full flex items-center justify-center bg-background p-4">
       <div className="max-w-sm w-full text-center space-y-4">
         <div className="mx-auto w-16 h-16 rounded-2xl flex items-center justify-center"
           style={{

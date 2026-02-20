@@ -266,7 +266,7 @@ export default function OnboardingPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="h-full flex items-center justify-center">
         <div
           className="animate-spin h-8 w-8 border-2 border-t-transparent rounded-full"
           style={{ borderColor: "hsl(var(--kf-accent1))", borderTopColor: "transparent" }}
@@ -277,7 +277,7 @@ export default function OnboardingPage() {
 
   if (phase === "autopilot") {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-background via-background to-background p-4 md:p-8">
+      <div className="h-full overflow-y-auto bg-gradient-to-br from-background via-background to-background p-4 md:p-8">
         <div className="max-w-2xl mx-auto">
           <motion.div
             initial={{ opacity: 0, y: -20 }}
@@ -463,7 +463,7 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-background p-4 md:p-8">
+    <div className="h-full overflow-y-auto bg-gradient-to-br from-background via-background to-background p-4 md:p-8">
       <div className="max-w-3xl mx-auto">
         <motion.div
           initial={{ opacity: 0, y: -20 }}
