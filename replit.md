@@ -69,6 +69,14 @@ The project is structured as a monorepo containing a Next.js 16 frontend (`apps/
     - **Landing Pages:** Page builder with section types, public serving, and SEO scoring.
 
 ## Recent Changes (Feb 20, 2026)
+- **Commerce Module Competitive Enhancement:**
+  - Invoice UX overhaul: search/filter bar, pill-style status filters, rich table rows with contact email/due date indicators ("Xd overdue"/"Due in Xd"), detail preview drawer
+  - Duplicate invoice & quote: one-click clone to new Draft with all line items, tax, discount, notes
+  - WhatsApp share: for invoices and quotes, opens wa.me with pre-filled message including contact name, amount, and payment link
+  - Invoice email via Gmail: email modal with recipient/message, reuses sendQuoteEmail endpoint (only shown when Gmail connected)
+  - Payment terms presets: Net 7/15/30/60/90 and Due on Receipt with automatic due date calculation
+  - Recurring Invoices tab: full CRUD UI (create, edit, toggle active/pause, delete), frequency selector (weekly/biweekly/monthly/quarterly/yearly), line items, tax/discount, totals preview
+  - Product catalog: category filter tabs (All/Services/Products/Packages) with live counts, Show/Hide inactive toggle
 - **CRM Contacts Overhaul:**
   - Enhanced ContactCard with source badges (booking/store/lead-form/import/google), 1-tap communication (email/phone/WhatsApp), pin/favorite, multi-select for broadcast
   - Enhanced ContactDetail with Quick Compose panel (WhatsApp/Email templates), communication actions bar, financial summary card (totalRevenue, invoiceCount, bookingCount)
