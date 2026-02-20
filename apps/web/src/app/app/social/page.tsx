@@ -18,6 +18,7 @@ import {
   Clock,
   CheckCircle2,
   TrendingUp,
+  MessageCircle,
 } from "lucide-react";
 import {
   SocialPost,
@@ -36,6 +37,9 @@ import { ContentCalendar } from "./components/content-calendar";
 import { ChannelsPanel } from "./components/channels-panel";
 import { AIStudio } from "./components/ai-studio";
 import { AnalyticsPanel } from "./components/analytics-stub";
+import { PageHeader } from "@/components/ui/page-header";
+import { StatCards } from "@/components/ui/stat-cards";
+import { TabNav } from "@/components/ui/tab-nav";
 
 type Tab = "posts" | "calendar" | "channels" | "ai" | "analytics";
 
@@ -208,46 +212,15 @@ export default function SocialPage() {
 
   return (
     <div className="space-y-6">
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex flex-col md:flex-row md:items-center md:justify-between gap-4"
-      >
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Social</h1>
-          <p className="text-muted-foreground mt-1">Content calendar, scheduling & publishing</p>
-        </div>
-        <button
-          onClick={() => { setShowComposer(true); setEditingPost(null); }}
-          className="kf-btn-primary inline-flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" />
-          New Post
-        </button>
-      </motion.div>
+      <PageHeader
+        icon={MessageCircle}
+        title="Social"
+        subtitle="Content calendar, scheduling & publishing"
+        actionLabel="New Post"
+        onAction={() => { setShowComposer(true); setEditingPost(null); }}
+      />
 
-      <motion.div
-        variants={stagger}
-        initial="hidden"
-        animate="show"
-        className="grid grid-cols-2 md:grid-cols-4 gap-3"
-      >
-        {kpiCards.map((kpi) => {
-          const Icon = kpi.icon;
-          return (
-            <motion.div
-              key={kpi.label}
-              variants={fadeUp}
-              className="rounded-2xl border backdrop-blur-xl p-4 text-center space-y-1"
-              style={{ background: "hsl(var(--kf-card) / 0.7)", borderColor: "hsl(var(--kf-border))" }}
-            >
-              <Icon className="w-4 h-4 mx-auto" style={{ color: kpi.color }} />
-              <p className="text-xl font-bold" style={{ color: kpi.color }}>{kpi.value}</p>
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{kpi.label}</p>
-            </motion.div>
-          );
-        })}
-      </motion.div>
+      <StatCards items={kpiCards} />
 
       {error && (
         <div className="kf-card p-3 text-xs" style={{ borderColor: "hsl(40 90% 50% / 0.4)", background: "hsl(40 90% 50% / 0.1)", color: "hsl(40 90% 90%)" }}>
@@ -353,37 +326,12 @@ export default function SocialPage() {
         </AnimatePresence>
       </motion.div>
 
-      <div className="flex gap-1.5 sm:gap-2 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-hide snap-x">
-        {TABS.map(({ key, label, icon: Icon }) => (
-          <button
-            key={key}
-            onClick={() => setActiveTab(key)}
-            className={`relative px-3.5 sm:px-5 py-2.5 text-xs sm:text-sm font-medium rounded-xl transition-all flex items-center gap-1.5 sm:gap-2 whitespace-nowrap snap-start flex-shrink-0 active:scale-95 ${
-              activeTab === key
-                ? "text-[hsl(var(--kf-accent1))]"
-                : "text-muted-foreground hover:text-foreground hover:bg-[hsl(var(--kf-muted)/0.5)]"
-            }`}
-          >
-            {activeTab === key && (
-              <motion.div
-                layoutId="social-tab-pill"
-                className="absolute inset-0 rounded-xl border shadow-lg"
-                style={{
-                  background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.12), hsl(var(--kf-accent2) / 0.08))",
-                  borderColor: "hsl(var(--kf-accent1) / 0.3)",
-                  boxShadow: "0 4px 12px hsl(var(--kf-accent1) / 0.1)",
-                }}
-                transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
-              />
-            )}
-            <span className="relative z-10 flex items-center gap-1.5 sm:gap-2">
-              <Icon className="w-4 h-4" />
-              <span className="hidden sm:inline">{label}</span>
-              <span className="sm:hidden">{label.split(" ")[0]}</span>
-            </span>
-          </button>
-        ))}
-      </div>
+      <TabNav 
+        tabs={TABS.map(t => ({ key: t.key, label: t.label, icon: t.icon }))}
+        activeTab={activeTab}
+        onTabChange={(key) => setActiveTab(key as Tab)}
+        layoutId="social-tab-pill"
+      />
 
       <AnimatePresence mode="wait">
         <motion.div

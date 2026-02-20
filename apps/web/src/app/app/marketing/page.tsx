@@ -42,6 +42,9 @@ import {
   LeadFormSubmission,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { PageHeader } from "@/components/ui/page-header";
+import { TabNav } from "@/components/ui/tab-nav";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: "#94a3b8",
@@ -263,57 +266,35 @@ export default function MarketingPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl md:text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Megaphone className="w-6 h-6" style={{ color: "hsl(var(--kf-accent1))" }} />
-            Marketing
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {campaigns.length} campaigns · {forms.length} lead forms
-          </p>
-        </div>
-        <button
-          onClick={activeTab === "campaigns" ? openNewCampaign : openNewForm}
-          className="kf-btn-primary flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium"
-        >
-          <Plus className="w-4 h-4" />
-          {activeTab === "campaigns" ? "New Campaign" : "New Form"}
-        </button>
-      </div>
+      <PageHeader
+        icon={Megaphone}
+        title="Marketing"
+        subtitle={`${campaigns.length} campaigns · ${forms.length} lead forms`}
+        actionLabel={activeTab === "campaigns" ? "New Campaign" : "New Form"}
+        onAction={activeTab === "campaigns" ? openNewCampaign : openNewForm}
+      />
 
-      <div className="flex gap-1 bg-white/5 backdrop-blur border border-white/10 rounded-xl p-1">
-        {[
-          { key: "campaigns" as const, label: "Campaigns", icon: Mail },
-          { key: "forms" as const, label: "Lead Forms", icon: ClipboardList },
-        ].map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-medium transition-all ${
-              activeTab === tab.key
-                ? "bg-white/10 text-white shadow-sm"
-                : "text-muted-foreground hover:text-white hover:bg-white/5"
-            }`}
-          >
-            <tab.icon className="w-4 h-4" />
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <TabNav
+        tabs={[
+          { key: "campaigns", label: "Campaigns", icon: Mail },
+          { key: "forms", label: "Lead Forms", icon: ClipboardList },
+        ]}
+        activeTab={activeTab}
+        onTabChange={(key) => setActiveTab(key as "campaigns" | "forms")}
+        layoutId="marketing-tab-pill"
+      />
 
       <AnimatePresence mode="wait">
         {activeTab === "campaigns" ? (
           <motion.div key="campaigns" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
             {campaigns.length === 0 ? (
-              <div className="bg-white/5 backdrop-blur border border-white/10 rounded-xl p-12 text-center">
-                <Mail className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold mb-2">No campaigns yet</h3>
-                <p className="text-sm text-muted-foreground mb-4">Create your first email campaign to start reaching your contacts.</p>
-                <button onClick={openNewCampaign} className="kf-btn-primary px-4 py-2 rounded-xl text-sm font-medium inline-flex items-center gap-2">
-                  <Plus className="w-4 h-4" /> New Campaign
-                </button>
-              </div>
+              <EmptyState
+                icon={Mail}
+                title="No campaigns yet"
+                description="Create your first email campaign to start reaching your contacts."
+                actionLabel="New Campaign"
+                onAction={openNewCampaign}
+              />
             ) : (
               campaigns.map(campaign => (
                 <motion.div key={campaign.id} layout className="bg-white/5 backdrop-blur border border-white/10 rounded-xl overflow-hidden">
@@ -392,14 +373,13 @@ export default function MarketingPage() {
         ) : (
           <motion.div key="forms" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
             {forms.length === 0 ? (
-              <div className="bg-white/5 backdrop-blur border border-white/10 rounded-xl p-12 text-center">
-                <ClipboardList className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold mb-2">No lead forms yet</h3>
-                <p className="text-sm text-muted-foreground mb-4">Create a lead form to start capturing leads from your website.</p>
-                <button onClick={openNewForm} className="kf-btn-primary px-4 py-2 rounded-xl text-sm font-medium inline-flex items-center gap-2">
-                  <Plus className="w-4 h-4" /> New Form
-                </button>
-              </div>
+              <EmptyState
+                icon={ClipboardList}
+                title="No lead forms yet"
+                description="Create a lead capture form to grow your contact list."
+                actionLabel="New Form"
+                onAction={openNewForm}
+              />
             ) : (
               forms.map(form => (
                 <motion.div key={form.id} layout className="bg-white/5 backdrop-blur border border-white/10 rounded-xl overflow-hidden">

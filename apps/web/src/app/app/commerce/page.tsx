@@ -28,6 +28,7 @@ import {
   Contact,
   Quote,
 } from "@/lib/client";
+import { PageHeader } from "@/components/ui/page-header";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { Tab, ProductForm, InvoiceLineItem, CATEGORIES, generateItemId } from "./components/commerce-types";
 import CommerceDashboard from "./components/commerce-dashboard";
@@ -303,77 +304,71 @@ export default function CommercePage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-primary/30 to-secondary/30 border border-primary/40 flex items-center justify-center">
-            <CreditCard className="w-6 h-6 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
-              Commerce
-            </h1>
-            <p className="text-sm text-muted-foreground">Manage your products, quotes, and invoices</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          {gmailStatus?.connected ? (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-green-500/10 border border-green-500/30">
-              <Mail className="w-4 h-4 text-green-400" />
-              <span className="text-sm text-green-200">{gmailStatus.email}</span>
+      <PageHeader
+        icon={CreditCard}
+        title="Commerce"
+        subtitle="Manage invoices, payments and quotes"
+        rightSlot={
+          <div className="flex items-center gap-3">
+            {gmailStatus?.connected ? (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-green-500/10 border border-green-500/30">
+                <Mail className="w-4 h-4 text-green-400" />
+                <span className="text-sm text-green-200">{gmailStatus.email}</span>
+                <button
+                  onClick={async () => {
+                    if (!businessId) return;
+                    if (confirm("Disconnect Gmail? You won't be able to send quotes via email until you reconnect.")) {
+                      await disconnectGmail(businessId);
+                      setGmailStatus({ connected: false, email: null });
+                    }
+                  }}
+                  className="ml-1 text-green-400/60 hover:text-red-400 transition-colors"
+                  title="Disconnect Gmail"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
               <button
                 onClick={async () => {
                   if (!businessId) return;
-                  if (confirm("Disconnect Gmail? You won't be able to send quotes via email until you reconnect.")) {
-                    await disconnectGmail(businessId);
-                    setGmailStatus({ connected: false, email: null });
+                  setLoadingGmail(true);
+                  const res = await getGmailAuthUrl(businessId);
+                  if (res.data?.url) {
+                    window.location.href = res.data.url;
                   }
+                  setLoadingGmail(false);
                 }}
-                className="ml-1 text-green-400/60 hover:text-red-400 transition-colors"
-                title="Disconnect Gmail"
+                disabled={loadingGmail}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-card/50 border border-border/60 text-sm text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors disabled:opacity-50"
               >
-                <X className="w-3.5 h-3.5" />
+                <Mail className="w-4 h-4" />
+                {loadingGmail ? "Connecting..." : "Connect Gmail"}
               </button>
+            )}
+            <div className="flex gap-2">
+              {tab === "products" && (
+                <Button onClick={openAddProduct} className="gap-2">
+                  <Plus className="w-4 h-4" />
+                  Add Product
+                </Button>
+              )}
+              {tab === "quotes" && (
+                <Button onClick={() => { setEditingQuoteId(null); resetQuoteForm(); setShowQuoteBuilder(true); }} className="gap-2">
+                  <Plus className="w-4 h-4" />
+                  New Quote
+                </Button>
+              )}
+              {tab === "invoices" && (
+                <Button onClick={() => setShowInvoiceBuilder(!showInvoiceBuilder)} className="gap-2">
+                  <Plus className="w-4 h-4" />
+                  New Invoice
+                </Button>
+              )}
             </div>
-          ) : (
-            <button
-              onClick={async () => {
-                if (!businessId) return;
-                setLoadingGmail(true);
-                const res = await getGmailAuthUrl(businessId);
-                if (res.data?.url) {
-                  window.location.href = res.data.url;
-                }
-                setLoadingGmail(false);
-              }}
-              disabled={loadingGmail}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-card/50 border border-border/60 text-sm text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors disabled:opacity-50"
-            >
-              <Mail className="w-4 h-4" />
-              {loadingGmail ? "Connecting..." : "Connect Gmail"}
-            </button>
-          )}
-          <div className="flex gap-2">
-            {tab === "products" && (
-              <Button onClick={openAddProduct} className="gap-2">
-                <Plus className="w-4 h-4" />
-                Add Product
-              </Button>
-            )}
-            {tab === "quotes" && (
-              <Button onClick={() => { setEditingQuoteId(null); resetQuoteForm(); setShowQuoteBuilder(true); }} className="gap-2">
-                <Plus className="w-4 h-4" />
-                New Quote
-              </Button>
-            )}
-            {tab === "invoices" && (
-              <Button onClick={() => setShowInvoiceBuilder(!showInvoiceBuilder)} className="gap-2">
-                <Plus className="w-4 h-4" />
-                New Invoice
-              </Button>
-            )}
           </div>
-        </div>
-      </div>
+        }
+      />
 
       <CommerceDashboard invoices={invoices} quotes={quotes} products={products} />
 

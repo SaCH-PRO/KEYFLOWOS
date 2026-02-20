@@ -36,6 +36,8 @@ import {
 } from "@/lib/client";
 import { API_BASE, getAuthHeaders } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { PageHeader } from "@/components/ui/page-header";
+import { StatCards } from "@/components/ui/stat-cards";
 
 const CATEGORY_COLORS = [
   "#f97316", "#ef4444", "#8b5cf6", "#06b6d4", "#22c55e",
@@ -298,81 +300,22 @@ export default function ExpensesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-xl md:text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Receipt className="w-6 h-6" style={{ color: "hsl(var(--kf-accent1))" }} />
-            Expenses
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Track and manage your business expenses
-          </p>
-        </div>
-        <button
-          onClick={openAddModal}
-          className="kf-btn-primary flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium"
-        >
-          <Plus className="w-4 h-4" />
-          Add Expense
-        </button>
-      </div>
+      <PageHeader
+        icon={Receipt}
+        title="Expenses"
+        subtitle="Track and manage your business expenses"
+        actionLabel="Add Expense"
+        onAction={openAddModal}
+      />
 
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
-        {[
-          {
-            label: "Total Expenses",
-            value: formatCurrency(summary?.total ?? 0),
-            sub: "This month",
-            icon: DollarSign,
-            color: "#ef4444",
-          },
-          {
-            label: "Transactions",
-            value: String(summary?.count ?? 0),
-            sub: "This month",
-            icon: Receipt,
-            color: "#8b5cf6",
-          },
-          {
-            label: "Top Category",
-            value: topCategory?.name ?? "—",
-            sub: topCategory ? formatCurrency(topCategory.total) : "No data",
-            icon: Tag,
-            color: topCategory?.color ?? "#06b6d4",
-          },
-          {
-            label: "Monthly Average",
-            value: formatCurrency(monthlyAvg),
-            sub: `Over ${summary?.monthlyTrend?.length ?? 0} months`,
-            icon: TrendingUp,
-            color: "#22c55e",
-          },
-        ].map((kpi) => {
-          const Icon = kpi.icon;
-          return (
-            <motion.div
-              key={kpi.label}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="kf-card p-4 rounded-xl"
-            >
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase tracking-wider">{kpi.label}</p>
-                  <p className="text-lg font-bold mt-1">{kpi.value}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{kpi.sub}</p>
-                </div>
-                <div
-                  className="w-9 h-9 rounded-lg flex items-center justify-center"
-                  style={{ background: `${kpi.color}20` }}
-                >
-                  <Icon className="w-4 h-4" style={{ color: kpi.color }} />
-                </div>
-              </div>
-            </motion.div>
-          );
-        })}
-      </div>
+      <StatCards
+        items={[
+          { label: "Total Expenses", value: formatCurrency(summary?.total ?? 0), sub: "This month", icon: DollarSign, color: "#ef4444" },
+          { label: "Transactions", value: String(summary?.count ?? 0), sub: "This month", icon: Receipt, color: "#8b5cf6" },
+          { label: "Top Category", value: topCategory?.name ?? "—", sub: topCategory ? formatCurrency(topCategory.total) : "No data", icon: Tag, color: topCategory?.color ?? "#06b6d4" },
+          { label: "Monthly Average", value: formatCurrency(monthlyAvg), sub: `Over ${summary?.monthlyTrend?.length ?? 0} months`, icon: TrendingUp, color: "#22c55e" },
+        ]}
+      />
 
       {summary && (summary.byCategory?.length > 0 || summary.monthlyTrend?.length > 0) && (
         <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">

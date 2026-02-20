@@ -17,6 +17,7 @@ import {
   MicOff,
   FlaskConical,
   Loader2,
+  Brain,
 } from "lucide-react";
 import {
   sendAiChat,
@@ -29,6 +30,7 @@ import {
   SimulationResult,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { PageHeader } from "@/components/ui/page-header";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -152,15 +154,11 @@ export default function AdvisorPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl md:text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <Sparkles className="w-6 h-6" style={{ color: "hsl(var(--kf-accent1))" }} />
-          KeyFlow AI Advisor
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Your AI co-founder for strategy, finances, and operations
-        </p>
-      </div>
+      <PageHeader
+        icon={Brain}
+        title="KeyFlow AI Advisor"
+        subtitle="Your AI co-founder for strategy, finances, and operations"
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4" style={{ minHeight: "calc(100vh - 200px)" }}>
         <motion.div
@@ -513,7 +511,7 @@ export default function AdvisorPage() {
             className="bg-white/5 backdrop-blur border border-white/10 rounded-xl overflow-hidden"
           >
             <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
-              <FlaskConical className="w-5 h-5 text-purple-400" />
+              <FlaskConical className="w-5 h-5" style={{ color: "hsl(var(--kf-accent1))" }} />
               <h2 className="text-sm font-semibold">Business Simulation</h2>
             </div>
             <div className="p-4 space-y-3">
@@ -524,21 +522,24 @@ export default function AdvisorPage() {
                   onChange={(e) => setSimScenario(e.target.value)}
                   placeholder="e.g., What if I hire 2 employees at $3000/month each? What if I raise prices by 20%? What if I launch a new product line?"
                   rows={3}
-                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-purple-500/50 placeholder:text-muted-foreground resize-none"
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm focus:outline-none placeholder:text-muted-foreground resize-none"
+                  style={{ "--tw-border-opacity": "1" } as any}
+                  onFocus={(e) => e.currentTarget.style.borderColor = "hsl(var(--kf-accent1) / 0.5)"}
+                  onBlur={(e) => e.currentTarget.style.borderColor = "hsl(var(--tw-border-color) / var(--tw-border-opacity))"}
                   disabled={!businessId}
                 />
                 <button
                   onClick={handleSimulate}
                   disabled={simLoading || !simScenario.trim() || !businessId}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40"
-                  style={{ background: "linear-gradient(135deg, #8b5cf6, #6366f1)" }}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 text-white"
+                  style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
                 >
                   {simLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FlaskConical className="w-4 h-4" />}
                   {simLoading ? "Running Simulation..." : "Simulate Scenario"}
                 </button>
               </div>
               {simResult && (
-                <div className="bg-white/5 border border-purple-500/20 rounded-lg p-4 max-h-96 overflow-y-auto">
+                <div className="bg-white/5 rounded-lg p-4 max-h-96 overflow-y-auto" style={{ borderColor: "hsl(var(--kf-accent1) / 0.2)", borderWidth: "1px" }}>
                   <p className="text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">{simResult.simulation}</p>
                 </div>
               )}
@@ -547,7 +548,15 @@ export default function AdvisorPage() {
                   <button
                     key={q}
                     onClick={() => setSimScenario(q)}
-                    className="text-[10px] px-2 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-300 hover:bg-purple-500/20 transition-colors"
+                    className="text-[10px] px-2 py-1 rounded-full transition-colors"
+                    style={{
+                      backgroundColor: "hsl(var(--kf-accent1) / 0.1)",
+                      borderColor: "hsl(var(--kf-accent1) / 0.2)",
+                      borderWidth: "1px",
+                      color: "hsl(var(--kf-accent1) / 0.8)",
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "hsl(var(--kf-accent1) / 0.2)"}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "hsl(var(--kf-accent1) / 0.1)"}
                   >
                     {q}
                   </button>

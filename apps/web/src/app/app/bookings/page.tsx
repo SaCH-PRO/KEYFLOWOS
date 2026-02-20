@@ -36,6 +36,7 @@ import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { useSearchParams } from "next/navigation";
 import type { Tab, StatusFilter } from "./components/bookings-types";
 import { contactName } from "./components/bookings-types";
+import { PageHeader } from "@/components/ui/page-header";
 import BookingsDashboard from "./components/bookings-dashboard";
 import WeekCalendar from "./components/week-calendar";
 import BookingList from "./components/booking-list";
@@ -242,17 +243,14 @@ export default function BookingsPage() {
 
   return (
     <div className="space-y-6">
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex flex-col md:flex-row md:items-center md:justify-between gap-4"
-      >
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Bookings</h1>
-          <p className="text-muted-foreground mt-1">Schedule, manage services & staff</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {calendarConnected ? (
+      <PageHeader
+        icon={Calendar}
+        title="Bookings"
+        subtitle="Schedule, manage services & staff"
+        actionLabel="New Booking"
+        onAction={() => setShowCreateBooking(true)}
+        rightSlot={
+          calendarConnected ? (
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
                 <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -274,16 +272,9 @@ export default function BookingsPage() {
             >
               <Link2 className="w-3.5 h-3.5" /> Connect Google Calendar
             </button>
-          )}
-          <button
-            onClick={() => setShowCreateBooking(true)}
-            className="kf-btn-primary inline-flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            New Booking
-          </button>
-        </div>
-      </motion.div>
+          )
+        }
+      />
 
       <AnimatePresence>
         {banner && (

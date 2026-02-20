@@ -33,6 +33,7 @@ import {
 } from "@/lib/client";
 import type { SeoScore } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { PageHeader } from "@/components/ui/page-header";
 
 const SECTION_TYPES = [
   { type: "hero", label: "Hero", icon: Star },
@@ -212,13 +213,7 @@ export default function LandingPagesPage() {
   if (loading) {
     return (
       <div className="space-y-4">
-        <div>
-          <h1 className="text-xl md:text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Layout className="w-6 h-6" style={{ color: "hsl(var(--kf-accent1))" }} />
-            Landing Pages
-          </h1>
-          <p className="text-sm text-muted-foreground">Loading...</p>
-        </div>
+        <PageHeader icon={Layout} title="Landing Pages" subtitle="Loading..." />
         <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
           {[1, 2, 3].map((i) => (
             <div key={i} className="rounded-2xl border border-border/60 bg-slate-950/70 p-4 h-32 animate-pulse" />
@@ -504,22 +499,13 @@ export default function LandingPagesPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl md:text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Layout className="w-6 h-6" style={{ color: "hsl(var(--kf-accent1))" }} />
-            Landing Pages
-          </h1>
-          <p className="text-sm text-muted-foreground">Build and publish custom landing pages</p>
-        </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="kf-btn-primary flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium"
-        >
-          <Plus className="w-4 h-4" />
-          New Page
-        </button>
-      </div>
+      <PageHeader
+        icon={Layout}
+        title="Landing Pages"
+        subtitle="Build and publish landing pages"
+        actionLabel="New Page"
+        onAction={() => setShowCreate(true)}
+      />
 
       <AnimatePresence>
         {showCreate && (

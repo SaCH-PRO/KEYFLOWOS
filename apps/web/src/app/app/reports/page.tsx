@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Card } from "@keyflow/ui";
 import { BarChart3, TrendingUp, Users, Calendar, DollarSign, FileText } from "lucide-react";
+import { PageHeader } from "@/components/ui/page-header";
 import { fetchContacts, fetchBookings, fetchInvoices, fetchProducts, Booking, Invoice, Contact, Product } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 
@@ -89,25 +90,14 @@ export default function ReportsPage() {
   if (loading) {
     return (
       <div className="space-y-4">
-        <div>
-          <h1 className="text-xl md:text-2xl font-semibold tracking-tight">Reports</h1>
-          <p className="text-sm text-muted-foreground">Loading analytics...</p>
-        </div>
+          <PageHeader icon={BarChart3} title="Reports" subtitle="Loading analytics..." />
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <div className="h-10 w-10 rounded-3xl bg-primary/20 border border-primary/40 flex items-center justify-center text-primary">
-          <BarChart3 className="w-5 h-5" />
-        </div>
-        <div>
-          <h1 className="text-xl font-semibold">Reports</h1>
-          <p className="text-sm text-muted-foreground">KPI snapshots and business intelligence.</p>
-        </div>
-      </div>
+      <PageHeader icon={BarChart3} title="Reports" subtitle="Business analytics and insights" />
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card className="p-4 space-y-2">

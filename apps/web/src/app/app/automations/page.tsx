@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Button, Input } from "@keyflow/ui";
 import { Sparkles, Zap, Plus, Power, PowerOff } from "lucide-react";
+import { PageHeader } from "@/components/ui/page-header";
 import { Playbook, fetchPlaybooks, createPlaybook, updatePlaybook } from "@/lib/client";
 
 const TRIGGER_OPTIONS = [
@@ -86,23 +87,13 @@ export default function AutomationsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-3xl bg-primary/20 border border-primary/40 flex items-center justify-center text-primary">
-            <Sparkles className="w-5 h-5" />
-          </div>
-          <div>
-            <h1 className="text-xl font-semibold">Automations</h1>
-            <p className="text-sm text-muted-foreground">
-              Event-driven playbooks. Triggers fire on bookings, invoices, contacts, and social events.
-            </p>
-          </div>
-        </div>
-        <Button onClick={() => setShowBuilder(!showBuilder)} className="gap-2">
-          <Plus className="w-4 h-4" />
-          New Playbook
-        </Button>
-      </div>
+      <PageHeader
+        icon={Zap}
+        title="Automations"
+        subtitle="Build workflows to automate your business"
+        actionLabel="New Playbook"
+        onAction={() => setShowBuilder(!showBuilder)}
+      />
 
       {formError && <div className="text-xs text-amber-400">{formError}</div>}
       {error && (
