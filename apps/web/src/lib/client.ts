@@ -2695,4 +2695,49 @@ export async function toggleLandingPagePublish(businessId: string, id: string): 
   return apiPost<LandingPage>({ path: `/businesses/${encodeURIComponent(businessId)}/landing-pages/${id}/toggle-publish`, body: {} });
 }
 
+// ---
+// BUSINESS SIMULATION
+// ---
+export interface SimulationResult {
+  simulation: string;
+}
+export async function runSimulation(businessId: string, scenario: string, variables?: Record<string, any>): Promise<ApiResult<SimulationResult>> {
+  return apiPost<SimulationResult>({ path: `/businesses/${encodeURIComponent(businessId)}/ai/simulate`, body: { scenario, variables } });
+}
+
+// ---
+// SEO SCORING
+// ---
+export interface SeoScore {
+  score: number;
+  grade: string;
+  issues: string[];
+  suggestions: string[];
+}
+export async function scoreSEO(businessId: string, data: { title?: string; description?: string; content?: string; url?: string }): Promise<ApiResult<SeoScore>> {
+  return apiPost<SeoScore>({ path: `/businesses/${encodeURIComponent(businessId)}/ai/seo-score`, body: data });
+}
+
+// ---
+// WEBHOOKS / INTEGRATIONS
+// ---
+export interface WebhookConfig {
+  id: string;
+  name: string;
+  url: string;
+  events: string[];
+  secret: string;
+  isActive: boolean;
+  createdAt: string;
+}
+export async function fetchWebhooks(businessId: string): Promise<ApiResult<WebhookConfig[]>> {
+  return apiGetSimple<WebhookConfig[]>(`/businesses/${encodeURIComponent(businessId)}/webhooks`);
+}
+export async function createWebhook(businessId: string, data: { url: string; events: string[]; name?: string }): Promise<ApiResult<WebhookConfig>> {
+  return apiPost<WebhookConfig>({ path: `/businesses/${encodeURIComponent(businessId)}/webhooks`, body: data });
+}
+export async function deleteWebhook(businessId: string, webhookId: string): Promise<ApiResult<void>> {
+  return apiDelete<void>(`/businesses/${encodeURIComponent(businessId)}/webhooks/${webhookId}`);
+}
+
 export { DEFAULT_BUSINESS_ID };

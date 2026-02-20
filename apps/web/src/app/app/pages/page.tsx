@@ -20,6 +20,7 @@ import {
   FileText,
   ImageIcon,
   ChevronLeft,
+  BarChart3,
 } from "lucide-react";
 import {
   fetchLandingPages,
@@ -27,8 +28,10 @@ import {
   updateLandingPage,
   deleteLandingPage,
   toggleLandingPagePublish,
+  scoreSEO,
   LandingPage,
 } from "@/lib/client";
+import type { SeoScore } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 
 const SECTION_TYPES = [
@@ -79,6 +82,8 @@ export default function LandingPagesPage() {
   const [editingPage, setEditingPage] = useState<LandingPage | null>(null);
   const [saving, setSaving] = useState(false);
   const [showSectionPicker, setShowSectionPicker] = useState(false);
+  const [seoScore, setSeoScore] = useState<SeoScore | null>(null);
+  const [seoLoading, setSeoLoading] = useState(false);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -181,6 +186,22 @@ export default function LandingPagesPage() {
     setEditingPage({ ...editingPage, sections: newSections });
   };
 
+  const handleSeoScore = useCallback(async (page: LandingPage) => {
+    if (!businessId || seoLoading) return;
+    setSeoLoading(true);
+    const allContent = page.sections.map(s => Object.values(s.content).join(' ')).join(' ');
+    try {
+      const res = await scoreSEO(businessId, {
+        title: page.title,
+        description: page.sections.find(s => s.type === 'hero')?.content?.subtitle as string || '',
+        content: allContent,
+        url: page.slug,
+      });
+      if (res.data) setSeoScore(res.data);
+    } catch {}
+    setSeoLoading(false);
+  }, [businessId, seoLoading]);
+
   const updateSectionContent = (index: number, content: Record<string, unknown>) => {
     if (!editingPage) return;
     const newSections = [...editingPage.sections];
@@ -250,6 +271,14 @@ export default function LandingPagesPage() {
               </a>
             )}
             <button
+              onClick={() => handleSeoScore(editingPage)}
+              disabled={seoLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/5 border border-white/10 hover:bg-white/10 transition-colors disabled:opacity-40"
+            >
+              <BarChart3 className={`w-3 h-3 ${seoLoading ? "animate-spin" : ""}`} />
+              SEO Score
+            </button>
+            <button
               onClick={handleSave}
               disabled={saving}
               className="kf-btn-primary flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-50"
@@ -259,6 +288,36 @@ export default function LandingPagesPage() {
             </button>
           </div>
         </div>
+
+        {seoScore && (
+          <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-teal-400" /> SEO Score
+              </h3>
+              <div className={`text-2xl font-bold ${seoScore.score >= 80 ? 'text-green-400' : seoScore.score >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
+                {seoScore.grade} ({seoScore.score}/100)
+              </div>
+            </div>
+            {seoScore.issues.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-red-400 uppercase tracking-wider">Issues</p>
+                {seoScore.issues.map((issue, i) => (
+                  <p key={i} className="text-xs text-red-300/80 flex items-start gap-1.5"><span className="text-red-400 mt-px">•</span>{issue}</p>
+                ))}
+              </div>
+            )}
+            {seoScore.suggestions.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-amber-400 uppercase tracking-wider">Suggestions</p>
+                {seoScore.suggestions.map((s, i) => (
+                  <p key={i} className="text-xs text-amber-300/80 flex items-start gap-1.5"><span className="text-amber-400 mt-px">→</span>{s}</p>
+                ))}
+              </div>
+            )}
+            <button onClick={() => setSeoScore(null)} className="text-xs text-muted-foreground hover:text-white">Dismiss</button>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 space-y-3">

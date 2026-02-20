@@ -17,6 +17,9 @@ import {
   Tag,
   BarChart3,
   Palette,
+  Upload,
+  Image,
+  Calculator,
 } from "lucide-react";
 import {
   fetchExpenses,
@@ -31,6 +34,7 @@ import {
   ExpenseCategory,
   ExpenseSummary,
 } from "@/lib/client";
+import { API_BASE, getAuthHeaders } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 
 const CATEGORY_COLORS = [
@@ -57,6 +61,7 @@ export default function ExpensesPage() {
   const [summary, setSummary] = useState<ExpenseSummary | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const [uploading, setUploading] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [formData, setFormData] = useState({
@@ -76,6 +81,10 @@ export default function ExpensesPage() {
   const [categorySection, setCategorySection] = useState(false);
   const [newCatName, setNewCatName] = useState("");
   const [newCatColor, setNewCatColor] = useState(CATEGORY_COLORS[0]);
+
+  const [showTaxCalc, setShowTaxCalc] = useState(false);
+  const [taxRate, setTaxRate] = useState("12.5");
+  const [annualIncome, setAnnualIncome] = useState("");
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -224,6 +233,26 @@ export default function ExpensesPage() {
     }
   };
 
+  const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !businessId) return;
+    setUploading(true);
+    try {
+      const headers = getAuthHeaders();
+      const res = await fetch(`${API_BASE}/businesses/${businessId}/uploads/request-url`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, contentType: file.type }),
+      });
+      const data = await res.json();
+      if (data.uploadUrl) {
+        await fetch(data.uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
+        setFormData(prev => ({ ...prev, receiptUrl: data.publicUrl || data.uploadUrl.split('?')[0] }));
+      }
+    } catch {}
+    setUploading(false);
+  };
+
   const topCategory = summary?.byCategory?.length
     ? summary.byCategory.reduce((a, b) => (a.total > b.total ? a : b))
     : null;
@@ -236,6 +265,16 @@ export default function ExpensesPage() {
   const maxMonthly = summary?.monthlyTrend?.length
     ? Math.max(...summary.monthlyTrend.map((m) => m.total), 1)
     : 1;
+
+  const taxCalc = (() => {
+    const income = parseFloat(annualIncome) || 0;
+    const rate = parseFloat(taxRate) || 0;
+    const totalExpenses = summary?.total || 0;
+    const taxableIncome = Math.max(0, income - totalExpenses);
+    const estimatedTax = taxableIncome * (rate / 100);
+    const effectiveRate = income > 0 ? (estimatedTax / income) * 100 : 0;
+    return { income, totalExpenses, taxableIncome, estimatedTax, effectiveRate };
+  })();
 
   if (loading) {
     return (
@@ -626,6 +665,59 @@ export default function ExpensesPage() {
         </AnimatePresence>
       </div>
 
+      <div className="kf-card rounded-xl overflow-hidden">
+        <button
+          onClick={() => setShowTaxCalc(!showTaxCalc)}
+          className="w-full flex items-center justify-between p-4 hover:bg-white/[0.02] transition-colors"
+        >
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <Calculator className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+            Tax Estimator
+          </h3>
+          {showTaxCalc ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
+        </button>
+        <AnimatePresence>
+          {showTaxCalc && (
+            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+              <div className="px-4 pb-4 space-y-4">
+                <p className="text-xs text-muted-foreground">Estimate your tax liability based on income and tracked expenses. Default rate is Trinidad VAT (12.5%).</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Annual Income (TTD)</label>
+                    <input type="number" value={annualIncome} onChange={e => setAnnualIncome(e.target.value)} placeholder="0.00" className="w-full bg-transparent border border-border/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Tax Rate (%)</label>
+                    <input type="number" step="0.1" value={taxRate} onChange={e => setTaxRate(e.target.value)} className="w-full bg-transparent border border-border/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="bg-white/5 rounded-lg p-3 text-center">
+                    <p className="text-[10px] text-muted-foreground uppercase">Income</p>
+                    <p className="text-sm font-semibold text-green-400">{formatCurrency(taxCalc.income)}</p>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-3 text-center">
+                    <p className="text-[10px] text-muted-foreground uppercase">Expenses</p>
+                    <p className="text-sm font-semibold text-red-400">{formatCurrency(taxCalc.totalExpenses)}</p>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-3 text-center">
+                    <p className="text-[10px] text-muted-foreground uppercase">Taxable</p>
+                    <p className="text-sm font-semibold text-amber-400">{formatCurrency(taxCalc.taxableIncome)}</p>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-3 text-center">
+                    <p className="text-[10px] text-muted-foreground uppercase">Est. Tax</p>
+                    <p className="text-sm font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>{formatCurrency(taxCalc.estimatedTax)}</p>
+                  </div>
+                </div>
+                {taxCalc.effectiveRate > 0 && (
+                  <p className="text-xs text-muted-foreground text-center">Effective tax rate: {taxCalc.effectiveRate.toFixed(1)}%</p>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
       <AnimatePresence>
         {showModal && (
           <motion.div
@@ -735,13 +827,31 @@ export default function ExpensesPage() {
                 </div>
 
                 <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Receipt URL</label>
-                  <input
-                    value={formData.receiptUrl}
-                    onChange={(e) => setFormData({ ...formData, receiptUrl: e.target.value })}
-                    placeholder="https://..."
-                    className="w-full bg-transparent border border-border/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]"
-                  />
+                  <label className="text-xs text-muted-foreground mb-1 block">Receipt</label>
+                  <div className="flex items-center gap-2">
+                    <label className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors ${uploading ? "opacity-50 pointer-events-none" : ""} bg-white/5 border border-border/60 hover:bg-white/10`}>
+                      <Upload className="w-4 h-4" />
+                      {uploading ? "Uploading..." : "Upload Receipt"}
+                      <input type="file" accept="image/*,.pdf" onChange={handleReceiptUpload} className="hidden" />
+                    </label>
+                    {formData.receiptUrl && (
+                      <div className="flex items-center gap-1.5 text-xs text-green-400">
+                        <Image className="w-3.5 h-3.5" />
+                        <span className="truncate max-w-[150px]">Receipt attached</span>
+                        <button onClick={() => setFormData(prev => ({ ...prev, receiptUrl: "" }))} className="text-muted-foreground hover:text-red-400">
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {formData.receiptUrl && (
+                    <input
+                      value={formData.receiptUrl}
+                      onChange={(e) => setFormData({ ...formData, receiptUrl: e.target.value })}
+                      placeholder="Or paste URL..."
+                      className="mt-1.5 w-full bg-transparent border border-border/60 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[hsl(var(--kf-accent1))]"
+                    />
+                  )}
                 </div>
 
                 <div className="flex justify-end gap-2 pt-2">

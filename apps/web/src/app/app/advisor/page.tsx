@@ -13,6 +13,10 @@ import {
   RefreshCw,
   DollarSign,
   BarChart3,
+  Mic,
+  MicOff,
+  FlaskConical,
+  Loader2,
 } from "lucide-react";
 import {
   sendAiChat,
@@ -21,6 +25,8 @@ import {
   AiChatResponse,
   AiBriefing,
   CashFlowForecast,
+  runSimulation,
+  SimulationResult,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 
@@ -36,9 +42,9 @@ const WELCOME_MESSAGE: ChatMessage = {
 };
 
 function formatCurrency(value: number) {
-  return new Intl.NumberFormat("en-US", {
+  return new Intl.NumberFormat("en-TT", {
     style: "currency",
-    currency: "USD",
+    currency: "TTD",
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(value);
@@ -53,6 +59,11 @@ export default function AdvisorPage() {
   const [briefingLoading, setBriefingLoading] = useState(false);
   const [forecast, setForecast] = useState<CashFlowForecast | null>(null);
   const [forecastLoading, setForecastLoading] = useState(false);
+  const [simScenario, setSimScenario] = useState("");
+  const [simResult, setSimResult] = useState<SimulationResult | null>(null);
+  const [simLoading, setSimLoading] = useState(false);
+  const [voiceListening, setVoiceListening] = useState(false);
+  const [voiceSupported, setVoiceSupported] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -63,6 +74,10 @@ export default function AdvisorPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    setVoiceSupported(typeof window !== "undefined" && ("webkitSpeechRecognition" in window || "SpeechRecognition" in window));
+  }, []);
 
   const handleSend = useCallback(async () => {
     if (!businessId || !input.trim() || sending) return;
@@ -106,6 +121,34 @@ export default function AdvisorPage() {
     } catch {}
     setForecastLoading(false);
   }, [businessId, forecastLoading]);
+
+  const handleSimulate = useCallback(async () => {
+    if (!businessId || !simScenario.trim() || simLoading) return;
+    setSimLoading(true);
+    try {
+      const res = await runSimulation(businessId, simScenario.trim());
+      if (res.data) setSimResult(res.data);
+    } catch {}
+    setSimLoading(false);
+  }, [businessId, simScenario, simLoading]);
+
+  const startVoice = useCallback(() => {
+    if (!voiceSupported) return;
+    const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      setInput(transcript);
+      setVoiceListening(false);
+    };
+    recognition.onerror = () => setVoiceListening(false);
+    recognition.onend = () => setVoiceListening(false);
+    setVoiceListening(true);
+    recognition.start();
+  }, [voiceSupported]);
 
   return (
     <div className="space-y-4">
@@ -190,6 +233,15 @@ export default function AdvisorPage() {
                 className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-orange-500/50 placeholder:text-muted-foreground"
                 disabled={sending || !businessId}
               />
+              {voiceSupported && (
+                <button
+                  onClick={startVoice}
+                  className={`p-2.5 rounded-lg transition-colors ${voiceListening ? "bg-red-500/20 text-red-400" : "bg-white/5 text-muted-foreground hover:text-white hover:bg-white/10"}`}
+                  title={voiceListening ? "Listening..." : "Voice input"}
+                >
+                  {voiceListening ? <MicOff className="w-4 h-4 animate-pulse" /> : <Mic className="w-4 h-4" />}
+                </button>
+              )}
               <button
                 onClick={handleSend}
                 disabled={sending || !input.trim() || !businessId}
@@ -207,7 +259,7 @@ export default function AdvisorPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="bg-white/5 backdrop-blur border border-white/10 rounded-xl overflow-hidden flex-1"
+            className="bg-white/5 backdrop-blur border border-white/10 rounded-xl overflow-hidden flex"
           >
             <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -321,7 +373,7 @@ export default function AdvisorPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
-            className="bg-white/5 backdrop-blur border border-white/10 rounded-xl overflow-hidden flex-1"
+            className="bg-white/5 backdrop-blur border border-white/10 rounded-xl overflow-hidden flex"
           >
             <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -451,6 +503,56 @@ export default function AdvisorPage() {
                   </p>
                 </div>
               )}
+            </div>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="bg-white/5 backdrop-blur border border-white/10 rounded-xl overflow-hidden"
+          >
+            <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
+              <FlaskConical className="w-5 h-5 text-purple-400" />
+              <h2 className="text-sm font-semibold">Business Simulation</h2>
+            </div>
+            <div className="p-4 space-y-3">
+              <p className="text-xs text-muted-foreground">Run &quot;what-if&quot; scenarios using your real business data.</p>
+              <div className="space-y-2">
+                <textarea
+                  value={simScenario}
+                  onChange={(e) => setSimScenario(e.target.value)}
+                  placeholder="e.g., What if I hire 2 employees at $3000/month each? What if I raise prices by 20%? What if I launch a new product line?"
+                  rows={3}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-purple-500/50 placeholder:text-muted-foreground resize-none"
+                  disabled={!businessId}
+                />
+                <button
+                  onClick={handleSimulate}
+                  disabled={simLoading || !simScenario.trim() || !businessId}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40"
+                  style={{ background: "linear-gradient(135deg, #8b5cf6, #6366f1)" }}
+                >
+                  {simLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FlaskConical className="w-4 h-4" />}
+                  {simLoading ? "Running Simulation..." : "Simulate Scenario"}
+                </button>
+              </div>
+              {simResult && (
+                <div className="bg-white/5 border border-purple-500/20 rounded-lg p-4 max-h-96 overflow-y-auto">
+                  <p className="text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">{simResult.simulation}</p>
+                </div>
+              )}
+              <div className="flex flex-wrap gap-1.5">
+                {["What if I hire 2 new employees?", "What if I raise prices by 15%?", "What if I expand to a second location?"].map(q => (
+                  <button
+                    key={q}
+                    onClick={() => setSimScenario(q)}
+                    className="text-[10px] px-2 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-300 hover:bg-purple-500/20 transition-colors"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
             </div>
           </motion.div>
         </div>

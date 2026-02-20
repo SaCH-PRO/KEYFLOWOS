@@ -37,4 +37,22 @@ export class AiController {
   ) {
     return this.advisor.predictCashFlow(businessId, days ? parseInt(days, 10) : 30);
   }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai/simulate')
+  async simulate(
+    @Param('businessId') businessId: string,
+    @Body() body: { scenario: string; variables?: Record<string, any> },
+  ) {
+    return this.advisor.simulateScenario(businessId, body.scenario, body.variables);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai/seo-score')
+  async seoScore(
+    @Param('businessId') businessId: string,
+    @Body() body: { title?: string; description?: string; content?: string; url?: string },
+  ) {
+    return this.advisor.scoreSEO(body);
+  }
 }

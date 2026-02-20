@@ -110,12 +110,159 @@ export class SeedService implements OnApplicationBootstrap {
             ],
           },
         },
+        {
+          name: 'consulting-agency',
+          displayName: 'Consulting / Agency',
+          description: 'For consulting firms and agencies providing professional services.',
+          icon: '🏢',
+          industry: 'Professional Services',
+          archetype: 'DIGITAL_PRODUCT',
+          config: {
+            products: [
+              { name: 'Strategy Consultation', description: 'Strategic consulting services', price: 3000, category: 'SERVICE' },
+              { name: 'Brand Audit', description: 'Comprehensive brand audit and recommendations', price: 1500, category: 'SERVICE' },
+              { name: 'Market Research Report', description: 'In-depth market research report', price: 2000, category: 'SERVICE' },
+              { name: 'Retainer Package', description: 'Monthly retainer package for ongoing consulting', price: 5000, category: 'SERVICE' },
+            ],
+            expenseCategories: [
+              { name: 'Office', icon: '🏢' },
+              { name: 'Travel', icon: '✈️' },
+              { name: 'Software', icon: '💻' },
+              { name: 'Team', icon: '👥' },
+            ],
+          },
+        },
+        {
+          name: 'fitness-wellness',
+          displayName: 'Fitness / Wellness',
+          description: 'For gyms, personal trainers, and wellness professionals.',
+          icon: '💪',
+          industry: 'Health & Fitness',
+          archetype: 'LOCAL_SERVICE',
+          config: {
+            services: [
+              { name: 'Personal Training', description: 'One-on-one personal training session', price: 80, duration: 60 },
+              { name: 'Group Class', description: 'Group fitness class', price: 25, duration: 45 },
+              { name: 'Wellness Consultation', description: 'Wellness and nutrition consultation', price: 120, duration: 60 },
+            ],
+            products: [
+              { name: 'Membership - Monthly', description: 'Monthly gym membership', price: 99, category: 'PACKAGE' },
+              { name: 'Protein Supplements', description: 'Protein supplement package', price: 45, category: 'PRODUCT' },
+            ],
+            expenseCategories: [
+              { name: 'Equipment', icon: '🏋️' },
+              { name: 'Rent', icon: '🏠' },
+              { name: 'Insurance', icon: '🛡️' },
+              { name: 'Marketing', icon: '📣' },
+            ],
+          },
+        },
+        {
+          name: 'photography-creative',
+          displayName: 'Photography / Creative',
+          description: 'For photographers, videographers, and creative professionals.',
+          icon: '📸',
+          industry: 'Creative Services',
+          archetype: 'DIGITAL_PRODUCT',
+          config: {
+            services: [
+              { name: 'Portrait Session', description: 'Professional portrait photography session', price: 300, duration: 90 },
+              { name: 'Event Photography', description: 'Full event photography coverage', price: 1500, duration: 480 },
+              { name: 'Video Production', description: 'Professional video production service', price: 2500, duration: 240 },
+            ],
+            products: [
+              { name: 'Photo Print Package', description: 'High-quality photo prints', price: 200, category: 'PRODUCT' },
+              { name: 'Digital Gallery Access', description: 'Cloud-based digital gallery access', price: 100, category: 'PRODUCT' },
+            ],
+            expenseCategories: [
+              { name: 'Equipment', icon: '📷' },
+              { name: 'Software', icon: '🖥️' },
+              { name: 'Props & Sets', icon: '🎭' },
+              { name: 'Travel', icon: '✈️' },
+            ],
+          },
+        },
+        {
+          name: 'cleaning-services',
+          displayName: 'Cleaning / Home Services',
+          description: 'For cleaning companies, handyman services, and home maintenance.',
+          icon: '🧹',
+          industry: 'Home Services',
+          archetype: 'LOCAL_SERVICE',
+          config: {
+            services: [
+              { name: 'Standard Cleaning', description: 'Standard residential cleaning service', price: 120, duration: 120 },
+              { name: 'Deep Cleaning', description: 'Comprehensive deep cleaning service', price: 250, duration: 240 },
+              { name: 'Move-in/out Clean', description: 'Move-in or move-out cleaning service', price: 400, duration: 360 },
+            ],
+            products: [
+              { name: 'Monthly Cleaning Plan', description: 'Monthly recurring cleaning service package', price: 350, category: 'PACKAGE' },
+            ],
+            expenseCategories: [
+              { name: 'Supplies', icon: '🧴' },
+              { name: 'Transport', icon: '🚗' },
+              { name: 'Equipment', icon: '⚙️' },
+              { name: 'Insurance', icon: '🛡️' },
+            ],
+          },
+        },
+        {
+          name: 'tutoring-education',
+          displayName: 'Tutoring / Education',
+          description: 'For tutors, coaches, and online educators.',
+          icon: '📚',
+          industry: 'Education',
+          archetype: 'DIGITAL_PRODUCT',
+          config: {
+            services: [
+              { name: '1-on-1 Tutoring', description: 'One-on-one personalized tutoring session', price: 60, duration: 60 },
+              { name: 'Group Workshop', description: 'Group learning workshop', price: 35, duration: 90 },
+              { name: 'Course Mentorship', description: 'Personal mentorship for course completion', price: 200, duration: 60 },
+            ],
+            products: [
+              { name: 'Online Course Bundle', description: 'Complete online course bundle', price: 299, category: 'PRODUCT' },
+              { name: 'Study Materials', description: 'Comprehensive study materials package', price: 49, category: 'PRODUCT' },
+            ],
+            expenseCategories: [
+              { name: 'Books & Resources', icon: '📖' },
+              { name: 'Software', icon: '💻' },
+              { name: 'Marketing', icon: '📣' },
+              { name: 'Rent', icon: '🏠' },
+            ],
+          },
+        },
+        {
+          name: 'event-planning',
+          displayName: 'Event Planning',
+          description: 'For event planners and wedding coordinators.',
+          icon: '🎉',
+          industry: 'Events',
+          archetype: 'LOCAL_SERVICE',
+          config: {
+            services: [
+              { name: 'Wedding Coordination', description: 'Full wedding coordination and planning', price: 5000, duration: 600 },
+              { name: 'Corporate Event', description: 'Corporate event planning and execution', price: 3000, duration: 480 },
+              { name: 'Birthday Party', description: 'Birthday party planning and coordination', price: 1500, duration: 300 },
+            ],
+            products: [
+              { name: 'Decoration Package', description: 'Event decoration package', price: 800, category: 'PRODUCT' },
+              { name: 'Audio/Visual Rental', description: 'Audio and visual equipment rental', price: 500, category: 'PRODUCT' },
+            ],
+            expenseCategories: [
+              { name: 'Decor', icon: '🎨' },
+              { name: 'Catering', icon: '🍽️' },
+              { name: 'Venue', icon: '🏛️' },
+              { name: 'Staff', icon: '👥' },
+              { name: 'Rentals', icon: '🪑' },
+            ],
+          },
+        },
       ];
 
       for (const t of templates) {
         await this.prisma.client.businessTemplate.create({ data: t });
       }
-      this.logger.log('Seeded 4 default business templates');
+      this.logger.log('Seeded 10 default business templates');
     } catch (e) {
       this.logger.warn('Templates seed failed: ' + (e as Error).message);
     }
