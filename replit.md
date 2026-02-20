@@ -69,6 +69,11 @@ The project is structured as a monorepo containing a Next.js 16 frontend (`apps/
     - **Landing Pages:** Page builder with section types, public serving, and SEO scoring.
 
 ## Recent Changes (Feb 20, 2026)
+- **Production Readiness Sprint:**
+  - Fixed critical CRM flow service bugs: `expiresAt` → `expiryDate` on Quote queries (3 occurrences), restored `deletedAt: null` soft-delete filters on Contact queries (19 occurrences)
+  - Enhanced PWA manifest for app store installability: added `id`, `scope`, `lang`, `dir`, `prefer_related_applications` fields, removed non-existent screenshot references
+  - Configured production deployment (autoscale): Prisma generate + server/web builds, concurrent server + frontend start
+  - Verified Service Worker registration and PWA compliance
 - **Gap Bridge Sprint:** Bridged all buildable gaps from the research brief:
   - Added 6 new business templates (total 10): Consulting/Agency, Fitness/Wellness, Photography/Creative, Cleaning/Home Services, Tutoring/Education, Event Planning
   - Built Business Simulation mode (AI-powered what-if scenarios) on the Advisor page
