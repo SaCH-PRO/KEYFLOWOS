@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
+import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Package, Plus } from "lucide-react";
+import { Search, Package, Plus, Filter } from "lucide-react";
 import { Button } from "@keyflow/ui";
 import type { Product } from "@/lib/client";
 import { ProductCard } from "./product-card";
@@ -19,6 +19,13 @@ interface ProductsPanelProps {
   setDeleteConfirm: (id: string | null) => void;
 }
 
+const CATEGORY_FILTERS = [
+  { value: "ALL", label: "All" },
+  { value: "SERVICE", label: "Services" },
+  { value: "PRODUCT", label: "Products" },
+  { value: "PACKAGE", label: "Packages" },
+] as const;
+
 export function ProductsPanel({
   products,
   loading,
@@ -30,15 +37,37 @@ export function ProductsPanel({
   deleteConfirm,
   setDeleteConfirm,
 }: ProductsPanelProps) {
+  const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
+  const [showInactive, setShowInactive] = useState(false);
+
   const filteredProducts = useMemo(() => {
-    if (!productSearch.trim()) return products;
-    const q = productSearch.toLowerCase();
-    return products.filter(
-      (p) =>
-        p.name.toLowerCase().includes(q) ||
-        (p.description && p.description.toLowerCase().includes(q))
-    );
-  }, [products, productSearch]);
+    let result = products;
+    if (!showInactive) {
+      result = result.filter((p) => p.isActive !== false);
+    }
+    if (categoryFilter !== "ALL") {
+      result = result.filter((p) => p.category === categoryFilter);
+    }
+    if (productSearch.trim()) {
+      const q = productSearch.toLowerCase();
+      result = result.filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          (p.description && p.description.toLowerCase().includes(q))
+      );
+    }
+    return result;
+  }, [products, productSearch, categoryFilter, showInactive]);
+
+  const categoryCounts = useMemo(() => {
+    const active = showInactive ? products : products.filter((p) => p.isActive !== false);
+    return {
+      ALL: active.length,
+      SERVICE: active.filter((p) => p.category === "SERVICE").length,
+      PRODUCT: active.filter((p) => p.category === "PRODUCT").length,
+      PACKAGE: active.filter((p) => p.category === "PACKAGE").length,
+    };
+  }, [products, showInactive]);
 
   return (
     <motion.div
@@ -47,15 +76,44 @@ export function ProductsPanel({
       transition={{ duration: 0.3 }}
       className="space-y-4"
     >
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-        <input
-          type="text"
-          placeholder="Search products..."
-          value={productSearch}
-          onChange={(e) => setProductSearch(e.target.value)}
-          className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-card border border-border/60 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 transition-all"
-        />
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Search products..."
+            value={productSearch}
+            onChange={(e) => setProductSearch(e.target.value)}
+            className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-card border border-border/60 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 transition-all"
+          />
+        </div>
+        <div className="flex items-center gap-1">
+          <Filter className="w-4 h-4 text-muted-foreground" />
+          {CATEGORY_FILTERS.map((f) => (
+            <button
+              key={f.value}
+              onClick={() => setCategoryFilter(f.value)}
+              className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
+                categoryFilter === f.value
+                  ? "bg-primary/20 text-primary border border-primary/30"
+                  : "text-muted-foreground hover:bg-muted border border-transparent"
+              }`}
+            >
+              {f.label}
+              <span className="ml-1 opacity-60">{categoryCounts[f.value as keyof typeof categoryCounts]}</span>
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => setShowInactive(!showInactive)}
+          className={`px-3 py-1.5 text-xs rounded-lg transition-colors border ${
+            showInactive
+              ? "bg-muted text-foreground border-border"
+              : "text-muted-foreground hover:bg-muted border-transparent"
+          }`}
+        >
+          {showInactive ? "Hide" : "Show"} inactive
+        </button>
       </div>
 
       {loading ? (
@@ -81,12 +139,11 @@ export function ProductsPanel({
           <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">
             <Package className="w-8 h-8 text-muted-foreground" />
           </div>
-          {productSearch.trim() ? (
+          {productSearch.trim() || categoryFilter !== "ALL" ? (
             <>
               <h3 className="text-lg font-semibold mb-1">No products found</h3>
               <p className="text-sm text-muted-foreground max-w-sm">
-                No products match your search. Try a different term or clear the
-                search.
+                No products match your filters. Try adjusting your search or category.
               </p>
             </>
           ) : (

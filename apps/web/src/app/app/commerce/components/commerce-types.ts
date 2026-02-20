@@ -1,4 +1,4 @@
-export type Tab = "products" | "quotes" | "invoices";
+export type Tab = "products" | "quotes" | "invoices" | "recurring";
 
 export type ProductForm = {
   name: string;
@@ -45,6 +45,30 @@ export const QUOTE_STATUS_FILTERS = [
 
 export function generateItemId() {
   return `item_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+export const PAYMENT_TERMS = [
+  { value: "DUE_ON_RECEIPT", label: "Due on Receipt" },
+  { value: "NET_7", label: "Net 7 (7 days)" },
+  { value: "NET_15", label: "Net 15 (15 days)" },
+  { value: "NET_30", label: "Net 30 (30 days)" },
+  { value: "NET_60", label: "Net 60 (60 days)" },
+  { value: "NET_90", label: "Net 90 (90 days)" },
+] as const;
+
+export function getDueDateFromTerms(termKey: string): string {
+  const now = new Date();
+  const daysMap: Record<string, number> = {
+    DUE_ON_RECEIPT: 0,
+    NET_7: 7,
+    NET_15: 15,
+    NET_30: 30,
+    NET_60: 60,
+    NET_90: 90,
+  };
+  const days = daysMap[termKey] ?? 30;
+  now.setDate(now.getDate() + days);
+  return now.toISOString().split("T")[0];
 }
 
 export function getStatusBadge(status: string) {

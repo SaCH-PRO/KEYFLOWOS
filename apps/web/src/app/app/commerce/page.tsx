@@ -11,6 +11,7 @@ import {
   Plus,
   X,
   Mail,
+  RefreshCw,
 } from "lucide-react";
 import {
   createProduct,
@@ -35,6 +36,7 @@ import CommerceDashboard from "./components/commerce-dashboard";
 import { ProductsPanel } from "./products/products-panel";
 import QuotesPanel from "./quotes/quotes-panel";
 import InvoicesPanel from "./invoices/invoices-panel";
+import RecurringPanel from "./recurring/recurring-panel";
 
 const productSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -83,6 +85,7 @@ export default function CommercePage() {
   const [productSearch, setProductSearch] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
+  const [recurringTriggerNew, setRecurringTriggerNew] = useState(0);
   const [showInvoiceBuilder, setShowInvoiceBuilder] = useState(false);
   const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null);
   const [invoiceForm, setInvoiceForm] = useState({
@@ -300,6 +303,7 @@ export default function CommercePage() {
     { key: "products", label: "Products & Services", icon: <Package className="w-4 h-4" /> },
     { key: "quotes", label: "Quotations", icon: <FileText className="w-4 h-4" /> },
     { key: "invoices", label: "Invoices", icon: <CreditCard className="w-4 h-4" /> },
+    { key: "recurring", label: "Recurring", icon: <RefreshCw className="w-4 h-4" /> },
   ];
 
   return (
@@ -363,6 +367,12 @@ export default function CommercePage() {
                 <Button onClick={() => setShowInvoiceBuilder(!showInvoiceBuilder)} className="gap-2">
                   <Plus className="w-4 h-4" />
                   New Invoice
+                </Button>
+              )}
+              {tab === "recurring" && (
+                <Button onClick={() => setRecurringTriggerNew((n) => n + 1)} className="gap-2">
+                  <Plus className="w-4 h-4" />
+                  New Schedule
                 </Button>
               )}
             </div>
@@ -477,6 +487,22 @@ export default function CommercePage() {
               resetInvoiceForm={resetInvoiceForm}
               setProducts={setProducts}
               setInvoices={setInvoices}
+              gmailStatus={gmailStatus}
+            />
+          </motion.div>
+        )}
+        {tab === "recurring" && (
+          <motion.div
+            key="recurring"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+          >
+            <RecurringPanel
+              businessId={businessId}
+              contacts={contacts}
+              products={products}
+              triggerNew={recurringTriggerNew}
             />
           </motion.div>
         )}

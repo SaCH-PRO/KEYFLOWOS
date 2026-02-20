@@ -18,6 +18,8 @@ import {
   ToggleRight,
   Plus,
   Minus,
+  Copy,
+  MessageCircle,
 } from "lucide-react";
 import {
   createProduct,
@@ -322,6 +324,34 @@ export default function QuotesPanel({
       await deleteQuote(businessId, quote.id);
       setQuotes((q) => q.filter((qItem) => qItem.id !== quote.id));
     }
+  }
+
+  function duplicateQuote(quote: Quote) {
+    setEditingQuoteId(null);
+    setQuoteForm({
+      contactId: quote.contactId || "",
+      expiryDate: "",
+      items: (quote.items ?? []).map((item: any) => ({
+        id: generateItemId(),
+        productId: item.productId ?? "",
+        description: item.description,
+        quantity: String(item.quantity),
+        unitPrice: String(item.unitPrice),
+      })),
+      taxRate: String(quote.taxRate ?? 0),
+      discountType: (quote.discountType as "PERCENT" | "FIXED") || "PERCENT",
+      discountValue: quote.discountValue ? String(quote.discountValue) : "",
+      notes: quote.notes || "",
+    });
+    setShowQuoteBuilder(true);
+  }
+
+  function shareQuoteViaWhatsApp(quote: Quote) {
+    const contactName = quote.contact
+      ? `${quote.contact.firstName ?? ""} ${quote.contact.lastName ?? ""}`.trim()
+      : "there";
+    const msg = `Hi ${contactName}, here is your quote ${quote.quoteNumber} for ${quote.currency} ${Number(quote.total).toFixed(2)}. Please review and let us know if you'd like to proceed!`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
   }
 
   async function handleConvert() {
@@ -759,6 +789,20 @@ export default function QuotesPanel({
                         >
                           <Pencil className="w-4 h-4" />
                         </button>
+                        <button
+                          onClick={() => duplicateQuote(quote)}
+                          className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
+                          title="Duplicate Quote"
+                        >
+                          <Copy className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => shareQuoteViaWhatsApp(quote)}
+                          className="p-1.5 rounded-lg hover:bg-green-500/20 text-green-400"
+                          title="Share via WhatsApp"
+                        >
+                          <MessageCircle className="w-4 h-4" />
+                        </button>
                         {(quote.status === "DRAFT" || quote.status === "SENT") && (
                           <button
                             onClick={() => {
@@ -862,19 +906,18 @@ export default function QuotesPanel({
                   >
                     <Eye className="w-4 h-4" />
                   </button>
-                  <button
-                    onClick={() => openEditQuote(quote)}
-                    className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
-                    title="Edit"
-                  >
+                  <button onClick={() => openEditQuote(quote)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground" title="Edit">
                     <Pencil className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => duplicateQuote(quote)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground" title="Duplicate">
+                    <Copy className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => shareQuoteViaWhatsApp(quote)} className="p-1.5 rounded-lg hover:bg-green-500/20 text-green-400" title="WhatsApp">
+                    <MessageCircle className="w-4 h-4" />
                   </button>
                   {(quote.status === "DRAFT" || quote.status === "SENT") && (
                     <button
-                      onClick={() => {
-                        setSelectedQuote(quote);
-                        setShowEmailModal(true);
-                      }}
+                      onClick={() => { setSelectedQuote(quote); setShowEmailModal(true); }}
                       className="p-1.5 rounded-lg hover:bg-blue-500/20 text-blue-400"
                       title="Send to Email"
                     >
@@ -882,48 +925,29 @@ export default function QuotesPanel({
                     </button>
                   )}
                   {quote.status === "DRAFT" && (
-                    <button
-                      onClick={() => handleMarkSent(quote)}
-                      className="p-1.5 rounded-lg hover:bg-primary/20 text-primary"
-                      title="Mark as Sent"
-                    >
+                    <button onClick={() => handleMarkSent(quote)} className="p-1.5 rounded-lg hover:bg-primary/20 text-primary" title="Mark as Sent">
                       <Send className="w-4 h-4" />
                     </button>
                   )}
                   {quote.status === "SENT" && (
                     <>
-                      <button
-                        onClick={() => handleAcceptQuote(quote)}
-                        className="p-1.5 rounded-lg hover:bg-green-500/20 text-green-400"
-                        title="Accept"
-                      >
+                      <button onClick={() => handleAcceptQuote(quote)} className="p-1.5 rounded-lg hover:bg-green-500/20 text-green-400" title="Accept">
                         <CheckCircle className="w-4 h-4" />
                       </button>
-                      <button
-                        onClick={() => handleRejectQuote(quote)}
-                        className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400"
-                        title="Reject"
-                      >
+                      <button onClick={() => handleRejectQuote(quote)} className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400" title="Reject">
                         <X className="w-4 h-4" />
                       </button>
                     </>
                   )}
                   {quote.status === "ACCEPTED" && !quote.invoiceId && (
                     <button
-                      onClick={() => {
-                        setSelectedQuote(quote);
-                        setShowConvertModal(true);
-                      }}
+                      onClick={() => { setSelectedQuote(quote); setShowConvertModal(true); }}
                       className="px-2 py-1 rounded-lg bg-primary/20 text-primary text-xs font-medium hover:bg-primary/30"
                     >
                       Convert
                     </button>
                   )}
-                  <button
-                    onClick={() => handleDeleteQuote(quote)}
-                    className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400 ml-auto"
-                    title="Delete"
-                  >
+                  <button onClick={() => handleDeleteQuote(quote)} className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400 ml-auto" title="Delete">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
