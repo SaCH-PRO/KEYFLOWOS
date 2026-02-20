@@ -29,7 +29,8 @@ import {
   publishPost,
   fetchSocialConnections,
 } from "@/lib/client";
-import { PostComposer } from "./components/post-composer";
+import { getStoredBusinessId } from "@/lib/workspace";
+import { PostComposer, ComposerSubmitData } from "./components/post-composer";
 import { PostsFeed } from "./components/posts-feed";
 import { ContentCalendar } from "./components/content-calendar";
 import { ChannelsPanel } from "./components/channels-panel";
@@ -79,18 +80,20 @@ export default function SocialPage() {
     return () => clearTimeout(timeout);
   }, [searchInput]);
 
+  const bId = getStoredBusinessId() || undefined;
+
   const loadPosts = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await fetchPosts();
+    const { data, error } = await fetchPosts(bId);
     setPosts(data ?? []);
     if (error) setError(error);
     setLoading(false);
-  }, []);
+  }, [bId]);
 
   const loadConnections = useCallback(async () => {
-    const { data } = await fetchSocialConnections();
+    const { data } = await fetchSocialConnections(bId);
     if (data) setConnections(data);
-  }, []);
+  }, [bId]);
 
   useEffect(() => {
     void loadPosts();
@@ -103,23 +106,33 @@ export default function SocialPage() {
     return true;
   });
 
-  async function handleCreate(data: { content: string; scheduledFor?: string; channelIds?: string[] }) {
+  async function handleCreate(data: ComposerSubmitData) {
     setSubmitting(true);
     setError(null);
     const { data: post, error } = await createPost({
+      businessId: bId,
       content: data.content,
       scheduledFor: data.scheduledFor,
       channelIds: data.channelIds,
+      mediaUrls: data.mediaUrls,
     });
-    if (error) setError(error);
+    if (error) { setError(error); setSubmitting(false); return; }
     if (post) {
-      setPosts((prev) => [post, ...prev]);
+      if (data.action === "publish") {
+        const channels = data.channelIds && data.channelIds.length > 0 ? data.channelIds : undefined;
+        const { data: pubData, error: pubError } = await publishPost(post.id, channels, bId);
+        if (pubError) setError(pubError);
+        const published = pubData ? ((pubData as any).post || pubData) : post;
+        setPosts((prev) => [published, ...prev]);
+      } else {
+        setPosts((prev) => [post, ...prev]);
+      }
       setShowComposer(false);
     }
     setSubmitting(false);
   }
 
-  async function handleUpdate(data: { content: string; scheduledFor?: string; channelIds?: string[] }) {
+  async function handleUpdate(data: ComposerSubmitData) {
     if (!editingPost) return;
     setSubmitting(true);
     setError(null);
@@ -127,10 +140,19 @@ export default function SocialPage() {
       content: data.content,
       scheduledAt: data.scheduledFor || null,
       channelIds: data.channelIds,
-    });
-    if (error) setError(error);
+      mediaUrls: data.mediaUrls,
+    }, bId);
+    if (error) { setError(error); setSubmitting(false); return; }
     if (updated) {
-      setPosts((prev) => prev.map((p) => (p.id === editingPost.id ? updated : p)));
+      if (data.action === "publish") {
+        const channels = data.channelIds && data.channelIds.length > 0 ? data.channelIds : undefined;
+        const { data: pubData, error: pubError } = await publishPost(updated.id, channels, bId);
+        if (pubError) setError(pubError);
+        const published = pubData ? ((pubData as any).post || pubData) : updated;
+        setPosts((prev) => prev.map((p) => (p.id === editingPost.id ? published : p)));
+      } else {
+        setPosts((prev) => prev.map((p) => (p.id === editingPost.id ? updated : p)));
+      }
       setEditingPost(null);
     }
     setSubmitting(false);
@@ -140,7 +162,7 @@ export default function SocialPage() {
     setError(null);
     const post = posts.find((p) => p.id === postId);
     const channelIds = post?.channelIds && post.channelIds.length > 0 ? post.channelIds : undefined;
-    const { data, error } = await publishPost(postId, channelIds);
+    const { data, error } = await publishPost(postId, channelIds, bId);
     if (error) setError(error);
     if (data) {
       const updated = (data as any).post || data;
@@ -151,7 +173,7 @@ export default function SocialPage() {
   async function handleDelete(postId: string) {
     if (!confirm("Are you sure you want to delete this post?")) return;
     setError(null);
-    const { error } = await deletePost(postId);
+    const { error } = await deletePost(postId, bId);
     if (error) {
       setError(error);
     } else {
@@ -167,7 +189,9 @@ export default function SocialPage() {
 
   function handleCalendarSelect(post: SocialPost) {
     setEditingPost(post);
+    setShowComposer(false);
     setActiveTab("posts");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   const draftCount = posts.filter((p) => p.status === "DRAFT").length;
@@ -252,7 +276,7 @@ export default function SocialPage() {
               onSubmit={handleUpdate}
               onClose={() => setEditingPost(null)}
               submitting={submitting}
-              initial={{ content: editingPost.content, scheduledFor: editingPost.scheduledAt || editingPost.scheduledFor || "", channelIds: editingPost.channelIds }}
+              initial={{ content: editingPost.content, scheduledFor: editingPost.scheduledAt || editingPost.scheduledFor || "", channelIds: editingPost.channelIds, mediaUrls: editingPost.mediaUrls }}
               mode="edit"
               connections={connections}
             />
