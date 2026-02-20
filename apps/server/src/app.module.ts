@@ -31,6 +31,7 @@ import { TemplatesModule } from './modules/templates/templates.module';
 import { EducationModule } from './modules/education/education.module';
 import { CommunityModule } from './modules/community/community.module';
 import { LandingPagesModule } from './modules/landing-pages/landing-pages.module';
+import { SeedModule } from './core/seed/seed.module';
 
 @Module({
   imports: [
@@ -38,7 +39,7 @@ import { LandingPagesModule } from './modules/landing-pages/landing-pages.module
     PrismaModule,
     EventBusModule,
     AuthModule,
-    TrpcModule, // <-- IMPORT THE TRPC MODULE
+    TrpcModule,
 
     // Feature Modules
     IdentityModule,
@@ -66,6 +67,7 @@ import { LandingPagesModule } from './modules/landing-pages/landing-pages.module
     EducationModule,
     CommunityModule,
     LandingPagesModule,
+    SeedModule,
   ],
   controllers: [AppController],
   providers: [AppService, AuthMiddleware],
