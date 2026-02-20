@@ -10,18 +10,13 @@ import { clearStoredBusinessId, getStoredBusinessId, getCachedUser, getUserDispl
 import { apiGet, apiPatch } from "@/lib/api";
 import { useThemeColors } from "@/lib/theme-context";
 import {
-  Activity,
   Settings,
-  Sparkles,
   Users,
   CreditCard,
   Calendar,
-  Share2,
-  Workflow,
   Bell,
   Plus,
   ChevronDown,
-  LayoutDashboard,
   BarChart3,
   LogOut,
   Search,
@@ -39,6 +34,7 @@ import {
   Receipt,
   Megaphone,
   GraduationCap,
+  FolderKanban,
 } from "lucide-react";
 
 const navItems = [
@@ -52,6 +48,7 @@ const navItems = [
   { label: "Social", href: "/app/social", icon: MessageCircle },
   { label: "Marketing", href: "/app/marketing", icon: Megaphone },
   { label: "Expenses", href: "/app/expenses", icon: Receipt },
+  { label: "Projects", href: "/app/projects", icon: FolderKanban },
   { label: "Automations", href: "/app/automations", icon: Zap },
   { label: "Reports", href: "/app/reports", icon: BarChart3 },
 ];
@@ -59,15 +56,15 @@ const navItems = [
 const bottomNavItems = [
   { label: "Learn", href: "/app/learn", icon: GraduationCap },
   { label: "Community", href: "/app/community", icon: Users },
-  { label: "Studio", href: "/app/studio", icon: Sparkles },
   { label: "Settings", href: "/app/settings", icon: Settings },
 ];
 
 const mobileBottomNav = [
   { label: "Home", href: "/app", icon: Home },
-  { label: "Social", href: "/app/social", icon: MessageCircle },
   { label: "Commerce", href: "/app/commerce", icon: CreditCard },
   { label: "Bookings", href: "/app/bookings", icon: Calendar },
+  { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
+  { label: "More", href: "#more", icon: MoreHorizontal },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -333,12 +330,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 {addMenuOpen && (
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setAddMenuOpen(false)} />
-                    <div className="absolute right-0 mt-2 w-48 rounded-xl border border-border bg-card shadow-lg p-2 z-50">
+                    <div className="absolute right-0 mt-2 w-48 rounded-xl border border-border bg-card shadow-lg p-2 z-50 max-h-[70vh] overflow-y-auto">
                       {[
                         { label: "New Contact", href: "/app/crm/pipeline" },
                         { label: "New Invoice", href: "/app/commerce" },
                         { label: "New Booking", href: "/app/bookings" },
                         { label: "New Post", href: "/app/social" },
+                        { label: "New Expense", href: "/app/expenses" },
+                        { label: "New Project", href: "/app/projects" },
+                        { label: "New Campaign", href: "/app/marketing" },
+                        { label: "New Page", href: "/app/pages" },
                       ].map((action) => (
                         <Link
                           key={action.label}
@@ -558,6 +559,19 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="flex items-center justify-around px-1" style={{ height: "60px" }}>
           {mobileBottomNav.map((item) => {
             const Icon = item.icon;
+            if (item.href === "#more") {
+              return (
+                <button
+                  key="more"
+                  onClick={() => setMobileDrawerOpen(true)}
+                  className="flex flex-col items-center justify-center gap-0.5 min-w-[56px] py-1.5 px-2 rounded-xl transition-all text-muted-foreground active:scale-95"
+                  aria-label="More navigation options"
+                >
+                  <Icon className="w-5 h-5" />
+                  <span className="text-[10px] font-medium mt-0.5">{item.label}</span>
+                </button>
+              );
+            }
             const active = pathname === item.href || (item.href !== "/app" && pathname.startsWith(item.href));
             return (
               <Link
@@ -582,14 +596,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </Link>
             );
           })}
-          <button
-            onClick={() => setMobileDrawerOpen(true)}
-            className="flex flex-col items-center justify-center gap-0.5 min-w-[56px] py-1.5 px-2 rounded-xl transition-all text-muted-foreground active:scale-95"
-            aria-label="More navigation options"
-          >
-            <MoreHorizontal className="w-5 h-5" />
-            <span className="text-[10px] font-medium mt-0.5">More</span>
-          </button>
         </div>
       </nav>
 
