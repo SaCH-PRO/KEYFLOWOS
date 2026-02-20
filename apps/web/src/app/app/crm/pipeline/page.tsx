@@ -561,7 +561,7 @@ export default function ContactsPage() {
       />
 
       <StatCards
-        stats={[
+        items={[
           { label: "Total", value: contacts.length, color: "hsl(var(--kf-accent1))" },
           { label: "Leads", value: segments["LEAD"] ?? contacts.filter((c) => c.status === "LEAD").length, color: "hsl(var(--kf-accent2))" },
           { label: "Prospects", value: segments["PROSPECT"] ?? contacts.filter((c) => c.status === "PROSPECT").length, color: "hsl(200 70% 50%)" },
