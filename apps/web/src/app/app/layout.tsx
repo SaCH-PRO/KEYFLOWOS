@@ -210,7 +210,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             )}
           </div>
 
-          <div className="flex-1 flex flex-col py-4 px-3 gap-1">
+          <div className="flex-1 flex flex-col py-4 px-3 gap-1 overflow-y-auto min-h-0">
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = pathname === item.href || (item.href !== "/app" && pathname.startsWith(item.href));
