@@ -301,6 +301,71 @@ export class SocialController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/connections/:platform/test')
+  async testConnection(
+    @Param('businessId') businessId: string,
+    @Param('platform') platform: string,
+  ) {
+    const conn = await this.connections.getConnection(businessId, platform);
+    if (!conn) {
+      return { success: false, error: 'No connection found for this platform' };
+    }
+
+    const platformUpper = platform.toUpperCase();
+
+    try {
+      switch (platformUpper) {
+        case 'FACEBOOK': {
+          const res = await fetch(`https://graph.facebook.com/v19.0/me?access_token=${conn.token}&fields=id,name`);
+          const data = await res.json() as any;
+          if (data.error) return { success: false, error: data.error.message, status: 'EXPIRED' };
+          return { success: true, account: { id: data.id, name: data.name }, status: 'CONNECTED' };
+        }
+        case 'INSTAGRAM': {
+          const res = await fetch(`https://graph.facebook.com/v19.0/me?access_token=${conn.token}&fields=id,name`);
+          const data = await res.json() as any;
+          if (data.error) return { success: false, error: data.error.message, status: 'EXPIRED' };
+          return { success: true, account: { id: data.id, name: data.name }, status: 'CONNECTED' };
+        }
+        case 'LINKEDIN': {
+          const res = await fetch('https://api.linkedin.com/v2/userinfo', {
+            headers: { 'Authorization': `Bearer ${conn.token}` },
+          });
+          if (!res.ok) {
+            const errText = await res.text();
+            return { success: false, error: `LinkedIn API error: ${res.status}`, status: 'EXPIRED' };
+          }
+          const data = await res.json() as any;
+          return { success: true, account: { id: data.sub, name: data.name }, status: 'CONNECTED' };
+        }
+        case 'TWITTER': {
+          const res = await fetch('https://api.twitter.com/2/users/me', {
+            headers: { 'Authorization': `Bearer ${conn.token}` },
+          });
+          const data = await res.json() as any;
+          if (data.errors || !data.data) return { success: false, error: data.errors?.[0]?.message || 'Invalid token', status: 'EXPIRED' };
+          return { success: true, account: { id: data.data.id, name: `@${data.data.username}` }, status: 'CONNECTED' };
+        }
+        case 'TIKTOK': {
+          const res = await fetch('https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name', {
+            headers: { 'Authorization': `Bearer ${conn.token}` },
+          });
+          const data = await res.json() as any;
+          if (data.error?.code !== 'ok' && data.error?.code) {
+            return { success: false, error: data.error.message || 'Token invalid', status: 'EXPIRED' };
+          }
+          const user = data?.data?.user;
+          return { success: true, account: { id: user?.open_id, name: user?.display_name }, status: 'CONNECTED' };
+        }
+        default:
+          return { success: false, error: `Unsupported platform: ${platform}` };
+      }
+    } catch (err) {
+      return { success: false, error: (err as Error).message, status: 'ERROR' };
+    }
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/connections/:platform/manual')
   async manualConnect(
     @Param('businessId') businessId: string,

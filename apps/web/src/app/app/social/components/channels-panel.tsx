@@ -2,8 +2,15 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Facebook, Instagram, Linkedin, Twitter, CheckCircle2, XCircle, Loader2, Link2, Unlink, Key, ChevronDown, Globe, AlertCircle, RefreshCw, ExternalLink, Music2 } from "lucide-react";
-import { fetchSocialConnections, startSocialOAuth, completeSocialOAuth, connectSocialManual, disconnectSocial, SocialConnection } from "@/lib/client";
+import {
+  Facebook, Instagram, Linkedin, Twitter, CheckCircle2, XCircle, Loader2,
+  Key, Globe, AlertCircle, RefreshCw, ExternalLink, Music2, Unlink, Wifi, WifiOff,
+  ChevronDown, ChevronUp,
+} from "lucide-react";
+import {
+  fetchSocialConnections, startSocialOAuth, connectSocialManual,
+  disconnectSocial, testSocialConnection, SocialConnection,
+} from "@/lib/client";
 
 const PLATFORMS = [
   {
@@ -63,13 +70,17 @@ const item = {
   show: { opacity: 1, y: 0, transition: { type: "spring" as const, stiffness: 300, damping: 24 } },
 };
 
+type TestResult = { platform: string; success: boolean; error?: string; accountName?: string };
+
 export function ChannelsPanel() {
   const [connections, setConnections] = useState<SocialConnection[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [testLoading, setTestLoading] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [manualEntry, setManualEntry] = useState<string | null>(null);
+  const [expandedPlatform, setExpandedPlatform] = useState<string | null>(null);
   const [manualToken, setManualToken] = useState("");
   const [manualPlatformId, setManualPlatformId] = useState("");
   const [manualAccountName, setManualAccountName] = useState("");
@@ -95,6 +106,31 @@ export function ChannelsPanel() {
 
   function getConnection(platform: string): SocialConnection | undefined {
     return connections.find((c) => c.platform === platform);
+  }
+
+  async function handleTestConnection(platform: string) {
+    setTestLoading(platform);
+    setTestResults((prev) => ({ ...prev, [platform]: undefined as any }));
+    const { data, error } = await testSocialConnection(platform);
+    if (error) {
+      setTestResults((prev) => ({ ...prev, [platform]: { platform, success: false, error } }));
+    } else if (data) {
+      setTestResults((prev) => ({
+        ...prev,
+        [platform]: {
+          platform,
+          success: data.success,
+          error: data.error,
+          accountName: data.account?.name,
+        },
+      }));
+      if (!data.success && data.status === "EXPIRED") {
+        setConnections((prev) =>
+          prev.map((c) => (c.platform === platform ? { ...c, status: "EXPIRED" } : c))
+        );
+      }
+    }
+    setTestLoading(null);
   }
 
   async function handleOAuthConnect(platform: string) {
@@ -133,11 +169,11 @@ export function ChannelsPanel() {
         }
         return [...prev, data];
       });
-      setManualEntry(null);
+      setExpandedPlatform(null);
       setManualToken("");
       setManualPlatformId("");
       setManualAccountName("");
-      setSuccess(`${platform.charAt(0) + platform.slice(1).toLowerCase()} connected successfully!`);
+      setSuccess(`${PLATFORMS.find((p) => p.key === platform)?.name || platform} connected!`);
     }
     setActionLoading(null);
   }
@@ -152,16 +188,21 @@ export function ChannelsPanel() {
       setError(error);
     } else {
       setConnections((prev) => prev.filter((c) => c.platform !== platform));
+      setTestResults((prev) => {
+        const next = { ...prev };
+        delete next[platform];
+        return next;
+      });
       setSuccess(`${platformName} disconnected.`);
     }
     setActionLoading(null);
   }
 
-  function openManualEntry(platform: string) {
-    if (manualEntry === platform) {
-      setManualEntry(null);
+  function toggleExpand(platform: string) {
+    if (expandedPlatform === platform) {
+      setExpandedPlatform(null);
     } else {
-      setManualEntry(platform);
+      setExpandedPlatform(platform);
       setManualToken("");
       setManualPlatformId("");
       setManualAccountName("");
@@ -238,21 +279,22 @@ export function ChannelsPanel() {
           <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
         </div>
       ) : (
-        <motion.div variants={container} className="grid gap-3 md:grid-cols-2">
+        <motion.div variants={container} className="space-y-3">
           {PLATFORMS.map((platform) => {
             const conn = getConnection(platform.key);
             const isConnected = conn?.status === "CONNECTED";
             const isExpired = conn?.status === "EXPIRED";
             const isLoading = actionLoading === platform.key;
+            const isTesting = testLoading === platform.key;
+            const testResult = testResults[platform.key];
             const Icon = platform.icon;
-            const showManual = manualEntry === platform.key;
+            const isExpanded = expandedPlatform === platform.key;
 
             return (
               <motion.div
                 key={platform.key}
                 variants={item}
-                whileHover={{ scale: 1.01, y: -1 }}
-                className="rounded-2xl border backdrop-blur-xl p-4 space-y-3 transition-all"
+                className="rounded-2xl border backdrop-blur-xl overflow-hidden transition-all"
                 style={{
                   background: isConnected
                     ? "hsl(150 60% 40% / 0.05)"
@@ -266,103 +308,198 @@ export function ChannelsPanel() {
                     : "hsl(var(--kf-border))",
                 }}
               >
-                <div className="flex items-center gap-4">
-                  <div
-                    className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 bg-gradient-to-br ${platform.gradient}`}
-                    style={{ border: `1px solid ${platform.color}30` }}
-                  >
-                    <Icon className="w-5 h-5" style={{ color: platform.color }} />
-                  </div>
-                  <div className="flex-1 min-w-0">
+                <div className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 bg-gradient-to-br ${platform.gradient}`}
+                        style={{ border: `1px solid ${platform.color}30` }}
+                      >
+                        <Icon className="w-5 h-5" style={{ color: platform.color }} />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium">{platform.name}</p>
+                          {isConnected && (
+                            <span
+                              className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full"
+                              style={{
+                                background: "hsl(150 60% 40% / 0.15)",
+                                color: "hsl(150 60% 60%)",
+                                border: "1px solid hsl(150 60% 40% / 0.3)",
+                              }}
+                            >
+                              <CheckCircle2 className="w-3 h-3" />
+                              Connected
+                            </span>
+                          )}
+                          {isExpired && (
+                            <span
+                              className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full"
+                              style={{
+                                background: "hsl(40 80% 50% / 0.15)",
+                                color: "hsl(40 80% 60%)",
+                                border: "1px solid hsl(40 80% 50% / 0.3)",
+                              }}
+                            >
+                              <XCircle className="w-3 h-3" />
+                              Expired
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          {isConnected && conn?.accountName
+                            ? conn.accountName
+                            : isExpired
+                            ? "Token expired -- reconnect to continue publishing"
+                            : platform.description}
+                        </p>
+                      </div>
+                    </div>
+
                     <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium">{platform.name}</p>
-                      {isConnected && (
-                        <CheckCircle2 className="w-3.5 h-3.5" style={{ color: "hsl(150 60% 50%)" }} />
+                      {(isConnected || isExpired) && (
+                        <>
+                          <button
+                            onClick={() => handleTestConnection(platform.key)}
+                            disabled={isTesting}
+                            className="text-xs inline-flex items-center gap-1.5 rounded-lg px-3 py-2 border transition-all hover:bg-[hsl(var(--kf-accent2)/0.1)]"
+                            style={{
+                              borderColor: "hsl(var(--kf-accent2) / 0.3)",
+                              color: "hsl(var(--kf-accent2))",
+                            }}
+                            title="Test this connection"
+                          >
+                            {isTesting ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <Wifi className="w-3 h-3" />
+                            )}
+                            Test
+                          </button>
+                          <button
+                            onClick={() => handleDisconnect(platform.key)}
+                            disabled={isLoading}
+                            className="text-xs inline-flex items-center gap-1.5 rounded-lg px-3 py-2 border transition-all hover:bg-red-500/10"
+                            style={{ borderColor: "hsl(0 60% 40% / 0.3)", color: "hsl(0 60% 65%)" }}
+                          >
+                            {isLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Unlink className="w-3 h-3" />}
+                            Disconnect
+                          </button>
+                        </>
                       )}
-                      {isExpired && (
-                        <XCircle className="w-3.5 h-3.5" style={{ color: "hsl(40 80% 50%)" }} />
+                      {!isConnected && !isExpired && (
+                        <button
+                          onClick={() => toggleExpand(platform.key)}
+                          className="kf-btn-primary text-xs inline-flex items-center gap-1.5"
+                        >
+                          <Key className="w-3 h-3" />
+                          Connect
+                          {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                        </button>
+                      )}
+                      {(isConnected || isExpired) && (
+                        <button
+                          onClick={() => toggleExpand(platform.key)}
+                          className="text-xs inline-flex items-center gap-1 rounded-lg px-2 py-2 border transition-all hover:bg-white/5"
+                          style={{ borderColor: "hsl(var(--kf-border))", color: "hsl(var(--kf-accent1))" }}
+                          title={isExpanded ? "Collapse" : "Update token"}
+                        >
+                          {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                        </button>
                       )}
                     </div>
-                    {isConnected && conn?.accountName ? (
-                      <p className="text-[11px] text-muted-foreground truncate">{conn.accountName}</p>
-                    ) : isExpired ? (
-                      <p className="text-[11px]" style={{ color: "hsl(40 80% 60%)" }}>Token expired — reconnect to continue publishing</p>
-                    ) : (
-                      <p className="text-[11px] text-muted-foreground">{platform.description}</p>
-                    )}
                   </div>
+
+                  <AnimatePresence>
+                    {testResult && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="mt-3"
+                      >
+                        <div
+                          className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs"
+                          style={{
+                            background: testResult.success
+                              ? "hsl(150 60% 40% / 0.1)"
+                              : "hsl(0 60% 40% / 0.1)",
+                            border: `1px solid ${testResult.success ? "hsl(150 60% 40% / 0.25)" : "hsl(0 60% 40% / 0.25)"}`,
+                            color: testResult.success
+                              ? "hsl(150 60% 65%)"
+                              : "hsl(0 60% 70%)",
+                          }}
+                        >
+                          {testResult.success ? (
+                            <>
+                              <Wifi className="w-3.5 h-3.5 flex-shrink-0" />
+                              Connection verified
+                              {testResult.accountName && (
+                                <span className="text-muted-foreground ml-1">
+                                  — {testResult.accountName}
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              <WifiOff className="w-3.5 h-3.5 flex-shrink-0" />
+                              Connection failed: {testResult.error || "Unknown error"}
+                            </>
+                          )}
+                          <button
+                            onClick={() =>
+                              setTestResults((prev) => {
+                                const next = { ...prev };
+                                delete next[platform.key];
+                                return next;
+                              })
+                            }
+                            className="ml-auto text-[10px] hover:underline opacity-60"
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
 
-                {isConnected ? (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => openManualEntry(platform.key)}
-                      className="flex-1 text-xs inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 border transition-all hover:bg-[hsl(var(--kf-accent1)/0.1)]"
-                      style={{ borderColor: "hsl(var(--kf-accent1) / 0.3)", color: "hsl(var(--kf-accent1))" }}
-                    >
-                      <RefreshCw className="w-3 h-3" />
-                      Update Token
-                    </button>
-                    <button
-                      onClick={() => handleDisconnect(platform.key)}
-                      disabled={isLoading}
-                      className="text-xs inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 border transition-all hover:bg-red-500/10"
-                      style={{ borderColor: "hsl(0 60% 40% / 0.3)", color: "hsl(0 60% 65%)" }}
-                    >
-                      {isLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Unlink className="w-3 h-3" />}
-                      Disconnect
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => openManualEntry(platform.key)}
-                      className="kf-btn-primary text-xs flex-1 inline-flex items-center justify-center gap-1.5"
-                    >
-                      {isLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Key className="w-3 h-3" />}
-                      Connect with Token
-                    </button>
-                    <button
-                      onClick={() => handleOAuthConnect(platform.key)}
-                      disabled={isLoading}
-                      className="kf-btn-secondary text-xs inline-flex items-center justify-center gap-1.5"
-                      title="Connect via OAuth (requires API credentials in Settings)"
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                      OAuth
-                    </button>
-                  </div>
-                )}
-
                 <AnimatePresence>
-                  {showManual && (
+                  {isExpanded && (
                     <motion.div
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: "auto" }}
                       exit={{ opacity: 0, height: 0 }}
-                      className="space-y-2 pt-1"
+                      className="border-t px-4 py-4 space-y-3"
+                      style={{ borderColor: "hsl(var(--kf-border) / 0.5)", background: "hsl(var(--kf-card) / 0.3)" }}
                     >
-                      <p className="text-[10px] text-muted-foreground">{platform.helpText}</p>
-                      <input
-                        className="kf-input w-full text-xs"
-                        placeholder="Access Token *"
-                        value={manualToken}
-                        onChange={(e) => setManualToken(e.target.value)}
-                        autoFocus
-                      />
-                      <input
-                        className="kf-input w-full text-xs"
-                        placeholder="Platform ID (page ID, person URN, etc.)"
-                        value={manualPlatformId}
-                        onChange={(e) => setManualPlatformId(e.target.value)}
-                      />
-                      <input
-                        className="kf-input w-full text-xs"
-                        placeholder="Display Name (optional)"
-                        value={manualAccountName}
-                        onChange={(e) => setManualAccountName(e.target.value)}
-                      />
-                      <div className="flex gap-2">
+                      <p className="text-[11px] text-muted-foreground">{platform.helpText}</p>
+
+                      <div className="grid gap-2">
+                        <input
+                          className="kf-input w-full text-xs"
+                          placeholder="Access Token *"
+                          value={manualToken}
+                          onChange={(e) => setManualToken(e.target.value)}
+                          type="password"
+                          autoFocus
+                        />
+                        <input
+                          className="kf-input w-full text-xs"
+                          placeholder="Platform ID (page ID, person URN, etc.)"
+                          value={manualPlatformId}
+                          onChange={(e) => setManualPlatformId(e.target.value)}
+                        />
+                        <input
+                          className="kf-input w-full text-xs"
+                          placeholder="Display Name (optional)"
+                          value={manualAccountName}
+                          onChange={(e) => setManualAccountName(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-2">
                         <button
                           onClick={() => handleManualConnect(platform.key)}
                           disabled={!manualToken.trim() || isLoading}
@@ -370,10 +507,19 @@ export function ChannelsPanel() {
                           style={{ opacity: !manualToken.trim() || isLoading ? 0.5 : 1 }}
                         >
                           {isLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
-                          {isConnected ? "Update Connection" : "Save & Connect"}
+                          {isConnected || isExpired ? "Update Connection" : "Save & Connect"}
                         </button>
                         <button
-                          onClick={() => setManualEntry(null)}
+                          onClick={() => handleOAuthConnect(platform.key)}
+                          disabled={isLoading}
+                          className="kf-btn-secondary text-xs inline-flex items-center justify-center gap-1.5"
+                          title="Connect via OAuth (requires API credentials in Settings)"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          OAuth
+                        </button>
+                        <button
+                          onClick={() => setExpandedPlatform(null)}
                           className="kf-btn-secondary text-xs"
                         >
                           Cancel
@@ -391,9 +537,10 @@ export function ChannelsPanel() {
       <motion.div variants={item} className="rounded-xl border border-dashed p-4 space-y-2" style={{ borderColor: "hsl(var(--kf-border))" }}>
         <p className="text-xs font-medium">How to connect your accounts:</p>
         <ol className="text-[11px] text-muted-foreground space-y-1 list-decimal list-inside">
-          <li>Click <strong>Connect with Token</strong> on any platform above</li>
+          <li>Click <strong>Connect</strong> on any platform above</li>
           <li>Paste your API access token from the platform's developer portal</li>
           <li>Add your page/account ID to target the right account</li>
+          <li>Click <strong>Test</strong> to verify the connection is working</li>
           <li>Once connected, select platforms when composing posts to auto-publish</li>
         </ol>
         <p className="text-[11px] text-muted-foreground mt-2">
