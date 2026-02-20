@@ -1,4 +1,4 @@
-export { ContactCard, type ContactCardData } from "./contact-card";
+export { ContactCard, type ContactCardData, type QuickActionType } from "./contact-card";
 export { ContactForm, type ContactFormData } from "./contact-form";
 export {
   ContactDetail,
@@ -6,6 +6,7 @@ export {
   type ContactEvent,
   type ContactNote,
   type ContactTask,
+  type DetailQuickAction,
 } from "./contact-detail";
 export { ContactImport } from "./contact-import";
 export { FlowIntelligence, type FlowIntelligenceData } from "./flow-intelligence";

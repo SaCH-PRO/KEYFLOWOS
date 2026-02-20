@@ -1,7 +1,8 @@
 "use client";
 
+import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Mail, Phone, Building2, Tag, Trash2, MessageCircle, Star, Globe, FileText, CalendarCheck, UserPlus, Upload, Sparkles } from "lucide-react";
+import { Mail, Phone, Building2, Tag, Trash2, MessageCircle, Star, Globe, FileText, CalendarCheck, UserPlus, Upload, Sparkles, MoreHorizontal, Receipt, Calendar, FileSignature } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 
 export type ContactCardData = {
@@ -53,6 +54,8 @@ function getSourceInfo(source?: string | null) {
   return SOURCE_CONFIG[key] || { label: source, icon: Globe, color: "hsl(var(--kf-muted-foreground))" };
 }
 
+export type QuickActionType = "create-invoice" | "book-appointment" | "send-quote";
+
 interface ContactCardProps {
   contact: ContactCardData;
   isSelected?: boolean;
@@ -63,15 +66,27 @@ interface ContactCardProps {
   onTogglePin?: (id: string) => void;
   onClick?: () => void;
   onDelete?: (contact: ContactCardData) => void;
+  onQuickAction?: (contactId: string, action: QuickActionType) => void;
   index?: number;
 }
 
-export function ContactCard({ contact, isSelected, selectable, selected, onToggleSelect, isPinned, onTogglePin, onClick, onDelete, index = 0 }: ContactCardProps) {
+export function ContactCard({ contact, isSelected, selectable, selected, onToggleSelect, isPinned, onTogglePin, onClick, onDelete, onQuickAction, index = 0 }: ContactCardProps) {
+  const [showActions, setShowActions] = useState(false);
+  const actionsRef = useRef<HTMLDivElement>(null);
   const fullName = `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "Unnamed";
   const initials = `${contact.firstName?.[0] ?? ""}${contact.lastName?.[0] ?? ""}`.toUpperCase() || "?";
   const statusColor = STATUS_COLORS[contact.status ?? ""] ?? STATUS_COLORS.LEAD;
   const sourceInfo = getSourceInfo(contact.source);
   const SourceIcon = sourceInfo.icon;
+
+  useEffect(() => {
+    if (!showActions) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (actionsRef.current && !actionsRef.current.contains(e.target as Node)) setShowActions(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showActions]);
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -86,6 +101,12 @@ export function ContactCard({ contact, isSelected, selectable, selected, onToggl
   const handlePin = (e: React.MouseEvent) => {
     e.stopPropagation();
     onTogglePin?.(contact.id);
+  };
+
+  const handleQuickAction = (e: React.MouseEvent, action: QuickActionType) => {
+    e.stopPropagation();
+    setShowActions(false);
+    onQuickAction?.(contact.id, action);
   };
 
   return (
@@ -133,6 +154,33 @@ export function ContactCard({ contact, isSelected, selectable, selected, onToggl
               )}
             </div>
             <div className="flex items-center gap-1.5 flex-shrink-0">
+              {onQuickAction && (
+                <div className="relative" ref={actionsRef}>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setShowActions(!showActions); }}
+                    className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors opacity-0 group-hover:opacity-100"
+                    title="Quick actions"
+                  >
+                    <MoreHorizontal className="w-3.5 h-3.5" />
+                  </button>
+                  {showActions && (
+                    <div className="absolute right-0 top-8 z-50 w-48 kf-card border border-border shadow-xl rounded-xl py-1 animate-in fade-in zoom-in-95">
+                      <button onClick={(e) => handleQuickAction(e, "create-invoice")} className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/50 transition-colors">
+                        <Receipt className="w-4 h-4 text-emerald-400" />
+                        Create Invoice
+                      </button>
+                      <button onClick={(e) => handleQuickAction(e, "book-appointment")} className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/50 transition-colors">
+                        <Calendar className="w-4 h-4 text-blue-400" />
+                        Book Appointment
+                      </button>
+                      <button onClick={(e) => handleQuickAction(e, "send-quote")} className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/50 transition-colors">
+                        <FileSignature className="w-4 h-4 text-violet-400" />
+                        Send Quote
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
               <button
                 onClick={handleDelete}
                 className="p-1.5 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
