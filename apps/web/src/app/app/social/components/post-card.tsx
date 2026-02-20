@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
-import { Send, Pencil, Trash2, MoreHorizontal, Clock, CheckCircle2, FileText, AlertTriangle, BookOpen, Hash, Facebook, Instagram, Linkedin, Twitter, XCircle, Music2, Image as ImageIcon } from "lucide-react";
+import { Send, Pencil, Trash2, MoreHorizontal, Clock, CheckCircle2, FileText, AlertTriangle, BookOpen, Hash, Facebook, Instagram, Linkedin, Twitter, XCircle, Music2, Image as ImageIcon, ImageOff } from "lucide-react";
 import type { SocialPost } from "@/lib/client";
 
 type Props = {
@@ -40,6 +40,26 @@ const HASHTAG_COLORS = [
   "bg-pink-500/15 text-pink-400 border-pink-500/30",
   "bg-teal-500/15 text-teal-400 border-teal-500/30",
 ];
+
+function MediaThumb({ url, large }: { url: string; large?: boolean }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <div className={`flex items-center justify-center gap-2 text-muted-foreground ${large ? "py-6 text-xs" : ""}`} style={large ? {} : { background: "hsl(var(--kf-muted) / 0.3)", width: "100%", height: "100%" }}>
+        <ImageOff className="w-4 h-4" />
+        {large && <span>Image</span>}
+      </div>
+    );
+  }
+  return (
+    <img
+      src={url}
+      alt={large ? "Post media" : "Media attachment"}
+      className={large ? "w-full h-full object-cover max-h-48" : "w-full h-full object-cover"}
+      onError={() => setFailed(true)}
+    />
+  );
+}
 
 export function PostCard({ post, onPublish, onEdit, onDelete, listView }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -123,16 +143,24 @@ export function PostCard({ post, onPublish, onEdit, onDelete, listView }: Props)
         </div>
 
         {post.mediaUrls && post.mediaUrls.length > 0 && (
-          <div className="flex gap-2 flex-wrap">
-            {post.mediaUrls.slice(0, 4).map((url, i) => (
-              <div key={i} className="w-16 h-16 rounded-lg border overflow-hidden" style={{ borderColor: "hsl(var(--kf-border))" }}>
-                <img src={url} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+          <div className={`flex gap-2 ${post.mediaUrls.length === 1 && !listView ? "" : "flex-wrap"}`}>
+            {post.mediaUrls.length === 1 && !listView ? (
+              <div className="w-full max-h-48 rounded-xl border overflow-hidden" style={{ borderColor: "hsl(var(--kf-border))" }}>
+                <MediaThumb url={post.mediaUrls[0]} large />
               </div>
-            ))}
-            {post.mediaUrls.length > 4 && (
-              <div className="w-16 h-16 rounded-lg border flex items-center justify-center text-xs text-muted-foreground" style={{ borderColor: "hsl(var(--kf-border))", background: "hsl(var(--kf-muted)/0.3)" }}>
-                <ImageIcon className="w-4 h-4 mr-0.5" />+{post.mediaUrls.length - 4}
-              </div>
+            ) : (
+              <>
+                {post.mediaUrls.slice(0, 4).map((url, i) => (
+                  <div key={i} className="w-20 h-20 sm:w-16 sm:h-16 rounded-lg border overflow-hidden flex-shrink-0" style={{ borderColor: "hsl(var(--kf-border))" }}>
+                    <MediaThumb url={url} />
+                  </div>
+                ))}
+                {post.mediaUrls.length > 4 && (
+                  <div className="w-20 h-20 sm:w-16 sm:h-16 rounded-lg border flex items-center justify-center text-xs text-muted-foreground flex-shrink-0" style={{ borderColor: "hsl(var(--kf-border))", background: "hsl(var(--kf-muted)/0.3)" }}>
+                    <ImageIcon className="w-4 h-4 mr-0.5" />+{post.mediaUrls.length - 4}
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
