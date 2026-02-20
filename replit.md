@@ -69,6 +69,13 @@ The project is structured as a monorepo containing a Next.js 16 frontend (`apps/
     - **Landing Pages:** Page builder with section types, public serving, and SEO scoring.
 
 ## Recent Changes (Feb 20, 2026)
+- **CRM Contacts Overhaul:**
+  - Enhanced ContactCard with source badges (booking/store/lead-form/import/google), 1-tap communication (email/phone/WhatsApp), pin/favorite, multi-select for broadcast
+  - Enhanced ContactDetail with Quick Compose panel (WhatsApp/Email templates), communication actions bar, financial summary card (totalRevenue, invoiceCount, bookingCount)
+  - Built BroadcastDrawer for bulk WhatsApp/email messaging with templates, personalization tokens, preview, and eligibility tracking
+  - Added Recent/Pinned contacts tabs with localStorage persistence, multi-select mode with broadcast button
+  - Backend: Added totalRevenue, invoiceCount, bookingCount to ContactMeta type and populated across list/detail views
+  - Source tracking verified across all channels: booking, store, lead-form, import, google, manual
 - **UI Standardization Sprint:**
   - Created 4 shared UI components: PageHeader, TabNav, StatCards, EmptyState in `apps/web/src/components/ui/`
   - Updated 12+ pages (Expenses, Social, Bookings, Marketing, MasterClass, Advisor, Automations, Community, Projects, Reports, Commerce, Pages) to use shared components
