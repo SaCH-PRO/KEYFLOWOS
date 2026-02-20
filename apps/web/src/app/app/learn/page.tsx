@@ -24,6 +24,7 @@ import {
   CourseEnrollment,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { PageHeader } from "@/components/ui/page-header";
 
 const DIFFICULTY_COLORS: Record<string, { bg: string; text: string }> = {
   BEGINNER: { bg: "bg-green-500/20", text: "text-green-400" },
@@ -294,18 +295,11 @@ export default function LearnPage() {
 
   return (
     <div className="space-y-6">
-      <div
-        className="rounded-2xl p-6 md:p-8"
-        style={{
-          background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.15), hsl(var(--kf-accent2) / 0.1))",
-        }}
-      >
-        <div className="flex items-center gap-3 mb-2">
-          <GraduationCap className="w-8 h-8" style={{ color: "hsl(var(--kf-accent1))" }} />
-          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">MasterClass</h1>
-        </div>
-        <p className="text-muted-foreground">Level up your business skills</p>
-      </div>
+      <PageHeader
+        icon={GraduationCap}
+        title="MasterClass"
+        subtitle="Level up your business skills"
+      />
 
       {enrolledCourses.length > 0 && (
         <div className="space-y-3">
@@ -322,7 +316,7 @@ export default function LearnPage() {
                   key={enrollment.id}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="bg-white/5 backdrop-blur border border-white/10 rounded-xl p-4 space-y-3"
+                  className="kf-card rounded-xl p-4 space-y-3"
                 >
                   <div className="flex items-center gap-3">
                     <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${getGradient(course.category)} flex items-center justify-center flex-shrink-0`}>
@@ -385,22 +379,20 @@ export default function LearnPage() {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: i * 0.05 }}
-                    className="bg-white/5 backdrop-blur border border-white/10 rounded-xl overflow-hidden group"
+                    className="kf-card rounded-xl overflow-hidden group"
                   >
-                    <div className={`h-32 bg-gradient-to-br ${getGradient(course.category)} flex items-center justify-center relative`}>
-                      <GraduationCap className="w-12 h-12 text-white/30" />
-                      <div className="absolute top-3 right-3">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase ${diffColors.bg} ${diffColors.text}`}>
+                    <div className={`h-1 bg-gradient-to-r ${getGradient(course.category)}`} />
+                    <div className="p-4 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <h3 className="text-sm font-semibold line-clamp-1">{course.title}</h3>
+                          {course.description && (
+                            <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{course.description}</p>
+                          )}
+                        </div>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase flex-shrink-0 ${diffColors.bg} ${diffColors.text}`}>
                           {course.difficulty}
                         </span>
-                      </div>
-                    </div>
-                    <div className="p-4 space-y-3">
-                      <div>
-                        <h3 className="text-sm font-semibold line-clamp-1">{course.title}</h3>
-                        {course.description && (
-                          <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{course.description}</p>
-                        )}
                       </div>
                       <div className="flex items-center gap-3 text-xs text-muted-foreground">
                         {course.duration && (

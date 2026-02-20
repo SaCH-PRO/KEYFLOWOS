@@ -28,6 +28,7 @@ import {
   ProjectTask,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { PageHeader } from "@/components/ui/page-header";
 
 const STATUS_COLUMNS = [
   { key: "ACTIVE", label: "Active", color: "hsl(var(--kf-accent2))" },
@@ -166,12 +167,7 @@ export default function ProjectsPage() {
   if (loading) {
     return (
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl md:text-2xl font-semibold tracking-tight">Projects</h1>
-            <p className="text-sm text-muted-foreground">Loading your projects...</p>
-          </div>
-        </div>
+        <PageHeader icon={FolderKanban} title="Projects" subtitle="Loading your projects..." />
         <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
           {[1, 2, 3, 4].map((i) => (
             <div key={i} className="rounded-2xl border border-border/60 bg-slate-950/70 p-4 h-48 animate-pulse" />
@@ -183,24 +179,13 @@ export default function ProjectsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl md:text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <FolderKanban className="w-6 h-6" style={{ color: "hsl(var(--kf-accent1))" }} />
-            Projects
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {projects.length} projects across {STATUS_COLUMNS.length} stages
-          </p>
-        </div>
-        <button
-          onClick={() => setShowNewProject(true)}
-          className="kf-btn-primary flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium"
-        >
-          <Plus className="w-4 h-4" />
-          New Project
-        </button>
-      </div>
+      <PageHeader
+        icon={FolderKanban}
+        title="Projects"
+        subtitle="Manage your projects and tasks"
+        actionLabel="New Project"
+        onAction={() => setShowNewProject(true)}
+      />
 
       <AnimatePresence>
         {showNewProject && (
