@@ -124,9 +124,10 @@ export default function ConnectionsSettingsPage() {
 
   const fetchSocial = useCallback(async () => {
     setSocialLoading(true);
+    const bId = getStoredBusinessId() || undefined;
     const [connRes, availRes] = await Promise.all([
-      fetchSocialConnections(),
-      fetchOAuthAvailability(),
+      fetchSocialConnections(bId),
+      fetchOAuthAvailability(bId),
     ]);
     if (connRes.data) setSocialConnections(connRes.data);
     if (availRes.data) setOauthAvailability(availRes.data);
@@ -224,7 +225,8 @@ export default function ConnectionsSettingsPage() {
   async function handleSocialOAuthConnect(platform: string) {
     setSocialActionLoading(platform);
     setError(null);
-    const { data, error: startError } = await startSocialOAuth(platform);
+    const bId = getStoredBusinessId() || undefined;
+    const { data, error: startError } = await startSocialOAuth(platform, bId);
     if (startError) {
       setError(startError);
       setSocialActionLoading(null);
@@ -264,7 +266,8 @@ export default function ConnectionsSettingsPage() {
 
   async function handleSocialTest(platform: string) {
     setSocialTestLoading(platform);
-    const { data, error: testError } = await testSocialConnection(platform);
+    const bId = getStoredBusinessId() || undefined;
+    const { data, error: testError } = await testSocialConnection(platform, bId);
     if (testError) {
       setSocialTestResults((prev) => ({ ...prev, [platform]: { success: false, error: testError } }));
     } else if (data) {
@@ -284,11 +287,12 @@ export default function ConnectionsSettingsPage() {
   async function handleSocialManualConnect(platform: string) {
     if (!manualToken.trim()) return;
     setSocialActionLoading(platform);
+    const bId = getStoredBusinessId() || undefined;
     const { data, error: connError } = await connectSocialManual(platform, {
       token: manualToken.trim(),
       platformId: manualPlatformId.trim() || undefined,
       accountName: manualAccountName.trim() || undefined,
-    });
+    }, bId);
     if (connError) {
       setError(connError);
     } else if (data) {
@@ -308,7 +312,8 @@ export default function ConnectionsSettingsPage() {
     const name = SOCIAL_PLATFORMS.find((p) => p.key === platform)?.name || platform;
     if (!confirm(`Disconnect ${name}?`)) return;
     setSocialActionLoading(platform);
-    const { error: discError } = await disconnectSocial(platform);
+    const bId = getStoredBusinessId() || undefined;
+    const { error: discError } = await disconnectSocial(platform, bId);
     if (discError) { setError(discError); }
     else {
       setSocialConnections((prev) => prev.filter((c) => c.platform !== platform));
