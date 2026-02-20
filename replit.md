@@ -18,7 +18,15 @@ The project is structured as a monorepo containing a Next.js 16 frontend (`apps/
 - Glassmorphism UI elements and a dark theme.
 - Redesigned sidebar with icon-first navigation and a collapsible width.
 - Unified component classes (e.g., `kf-card`, `kf-btn-primary`).
-- Mobile-optimized bottom navigation bar.
+- Mobile-optimized bottom navigation bar with 4 core items + "More" drawer.
+- Mobile slide-out navigation drawer with full menu, user profile, and logout.
+- Mobile header: hamburger menu, compact branding, search button, notification bell.
+- Notifications as bottom-sheet on mobile, dropdown on desktop.
+- PostCard actions as mobile bottom-sheet with cancel button, larger touch targets (44px min).
+- PostComposer stacked action buttons on mobile, scrollable hashtags.
+- Social tabs scrollable with snap scrolling on mobile.
+- Calendar defaults to week view on small screens.
+- `scrollbar-hide` utility for horizontal scroll areas.
 - Flow-themed animations and momentum indicators.
 
 **Technical Implementations & Features:**

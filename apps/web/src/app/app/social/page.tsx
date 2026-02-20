@@ -353,12 +353,12 @@ export default function SocialPage() {
         </AnimatePresence>
       </motion.div>
 
-      <div className="flex gap-2 overflow-x-auto pb-1">
+      <div className="flex gap-1.5 sm:gap-2 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-hide snap-x">
         {TABS.map(({ key, label, icon: Icon }) => (
           <button
             key={key}
             onClick={() => setActiveTab(key)}
-            className={`relative px-5 py-2.5 text-sm font-medium rounded-xl transition-all flex items-center gap-2 whitespace-nowrap ${
+            className={`relative px-3.5 sm:px-5 py-2.5 text-xs sm:text-sm font-medium rounded-xl transition-all flex items-center gap-1.5 sm:gap-2 whitespace-nowrap snap-start flex-shrink-0 active:scale-95 ${
               activeTab === key
                 ? "text-[hsl(var(--kf-accent1))]"
                 : "text-muted-foreground hover:text-foreground hover:bg-[hsl(var(--kf-muted)/0.5)]"
@@ -376,9 +376,10 @@ export default function SocialPage() {
                 transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
               />
             )}
-            <span className="relative z-10 flex items-center gap-2">
+            <span className="relative z-10 flex items-center gap-1.5 sm:gap-2">
               <Icon className="w-4 h-4" />
-              {label}
+              <span className="hidden sm:inline">{label}</span>
+              <span className="sm:hidden">{label.split(" ")[0]}</span>
             </span>
           </button>
         ))}

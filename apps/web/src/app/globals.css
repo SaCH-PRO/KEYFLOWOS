@@ -319,6 +319,14 @@ html {
   background: hsl(var(--kf-muted-foreground));
 }
 
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 @keyframes slow-pulse {
   0% {
     opacity: 0.5;
