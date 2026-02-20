@@ -12,6 +12,7 @@ import {
   disconnectSocial, testSocialConnection, fetchOAuthAvailability,
   SocialConnection,
 } from "@/lib/client";
+import { getStoredBusinessId } from "@/lib/workspace";
 
 const PLATFORMS = [
   {
@@ -89,9 +90,10 @@ export function ChannelsPanel() {
 
   const loadConnections = useCallback(async () => {
     setLoading(true);
+    const bId = getStoredBusinessId() || undefined;
     const [connRes, availRes] = await Promise.all([
-      fetchSocialConnections(),
-      fetchOAuthAvailability(),
+      fetchSocialConnections(bId),
+      fetchOAuthAvailability(bId),
     ]);
     if (connRes.data) setConnections(connRes.data);
     if (connRes.error) setError(connRes.error);
@@ -147,7 +149,8 @@ export function ChannelsPanel() {
   async function handleOAuthConnect(platform: string) {
     setActionLoading(platform);
     setError(null);
-    const { data, error: startErr } = await startSocialOAuth(platform);
+    const bId = getStoredBusinessId() || undefined;
+    const { data, error: startErr } = await startSocialOAuth(platform, bId);
     if (startErr) {
       setError(startErr);
       setActionLoading(null);
@@ -186,7 +189,8 @@ export function ChannelsPanel() {
   async function handleTestConnection(platform: string) {
     setTestLoading(platform);
     setTestResults((prev) => ({ ...prev, [platform]: undefined as any }));
-    const { data, error: testErr } = await testSocialConnection(platform);
+    const bId = getStoredBusinessId() || undefined;
+    const { data, error: testErr } = await testSocialConnection(platform, bId);
     if (testErr) {
       setTestResults((prev) => ({ ...prev, [platform]: { platform, success: false, error: testErr } }));
     } else if (data) {
@@ -212,11 +216,12 @@ export function ChannelsPanel() {
     if (!manualToken.trim()) return;
     setActionLoading(platform);
     setError(null);
+    const bId = getStoredBusinessId() || undefined;
     const { data, error: connErr } = await connectSocialManual(platform, {
       token: manualToken.trim(),
       platformId: manualPlatformId.trim() || undefined,
       accountName: manualAccountName.trim() || undefined,
-    });
+    }, bId);
     if (connErr) {
       setError(connErr);
     } else if (data) {
@@ -243,7 +248,8 @@ export function ChannelsPanel() {
     if (!confirm(`Disconnect ${platformName}? You won't be able to publish to this platform until reconnected.`)) return;
     setActionLoading(platform);
     setError(null);
-    const { error: discErr } = await disconnectSocial(platform);
+    const bId = getStoredBusinessId() || undefined;
+    const { error: discErr } = await disconnectSocial(platform, bId);
     if (discErr) {
       setError(discErr);
     } else {
