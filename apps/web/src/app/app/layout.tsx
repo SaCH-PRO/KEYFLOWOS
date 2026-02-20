@@ -179,11 +179,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <div className="flex">
+    <div className="h-dvh bg-background text-foreground overflow-hidden">
+      <div className="flex h-full">
         <aside 
           className={cn(
-            "hidden md:flex md:flex-col border-r border-border min-h-screen transition-all duration-300",
+            "hidden md:flex md:flex-col border-r border-border h-full transition-all duration-300",
             sidebarCollapsed ? "w-[72px]" : "w-64"
           )}
           style={{ background: "hsl(var(--kf-sidebar-bg))" }}
@@ -257,9 +257,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </aside>
 
-        <main className="flex-1 flex flex-col min-h-screen">
+        <main className="flex-1 flex flex-col h-full min-w-0">
           <header 
-            className="h-14 md:h-16 border-b border-border px-3 md:px-6 flex items-center justify-between sticky top-0 z-40"
+            className="h-14 md:h-16 border-b border-border px-3 md:px-6 flex items-center justify-between flex-shrink-0 z-40"
             style={{ background: "hsl(var(--kf-header-bg))" }}
           >
             <div className="flex items-center gap-2 md:gap-4 flex-1">
@@ -433,7 +433,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
           </header>
 
-          <div className="flex-1 p-3 sm:p-4 md:p-6 pb-24 md:pb-6">{children}</div>
+          <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 md:p-6 pb-24 md:pb-6">{children}</div>
         </main>
       </div>
 
