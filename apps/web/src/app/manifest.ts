@@ -2,15 +2,20 @@ import { MetadataRoute } from 'next'
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
+    id: '/app',
     name: 'KEYFLOWOS - Business Autopilot',
     short_name: 'KEYFLOWOS',
     description: 'AI-powered business autopilot. Automate bookings, payments, contacts, and daily operations.',
     start_url: '/app',
+    scope: '/',
     display: 'standalone',
+    lang: 'en',
+    dir: 'ltr',
     background_color: '#000000',
-    theme_color: '#3B82F6',
+    theme_color: '#F97316',
     orientation: 'portrait-primary',
     categories: ['business', 'productivity', 'finance'],
+    prefer_related_applications: false,
     icons: [
       {
         src: '/icons/icon-72x72.png',
@@ -59,20 +64,6 @@ export default function manifest(): MetadataRoute.Manifest {
         sizes: '512x512',
         type: 'image/png',
         purpose: 'maskable',
-      },
-    ],
-    screenshots: [
-      {
-        src: '/screenshots/dashboard.png',
-        sizes: '1280x720',
-        type: 'image/png',
-        form_factor: 'wide',
-      },
-      {
-        src: '/screenshots/mobile.png',
-        sizes: '750x1334',
-        type: 'image/png',
-        form_factor: 'narrow',
       },
     ],
   }

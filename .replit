@@ -65,5 +65,5 @@ externalPort = 80
 
 [deployment]
 deploymentTarget = "autoscale"
-run = ["pnpm", "--filter", "web", "start"]
-build = ["pnpm", "-r", "build"]
+run = ["bash", "-c", "cd apps/server && node dist/src/main.js & cd apps/web && pnpm start"]
+build = ["bash", "-c", "pnpm --filter db exec prisma generate && cd apps/server && pnpm build && cd ../../apps/web && pnpm build"]
