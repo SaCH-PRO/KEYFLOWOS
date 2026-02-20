@@ -2278,4 +2278,81 @@ export async function deleteProjectTask(businessId: string, taskId: string): Pro
   );
 }
 
+export interface StorefrontConfig {
+  hero: {
+    headline?: string;
+    subheadline?: string;
+    ctaLabel?: string;
+    coverImageUrl?: string;
+    showHours?: boolean;
+    showWhatsApp?: boolean;
+  };
+  appearance: {
+    theme?: 'default' | 'minimal' | 'bold' | 'elegant';
+    cardStyle?: 'grid' | 'list';
+    showPrices?: boolean;
+    showDuration?: boolean;
+    accentColor?: string;
+  };
+  merchandising: {
+    featuredItemIds?: string[];
+    collections?: { id: string; name: string; itemIds: string[] }[];
+    badges?: Record<string, 'popular' | 'new' | 'best_seller' | 'limited'>;
+  };
+  promotions: {
+    bannerEnabled?: boolean;
+    bannerText?: string;
+    bannerColor?: string;
+    bannerLink?: string;
+    bannerExpiry?: string;
+  };
+  socialProof: {
+    testimonials?: { id: string; name: string; text: string; rating: number; date: string }[];
+    showBookingCount?: boolean;
+    showRating?: boolean;
+    guaranteeText?: string;
+  };
+  seo: {
+    metaTitle?: string;
+    metaDescription?: string;
+    socialImage?: string;
+  };
+}
+
+export interface StoreAnalytics {
+  period: { days: number; since: string };
+  bookings: { total: number; inPeriod: number; last7Days: number };
+  invoices: { total: number; inPeriod: number };
+  revenue: { inPeriod: number };
+  catalog: { products: number; services: number };
+  storefrontEvents: Record<string, number>;
+}
+
+export async function fetchStorefrontConfig(businessId: string): Promise<ApiResult<StorefrontConfig>> {
+  return apiGetSimple<StorefrontConfig>(`/site/businesses/${encodeURIComponent(businessId)}/storefront`);
+}
+
+export async function updateStorefrontConfig(businessId: string, config: Partial<StorefrontConfig>): Promise<ApiResult<StorefrontConfig>> {
+  const res = await fetch(`${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/storefront`, {
+    method: 'PUT',
+    headers: { ...await getAuthHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) return { data: null, error: data?.message || 'Failed to update' };
+  return { data, error: null };
+}
+
+export async function fetchStoreAnalytics(businessId: string, days = 30): Promise<ApiResult<StoreAnalytics>> {
+  return apiGetSimple<StoreAnalytics>(`/site/businesses/${encodeURIComponent(businessId)}/analytics?days=${days}`);
+}
+
+export async function trackStoreEvent(businessId: string, type: string, itemId?: string): Promise<void> {
+  fetch(`${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/analytics/event`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type, itemId }),
+  }).catch(() => {});
+}
+
 export { DEFAULT_BUSINESS_ID };

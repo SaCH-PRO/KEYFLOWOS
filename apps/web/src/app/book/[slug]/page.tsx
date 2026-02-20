@@ -4,7 +4,9 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { apiGet, apiPost, API_BASE } from "@/lib/api";
 import { formatPrice } from "@/lib/format";
-import { Loader2, CheckCircle2, Globe } from "lucide-react";
+import { Loader2, CheckCircle2, Globe, Star, MessageCircle, Shield, Award, Flame } from "lucide-react";
+import { ItemDetailModal } from "./components/item-detail-modal";
+import { trackStoreEvent, StorefrontConfig } from "@/lib/client";
 
 import type {
   Business,
@@ -39,6 +41,9 @@ export default function PublicBookingPage() {
   const [success, setSuccess] = useState(false);
   const [bookingResults, setBookingResults] = useState<{ bookingId: string; invoiceId?: string }[]>([]);
 
+  const [selectedItem, setSelectedItem] = useState<CatalogItem | null>(null);
+  const [storefrontConfig, setStorefrontConfig] = useState<StorefrontConfig | null>(null);
+
   const primaryColor = business?.primaryColor || "#F97316";
   const secondaryColor = business?.secondaryColor || "#14B8A6";
 
@@ -65,8 +70,9 @@ export default function PublicBookingPage() {
         saveCart(slug, next);
         return next;
       });
+      if (business?.id) trackStoreEvent(business.id, 'add_to_cart', item.id);
     },
-    [slug]
+    [slug, business]
   );
 
   const removeFromCart = useCallback(
@@ -106,6 +112,11 @@ export default function PublicBookingPage() {
     [cart]
   );
 
+  const handleItemClick = useCallback((item: CatalogItem) => {
+    setSelectedItem(item);
+    if (business?.id) trackStoreEvent(business.id, 'item_view', item.id);
+  }, [business]);
+
   const cartTotal = cart.reduce((sum, c) => sum + c.price * c.quantity, 0);
   const cartCount = cart.reduce((sum, c) => sum + c.quantity, 0);
   const cartCurrency = cart[0]?.currency || business?.currency || "TTD";
@@ -129,6 +140,11 @@ export default function PublicBookingPage() {
         return;
       }
       setBusiness(res.data);
+
+      const sfRes = await apiGet<any>(`/site/storefront/public/${encodeURIComponent(slug)}`);
+      if (sfRes.data?.storefrontConfig) setStorefrontConfig(sfRes.data.storefrontConfig);
+
+      if (res.data?.id) trackStoreEvent(res.data.id, 'page_view');
 
       const [servicesRes, staffRes, productsRes] = await Promise.all([
         apiGet<Service[]>(`/bookings/public/businesses/${res.data.id}/services`),
@@ -300,6 +316,7 @@ export default function PublicBookingPage() {
     setBookingResults(results);
     setSuccess(true);
     updateCart([]);
+    if (business?.id) trackStoreEvent(business.id, 'checkout_complete');
   };
 
   if (loading) {
@@ -392,9 +409,25 @@ export default function PublicBookingPage() {
 
   return (
     <main className="min-h-screen bg-[#0a0a0f] text-white">
+      {storefrontConfig?.hero?.coverImageUrl && (
+        <div className="w-full h-48 md:h-64 overflow-hidden">
+          <img src={storefrontConfig.hero.coverImageUrl} alt="" className="w-full h-full object-cover" />
+        </div>
+      )}
+
       <BusinessHero business={business!} primaryColor={primaryColor} secondaryColor={secondaryColor} />
 
       <div className="max-w-4xl mx-auto px-4 pb-24 space-y-6">
+        {storefrontConfig?.promotions?.bannerEnabled && storefrontConfig.promotions.bannerText && (
+          <div className="rounded-2xl px-4 py-3 text-center text-sm font-medium"
+            style={{ backgroundColor: `${storefrontConfig.promotions.bannerColor || '#f59e0b'}20`,
+                     color: storefrontConfig.promotions.bannerColor || '#f59e0b',
+                     border: `1px solid ${storefrontConfig.promotions.bannerColor || '#f59e0b'}30` }}>
+            <Flame className="w-4 h-4 inline mr-2" />
+            {storefrontConfig.promotions.bannerText}
+          </div>
+        )}
+
         <CatalogGrid
           catalogItems={catalogItems}
           primaryColor={primaryColor}
@@ -402,12 +435,61 @@ export default function PublicBookingPage() {
           isInCart={isInCart}
           addToCart={addToCart}
           removeFromCart={removeFromCart}
+          badges={storefrontConfig?.merchandising?.badges}
+          featuredItemIds={storefrontConfig?.merchandising?.featuredItemIds}
+          onItemClick={handleItemClick}
         />
+
+        {storefrontConfig?.socialProof?.testimonials && storefrontConfig.socialProof.testimonials.length > 0 && (
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold text-white/80 flex items-center gap-2">
+              <MessageCircle className="w-5 h-5" style={{ color: primaryColor }} />
+              What Our Clients Say
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {storefrontConfig.socialProof.testimonials.map(t => (
+                <div key={t.id} className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 space-y-3">
+                  <div className="flex gap-1">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <Star key={i} className="w-4 h-4" fill={i < t.rating ? '#f59e0b' : 'transparent'}
+                            color={i < t.rating ? '#f59e0b' : '#ffffff30'} />
+                    ))}
+                  </div>
+                  <p className="text-sm text-white/60 italic">&ldquo;{t.text}&rdquo;</p>
+                  <p className="text-xs text-white/40 font-medium">&mdash; {t.name}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {storefrontConfig?.socialProof?.guaranteeText && (
+          <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4 flex items-center gap-3 text-sm">
+            <Shield className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+            <span className="text-white/60">{storefrontConfig.socialProof.guaranteeText}</span>
+          </div>
+        )}
 
         <div className="text-center text-xs text-white/20 pt-4">
           Powered by <span style={{ color: primaryColor }} className="font-semibold">KeyFlowOS</span>
         </div>
       </div>
+
+      {selectedItem && (
+        <ItemDetailModal
+          item={selectedItem}
+          primaryColor={primaryColor}
+          secondaryColor={secondaryColor}
+          isInCart={isInCart(selectedItem.id, selectedItem.itemType)}
+          addToCart={addToCart}
+          removeFromCart={removeFromCart}
+          relatedItems={catalogItems.filter(i => i.itemType === selectedItem.itemType && i.id !== selectedItem.id).slice(0, 4)}
+          businessPhone={business?.phone}
+          onClose={() => setSelectedItem(null)}
+          onSelectItem={(item) => setSelectedItem(item)}
+          badges={storefrontConfig?.merchandising?.badges}
+        />
+      )}
 
       <CartDrawer
         cart={cart}
@@ -425,6 +507,7 @@ export default function PublicBookingPage() {
           setCartOpen(false);
           setCheckoutMode(true);
           setError(null);
+          if (business?.id) trackStoreEvent(business.id, 'checkout_start');
         }}
       />
     </main>
