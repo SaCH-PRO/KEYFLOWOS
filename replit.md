@@ -1,7 +1,7 @@
 # KEYFLOWOS Monorepo
 
 ## Overview
-KEYFLOWOS is an AI-powered operating system designed for service businesses to streamline operations and eliminate the "tool maze." It provides pre-built Playbooks for common workflows, features a "Cockpit" dashboard with a Flow Graph visualization, an AI-driven Flow Feed, and a comprehensive CRM acting as the intelligence layer. The system aims to achieve 80-90% automation of business operations. It's envisioned as an Operating System for business ownership, comprising 5 interconnected engines: LaunchFlow, OperateAI, GrowthStack, ProfitLens, ScaleHub, and MasterClass Mode.
+KEYFLOWOS is an AI-powered operating system designed for service businesses to streamline operations and eliminate the "tool maze." It provides pre-built Playbooks for common workflows, features a "Cockpit" dashboard with a Flow Graph visualization, an AI-driven Flow Feed, and a comprehensive CRM acting as the intelligence layer. The system aims to achieve 80-90% automation of business operations. It's envisioned as an Operating System for business ownership, comprising 6 interconnected engines: LaunchFlow, OperateAI, GrowthStack, ProfitLens, ScaleHub, and MasterClass Mode.
 
 ## User Preferences
 - Caribbean localization (TTD currency, Trinidad timezone)
@@ -36,12 +36,21 @@ The project is structured as a monorepo containing a Next.js 16 frontend (`apps/
 - **Subscription & Billing System:** Offers 3-tier plans (Free, Flow, KeyFlow) with a free trial, managed through a dedicated module handling activation, cancellation, and enforcing subscription limits across modules.
 - **Multi-Tenant System:** Ensures data isolation by associating all operations with the logged-in user's `businessId`, enforcing ownership and membership.
 - **Commerce Module Overhaul (v2):** Re-architected into 8 focused modules for improved maintainability, featuring a KPI dashboard, animated tab navigation, glassmorphism product cards, and preserved existing CRUD and payment flows.
+- **Recurring Invoices:** Auto-generating invoices on WEEKLY/BIWEEKLY/MONTHLY/QUARTERLY/YEARLY schedules with line items, tax, and discount support.
 - **Contacts Page Overhaul:** Modular component architecture with a split-view layout and reusable components.
 - **Settings Feature:** Production-ready modular business settings including basic info, social links, branding, logo upload, and Google Calendar OAuth integration.
+- **Expense Tracking:** Full CRUD for business expenses with categories, vendor tracking, analytics summary (by category breakdown, monthly trends), and receipt management.
+- **AI Co-Founder (KeyFlow AI):** OpenAI-powered business advisor with full business context injection, multi-turn chat, daily briefing generation, and predictive cash flow forecasting.
+- **Email Marketing:** Campaign management with draft/send workflow, contact segmentation by tags/status, and delivery tracking (sent/opened/clicked stats).
+- **Lead Capture Forms:** Form builder with custom fields (text/email/phone/select/textarea), public submission endpoint with auto-CRM contact creation, and embed code generation.
+- **Business Templates:** Industry-specific presets (Freelancer, Restaurant/Food, Salon/Beauty, E-commerce) that seed products, services, and expense categories.
+- **Landing Page Builder:** Template-based page builder with section types (hero/features/testimonials/cta/text/gallery), publish/unpublish toggle, and public page serving.
+- **MasterClass (Education):** Micro-course catalog with difficulty levels, lesson-by-lesson progress tracking, enrollment management, and certificate generation.
+- **Community Hub:** Peer discussion forum with post types (Discussion/Question/Win/Resource), likes, comments, and cohort-based founder circles with membership management.
 - **Core Modules:**
     - **Identity:** User authentication, team, business settings.
     - **CRM:** Contacts, timeline, lead scoring.
-    - **Commerce:** Products, invoices, quotes, payments.
+    - **Commerce:** Products, invoices, quotes, payments, recurring invoices.
     - **Bookings:** Services, staff, availability, calendar.
     - **Social:** Posts, scheduling, multi-platform channel integration (Facebook, Instagram, LinkedIn, Twitter, TikTok) with analytics.
     - **Automations:** Playbooks, triggers, actions, with an AutomationExecutorService.
@@ -49,10 +58,27 @@ The project is structured as a monorepo containing a Next.js 16 frontend (`apps/
     - **Flow (Activity & Search):** Unified activity feed and universal search across all modules.
     - **Reports:** KPIs, analytics.
     - **Cockpit:** Flow Graph, Flow Feed, live momentum bar, universal search, and prioritized tasks.
+    - **Expenses:** Expense tracking with categories, analytics, and receipt management.
+    - **AI:** Co-Founder chat, daily briefing, cash flow prediction.
+    - **Email Marketing:** Campaign management with segmentation and analytics.
+    - **Lead Forms:** Form builder with public submissions and CRM integration.
+    - **Templates:** Industry-specific business presets.
+    - **Education:** MasterClass courses with progress tracking and certificates.
+    - **Community:** Forum posts, comments, likes, and cohort management.
+    - **Landing Pages:** Page builder with section types and public serving.
+
+## Recent Changes (Feb 20, 2026)
+- Expanded Prisma schema with 9 new modules (Expense, ExpenseCategory, RecurringInvoice, EmailCampaign, LeadForm, LeadFormSubmission, BusinessTemplate, Course, CourseEnrollment, Cohort, CommunityPost, CommunityComment, LandingPage)
+- Built 8 new NestJS backend modules: Expenses, Recurring Invoices, Email Marketing, Lead Forms, Templates, Education, Community, Landing Pages
+- Enhanced AI module with OpenAI-powered Co-Founder chat, daily briefing generation, and predictive cash flow
+- Built 8 new frontend pages: Expenses, AI Advisor, Marketing (campaigns + lead forms), Learn (MasterClass), Community, Landing Pages, Templates
+- Added sidebar navigation links for all new modules
+- All API client functions added to `apps/web/src/lib/client.ts`
 
 ## External Dependencies
 - **Database:** PostgreSQL (Replit built-in)
 - **Authentication:** Supabase Auth
+- **AI:** OpenAI via Replit AI Integrations (gpt-5.2 model for AI Co-Founder)
 - **Google Services:**
     - Google Calendar Integration (OAuth 2.0 with `calendar.events` scope)
     - Google Sign-In (via Supabase OAuth)

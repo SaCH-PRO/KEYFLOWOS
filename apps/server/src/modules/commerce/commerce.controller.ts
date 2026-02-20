@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Inject, Logger, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { CommerceService } from './commerce.service';
+import { RecurringInvoiceService } from './recurring-invoice.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -16,6 +17,7 @@ export class CommerceController {
 
   constructor(
     @Inject(CommerceService) private readonly commerce: CommerceService,
+    @Inject(RecurringInvoiceService) private readonly recurringInvoices: RecurringInvoiceService,
     @Inject(ReceiptService) private readonly receipts: ReceiptService,
     @Inject(GmailService) private readonly gmail: GmailService,
   ) {}
@@ -348,5 +350,84 @@ export class CommerceController {
     });
 
     return { success: true };
+  }
+
+  // ========== RECURRING INVOICES ==========
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/recurring-invoices')
+  listRecurringInvoices(@Param('businessId') businessId: string) {
+    return this.recurringInvoices.listRecurringInvoices(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/recurring-invoices/:id')
+  getRecurringInvoice(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+  ) {
+    return this.recurringInvoices.getRecurringInvoice(businessId, id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/recurring-invoices')
+  createRecurringInvoice(
+    @Param('businessId') businessId: string,
+    @Body() body: {
+      name: string;
+      frequency: string;
+      nextRunDate: string;
+      endDate?: string;
+      contactId: string;
+      lineItems: { description: string; quantity: number; unitPrice: number; total: number; productId?: string }[];
+      taxRate?: number;
+      discountType?: 'PERCENT' | 'FIXED';
+      discountValue?: number;
+      currency?: string;
+      notes?: string;
+    },
+  ) {
+    return this.recurringInvoices.createRecurringInvoice({ businessId, ...body });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/recurring-invoices/:id')
+  updateRecurringInvoice(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: {
+      name?: string;
+      frequency?: string;
+      nextRunDate?: string;
+      endDate?: string | null;
+      contactId?: string;
+      lineItems?: { description: string; quantity: number; unitPrice: number; total: number; productId?: string }[];
+      taxRate?: number;
+      discountType?: 'PERCENT' | 'FIXED' | null;
+      discountValue?: number | null;
+      currency?: string;
+      notes?: string | null;
+      isActive?: boolean;
+    },
+  ) {
+    return this.recurringInvoices.updateRecurringInvoice({ id, businessId, ...body });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/recurring-invoices/:id')
+  deleteRecurringInvoice(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+  ) {
+    return this.recurringInvoices.deleteRecurringInvoice(businessId, id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/recurring-invoices/:id/toggle')
+  toggleRecurringInvoice(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+  ) {
+    return this.recurringInvoices.toggleActive(businessId, id);
   }
 }

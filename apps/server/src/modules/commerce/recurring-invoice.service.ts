@@ -1,0 +1,279 @@
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { PrismaService } from '../../core/prisma/prisma.service';
+
+@Injectable()
+export class RecurringInvoiceService {
+  private readonly logger = new Logger(RecurringInvoiceService.name);
+
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+  ) {}
+
+  listRecurringInvoices(businessId: string) {
+    return this.prisma.client.recurringInvoice.findMany({
+      where: { businessId, deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+      include: { contact: true },
+    });
+  }
+
+  getRecurringInvoice(businessId: string, id: string) {
+    return this.prisma.client.recurringInvoice.findFirst({
+      where: { id, businessId, deletedAt: null },
+      include: { contact: true },
+    });
+  }
+
+  async createRecurringInvoice(input: {
+    businessId: string;
+    name: string;
+    frequency: string;
+    nextRunDate: Date | string;
+    endDate?: Date | string | null;
+    contactId: string;
+    lineItems: { description: string; quantity: number; unitPrice: number; total: number; productId?: string }[];
+    taxRate?: number;
+    discountType?: 'PERCENT' | 'FIXED';
+    discountValue?: number;
+    currency?: string;
+    notes?: string;
+  }) {
+    const subtotal = input.lineItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    const taxRate = input.taxRate ?? 0;
+    const taxAmount = (subtotal * taxRate) / 100;
+    let discountAmount = 0;
+    if (input.discountType === 'PERCENT' && input.discountValue) {
+      discountAmount = (subtotal * input.discountValue) / 100;
+    } else if (input.discountType === 'FIXED' && input.discountValue) {
+      discountAmount = input.discountValue;
+    }
+    const total = subtotal + taxAmount - discountAmount;
+
+    return this.prisma.client.recurringInvoice.create({
+      data: {
+        businessId: input.businessId,
+        name: input.name,
+        frequency: input.frequency,
+        nextRunDate: new Date(input.nextRunDate),
+        endDate: input.endDate ? new Date(input.endDate) : null,
+        contactId: input.contactId,
+        lineItems: input.lineItems,
+        subtotal,
+        taxRate,
+        discountType: input.discountType ?? null,
+        discountValue: input.discountValue ?? null,
+        total,
+        currency: input.currency ?? 'TTD',
+        notes: input.notes ?? null,
+      },
+      include: { contact: true },
+    });
+  }
+
+  async updateRecurringInvoice(input: {
+    id: string;
+    businessId: string;
+    name?: string;
+    frequency?: string;
+    nextRunDate?: Date | string;
+    endDate?: Date | string | null;
+    contactId?: string;
+    lineItems?: { description: string; quantity: number; unitPrice: number; total: number; productId?: string }[];
+    taxRate?: number;
+    discountType?: 'PERCENT' | 'FIXED' | null;
+    discountValue?: number | null;
+    currency?: string;
+    notes?: string | null;
+    isActive?: boolean;
+  }) {
+    const existing = await this.prisma.client.recurringInvoice.findFirst({
+      where: { id: input.id, businessId: input.businessId, deletedAt: null },
+    });
+    if (!existing) {
+      throw new Error('Recurring invoice not found');
+    }
+
+    const updateData: any = {};
+    if (input.name !== undefined) updateData.name = input.name;
+    if (input.frequency !== undefined) updateData.frequency = input.frequency;
+    if (input.nextRunDate !== undefined) updateData.nextRunDate = new Date(input.nextRunDate);
+    if (input.endDate !== undefined) updateData.endDate = input.endDate ? new Date(input.endDate) : null;
+    if (input.contactId !== undefined) updateData.contactId = input.contactId;
+    if (input.currency !== undefined) updateData.currency = input.currency;
+    if (input.notes !== undefined) updateData.notes = input.notes;
+    if (input.isActive !== undefined) updateData.isActive = input.isActive;
+
+    if (input.lineItems) {
+      const subtotal = input.lineItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+      const taxRate = input.taxRate ?? existing.taxRate ?? 0;
+      const taxAmount = (subtotal * taxRate) / 100;
+      const discountType = input.discountType !== undefined ? input.discountType : existing.discountType;
+      const discountValue = input.discountValue !== undefined ? input.discountValue : existing.discountValue;
+      let discountAmount = 0;
+      if (discountType === 'PERCENT' && discountValue) {
+        discountAmount = (subtotal * discountValue) / 100;
+      } else if (discountType === 'FIXED' && discountValue) {
+        discountAmount = discountValue;
+      }
+      const total = subtotal + taxAmount - discountAmount;
+
+      updateData.lineItems = input.lineItems;
+      updateData.subtotal = subtotal;
+      updateData.taxRate = taxRate;
+      updateData.discountType = discountType;
+      updateData.discountValue = discountValue;
+      updateData.total = total;
+    } else if (input.taxRate !== undefined || input.discountType !== undefined || input.discountValue !== undefined) {
+      const subtotal = existing.subtotal;
+      const taxRate = input.taxRate ?? existing.taxRate ?? 0;
+      const taxAmount = (subtotal * taxRate) / 100;
+      const discountType = input.discountType !== undefined ? input.discountType : existing.discountType;
+      const discountValue = input.discountValue !== undefined ? input.discountValue : existing.discountValue;
+      let discountAmount = 0;
+      if (discountType === 'PERCENT' && discountValue) {
+        discountAmount = (subtotal * discountValue) / 100;
+      } else if (discountType === 'FIXED' && discountValue) {
+        discountAmount = discountValue;
+      }
+      const total = subtotal + taxAmount - discountAmount;
+
+      updateData.taxRate = taxRate;
+      updateData.discountType = discountType;
+      updateData.discountValue = discountValue;
+      updateData.total = total;
+    }
+
+    return this.prisma.client.recurringInvoice.update({
+      where: { id: input.id },
+      data: updateData,
+      include: { contact: true },
+    });
+  }
+
+  deleteRecurringInvoice(businessId: string, id: string) {
+    return this.prisma.client.recurringInvoice.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
+  }
+
+  async toggleActive(businessId: string, id: string) {
+    const existing = await this.prisma.client.recurringInvoice.findFirst({
+      where: { id, businessId, deletedAt: null },
+    });
+    if (!existing) {
+      throw new Error('Recurring invoice not found');
+    }
+    return this.prisma.client.recurringInvoice.update({
+      where: { id },
+      data: { isActive: !existing.isActive },
+      include: { contact: true },
+    });
+  }
+
+  async processRecurringInvoices() {
+    const now = new Date();
+    const dueInvoices = await this.prisma.client.recurringInvoice.findMany({
+      where: {
+        isActive: true,
+        deletedAt: null,
+        nextRunDate: { lte: now },
+        OR: [
+          { endDate: null },
+          { endDate: { gte: now } },
+        ],
+      },
+      include: { contact: true },
+    });
+
+    this.logger.log(`Processing ${dueInvoices.length} recurring invoices`);
+    const results: any[] = [];
+
+    for (const recurring of dueInvoices) {
+      try {
+        const lineItems = recurring.lineItems as any[];
+        const subtotal = lineItems.reduce((sum: number, item: any) => sum + item.quantity * item.unitPrice, 0);
+        const taxRate = recurring.taxRate ?? 0;
+        const taxAmount = (subtotal * taxRate) / 100;
+        let discountAmount = 0;
+        if (recurring.discountType === 'PERCENT' && recurring.discountValue) {
+          discountAmount = (subtotal * recurring.discountValue) / 100;
+        } else if (recurring.discountType === 'FIXED' && recurring.discountValue) {
+          discountAmount = recurring.discountValue;
+        }
+        const total = subtotal + taxAmount - discountAmount;
+
+        const invoice = await this.prisma.client.invoice.create({
+          data: {
+            businessId: recurring.businessId,
+            contactId: recurring.contactId,
+            invoiceNumber: `INV-${Date.now()}`,
+            status: 'DRAFT',
+            issueDate: new Date(),
+            subtotal,
+            taxRate,
+            taxAmount,
+            discountType: recurring.discountType ?? null,
+            discountValue: recurring.discountValue ?? null,
+            discountAmount,
+            total,
+            currency: recurring.currency,
+            notes: recurring.notes,
+            items: {
+              create: lineItems.map((item: any) => ({
+                description: item.description,
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+                total: item.quantity * item.unitPrice,
+                productId: item.productId ?? null,
+              })),
+            },
+          },
+          include: { items: true, contact: true },
+        });
+
+        const nextRunDate = this.calculateNextRunDate(recurring.nextRunDate, recurring.frequency);
+
+        await this.prisma.client.recurringInvoice.update({
+          where: { id: recurring.id },
+          data: {
+            lastRunDate: now,
+            nextRunDate,
+            runCount: { increment: 1 },
+          },
+        });
+
+        this.logger.log(`Generated invoice ${invoice.invoiceNumber} from recurring "${recurring.name}"`);
+        results.push({ recurringId: recurring.id, invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber });
+      } catch (error: any) {
+        this.logger.error(`Failed to process recurring invoice ${recurring.id}: ${error?.message}`, error?.stack);
+      }
+    }
+
+    return results;
+  }
+
+  private calculateNextRunDate(currentDate: Date, frequency: string): Date {
+    const next = new Date(currentDate);
+    switch (frequency) {
+      case 'WEEKLY':
+        next.setDate(next.getDate() + 7);
+        break;
+      case 'BIWEEKLY':
+        next.setDate(next.getDate() + 14);
+        break;
+      case 'MONTHLY':
+        next.setMonth(next.getMonth() + 1);
+        break;
+      case 'QUARTERLY':
+        next.setMonth(next.getMonth() + 3);
+        break;
+      case 'YEARLY':
+        next.setFullYear(next.getFullYear() + 1);
+        break;
+      default:
+        next.setMonth(next.getMonth() + 1);
+    }
+    return next;
+  }
+}
