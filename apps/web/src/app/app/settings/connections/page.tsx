@@ -1,18 +1,19 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Calendar, CheckCircle2, Loader2, AlertCircle, Link2, Zap, ArrowRight,
+  Calendar, CheckCircle2, Loader2, AlertCircle, Link2, Zap,
   Facebook, Instagram, Linkedin, Twitter, Music2, Wifi, WifiOff,
-  Key, Unlink, ExternalLink, ChevronDown, ChevronUp, Mail,
+  Key, Unlink, ExternalLink, ChevronDown, ChevronUp, Mail, Settings2,
 } from "lucide-react";
 import { Button, Badge } from "@keyflow/ui";
 import { apiGet, apiPostSimple, apiDelete } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import {
   fetchSocialConnections, connectSocialManual, disconnectSocial,
-  testSocialConnection, startSocialOAuth, SocialConnection,
+  testSocialConnection, startSocialOAuth, fetchOAuthAvailability,
+  SocialConnection,
 } from "@/lib/client";
 
 type CalendarStatus = { connected: boolean; email?: string };
@@ -31,7 +32,7 @@ const SOCIAL_PLATFORMS = [
     color: "#1877F2",
     description: "Publish posts and stories to your Facebook Page",
     gradient: "from-blue-500/15 to-sky-500/15",
-    helpText: "Enter your Page Access Token and Page ID from the Facebook Developer Portal.",
+    helpText: "Paste your Page Access Token and Page ID from the Facebook Developer Portal.",
   },
   {
     key: "INSTAGRAM",
@@ -49,7 +50,7 @@ const SOCIAL_PLATFORMS = [
     color: "#0A66C2",
     description: "Share professional posts and articles",
     gradient: "from-blue-600/15 to-indigo-500/15",
-    helpText: "Enter your LinkedIn access token and person URN.",
+    helpText: "Paste your LinkedIn access token and person URN (e.g. urn:li:person:abc123).",
   },
   {
     key: "TWITTER",
@@ -58,7 +59,7 @@ const SOCIAL_PLATFORMS = [
     color: "#1DA1F2",
     description: "Post tweets and threads to your account",
     gradient: "from-sky-400/15 to-blue-500/15",
-    helpText: "Enter your Bearer Token from the Twitter Developer Portal.",
+    helpText: "Paste your Bearer Token from the Twitter Developer Portal.",
   },
   {
     key: "TIKTOK",
@@ -67,7 +68,7 @@ const SOCIAL_PLATFORMS = [
     color: "#00F2EA",
     description: "Publish videos, photos and text posts",
     gradient: "from-cyan-400/15 to-pink-500/15",
-    helpText: "Enter your TikTok access token or connect via OAuth.",
+    helpText: "Paste your TikTok access token from the TikTok Developer Portal.",
   },
 ];
 
@@ -103,7 +104,9 @@ export default function ConnectionsSettingsPage() {
   const [manualToken, setManualToken] = useState("");
   const [manualPlatformId, setManualPlatformId] = useState("");
   const [manualAccountName, setManualAccountName] = useState("");
+  const [oauthAvailability, setOauthAvailability] = useState<Record<string, boolean>>({});
 
+  const oauthPopupRef = useRef<Window | null>(null);
   const businessId = getStoredBusinessId();
 
   const fetchCalendarStatus = useCallback(async () => {
@@ -121,8 +124,12 @@ export default function ConnectionsSettingsPage() {
 
   const fetchSocial = useCallback(async () => {
     setSocialLoading(true);
-    const { data } = await fetchSocialConnections();
-    if (data) setSocialConnections(data);
+    const [connRes, availRes] = await Promise.all([
+      fetchSocialConnections(),
+      fetchOAuthAvailability(),
+    ]);
+    if (connRes.data) setSocialConnections(connRes.data);
+    if (availRes.data) setOauthAvailability(availRes.data);
     setSocialLoading(false);
   }, []);
 
@@ -134,6 +141,36 @@ export default function ConnectionsSettingsPage() {
       return () => clearTimeout(t);
     }
   }, [success]);
+
+  useEffect(() => {
+    function handleOAuthMessage(event: MessageEvent) {
+      if (event.origin !== window.location.origin) return;
+      const { type, platform, connection, error: oauthError } = event.data || {};
+
+      if (type === "social-oauth-success" && platform) {
+        if (connection) {
+          setSocialConnections((prev) => {
+            const idx = prev.findIndex((c) => c.platform === platform);
+            if (idx >= 0) { const next = [...prev]; next[idx] = connection; return next; }
+            return [...prev, connection];
+          });
+        } else {
+          fetchSocial();
+        }
+        const name = SOCIAL_PLATFORMS.find((p) => p.key === platform)?.name || platform;
+        setSuccess(`${name} connected successfully!`);
+        setSocialActionLoading(null);
+      }
+
+      if (type === "social-oauth-error" && platform) {
+        setError(oauthError || `Failed to connect ${platform}`);
+        setSocialActionLoading(null);
+      }
+    }
+
+    window.addEventListener("message", handleOAuthMessage);
+    return () => window.removeEventListener("message", handleOAuthMessage);
+  }, [fetchSocial]);
 
   const handleConnect = async () => {
     if (!businessId) return;
@@ -184,11 +221,52 @@ export default function ConnectionsSettingsPage() {
     return socialConnections.find((c) => c.platform === platform);
   }
 
+  async function handleSocialOAuthConnect(platform: string) {
+    setSocialActionLoading(platform);
+    setError(null);
+    const { data, error: startError } = await startSocialOAuth(platform);
+    if (startError) {
+      setError(startError);
+      setSocialActionLoading(null);
+      return;
+    }
+    if (data?.authUrl) {
+      const width = 600;
+      const height = 700;
+      const left = window.screenX + (window.innerWidth - width) / 2;
+      const top = window.screenY + (window.innerHeight - height) / 2;
+      const popup = window.open(
+        data.authUrl,
+        `social_oauth_${platform}`,
+        `width=${width},height=${height},left=${left},top=${top},toolbar=no,menubar=no,scrollbars=yes`,
+      );
+
+      if (!popup || popup.closed) {
+        window.location.href = data.authUrl;
+        return;
+      }
+
+      oauthPopupRef.current = popup;
+
+      const pollTimer = setInterval(() => {
+        if (popup.closed) {
+          clearInterval(pollTimer);
+          setTimeout(() => {
+            setSocialActionLoading((current) => (current === platform ? null : current));
+          }, 2000);
+        }
+      }, 500);
+    } else {
+      setError("Could not generate authorization URL. Please try again.");
+      setSocialActionLoading(null);
+    }
+  }
+
   async function handleSocialTest(platform: string) {
     setSocialTestLoading(platform);
-    const { data, error } = await testSocialConnection(platform);
-    if (error) {
-      setSocialTestResults((prev) => ({ ...prev, [platform]: { success: false, error } }));
+    const { data, error: testError } = await testSocialConnection(platform);
+    if (testError) {
+      setSocialTestResults((prev) => ({ ...prev, [platform]: { success: false, error: testError } }));
     } else if (data) {
       setSocialTestResults((prev) => ({
         ...prev,
@@ -206,13 +284,13 @@ export default function ConnectionsSettingsPage() {
   async function handleSocialManualConnect(platform: string) {
     if (!manualToken.trim()) return;
     setSocialActionLoading(platform);
-    const { data, error } = await connectSocialManual(platform, {
+    const { data, error: connError } = await connectSocialManual(platform, {
       token: manualToken.trim(),
       platformId: manualPlatformId.trim() || undefined,
       accountName: manualAccountName.trim() || undefined,
     });
-    if (error) {
-      setError(error);
+    if (connError) {
+      setError(connError);
     } else if (data) {
       setSocialConnections((prev) => {
         const idx = prev.findIndex((c) => c.platform === platform);
@@ -230,21 +308,13 @@ export default function ConnectionsSettingsPage() {
     const name = SOCIAL_PLATFORMS.find((p) => p.key === platform)?.name || platform;
     if (!confirm(`Disconnect ${name}?`)) return;
     setSocialActionLoading(platform);
-    const { error } = await disconnectSocial(platform);
-    if (error) { setError(error); }
+    const { error: discError } = await disconnectSocial(platform);
+    if (discError) { setError(discError); }
     else {
       setSocialConnections((prev) => prev.filter((c) => c.platform !== platform));
       setSocialTestResults((prev) => { const n = { ...prev }; delete n[platform]; return n; });
       setSuccess(`${name} disconnected.`);
     }
-    setSocialActionLoading(null);
-  }
-
-  async function handleSocialOAuth(platform: string) {
-    setSocialActionLoading(platform);
-    const { data, error } = await startSocialOAuth(platform);
-    if (error) setError(error);
-    else if (data?.authUrl) window.open(data.authUrl, "_blank", "width=600,height=700");
     setSocialActionLoading(null);
   }
 
@@ -430,6 +500,7 @@ export default function ConnectionsSettingsPage() {
               const testResult = socialTestResults[platform.key];
               const Icon = platform.icon;
               const isExpanded = expandedSocial === platform.key;
+              const hasOAuth = oauthAvailability[platform.key] === true;
 
               return (
                 <div
@@ -495,23 +566,41 @@ export default function ConnectionsSettingsPage() {
                         </>
                       )}
                       {!isConnected && !isExpired && (
-                        <Button
-                          variant="default"
-                          size="sm"
-                          onClick={() => toggleSocialExpand(platform.key)}
-                        >
-                          <Key className="h-3 w-3 mr-1.5" />
-                          Connect
-                        </Button>
+                        <>
+                          {hasOAuth ? (
+                            <Button
+                              variant="default"
+                              size="sm"
+                              onClick={() => handleSocialOAuthConnect(platform.key)}
+                              disabled={isActionLoading}
+                            >
+                              {isActionLoading ? (
+                                <Loader2 className="h-3 w-3 animate-spin mr-1.5" />
+                              ) : (
+                                <ExternalLink className="h-3 w-3 mr-1.5" />
+                              )}
+                              Connect
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="default"
+                              size="sm"
+                              onClick={() => toggleSocialExpand(platform.key)}
+                            >
+                              <Key className="h-3 w-3 mr-1.5" />
+                              Connect
+                            </Button>
+                          )}
+                        </>
                       )}
                       {(isConnected || isExpired) && (
                         <Button
-                          variant="subtle"
+                          variant="outline"
                           size="sm"
                           onClick={() => toggleSocialExpand(platform.key)}
-                          title="Update token"
+                          title={hasOAuth ? "Reconnect or enter token manually" : "Update token"}
                         >
-                          {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                          {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <Settings2 className="h-3.5 w-3.5" />}
                         </Button>
                       )}
                     </div>
@@ -536,7 +625,7 @@ export default function ConnectionsSettingsPage() {
                           {testResult.success ? (
                             <>
                               <Wifi className="w-3.5 h-3.5 flex-shrink-0" />
-                              Connection verified{testResult.accountName && ` — ${testResult.accountName}`}
+                              Connection verified{testResult.accountName && ` \u2014 ${testResult.accountName}`}
                             </>
                           ) : (
                             <>
@@ -555,52 +644,68 @@ export default function ConnectionsSettingsPage() {
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: "auto" }}
                         exit={{ opacity: 0, height: 0 }}
-                        className="mt-3 pt-3 border-t border-border/30 space-y-2"
+                        className="mt-3 pt-3 border-t border-border/30 space-y-3"
                       >
-                        <p className="text-[11px] text-muted-foreground">{platform.helpText}</p>
-                        <input
-                          className="kf-input w-full text-xs"
-                          placeholder="Access Token *"
-                          value={manualToken}
-                          onChange={(e) => setManualToken(e.target.value)}
-                          type="password"
-                          autoFocus
-                        />
-                        <input
-                          className="kf-input w-full text-xs"
-                          placeholder="Platform ID (page ID, person URN, etc.)"
-                          value={manualPlatformId}
-                          onChange={(e) => setManualPlatformId(e.target.value)}
-                        />
-                        <input
-                          className="kf-input w-full text-xs"
-                          placeholder="Display Name (optional)"
-                          value={manualAccountName}
-                          onChange={(e) => setManualAccountName(e.target.value)}
-                        />
-                        <div className="flex gap-2">
+                        {hasOAuth && (isConnected || isExpired) && (
                           <Button
                             variant="default"
                             size="sm"
-                            onClick={() => handleSocialManualConnect(platform.key)}
-                            disabled={!manualToken.trim() || isActionLoading}
-                            className="flex-1"
-                          >
-                            {isActionLoading ? <Loader2 className="h-3 w-3 animate-spin mr-1.5" /> : <CheckCircle2 className="h-3 w-3 mr-1.5" />}
-                            {isConnected || isExpired ? "Update" : "Save & Connect"}
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleSocialOAuth(platform.key)}
+                            className="w-full"
+                            onClick={() => { setExpandedSocial(null); handleSocialOAuthConnect(platform.key); }}
                             disabled={isActionLoading}
                           >
-                            <ExternalLink className="h-3 w-3 mr-1.5" />
-                            OAuth
+                            {isActionLoading ? (
+                              <Loader2 className="h-3 w-3 animate-spin mr-1.5" />
+                            ) : (
+                              <ExternalLink className="h-3 w-3 mr-1.5" />
+                            )}
+                            Reconnect with {platform.name}
                           </Button>
-                          <Button variant="subtle" size="sm" onClick={() => setExpandedSocial(null)}>
-                            Cancel
-                          </Button>
+                        )}
+
+                        <div className="space-y-2">
+                          <button
+                            onClick={() => toggleSocialExpand(expandedSocial === `${platform.key}_manual` ? platform.key : `${platform.key}_manual`)}
+                            className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition w-full"
+                          >
+                            <Key className="h-3 w-3" />
+                            <span>Advanced: Enter token manually</span>
+                            <ChevronDown className={`h-3 w-3 ml-auto transition-transform ${expandedSocial === `${platform.key}_manual` ? "rotate-180" : ""}`} />
+                          </button>
+
+                          <div className="space-y-2">
+                            <p className="text-[11px] text-muted-foreground">{platform.helpText}</p>
+                            <input
+                              className="kf-input w-full text-xs"
+                              placeholder="Access Token *"
+                              value={manualToken}
+                              onChange={(e) => setManualToken(e.target.value)}
+                              type="password"
+                              autoFocus
+                            />
+                            <input
+                              className="kf-input w-full text-xs"
+                              placeholder="Platform ID (page ID, person URN, etc.)"
+                              value={manualPlatformId}
+                              onChange={(e) => setManualPlatformId(e.target.value)}
+                            />
+                            <input
+                              className="kf-input w-full text-xs"
+                              placeholder="Display Name (optional)"
+                              value={manualAccountName}
+                              onChange={(e) => setManualAccountName(e.target.value)}
+                            />
+                            <Button
+                              variant="default"
+                              size="sm"
+                              onClick={() => handleSocialManualConnect(platform.key)}
+                              disabled={!manualToken.trim() || isActionLoading}
+                              className="w-full"
+                            >
+                              {isActionLoading ? <Loader2 className="h-3 w-3 animate-spin mr-1.5" /> : <CheckCircle2 className="h-3 w-3 mr-1.5" />}
+                              {isConnected || isExpired ? "Update Connection" : "Save & Connect"}
+                            </Button>
+                          </div>
                         </div>
                       </motion.div>
                     )}
@@ -609,16 +714,16 @@ export default function ConnectionsSettingsPage() {
               );
             })
           )}
-        </div>
-      </motion.div>
 
-      <motion.div variants={fadeUp} className="kf-card p-4 border-dashed">
-        <div className="text-center text-sm text-muted-foreground flex items-center justify-center gap-2">
-          <Link2 className="h-4 w-4" />
-          More integrations coming soon.{" "}
-          <a href="mailto:support@keyflow.app" className="text-[hsl(var(--kf-accent1))] hover:underline font-medium">
-            Request one
-          </a>
+          {!socialLoading && !Object.values(oauthAvailability).some(Boolean) && (
+            <div className="mt-3 px-4 py-3 rounded-xl bg-amber-500/5 border border-amber-500/20">
+              <p className="text-xs text-amber-300/80">
+                <AlertCircle className="h-3 w-3 inline mr-1.5 -mt-0.5" />
+                No social platform OAuth apps configured. Add platform credentials as environment variables
+                (e.g. FACEBOOK_APP_ID, TWITTER_CLIENT_ID) for one-click connect, or use manual token entry above.
+              </p>
+            </div>
+          )}
         </div>
       </motion.div>
     </motion.div>

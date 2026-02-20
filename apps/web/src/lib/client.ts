@@ -1363,17 +1363,23 @@ export async function fetchSocialConnections(businessId: string = DEFAULT_BUSINE
 }
 
 export async function startSocialOAuth(platform: string, businessId: string = DEFAULT_BUSINESS_ID) {
-  return apiPost<{ authUrl: string; redirectUri: string; codeVerifier?: string; state?: string }>({
+  return apiPost<{ authUrl: string; redirectUri: string; state?: string }>({
     path: `/social/businesses/${encodeURIComponent(businessId)}/connections/${encodeURIComponent(platform)}/oauth/start`,
     body: {},
   });
 }
 
-export async function completeSocialOAuth(platform: string, code: string, businessId: string = DEFAULT_BUSINESS_ID) {
-  return apiPost<SocialConnection>({
+export async function completeSocialOAuth(platform: string, code: string, state?: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<{ success: boolean; error?: string; connection?: SocialConnection }>({
     path: `/social/businesses/${encodeURIComponent(businessId)}/connections/${encodeURIComponent(platform)}/oauth/callback`,
-    body: { code },
+    body: { code, state },
   });
+}
+
+export async function fetchOAuthAvailability(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGetSimple<Record<string, boolean>>(
+    `/social/businesses/${encodeURIComponent(businessId)}/connections/oauth-availability`,
+  );
 }
 
 export async function connectSocialManual(platform: string, data: { token: string; platformId?: string; accountName?: string }, businessId: string = DEFAULT_BUSINESS_ID) {
