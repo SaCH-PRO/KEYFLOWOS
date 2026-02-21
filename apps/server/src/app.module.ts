@@ -30,7 +30,6 @@ import { LeadFormsModule } from './modules/lead-forms/lead-forms.module';
 import { TemplatesModule } from './modules/templates/templates.module';
 import { EducationModule } from './modules/education/education.module';
 import { CommunityModule } from './modules/community/community.module';
-import { LandingPagesModule } from './modules/landing-pages/landing-pages.module';
 import { SeedModule } from './core/seed/seed.module';
 
 @Module({
@@ -66,7 +65,6 @@ import { SeedModule } from './core/seed/seed.module';
     TemplatesModule,
     EducationModule,
     CommunityModule,
-    LandingPagesModule,
     SeedModule,
   ],
   controllers: [AppController],
