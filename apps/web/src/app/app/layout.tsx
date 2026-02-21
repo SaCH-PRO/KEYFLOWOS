@@ -21,9 +21,7 @@ import {
   LogOut,
   Search,
   Zap,
-  Home,
   MessageCircle,
-  Brain,
   PanelLeftClose,
   PanelLeft,
   Store,
@@ -37,8 +35,7 @@ import {
 } from "lucide-react";
 
 const navItems = [
-  { label: "Cockpit", href: "/app", icon: Home },
-  { label: "KeyFlow AI", href: "/app/advisor", icon: Brain },
+  { label: "Command", href: "/app", icon: Zap },
   { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
   { label: "Commerce", href: "/app/commerce", icon: CreditCard },
   { label: "Bookings", href: "/app/bookings", icon: Calendar },
@@ -57,7 +54,7 @@ const bottomNavItems = [
 ];
 
 const mobileBottomNav = [
-  { label: "Home", href: "/app", icon: Home },
+  { label: "Command", href: "/app", icon: Zap },
   { label: "Commerce", href: "/app/commerce", icon: CreditCard },
   { label: "Bookings", href: "/app/bookings", icon: Calendar },
   { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
