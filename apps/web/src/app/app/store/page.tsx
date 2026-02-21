@@ -96,9 +96,9 @@ export default function StorePage() {
     void initWorkspace();
   }, []);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (showLoader = false) => {
     if (!businessId) return;
-    setLoading(true);
+    if (showLoader) setLoading(true);
     try {
       const [servicesRes, staffRes, bizRes, productsRes] = await Promise.all([
         fetchServices(businessId),
@@ -149,14 +149,23 @@ export default function StorePage() {
   }, [businessId]);
 
   useEffect(() => {
-    void loadData();
+    void loadData(true);
   }, [loadData]);
 
   useEffect(() => {
     const unsub = onProductsChanged(() => {
       void loadData();
     });
-    return unsub;
+
+    const handleFocus = () => {
+      void loadData();
+    };
+    window.addEventListener("focus", handleFocus);
+
+    return () => {
+      unsub();
+      window.removeEventListener("focus", handleFocus);
+    };
   }, [loadData]);
 
   function getPublicBookingUrl() {
