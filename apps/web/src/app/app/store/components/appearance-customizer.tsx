@@ -28,7 +28,7 @@ type Props = {
   saving: boolean;
 };
 
-const THEMES: { key: StorefrontConfig["appearance"]["theme"]; label: string; desc: string }[] = [
+const THEMES: { key: string; label: string; desc: string }[] = [
   { key: "default", label: "Default", desc: "Clean & balanced" },
   { key: "minimal", label: "Minimal", desc: "Whitespace-focused" },
   { key: "bold", label: "Bold", desc: "High contrast" },
