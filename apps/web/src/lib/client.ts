@@ -2441,10 +2441,11 @@ export const PAYMENT_METHODS = [
   { value: 'linx', label: 'Linx' },
   { value: 'other', label: 'Other' },
 ];
-export async function fetchExpenses(businessId: string, params?: { startDate?: string; endDate?: string; categoryId?: string; search?: string; paymentMethod?: string; tag?: string; page?: number; limit?: number }): Promise<ApiResult<{ data: Expense[]; total: number; page: number; limit: number }>> {
+export async function fetchExpenses(businessId: string, params?: { startDate?: string; endDate?: string; period?: string; categoryId?: string; search?: string; paymentMethod?: string; tag?: string; page?: number; limit?: number }): Promise<ApiResult<{ data: Expense[]; total: number; page: number; limit: number }>> {
   const q = new URLSearchParams();
   if (params?.startDate) q.set('startDate', params.startDate);
   if (params?.endDate) q.set('endDate', params.endDate);
+  if (params?.period) q.set('period', params.period);
   if (params?.categoryId) q.set('categoryId', params.categoryId);
   if (params?.search) q.set('search', params.search);
   if (params?.paymentMethod) q.set('paymentMethod', params.paymentMethod);

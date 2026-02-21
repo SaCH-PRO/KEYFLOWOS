@@ -16,6 +16,7 @@ export class ExpensesController {
     @Param('businessId') businessId: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
+    @Query('period') period?: string,
     @Query('categoryId') categoryId?: string,
     @Query('vendor') vendor?: string,
     @Query('search') search?: string,
@@ -28,6 +29,7 @@ export class ExpensesController {
     return this.expenses.listExpenses(businessId, {
       startDate,
       endDate,
+      period,
       categoryId,
       vendor,
       search,
