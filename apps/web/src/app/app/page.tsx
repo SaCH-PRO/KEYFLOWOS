@@ -26,6 +26,7 @@ import {
   SimulationResult,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId, getUserDisplayName } from "@/lib/workspace";
+import { DashboardSkeleton } from "@/components/ui/skeleton";
 import {
   CheckCircle2,
   Clock,
@@ -392,8 +393,10 @@ export default function CommandPage() {
   const priorities = cockpit?.priorities ?? [];
   const revenueInsights = cockpit?.revenueInsights;
 
+  if (loading) return <DashboardSkeleton />;
+
   return (
-    <div className="space-y-6 max-w-5xl mx-auto">
+    <div className="space-y-6 max-w-5xl mx-auto" aria-label="Command Center">
       {error && (
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500">
           {error}
@@ -450,6 +453,7 @@ export default function CommandPage() {
               onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
               onFocus={() => setChatOpen(true)}
               placeholder="Ask AI anything, run a command, or use voice..."
+              aria-label="AI command input"
               className="flex-1 bg-transparent text-sm py-3 focus:outline-none placeholder:text-muted-foreground/60"
               disabled={sending || !businessId}
             />
@@ -466,6 +470,7 @@ export default function CommandPage() {
               <button
                 onClick={handleSend}
                 disabled={sending || !aiInput.trim() || !businessId}
+                aria-label="Send message"
                 className="p-2.5 rounded-xl transition-all disabled:opacity-30 hover:scale-105"
                 style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
               >

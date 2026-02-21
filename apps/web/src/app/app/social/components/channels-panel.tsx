@@ -12,6 +12,8 @@ import {
   disconnectSocial, testSocialConnection, fetchOAuthAvailability,
   SocialConnection,
 } from "@/lib/client";
+import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { getStoredBusinessId } from "@/lib/workspace";
 
 const PLATFORMS = [
@@ -87,6 +89,7 @@ export function ChannelsPanel() {
   const [manualPlatformId, setManualPlatformId] = useState("");
   const [manualAccountName, setManualAccountName] = useState("");
   const [oauthAvailability, setOauthAvailability] = useState<Record<string, boolean>>({});
+  const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void; message: string}>({open: false, action: () => {}, message: ""});
 
   const loadConnections = useCallback(async () => {
     setLoading(true);
@@ -243,6 +246,7 @@ export function ChannelsPanel() {
     }, bId);
     if (connErr) {
       setError(connErr);
+      toast.error(connErr);
     } else if (data) {
       setConnections((prev) => {
         const idx = prev.findIndex((c) => c.platform === platform);
@@ -257,7 +261,9 @@ export function ChannelsPanel() {
       setManualToken("");
       setManualPlatformId("");
       setManualAccountName("");
-      setSuccess(`${PLATFORMS.find((p) => p.key === platform)?.name || platform} connected!`);
+      const name = PLATFORMS.find((p) => p.key === platform)?.name || platform;
+      setSuccess(`${name} connected!`);
+      toast.success(`${name} connected!`);
       try { localStorage.setItem("social-connection-changed", Date.now().toString()); } catch {}
     }
     setActionLoading(null);
@@ -265,23 +271,30 @@ export function ChannelsPanel() {
 
   async function handleDisconnect(platform: string) {
     const platformName = PLATFORMS.find((p) => p.key === platform)?.name || platform;
-    if (!confirm(`Disconnect ${platformName}? You won't be able to publish to this platform until reconnected.`)) return;
-    setActionLoading(platform);
-    setError(null);
-    const bId = getStoredBusinessId() || undefined;
-    const { error: discErr } = await disconnectSocial(platform, bId);
-    if (discErr) {
-      setError(discErr);
-    } else {
-      setConnections((prev) => prev.filter((c) => c.platform !== platform));
-      setTestResults((prev) => {
-        const next = { ...prev };
-        delete next[platform];
-        return next;
-      });
-      setSuccess(`${platformName} disconnected.`);
-    }
-    setActionLoading(null);
+    setConfirmState({
+      open: true,
+      message: `Disconnect ${platformName}? You won't be able to publish to this platform until reconnected.`,
+      action: async () => {
+        setActionLoading(platform);
+        setError(null);
+        const bId = getStoredBusinessId() || undefined;
+        const { error: discErr } = await disconnectSocial(platform, bId);
+        if (discErr) {
+          setError(discErr);
+          toast.error(discErr);
+        } else {
+          setConnections((prev) => prev.filter((c) => c.platform !== platform));
+          setTestResults((prev) => {
+            const next = { ...prev };
+            delete next[platform];
+            return next;
+          });
+          setSuccess(`${platformName} disconnected.`);
+          toast.success(`${platformName} disconnected`);
+        }
+        setActionLoading(null);
+      },
+    });
   }
 
   function toggleExpand(platform: string) {
@@ -680,6 +693,15 @@ export function ChannelsPanel() {
           for one-click connect
         </p>
       </motion.div>
+      <ConfirmDialog
+        open={confirmState.open}
+        title="Disconnect Channel"
+        message={confirmState.message}
+        confirmLabel="Disconnect"
+        variant="danger"
+        onConfirm={() => { confirmState.action(); setConfirmState({open: false, action: () => {}, message: ""}); }}
+        onCancel={() => setConfirmState({open: false, action: () => {}, message: ""})}
+      />
     </motion.div>
   );
 }

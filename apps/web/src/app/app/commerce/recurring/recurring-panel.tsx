@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button, Input } from "@keyflow/ui";
 import {
@@ -53,6 +55,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
   const [showBuilder, setShowBuilder] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
 
   const [form, setForm] = useState({
     name: "",
@@ -195,8 +198,10 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
         setRecurring((prev) => prev.map((r) => (r.id === editingId ? res.data! : r)));
         setShowBuilder(false);
         resetForm();
+        toast.success("Schedule updated");
       } else {
         setError(res.error || "Failed to update");
+        toast.error(res.error || "Failed to update schedule");
       }
     } else {
       const res = await createRecurringInvoice(businessId, payload);
@@ -204,16 +209,24 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
         setRecurring((prev) => [res.data!, ...prev]);
         setShowBuilder(false);
         resetForm();
+        toast.success("Recurring schedule created");
       } else {
         setError(res.error || "Failed to create");
+        toast.error(res.error || "Failed to create schedule");
       }
     }
   }
 
   async function handleDelete(id: string) {
-    if (!businessId || !confirm("Delete this recurring invoice schedule?")) return;
-    await deleteRecurringInvoice(businessId, id);
-    setRecurring((prev) => prev.filter((r) => r.id !== id));
+    if (!businessId) return;
+    setConfirmState({
+      open: true,
+      action: async () => {
+        await deleteRecurringInvoice(businessId!, id);
+        setRecurring((prev) => prev.filter((r) => r.id !== id));
+        toast.success("Recurring schedule deleted");
+      },
+    });
   }
 
   async function handleToggle(id: string) {
@@ -491,6 +504,15 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
           ))}
         </div>
       )}
+      <ConfirmDialog
+        open={confirmState.open}
+        title="Delete?"
+        message="This cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => { confirmState.action(); setConfirmState({open: false, action: () => {}}); }}
+        onCancel={() => setConfirmState({open: false, action: () => {}})}
+      />
     </motion.div>
   );
 }

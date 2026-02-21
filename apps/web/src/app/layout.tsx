@@ -3,6 +3,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeColorsProvider } from "@/lib/theme-context";
 import { RegisterSW } from "@/components/register-sw";
+import { Toaster } from "sonner";
 
 export const metadata: Metadata = {
   title: "KEYFLOWOS",
@@ -54,6 +55,20 @@ export default function RootLayout({
         <ThemeProvider>
           <ThemeColorsProvider>
             <RegisterSW />
+            <Toaster
+              theme="dark"
+              position="top-right"
+              toastOptions={{
+                style: {
+                  background: "rgba(15, 23, 42, 0.95)",
+                  backdropFilter: "blur(12px)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  color: "#e2e8f0",
+                },
+              }}
+              closeButton
+              richColors
+            />
             {children}
           </ThemeColorsProvider>
         </ThemeProvider>

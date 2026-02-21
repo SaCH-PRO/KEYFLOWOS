@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { z } from "zod";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@keyflow/ui";
@@ -35,6 +37,7 @@ import { Send } from "lucide-react";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { Tab, ProductForm, InvoiceLineItem, CATEGORIES, generateItemId } from "./components/commerce-types";
+import { ListPageSkeleton } from "@/components/ui/skeleton";
 import CommerceDashboard from "./components/commerce-dashboard";
 import { ProductsPanel } from "./products/products-panel";
 import QuotesPanel from "./quotes/quotes-panel";
@@ -90,6 +93,7 @@ export default function CommercePage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [productSearch, setProductSearch] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [confirmDisconnectGmail, setConfirmDisconnectGmail] = useState(false);
 
   const [recurringTriggerNew, setRecurringTriggerNew] = useState(0);
   const [showInvoiceBuilder, setShowInvoiceBuilder] = useState(false);
@@ -226,10 +230,11 @@ export default function CommercePage() {
         sku: productForm.sku || null,
         isActive: productForm.isActive,
       });
-      if (error) { setFormError(error); return; }
+      if (error) { setFormError(error); toast.error("Failed to update product"); return; }
       if (data) {
         setProducts((prev) => prev.map((p) => (p.id === editingProductId ? { ...p, ...data } : p)));
         closeProductForm();
+        toast.success("Product updated");
       }
     } else {
       const { data, error } = await createProduct({
@@ -243,10 +248,11 @@ export default function CommercePage() {
         sku: productForm.sku || null,
         isActive: productForm.isActive,
       });
-      if (error) { setFormError(error); return; }
+      if (error) { setFormError(error); toast.error("Failed to create product"); return; }
       if (data) {
         setProducts((prev) => [data, ...prev]);
         closeProductForm();
+        toast.success("Product created");
       }
     }
   }
@@ -254,9 +260,10 @@ export default function CommercePage() {
   async function handleDeleteProduct(productId: string) {
     if (!businessId) return;
     const { error } = await deleteProduct(productId, businessId);
-    if (error) { setError(error); return; }
+    if (error) { setError(error); toast.error("Failed to delete product"); return; }
     setProducts((prev) => prev.filter((p) => p.id !== productId));
     setDeleteConfirm(null);
+    toast.success("Product deleted");
   }
 
   function resetQuoteForm() {
@@ -285,24 +292,7 @@ export default function CommercePage() {
     });
   }
 
-  if (workspaceLoading) {
-    return (
-      <div className="space-y-6">
-        <div className="h-16 bg-muted/30 rounded-2xl animate-pulse" />
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-28 bg-muted/30 rounded-2xl animate-pulse" />
-          ))}
-        </div>
-        <div className="h-10 bg-muted/30 rounded-xl animate-pulse w-80" />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-40 bg-muted/30 rounded-2xl animate-pulse" />
-          ))}
-        </div>
-      </div>
-    );
-  }
+  if (workspaceLoading) return <ListPageSkeleton />;
 
   if (workspaceError) {
     return (
@@ -342,12 +332,9 @@ export default function CommercePage() {
                 <Mail className="w-4 h-4 text-green-400" />
                 <span className="text-sm text-green-200">{gmailStatus.email}</span>
                 <button
-                  onClick={async () => {
+                  onClick={() => {
                     if (!businessId) return;
-                    if (confirm("Disconnect Gmail? You won't be able to send quotes via email until you reconnect.")) {
-                      await disconnectGmail(businessId);
-                      setGmailStatus({ connected: false, email: null });
-                    }
+                    setConfirmDisconnectGmail(true);
                   }}
                   className="ml-1 text-green-400/60 hover:text-red-400 transition-colors"
                   title="Disconnect Gmail"
@@ -419,11 +406,13 @@ export default function CommercePage() {
 
       <CommerceDashboard invoices={invoices} quotes={quotes} products={products} />
 
-      <div className="flex gap-2 overflow-x-auto pb-1">
+      <div className="flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Commerce sections">
         {tabs.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
+            role="tab"
+            aria-selected={tab === t.key}
             className={`relative px-5 py-2.5 text-sm font-medium rounded-xl transition-all flex items-center gap-2 whitespace-nowrap ${
               tab === t.key
                 ? "text-primary"
@@ -552,6 +541,9 @@ export default function CommercePage() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="product-modal-title"
             onClick={(e) => e.target === e.currentTarget && closeProductForm()}
           >
             <motion.div
@@ -561,7 +553,7 @@ export default function CommercePage() {
               className="w-full max-w-lg bg-card rounded-2xl border border-border shadow-2xl overflow-hidden"
             >
               <div className="p-5 border-b border-border flex items-center justify-between">
-                <h2 className="text-lg font-semibold flex items-center gap-2">
+                <h2 id="product-modal-title" className="text-lg font-semibold flex items-center gap-2">
                   <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/30 to-secondary/30 flex items-center justify-center">
                     <Package className="w-4 h-4 text-primary" />
                   </div>
@@ -699,6 +691,22 @@ export default function CommercePage() {
         )}
       </AnimatePresence>
       <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
+      <ConfirmDialog
+        open={confirmDisconnectGmail}
+        title="Disconnect Gmail?"
+        message="You won't be able to send quotes via email until you reconnect."
+        confirmLabel="Disconnect"
+        variant="danger"
+        onConfirm={async () => {
+          if (businessId) {
+            await disconnectGmail(businessId);
+            setGmailStatus({ connected: false, email: null });
+            toast.success("Gmail disconnected");
+          }
+          setConfirmDisconnectGmail(false);
+        }}
+        onCancel={() => setConfirmDisconnectGmail(false)}
+      />
     </div>
   );
 }

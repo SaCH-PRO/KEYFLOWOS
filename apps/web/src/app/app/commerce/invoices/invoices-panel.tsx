@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button, Input } from "@keyflow/ui";
 import {
@@ -90,6 +92,7 @@ export default function InvoicesPanel({
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailForm, setEmailForm] = useState({ email: "", message: "" });
   const [sendingEmail, setSendingEmail] = useState(false);
+  const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
 
   const filteredInvoices = useMemo(() => {
     let result = invoices;
@@ -291,19 +294,21 @@ export default function InvoicesPanel({
         ...invoicePayload,
         invoiceId: editingInvoiceId,
       });
-      if (error) setFormError(error);
+      if (error) { setFormError(error); toast.error("Failed to update invoice"); }
       if (data) {
         setInvoices((prev) => prev.map((inv) => inv.id === editingInvoiceId ? data : inv));
         resetInvoiceForm();
         setShowInvoiceBuilder(false);
+        toast.success("Invoice updated");
       }
     } else {
       const { data, error } = await createInvoice(invoicePayload);
-      if (error) setFormError(error);
+      if (error) { setFormError(error); toast.error("Failed to create invoice"); }
       if (data) {
         setInvoices((prev) => [data, ...prev]);
         resetInvoiceForm();
         setShowInvoiceBuilder(false);
+        toast.success("Invoice created");
       }
     }
   }
@@ -312,8 +317,9 @@ export default function InvoicesPanel({
     const { data, error } = await updateInvoiceStatus(invoiceId, "SENT");
     if (!error && data) {
       setInvoices((prev) => prev.map((i) => (i.id === invoiceId ? { ...i, status: "SENT" } : i)));
+      toast.success("Invoice sent");
     } else {
-      setInvoiceError(error ?? "Failed to send invoice");
+      toast.error(error ?? "Failed to send invoice");
     }
   }
 
@@ -328,34 +334,40 @@ export default function InvoicesPanel({
           })
         );
       }
+      toast.success("Invoice marked as paid");
     } else {
-      setInvoiceError(error ?? "Failed to mark paid");
+      toast.error(error ?? "Failed to mark paid");
     }
   }
 
   async function handleDeleteInvoice(invoiceId: string) {
     if (!businessId) return;
-    if (!confirm("Are you sure you want to delete this invoice?")) return;
-    try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || "https://keyflowos.replit.app"}/commerce/businesses/${businessId}/invoices/${invoiceId}`, {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("kf_token") || ""}`,
-        },
-      });
-      if (res.ok) {
-        setInvoices((prev) => prev.filter((i) => i.id !== invoiceId));
-        if (selectedInvoice?.id === invoiceId) {
-          setSelectedInvoice(null);
+    setConfirmState({
+      open: true,
+      action: async () => {
+        try {
+          const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || "https://keyflowos.replit.app"}/commerce/businesses/${businessId}/invoices/${invoiceId}`, {
+            method: "DELETE",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${localStorage.getItem("kf_token") || ""}`,
+            },
+          });
+          if (res.ok) {
+            setInvoices((prev) => prev.filter((i) => i.id !== invoiceId));
+            if (selectedInvoice?.id === invoiceId) {
+              setSelectedInvoice(null);
+            }
+            toast.success("Invoice deleted");
+          } else {
+            const err = await res.json();
+            toast.error(err.message || "Failed to delete invoice");
+          }
+        } catch (e) {
+          toast.error("Failed to delete invoice");
         }
-      } else {
-        const err = await res.json();
-        setInvoiceError(err.message || "Failed to delete invoice");
-      }
-    } catch (e) {
-      setInvoiceError("Failed to delete invoice");
-    }
+      },
+    });
   }
 
   async function handleSendInvoiceEmail() {
@@ -380,11 +392,12 @@ export default function InvoicesPanel({
         setShowEmailModal(false);
         setEmailForm({ email: "", message: "" });
         setInvoiceError(null);
+        toast.success("Invoice sent via email");
       } else {
-        setInvoiceError(res.error || "Failed to send email");
+        toast.error(res.error || "Failed to send email");
       }
     } catch (err) {
-      setInvoiceError(err instanceof Error ? err.message : "Failed to send email");
+      toast.error(err instanceof Error ? err.message : "Failed to send email");
     } finally {
       setSendingEmail(false);
     }
@@ -1131,6 +1144,15 @@ export default function InvoicesPanel({
           </motion.div>
         )}
       </AnimatePresence>
+      <ConfirmDialog
+        open={confirmState.open}
+        title="Delete?"
+        message="This cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => { confirmState.action(); setConfirmState({open: false, action: () => {}}); }}
+        onCancel={() => setConfirmState({open: false, action: () => {}})}
+      />
     </motion.div>
   );
 }

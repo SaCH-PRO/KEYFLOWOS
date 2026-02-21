@@ -186,6 +186,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <div className="h-dvh bg-background text-foreground overflow-hidden">
       <div className="flex h-full">
         <aside 
+          role="navigation"
+          aria-label="Main navigation"
           className={cn(
             "hidden md:flex md:flex-col border-r border-border h-full transition-all duration-300",
             sidebarCollapsed ? "w-[72px]" : "w-64"
@@ -261,7 +263,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </aside>
 
-        <main className="flex-1 flex flex-col h-full min-w-0">
+        <main role="main" className="flex-1 flex flex-col h-full min-w-0">
           <header 
             className="h-14 md:h-16 border-b border-border px-3 md:px-6 flex items-center justify-between flex-shrink-0 z-40"
             style={{ background: "hsl(var(--kf-header-bg))" }}
@@ -446,10 +448,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </div>
 
       {mobileDrawerOpen && (
-        <div className="md:hidden fixed inset-0 z-[60]">
+        <div className="md:hidden fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="Navigation menu">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setMobileDrawerOpen(false)} />
           <div
             className="absolute left-0 top-0 bottom-0 w-72 border-r border-border flex flex-col overflow-y-auto"
+            role="navigation"
+            aria-label="Main navigation"
             style={{ background: "hsl(var(--kf-sidebar-bg))" }}
           >
             <div className="flex items-center justify-between px-4 py-4 border-b border-border">
@@ -551,7 +555,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       )}
 
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 border-t border-border bg-card/95 backdrop-blur-lg z-50 safe-area-pb" style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+      <nav aria-label="Mobile navigation" className="md:hidden fixed bottom-0 left-0 right-0 border-t border-border bg-card/95 backdrop-blur-lg z-50 safe-area-pb" style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
         <div className="flex items-center justify-around px-1" style={{ height: "60px" }}>
           {mobileBottomNav.map((item) => {
             const Icon = item.icon;

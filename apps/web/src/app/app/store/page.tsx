@@ -2,26 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  AlertCircle,
-  CheckCircle2,
-  RefreshCw,
-  Store,
-  LayoutGrid,
-  Settings2,
-  ShoppingBag,
-  AlertTriangle,
-  TrendingUp,
-  BarChart3,
-  Palette,
-  Clock,
-  Star,
-  Plus,
-  Trash2,
-  Save,
-  Loader2,
-  MessageSquareQuote,
-} from "lucide-react";
+import { AlertCircle, Send } from "lucide-react";
 import {
   Service,
   StaffMember,
@@ -49,29 +30,12 @@ import { MerchandisingPanel } from "./components/merchandising-panel";
 import { StoreAnalyticsDashboard } from "./components/store-analytics";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { ContactPickerDrawer } from "@/components/contacts";
-import { Send } from "lucide-react";
-
-type Banner = { text: string; type: "success" | "error" | "info" | "warning" };
-type DriftedItem = {
-  serviceId: string;
-  serviceName: string;
-  priceDiff: boolean;
-  durationDiff: boolean;
-  commercePrice: number;
-  commerceDuration: number | null;
-};
-
-type TabKey = "overview" | "customize" | "products" | "hours" | "settings";
-
-const VIEW_TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
-  { key: "overview", label: "Overview", icon: BarChart3 },
-  { key: "customize", label: "Customize", icon: Palette },
-  { key: "products", label: "Products", icon: ShoppingBag },
-  { key: "hours", label: "Hours", icon: Clock },
-  { key: "settings", label: "Settings", icon: Settings2 },
-];
-
-type Testimonial = { id: string; name: string; text: string; rating: number; date: string };
+import { StoreBanner } from "./components/store-banner";
+import { StoreTabs } from "./components/store-tabs";
+import { StoreLoading } from "./components/store-loading";
+import { KpiCards } from "./components/kpi-cards";
+import { SocialProofPanel } from "./components/social-proof-panel";
+import type { Banner, DriftedItem, TabKey } from "./components/store-types";
 
 export default function StorePage() {
   const [businessId, setBusinessId] = useState<string | null>(null);
@@ -117,9 +81,6 @@ export default function StorePage() {
     seo: {},
   });
   const [configSaving, setConfigSaving] = useState(false);
-
-  const [showTestimonialForm, setShowTestimonialForm] = useState(false);
-  const [newTestimonial, setNewTestimonial] = useState({ name: "", text: "", rating: 5 });
 
   useEffect(() => {
     const initWorkspace = async () => {
@@ -359,26 +320,6 @@ export default function StorePage() {
     setConfigSaving(false);
   }
 
-  function addTestimonial() {
-    if (!newTestimonial.name.trim() || !newTestimonial.text.trim()) return;
-    const testimonial: Testimonial = {
-      id: `t_${Date.now()}`,
-      name: newTestimonial.name.trim(),
-      text: newTestimonial.text.trim(),
-      rating: newTestimonial.rating,
-      date: new Date().toISOString().split("T")[0],
-    };
-    const current = storefrontConfig.socialProof?.testimonials ?? [];
-    handleConfigChange("socialProof", { testimonials: [...current, testimonial] });
-    setNewTestimonial({ name: "", text: "", rating: 5 });
-    setShowTestimonialForm(false);
-  }
-
-  function deleteTestimonial(id: string) {
-    const current = storefrontConfig.socialProof?.testimonials ?? [];
-    handleConfigChange("socialProof", { testimonials: current.filter((t) => t.id !== id) });
-  }
-
   if (!businessId && !loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -395,45 +336,6 @@ export default function StorePage() {
 
   const storeServiceNames = new Set(services.map((s) => s.name));
   const storeItemCount = services.filter((s) => commerceProducts.some((p) => p.name === s.name)).length;
-
-  const kpiCards = [
-    {
-      label: "Store Items",
-      value: services.length,
-      icon: Store,
-      color: "hsl(var(--kf-accent1))",
-      bg: "hsl(var(--kf-accent1) / 0.08)",
-      border: "hsl(var(--kf-accent1) / 0.2)",
-    },
-    {
-      label: "Commerce Products",
-      value: commerceProducts.length,
-      icon: ShoppingBag,
-      color: "hsl(var(--kf-accent2))",
-      bg: "hsl(var(--kf-accent2) / 0.08)",
-      border: "hsl(var(--kf-accent2) / 0.2)",
-    },
-    {
-      label: "Store Status",
-      value: storeEnabled ? "Published" : "Unpublished",
-      icon: TrendingUp,
-      color: storeEnabled ? "hsl(142 70% 55%)" : "hsl(40 90% 55%)",
-      bg: storeEnabled ? "hsl(142 70% 45% / 0.08)" : "hsl(40 90% 50% / 0.08)",
-      border: storeEnabled ? "hsl(142 70% 45% / 0.2)" : "hsl(40 90% 50% / 0.2)",
-      dot: storeEnabled ? "hsl(142 70% 55%)" : "hsl(40 90% 55%)",
-    },
-    {
-      label: "Price Drifts",
-      value: driftedItems.length,
-      icon: AlertTriangle,
-      color: driftedItems.length > 0 ? "hsl(30 90% 60%)" : "hsl(var(--kf-muted-foreground))",
-      bg: driftedItems.length > 0 ? "hsl(30 90% 50% / 0.08)" : "hsl(var(--kf-muted) / 0.3)",
-      border: driftedItems.length > 0 ? "hsl(30 90% 50% / 0.2)" : "hsl(var(--kf-border))",
-      warn: driftedItems.length > 0,
-    },
-  ];
-
-  const testimonials = storefrontConfig.socialProof?.testimonials ?? [];
 
   return (
     <div className="space-y-6">
@@ -497,95 +399,13 @@ export default function StorePage() {
         </div>
       )}
 
-      <AnimatePresence>
-        {banner && (
-          <motion.div
-            initial={{ opacity: 0, y: -5 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -5 }}
-            className={`kf-card p-3 text-sm flex items-center gap-2 ${
-              banner.type === "success"
-                ? "!border-emerald-500/30 !bg-emerald-500/10 text-emerald-300"
-                : banner.type === "error"
-                ? "!border-red-500/30 !bg-red-500/10 text-red-300"
-                : banner.type === "warning"
-                ? "!border-yellow-500/30 !bg-yellow-500/10 text-yellow-300"
-                : "text-[hsl(var(--kf-accent1))]"
-            }`}
-          >
-            {banner.type === "success" ? (
-              <CheckCircle2 className="w-4 h-4" />
-            ) : (
-              <AlertCircle className="w-4 h-4" />
-            )}
-            {banner.text}
-            <button onClick={() => setBanner(null)} className="ml-auto text-xs opacity-60 hover:opacity-100">
-              Dismiss
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <StoreBanner banner={banner} onDismiss={() => setBanner(null)} />
 
       {loading ? (
-        <div className="space-y-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[1, 2, 3, 4].map((i) => (
-              <div
-                key={i}
-                className="h-24 rounded-2xl animate-pulse"
-                style={{ background: "hsl(var(--kf-muted) / 0.3)" }}
-              />
-            ))}
-          </div>
-          <div className="h-12 rounded-xl animate-pulse w-64" style={{ background: "hsl(var(--kf-muted) / 0.3)" }} />
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {[1, 2, 3, 4].map((i) => (
-              <div
-                key={i}
-                className="h-32 rounded-2xl animate-pulse"
-                style={{ background: "hsl(var(--kf-muted) / 0.3)" }}
-              />
-            ))}
-          </div>
-        </div>
+        <StoreLoading />
       ) : (
         <div className="space-y-6">
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {VIEW_TABS.map((t) => {
-              const Icon = t.icon;
-              return (
-                <button
-                  key={t.key}
-                  onClick={() => setActiveView(t.key)}
-                  className={`relative px-5 py-2.5 text-sm font-medium rounded-xl transition-all flex items-center gap-2 whitespace-nowrap ${
-                    activeView === t.key
-                      ? ""
-                      : "text-muted-foreground hover:text-foreground hover:bg-[hsl(var(--kf-muted)/0.5)]"
-                  }`}
-                >
-                  {activeView === t.key && (
-                    <motion.div
-                      layoutId="store-tab-pill"
-                      className="absolute inset-0 rounded-xl"
-                      style={{
-                        background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.15), hsl(var(--kf-accent2) / 0.1))",
-                        border: "1px solid hsl(var(--kf-accent1) / 0.25)",
-                        boxShadow: "0 2px 12px hsl(var(--kf-accent1) / 0.1)",
-                      }}
-                      transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
-                    />
-                  )}
-                  <span
-                    className="relative z-10 flex items-center gap-2"
-                    style={activeView === t.key ? { color: "hsl(var(--kf-accent1))" } : {}}
-                  >
-                    <Icon className="w-4 h-4" />
-                    {t.label}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+          <StoreTabs activeView={activeView} onViewChange={setActiveView} />
 
           <AnimatePresence mode="wait">
             {activeView === "overview" && (
@@ -596,46 +416,12 @@ export default function StorePage() {
                 exit={{ opacity: 0, y: -10 }}
                 className="space-y-6"
               >
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {kpiCards.map((kpi, idx) => {
-                    const Icon = kpi.icon;
-                    return (
-                      <motion.div
-                        key={kpi.label}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: idx * 0.05 }}
-                        className="rounded-2xl p-4 relative overflow-hidden"
-                        style={{
-                          background: kpi.bg,
-                          border: `1px solid ${kpi.border}`,
-                          backdropFilter: "blur(20px)",
-                        }}
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <Icon className="w-4 h-4" style={{ color: kpi.color }} />
-                          {(kpi as any).dot && (
-                            <span
-                              className="w-2 h-2 rounded-full animate-pulse"
-                              style={{ background: (kpi as any).dot }}
-                            />
-                          )}
-                          {(kpi as any).warn && (
-                            <span
-                              className="w-2 h-2 rounded-full animate-pulse"
-                              style={{ background: "hsl(30 90% 55%)" }}
-                            />
-                          )}
-                        </div>
-                        <p className="text-2xl font-bold" style={{ color: kpi.color }}>
-                          {kpi.value}
-                        </p>
-                        <p className="text-[11px] text-muted-foreground mt-0.5">{kpi.label}</p>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-
+                <KpiCards
+                  servicesCount={services.length}
+                  commerceProductsCount={commerceProducts.length}
+                  storeEnabled={storeEnabled}
+                  driftedItemsCount={driftedItems.length}
+                />
                 <StoreAnalyticsDashboard businessId={businessId!} />
               </motion.div>
             )}
@@ -729,234 +515,12 @@ export default function StorePage() {
                   onSaveSlug={handleSaveSlug}
                   slugSaving={slugSaving}
                 />
-
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.1 }}
-                  className="rounded-2xl overflow-hidden"
-                  style={{
-                    background: "hsl(var(--kf-background) / 0.6)",
-                    backdropFilter: "blur(20px)",
-                    border: "1px solid hsl(var(--kf-accent2) / 0.15)",
-                    boxShadow: "0 4px 24px hsl(var(--kf-accent2) / 0.05)",
-                  }}
-                >
-                  <div
-                    className="flex items-center justify-between px-5 py-4"
-                    style={{
-                      borderBottom: "1px solid hsl(var(--kf-accent2) / 0.1)",
-                      background: "linear-gradient(135deg, hsl(var(--kf-accent2) / 0.06), transparent)",
-                    }}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <div
-                        className="h-10 w-10 rounded-xl flex items-center justify-center"
-                        style={{ background: "hsl(var(--kf-accent2) / 0.15)" }}
-                      >
-                        <MessageSquareQuote className="w-5 h-5" style={{ color: "hsl(var(--kf-accent2))" }} />
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-semibold">Social Proof</h3>
-                        <p className="text-[11px] text-muted-foreground mt-0.5">Testimonials and trust signals</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={handleSaveConfig}
-                      disabled={configSaving}
-                      className="kf-btn-primary text-xs inline-flex items-center gap-1.5"
-                      style={{ opacity: configSaving ? 0.6 : 1 }}
-                    >
-                      {configSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                      {configSaving ? "Saving..." : "Save"}
-                    </button>
-                  </div>
-
-                  <div className="p-5 space-y-5">
-                    <div
-                      className="rounded-xl p-3 space-y-1"
-                      style={{ background: "hsl(var(--kf-muted) / 0.2)", border: "1px solid hsl(var(--kf-border) / 0.3)" }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => handleConfigChange("socialProof", { showBookingCount: !(storefrontConfig.socialProof?.showBookingCount ?? false) })}
-                        className="flex items-center justify-between w-full py-2 group"
-                      >
-                        <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">Show Booking Count</span>
-                        <div
-                          className="w-10 h-5 rounded-full transition-colors relative flex-shrink-0"
-                          style={{ background: storefrontConfig.socialProof?.showBookingCount ? "hsl(var(--kf-accent2))" : "hsl(var(--kf-muted-foreground) / 0.3)" }}
-                        >
-                          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${storefrontConfig.socialProof?.showBookingCount ? "left-[22px]" : "left-0.5"}`} />
-                        </div>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleConfigChange("socialProof", { showRating: !(storefrontConfig.socialProof?.showRating ?? false) })}
-                        className="flex items-center justify-between w-full py-2 group"
-                      >
-                        <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">Show Rating</span>
-                        <div
-                          className="w-10 h-5 rounded-full transition-colors relative flex-shrink-0"
-                          style={{ background: storefrontConfig.socialProof?.showRating ? "hsl(var(--kf-accent2))" : "hsl(var(--kf-muted-foreground) / 0.3)" }}
-                        >
-                          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${storefrontConfig.socialProof?.showRating ? "left-[22px]" : "left-0.5"}`} />
-                        </div>
-                      </button>
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Guarantee Text</label>
-                      <input
-                        type="text"
-                        value={storefrontConfig.socialProof?.guaranteeText ?? ""}
-                        onChange={(e) => handleConfigChange("socialProof", { guaranteeText: e.target.value })}
-                        placeholder="e.g. 100% satisfaction guaranteed"
-                        className="kf-input w-full text-sm"
-                      />
-                    </div>
-
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <h4 className="text-sm font-semibold">Testimonials</h4>
-                        <button
-                          onClick={() => setShowTestimonialForm(true)}
-                          className="kf-btn-secondary text-xs inline-flex items-center gap-1.5"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          Add Testimonial
-                        </button>
-                      </div>
-
-                      <AnimatePresence>
-                        {showTestimonialForm && (
-                          <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: "auto" }}
-                            exit={{ opacity: 0, height: 0 }}
-                            className="overflow-hidden"
-                          >
-                            <div
-                              className="rounded-xl p-4 space-y-3"
-                              style={{ background: "hsl(var(--kf-accent2) / 0.06)", border: "1px solid hsl(var(--kf-accent2) / 0.15)" }}
-                            >
-                              <div>
-                                <label className="text-xs font-medium text-muted-foreground mb-1 block">Name</label>
-                                <input
-                                  type="text"
-                                  value={newTestimonial.name}
-                                  onChange={(e) => setNewTestimonial((p) => ({ ...p, name: e.target.value }))}
-                                  placeholder="Customer name"
-                                  className="kf-input w-full text-sm"
-                                />
-                              </div>
-                              <div>
-                                <label className="text-xs font-medium text-muted-foreground mb-1 block">Rating</label>
-                                <div className="flex gap-1">
-                                  {[1, 2, 3, 4, 5].map((r) => (
-                                    <button
-                                      key={r}
-                                      type="button"
-                                      onClick={() => setNewTestimonial((p) => ({ ...p, rating: r }))}
-                                      className="p-0.5"
-                                    >
-                                      <Star
-                                        className="w-5 h-5 transition-colors"
-                                        style={{
-                                          color: r <= newTestimonial.rating ? "hsl(45 93% 55%)" : "hsl(var(--kf-muted-foreground) / 0.3)",
-                                          fill: r <= newTestimonial.rating ? "hsl(45 93% 55%)" : "transparent",
-                                        }}
-                                      />
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                              <div>
-                                <label className="text-xs font-medium text-muted-foreground mb-1 block">Testimonial</label>
-                                <textarea
-                                  value={newTestimonial.text}
-                                  onChange={(e) => setNewTestimonial((p) => ({ ...p, text: e.target.value }))}
-                                  placeholder="What did the customer say?"
-                                  className="kf-input w-full text-sm min-h-[60px] resize-none"
-                                  rows={2}
-                                />
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={addTestimonial}
-                                  disabled={!newTestimonial.name.trim() || !newTestimonial.text.trim()}
-                                  className="kf-btn-primary text-xs"
-                                  style={{ opacity: !newTestimonial.name.trim() || !newTestimonial.text.trim() ? 0.5 : 1 }}
-                                >
-                                  Add
-                                </button>
-                                <button
-                                  onClick={() => { setShowTestimonialForm(false); setNewTestimonial({ name: "", text: "", rating: 5 }); }}
-                                  className="kf-btn-secondary text-xs"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-
-                      {testimonials.length === 0 ? (
-                        <div
-                          className="text-center py-6 rounded-xl"
-                          style={{ background: "hsl(var(--kf-muted) / 0.2)", border: "1px dashed hsl(var(--kf-border) / 0.5)" }}
-                        >
-                          <MessageSquareQuote className="w-8 h-8 mx-auto mb-2" style={{ color: "hsl(var(--kf-muted-foreground) / 0.3)" }} />
-                          <p className="text-xs text-muted-foreground">No testimonials yet. Add one to build trust.</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {testimonials.map((t) => (
-                            <motion.div
-                              key={t.id}
-                              layout
-                              initial={{ opacity: 0, x: -10 }}
-                              animate={{ opacity: 1, x: 0 }}
-                              className="rounded-xl px-4 py-3"
-                              style={{
-                                background: "hsl(var(--kf-accent2) / 0.04)",
-                                border: "1px solid hsl(var(--kf-accent2) / 0.12)",
-                              }}
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2 mb-1">
-                                    <span className="text-sm font-medium truncate">{t.name}</span>
-                                    <div className="flex gap-0.5">
-                                      {[1, 2, 3, 4, 5].map((r) => (
-                                        <Star
-                                          key={r}
-                                          className="w-3 h-3"
-                                          style={{
-                                            color: r <= t.rating ? "hsl(45 93% 55%)" : "hsl(var(--kf-muted-foreground) / 0.2)",
-                                            fill: r <= t.rating ? "hsl(45 93% 55%)" : "transparent",
-                                          }}
-                                        />
-                                      ))}
-                                    </div>
-                                  </div>
-                                  <p className="text-xs text-muted-foreground line-clamp-2">{t.text}</p>
-                                </div>
-                                <button
-                                  onClick={() => deleteTestimonial(t.id)}
-                                  className="p-1.5 rounded-lg hover:bg-red-500/20 transition-colors flex-shrink-0"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5 text-red-400" />
-                                </button>
-                              </div>
-                            </motion.div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </motion.div>
+                <SocialProofPanel
+                  storefrontConfig={storefrontConfig}
+                  configSaving={configSaving}
+                  onConfigChange={handleConfigChange}
+                  onSaveConfig={handleSaveConfig}
+                />
               </motion.div>
             )}
           </AnimatePresence>

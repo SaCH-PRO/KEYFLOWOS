@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button, Input } from "@keyflow/ui";
 import {
@@ -99,6 +101,7 @@ export default function QuotesPanel({
     notes: "",
     dueDate: "",
   });
+  const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
   const [autoConvertToInvoice, setAutoConvertToInvoice] = useState(() => {
     if (typeof window !== "undefined") {
       return localStorage.getItem("kf_auto_convert_quote") === "true";
@@ -238,6 +241,9 @@ export default function QuotesPanel({
       });
       if (res.data) {
         setQuotes((q) => q.map((quote) => (quote.id === editingQuoteId ? res.data! : quote)));
+        toast.success("Quote updated");
+      } else if (res.error) {
+        toast.error("Failed to update quote");
       }
     } else {
       const res = await createQuote({
@@ -252,6 +258,9 @@ export default function QuotesPanel({
       });
       if (res.data) {
         setQuotes((q) => [res.data!, ...q]);
+        toast.success("Quote created");
+      } else if (res.error) {
+        toast.error("Failed to create quote");
       }
     }
     setShowQuoteBuilder(false);
@@ -297,10 +306,10 @@ export default function QuotesPanel({
           setShowAcceptPrompt(true);
         }
       } else if (res.error) {
-        alert("Failed to accept quote: " + res.error);
+        toast.error("Failed to accept quote: " + res.error);
       }
     } catch (err) {
-      alert("Failed to accept quote");
+      toast.error("Failed to accept quote");
     }
   }
 
@@ -320,10 +329,14 @@ export default function QuotesPanel({
 
   async function handleDeleteQuote(quote: Quote) {
     if (!businessId) return;
-    if (confirm("Are you sure you want to delete this quote?")) {
-      await deleteQuote(businessId, quote.id);
-      setQuotes((q) => q.filter((qItem) => qItem.id !== quote.id));
-    }
+    setConfirmState({
+      open: true,
+      action: async () => {
+        await deleteQuote(businessId!, quote.id);
+        setQuotes((q) => q.filter((qItem) => qItem.id !== quote.id));
+        toast.success("Quote deleted");
+      },
+    });
   }
 
   function duplicateQuote(quote: Quote) {
@@ -374,6 +387,9 @@ export default function QuotesPanel({
       setSelectedQuote(null);
       setConvertForm({ taxRate: "12.5", discountType: "PERCENT", discountValue: "", notes: "", dueDate: "" });
       setTab("invoices");
+      toast.success("Quote converted to invoice");
+    } else if (res.error) {
+      toast.error("Failed to convert quote");
     }
   }
 
@@ -381,7 +397,7 @@ export default function QuotesPanel({
     if (!selectedQuote) return;
     const targetEmail = emailForm.email || selectedQuote.contact?.email;
     if (!targetEmail) {
-      alert("Please enter an email address");
+      toast.error("Please enter an email address");
       return;
     }
     setSendingEmail(true);
@@ -398,12 +414,12 @@ export default function QuotesPanel({
         );
         setShowEmailModal(false);
         setEmailForm({ email: "", message: "" });
-        alert(`Quote sent to ${targetEmail}!`);
+        toast.success(`Quote sent to ${targetEmail}`);
       } else {
-        alert(res.error || "Failed to send email");
+        toast.error(res.error || "Failed to send email");
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to send email");
+      toast.error(err instanceof Error ? err.message : "Failed to send email");
     } finally {
       setSendingEmail(false);
     }
@@ -1230,7 +1246,7 @@ export default function QuotesPanel({
                           window.location.href = res.data.url;
                         }
                       } catch {
-                        alert("Failed to get Gmail authorization URL");
+                        toast.error("Failed to get Gmail authorization URL");
                       } finally {
                         setLoadingGmail(false);
                       }
@@ -1265,10 +1281,14 @@ export default function QuotesPanel({
                       <span className="text-sm text-green-200">Sending from: {gmailStatus.email}</span>
                     </div>
                     <button
-                      onClick={async () => {
-                        if (confirm("Disconnect Gmail?")) {
-                          await disconnectGmail(businessId ?? undefined);
-                        }
+                      onClick={() => {
+                        setConfirmState({
+                          open: true,
+                          action: async () => {
+                            await disconnectGmail(businessId ?? undefined);
+                            toast.success("Gmail disconnected");
+                          },
+                        });
                       }}
                       className="text-xs text-muted-foreground hover:text-foreground"
                     >
@@ -1341,6 +1361,15 @@ export default function QuotesPanel({
           </div>
         )}
       </AnimatePresence>
+      <ConfirmDialog
+        open={confirmState.open}
+        title="Delete?"
+        message="This cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => { confirmState.action(); setConfirmState({open: false, action: () => {}}); }}
+        onCancel={() => setConfirmState({open: false, action: () => {}})}
+      />
     </motion.div>
   );
 }

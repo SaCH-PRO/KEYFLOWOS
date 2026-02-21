@@ -30,6 +30,8 @@ import {
   publishPost,
   fetchSocialConnections,
 } from "@/lib/client";
+import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PostComposer, ComposerSubmitData } from "./components/post-composer";
 import { PostsFeed } from "./components/posts-feed";
@@ -82,6 +84,7 @@ export default function SocialPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [showFilters, setShowFilters] = useState(false);
+  const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
 
   useEffect(() => {
     const timeout = setTimeout(() => setSearch(searchInput.trim().toLowerCase()), 300);
@@ -124,16 +127,18 @@ export default function SocialPage() {
       channelIds: data.channelIds,
       mediaUrls: data.mediaUrls,
     });
-    if (error) { setError(error); setSubmitting(false); return; }
+    if (error) { setError(error); toast.error(error); setSubmitting(false); return; }
     if (post) {
       if (data.action === "publish") {
         const channels = data.channelIds && data.channelIds.length > 0 ? data.channelIds : undefined;
         const { data: pubData, error: pubError } = await publishPost(post.id, channels, bId);
-        if (pubError) setError(pubError);
+        if (pubError) { setError(pubError); toast.error(pubError); }
+        else toast.success("Post published");
         const published = pubData ? ((pubData as any).post || pubData) : post;
         setPosts((prev) => [published, ...prev]);
       } else {
         setPosts((prev) => [post, ...prev]);
+        toast.success("Post created");
       }
       setShowComposer(false);
     }
@@ -150,16 +155,18 @@ export default function SocialPage() {
       channelIds: data.channelIds,
       mediaUrls: data.mediaUrls,
     }, bId);
-    if (error) { setError(error); setSubmitting(false); return; }
+    if (error) { setError(error); toast.error(error); setSubmitting(false); return; }
     if (updated) {
       if (data.action === "publish") {
         const channels = data.channelIds && data.channelIds.length > 0 ? data.channelIds : undefined;
         const { data: pubData, error: pubError } = await publishPost(updated.id, channels, bId);
-        if (pubError) setError(pubError);
+        if (pubError) { setError(pubError); toast.error(pubError); }
+        else toast.success("Post published");
         const published = pubData ? ((pubData as any).post || pubData) : updated;
         setPosts((prev) => prev.map((p) => (p.id === editingPost.id ? published : p)));
       } else {
         setPosts((prev) => prev.map((p) => (p.id === editingPost.id ? updated : p)));
+        toast.success("Post updated");
       }
       setEditingPost(null);
     }
@@ -171,22 +178,29 @@ export default function SocialPage() {
     const post = posts.find((p) => p.id === postId);
     const channelIds = post?.channelIds && post.channelIds.length > 0 ? post.channelIds : undefined;
     const { data, error } = await publishPost(postId, channelIds, bId);
-    if (error) setError(error);
+    if (error) { setError(error); toast.error(error); }
     if (data) {
       const updated = (data as any).post || data;
       setPosts((prev) => prev.map((p) => (p.id === postId ? updated : p)));
+      toast.success("Post published");
     }
   }
 
   async function handleDelete(postId: string) {
-    if (!confirm("Are you sure you want to delete this post?")) return;
-    setError(null);
-    const { error } = await deletePost(postId, bId);
-    if (error) {
-      setError(error);
-    } else {
-      setPosts((prev) => prev.filter((p) => p.id !== postId));
-    }
+    setConfirmState({
+      open: true,
+      action: async () => {
+        setError(null);
+        const { error } = await deletePost(postId, bId);
+        if (error) {
+          setError(error);
+          toast.error(error);
+        } else {
+          setPosts((prev) => prev.filter((p) => p.id !== postId));
+          toast.success("Post deleted");
+        }
+      },
+    });
   }
 
   function handleEditStart(post: SocialPost) {
@@ -384,6 +398,15 @@ export default function SocialPage() {
         </motion.div>
       </AnimatePresence>
       <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
+      <ConfirmDialog
+        open={confirmState.open}
+        title="Delete Post"
+        message="Are you sure you want to delete this post?"
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => { confirmState.action(); setConfirmState({open: false, action: () => {}}); }}
+        onCancel={() => setConfirmState({open: false, action: () => {}})}
+      />
     </div>
   );
 }
