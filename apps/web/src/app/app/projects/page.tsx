@@ -203,12 +203,13 @@ export default function ProjectsPage() {
       <FeatureGuide
         featureKey="projects"
         title="Getting Started with Projects"
-        description="Organize work into projects with tasks, deadlines, and a visual Kanban board."
+        description="Projects keeps your business organized. Whether it's a client deliverable, an internal campaign, or a product launch — break it into steps, assign deadlines, and watch progress at a glance."
         steps={[
-          { title: "Create a Project", description: "Set up a project with a name, description, status, and priority level." },
-          { title: "Add Tasks", description: "Break projects into tasks with titles, deadlines, and assignees." },
-          { title: "Use Kanban Board", description: "Drag and drop tasks across columns (To Do, In Progress, Done) to track progress." },
-          { title: "Track Status", description: "Monitor project health with status indicators and completion tracking." },
+          { title: "Create a Project", description: "Click '+ New Project', give it a name (e.g. \"Website Redesign\" or \"Grand Opening\"), pick a color to spot it quickly, and hit Enter. Each project acts as a folder for related tasks." },
+          { title: "Add Tasks Inside", description: "Open your project and add tasks — each one is a specific action item (e.g. \"Design flyer\", \"Confirm venue\"). Set a deadline so nothing slips through the cracks." },
+          { title: "Track with Kanban Board", description: "Switch to Board view to see tasks in columns: To Do, In Progress, and Done. Drag tasks between columns as you make progress — it's a visual way to see how close you are to finishing." },
+          { title: "Set Priority & Status", description: "Mark projects as Active, On Hold, or Completed. Use priority levels (Low, Medium, High, Urgent) so you always know what needs attention first." },
+          { title: "Broadcast Updates", description: "Need to update your team or clients? Use the Broadcast button to select contacts and send a quick WhatsApp or email about project progress." },
         ]}
       />
 
