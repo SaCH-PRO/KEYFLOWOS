@@ -2677,34 +2677,6 @@ export async function fetchMyCohorts(businessId: string): Promise<ApiResult<Coho
   return apiGetSimple<Cohort[]>(`/businesses/${encodeURIComponent(businessId)}/community/my-cohorts`);
 }
 
-// ---
-// LANDING PAGES
-// ---
-export interface LandingPage {
-  id: string;
-  title: string;
-  slug: string;
-  template: string;
-  sections: { type: string; content: Record<string, unknown> }[];
-  settings?: Record<string, unknown>;
-  isPublished: boolean;
-  createdAt: string;
-}
-export async function fetchLandingPages(businessId: string): Promise<ApiResult<LandingPage[]>> {
-  return apiGetSimple<LandingPage[]>(`/businesses/${encodeURIComponent(businessId)}/landing-pages`);
-}
-export async function createLandingPage(businessId: string, data: Partial<LandingPage>): Promise<ApiResult<LandingPage>> {
-  return apiPost<LandingPage>({ path: `/businesses/${encodeURIComponent(businessId)}/landing-pages`, body: data });
-}
-export async function updateLandingPage(businessId: string, id: string, data: Partial<LandingPage>): Promise<ApiResult<LandingPage>> {
-  return apiPatch<LandingPage>(`/businesses/${encodeURIComponent(businessId)}/landing-pages/${id}`, data);
-}
-export async function deleteLandingPage(businessId: string, id: string): Promise<ApiResult<void>> {
-  return apiDelete<void>(`/businesses/${encodeURIComponent(businessId)}/landing-pages/${id}`);
-}
-export async function toggleLandingPagePublish(businessId: string, id: string): Promise<ApiResult<LandingPage>> {
-  return apiPost<LandingPage>({ path: `/businesses/${encodeURIComponent(businessId)}/landing-pages/${id}/toggle-publish`, body: {} });
-}
 
 // ---
 // BUSINESS SIMULATION

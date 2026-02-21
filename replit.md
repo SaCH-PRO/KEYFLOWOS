@@ -44,7 +44,6 @@ The project is structured as a monorepo containing a Next.js 16 frontend (`apps/
 - **Email Marketing:** Campaign management with draft/send workflow, contact segmentation by tags/status, and delivery tracking (sent/opened/clicked stats).
 - **Lead Capture Forms:** Form builder with custom fields (text/email/phone/select/textarea), public submission endpoint with auto-CRM contact creation, and embed code generation.
 - **Business Templates:** 10 industry-specific presets (Freelancer, Restaurant/Food, Salon/Beauty, E-commerce, Consulting/Agency, Fitness/Wellness, Photography/Creative, Cleaning/Home Services, Tutoring/Education, Event Planning) that seed products, services, and expense categories.
-- **Landing Page Builder:** Template-based page builder with section types (hero/features/testimonials/cta/text/gallery), publish/unpublish toggle, and public page serving.
 - **MasterClass (Education):** Micro-course catalog with difficulty levels, lesson-by-lesson progress tracking, enrollment management, and certificate generation.
 - **Community Hub:** Peer discussion forum with post types (Discussion/Question/Win/Resource), likes, comments, and cohort-based founder circles with membership management.
 - **Core Modules:**
@@ -66,7 +65,6 @@ The project is structured as a monorepo containing a Next.js 16 frontend (`apps/
     - **Templates:** Industry-specific business presets.
     - **Education:** MasterClass courses with progress tracking and certificates.
     - **Community:** Forum posts, comments, likes, and cohort management.
-    - **Landing Pages:** Page builder with section types, public serving, and SEO scoring.
 
 ## Recent Changes (Feb 20, 2026)
 - **Commerce Module Competitive Enhancement:**
@@ -101,7 +99,7 @@ The project is structured as a monorepo containing a Next.js 16 frontend (`apps/
   - Added Voice-First Operations via Web Speech API for voice input to AI chat
   - Built Tax Estimation Calculator on the Expenses page (Trinidad VAT 12.5% default)
   - Added Receipt File Upload for expenses using object storage
-  - Built SEO Scoring for landing pages (heuristic-based: title, description, content, URL, keywords)
+  - SEO Scoring available via AI module (heuristic-based: title, description, content, URL, keywords)
   - Enhanced LaunchFlow onboarding with business formation checklist (entity type, tax ID, banking, compliance)
   - Built Webhook Management in Settings (CRUD, event subscriptions, secret management)
   - Added Webhook model to Prisma schema

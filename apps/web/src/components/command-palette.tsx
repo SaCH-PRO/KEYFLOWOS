@@ -130,7 +130,6 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       { label: "Go to Commerce", hint: "Invoices & Products", onSelect: () => router.push("/app/commerce") },
       { label: "Go to Bookings", hint: "Schedule & calendar", onSelect: () => router.push("/app/bookings") },
       { label: "Go to Store", hint: "Online booking page", onSelect: () => router.push("/app/store") },
-      { label: "Go to Pages", hint: "Landing page builder", onSelect: () => router.push("/app/pages") },
       { label: "Go to Social", hint: "Content & scheduling", onSelect: () => router.push("/app/social") },
       { label: "Go to Marketing", hint: "Email campaigns & lead forms", onSelect: () => router.push("/app/marketing") },
       { label: "Go to Expenses", hint: "Track & manage expenses", onSelect: () => router.push("/app/expenses") },
