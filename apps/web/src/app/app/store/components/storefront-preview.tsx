@@ -103,7 +103,7 @@ export function StorefrontPreview({ businessData, services, commerceProducts }: 
         price: p.price,
         currency: p.currency ?? "TTD",
         duration: null as number | null,
-        imageUrl: (p as any).imageUrl ?? null,
+        imageUrl: p.imageUrl ?? null,
         itemType: "product" as const,
       })),
     ...commerceProducts
@@ -114,8 +114,8 @@ export function StorefrontPreview({ businessData, services, commerceProducts }: 
         description: p.description,
         price: p.price,
         currency: p.currency ?? "TTD",
-        duration: (p as any).duration ?? null,
-        imageUrl: (p as any).imageUrl ?? null,
+        duration: p.duration ?? null,
+        imageUrl: p.imageUrl ?? null,
         itemType: "package" as const,
       })),
   ];
