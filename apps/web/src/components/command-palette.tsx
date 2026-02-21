@@ -124,8 +124,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
 
   const actions = useMemo<Action[]>(
     () => [
-      { label: "Go to Cockpit", hint: "Dashboard", onSelect: () => router.push("/app") },
-      { label: "Go to KeyFlow AI", hint: "AI advisor & simulation", onSelect: () => router.push("/app/advisor") },
+      { label: "Go to Command", hint: "Command Center", onSelect: () => router.push("/app") },
       { label: "Go to Contacts", hint: "CRM & pipeline", onSelect: () => router.push("/app/crm/pipeline") },
       { label: "Go to Commerce", hint: "Invoices & Products", onSelect: () => router.push("/app/commerce") },
       { label: "Go to Bookings", hint: "Schedule & calendar", onSelect: () => router.push("/app/bookings") },
