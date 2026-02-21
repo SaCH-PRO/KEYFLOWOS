@@ -53,6 +53,9 @@ import type { HealthMetrics } from "@/components/contacts/contact-health-score";
 import type { JourneyMilestone } from "@/components/contacts/relationship-timeline";
 import type { ConversationContextData } from "@/components/contacts/conversation-context";
 import type { AiInsight } from "@/components/contacts/ai-copilot";
+import { toast } from "sonner";
+import { KanbanSkeleton } from "@/components/ui/skeleton";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader } from "@/components/ui/page-header";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { TabNav } from "@/components/ui/tab-nav";
@@ -172,9 +175,12 @@ export default function ContactsPage() {
   const [sortBy, setSortBy] = useState<SortOption>("newest");
   const [showSort, setShowSort] = useState(false);
   const [activeSegment, setActiveSegment] = useState<SmartSegment | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [bulkStatus, setBulkStatus] = useState<string | null>(null);
   const [bulkTagInput, setBulkTagInput] = useState("");
   const [showBulkTag, setShowBulkTag] = useState(false);
+  const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
   const router = useRouter();
 
   useEffect(() => {
@@ -206,6 +212,10 @@ export default function ContactsPage() {
     const timeout = setTimeout(() => setSearch(searchInput.trim()), 300);
     return () => clearTimeout(timeout);
   }, [searchInput]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter, activeSegment, sortBy, activeListTab, pageSize]);
 
   const loadFlowData = useCallback(async () => {
     if (!businessId) return;
@@ -362,41 +372,47 @@ export default function ContactsPage() {
   const handleSubmitContact = async (formData: ContactFormData) => {
     if (!businessId) return;
     const tagsArray = formData.tags.split(",").map((t) => t.trim()).filter(Boolean);
-    if (editingContact && selectedContactId) {
-      await updateContact({
-        businessId, contactId: selectedContactId,
-        firstName: formData.firstName, lastName: formData.lastName,
-        email: formData.email || undefined, phone: formData.phone || undefined,
-        status: formData.status, source: formData.source || undefined,
-        companyName: formData.companyName || undefined, jobTitle: formData.jobTitle || undefined,
-        preferredChannel: formData.preferredChannel || undefined,
-        lifecycleStage: formData.lifecycleStage || undefined, tags: tagsArray,
-        addressLine1: formData.addressLine1 || undefined, city: formData.city || undefined,
-        country: formData.country || undefined,
-      });
-      setShowAddForm(false);
-      setEditingContact(null);
-      void loadContacts();
-      void loadDetail(selectedContactId);
-    } else {
-      const { data } = await createContact({
-        businessId, firstName: formData.firstName, lastName: formData.lastName,
-        email: formData.email, phone: formData.phone, status: formData.status,
-        source: formData.source || "manual",
-        companyName: formData.companyName || undefined, jobTitle: formData.jobTitle || undefined,
-        preferredChannel: formData.preferredChannel || undefined,
-        lifecycleStage: formData.lifecycleStage || undefined, tags: tagsArray,
-        addressLine1: formData.addressLine1 || undefined, city: formData.city || undefined,
-        country: formData.country || undefined,
-      });
-      if (data) {
-        if (formData.initialNote.trim()) {
-          await addContactNote(data.id, formData.initialNote.trim(), businessId);
-        }
+    try {
+      if (editingContact && selectedContactId) {
+        await updateContact({
+          businessId, contactId: selectedContactId,
+          firstName: formData.firstName, lastName: formData.lastName,
+          email: formData.email || undefined, phone: formData.phone || undefined,
+          status: formData.status, source: formData.source || undefined,
+          companyName: formData.companyName || undefined, jobTitle: formData.jobTitle || undefined,
+          preferredChannel: formData.preferredChannel || undefined,
+          lifecycleStage: formData.lifecycleStage || undefined, tags: tagsArray,
+          addressLine1: formData.addressLine1 || undefined, city: formData.city || undefined,
+          country: formData.country || undefined,
+        });
         setShowAddForm(false);
+        setEditingContact(null);
         void loadContacts();
-        void loadFlowData();
+        void loadDetail(selectedContactId);
+        toast.success("Contact updated");
+      } else {
+        const { data } = await createContact({
+          businessId, firstName: formData.firstName, lastName: formData.lastName,
+          email: formData.email, phone: formData.phone, status: formData.status,
+          source: formData.source || "manual",
+          companyName: formData.companyName || undefined, jobTitle: formData.jobTitle || undefined,
+          preferredChannel: formData.preferredChannel || undefined,
+          lifecycleStage: formData.lifecycleStage || undefined, tags: tagsArray,
+          addressLine1: formData.addressLine1 || undefined, city: formData.city || undefined,
+          country: formData.country || undefined,
+        });
+        if (data) {
+          if (formData.initialNote.trim()) {
+            await addContactNote(data.id, formData.initialNote.trim(), businessId);
+          }
+          setShowAddForm(false);
+          void loadContacts();
+          void loadFlowData();
+          toast.success("Contact created");
+        }
       }
+    } catch {
+      toast.error("Failed to save contact");
     }
   };
 
@@ -420,15 +436,20 @@ export default function ContactsPage() {
 
   const handleUpdateStatus = async (status: string) => {
     if (!selectedContactId || !businessId) return;
-    await updateContact({ businessId, contactId: selectedContactId, status });
-    setContacts((prev) => prev.map((c) => (c.id === selectedContactId ? { ...c, status } : c)));
-    if (contactDetail) {
-      setContactDetail({
-        ...contactDetail,
-        contact: contactDetail.contact ? { ...contactDetail.contact, status } : null,
-      });
+    try {
+      await updateContact({ businessId, contactId: selectedContactId, status });
+      setContacts((prev) => prev.map((c) => (c.id === selectedContactId ? { ...c, status } : c)));
+      if (contactDetail) {
+        setContactDetail({
+          ...contactDetail,
+          contact: contactDetail.contact ? { ...contactDetail.contact, status } : null,
+        });
+      }
+      void loadFlowData();
+      toast.success("Status updated");
+    } catch {
+      toast.error("Failed to update status");
     }
-    void loadFlowData();
   };
 
   const handleEditContact = (contact?: ContactCardData) => {
@@ -456,15 +477,24 @@ export default function ContactsPage() {
   const handleDeleteContact = async (contact?: ContactCardData) => {
     const id = contact?.id || selectedContactId;
     if (!id || !businessId) return;
-    if (!confirm("Are you sure you want to delete this contact?")) return;
-    await deleteContact(id, businessId);
-    setContacts((prev) => prev.filter((c) => c.id !== id));
-    if (selectedContactId === id) {
-      setSelectedContactId(null);
-      setContactDetail(null);
-    }
-    setShowMobileDetail(false);
-    void loadFlowData();
+    setConfirmState({
+      open: true,
+      action: async () => {
+        try {
+          await deleteContact(id, businessId);
+          setContacts((prev) => prev.filter((c) => c.id !== id));
+          if (selectedContactId === id) {
+            setSelectedContactId(null);
+            setContactDetail(null);
+          }
+          setShowMobileDetail(false);
+          void loadFlowData();
+          toast.success("Contact deleted");
+        } catch {
+          toast.error("Failed to delete contact");
+        }
+      },
+    });
   };
 
   const handleImportFile = async (type: "csv" | "xlsx" | "vcf" | "image", file: File) => {
@@ -615,21 +645,18 @@ export default function ContactsPage() {
     return list;
   }, [activeListTab, contacts, pinnedContacts, recentContacts, activeSegment, sortBy]);
 
+  const totalPages = Math.max(1, Math.ceil(displayContacts.length / pageSize));
+  const paginatedContacts = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return displayContacts.slice(start, start + pageSize);
+  }, [displayContacts, page, pageSize]);
+
   const selectedContactsForBroadcast = useMemo(
     () => contacts.filter((c) => selectedIds.has(c.id)) as ContactCardData[],
     [contacts, selectedIds],
   );
 
-  if (workspaceLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center space-y-3">
-          <RefreshCw className="w-8 h-8 animate-spin mx-auto text-muted-foreground" />
-          <p className="text-muted-foreground">Preparing your workspace...</p>
-        </div>
-      </div>
-    );
-  }
+  if (workspaceLoading) return <KanbanSkeleton />;
 
   if (workspaceError) {
     return (
@@ -643,7 +670,7 @@ export default function ContactsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" aria-label="CRM Pipeline">
       <PageHeader
         icon={Users}
         title="Contacts"
@@ -834,6 +861,7 @@ export default function ContactsPage() {
               placeholder="Search contacts by name, email, phone, company..."
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
+              aria-label="Search contacts"
               className="kf-input w-full pl-10"
             />
           </div>
@@ -1000,7 +1028,7 @@ export default function ContactsPage() {
             </div>
           ) : (
             <>
-              {displayContacts.map((contact, index) => (
+              {paginatedContacts.map((contact, index) => (
                 <ContactCard
                   key={contact.id}
                   contact={contact as ContactCardData}
@@ -1024,6 +1052,23 @@ export default function ContactsPage() {
                 >
                   {loading ? "Loading..." : "Load More"}
                 </button>
+              )}
+              {displayContacts.length > 0 && (
+                <div className="flex items-center justify-between px-4 py-3 border-t border-border/30">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <span>Rows per page:</span>
+                    <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }} className="bg-white/5 border border-border/40 rounded px-2 py-1 text-sm">
+                      <option value={10}>10</option>
+                      <option value={20}>20</option>
+                      <option value={50}>50</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-3 text-sm">
+                    <span className="text-muted-foreground">Page {page} of {totalPages}</span>
+                    <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="px-3 py-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed text-sm">Previous</button>
+                    <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)} className="px-3 py-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed text-sm">Next</button>
+                  </div>
+                </div>
               )}
             </>
           )}
@@ -1150,6 +1195,15 @@ export default function ContactsPage() {
         onClose={() => setShowBroadcast(false)}
         selectedContacts={selectedContactsForBroadcast}
         onDeselectAll={() => { setSelectedIds(new Set()); setSelectMode(false); }}
+      />
+      <ConfirmDialog
+        open={confirmState.open}
+        title="Delete Contact"
+        message="Are you sure you want to delete this contact?"
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => { confirmState.action(); setConfirmState({open: false, action: () => {}}); }}
+        onCancel={() => setConfirmState({open: false, action: () => {}})}
       />
     </div>
   );

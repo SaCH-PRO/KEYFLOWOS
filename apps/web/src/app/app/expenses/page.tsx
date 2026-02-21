@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Receipt, Plus, Trash2, Pencil, X, ChevronDown, ChevronRight,
@@ -22,6 +23,7 @@ import { API_BASE, getAuthHeaders } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatCards } from "@/components/ui/stat-cards";
+import { ListPageSkeleton } from "@/components/ui/skeleton";
 
 const CATEGORY_COLORS = [
   "#f97316", "#ef4444", "#8b5cf6", "#06b6d4", "#22c55e",
@@ -89,8 +91,12 @@ export default function ExpensesPage() {
   });
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [filterCategory, setFilterCategory] = useState("");
   const [filterPayment, setFilterPayment] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [sortField, setSortField] = useState<"date" | "amount">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -110,13 +116,25 @@ export default function ExpensesPage() {
     if (bid) setBusinessId(bid);
   }, []);
 
+  useEffect(() => {
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    searchTimeoutRef.current = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 300);
+    return () => { if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current); };
+  }, [searchQuery]);
+
+  useEffect(() => { setPage(1); }, [period, filterCategory, filterPayment, debouncedSearch]);
+
+  const totalPages = Math.max(1, Math.ceil(totalExpenses / pageSize));
+
   const loadData = useCallback(async () => {
     if (!businessId) { setLoading(false); return; }
     setLoading(true);
     try {
       const useCustom = period === "custom" && customStart && customEnd;
       const [expRes, catRes, sumRes, venRes, budRes] = await Promise.all([
-        fetchExpenses(businessId, { search: searchQuery || undefined, categoryId: filterCategory || undefined, paymentMethod: filterPayment || undefined, period: useCustom ? undefined : period, startDate: useCustom ? customStart : undefined, endDate: useCustom ? customEnd : undefined }),
+        fetchExpenses(businessId, { search: debouncedSearch || undefined, categoryId: filterCategory || undefined, paymentMethod: filterPayment || undefined, period: useCustom ? undefined : period, startDate: useCustom ? customStart : undefined, endDate: useCustom ? customEnd : undefined, page, limit: pageSize }),
         fetchExpenseCategories(businessId),
         fetchExpenseSummary(businessId, useCustom ? "custom" : period, useCustom ? customStart : undefined, useCustom ? customEnd : undefined),
         fetchVendorAnalytics(businessId, useCustom ? "custom" : period, useCustom ? customStart : undefined, useCustom ? customEnd : undefined),
@@ -129,7 +147,7 @@ export default function ExpensesPage() {
       if (budRes.data) setBudgets(budRes.data);
     } catch {}
     setLoading(false);
-  }, [businessId, period, searchQuery, filterCategory, filterPayment, customStart, customEnd]);
+  }, [businessId, period, debouncedSearch, filterCategory, filterPayment, customStart, customEnd, page, pageSize]);
 
   useEffect(() => { void loadData(); }, [loadData]);
 
@@ -184,13 +202,14 @@ export default function ExpensesPage() {
         if (res.data) setExpenses(prev => [res.data!, ...prev]);
       }
       setShowModal(false);
+      toast.success("Expense saved");
       void loadData();
-    } catch {}
+    } catch (err) { toast.error("Failed to save expense"); }
   };
 
   const handleDelete = async (expenseId: string) => {
     if (!businessId) return;
-    try { await deleteExpense(businessId, expenseId); void loadData(); } catch {}
+    try { await deleteExpense(businessId, expenseId); toast.success("Expense deleted"); void loadData(); } catch (err) { toast.error("Failed to delete expense"); }
   };
 
   const handleAddCategory = async () => {
@@ -199,12 +218,13 @@ export default function ExpensesPage() {
       const res = await createExpenseCategory(businessId, { name: newCatName.trim(), color: newCatColor });
       if (res.data) setCategories(prev => [...prev, res.data!]);
       setNewCatName(""); setNewCatColor(CATEGORY_COLORS[0]);
-    } catch {}
+      toast.success("Category created");
+    } catch (err) { toast.error("Failed to create category"); }
   };
 
   const handleDeleteCategory = async (categoryId: string) => {
     if (!businessId) return;
-    try { await deleteExpenseCategory(businessId, categoryId); setCategories(prev => prev.filter(c => c.id !== categoryId)); } catch {}
+    try { await deleteExpenseCategory(businessId, categoryId); setCategories(prev => prev.filter(c => c.id !== categoryId)); toast.success("Category deleted"); } catch (err) { toast.error("Failed to delete category"); }
   };
 
   const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -221,8 +241,9 @@ export default function ExpensesPage() {
       if (data.uploadUrl) {
         await fetch(data.uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
         setFormData(prev => ({ ...prev, receiptUrl: data.publicUrl || data.uploadUrl.split("?")[0] }));
+        toast.success("Receipt uploaded");
       }
-    } catch {}
+    } catch (err) { toast.error("Failed to upload receipt"); }
     setUploading(false);
   };
 
@@ -238,13 +259,14 @@ export default function ExpensesPage() {
       });
       setShowBudgetModal(false);
       setBudgetForm({ categoryId: "", amount: "", alertAt: "80" });
+      toast.success("Budget saved");
       void loadData();
-    } catch {}
+    } catch (err) { toast.error("Failed to save budget"); }
   };
 
   const handleDeleteBudget = async (budgetId: string) => {
     if (!businessId) return;
-    try { await deleteExpenseBudget(businessId, budgetId); void loadData(); } catch {}
+    try { await deleteExpenseBudget(businessId, budgetId); toast.success("Budget deleted"); void loadData(); } catch (err) { toast.error("Failed to delete budget"); }
   };
 
   const handleExport = () => {
@@ -274,15 +296,7 @@ export default function ExpensesPage() {
   const overBudgetCount = budgets.filter(b => b.isOverBudget).length;
   const nearAlertCount = budgets.filter(b => b.isNearAlert && !b.isOverBudget).length;
 
-  if (loading) {
-    return (
-      <div className="space-y-4">
-        <div><h1 className="text-xl md:text-2xl font-semibold tracking-tight flex items-center gap-2"><Receipt className="w-6 h-6" style={{ color: "hsl(var(--kf-accent1))" }} />Expenses</h1><p className="text-sm text-muted-foreground">Loading expense data...</p></div>
-        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">{[1,2,3,4].map(i => <div key={i} className="rounded-2xl border border-border/60 bg-slate-950/70 p-4 h-24 animate-pulse" />)}</div>
-        <div className="rounded-2xl border border-border/60 bg-slate-950/70 p-4 h-64 animate-pulse" />
-      </div>
-    );
-  }
+  if (loading) return <ListPageSkeleton />;
 
   return (
     <div className="space-y-6">
@@ -311,7 +325,7 @@ export default function ExpensesPage() {
       />
 
       <div className="flex items-center gap-2 flex-wrap">
-        <select value={period} onChange={e => setPeriod(e.target.value)} className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]">
+        <select value={period} onChange={e => setPeriod(e.target.value)} aria-label="Time period" className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]">
           {PERIODS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
           <option value="custom">Custom Range</option>
         </select>
@@ -324,11 +338,11 @@ export default function ExpensesPage() {
         )}
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search expenses..." className="w-full bg-white/5 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]" />
+          <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search expenses..." aria-label="Search expenses" className="w-full bg-white/5 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]" />
         </div>
-        <div className="flex rounded-lg border border-white/10 overflow-hidden">
+        <div className="flex rounded-lg border border-white/10 overflow-hidden" role="tablist" aria-label="Expense views">
           {(["overview", "budgets", "vendors", "categories"] as Tab[]).map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)} className={`px-3 py-2 text-xs font-medium capitalize transition-colors ${activeTab === tab ? "bg-[hsl(var(--kf-accent1))] text-white" : "bg-white/5 text-muted-foreground hover:text-white hover:bg-white/10"}`}>
+            <button key={tab} onClick={() => setActiveTab(tab)} role="tab" aria-selected={activeTab === tab} className={`px-3 py-2 text-xs font-medium capitalize transition-colors ${activeTab === tab ? "bg-[hsl(var(--kf-accent1))] text-white" : "bg-white/5 text-muted-foreground hover:text-white hover:bg-white/10"}`}>
               {tab}
             </button>
           ))}
@@ -527,16 +541,16 @@ export default function ExpensesPage() {
         {filteredExpenses.length === 0 ? (
           <div className="p-8 text-center text-sm text-muted-foreground">{expenses.length === 0 ? 'No expenses recorded yet. Click "Add Expense" to get started.' : "No expenses match the selected filters."}</div>
         ) : (
-          <div className="divide-y divide-border/30">
-            <div className="hidden md:grid grid-cols-[0.8fr_2fr_1fr_0.8fr_0.8fr_1fr_auto] gap-3 px-4 py-2 text-xs text-muted-foreground uppercase tracking-wider">
-              <span>Date</span><span>Description</span><span>Vendor</span><span>Category</span><span>Method</span><span className="text-right">Amount</span><span className="w-20" />
+          <div className="divide-y divide-border/30" role="table" aria-label="Expenses list">
+            <div className="hidden md:grid grid-cols-[0.8fr_2fr_1fr_0.8fr_0.8fr_1fr_auto] gap-3 px-4 py-2 text-xs text-muted-foreground uppercase tracking-wider" role="row">
+              <span role="columnheader">Date</span><span role="columnheader">Description</span><span role="columnheader">Vendor</span><span role="columnheader">Category</span><span role="columnheader">Method</span><span role="columnheader" className="text-right">Amount</span><span className="w-20" />
             </div>
             <AnimatePresence>
               {filteredExpenses.map(exp => {
                 const cat = categories.find(c => c.id === exp.categoryId) || exp.category;
                 const pmLabel = PAYMENT_METHODS.find(m => m.value === exp.paymentMethod)?.label;
                 return (
-                  <motion.div key={exp.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} className="grid grid-cols-1 md:grid-cols-[0.8fr_2fr_1fr_0.8fr_0.8fr_1fr_auto] gap-1 md:gap-3 px-4 py-3 hover:bg-white/[0.02] transition-colors group items-center cursor-pointer" onClick={() => setDetailExpense(exp)}>
+                  <motion.div key={exp.id} role="row" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} className="grid grid-cols-1 md:grid-cols-[0.8fr_2fr_1fr_0.8fr_0.8fr_1fr_auto] gap-1 md:gap-3 px-4 py-3 hover:bg-white/[0.02] transition-colors group items-center cursor-pointer" onClick={() => setDetailExpense(exp)}>
                     <span className="text-xs text-muted-foreground">{formatDate(exp.date)}</span>
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium truncate">{exp.description}</span>
@@ -555,6 +569,26 @@ export default function ExpensesPage() {
                 );
               })}
             </AnimatePresence>
+          </div>
+        )}
+
+        {totalExpenses > 0 && (
+          <div className="p-4 border-t border-border/40 flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>Rows per page:</span>
+              <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }} className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-[hsl(var(--kf-accent1))]">
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground">Page {page} of {totalPages}</span>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1} className="px-3 py-1.5 rounded-lg text-xs border border-white/10 bg-white/5 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Previous</button>
+                <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages} className="px-3 py-1.5 rounded-lg text-xs border border-white/10 bg-white/5 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Next</button>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -588,11 +622,11 @@ export default function ExpensesPage() {
 
       <AnimatePresence>
         {showModal && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[70] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="expense-modal-title">
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowModal(false)} />
             <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="relative w-full max-w-lg bg-card border border-border rounded-2xl shadow-2xl overflow-hidden max-h-[85vh] overflow-y-auto">
               <div className="px-5 py-4 border-b border-border flex items-center justify-between" style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.1), hsl(var(--kf-accent2) / 0.1))" }}>
-                <h2 className="text-base font-semibold">{editingExpense ? "Edit Expense" : "Add Expense"}</h2>
+                <h2 id="expense-modal-title" className="text-base font-semibold">{editingExpense ? "Edit Expense" : "Add Expense"}</h2>
                 <button onClick={() => setShowModal(false)} className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-white"><X className="w-4 h-4" /></button>
               </div>
               <div className="p-5 space-y-4">
@@ -639,11 +673,11 @@ export default function ExpensesPage() {
 
       <AnimatePresence>
         {showBudgetModal && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[70] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="budget-modal-title">
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowBudgetModal(false)} />
             <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="relative w-full max-w-md bg-card border border-border rounded-2xl shadow-2xl overflow-hidden">
               <div className="px-5 py-4 border-b border-border flex items-center justify-between" style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.1), hsl(var(--kf-accent2) / 0.1))" }}>
-                <h2 className="text-base font-semibold">Set Monthly Budget</h2>
+                <h2 id="budget-modal-title" className="text-base font-semibold">Set Monthly Budget</h2>
                 <button onClick={() => setShowBudgetModal(false)} className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-white"><X className="w-4 h-4" /></button>
               </div>
               <div className="p-5 space-y-4">
@@ -662,11 +696,11 @@ export default function ExpensesPage() {
 
       <AnimatePresence>
         {detailExpense && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[70] flex items-end md:items-center justify-center">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[70] flex items-end md:items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="expense-detail-title">
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setDetailExpense(null)} />
             <motion.div initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }} className="relative w-full max-w-lg bg-card border border-border rounded-t-2xl md:rounded-2xl shadow-2xl overflow-hidden max-h-[80vh] overflow-y-auto">
               <div className="px-5 py-4 border-b border-border flex items-center justify-between" style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.1), hsl(var(--kf-accent2) / 0.1))" }}>
-                <h2 className="text-base font-semibold">Expense Details</h2>
+                <h2 id="expense-detail-title" className="text-base font-semibold">Expense Details</h2>
                 <div className="flex items-center gap-1">
                   <button onClick={() => { openEditModal(detailExpense); setDetailExpense(null); }} className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-white"><Pencil className="w-4 h-4" /></button>
                   <button onClick={() => setDetailExpense(null)} className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-white"><X className="w-4 h-4" /></button>

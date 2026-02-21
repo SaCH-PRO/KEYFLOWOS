@@ -7,6 +7,8 @@ import {
   Facebook, Instagram, Linkedin, Twitter, Music2, Wifi, WifiOff,
   Key, Unlink, ExternalLink, ChevronDown, ChevronUp, Mail, Settings2,
 } from "lucide-react";
+import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Button, Badge } from "@keyflow/ui";
 import { apiGet, apiPostSimple, apiDelete } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -105,6 +107,7 @@ export default function ConnectionsSettingsPage() {
   const [manualPlatformId, setManualPlatformId] = useState("");
   const [manualAccountName, setManualAccountName] = useState("");
   const [oauthAvailability, setOauthAvailability] = useState<Record<string, boolean>>({});
+  const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void; message: string}>({open: false, action: () => {}, message: ""});
 
   const oauthPopupRef = useRef<Window | null>(null);
   const businessId = getStoredBusinessId();
@@ -179,7 +182,7 @@ export default function ConnectionsSettingsPage() {
     setConnecting(true);
     setError(null);
     const res = await apiGet<{ url: string }>(`/bookings/businesses/${businessId}/calendar/auth-url`);
-    if (res.error) { setError(res.error); setConnecting(false); return; }
+    if (res.error) { setError(res.error); toast.error(res.error); setConnecting(false); return; }
     if (res.data?.url) window.location.href = res.data.url;
   };
 
@@ -190,8 +193,10 @@ export default function ConnectionsSettingsPage() {
     const res = await apiPostSimple<{ success: boolean }>(`/bookings/businesses/${businessId}/calendar/disconnect`, {});
     if (res.error) {
       setError(res.error);
+      toast.error(res.error);
     } else {
       setCalendarStatus({ connected: false });
+      toast.success("Google Calendar disconnected");
     }
     setDisconnecting(false);
   };
@@ -201,7 +206,7 @@ export default function ConnectionsSettingsPage() {
     setGmailConnecting(true);
     setError(null);
     const res = await apiGet<{ url: string }>(`/commerce/businesses/${businessId}/gmail/auth-url`);
-    if (res.error) { setError(res.error); setGmailConnecting(false); return; }
+    if (res.error) { setError(res.error); toast.error(res.error); setGmailConnecting(false); return; }
     if (res.data?.url) window.location.href = res.data.url;
   };
 
@@ -212,9 +217,11 @@ export default function ConnectionsSettingsPage() {
     const res = await apiDelete<{ success: boolean }>(`/commerce/businesses/${businessId}/gmail`);
     if (res.error) {
       setError(res.error);
+      toast.error(res.error);
     } else {
       setGmailStatus({ connected: false, email: null });
       setSuccess("Gmail disconnected.");
+      toast.success("Gmail disconnected");
     }
     setGmailDisconnecting(false);
   };
@@ -296,6 +303,7 @@ export default function ConnectionsSettingsPage() {
     }, bId);
     if (connError) {
       setError(connError);
+      toast.error(connError);
     } else if (data) {
       setSocialConnections((prev) => {
         const idx = prev.findIndex((c) => c.platform === platform);
@@ -304,7 +312,9 @@ export default function ConnectionsSettingsPage() {
       });
       setExpandedSocial(null);
       setManualToken(""); setManualPlatformId(""); setManualAccountName("");
-      setSuccess(`${SOCIAL_PLATFORMS.find((p) => p.key === platform)?.name} connected!`);
+      const platformName = SOCIAL_PLATFORMS.find((p) => p.key === platform)?.name;
+      setSuccess(`${platformName} connected!`);
+      toast.success(`${platformName} connected!`);
       try { localStorage.setItem("social-connection-changed", Date.now().toString()); } catch {}
     }
     setSocialActionLoading(null);
@@ -312,18 +322,24 @@ export default function ConnectionsSettingsPage() {
 
   async function handleSocialDisconnect(platform: string) {
     const name = SOCIAL_PLATFORMS.find((p) => p.key === platform)?.name || platform;
-    if (!confirm(`Disconnect ${name}?`)) return;
-    setSocialActionLoading(platform);
-    const bId = getStoredBusinessId() || undefined;
-    const { error: discError } = await disconnectSocial(platform, bId);
-    if (discError) { setError(discError); }
-    else {
-      setSocialConnections((prev) => prev.filter((c) => c.platform !== platform));
-      setSocialTestResults((prev) => { const n = { ...prev }; delete n[platform]; return n; });
-      setSuccess(`${name} disconnected.`);
-      try { localStorage.setItem("social-connection-changed", Date.now().toString()); } catch {}
-    }
-    setSocialActionLoading(null);
+    setConfirmState({
+      open: true,
+      message: `Disconnect ${name}?`,
+      action: async () => {
+        setSocialActionLoading(platform);
+        const bId = getStoredBusinessId() || undefined;
+        const { error: discError } = await disconnectSocial(platform, bId);
+        if (discError) { setError(discError); toast.error(discError); }
+        else {
+          setSocialConnections((prev) => prev.filter((c) => c.platform !== platform));
+          setSocialTestResults((prev) => { const n = { ...prev }; delete n[platform]; return n; });
+          setSuccess(`${name} disconnected.`);
+          toast.success(`${name} disconnected`);
+          try { localStorage.setItem("social-connection-changed", Date.now().toString()); } catch {}
+        }
+        setSocialActionLoading(null);
+      },
+    });
   }
 
   function toggleSocialExpand(platform: string) {
@@ -734,6 +750,15 @@ export default function ConnectionsSettingsPage() {
           )}
         </div>
       </motion.div>
+      <ConfirmDialog
+        open={confirmState.open}
+        title="Disconnect"
+        message={confirmState.message}
+        confirmLabel="Disconnect"
+        variant="danger"
+        onConfirm={() => { confirmState.action(); setConfirmState({open: false, action: () => {}, message: ""}); }}
+        onCancel={() => setConfirmState({open: false, action: () => {}, message: ""})}
+      />
     </motion.div>
   );
 }

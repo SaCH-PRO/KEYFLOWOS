@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { motion, AnimatePresence } from "framer-motion";
 import { apiGet, apiPost } from "@/lib/api";
 import { fetchAiUsageHistory, type AiUsageHistoryResponse } from "@/lib/client";
@@ -148,6 +150,7 @@ export function BillingTab() {
   const [activeSubTab, setActiveSubTab] = useState<BillingSubTab>("overview");
   const [showMatrix, setShowMatrix] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
 
   const businessId = getStoredBusinessId();
 
@@ -178,8 +181,10 @@ export function BillingTab() {
     });
     if (res.error) {
       setMessage({ type: "error", text: res.error });
+      toast.error(res.error);
     } else {
       setMessage({ type: "success", text: `${plan} trial started! You have 1 day to explore.` });
+      toast.success(`${plan} trial started!`);
       await loadAll();
     }
     setUpgrading(false);
@@ -195,28 +200,37 @@ export function BillingTab() {
     });
     if (res.error) {
       setMessage({ type: "error", text: res.error });
+      toast.error(res.error);
     } else {
       setMessage({ type: "success", text: `${plan} plan activated!` });
+      toast.success(`${plan} plan activated!`);
       await loadAll();
     }
     setUpgrading(false);
   };
 
   const handleCancel = async () => {
-    if (!businessId || !confirm("Are you sure you want to cancel your subscription? You will revert to the Free plan.")) return;
-    setCancelling(true);
-    setMessage(null);
-    const res = await apiPost<{ message: string }>({
-      path: `/subscriptions/businesses/${businessId}/cancel`,
-      body: {},
+    if (!businessId) return;
+    setConfirmState({
+      open: true,
+      action: async () => {
+        setCancelling(true);
+        setMessage(null);
+        const res = await apiPost<{ message: string }>({
+          path: `/subscriptions/businesses/${businessId}/cancel`,
+          body: {},
+        });
+        if (res.error) {
+          setMessage({ type: "error", text: res.error });
+          toast.error(res.error);
+        } else {
+          setMessage({ type: "success", text: res.data?.message || "Subscription cancelled." });
+          toast.success("Subscription cancelled");
+          await loadAll();
+        }
+        setCancelling(false);
+      },
     });
-    if (res.error) {
-      setMessage({ type: "error", text: res.error });
-    } else {
-      setMessage({ type: "success", text: res.data?.message || "Subscription cancelled." });
-      await loadAll();
-    }
-    setCancelling(false);
   };
 
   const toggleCategory = (cat: string) => {
@@ -961,6 +975,15 @@ export function BillingTab() {
           )}
         </motion.div>
       </AnimatePresence>
+      <ConfirmDialog
+        open={confirmState.open}
+        title="Cancel Subscription"
+        message="Are you sure you want to cancel your subscription? You will revert to the Free plan."
+        confirmLabel="Cancel Subscription"
+        variant="danger"
+        onConfirm={() => { confirmState.action(); setConfirmState({open: false, action: () => {}}); }}
+        onCancel={() => setConfirmState({open: false, action: () => {}})}
+      />
     </motion.div>
   );
 }

@@ -18,6 +18,14 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - Redesigned, icon-first, collapsible sidebar.
 - Unified component classes and mobile-optimized navigation.
 - Context-aware notifications and flow-themed animations.
+- Toast notification system (sonner) with glassmorphism styling for all CRUD feedback.
+- Glassmorphism ConfirmDialog component replacing all native browser confirm() dialogs.
+- Skeleton loading states (stat cards, tables, charts, kanban, dashboards) replacing generic spinners.
+- Next.js error.tsx, loading.tsx, and not-found.tsx boundaries for graceful error recovery.
+- Search debouncing (300ms) on all search inputs to reduce API calls.
+- Client-side pagination with page size selector on lists (expenses, CRM contacts, marketplace).
+- Core accessibility: ARIA labels, roles (tablist/tab, navigation, main, dialog), aria-selected on tabs.
+- Component decomposition: Marketplace (9 files), Reports (8 files), Store (6 files) extracted from monolithic pages.
 
 **Technical Implementations & Features:**
 - **Business Autopilot System:** AI-powered operations with quick-start onboarding, business archetype inference, revenue model detection, task orchestration, and a Legal & Compliance Module.

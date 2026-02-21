@@ -4,6 +4,8 @@ import type { ChangeEvent } from "react";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Badge, Button, Input } from "@keyflow/ui";
+import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Contact,
   ContactPlaybook,
@@ -67,6 +69,7 @@ export default function ContactDetailPage() {
   const [eventFilter, setEventFilter] = useState<string>("ALL");
   const [notesQuery, setNotesQuery] = useState("");
   const [playbookEdit, setPlaybookEdit] = useState(false);
+  const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
 
   const normalizeContact = useCallback(
     (contact?: Contact | null): ContactWithTags | null => (contact ? { ...contact, tags: contact.tags ?? [] } : null),
@@ -118,9 +121,14 @@ export default function ContactDetailPage() {
   const addNoteAction = useCallback(() => {
     if (!noteBody.trim()) return;
     startTransition(async () => {
-      await addContactNote(contactId, noteBody);
-      setNoteBody("");
-      await refreshDetail();
+      try {
+        await addContactNote(contactId, noteBody);
+        setNoteBody("");
+        await refreshDetail();
+        toast.success("Note added");
+      } catch {
+        toast.error("Failed to add note");
+      }
     });
   }, [contactId, noteBody, refreshDetail]);
 
@@ -160,19 +168,33 @@ export default function ContactDetailPage() {
   };
 
   const deleteAction = async () => {
-    if (!confirm("Delete this contact?")) return;
-    startTransition(async () => {
-      await deleteContact(contactId);
-      router.push("/app/crm/pipeline");
+    setConfirmState({
+      open: true,
+      action: () => {
+        startTransition(async () => {
+          try {
+            await deleteContact(contactId);
+            toast.success("Contact deleted");
+            router.push("/app/crm/pipeline");
+          } catch {
+            toast.error("Failed to delete contact");
+          }
+        });
+      },
     });
   };
 
   const mergeAction = async () => {
     if (!mergeId.trim()) return;
     startTransition(async () => {
-      await mergeContacts({ contactId, duplicateId: mergeId });
-      setMergeId("");
-      await refreshDetail();
+      try {
+        await mergeContacts({ contactId, duplicateId: mergeId });
+        setMergeId("");
+        await refreshDetail();
+        toast.success("Contacts merged");
+      } catch {
+        toast.error("Failed to merge contacts");
+      }
     });
   };
 
@@ -195,19 +217,29 @@ export default function ContactDetailPage() {
   const addTaskAction = useCallback(() => {
     if (!taskTitle.trim()) return;
     startTransition(async () => {
-      await addContactTask(contactId, taskTitle, { dueDate: taskDue || undefined, assigneeId: taskAssignee || undefined });
-      setTaskTitle("");
-      setTaskDue("");
-      setTaskAssignee("");
-      await refreshDetail();
+      try {
+        await addContactTask(contactId, taskTitle, { dueDate: taskDue || undefined, assigneeId: taskAssignee || undefined });
+        setTaskTitle("");
+        setTaskDue("");
+        setTaskAssignee("");
+        await refreshDetail();
+        toast.success("Task added");
+      } catch {
+        toast.error("Failed to add task");
+      }
     });
   }, [contactId, refreshDetail, taskAssignee, taskDue, taskTitle]);
 
   const completeTaskAction = useCallback(
     (taskId: string) => {
       startTransition(async () => {
-        await completeContactTask(taskId);
-        await refreshDetail();
+        try {
+          await completeContactTask(taskId);
+          await refreshDetail();
+          toast.success("Task completed");
+        } catch {
+          toast.error("Failed to complete task");
+        }
       });
     },
     [refreshDetail],
@@ -535,6 +567,15 @@ export default function ContactDetailPage() {
           ))}
         </div>
       </div>
+      <ConfirmDialog
+        open={confirmState.open}
+        title="Delete Contact"
+        message="Are you sure you want to delete this contact?"
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => { confirmState.action(); setConfirmState({open: false, action: () => {}}); }}
+        onCancel={() => setConfirmState({open: false, action: () => {}})}
+      />
     </div>
   );
 }

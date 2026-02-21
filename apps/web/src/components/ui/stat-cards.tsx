@@ -35,6 +35,8 @@ export function StatCards({ items, columns = 4 }: StatCardsProps) {
 
   return (
     <motion.div
+      role="region"
+      aria-label="Statistics"
       variants={stagger}
       initial="hidden"
       animate="show"
