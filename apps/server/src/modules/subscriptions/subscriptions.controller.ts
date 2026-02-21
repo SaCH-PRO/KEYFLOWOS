@@ -10,9 +10,19 @@ export class SubscriptionsController {
     return this.subs.getPlans();
   }
 
+  @Get('feature-registry')
+  getFeatureRegistry() {
+    return this.subs.getFeatureRegistry();
+  }
+
   @Get('businesses/:businessId/current')
   async getCurrentSubscription(@Param('businessId') businessId: string) {
     return this.subs.getActiveSubscription(businessId);
+  }
+
+  @Get('businesses/:businessId/billing-dashboard')
+  async getBillingDashboard(@Param('businessId') businessId: string) {
+    return this.subs.getBillingDashboard(businessId);
   }
 
   @Post('businesses/:businessId/trial')
