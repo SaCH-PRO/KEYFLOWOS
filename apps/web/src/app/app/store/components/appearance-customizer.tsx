@@ -28,11 +28,11 @@ type Props = {
   saving: boolean;
 };
 
-const THEMES: { key: string; label: string; desc: string }[] = [
-  { key: "default", label: "Default", desc: "Clean & balanced" },
-  { key: "minimal", label: "Minimal", desc: "Whitespace-focused" },
-  { key: "bold", label: "Bold", desc: "High contrast" },
-  { key: "elegant", label: "Elegant", desc: "Refined serif" },
+const THEMES: { key: string; label: string; desc: string; accent: string }[] = [
+  { key: "default", label: "Default", desc: "Clean glassmorphism", accent: "hsl(var(--kf-accent1))" },
+  { key: "minimal", label: "Minimal", desc: "Airy & spacious", accent: "hsl(var(--kf-muted-foreground))" },
+  { key: "bold", label: "Bold", desc: "Vibrant & impactful", accent: "hsl(var(--kf-accent1))" },
+  { key: "elegant", label: "Elegant", desc: "Refined & luxurious", accent: "hsl(var(--kf-accent2))" },
 ];
 
 function Toggle({ enabled, onToggle, label }: { enabled: boolean; onToggle: () => void; label: string }) {
@@ -128,69 +128,60 @@ function ThemeCard({
   selected,
   onClick,
 }: {
-  theme: { key: string; label: string; desc: string };
+  theme: { key: string; label: string; desc: string; accent: string };
   selected: boolean;
   onClick: () => void;
 }) {
+  const isMinimal = theme.key === "minimal";
+  const isBold = theme.key === "bold";
+  const isElegant = theme.key === "elegant";
+
+  const cardBg = isMinimal ? "transparent" : isBold ? "hsl(var(--kf-accent1) / 0.08)" : isElegant ? "hsl(var(--kf-muted) / 0.2)" : "hsl(var(--kf-muted) / 0.3)";
+  const cardBorder = isMinimal ? "1px solid hsl(var(--kf-border) / 0.15)" : isBold ? "2px solid hsl(var(--kf-accent1) / 0.2)" : isElegant ? "1px solid hsl(var(--kf-border) / 0.2)" : "1px solid hsl(var(--kf-border) / 0.2)";
+  const cardRadius = isElegant ? "rounded-2xl" : isBold ? "rounded-lg" : isMinimal ? "rounded-md" : "rounded-xl";
+  const headerH = isBold ? "h-2.5" : "h-1.5";
+  const headerW = isMinimal ? "w-1/2" : "w-3/4";
+  const headerFont = isBold ? "font-black" : isElegant ? "font-serif" : isMinimal ? "font-light" : "font-bold";
+
   return (
     <button
       type="button"
       onClick={onClick}
-      className="rounded-xl p-3 text-left transition-all w-full"
+      className="rounded-xl p-2.5 text-left transition-all w-full group"
       style={{
-        background: selected ? "hsl(var(--kf-accent1) / 0.12)" : "hsl(var(--kf-muted) / 0.3)",
-        border: selected ? "2px solid hsl(var(--kf-accent1) / 0.5)" : "2px solid hsl(var(--kf-border) / 0.5)",
+        background: selected ? "hsl(var(--kf-accent1) / 0.1)" : "hsl(var(--kf-muted) / 0.2)",
+        border: selected ? "2px solid hsl(var(--kf-accent1) / 0.5)" : "2px solid hsl(var(--kf-border) / 0.4)",
       }}
     >
       <div
-        className="rounded-lg p-2 mb-2"
-        style={{ background: "hsl(var(--kf-muted) / 0.5)", border: "1px solid hsl(var(--kf-border) / 0.3)" }}
+        className="rounded-lg overflow-hidden mb-2"
+        style={{ background: "#0a0a0f", border: "1px solid hsl(var(--kf-border) / 0.2)" }}
       >
-        <div className="space-y-1">
-          <div
-            className="h-1.5 rounded-full w-3/4"
-            style={{
-              background: theme.key === "bold"
-                ? "hsl(var(--kf-accent1))"
-                : theme.key === "elegant"
-                ? "hsl(var(--kf-accent2) / 0.6)"
-                : "hsl(var(--kf-muted-foreground) / 0.4)",
-            }}
-          />
-          <div className="flex gap-1">
-            <div
-              className="h-6 flex-1 rounded"
-              style={{
-                background: theme.key === "minimal"
-                  ? "transparent"
-                  : theme.key === "bold"
-                  ? "hsl(var(--kf-accent1) / 0.15)"
-                  : "hsl(var(--kf-muted) / 0.4)",
-                border: theme.key === "minimal" ? "1px solid hsl(var(--kf-border) / 0.3)" : "none",
-              }}
-            />
-            <div
-              className="h-6 flex-1 rounded"
-              style={{
-                background: theme.key === "minimal"
-                  ? "transparent"
-                  : theme.key === "bold"
-                  ? "hsl(var(--kf-accent2) / 0.15)"
-                  : "hsl(var(--kf-muted) / 0.4)",
-                border: theme.key === "minimal" ? "1px solid hsl(var(--kf-border) / 0.3)" : "none",
-              }}
-            />
+        <div className="p-2 space-y-1.5">
+          {isBold && (
+            <div className="h-3 rounded-md mb-1" style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.15), hsl(var(--kf-accent2) / 0.08))" }} />
+          )}
+          <div className="flex items-center gap-1 mb-1">
+            <div className={`w-3 h-3 ${isElegant ? "rounded-full" : "rounded"}`} style={{ background: "hsl(var(--kf-accent1) / 0.2)" }} />
+            <div className={`${headerH} ${headerW} rounded-full`} style={{ background: `${theme.accent} / 0.5)`.replace("/ 0.5)", "").includes("--kf") ? theme.accent.replace(")", " / 0.5)") : "rgba(255,255,255,0.3)" }} />
           </div>
-          <div
-            className="h-1 rounded-full w-1/2"
-            style={{ background: "hsl(var(--kf-muted-foreground) / 0.2)" }}
-          />
+          <div className="flex gap-1">
+            <div className={`h-8 flex-1 ${cardRadius}`} style={{ background: cardBg, border: cardBorder }} />
+            <div className={`h-8 flex-1 ${cardRadius}`} style={{ background: cardBg, border: cardBorder }} />
+          </div>
+          <div className="flex gap-1">
+            <div className={`h-8 flex-1 ${cardRadius}`} style={{ background: cardBg, border: cardBorder }} />
+            <div className={`h-8 flex-1 ${cardRadius}`} style={{ background: cardBg, border: cardBorder }} />
+          </div>
+          {isBold && (
+            <div className="h-2 rounded-lg mt-0.5" style={{ background: "linear-gradient(90deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }} />
+          )}
         </div>
       </div>
-      <p className="text-xs font-semibold" style={{ color: selected ? "hsl(var(--kf-accent1))" : undefined }}>
+      <p className={`text-xs ${headerFont}`} style={{ color: selected ? "hsl(var(--kf-accent1))" : undefined }}>
         {theme.label}
       </p>
-      <p className="text-[10px] text-muted-foreground">{theme.desc}</p>
+      <p className="text-[10px] text-muted-foreground leading-tight">{theme.desc}</p>
     </button>
   );
 }
