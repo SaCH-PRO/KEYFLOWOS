@@ -38,6 +38,8 @@ import { ChannelsPanel } from "./components/channels-panel";
 import { AIStudio } from "./components/ai-studio";
 import { AnalyticsPanel } from "./components/analytics-stub";
 import { PageHeader } from "@/components/ui/page-header";
+import { ContactPickerDrawer } from "@/components/contacts";
+import { Send } from "lucide-react";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { StatCards } from "@/components/ui/stat-cards";
 import { TabNav } from "@/components/ui/tab-nav";
@@ -71,6 +73,7 @@ export default function SocialPage() {
   const [activeTab, setActiveTab] = useState<Tab>("posts");
   const [showComposer, setShowComposer] = useState(false);
   const [editingPost, setEditingPost] = useState<SocialPost | null>(null);
+  const [showContactPicker, setShowContactPicker] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const [connections, setConnections] = useState<SocialConnection[]>([]);
@@ -219,6 +222,15 @@ export default function SocialPage() {
         subtitle="Content calendar, scheduling & publishing"
         actionLabel="New Post"
         onAction={() => { setShowComposer(true); setEditingPost(null); }}
+        rightSlot={
+          <button
+            onClick={() => setShowContactPicker(true)}
+            className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Send className="w-4 h-4" />
+            Broadcast
+          </button>
+        }
       />
 
       <FeatureGuide
@@ -371,6 +383,7 @@ export default function SocialPage() {
           {activeTab === "analytics" && <AnalyticsPanel posts={posts} />}
         </motion.div>
       </AnimatePresence>
+      <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
     </div>
   );
 }

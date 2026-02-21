@@ -30,6 +30,8 @@ import {
   Quote,
 } from "@/lib/client";
 import { PageHeader } from "@/components/ui/page-header";
+import { ContactPickerDrawer } from "@/components/contacts";
+import { Send } from "lucide-react";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { Tab, ProductForm, InvoiceLineItem, CATEGORIES, generateItemId } from "./components/commerce-types";
@@ -71,6 +73,7 @@ export default function CommercePage() {
   });
   const [gmailStatus, setGmailStatus] = useState<{ connected: boolean; email: string | null } | null>(null);
   const [loadingGmail, setLoadingGmail] = useState(false);
+  const [showContactPicker, setShowContactPicker] = useState(false);
 
   const [showProductForm, setShowProductForm] = useState(false);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -327,6 +330,13 @@ export default function CommercePage() {
         subtitle="Manage invoices, payments and quotes"
         rightSlot={
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowContactPicker(true)}
+              className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Send className="w-4 h-4" />
+              Broadcast
+            </button>
             {gmailStatus?.connected ? (
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-green-500/10 border border-green-500/30">
                 <Mail className="w-4 h-4 text-green-400" />
@@ -688,6 +698,7 @@ export default function CommercePage() {
           </motion.div>
         )}
       </AnimatePresence>
+      <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
     </div>
   );
 }

@@ -43,6 +43,7 @@ import {
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
+import { ContactPickerDrawer } from "@/components/contacts";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { TabNav } from "@/components/ui/tab-nav";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -78,6 +79,7 @@ export default function MarketingPage() {
   const [submissions, setSubmissions] = useState<Record<string, LeadFormSubmission[]>>({});
   const [copiedEmbed, setCopiedEmbed] = useState<string | null>(null);
   const [availableTags, setAvailableTags] = useState<string[]>([]);
+  const [showContactPicker, setShowContactPicker] = useState(false);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -273,6 +275,15 @@ export default function MarketingPage() {
         subtitle={`${campaigns.length} campaigns · ${forms.length} lead forms`}
         actionLabel={activeTab === "campaigns" ? "New Campaign" : "New Form"}
         onAction={activeTab === "campaigns" ? openNewCampaign : openNewForm}
+        rightSlot={
+          <button
+            onClick={() => setShowContactPicker(true)}
+            className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Send className="w-4 h-4" />
+            Broadcast
+          </button>
+        }
       />
 
       <FeatureGuide
@@ -718,6 +729,7 @@ export default function MarketingPage() {
           </motion.div>
         )}
       </AnimatePresence>
+      <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
     </div>
   );
 }

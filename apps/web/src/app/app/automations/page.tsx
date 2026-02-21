@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { Button, Input } from "@keyflow/ui";
 import { Sparkles, Zap, Plus, Power, PowerOff } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
+import { ContactPickerDrawer } from "@/components/contacts";
+import { Send } from "lucide-react";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { Playbook, fetchPlaybooks, createPlaybook, updatePlaybook } from "@/lib/client";
 
@@ -33,6 +35,7 @@ export default function AutomationsPage() {
   const [showBuilder, setShowBuilder] = useState(false);
   const [form, setForm] = useState({ name: "", triggerEvent: "", actionType: "" });
   const [formError, setFormError] = useState<string | null>(null);
+  const [showContactPicker, setShowContactPicker] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -94,6 +97,15 @@ export default function AutomationsPage() {
         subtitle="Build workflows to automate your business"
         actionLabel="New Playbook"
         onAction={() => setShowBuilder(!showBuilder)}
+        rightSlot={
+          <button
+            onClick={() => setShowContactPicker(true)}
+            className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Send className="w-4 h-4" />
+            Broadcast
+          </button>
+        }
       />
 
       <FeatureGuide
@@ -220,6 +232,7 @@ export default function AutomationsPage() {
           Coming soon: Visual flow builder with conditions, delays, and multi-step actions.
         </div>
       </div>
+      <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
     </div>
   );
 }

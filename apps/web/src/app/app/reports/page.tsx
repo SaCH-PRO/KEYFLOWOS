@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { Card } from "@keyflow/ui";
 import { BarChart3, TrendingUp, Users, Calendar, DollarSign, FileText } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
+import { ContactPickerDrawer } from "@/components/contacts";
+import { Send } from "lucide-react";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { fetchContacts, fetchBookings, fetchInvoices, fetchProducts, Booking, Invoice, Contact, Product } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
@@ -27,6 +29,7 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [recentBookings, setRecentBookings] = useState<Booking[]>([]);
   const [recentInvoices, setRecentInvoices] = useState<Invoice[]>([]);
+  const [showContactPicker, setShowContactPicker] = useState(false);
 
   useEffect(() => {
     const initWorkspace = async () => {
@@ -98,7 +101,20 @@ export default function ReportsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader icon={BarChart3} title="Reports" subtitle="Business analytics and insights" />
+      <PageHeader
+        icon={BarChart3}
+        title="Reports"
+        subtitle="Business analytics and insights"
+        rightSlot={
+          <button
+            onClick={() => setShowContactPicker(true)}
+            className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Send className="w-4 h-4" />
+            Broadcast
+          </button>
+        }
+      />
 
       <FeatureGuide
         featureKey="reports"
@@ -255,6 +271,7 @@ export default function ReportsPage() {
       <div className="rounded-2xl border border-dashed border-border/60 p-4 text-sm text-muted-foreground text-center">
         Coming soon: Interactive charts, date range filters, and exportable PDF reports.
       </div>
+      <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
     </div>
   );
 }

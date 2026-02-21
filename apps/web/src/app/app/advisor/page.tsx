@@ -31,6 +31,7 @@ import {
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
+import { ContactPickerDrawer } from "@/components/contacts";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 
 interface ChatMessage {
@@ -67,6 +68,7 @@ export default function AdvisorPage() {
   const [simLoading, setSimLoading] = useState(false);
   const [voiceListening, setVoiceListening] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(false);
+  const [showContactPicker, setShowContactPicker] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -159,6 +161,15 @@ export default function AdvisorPage() {
         icon={Brain}
         title="KeyFlow AI Advisor"
         subtitle="Your AI co-founder for strategy, finances, and operations"
+        rightSlot={
+          <button
+            onClick={() => setShowContactPicker(true)}
+            className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Send className="w-4 h-4" />
+            Broadcast
+          </button>
+        }
       />
 
       <FeatureGuide
@@ -580,6 +591,7 @@ export default function AdvisorPage() {
           </motion.div>
         </div>
       </div>
+      <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
     </div>
   );
 }

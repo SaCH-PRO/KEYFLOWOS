@@ -18,3 +18,4 @@ export { PredictiveRevenue, type RevenueData } from "./predictive-revenue";
 export { ConversationContext, type ConversationContextData } from "./conversation-context";
 export { AiCopilot, type AiInsight } from "./ai-copilot";
 export { BroadcastDrawer } from "./broadcast-drawer";
+export { ContactPickerDrawer } from "./contact-picker-drawer";

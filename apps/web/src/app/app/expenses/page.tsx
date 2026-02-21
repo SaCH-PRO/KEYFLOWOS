@@ -37,6 +37,8 @@ import {
 import { API_BASE, getAuthHeaders } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
+import { ContactPickerDrawer } from "@/components/contacts";
+import { Send } from "lucide-react";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { StatCards } from "@/components/ui/stat-cards";
 
@@ -81,6 +83,7 @@ export default function ExpensesPage() {
   const [sortField, setSortField] = useState<"date" | "amount">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
+  const [showContactPicker, setShowContactPicker] = useState(false);
   const [categorySection, setCategorySection] = useState(false);
   const [newCatName, setNewCatName] = useState("");
   const [newCatColor, setNewCatColor] = useState(CATEGORY_COLORS[0]);
@@ -307,6 +310,15 @@ export default function ExpensesPage() {
         subtitle="Track and manage your business expenses"
         actionLabel="Add Expense"
         onAction={openAddModal}
+        rightSlot={
+          <button
+            onClick={() => setShowContactPicker(true)}
+            className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Send className="w-4 h-4" />
+            Broadcast
+          </button>
+        }
       />
 
       <FeatureGuide
@@ -831,6 +843,7 @@ export default function ExpensesPage() {
           </motion.div>
         )}
       </AnimatePresence>
+      <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
     </div>
   );
 }
