@@ -111,12 +111,14 @@ export default function AutomationsPage() {
       <FeatureGuide
         featureKey="automations"
         title="Getting Started with Automations"
-        description="Create playbooks that automatically handle repetitive tasks when events occur."
+        description="Automations (Playbooks) let your business run on autopilot. Instead of manually following up, sending receipts, or updating records — set it once and let KeyFlow handle the rest every time."
         steps={[
-          { title: "Create a Playbook", description: "Define a workflow with a name, trigger event, and action to perform." },
-          { title: "Choose a Trigger", description: "Select what starts the automation (e.g., new booking, invoice paid, contact created)." },
-          { title: "Set the Action", description: "Define what happens automatically (e.g., send email, update status, notify team)." },
-          { title: "Toggle On/Off", description: "Enable or pause playbooks anytime without deleting them." },
+          { title: "Understand the Concept", description: "A Playbook is simple: WHEN something happens (the trigger) → THEN do something automatically (the action). For example: WHEN a booking is confirmed → THEN send a WhatsApp reminder to the client." },
+          { title: "Click '+ New Playbook'", description: "Give your playbook a clear name that describes what it does, like \"Send receipt when invoice paid\" or \"Welcome new contacts\". A good name helps you manage multiple automations later." },
+          { title: "Pick Your Trigger", description: "Choose the event that kicks things off. Options include: a new booking is created, an invoice gets paid, a new contact is added, or a form submission comes in. This is the 'WHEN' part." },
+          { title: "Set Your Action", description: "Choose what should happen automatically. For example: send a confirmation email, update a contact's status, create a follow-up task, or notify you via WhatsApp. This is the 'THEN' part." },
+          { title: "Activate & Monitor", description: "Toggle your playbook ON to start it. It will run automatically every time the trigger fires. You can pause it anytime without losing your setup — just toggle it OFF and back ON when ready." },
+          { title: "Start with These Common Playbooks", description: "Try these to save hours each week: 1) Auto-send receipt when invoice is paid, 2) Welcome email to new contacts, 3) Follow-up reminder after a booking, 4) Thank-you message after a purchase." },
         ]}
       />
 
