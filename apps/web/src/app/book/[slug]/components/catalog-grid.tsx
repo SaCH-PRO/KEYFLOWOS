@@ -13,6 +13,8 @@ import {
 import { formatPrice } from "@/lib/format";
 import type { CatalogItem, FilterTab, SortOption } from "./types";
 import { typeBadge } from "./utils";
+import { getThemeStyles, getTabClasses, getButtonStyles, type ThemeKey } from "@/lib/storefront-themes";
+import type { StorefrontConfig } from "@/lib/client";
 
 type Props = {
   catalogItems: CatalogItem[];
@@ -24,6 +26,7 @@ type Props = {
   badges?: Record<string, string>;
   featuredItemIds?: string[];
   onItemClick?: (item: CatalogItem) => void;
+  config?: StorefrontConfig | null;
 };
 
 const catalogBadgeConfig: Record<string, { label: string; bg: string; text: string }> = {
@@ -32,20 +35,6 @@ const catalogBadgeConfig: Record<string, { label: string; bg: string; text: stri
   best_seller: { label: "Best Seller", bg: "bg-violet-500/20", text: "text-violet-400" },
   limited: { label: "Limited", bg: "bg-red-500/20", text: "text-red-400" },
 };
-
-function ItemPlaceholder({ name, color }: { name: string; color: string }) {
-  return (
-    <div
-      className="w-full h-40 rounded-t-2xl flex items-center justify-center text-4xl font-bold"
-      style={{
-        background: `linear-gradient(135deg, ${color}15, ${color}08)`,
-        color: `${color}40`,
-      }}
-    >
-      {name.charAt(0).toUpperCase()}
-    </div>
-  );
-}
 
 export function CatalogGrid({
   catalogItems,
@@ -57,11 +46,19 @@ export function CatalogGrid({
   badges,
   featuredItemIds,
   onItemClick,
+  config,
 }: Props) {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
   const [sortOption, setSortOption] = useState<SortOption>("default");
   const [sortOpen, setSortOpen] = useState(false);
+
+  const theme = (config?.appearance?.theme ?? "default") as ThemeKey;
+  const cardStylePref = config?.appearance?.cardStyle ?? "grid";
+  const showPrices = config?.appearance?.showPrices ?? true;
+  const showDuration = config?.appearance?.showDuration ?? true;
+  const ts = getThemeStyles(theme, primaryColor, secondaryColor);
+  const btnStyles = getButtonStyles(ts, primaryColor);
 
   const hasServices = catalogItems.some((i) => i.itemType === "service");
   const hasProducts = catalogItems.some((i) => i.itemType === "product");
@@ -94,18 +91,207 @@ export function CatalogGrid({
 
   if (catalogItems.length === 0) {
     return (
-      <div className="rounded-3xl border border-white/10 bg-white/[0.02] p-12 text-center space-y-4">
+      <div className={`${ts.cardRadius} border border-white/10 bg-white/[0.02] p-12 text-center space-y-4 ${ts.fontClass}`}>
         <Sparkles className="w-10 h-10 text-white/20 mx-auto" />
-        <h2 className="text-lg font-semibold text-white/60">Coming Soon</h2>
-        <p className="text-sm text-white/30 max-w-sm mx-auto">
+        <h2 className={`text-lg ${ts.headerWeight} text-white/60 ${ts.textStyle}`}>Coming Soon</h2>
+        <p className={`text-sm text-white/30 max-w-sm mx-auto ${ts.bodyWeight}`}>
           This business is setting up their online store. Check back soon!
         </p>
       </div>
     );
   }
 
+  function renderGridCard(item: CatalogItem) {
+    const inCart = isInCart(item.id, item.itemType);
+    const badge = typeBadge(item.itemType, primaryColor, secondaryColor);
+    const accentColor = item.itemType === "service" ? primaryColor : item.itemType === "product" ? secondaryColor : "#a78bfa";
+    return (
+      <div
+        key={`${item.id}_${item.itemType}`}
+        className={`${ts.cardRadius} border backdrop-blur transition-all group cursor-pointer ${ts.cardHoverTransform} ${ts.fontClass} ${
+          inCart ? "border-white/20 bg-white/[0.06]" : ""
+        }`}
+        style={{
+          background: inCart ? ts.cardBgHover : ts.cardBg,
+          border: inCart ? ts.cardBorderHover : ts.cardBorder,
+          boxShadow: ts.cardShadow,
+        }}
+        onClick={() => onItemClick?.(item)}
+      >
+        <div className="relative">
+          {item.imageUrl ? (
+            <div className={`w-full ${ts.imageHeight} ${ts.cardRadius} overflow-hidden rounded-b-none`}>
+              <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+            </div>
+          ) : (
+            <div
+              className={`w-full ${ts.imageHeight} rounded-t-inherit flex items-center justify-center text-4xl ${ts.headerWeight}`}
+              style={{
+                background: theme === "bold"
+                  ? `linear-gradient(135deg, ${accentColor}${ts.accentOpacity}, ${accentColor}08)`
+                  : theme === "elegant"
+                  ? `linear-gradient(180deg, ${accentColor}${ts.accentOpacity}, transparent)`
+                  : theme === "minimal"
+                  ? `${accentColor}06`
+                  : `linear-gradient(135deg, ${accentColor}15, ${accentColor}08)`,
+                color: `${accentColor}40`,
+                borderTopLeftRadius: "inherit",
+                borderTopRightRadius: "inherit",
+              }}
+            >
+              {item.name.charAt(0).toUpperCase()}
+            </div>
+          )}
+          {badges?.[item.id] && catalogBadgeConfig[badges[item.id]] && (
+            <span
+              className={`absolute top-2 right-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${catalogBadgeConfig[badges[item.id]].bg} ${catalogBadgeConfig[badges[item.id]].text} backdrop-blur-sm`}
+            >
+              {catalogBadgeConfig[badges[item.id]].label}
+            </span>
+          )}
+        </div>
+        <div className={`${ts.spacing === "relaxed" ? "p-5" : "p-4"} space-y-3`}>
+          <div className="flex items-center gap-2">
+            <span
+              className={`inline-flex items-center px-2 py-0.5 text-[10px] font-semibold ${ts.badgeRadius}`}
+              style={{ backgroundColor: `${badge.color}20`, color: badge.color }}
+            >
+              {badge.label}
+            </span>
+          </div>
+          <div className="flex items-start justify-between">
+            <h4 className={`${ts.nameSize} ${ts.headerWeight} text-white leading-tight pr-2 ${ts.textStyle}`}>{item.name}</h4>
+            {showPrices && (
+              <div className={`${ts.nameSize} ${ts.priceWeight} whitespace-nowrap`} style={{ color: primaryColor }}>
+                {formatPrice(item.price, item.currency)}
+              </div>
+            )}
+          </div>
+          {item.description && (
+            <p className={`${ts.descSize} text-white/50 line-clamp-2 leading-relaxed ${ts.bodyWeight}`}>{item.description}</p>
+          )}
+          <div className="flex items-center justify-between pt-1">
+            {showDuration && item.duration ? (
+              <span className={`flex items-center gap-1 ${ts.descSize} text-white/40`}>
+                <Clock className="w-3 h-3" /> {item.duration} min
+              </span>
+            ) : (
+              <span />
+            )}
+            {inCart ? (
+              <button
+                onClick={(e) => { e.stopPropagation(); removeFromCart(item.id, item.itemType); }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 ${ts.buttonRadius} text-xs font-medium transition-all text-emerald-400 bg-emerald-400/10 hover:bg-red-400/10 hover:text-red-400`}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" /> In Cart
+              </button>
+            ) : (
+              <button
+                onClick={(e) => { e.stopPropagation(); addToCart(item); }}
+                className={btnStyles.className}
+                style={btnStyles.style}
+              >
+                <Plus className="w-3.5 h-3.5" /> Add
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderListCard(item: CatalogItem) {
+    const inCart = isInCart(item.id, item.itemType);
+    const badge = typeBadge(item.itemType, primaryColor, secondaryColor);
+    const accentColor = item.itemType === "service" ? primaryColor : item.itemType === "product" ? secondaryColor : "#a78bfa";
+    return (
+      <div
+        key={`${item.id}_${item.itemType}`}
+        className={`${ts.cardRadius} border backdrop-blur transition-all group cursor-pointer ${ts.fontClass} flex gap-4 ${ts.spacing === "relaxed" ? "p-4" : "p-3"}`}
+        style={{
+          background: inCart ? ts.cardBgHover : ts.cardBg,
+          border: inCart ? ts.cardBorderHover : ts.cardBorder,
+          boxShadow: ts.cardShadow,
+        }}
+        onClick={() => onItemClick?.(item)}
+      >
+        {item.imageUrl ? (
+          <div className="w-24 h-24 flex-shrink-0 overflow-hidden" style={{ borderRadius: "inherit" }}>
+            <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+          </div>
+        ) : (
+          <div
+            className={`w-24 h-24 flex-shrink-0 flex items-center justify-center text-3xl ${ts.headerWeight}`}
+            style={{
+              background: theme === "bold"
+                ? `linear-gradient(135deg, ${accentColor}${ts.accentOpacity}, ${accentColor}08)`
+                : `linear-gradient(135deg, ${accentColor}15, ${accentColor}05)`,
+              color: `${accentColor}40`,
+              borderRadius: "inherit",
+            }}
+          >
+            {item.name.charAt(0).toUpperCase()}
+          </div>
+        )}
+        <div className="flex-1 min-w-0 space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 space-y-1">
+              <span
+                className={`inline-flex items-center px-2 py-0.5 text-[10px] font-semibold ${ts.badgeRadius}`}
+                style={{ backgroundColor: `${badge.color}20`, color: badge.color }}
+              >
+                {badge.label}
+              </span>
+              <h4 className={`${ts.nameSize} ${ts.headerWeight} text-white leading-tight ${ts.textStyle}`}>{item.name}</h4>
+            </div>
+            <div className="flex flex-col items-end gap-2 flex-shrink-0">
+              {showPrices && (
+                <div className={`${ts.nameSize} ${ts.priceWeight} whitespace-nowrap`} style={{ color: primaryColor }}>
+                  {formatPrice(item.price, item.currency)}
+                </div>
+              )}
+              {badges?.[item.id] && catalogBadgeConfig[badges[item.id]] && (
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${catalogBadgeConfig[badges[item.id]].bg} ${catalogBadgeConfig[badges[item.id]].text}`}>
+                  {catalogBadgeConfig[badges[item.id]].label}
+                </span>
+              )}
+            </div>
+          </div>
+          {item.description && (
+            <p className={`${ts.descSize} text-white/50 line-clamp-2 leading-relaxed ${ts.bodyWeight}`}>{item.description}</p>
+          )}
+          <div className="flex items-center justify-between pt-0.5">
+            {showDuration && item.duration ? (
+              <span className={`flex items-center gap-1 ${ts.descSize} text-white/40`}>
+                <Clock className="w-3 h-3" /> {item.duration} min
+              </span>
+            ) : (
+              <span />
+            )}
+            {inCart ? (
+              <button
+                onClick={(e) => { e.stopPropagation(); removeFromCart(item.id, item.itemType); }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 ${ts.buttonRadius} text-xs font-medium transition-all text-emerald-400 bg-emerald-400/10 hover:bg-red-400/10 hover:text-red-400`}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" /> In Cart
+              </button>
+            ) : (
+              <button
+                onClick={(e) => { e.stopPropagation(); addToCart(item); }}
+                className={btnStyles.className}
+                style={btnStyles.style}
+              >
+                <Plus className="w-3.5 h-3.5" /> Add
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6">
+    <div className={`space-y-6 ${ts.fontClass}`}>
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
@@ -114,24 +300,24 @@ export function CatalogGrid({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search services, products..."
-            className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-white/10 bg-white/[0.03] text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 transition-all"
+            className={`w-full pl-10 pr-4 py-2.5 ${ts.searchRadius} border border-white/10 bg-white/[0.03] text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 transition-all`}
             style={{ "--tw-ring-color": primaryColor } as React.CSSProperties}
           />
         </div>
         <div className="relative">
           <button
             onClick={() => setSortOpen(!sortOpen)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 bg-white/[0.03] text-sm text-white/60 hover:border-white/20 transition-all"
+            className={`flex items-center gap-2 px-4 py-2.5 ${ts.searchRadius} border border-white/10 bg-white/[0.03] text-sm text-white/60 hover:border-white/20 transition-all`}
           >
             Sort
             {sortOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
           {sortOpen && (
-            <div className="absolute right-0 top-full mt-1 w-48 rounded-xl border border-white/10 bg-[#16161f] backdrop-blur-xl shadow-2xl z-30 overflow-hidden">
+            <div className={`absolute right-0 top-full mt-1 w-48 ${ts.cardRadius} border border-white/10 bg-[#16161f] backdrop-blur-xl shadow-2xl z-30 overflow-hidden`}>
               {([
                 ["default", "Default"],
-                ["price_asc", "Price: Low \u2192 High"],
-                ["price_desc", "Price: High \u2192 Low"],
+                ["price_asc", "Price: Low → High"],
+                ["price_desc", "Price: High → Low"],
                 ["duration", "Duration"],
               ] as [SortOption, string][]).map(([val, label]) => (
                 <button
@@ -157,104 +343,35 @@ export function CatalogGrid({
             ...(hasProducts ? [["product", "Products"]] : []),
             ...(hasPackages ? [["package", "Packages"]] : []),
           ] as [FilterTab, string][]
-        ).map(([tab, label]) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
-              activeTab === tab ? "text-white" : "text-white/40 bg-white/[0.03] hover:text-white/60"
-            }`}
-            style={activeTab === tab ? { backgroundColor: `${primaryColor}25`, color: primaryColor } : {}}
-          >
-            {label}
-          </button>
-        ))}
+        ).map(([tab, label]) => {
+          const tabProps = getTabClasses(ts, activeTab === tab, primaryColor);
+          return (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={tabProps.className}
+              style={tabProps.style}
+            >
+              {label}
+            </button>
+          );
+        })}
       </div>
 
       {filteredItems.length > 0 ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-          {filteredItems.map((item) => {
-            const inCart = isInCart(item.id, item.itemType);
-            const badge = typeBadge(item.itemType, primaryColor, secondaryColor);
-            const accentColor = item.itemType === "service" ? primaryColor : item.itemType === "product" ? secondaryColor : "#a78bfa";
-            return (
-              <div
-                key={`${item.id}_${item.itemType}`}
-                className={`rounded-2xl border backdrop-blur transition-all group cursor-pointer ${
-                  inCart
-                    ? "border-white/20 bg-white/[0.06]"
-                    : "border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.06]"
-                }`}
-                onClick={() => onItemClick?.(item)}
-              >
-                <div className="relative">
-                  {item.imageUrl ? (
-                    <div className="w-full h-40 rounded-t-2xl overflow-hidden">
-                      <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                    </div>
-                  ) : (
-                    <ItemPlaceholder name={item.name} color={accentColor} />
-                  )}
-                  {badges?.[item.id] && catalogBadgeConfig[badges[item.id]] && (
-                    <span
-                      className={`absolute top-2 right-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${catalogBadgeConfig[badges[item.id]].bg} ${catalogBadgeConfig[badges[item.id]].text} backdrop-blur-sm`}
-                    >
-                      {catalogBadgeConfig[badges[item.id]].label}
-                    </span>
-                  )}
-                </div>
-                <div className="p-4 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold"
-                      style={{ backgroundColor: `${badge.color}20`, color: badge.color }}
-                    >
-                      {badge.label}
-                    </span>
-                  </div>
-                  <div className="flex items-start justify-between">
-                    <h4 className="font-semibold text-white text-sm leading-tight pr-2">{item.name}</h4>
-                    <div className="text-sm font-bold whitespace-nowrap" style={{ color: primaryColor }}>
-                      {formatPrice(item.price, item.currency)}
-                    </div>
-                  </div>
-                  {item.description && (
-                    <p className="text-xs text-white/50 line-clamp-2 leading-relaxed">{item.description}</p>
-                  )}
-                  <div className="flex items-center justify-between pt-1">
-                    {item.duration ? (
-                      <span className="flex items-center gap-1 text-xs text-white/40">
-                        <Clock className="w-3 h-3" /> {item.duration} min
-                      </span>
-                    ) : (
-                      <span />
-                    )}
-                    {inCart ? (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); removeFromCart(item.id, item.itemType); }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all text-emerald-400 bg-emerald-400/10 hover:bg-red-400/10 hover:text-red-400"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" /> In Cart
-                      </button>
-                    ) : (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); addToCart(item); }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:scale-105"
-                        style={{ backgroundColor: `${primaryColor}20`, color: primaryColor }}
-                      >
-                        <Plus className="w-3.5 h-3.5" /> Add
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        cardStylePref === "list" ? (
+          <div className="space-y-3">
+            {filteredItems.map(renderListCard)}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+            {filteredItems.map(renderGridCard)}
+          </div>
+        )
       ) : (
-        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-10 text-center space-y-3">
+        <div className={`${ts.cardRadius} border border-white/10 bg-white/[0.02] p-10 text-center space-y-3`}>
           <Search className="w-8 h-8 text-white/20 mx-auto" />
-          <p className="text-sm text-white/40">No items match your search.</p>
+          <p className={`text-sm text-white/40 ${ts.bodyWeight}`}>No items match your search.</p>
         </div>
       )}
     </div>

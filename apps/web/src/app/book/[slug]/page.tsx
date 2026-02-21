@@ -415,7 +415,7 @@ export default function PublicBookingPage() {
         </div>
       )}
 
-      <BusinessHero business={business!} primaryColor={primaryColor} secondaryColor={secondaryColor} />
+      <BusinessHero business={business!} primaryColor={primaryColor} secondaryColor={secondaryColor} config={storefrontConfig} />
 
       <div className="max-w-4xl mx-auto px-4 pb-24 space-y-6">
         {storefrontConfig?.promotions?.bannerEnabled && storefrontConfig.promotions.bannerText && (
@@ -438,6 +438,7 @@ export default function PublicBookingPage() {
           badges={storefrontConfig?.merchandising?.badges}
           featuredItemIds={storefrontConfig?.merchandising?.featuredItemIds}
           onItemClick={handleItemClick}
+          config={storefrontConfig}
         />
 
         {storefrontConfig?.socialProof?.testimonials && storefrontConfig.socialProof.testimonials.length > 0 && (
