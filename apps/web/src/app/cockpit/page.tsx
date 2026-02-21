@@ -225,7 +225,7 @@ export default function CockpitPage() {
             {[
               { label: "Flow Feed", href: "#" },
               { label: "Projects", href: "/app/projects" },
-              { label: "Automations", href: "/app/automations" },
+              { label: "Playbooks", href: "/app/projects?tab=automations" },
               { label: "Reports", href: "/app/reports" },
               { label: "Settings", href: "/app/settings" },
             ].map((item) => (

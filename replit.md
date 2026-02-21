@@ -43,7 +43,8 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Business Templates:** 10 industry-specific presets to seed business data.
 - **MasterClass (Education):** Micro-course catalog with progress tracking and certificate generation.
 - **Community Hub:** Peer discussion forum with various post types, likes, comments, and cohort-based founder circles.
-- **Core Modules:** Identity, CRM, Commerce, Bookings, Social, Automations, Projects, Flow (Activity & Search), Reports, Cockpit, Expenses, Webhooks, AI, Email Marketing, Lead Forms, Templates, Education, Community.
+- **Projects & Playbooks (Merged):** Unified page at /app/projects with tabbed navigation. Projects tab: Kanban board with task management. Playbooks tab: event-driven automations with triggers and actions. Contextual "How this works" explainer buttons in each tab.
+- **Core Modules:** Identity, CRM, Commerce, Bookings, Social, Projects & Playbooks, Flow (Activity & Search), Reports, Cockpit, Expenses, Webhooks, AI, Email Marketing, Lead Forms, Templates, Education, Community.
 
 ## External Dependencies
 - **Database:** PostgreSQL
