@@ -629,6 +629,7 @@ export default function StorePage() {
                     businessData={businessData}
                     services={services}
                     commerceProducts={commerceProducts}
+                    config={storefrontConfig}
                   />
                 </div>
               </motion.div>
