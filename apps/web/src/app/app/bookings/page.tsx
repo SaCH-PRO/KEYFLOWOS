@@ -37,6 +37,8 @@ import { useSearchParams } from "next/navigation";
 import type { Tab, StatusFilter } from "./components/bookings-types";
 import { contactName } from "./components/bookings-types";
 import { PageHeader } from "@/components/ui/page-header";
+import { ContactPickerDrawer } from "@/components/contacts";
+import { Send } from "lucide-react";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import BookingsDashboard from "./components/bookings-dashboard";
 import WeekCalendar from "./components/week-calendar";
@@ -68,6 +70,7 @@ export default function BookingsPage() {
 
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  const [showContactPicker, setShowContactPicker] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
@@ -251,29 +254,38 @@ export default function BookingsPage() {
         actionLabel="New Booking"
         onAction={() => setShowCreateBooking(true)}
         rightSlot={
-          calendarConnected ? (
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
-                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-xs text-emerald-400">{calendarEmail}</span>
-              </div>
-              <button
-                onClick={handleDisconnectCalendar}
-                disabled={calendarLoading}
-                className="kf-btn-secondary inline-flex items-center gap-1 text-xs"
-              >
-                <Unlink className="w-3 h-3" /> Disconnect
-              </button>
-            </div>
-          ) : (
+          <div className="flex items-center gap-2">
             <button
-              onClick={handleConnectCalendar}
-              disabled={calendarLoading}
-              className="kf-btn-secondary inline-flex items-center gap-1.5 text-xs"
+              onClick={() => setShowContactPicker(true)}
+              className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
             >
-              <Link2 className="w-3.5 h-3.5" /> Connect Google Calendar
+              <Send className="w-4 h-4" />
+              Broadcast
             </button>
-          )
+            {calendarConnected ? (
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-xs text-emerald-400">{calendarEmail}</span>
+                </div>
+                <button
+                  onClick={handleDisconnectCalendar}
+                  disabled={calendarLoading}
+                  className="kf-btn-secondary inline-flex items-center gap-1 text-xs"
+                >
+                  <Unlink className="w-3 h-3" /> Disconnect
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={handleConnectCalendar}
+                disabled={calendarLoading}
+                className="kf-btn-secondary inline-flex items-center gap-1.5 text-xs"
+              >
+                <Link2 className="w-3.5 h-3.5" /> Connect Google Calendar
+              </button>
+            )}
+          </div>
         }
       />
 
@@ -418,6 +430,7 @@ export default function BookingsPage() {
           />
         )}
       </AnimatePresence>
+      <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
     </div>
   );
 }

@@ -48,6 +48,8 @@ import { AppearanceCustomizer } from "./components/appearance-customizer";
 import { MerchandisingPanel } from "./components/merchandising-panel";
 import { StoreAnalyticsDashboard } from "./components/store-analytics";
 import { FeatureGuide } from "@/components/ui/feature-guide";
+import { ContactPickerDrawer } from "@/components/contacts";
+import { Send } from "lucide-react";
 
 type Banner = { text: string; type: "success" | "error" | "info" | "warning" };
 type DriftedItem = {
@@ -103,6 +105,7 @@ export default function StorePage() {
   const [businessHours, setBusinessHours] = useState<BusinessHoursMap>(DEFAULT_HOURS);
   const [hoursSaving, setHoursSaving] = useState(false);
   const [driftedItems, setDriftedItems] = useState<DriftedItem[]>([]);
+  const [showContactPicker, setShowContactPicker] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
   const [storefrontConfig, setStorefrontConfig] = useState<StorefrontConfig>({
@@ -434,11 +437,22 @@ export default function StorePage() {
 
   return (
     <div className="space-y-6">
-      <StoreHeader
-        storeEnabled={storeEnabled}
-        publicUrl={getPublicBookingUrl()}
-        onToggleEnabled={toggleStoreEnabled}
-      />
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex-1">
+          <StoreHeader
+            storeEnabled={storeEnabled}
+            publicUrl={getPublicBookingUrl()}
+            onToggleEnabled={toggleStoreEnabled}
+          />
+        </div>
+        <button
+          onClick={() => setShowContactPicker(true)}
+          className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
+        >
+          <Send className="w-4 h-4" />
+          Broadcast
+        </button>
+      </div>
 
       <FeatureGuide
         featureKey="store"
@@ -948,6 +962,7 @@ export default function StorePage() {
           </AnimatePresence>
         </div>
       )}
+      <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
     </div>
   );
 }

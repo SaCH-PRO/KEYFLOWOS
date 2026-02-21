@@ -29,6 +29,8 @@ import {
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
+import { ContactPickerDrawer } from "@/components/contacts";
+import { Send } from "lucide-react";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 
 const STATUS_COLUMNS = [
@@ -60,6 +62,7 @@ export default function ProjectsPage() {
   const [newTaskInputs, setNewTaskInputs] = useState<Record<string, string>>({});
   const [editingProject, setEditingProject] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
+  const [showContactPicker, setShowContactPicker] = useState(false);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -186,6 +189,15 @@ export default function ProjectsPage() {
         subtitle="Manage your projects and tasks"
         actionLabel="New Project"
         onAction={() => setShowNewProject(true)}
+        rightSlot={
+          <button
+            onClick={() => setShowContactPicker(true)}
+            className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Send className="w-4 h-4" />
+            Broadcast
+          </button>
+        }
       />
 
       <FeatureGuide
@@ -428,6 +440,7 @@ export default function ProjectsPage() {
           </div>
         ))}
       </div>
+      <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
     </div>
   );
 }
