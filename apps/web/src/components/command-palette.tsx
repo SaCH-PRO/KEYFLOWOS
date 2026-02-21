@@ -134,7 +134,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       { label: "Go to Marketing", hint: "Email campaigns & lead forms", onSelect: () => router.push("/app/marketing") },
       { label: "Go to Expenses", hint: "Track & manage expenses", onSelect: () => router.push("/app/expenses") },
       { label: "Go to Projects", hint: "Project management & Kanban", onSelect: () => router.push("/app/projects") },
-      { label: "Go to Automations", hint: "Playbooks & workflows", onSelect: () => router.push("/app/automations") },
+      { label: "Go to Playbooks", hint: "Automations & workflows", onSelect: () => router.push("/app/projects?tab=automations") },
       { label: "Go to Reports", hint: "Analytics & KPIs", onSelect: () => router.push("/app/reports") },
       { label: "Go to Learn", hint: "MasterClass courses", onSelect: () => router.push("/app/learn") },
       { label: "Go to Community", hint: "Forum & founder circles", onSelect: () => router.push("/app/community") },

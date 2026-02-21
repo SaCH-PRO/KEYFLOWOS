@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus,
@@ -8,14 +9,18 @@ import {
   CheckCircle2,
   Circle,
   Calendar,
-  Flag,
   Trash2,
-  GripVertical,
   FolderKanban,
   ChevronDown,
   ChevronRight,
-  Pencil,
+  Zap,
+  Power,
+  PowerOff,
+  Send,
+  HelpCircle,
+  Lightbulb,
 } from "lucide-react";
+import { Button, Input } from "@keyflow/ui";
 import {
   fetchProjects,
   createProject,
@@ -26,12 +31,15 @@ import {
   deleteProjectTask,
   Project,
   ProjectTask,
+  Playbook,
+  fetchPlaybooks,
+  createPlaybook,
+  updatePlaybook,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
+import { TabNav } from "@/components/ui/tab-nav";
 import { ContactPickerDrawer } from "@/components/contacts";
-import { Send } from "lucide-react";
-import { FeatureGuide } from "@/components/ui/feature-guide";
 
 const STATUS_COLUMNS = [
   { key: "ACTIVE", label: "Active", color: "hsl(var(--kf-accent2))" },
@@ -40,19 +48,105 @@ const STATUS_COLUMNS = [
   { key: "ON_HOLD", label: "On Hold", color: "#94a3b8" },
 ];
 
-const PRIORITY_COLORS: Record<string, string> = {
-  URGENT: "#ef4444",
-  HIGH: "#f97316",
-  NORMAL: "#3b82f6",
-  LOW: "#94a3b8",
-};
-
 const PROJECT_COLORS = [
   "#f97316", "#ef4444", "#8b5cf6", "#06b6d4", "#22c55e", "#eab308", "#ec4899", "#6366f1",
 ];
 
-export default function ProjectsPage() {
-  const [businessId, setBusinessId] = useState<string | null>(null);
+const TRIGGER_OPTIONS = [
+  { value: "invoice.paid", label: "Invoice Paid" },
+  { value: "invoice.sent", label: "Invoice Sent" },
+  { value: "invoice.overdue", label: "Invoice Overdue" },
+  { value: "booking.created", label: "Booking Created" },
+  { value: "booking.confirmed", label: "Booking Confirmed" },
+  { value: "booking.cancelled", label: "Booking Cancelled" },
+  { value: "contact.created", label: "Contact Created" },
+  { value: "contact.updated", label: "Contact Updated" },
+];
+
+const ACTION_OPTIONS = [
+  { value: "send_email", label: "Send Email" },
+  { value: "send_whatsapp", label: "Send WhatsApp" },
+  { value: "create_task", label: "Create Task" },
+  { value: "add_tag", label: "Add Tag" },
+  { value: "update_status", label: "Update Status" },
+];
+
+const TABS = [
+  { key: "projects", label: "Projects", icon: FolderKanban },
+  { key: "automations", label: "Playbooks", icon: Zap },
+];
+
+function ExplainerButton({ items }: { items: { title: string; text: string }[] }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground transition-colors"
+        style={{ background: "hsl(var(--kf-muted) / 0.3)" }}
+      >
+        <HelpCircle className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+        How this works
+      </button>
+      <AnimatePresence>
+        {open && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+            <motion.div
+              initial={{ opacity: 0, y: -4, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -4, scale: 0.96 }}
+              className="absolute right-0 top-full mt-2 z-50 w-80 sm:w-96 rounded-xl border shadow-2xl p-4 space-y-3"
+              style={{
+                background: "hsl(var(--kf-bg))",
+                borderColor: "hsl(var(--kf-accent1) / 0.2)",
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Lightbulb className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+                  Quick Guide
+                </div>
+                <button onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground text-xs">
+                  Close
+                </button>
+              </div>
+              <div className="space-y-2">
+                {items.map((item, i) => (
+                  <div
+                    key={i}
+                    className="rounded-lg px-3 py-2.5 flex gap-2.5 items-start"
+                    style={{
+                      background: "hsl(var(--kf-muted) / 0.25)",
+                      border: "1px solid hsl(var(--kf-border) / 0.2)",
+                    }}
+                  >
+                    <span
+                      className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-0.5"
+                      style={{
+                        background: "hsl(var(--kf-accent1) / 0.15)",
+                        color: "hsl(var(--kf-accent1))",
+                      }}
+                    >
+                      {i + 1}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium leading-tight">{item.title}</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{item.text}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function ProjectsTab({ businessId }: { businessId: string | null }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewProject, setShowNewProject] = useState(false);
@@ -60,38 +154,23 @@ export default function ProjectsPage() {
   const [newProjectColor, setNewProjectColor] = useState(PROJECT_COLORS[0]);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [newTaskInputs, setNewTaskInputs] = useState<Record<string, string>>({});
-  const [editingProject, setEditingProject] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
-  const [showContactPicker, setShowContactPicker] = useState(false);
-
-  useEffect(() => {
-    const bid = getStoredBusinessId();
-    if (bid) setBusinessId(bid);
-  }, []);
 
   const loadProjects = useCallback(async () => {
-    if (!businessId) {
-      setLoading(false);
-      return;
-    }
+    if (!businessId) { setLoading(false); return; }
     setLoading(true);
     try {
       const res = await fetchProjects(businessId);
       if (res.data) setProjects(res.data);
-    } catch { /* ignore */ }
+    } catch {}
     setLoading(false);
   }, [businessId]);
 
-  useEffect(() => {
-    void loadProjects();
-  }, [loadProjects]);
+  useEffect(() => { void loadProjects(); }, [loadProjects]);
 
   const handleCreateProject = async () => {
     if (!businessId || !newProjectName.trim()) return;
-    const res = await createProject(businessId, {
-      name: newProjectName.trim(),
-      color: newProjectColor,
-    });
+    const res = await createProject(businessId, { name: newProjectName.trim(), color: newProjectColor });
     if (res.data) {
       setProjects((prev) => [res.data!, ...prev]);
       setExpandedProjects((prev) => new Set(prev).add(res.data!.id));
@@ -161,8 +240,6 @@ export default function ProjectsPage() {
     });
   };
 
-  const getStatusColumn = (status: string) => STATUS_COLUMNS.find((c) => c.key === status) || STATUS_COLUMNS[0];
-
   const projectsByStatus = STATUS_COLUMNS.map((col) => ({
     ...col,
     projects: projects.filter((p) => p.status === col.key),
@@ -170,48 +247,33 @@ export default function ProjectsPage() {
 
   if (loading) {
     return (
-      <div className="space-y-4">
-        <PageHeader icon={FolderKanban} title="Projects" subtitle="Loading your projects..." />
-        <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="rounded-2xl border border-border/60 bg-slate-950/70 p-4 h-48 animate-pulse" />
-          ))}
-        </div>
+      <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="rounded-2xl border border-border/60 bg-slate-950/70 p-4 h-48 animate-pulse" />
+        ))}
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        icon={FolderKanban}
-        title="Projects"
-        subtitle="Manage your projects and tasks"
-        actionLabel="New Project"
-        onAction={() => setShowNewProject(true)}
-        rightSlot={
-          <button
-            onClick={() => setShowContactPicker(true)}
-            className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <Send className="w-4 h-4" />
-            Broadcast
-          </button>
-        }
-      />
-
-      <FeatureGuide
-        featureKey="projects"
-        title="Getting Started with Projects"
-        description="Projects keeps your business organized. Whether it's a client deliverable, an internal campaign, or a product launch — break it into steps, assign deadlines, and watch progress at a glance."
-        steps={[
-          { title: "Create a Project", description: "Click '+ New Project', give it a name (e.g. \"Website Redesign\" or \"Grand Opening\"), pick a color to spot it quickly, and hit Enter. Each project acts as a folder for related tasks." },
-          { title: "Add Tasks Inside", description: "Open your project and add tasks — each one is a specific action item (e.g. \"Design flyer\", \"Confirm venue\"). Set a deadline so nothing slips through the cracks." },
-          { title: "Track with Kanban Board", description: "Switch to Board view to see tasks in columns: To Do, In Progress, and Done. Drag tasks between columns as you make progress — it's a visual way to see how close you are to finishing." },
-          { title: "Set Priority & Status", description: "Mark projects as Active, On Hold, or Completed. Use priority levels (Low, Medium, High, Urgent) so you always know what needs attention first." },
-          { title: "Broadcast Updates", description: "Need to update your team or clients? Use the Broadcast button to select contacts and send a quick WhatsApp or email about project progress." },
-        ]}
-      />
+      <div className="flex items-center justify-between">
+        <ExplainerButton
+          items={[
+            { title: "Create a Project", text: "Click '+ New Project' to set up a project with a name and color. Each project is a container for related tasks — like a client job, campaign, or event." },
+            { title: "Add Tasks", text: "Expand a project and add tasks — each is a specific action item (e.g. \"Design flyer\", \"Confirm venue\"). Check them off as you complete them." },
+            { title: "Kanban Board View", text: "Projects are displayed in columns by status: Active, In Progress, Completed, and On Hold. Move projects between statuses using the menu." },
+            { title: "Track Progress", text: "Each project shows a progress bar based on completed tasks. Open it to see all tasks and their status at a glance." },
+          ]}
+        />
+        <button
+          onClick={() => setShowNewProject(true)}
+          className="kf-btn-primary px-4 py-2 rounded-xl text-sm font-medium inline-flex items-center gap-2"
+        >
+          <Plus className="w-4 h-4" />
+          New Project
+        </button>
+      </div>
 
       <AnimatePresence>
         {showNewProject && (
@@ -441,6 +503,262 @@ export default function ProjectsPage() {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function PlaybooksTab() {
+  const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showBuilder, setShowBuilder] = useState(false);
+  const [form, setForm] = useState({ name: "", triggerEvent: "", actionType: "" });
+  const [formError, setFormError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      const { data, error } = await fetchPlaybooks();
+      setPlaybooks(data ?? []);
+      if (error) setError(error);
+      setLoading(false);
+    };
+    void load();
+  }, []);
+
+  async function handleCreate() {
+    setFormError(null);
+    if (!form.name.trim() || !form.triggerEvent || !form.actionType) {
+      setFormError("All fields are required");
+      return;
+    }
+    const { data, error } = await createPlaybook({
+      name: form.name,
+      triggerEvent: form.triggerEvent,
+      actions: [{ type: form.actionType }],
+    });
+    if (error) setFormError(error);
+    if (data) {
+      setPlaybooks((prev) => [data, ...prev]);
+      setForm({ name: "", triggerEvent: "", actionType: "" });
+      setShowBuilder(false);
+    }
+  }
+
+  async function handleToggle(playbook: Playbook) {
+    const { data, error } = await updatePlaybook({
+      playbookId: playbook.id,
+      enabled: !playbook.enabled,
+    });
+    if (error) {
+      setError(error);
+    } else if (data) {
+      setPlaybooks((prev) => prev.map((p) => (p.id === playbook.id ? data : p)));
+    }
+  }
+
+  function getTriggerLabel(trigger: string) {
+    return TRIGGER_OPTIONS.find((t) => t.value === trigger)?.label ?? trigger;
+  }
+
+  function getActionLabel(actions: unknown) {
+    if (!Array.isArray(actions) || actions.length === 0) return "No actions";
+    const action = actions[0] as { type?: string };
+    return ACTION_OPTIONS.find((a) => a.value === action.type)?.label ?? action.type ?? "Custom action";
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <ExplainerButton
+          items={[
+            { title: "What is a Playbook?", text: "A Playbook is a simple rule: WHEN something happens (the trigger) → THEN do something automatically (the action). For example: WHEN a booking is confirmed → THEN send a WhatsApp reminder." },
+            { title: "Create a Playbook", text: "Click '+ New Playbook', give it a name, pick what triggers it (e.g. invoice paid, new booking), and choose the action (e.g. send email, update status)." },
+            { title: "Toggle On/Off", text: "Each playbook has a power button. Toggle it ON to activate, OFF to pause. Pausing doesn't delete your setup — you can re-enable it anytime." },
+            { title: "Starter Ideas", text: "Try these: 1) Auto-send receipt when invoice is paid, 2) Welcome email for new contacts, 3) Follow-up after a booking, 4) Thank-you after a purchase." },
+          ]}
+        />
+        <button
+          onClick={() => setShowBuilder(!showBuilder)}
+          className="kf-btn-primary px-4 py-2 rounded-xl text-sm font-medium inline-flex items-center gap-2"
+        >
+          <Plus className="w-4 h-4" />
+          New Playbook
+        </button>
+      </div>
+
+      {formError && <div className="text-xs text-amber-400">{formError}</div>}
+      {error && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+          {error}
+        </div>
+      )}
+
+      <AnimatePresence>
+        {showBuilder && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="rounded-2xl border border-primary/40 bg-slate-950/80 p-4 space-y-3">
+              <h3 className="text-sm font-medium flex items-center gap-2">
+                <Zap className="w-4 h-4" /> Create Playbook
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <Input
+                  label="Playbook Name"
+                  placeholder="Send receipt on payment"
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                />
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">When this happens...</label>
+                  <select
+                    className="w-full rounded-lg border border-border/60 bg-slate-900 px-3 py-2 text-sm"
+                    value={form.triggerEvent}
+                    onChange={(e) => setForm((f) => ({ ...f, triggerEvent: e.target.value }))}
+                  >
+                    <option value="">Select trigger...</option>
+                    {TRIGGER_OPTIONS.map((t) => (
+                      <option key={t.value} value={t.value}>{t.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Do this...</label>
+                  <select
+                    className="w-full rounded-lg border border-border/60 bg-slate-900 px-3 py-2 text-sm"
+                    value={form.actionType}
+                    onChange={(e) => setForm((f) => ({ ...f, actionType: e.target.value }))}
+                  >
+                    <option value="">Select action...</option>
+                    {ACTION_OPTIONS.map((a) => (
+                      <option key={a.value} value={a.value}>{a.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => setShowBuilder(false)}>Cancel</Button>
+                <Button onClick={handleCreate}>Create Playbook</Button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="rounded-3xl border border-border/60 bg-slate-950/60 backdrop-blur p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Live Playbooks</div>
+            <p className="text-sm text-muted-foreground">These respond to emitted events in your business.</p>
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {playbooks.filter((p) => p.enabled).length} active / {playbooks.length} total
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="text-sm text-muted-foreground py-4">Loading playbooks...</div>
+        ) : playbooks.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-border/60 p-6 text-center text-sm text-muted-foreground">
+            No playbooks yet. Create one to start automating your business flows.
+          </div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2">
+            {playbooks.map((pb) => (
+              <div
+                key={pb.id}
+                className={`rounded-2xl border p-3 flex flex-col gap-2 text-sm transition-colors ${
+                  pb.enabled
+                    ? "border-emerald-500/40 bg-emerald-500/5"
+                    : "border-border/60 bg-slate-900/60"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="font-semibold">{pb.name}</div>
+                  <button
+                    onClick={() => handleToggle(pb)}
+                    className={`rounded-full p-1.5 transition-colors ${
+                      pb.enabled
+                        ? "bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
+                        : "bg-slate-500/20 text-slate-400 hover:bg-slate-500/30"
+                    }`}
+                  >
+                    {pb.enabled ? <Power className="w-4 h-4" /> : <PowerOff className="w-4 h-4" />}
+                  </button>
+                </div>
+                <div className="text-[12px] text-muted-foreground">
+                  <span className="text-primary">Trigger:</span> {getTriggerLabel(pb.triggerEvent)}
+                </div>
+                <div className="text-[12px] text-muted-foreground">
+                  <span className="text-primary">Action:</span> {getActionLabel(pb.actions)}
+                </div>
+                <div className="text-[11px] text-muted-foreground/60">
+                  Created: {new Date(pb.createdAt).toLocaleDateString()}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="rounded-2xl border border-dashed border-border/60 p-3 text-xs text-muted-foreground">
+          Coming soon: Visual flow builder with conditions, delays, and multi-step actions.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function ProjectsPage() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const [businessId, setBusinessId] = useState<string | null>(null);
+  const [showContactPicker, setShowContactPicker] = useState(false);
+
+  const activeTab = searchParams.get("tab") === "automations" ? "automations" : "projects";
+
+  useEffect(() => {
+    const bid = getStoredBusinessId();
+    if (bid) setBusinessId(bid);
+  }, []);
+
+  const handleTabChange = (tab: string) => {
+    router.push(`/app/projects${tab === "automations" ? "?tab=automations" : ""}`, { scroll: false });
+  };
+
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        icon={FolderKanban}
+        title="Projects & Playbooks"
+        subtitle="Manage work and automate your business flows"
+        rightSlot={
+          <button
+            onClick={() => setShowContactPicker(true)}
+            className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Send className="w-4 h-4" />
+            Broadcast
+          </button>
+        }
+      />
+
+      <TabNav
+        tabs={TABS}
+        activeTab={activeTab}
+        onTabChange={handleTabChange}
+        layoutId="projects-tab"
+      />
+
+      {activeTab === "projects" ? (
+        <ProjectsTab businessId={businessId} />
+      ) : (
+        <PlaybooksTab />
+      )}
+
       <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
     </div>
   );

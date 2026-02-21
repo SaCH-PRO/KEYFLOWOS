@@ -47,7 +47,6 @@ const navItems = [
   { label: "Marketing", href: "/app/marketing", icon: Megaphone },
   { label: "Expenses", href: "/app/expenses", icon: Receipt },
   { label: "Projects", href: "/app/projects", icon: FolderKanban },
-  { label: "Automations", href: "/app/automations", icon: Zap },
   { label: "Reports", href: "/app/reports", icon: BarChart3 },
 ];
 
@@ -336,8 +335,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                         { label: "New Post", href: "/app/social" },
                         { label: "New Expense", href: "/app/expenses" },
                         { label: "New Project", href: "/app/projects" },
+                        { label: "New Playbook", href: "/app/projects?tab=automations" },
                         { label: "New Campaign", href: "/app/marketing" },
-                        { label: "New Page", href: "/app/pages" },
                       ].map((action) => (
                         <Link
                           key={action.label}

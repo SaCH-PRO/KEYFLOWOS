@@ -79,7 +79,7 @@ const DETAILED_STEPS: OnboardingStep[] = [
     title: "Set Up Your First Automation",
     description: "Create a playbook to automatically follow up with customers after bookings or payments.",
     icon: Zap,
-    href: "/app/automations?action=new",
+    href: "/app/projects?tab=automations",
     cta: "Create Playbook",
     skipLabel: "Skip automation",
   },
