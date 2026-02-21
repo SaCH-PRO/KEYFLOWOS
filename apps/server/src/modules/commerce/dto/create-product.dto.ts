@@ -24,6 +24,14 @@ export class CreateProductDto {
   @IsOptional()
   duration?: number; // Duration in minutes (for services)
 
+  @IsString()
+  @IsOptional()
+  imageUrl?: string;
+
+  @IsString()
+  @IsOptional()
+  sku?: string;
+
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;

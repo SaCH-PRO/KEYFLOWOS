@@ -6,6 +6,8 @@ export type ProductForm = {
   price: string;
   category: "SERVICE" | "PRODUCT" | "PACKAGE";
   duration: string;
+  imageUrl: string;
+  sku: string;
   isActive: boolean;
 };
 
