@@ -55,8 +55,10 @@ export class ExpensesController {
   getVendorAnalytics(
     @Param('businessId') businessId: string,
     @Query('period') period?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
   ) {
-    return this.expenses.getVendorAnalytics(businessId, period);
+    return this.expenses.getVendorAnalytics(businessId, period, startDate, endDate);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
