@@ -2477,8 +2477,11 @@ export async function fetchExpenseSummary(businessId: string, period = '30d', st
   if (endDate) q.set('endDate', endDate);
   return apiGetSimple<ExpenseSummary>(`/expenses/businesses/${encodeURIComponent(businessId)}/expenses/summary?${q}`);
 }
-export async function fetchVendorAnalytics(businessId: string, period = '30d'): Promise<ApiResult<VendorAnalytics[]>> {
-  return apiGetSimple<VendorAnalytics[]>(`/expenses/businesses/${encodeURIComponent(businessId)}/expenses/vendors?period=${period}`);
+export async function fetchVendorAnalytics(businessId: string, period = '30d', startDate?: string, endDate?: string): Promise<ApiResult<VendorAnalytics[]>> {
+  const q = new URLSearchParams({ period });
+  if (startDate) q.set('startDate', startDate);
+  if (endDate) q.set('endDate', endDate);
+  return apiGetSimple<VendorAnalytics[]>(`/expenses/businesses/${encodeURIComponent(businessId)}/expenses/vendors?${q}`);
 }
 export async function fetchExpenseBudgets(businessId: string, month?: number, year?: number): Promise<ApiResult<ExpenseBudget[]>> {
   const q = new URLSearchParams();

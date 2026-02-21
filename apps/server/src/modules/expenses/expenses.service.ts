@@ -338,8 +338,8 @@ export class ExpensesService {
     };
   }
 
-  async getVendorAnalytics(businessId: string, period?: string) {
-    const { start: startDate, end: endDate } = this.getDateRange(period);
+  async getVendorAnalytics(businessId: string, period?: string, customStart?: string, customEnd?: string) {
+    const { start: startDate, end: endDate } = this.getDateRange(period, customStart, customEnd);
     const where = { businessId, deletedAt: null as Date | null, date: { gte: startDate, lte: endDate }, vendor: { not: null } };
 
     const expenses = await this.prisma.client.expense.findMany({
@@ -458,23 +458,32 @@ export class ExpensesService {
     alertAt?: number;
     rollover?: boolean;
   }) {
-    return this.prisma.client.expenseBudget.upsert({
+    const catId = input.categoryId || null;
+    const existing = await this.prisma.client.expenseBudget.findFirst({
       where: {
-        businessId_categoryId_month_year: {
-          businessId: input.businessId,
-          categoryId: input.categoryId ?? '',
-          month: input.month,
-          year: input.year,
-        },
-      },
-      update: {
-        amount: input.amount,
-        alertAt: input.alertAt ?? 80,
-        rollover: input.rollover ?? false,
-      },
-      create: {
         businessId: input.businessId,
-        categoryId: input.categoryId ?? null,
+        categoryId: catId,
+        month: input.month,
+        year: input.year,
+      },
+    });
+
+    if (existing) {
+      return this.prisma.client.expenseBudget.update({
+        where: { id: existing.id },
+        data: {
+          amount: input.amount,
+          alertAt: input.alertAt ?? 80,
+          rollover: input.rollover ?? false,
+        },
+        include: { category: true },
+      });
+    }
+
+    return this.prisma.client.expenseBudget.create({
+      data: {
+        businessId: input.businessId,
+        categoryId: catId,
         amount: input.amount,
         month: input.month,
         year: input.year,

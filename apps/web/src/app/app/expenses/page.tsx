@@ -49,6 +49,20 @@ function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
 }
 
+function getDateRange(period: string): { startDate: string; endDate: string } {
+  const now = new Date();
+  const end = now.toISOString().split("T")[0];
+  let start: Date;
+  switch (period) {
+    case "7d": start = new Date(now.getTime() - 7 * 86400000); break;
+    case "90d": start = new Date(now.getTime() - 90 * 86400000); break;
+    case "12m": start = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()); break;
+    case "ytd": start = new Date(now.getFullYear(), 0, 1); break;
+    case "30d": default: start = new Date(now.getTime() - 30 * 86400000); break;
+  }
+  return { startDate: start.toISOString().split("T")[0], endDate: end };
+}
+
 function ChangeIndicator({ value, suffix = "%" }: { value: number; suffix?: string }) {
   if (value === 0) return <span className="text-xs text-muted-foreground flex items-center gap-0.5"><Minus className="w-3 h-3" /> No change</span>;
   const isUp = value > 0;
@@ -114,11 +128,12 @@ export default function ExpensesPage() {
     setLoading(true);
     try {
       const useCustom = period === "custom" && customStart && customEnd;
+      const dateRange = useCustom ? { startDate: customStart, endDate: customEnd } : getDateRange(period);
       const [expRes, catRes, sumRes, venRes, budRes] = await Promise.all([
-        fetchExpenses(businessId, { search: searchQuery || undefined, categoryId: filterCategory || undefined, paymentMethod: filterPayment || undefined, startDate: useCustom ? customStart : undefined, endDate: useCustom ? customEnd : undefined }),
+        fetchExpenses(businessId, { search: searchQuery || undefined, categoryId: filterCategory || undefined, paymentMethod: filterPayment || undefined, startDate: dateRange.startDate, endDate: dateRange.endDate }),
         fetchExpenseCategories(businessId),
         fetchExpenseSummary(businessId, useCustom ? "custom" : period, useCustom ? customStart : undefined, useCustom ? customEnd : undefined),
-        fetchVendorAnalytics(businessId, period),
+        fetchVendorAnalytics(businessId, period, useCustom ? customStart : undefined, useCustom ? customEnd : undefined),
         fetchExpenseBudgets(businessId),
       ]);
       if (expRes.data) { setExpenses(expRes.data.data); setTotalExpenses(expRes.data.total); }
