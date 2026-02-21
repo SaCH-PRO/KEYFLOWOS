@@ -93,14 +93,14 @@ const productSchema = z.object({
   id: z.string(),
   name: z.string(),
   description: z.string().nullable().optional(),
-  price: z.number(),
+  price: z.coerce.number(),
   currency: z.string().default("TTD"),
   category: z.string().default("SERVICE"),
-  duration: z.number().nullable().optional(),
+  duration: z.coerce.number().nullable().optional(),
   imageUrl: z.string().nullable().optional(),
   sku: z.string().nullable().optional(),
-  isActive: z.boolean().default(true),
-});
+  isActive: z.preprocess((v) => v === undefined ? true : v, z.boolean().default(true)),
+}).passthrough();
 
 const bookingSchema = z.object({
   id: z.string(),
@@ -253,8 +253,8 @@ async function apiGet<T>(path: string, schema: z.ZodSchema<T>, fallback?: T): Pr
     }
     const parsed = schema.safeParse(json);
     if (!parsed.success) {
-      console.warn(`[apiGet] ${path} schema validation failed, using raw data`);
-      return { data: json as T, error: null };
+      console.warn(`[apiGet] ${path} schema validation failed:`, parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join(', '));
+      return { data: (json as T) ?? fallback ?? null, error: null };
     }
     return { data: parsed.data, error: null };
   } catch (error: unknown) {
