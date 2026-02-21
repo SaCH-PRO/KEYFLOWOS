@@ -317,20 +317,33 @@ export function CatalogManager({
                   ) : null}
                 </div>
 
-                <div
-                  className="h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0 text-sm font-bold"
-                  style={{
-                    background: isOnStore
-                      ? `linear-gradient(135deg, hsl(var(--kf-accent1) / 0.2), hsl(var(--kf-accent2) / 0.1))`
-                      : "hsl(var(--kf-muted))",
-                    border: isOnStore
-                      ? "1px solid hsl(var(--kf-accent1) / 0.3)"
-                      : "1px solid hsl(var(--kf-border))",
-                    color: isOnStore ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-muted-foreground))",
-                  }}
-                >
-                  {p.name.charAt(0).toUpperCase()}
-                </div>
+                {p.imageUrl ? (
+                  <div
+                    className="h-10 w-10 rounded-xl overflow-hidden flex-shrink-0"
+                    style={{
+                      border: isOnStore
+                        ? "1px solid hsl(var(--kf-accent1) / 0.3)"
+                        : "1px solid hsl(var(--kf-border))",
+                    }}
+                  >
+                    <img src={p.imageUrl} alt={p.name} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                  </div>
+                ) : (
+                  <div
+                    className="h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0 text-sm font-bold"
+                    style={{
+                      background: isOnStore
+                        ? `linear-gradient(135deg, hsl(var(--kf-accent1) / 0.2), hsl(var(--kf-accent2) / 0.1))`
+                        : "hsl(var(--kf-muted))",
+                      border: isOnStore
+                        ? "1px solid hsl(var(--kf-accent1) / 0.3)"
+                        : "1px solid hsl(var(--kf-border))",
+                      color: isOnStore ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-muted-foreground))",
+                    }}
+                  >
+                    {p.name.charAt(0).toUpperCase()}
+                  </div>
+                )}
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
@@ -341,6 +354,11 @@ export function CatalogManager({
                     >
                       {p.category}
                     </span>
+                    {p.sku && (
+                      <span className="text-[10px] text-muted-foreground/50 flex-shrink-0">
+                        SKU: {p.sku}
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-1.5 mt-0.5">
                     <span className={`text-[11px] font-medium ${isOnStore ? "text-emerald-400" : "text-muted-foreground/60"}`}>

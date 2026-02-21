@@ -382,6 +382,7 @@ model Product {
   category    String   @default("SERVICE") // SERVICE, PRODUCT, PACKAGE
   duration    Int?     // Duration in minutes (for services)
   imageUrl    String?  @map("image_url")
+  sku         String?  // Stock keeping unit
   isActive    Boolean  @default(true) @map("is_active")
 
   businessId String   @map("business_id")

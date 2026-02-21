@@ -79,6 +79,8 @@ export default function CommercePage() {
     price: "",
     category: "SERVICE",
     duration: "",
+    imageUrl: "",
+    sku: "",
     isActive: true,
   });
   const [formError, setFormError] = useState<string | null>(null);
@@ -153,6 +155,8 @@ export default function CommercePage() {
       price: "",
       category: "SERVICE",
       duration: "",
+      imageUrl: "",
+      sku: "",
       isActive: true,
     });
     setFormError(null);
@@ -167,6 +171,8 @@ export default function CommercePage() {
       price: String(product.price),
       category: (product.category as "SERVICE" | "PRODUCT" | "PACKAGE") ?? "SERVICE",
       duration: product.duration ? String(product.duration) : "",
+      imageUrl: product.imageUrl || "",
+      sku: product.sku || "",
       isActive: product.isActive ?? true,
     });
     setFormError(null);
@@ -182,6 +188,8 @@ export default function CommercePage() {
       price: "",
       category: "SERVICE",
       duration: "",
+      imageUrl: "",
+      sku: "",
       isActive: true,
     });
     setFormError(null);
@@ -210,6 +218,8 @@ export default function CommercePage() {
         description: parsed.data.description ?? null,
         category: productForm.category,
         duration: durationValue,
+        imageUrl: productForm.imageUrl || null,
+        sku: productForm.sku || null,
         isActive: productForm.isActive,
       });
       if (error) { setFormError(error); return; }
@@ -225,6 +235,8 @@ export default function CommercePage() {
         description: parsed.data.description,
         category: productForm.category,
         duration: durationValue,
+        imageUrl: productForm.imageUrl || null,
+        sku: productForm.sku || null,
         isActive: productForm.isActive,
       });
       if (error) { setFormError(error); return; }
@@ -560,6 +572,38 @@ export default function CommercePage() {
                     className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 resize-none"
                   />
                 </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Image URL</label>
+                    <input
+                      type="url"
+                      value={productForm.imageUrl}
+                      onChange={(e) => setProductForm((f) => ({ ...f, imageUrl: e.target.value }))}
+                      placeholder="https://example.com/image.jpg"
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1.5 block">SKU</label>
+                    <input
+                      type="text"
+                      value={productForm.sku}
+                      onChange={(e) => setProductForm((f) => ({ ...f, sku: e.target.value }))}
+                      placeholder="e.g. SVC-001, PKG-DELUXE"
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50"
+                    />
+                  </div>
+                </div>
+                {productForm.imageUrl && (
+                  <div className="rounded-xl border border-border/60 overflow-hidden bg-muted/20">
+                    <img
+                      src={productForm.imageUrl}
+                      alt="Preview"
+                      className="w-full h-32 object-cover"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                    />
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Price (TTD) *</label>

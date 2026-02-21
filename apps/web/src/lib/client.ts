@@ -98,6 +98,7 @@ const productSchema = z.object({
   category: z.string().default("SERVICE"),
   duration: z.number().nullable().optional(),
   imageUrl: z.string().nullable().optional(),
+  sku: z.string().nullable().optional(),
   isActive: z.boolean().default(true),
 });
 
@@ -757,10 +758,12 @@ export async function createProduct(input: {
   description?: string;
   category?: string;
   duration?: number | null;
+  imageUrl?: string | null;
+  sku?: string | null;
   isActive?: boolean;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
-  const body = { 
+  const body: Record<string, unknown> = { 
     name: input.name, 
     price: input.price, 
     currency: input.currency ?? "TTD", 
@@ -769,6 +772,8 @@ export async function createProduct(input: {
     duration: input.duration,
     isActive: input.isActive ?? true,
   };
+  if (input.imageUrl) body.imageUrl = input.imageUrl;
+  if (input.sku) body.sku = input.sku;
 
   const res = await apiPost<Product>({
     path: `/commerce/businesses/${encodeURIComponent(businessId)}/products`,
@@ -785,6 +790,8 @@ export async function createProduct(input: {
     currency: input.currency ?? "TTD",
     category: input.category ?? "SERVICE",
     duration: input.duration ?? null,
+    imageUrl: input.imageUrl ?? null,
+    sku: input.sku ?? null,
     isActive: input.isActive ?? true,
   };
   return { data: synthesized, error: res.error };
@@ -799,6 +806,8 @@ export async function updateProduct(input: {
   description?: string | null;
   category?: string;
   duration?: number | null;
+  imageUrl?: string | null;
+  sku?: string | null;
   isActive?: boolean;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
@@ -809,6 +818,8 @@ export async function updateProduct(input: {
   if (input.description !== undefined) body.description = input.description;
   if (input.category !== undefined) body.category = input.category;
   if (input.duration !== undefined) body.duration = input.duration;
+  if (input.imageUrl !== undefined) body.imageUrl = input.imageUrl;
+  if (input.sku !== undefined) body.sku = input.sku;
   if (input.isActive !== undefined) body.isActive = input.isActive;
 
   return apiPatch<Product>(

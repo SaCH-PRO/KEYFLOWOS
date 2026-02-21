@@ -39,6 +39,8 @@ export class CommerceService {
     description?: string | null;
     category?: string;
     duration?: number | null;
+    imageUrl?: string | null;
+    sku?: string | null;
     isActive?: boolean;
   }) {
     return this.prisma.client.product.create({
@@ -50,6 +52,8 @@ export class CommerceService {
         description: input.description ?? null,
         category: input.category ?? 'SERVICE',
         duration: input.duration ?? null,
+        imageUrl: input.imageUrl ?? null,
+        sku: input.sku ?? null,
         isActive: input.isActive ?? true,
       },
     });
@@ -64,6 +68,8 @@ export class CommerceService {
     description?: string | null;
     category?: string;
     duration?: number | null;
+    imageUrl?: string | null;
+    sku?: string | null;
     isActive?: boolean;
   }) {
     return this.prisma.client.product.update({
@@ -75,6 +81,8 @@ export class CommerceService {
         ...(input.description !== undefined && { description: input.description }),
         ...(input.category !== undefined && { category: input.category }),
         ...(input.duration !== undefined && { duration: input.duration }),
+        ...(input.imageUrl !== undefined && { imageUrl: input.imageUrl }),
+        ...(input.sku !== undefined && { sku: input.sku }),
         ...(input.isActive !== undefined && { isActive: input.isActive }),
       },
     });
