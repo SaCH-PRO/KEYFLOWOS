@@ -55,9 +55,12 @@ export async function apiPost<T>({ path, body, init }: FetchOptions): Promise<Ap
 
 export async function apiGet<T>(path: string): Promise<ApiResponse<T>> {
   try {
-    const res = await fetch(`${API_BASE}${path}`, {
+    const sep = path.includes("?") ? "&" : "?";
+    const url = `${API_BASE}${path}${sep}_t=${Date.now()}`;
+    const res = await fetch(url, {
       method: "GET",
       headers: buildHeaders(),
+      cache: "no-store",
     });
     const data: unknown = await res.json().catch(() => null);
     if (!res.ok) {
