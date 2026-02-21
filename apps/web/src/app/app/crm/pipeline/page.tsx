@@ -471,7 +471,6 @@ export default function ContactsPage() {
     });
     setShowMobileDetail(false);
     setShowAddForm(true);
-    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleDeleteContact = async (contact?: ContactCardData) => {
