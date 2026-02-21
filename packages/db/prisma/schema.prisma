@@ -105,6 +105,7 @@ model Business {
   activities       Activity[]
   expenses         Expense[]
   expenseCategories ExpenseCategory[]
+  expenseBudgets   ExpenseBudget[]
   recurringInvoices RecurringInvoice[]
   emailCampaigns   EmailCampaign[]
   emailContacts    EmailCampaignContact[]
@@ -930,6 +931,7 @@ model ExpenseCategory {
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   expenses   Expense[]
+  budgets    ExpenseBudget[]
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -947,6 +949,8 @@ model Expense {
   vendor      String?
   receiptUrl  String?  @map("receipt_url")
   notes       String?
+  paymentMethod String? @map("payment_method")
+  tags        String[] @default([])
   isRecurring Boolean  @default(false) @map("is_recurring")
   recurringFrequency String? @map("recurring_frequency")
 
@@ -962,7 +966,30 @@ model Expense {
 
   @@index([businessId, date])
   @@index([businessId, categoryId])
+  @@index([businessId, vendor])
   @@map("expenses")
+}
+
+model ExpenseBudget {
+  id          String   @id @default(cuid())
+  amount      Float
+  month       Int
+  year        Int
+  alertAt     Float    @default(80) @map("alert_at")
+  rollover    Boolean  @default(false)
+
+  categoryId  String?          @map("category_id")
+  category    ExpenseCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  @@unique([businessId, categoryId, month, year])
+  @@index([businessId, month, year])
+  @@map("expense_budgets")
 }
 
 // ---

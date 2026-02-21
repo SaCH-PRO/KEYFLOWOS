@@ -1,7 +1,8 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, Inject, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { ExpensesService } from './expenses.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { Response } from 'express';
 
 @Controller('expenses')
 export class ExpensesController {
@@ -17,6 +18,10 @@ export class ExpensesController {
     @Query('endDate') endDate?: string,
     @Query('categoryId') categoryId?: string,
     @Query('vendor') vendor?: string,
+    @Query('search') search?: string,
+    @Query('paymentMethod') paymentMethod?: string,
+    @Query('tag') tag?: string,
+    @Query('isRecurring') isRecurring?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
@@ -25,6 +30,10 @@ export class ExpensesController {
       endDate,
       categoryId,
       vendor,
+      search,
+      paymentMethod,
+      tag,
+      isRecurring: isRecurring !== undefined ? isRecurring === 'true' : undefined,
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
     });
@@ -35,8 +44,34 @@ export class ExpensesController {
   getExpenseSummary(
     @Param('businessId') businessId: string,
     @Query('period') period?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
   ) {
-    return this.expenses.getExpenseSummary(businessId, period);
+    return this.expenses.getExpenseSummary(businessId, period, startDate, endDate);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/expenses/vendors')
+  getVendorAnalytics(
+    @Param('businessId') businessId: string,
+    @Query('period') period?: string,
+  ) {
+    return this.expenses.getVendorAnalytics(businessId, period);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/expenses/export')
+  async exportCSV(
+    @Param('businessId') businessId: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('categoryId') categoryId?: string,
+    @Res() res?: Response,
+  ) {
+    const csv = await this.expenses.exportExpensesCSV(businessId, { startDate, endDate, categoryId });
+    res!.setHeader('Content-Type', 'text/csv');
+    res!.setHeader('Content-Disposition', `attachment; filename=expenses-${new Date().toISOString().split('T')[0]}.csv`);
+    res!.send(csv);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -60,6 +95,8 @@ export class ExpensesController {
       vendor?: string;
       receiptUrl?: string;
       notes?: string;
+      paymentMethod?: string;
+      tags?: string[];
       isRecurring?: boolean;
       recurringFrequency?: string;
       categoryId?: string;
@@ -81,6 +118,8 @@ export class ExpensesController {
       vendor?: string;
       receiptUrl?: string;
       notes?: string;
+      paymentMethod?: string;
+      tags?: string[];
       isRecurring?: boolean;
       recurringFrequency?: string;
       categoryId?: string | null;
@@ -120,5 +159,44 @@ export class ExpensesController {
     @Param('categoryId') categoryId: string,
   ) {
     return this.expenses.deleteCategory(businessId, categoryId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/expense-budgets')
+  listBudgets(
+    @Param('businessId') businessId: string,
+    @Query('month') month?: string,
+    @Query('year') year?: string,
+  ) {
+    return this.expenses.listBudgets(
+      businessId,
+      month ? parseInt(month, 10) : undefined,
+      year ? parseInt(year, 10) : undefined,
+    );
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/expense-budgets')
+  upsertBudget(
+    @Param('businessId') businessId: string,
+    @Body() body: {
+      categoryId?: string;
+      amount: number;
+      month: number;
+      year: number;
+      alertAt?: number;
+      rollover?: boolean;
+    },
+  ) {
+    return this.expenses.upsertBudget({ businessId, ...body });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/expense-budgets/:budgetId')
+  deleteBudget(
+    @Param('businessId') businessId: string,
+    @Param('budgetId') budgetId: string,
+  ) {
+    return this.expenses.deleteBudget(businessId, budgetId);
   }
 }

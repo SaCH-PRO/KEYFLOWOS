@@ -36,7 +36,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Recurring Invoices:** Auto-generating invoices on various schedules with full item, tax, and discount support.
 - **Contacts Page Overhaul:** Modular split-view layout with reusable components.
 - **Settings Feature:** Modular business settings including basic info, social links, branding, logo upload, and Google Calendar OAuth.
-- **Expense Tracking:** Full CRUD for expenses with categories, vendor tracking, analytics, and receipt management.
+- **Expense Tracking (v2):** Comprehensive expense management with category/vendor/payment method tracking, budget system with alerts, vendor analytics, period-over-period comparison, CSV export, receipt upload/preview, tag system, recurring expense support, tax estimator, and tabbed UI (Overview, Budgets, Vendors, Categories).
 - **AI Co-Founder (KeyFlow AI):** OpenAI-powered business advisor integrated into Command page with multi-turn chat, daily briefings, predictive cash flow forecasting, and what-if scenario simulation.
 - **Email Marketing:** Campaign management with segmentation and delivery tracking.
 - **Lead Capture Forms:** Form builder with custom fields, public submission, auto-CRM contact creation, and embed code generation.
