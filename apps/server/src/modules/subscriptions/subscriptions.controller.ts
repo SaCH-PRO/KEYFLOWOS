@@ -1,9 +1,9 @@
-import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, Req } from '@nestjs/common';
 import { SubscriptionsService } from './subscriptions.service';
 
 @Controller('subscriptions')
 export class SubscriptionsController {
-  constructor(private readonly subs: SubscriptionsService) {}
+  constructor(@Inject(SubscriptionsService) private readonly subs: SubscriptionsService) {}
 
   @Get('plans')
   getPlans() {
