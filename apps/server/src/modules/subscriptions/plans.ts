@@ -12,6 +12,7 @@ export interface PlanDefinition {
     staffMembers: number;
     products: number;
     automations: number;
+    aiCreditsPerMonth: number;
     aiSuggestions: boolean;
     customBranding: boolean;
     prioritySupport: boolean;
@@ -21,6 +22,20 @@ export interface PlanDefinition {
   };
   popular?: boolean;
 }
+
+export const AI_CREDIT_COSTS: Record<string, number> = {
+  chat: 1,
+  briefing: 2,
+  forecast: 1,
+  simulation: 3,
+  report_narrative: 2,
+  seo_analysis: 1,
+  email_draft: 1,
+  social_caption: 1,
+};
+
+export const AI_OVERAGE_RATE_TTD = 2.50;
+export const AI_OVERAGE_RATE_USD = 0.35;
 
 export const PLANS: Record<string, PlanDefinition> = {
   FREE: {
@@ -35,6 +50,7 @@ export const PLANS: Record<string, PlanDefinition> = {
       '10 bookings per month',
       '1 staff member',
       '10 products/services',
+      '10 AI credits/month',
       'Basic CRM',
       'Public booking page',
     ],
@@ -45,6 +61,7 @@ export const PLANS: Record<string, PlanDefinition> = {
       staffMembers: 1,
       products: 10,
       automations: 0,
+      aiCreditsPerMonth: 10,
       aiSuggestions: false,
       customBranding: false,
       prioritySupport: false,
@@ -66,6 +83,8 @@ export const PLANS: Record<string, PlanDefinition> = {
       '100 bookings per month',
       '5 staff members',
       '100 products/services',
+      '100 AI credits/month',
+      'AI business advisor',
       'Quotes & proposals',
       '5 automations',
       'Online store',
@@ -79,7 +98,8 @@ export const PLANS: Record<string, PlanDefinition> = {
       staffMembers: 5,
       products: 100,
       automations: 5,
-      aiSuggestions: false,
+      aiCreditsPerMonth: 100,
+      aiSuggestions: true,
       customBranding: true,
       prioritySupport: false,
       quotesEnabled: true,
@@ -99,8 +119,8 @@ export const PLANS: Record<string, PlanDefinition> = {
       'Unlimited bookings',
       'Unlimited staff',
       'Unlimited products/services',
-      'Unlimited automations',
-      'AI Autopilot & suggestions',
+      'Unlimited AI credits',
+      'AI Autopilot & all AI features',
       'Online store',
       'Unlimited social posts',
       'Custom branding',
@@ -114,6 +134,7 @@ export const PLANS: Record<string, PlanDefinition> = {
       staffMembers: -1,
       products: -1,
       automations: -1,
+      aiCreditsPerMonth: -1,
       aiSuggestions: true,
       customBranding: true,
       prioritySupport: true,

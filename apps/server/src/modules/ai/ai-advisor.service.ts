@@ -1,19 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import OpenAI from 'openai';
+import { AiUsageService } from './ai-usage.service';
 
 @Injectable()
 export class AiAdvisorService {
   private readonly logger = new Logger(AiAdvisorService.name);
-  private readonly openai: OpenAI;
-  private readonly model = 'gpt-5.2';
 
-  constructor(private readonly prisma: PrismaService) {
-    this.openai = new OpenAI({
-      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-    });
-  }
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly aiUsage: AiUsageService,
+  ) {}
 
   async getBusinessContext(businessId: string) {
     const now = new Date();
@@ -220,21 +216,21 @@ export class AiAdvisorService {
     messages.push({ role: 'user', content: message });
 
     try {
-      const response = await this.openai.chat.completions.create({
-        model: this.model,
+      const result = await this.aiUsage.callAi({
+        businessId,
+        feature: 'chat',
         messages,
-        max_tokens: 500,
+        maxTokens: 500,
         temperature: 0.7,
       });
 
-      const reply = response.choices[0]?.message?.content ?? 'I was unable to generate a response. Please try again.';
-
       return {
-        reply,
+        reply: result.content || 'I was unable to generate a response. Please try again.',
         context: {
           momentumScore: context.momentumScore,
           businessName,
         },
+        usage: result.usage,
       };
     } catch (error) {
       this.logger.error(`AI chat error: ${(error as Error).message}`);
@@ -276,9 +272,9 @@ export class AiAdvisorService {
 
 Yesterday's activity: ${context.recentActivities.filter((a) => {
       const actDate = new Date(a.createdAt);
-      const yesterday = new Date(now);
-      yesterday.setDate(yesterday.getDate() - 1);
-      return actDate >= yesterday;
+      const yday = new Date(now);
+      yday.setDate(yday.getDate() - 1);
+      return actDate >= yday;
     }).map((a) => a.title).join(', ') || 'No activity recorded'}
 
 Today's priorities:
@@ -297,8 +293,9 @@ Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
 {"summary":"...","highlights":["..."],"priorities":["..."],"cashFlow":{"revenue":${revenue},"expenses":${expenses},"net":${net}},"suggestion":"..."}`;
 
     try {
-      const response = await this.openai.chat.completions.create({
-        model: this.model,
+      const result = await this.aiUsage.callAi({
+        businessId,
+        feature: 'briefing',
         messages: [
           {
             role: 'system',
@@ -306,17 +303,16 @@ Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
           },
           { role: 'user', content: briefingPrompt },
         ],
-        max_tokens: 600,
+        maxTokens: 600,
         temperature: 0.5,
       });
 
-      const content = response.choices[0]?.message?.content ?? '';
-
       try {
-        return JSON.parse(content);
+        const parsed = JSON.parse(result.content);
+        return { ...parsed, usage: result.usage };
       } catch {
         return {
-          summary: content,
+          summary: result.content,
           highlights: [],
           priorities: [
             context.bookings.upcoming.length > 0 ? `${context.bookings.upcoming.length} upcoming bookings to prepare for` : null,
@@ -325,6 +321,7 @@ Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
           ].filter(Boolean),
           cashFlow: { revenue, expenses, net },
           suggestion: 'Review your overdue invoices and follow up with clients today.',
+          usage: result.usage,
         };
       }
     } catch (error) {
@@ -436,18 +433,19 @@ Provide your simulation results in this exact format:
 Use the business's actual data to make projections realistic. Currency should match the business currency.`;
 
     try {
-      const completion = await this.openai.chat.completions.create({
-        model: this.model,
+      const result = await this.aiUsage.callAi({
+        businessId,
+        feature: 'simulation',
         messages: [
           { role: 'system', content: 'You are KeyFlow AI, a business simulation engine that provides detailed what-if analysis based on real business data.' },
           { role: 'user', content: prompt },
         ],
-        max_tokens: 2000,
+        maxTokens: 2000,
       });
-      return { simulation: completion.choices[0]?.message?.content || 'Unable to run simulation.' };
+      return { simulation: result.content || 'Unable to run simulation.', usage: result.usage };
     } catch (e) {
       this.logger.error('Simulation failed: ' + (e as Error).message);
-      return { simulation: 'Simulation service temporarily unavailable. Please try again.' };
+      throw e;
     }
   }
 
