@@ -34,6 +34,7 @@ import {
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
+import { FeatureGuide } from "@/components/ui/feature-guide";
 
 const POST_TYPE_CONFIG: Record<string, { label: string; color: string; bg: string; icon: typeof MessageSquare }> = {
   DISCUSSION: { label: "Discussion", color: "text-blue-400", bg: "bg-blue-500/20", icon: MessageCircle },
@@ -308,6 +309,18 @@ export default function CommunityPage() {
   return (
     <div className="space-y-6">
       <PageHeader icon={Users} title="Community" subtitle="Connect with fellow entrepreneurs" />
+
+      <FeatureGuide
+        featureKey="community"
+        title="Getting Started with Community"
+        description="Connect with fellow entrepreneurs, share wins, ask questions, and join founder circles."
+        steps={[
+          { title: "Browse the Feed", description: "Read posts from other business owners covering discussions, questions, wins, and resources." },
+          { title: "Create a Post", description: "Share your experience, ask for advice, or celebrate a business milestone." },
+          { title: "Engage", description: "Like and comment on posts to build connections and help other founders." },
+          { title: "Join Cohorts", description: "Browse founder circles and join groups of entrepreneurs in similar industries." },
+        ]}
+      />
 
       <div className="flex items-center gap-1 border-b border-white/10 pb-0">
         {(["feed", "cohorts"] as const).map((t) => (

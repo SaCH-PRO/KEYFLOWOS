@@ -25,6 +25,7 @@ import {
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
+import { FeatureGuide } from "@/components/ui/feature-guide";
 
 const DIFFICULTY_COLORS: Record<string, { bg: string; text: string }> = {
   BEGINNER: { bg: "bg-green-500/20", text: "text-green-400" },
@@ -299,6 +300,18 @@ export default function LearnPage() {
         icon={GraduationCap}
         title="MasterClass"
         subtitle="Level up your business skills"
+      />
+
+      <FeatureGuide
+        featureKey="learn"
+        title="Getting Started with MasterClass"
+        description="Level up your business skills with bite-sized courses, progress tracking, and certificates."
+        steps={[
+          { title: "Browse Courses", description: "Explore courses by difficulty level (Beginner, Intermediate, Advanced)." },
+          { title: "Enroll", description: "Click any course to see the curriculum, then enroll to start learning." },
+          { title: "Complete Lessons", description: "Work through lessons at your own pace. Your progress is saved automatically." },
+          { title: "Earn Certificates", description: "Complete all lessons in a course to unlock a downloadable certificate." },
+        ]}
       />
 
       {enrolledCourses.length > 0 && (

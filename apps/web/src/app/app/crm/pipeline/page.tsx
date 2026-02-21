@@ -54,6 +54,7 @@ import type { JourneyMilestone } from "@/components/contacts/relationship-timeli
 import type { ConversationContextData } from "@/components/contacts/conversation-context";
 import type { AiInsight } from "@/components/contacts/ai-copilot";
 import { PageHeader } from "@/components/ui/page-header";
+import { FeatureGuide } from "@/components/ui/feature-guide";
 import { TabNav } from "@/components/ui/tab-nav";
 import { StatCards } from "@/components/ui/stat-cards";
 import {
@@ -647,7 +648,7 @@ export default function ContactsPage() {
         icon={Users}
         title="Contacts"
         subtitle="Your AI-powered contact management hub"
-        action={
+        rightSlot={
           <div className="flex items-center gap-2 flex-wrap">
             {selectMode ? (
               <>
@@ -744,6 +745,20 @@ export default function ContactsPage() {
             )}
           </div>
         }
+      />
+
+      <FeatureGuide
+        featureKey="contacts"
+        title="Getting Started with Contacts"
+        description="Your central hub for managing customer relationships, leads, and communication."
+        steps={[
+          { title: "Add Contacts", description: "Create contacts manually, or they auto-appear from bookings, store orders, and lead forms." },
+          { title: "Segment & Filter", description: "Use smart segments (High Value, New This Week, At Risk) to focus on key contacts." },
+          { title: "Track Revenue", description: "See total revenue, invoice count, and booking history for each contact." },
+          { title: "Communicate", description: "Reach out via WhatsApp, email, or phone directly from any contact card." },
+          { title: "Broadcast Messages", description: "Select multiple contacts and send bulk WhatsApp or email messages." },
+          { title: "Quick Actions", description: "Create invoices, send quotes, or book appointments directly from a contact." },
+        ]}
       />
 
       <StatCards

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Card } from "@keyflow/ui";
 import { BarChart3, TrendingUp, Users, Calendar, DollarSign, FileText } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
+import { FeatureGuide } from "@/components/ui/feature-guide";
 import { fetchContacts, fetchBookings, fetchInvoices, fetchProducts, Booking, Invoice, Contact, Product } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 
@@ -98,6 +99,18 @@ export default function ReportsPage() {
   return (
     <div className="space-y-6">
       <PageHeader icon={BarChart3} title="Reports" subtitle="Business analytics and insights" />
+
+      <FeatureGuide
+        featureKey="reports"
+        title="Understanding Your Reports"
+        description="Get a clear picture of your business performance with real-time analytics and KPIs."
+        steps={[
+          { title: "Revenue Overview", description: "See total revenue from paid invoices and average transaction values." },
+          { title: "Customer Insights", description: "Track total contacts, active clients, and new leads over time." },
+          { title: "Booking Analytics", description: "Monitor booking volume, completion rates, and popular services." },
+          { title: "Product Performance", description: "Review your product catalog size, top sellers, and pricing trends." },
+        ]}
+      />
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card className="p-4 space-y-2">

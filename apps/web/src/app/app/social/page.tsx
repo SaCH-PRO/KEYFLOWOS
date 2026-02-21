@@ -38,6 +38,7 @@ import { ChannelsPanel } from "./components/channels-panel";
 import { AIStudio } from "./components/ai-studio";
 import { AnalyticsPanel } from "./components/analytics-stub";
 import { PageHeader } from "@/components/ui/page-header";
+import { FeatureGuide } from "@/components/ui/feature-guide";
 import { StatCards } from "@/components/ui/stat-cards";
 import { TabNav } from "@/components/ui/tab-nav";
 
@@ -218,6 +219,18 @@ export default function SocialPage() {
         subtitle="Content calendar, scheduling & publishing"
         actionLabel="New Post"
         onAction={() => { setShowComposer(true); setEditingPost(null); }}
+      />
+
+      <FeatureGuide
+        featureKey="social"
+        title="Getting Started with Social Media"
+        description="Plan, create, and schedule social media content across all your platforms."
+        steps={[
+          { title: "Connect Accounts", description: "Link your Facebook, Instagram, LinkedIn, or TikTok accounts." },
+          { title: "Create Posts", description: "Write content, add images, and choose which platforms to post to." },
+          { title: "Schedule Ahead", description: "Set a date and time to auto-publish posts when your audience is active." },
+          { title: "Track Performance", description: "Monitor engagement, reach, and publishing stats in the analytics tab." },
+        ]}
       />
 
       <StatCards items={kpiCards} />

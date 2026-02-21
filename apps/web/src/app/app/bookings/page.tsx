@@ -37,6 +37,7 @@ import { useSearchParams } from "next/navigation";
 import type { Tab, StatusFilter } from "./components/bookings-types";
 import { contactName } from "./components/bookings-types";
 import { PageHeader } from "@/components/ui/page-header";
+import { FeatureGuide } from "@/components/ui/feature-guide";
 import BookingsDashboard from "./components/bookings-dashboard";
 import WeekCalendar from "./components/week-calendar";
 import BookingList from "./components/booking-list";
@@ -274,6 +275,20 @@ export default function BookingsPage() {
             </button>
           )
         }
+      />
+
+      <FeatureGuide
+        featureKey="bookings"
+        title="Getting Started with Bookings"
+        description="Set up your services, manage your team, and let customers book appointments online."
+        steps={[
+          { title: "Add Services", description: "Define your bookable services with duration, pricing, and descriptions." },
+          { title: "Add Staff", description: "Add team members who can be assigned to bookings." },
+          { title: "Share Booking Link", description: "Your public storefront lets customers browse services and book online." },
+          { title: "Manage Schedule", description: "View bookings on the calendar, confirm or cancel appointments." },
+          { title: "Connect Google Calendar", description: "Sync bookings to your Google Calendar for real-time availability." },
+          { title: "Track Stats", description: "Monitor booking volume, revenue, and completion rates from the dashboard." },
+        ]}
       />
 
       <AnimatePresence>

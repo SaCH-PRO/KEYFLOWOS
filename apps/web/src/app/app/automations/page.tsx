@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Button, Input } from "@keyflow/ui";
 import { Sparkles, Zap, Plus, Power, PowerOff } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
+import { FeatureGuide } from "@/components/ui/feature-guide";
 import { Playbook, fetchPlaybooks, createPlaybook, updatePlaybook } from "@/lib/client";
 
 const TRIGGER_OPTIONS = [
@@ -93,6 +94,18 @@ export default function AutomationsPage() {
         subtitle="Build workflows to automate your business"
         actionLabel="New Playbook"
         onAction={() => setShowBuilder(!showBuilder)}
+      />
+
+      <FeatureGuide
+        featureKey="automations"
+        title="Getting Started with Automations"
+        description="Create playbooks that automatically handle repetitive tasks when events occur."
+        steps={[
+          { title: "Create a Playbook", description: "Define a workflow with a name, trigger event, and action to perform." },
+          { title: "Choose a Trigger", description: "Select what starts the automation (e.g., new booking, invoice paid, contact created)." },
+          { title: "Set the Action", description: "Define what happens automatically (e.g., send email, update status, notify team)." },
+          { title: "Toggle On/Off", description: "Enable or pause playbooks anytime without deleting them." },
+        ]}
       />
 
       {formError && <div className="text-xs text-amber-400">{formError}</div>}
