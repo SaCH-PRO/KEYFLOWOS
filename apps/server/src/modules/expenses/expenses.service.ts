@@ -12,6 +12,7 @@ export class ExpensesService {
     filters?: {
       startDate?: string;
       endDate?: string;
+      period?: string;
       categoryId?: string;
       vendor?: string;
       search?: string;
@@ -24,10 +25,9 @@ export class ExpensesService {
   ) {
     const where: any = { businessId, deletedAt: null };
 
-    if (filters?.startDate || filters?.endDate) {
-      where.date = {};
-      if (filters.startDate) where.date.gte = new Date(filters.startDate);
-      if (filters.endDate) where.date.lte = new Date(filters.endDate);
+    if (filters?.startDate || filters?.endDate || filters?.period) {
+      const range = this.getDateRange(filters?.period, filters?.startDate, filters?.endDate);
+      where.date = { gte: range.start, lte: range.end };
     }
     if (filters?.categoryId) {
       where.categoryId = filters.categoryId;
@@ -459,38 +459,40 @@ export class ExpensesService {
     rollover?: boolean;
   }) {
     const catId = input.categoryId || null;
-    const existing = await this.prisma.client.expenseBudget.findFirst({
-      where: {
-        businessId: input.businessId,
-        categoryId: catId,
-        month: input.month,
-        year: input.year,
-      },
-    });
+    return this.prisma.client.$transaction(async (tx) => {
+      const existing = await tx.expenseBudget.findFirst({
+        where: {
+          businessId: input.businessId,
+          categoryId: catId,
+          month: input.month,
+          year: input.year,
+        },
+      });
 
-    if (existing) {
-      return this.prisma.client.expenseBudget.update({
-        where: { id: existing.id },
+      if (existing) {
+        return tx.expenseBudget.update({
+          where: { id: existing.id },
+          data: {
+            amount: input.amount,
+            alertAt: input.alertAt ?? 80,
+            rollover: input.rollover ?? false,
+          },
+          include: { category: true },
+        });
+      }
+
+      return tx.expenseBudget.create({
         data: {
+          businessId: input.businessId,
+          categoryId: catId,
           amount: input.amount,
+          month: input.month,
+          year: input.year,
           alertAt: input.alertAt ?? 80,
           rollover: input.rollover ?? false,
         },
         include: { category: true },
       });
-    }
-
-    return this.prisma.client.expenseBudget.create({
-      data: {
-        businessId: input.businessId,
-        categoryId: catId,
-        amount: input.amount,
-        month: input.month,
-        year: input.year,
-        alertAt: input.alertAt ?? 80,
-        rollover: input.rollover ?? false,
-      },
-      include: { category: true },
     });
   }
 
