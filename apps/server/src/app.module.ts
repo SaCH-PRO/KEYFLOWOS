@@ -25,6 +25,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 import { ProjectsModule } from './modules/projects/projects.module';
 import { ExpensesModule } from './modules/expenses/expenses.module';
+import { ReportsModule } from './modules/reports/reports.module';
 import { EmailMarketingModule } from './modules/email-marketing/email-marketing.module';
 import { LeadFormsModule } from './modules/lead-forms/lead-forms.module';
 import { TemplatesModule } from './modules/templates/templates.module';
@@ -60,6 +61,7 @@ import { SeedModule } from './core/seed/seed.module';
     SubscriptionsModule,
     ProjectsModule,
     ExpensesModule,
+    ReportsModule,
     EmailMarketingModule,
     LeadFormsModule,
     TemplatesModule,

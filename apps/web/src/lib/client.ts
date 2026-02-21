@@ -2483,6 +2483,62 @@ export async function fetchCashFlowForecast(businessId: string, days = 30): Prom
 }
 
 // ---
+// REPORTS
+// ---
+export interface ReportMetrics {
+  period: { start: string; end: string };
+  currency: string;
+  revenue: {
+    total: number;
+    invoiceCount: number;
+    averageInvoice: number;
+    byStatus: Record<string, { count: number; total: number }>;
+    outstanding: number;
+    outstandingCount: number;
+    overdueCount: number;
+    topClients: Array<{ name: string; total: number }>;
+  };
+  expenses: {
+    total: number;
+    count: number;
+    averageExpense: number;
+    byCategory: Array<{ category: string; total: number; count: number }>;
+    topVendors: Array<{ vendor: string; total: number }>;
+  };
+  profitability: {
+    netProfit: number;
+    profitMargin: number;
+    revenueToExpenseRatio: number | null;
+  };
+  clients: {
+    totalContacts: number;
+    byStatus: Array<{ status: string; count: number }>;
+  };
+  bookings: {
+    total: number;
+    confirmed: number;
+    completed: number;
+    cancelled: number;
+    pending: number;
+    completionRate: number;
+  };
+  products: { total: number };
+  business: { name: string; industry: string | null; archetype: string | null; revenueModel: string | null };
+}
+export interface GeneratedReport {
+  type: string;
+  generatedAt: string;
+  metrics: ReportMetrics;
+  aiNarrative: string;
+}
+export async function fetchReport(businessId: string, type = 'executive', startDate?: string, endDate?: string): Promise<ApiResult<GeneratedReport>> {
+  const params = new URLSearchParams({ type });
+  if (startDate) params.set('startDate', startDate);
+  if (endDate) params.set('endDate', endDate);
+  return apiGetSimple<GeneratedReport>(`/businesses/${encodeURIComponent(businessId)}/reports/generate?${params.toString()}`);
+}
+
+// ---
 // EMAIL MARKETING
 // ---
 export interface EmailCampaign {
