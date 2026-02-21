@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 interface StatItem {
   label: string;
   value: string | number;
-  sub?: string;
+  sub?: React.ReactNode;
   icon: React.ElementType;
   color: string;
 }

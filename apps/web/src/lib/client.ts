@@ -2385,24 +2385,73 @@ export interface Expense {
   vendor?: string;
   receiptUrl?: string;
   notes?: string;
+  paymentMethod?: string;
+  tags?: string[];
   isRecurring: boolean;
   recurringFrequency?: string;
   categoryId?: string;
   category?: ExpenseCategory;
   createdAt: string;
+  updatedAt: string;
 }
 export interface ExpenseSummary {
+  period: string;
+  startDate: string;
+  endDate: string;
   total: number;
   count: number;
-  byCategory: { name: string; total: number; count: number; color?: string }[];
+  averageExpense: number;
+  largestExpense: { id: string; description: string; amount: number; date: string; vendor?: string } | null;
+  comparison: { prevTotal: number; prevCount: number; changePercent: number; direction: 'up' | 'down' | 'flat' };
+  byCategory: { categoryId: string; name: string; color: string | null; total: number; count: number; prevTotal: number; percent: number }[];
+  byPaymentMethod: { method: string; total: number; count: number }[];
   monthlyTrend: { month: string; total: number }[];
+  dailyTrend: { date: string; total: number }[];
+  tags: string[];
 }
-export async function fetchExpenses(businessId: string, params?: { startDate?: string; endDate?: string; categoryId?: string }): Promise<ApiResult<Expense[]>> {
+export interface VendorAnalytics {
+  name: string;
+  total: number;
+  count: number;
+  average: number;
+  lastDate: string;
+  frequency: number;
+}
+export interface ExpenseBudget {
+  id: string;
+  amount: number;
+  month: number;
+  year: number;
+  alertAt: number;
+  rollover: boolean;
+  categoryId?: string;
+  category?: ExpenseCategory;
+  spent: number;
+  remaining: number;
+  percentUsed: number;
+  isOverBudget: boolean;
+  isNearAlert: boolean;
+}
+export const PAYMENT_METHODS = [
+  { value: 'cash', label: 'Cash' },
+  { value: 'card', label: 'Card' },
+  { value: 'bank_transfer', label: 'Bank Transfer' },
+  { value: 'mobile_money', label: 'Mobile Money' },
+  { value: 'cheque', label: 'Cheque' },
+  { value: 'linx', label: 'Linx' },
+  { value: 'other', label: 'Other' },
+];
+export async function fetchExpenses(businessId: string, params?: { startDate?: string; endDate?: string; categoryId?: string; search?: string; paymentMethod?: string; tag?: string; page?: number; limit?: number }): Promise<ApiResult<{ data: Expense[]; total: number; page: number; limit: number }>> {
   const q = new URLSearchParams();
   if (params?.startDate) q.set('startDate', params.startDate);
   if (params?.endDate) q.set('endDate', params.endDate);
   if (params?.categoryId) q.set('categoryId', params.categoryId);
-  return apiGetSimple<Expense[]>(`/expenses/businesses/${encodeURIComponent(businessId)}/expenses?${q}`);
+  if (params?.search) q.set('search', params.search);
+  if (params?.paymentMethod) q.set('paymentMethod', params.paymentMethod);
+  if (params?.tag) q.set('tag', params.tag);
+  if (params?.page) q.set('page', String(params.page));
+  if (params?.limit) q.set('limit', String(params.limit));
+  return apiGetSimple<{ data: Expense[]; total: number; page: number; limit: number }>(`/expenses/businesses/${encodeURIComponent(businessId)}/expenses?${q}`);
 }
 export async function createExpense(businessId: string, data: Partial<Expense>): Promise<ApiResult<Expense>> {
   return apiPost<Expense>({ path: `/expenses/businesses/${encodeURIComponent(businessId)}/expenses`, body: data });
@@ -2422,8 +2471,33 @@ export async function createExpenseCategory(businessId: string, data: { name: st
 export async function deleteExpenseCategory(businessId: string, categoryId: string): Promise<ApiResult<void>> {
   return apiDelete<void>(`/expenses/businesses/${encodeURIComponent(businessId)}/expense-categories/${categoryId}`);
 }
-export async function fetchExpenseSummary(businessId: string, period = '30d'): Promise<ApiResult<ExpenseSummary>> {
-  return apiGetSimple<ExpenseSummary>(`/expenses/businesses/${encodeURIComponent(businessId)}/expenses/summary?period=${period}`);
+export async function fetchExpenseSummary(businessId: string, period = '30d', startDate?: string, endDate?: string): Promise<ApiResult<ExpenseSummary>> {
+  const q = new URLSearchParams({ period });
+  if (startDate) q.set('startDate', startDate);
+  if (endDate) q.set('endDate', endDate);
+  return apiGetSimple<ExpenseSummary>(`/expenses/businesses/${encodeURIComponent(businessId)}/expenses/summary?${q}`);
+}
+export async function fetchVendorAnalytics(businessId: string, period = '30d'): Promise<ApiResult<VendorAnalytics[]>> {
+  return apiGetSimple<VendorAnalytics[]>(`/expenses/businesses/${encodeURIComponent(businessId)}/expenses/vendors?period=${period}`);
+}
+export async function fetchExpenseBudgets(businessId: string, month?: number, year?: number): Promise<ApiResult<ExpenseBudget[]>> {
+  const q = new URLSearchParams();
+  if (month) q.set('month', String(month));
+  if (year) q.set('year', String(year));
+  return apiGetSimple<ExpenseBudget[]>(`/expenses/businesses/${encodeURIComponent(businessId)}/expense-budgets?${q}`);
+}
+export async function upsertExpenseBudget(businessId: string, data: { categoryId?: string; amount: number; month: number; year: number; alertAt?: number; rollover?: boolean }): Promise<ApiResult<ExpenseBudget>> {
+  return apiPost<ExpenseBudget>({ path: `/expenses/businesses/${encodeURIComponent(businessId)}/expense-budgets`, body: data });
+}
+export async function deleteExpenseBudget(businessId: string, budgetId: string): Promise<ApiResult<void>> {
+  return apiDelete<void>(`/expenses/businesses/${encodeURIComponent(businessId)}/expense-budgets/${budgetId}`);
+}
+export function getExpenseExportUrl(businessId: string, params?: { startDate?: string; endDate?: string; categoryId?: string }): string {
+  const q = new URLSearchParams();
+  if (params?.startDate) q.set('startDate', params.startDate);
+  if (params?.endDate) q.set('endDate', params.endDate);
+  if (params?.categoryId) q.set('categoryId', params.categoryId);
+  return `${API_BASE}/expenses/businesses/${encodeURIComponent(businessId)}/expenses/export?${q}`;
 }
 
 // ---
