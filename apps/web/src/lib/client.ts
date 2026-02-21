@@ -239,7 +239,7 @@ const fallbackInvoices: Invoice[] = [
 
 async function apiGet<T>(path: string, schema: z.ZodSchema<T>, fallback?: T): Promise<ApiResult<T>> {
   try {
-    const res = await fetch(`${API_BASE}${path}`, { headers: getAuthHeaders() });
+    const res = await fetch(`${API_BASE}${path}`, { headers: getAuthHeaders(), cache: "no-store" });
     const json = await res.json().catch(() => null);
     if (!res.ok || !json) {
       let message: string = res.statusText;
