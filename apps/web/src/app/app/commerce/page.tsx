@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { z } from "zod";
@@ -14,6 +14,10 @@ import {
   X,
   Mail,
   RefreshCw,
+  Upload,
+  ImageIcon,
+  Trash2,
+  Link2,
 } from "lucide-react";
 import {
   createProduct,
@@ -36,6 +40,7 @@ import { ContactPickerDrawer } from "@/components/contacts";
 import { Send } from "lucide-react";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
+import { saveProductImage, deleteProductImage, fileToDataUrl, getAllProductImages } from "@/lib/image-store";
 import { Tab, ProductForm, InvoiceLineItem, CATEGORIES, generateItemId } from "./components/commerce-types";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import CommerceDashboard from "./components/commerce-dashboard";
@@ -93,6 +98,10 @@ export default function CommercePage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [productSearch, setProductSearch] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageMode, setImageMode] = useState<"upload" | "url">("upload");
+  const [cachedImages, setCachedImages] = useState<Record<string, string>>({});
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [confirmDisconnectGmail, setConfirmDisconnectGmail] = useState(false);
 
   const [recurringTriggerNew, setRecurringTriggerNew] = useState(0);
@@ -146,6 +155,11 @@ export default function CommercePage() {
         setQuotes(quotesRes.data ?? []);
         if (gmailRes.data) setGmailStatus(gmailRes.data);
         if (productsRes.error) setError(productsRes.error);
+        try {
+          const imgs = await getAllProductImages();
+          setCachedImages(imgs);
+        } catch {}
+
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load data");
       } finally {
@@ -167,11 +181,13 @@ export default function CommercePage() {
       sku: "",
       isActive: true,
     });
+    setImagePreview(null);
+    setImageMode("upload");
     setFormError(null);
     setShowProductForm(true);
   }
 
-  function openEditProduct(product: Product) {
+  async function openEditProduct(product: Product) {
     setEditingProductId(product.id);
     setProductForm({
       name: product.name,
@@ -183,6 +199,17 @@ export default function CommercePage() {
       sku: product.sku || "",
       isActive: product.isActive ?? true,
     });
+    const cached = cachedImages[product.id] ?? null;
+    if (cached) {
+      setImagePreview(cached);
+      setImageMode("upload");
+    } else if (product.imageUrl) {
+      setImagePreview(product.imageUrl);
+      setImageMode("url");
+    } else {
+      setImagePreview(null);
+      setImageMode("upload");
+    }
     setFormError(null);
     setShowProductForm(true);
   }
@@ -200,7 +227,29 @@ export default function CommercePage() {
       sku: "",
       isActive: true,
     });
+    setImagePreview(null);
+    setImageMode("upload");
     setFormError(null);
+  }
+
+  const handleFileSelect = useCallback(async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please select an image file");
+      return;
+    }
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      setImagePreview(dataUrl);
+      setProductForm((f) => ({ ...f, imageUrl: "__local__" }));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to load image");
+    }
+  }, []);
+
+  function removeImage() {
+    setImagePreview(null);
+    setProductForm((f) => ({ ...f, imageUrl: "" }));
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   async function handleSaveProduct() {
@@ -217,6 +266,9 @@ export default function CommercePage() {
     if (!businessId) return;
     const durationValue = productForm.duration ? parseInt(productForm.duration) : null;
 
+    const isLocalImage = imagePreview?.startsWith("data:");
+    const serverImageUrl = isLocalImage ? null : (productForm.imageUrl || null);
+
     if (editingProductId) {
       const { data, error } = await updateProduct({
         businessId,
@@ -226,12 +278,19 @@ export default function CommercePage() {
         description: parsed.data.description ?? null,
         category: productForm.category,
         duration: durationValue,
-        imageUrl: productForm.imageUrl || null,
+        imageUrl: serverImageUrl,
         sku: productForm.sku || null,
         isActive: productForm.isActive,
       });
       if (error) { setFormError(error); toast.error("Failed to update product"); return; }
       if (data) {
+        if (isLocalImage && imagePreview) {
+          await saveProductImage(editingProductId, imagePreview);
+          setCachedImages((prev) => ({ ...prev, [editingProductId]: imagePreview }));
+        } else if (!imagePreview) {
+          await deleteProductImage(editingProductId);
+          setCachedImages((prev) => { const n = { ...prev }; delete n[editingProductId]; return n; });
+        }
         setProducts((prev) => prev.map((p) => (p.id === editingProductId ? { ...p, ...data } : p)));
         closeProductForm();
         toast.success("Product updated");
@@ -244,12 +303,16 @@ export default function CommercePage() {
         description: parsed.data.description,
         category: productForm.category,
         duration: durationValue,
-        imageUrl: productForm.imageUrl || null,
+        imageUrl: serverImageUrl,
         sku: productForm.sku || null,
         isActive: productForm.isActive,
       });
       if (error) { setFormError(error); toast.error("Failed to create product"); return; }
       if (data) {
+        if (isLocalImage && imagePreview) {
+          await saveProductImage(data.id, imagePreview);
+          setCachedImages((prev) => ({ ...prev, [data.id]: imagePreview }));
+        }
         setProducts((prev) => [data, ...prev]);
         closeProductForm();
         toast.success("Product created");
@@ -261,6 +324,8 @@ export default function CommercePage() {
     if (!businessId) return;
     const { error } = await deleteProduct(productId, businessId);
     if (error) { setError(error); toast.error("Failed to delete product"); return; }
+    await deleteProductImage(productId).catch(() => {});
+    setCachedImages((prev) => { const n = { ...prev }; delete n[productId]; return n; });
     setProducts((prev) => prev.filter((p) => p.id !== productId));
     setDeleteConfirm(null);
     toast.success("Product deleted");
@@ -458,6 +523,7 @@ export default function CommercePage() {
               onAdd={openAddProduct}
               deleteConfirm={deleteConfirm}
               setDeleteConfirm={setDeleteConfirm}
+              cachedImages={cachedImages}
             />
           </motion.div>
         )}
@@ -589,38 +655,117 @@ export default function CommercePage() {
                     className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 resize-none"
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Image URL</label>
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">Product Image</label>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setImageMode("upload")}
+                        className={`px-2 py-0.5 text-[10px] rounded-md transition-colors ${
+                          imageMode === "upload"
+                            ? "bg-primary/20 text-primary border border-primary/30"
+                            : "text-muted-foreground hover:bg-muted border border-transparent"
+                        }`}
+                      >
+                        <Upload className="w-3 h-3 inline mr-1" />
+                        Upload
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setImageMode("url")}
+                        className={`px-2 py-0.5 text-[10px] rounded-md transition-colors ${
+                          imageMode === "url"
+                            ? "bg-primary/20 text-primary border border-primary/30"
+                            : "text-muted-foreground hover:bg-muted border border-transparent"
+                        }`}
+                      >
+                        <Link2 className="w-3 h-3 inline mr-1" />
+                        URL
+                      </button>
+                    </div>
+                  </div>
+                  {imagePreview ? (
+                    <div className="relative rounded-xl border border-border/60 overflow-hidden bg-muted/20 group/img">
+                      <img
+                        src={imagePreview}
+                        alt="Preview"
+                        className="w-full h-36 object-cover"
+                        onError={(e) => { (e.target as HTMLImageElement).src = ""; setImagePreview(null); }}
+                      />
+                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="p-2 rounded-lg bg-white/20 hover:bg-white/30 text-white transition-colors"
+                          title="Replace image"
+                        >
+                          <Upload className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={removeImage}
+                          className="p-2 rounded-lg bg-red-500/30 hover:bg-red-500/50 text-white transition-colors"
+                          title="Remove image"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ) : imageMode === "upload" ? (
+                    <div
+                      onClick={() => fileInputRef.current?.click()}
+                      onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add("border-primary/60", "bg-primary/5"); }}
+                      onDragLeave={(e) => { e.preventDefault(); e.currentTarget.classList.remove("border-primary/60", "bg-primary/5"); }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.currentTarget.classList.remove("border-primary/60", "bg-primary/5");
+                        const file = e.dataTransfer.files[0];
+                        if (file) handleFileSelect(file);
+                      }}
+                      className="w-full h-28 rounded-xl border-2 border-dashed border-border/60 bg-muted/10 flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-primary/40 hover:bg-primary/5 transition-all"
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-muted/30 flex items-center justify-center">
+                        <ImageIcon className="w-5 h-5 text-muted-foreground" />
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs font-medium text-muted-foreground">Click or drag to upload</p>
+                        <p className="text-[10px] text-muted-foreground/60 mt-0.5">PNG, JPG, WEBP up to 5 MB</p>
+                      </div>
+                    </div>
+                  ) : (
                     <input
                       type="url"
-                      value={productForm.imageUrl}
-                      onChange={(e) => setProductForm((f) => ({ ...f, imageUrl: e.target.value }))}
+                      value={productForm.imageUrl === "__local__" ? "" : productForm.imageUrl}
+                      onChange={(e) => {
+                        setProductForm((f) => ({ ...f, imageUrl: e.target.value }));
+                        setImagePreview(e.target.value || null);
+                      }}
                       placeholder="https://example.com/image.jpg"
                       className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50"
                     />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1.5 block">SKU</label>
-                    <input
-                      type="text"
-                      value={productForm.sku}
-                      onChange={(e) => setProductForm((f) => ({ ...f, sku: e.target.value }))}
-                      placeholder="e.g. SVC-001, PKG-DELUXE"
-                      className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50"
-                    />
-                  </div>
+                  )}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleFileSelect(file);
+                    }}
+                  />
                 </div>
-                {productForm.imageUrl && (
-                  <div className="rounded-xl border border-border/60 overflow-hidden bg-muted/20">
-                    <img
-                      src={productForm.imageUrl}
-                      alt="Preview"
-                      className="w-full h-32 object-cover"
-                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                    />
-                  </div>
-                )}
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">SKU</label>
+                  <input
+                    type="text"
+                    value={productForm.sku}
+                    onChange={(e) => setProductForm((f) => ({ ...f, sku: e.target.value }))}
+                    placeholder="e.g. SVC-001, PKG-DELUXE"
+                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50"
+                  />
+                </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Price (TTD) *</label>

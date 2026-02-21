@@ -11,6 +11,7 @@ interface ProductCardProps {
   onDelete: (productId: string) => void;
   deleteConfirm: string | null;
   setDeleteConfirm: (id: string | null) => void;
+  cachedImage?: string;
 }
 
 const CATEGORY_STYLES: Record<string, { badge: string; accent: string }> = {
@@ -31,11 +32,13 @@ export function ProductCard({
   onDelete,
   deleteConfirm,
   setDeleteConfirm,
+  cachedImage,
 }: ProductCardProps) {
   const isInactive = product.isActive === false;
   const isDeleting = deleteConfirm === product.id;
   const [imgError, setImgError] = useState(false);
   const style = CATEGORY_STYLES[product.category] ?? CATEGORY_STYLES.SERVICE;
+  const displayImage = cachedImage || product.imageUrl;
 
   return (
     <motion.div
@@ -49,10 +52,10 @@ export function ProductCard({
       }`}
     >
       <div className="relative">
-        {product.imageUrl && !imgError ? (
+        {displayImage && !imgError ? (
           <div className="w-full h-40 overflow-hidden">
             <img
-              src={product.imageUrl}
+              src={displayImage}
               alt={product.name}
               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
               onError={() => setImgError(true)}

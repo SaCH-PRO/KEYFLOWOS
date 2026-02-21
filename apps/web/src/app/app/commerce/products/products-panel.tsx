@@ -17,6 +17,7 @@ interface ProductsPanelProps {
   onAdd: () => void;
   deleteConfirm: string | null;
   setDeleteConfirm: (id: string | null) => void;
+  cachedImages?: Record<string, string>;
 }
 
 const CATEGORY_FILTERS = [
@@ -36,6 +37,7 @@ export function ProductsPanel({
   onAdd,
   deleteConfirm,
   setDeleteConfirm,
+  cachedImages = {},
 }: ProductsPanelProps) {
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
   const [showInactive, setShowInactive] = useState(false);
@@ -171,6 +173,7 @@ export function ProductsPanel({
                 onDelete={onDelete}
                 deleteConfirm={deleteConfirm}
                 setDeleteConfirm={setDeleteConfirm}
+                cachedImage={cachedImages[product.id]}
               />
             ))}
           </AnimatePresence>
