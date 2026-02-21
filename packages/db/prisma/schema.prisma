@@ -119,6 +119,7 @@ model Business {
   cohortMembers    CohortMember[]
   landingPages     LandingPage[]
   webhooks         Webhook[]
+  aiUsageLogs      AiUsageLog[]
 
   // Gmail Integration for sending quotes/invoices
   gmailEmail        String?   @map("gmail_email")
@@ -882,6 +883,27 @@ model Subscription {
 
   @@index([businessId, status])
   @@map("subscriptions")
+}
+
+model AiUsageLog {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  feature    String
+  model      String   @default("gpt-5.2")
+  promptTokens   Int  @default(0) @map("prompt_tokens")
+  completionTokens Int @default(0) @map("completion_tokens")
+  totalTokens    Int  @default(0) @map("total_tokens")
+  estimatedCost  Float @default(0) @map("estimated_cost")
+  creditsUsed    Int   @default(1) @map("credits_used")
+
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, createdAt])
+  @@index([businessId, feature])
+  @@map("ai_usage_logs")
 }
 
 // ---

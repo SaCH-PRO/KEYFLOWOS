@@ -2483,6 +2483,56 @@ export async function fetchCashFlowForecast(businessId: string, days = 30): Prom
 }
 
 // ---
+// AI USAGE & BILLING
+// ---
+export interface AiUsageSummary {
+  currentPlan: string;
+  creditsUsed: number;
+  creditsLimit: number;
+  creditsRemaining: number;
+  isUnlimited: boolean;
+  overageCredits: number;
+  overageCost: number;
+  overageCurrency: string;
+  totalEstimatedCost: number;
+  periodStart: string;
+  periodEnd: string;
+  byFeature: Array<{ feature: string; credits: number; calls: number; cost: number }>;
+}
+export interface AiCreditsInfo {
+  allowed: boolean;
+  used: number;
+  limit: number;
+  remaining: number;
+  isUnlimited: boolean;
+}
+export interface AiBillingSummary {
+  subscription: { plan: string; status: string; monthlyCost: number; currency: string; periodEnd: string | null };
+  aiUsage: { creditsUsed: number; creditsLimit: number; isUnlimited: boolean; overageCredits: number; overageCost: number; estimatedApiCost: number };
+  totalMonthlyCost: number;
+  currency: string;
+  breakdown: Array<{ item: string; amount: number }>;
+}
+export interface AiUsageHistoryResponse {
+  logs: Array<{ id: string; feature: string; model: string; promptTokens: number; completionTokens: number; totalTokens: number; estimatedCost: number; creditsUsed: number; createdAt: string }>;
+  total: number;
+  limit: number;
+  offset: number;
+}
+export async function fetchAiUsageSummary(businessId: string): Promise<ApiResult<AiUsageSummary>> {
+  return apiGetSimple<AiUsageSummary>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/usage`);
+}
+export async function fetchAiCredits(businessId: string): Promise<ApiResult<AiCreditsInfo>> {
+  return apiGetSimple<AiCreditsInfo>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/credits`);
+}
+export async function fetchAiBilling(businessId: string): Promise<ApiResult<AiBillingSummary>> {
+  return apiGetSimple<AiBillingSummary>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/billing`);
+}
+export async function fetchAiUsageHistory(businessId: string, limit = 50, offset = 0): Promise<ApiResult<AiUsageHistoryResponse>> {
+  return apiGetSimple<AiUsageHistoryResponse>(`/ai/businesses/${encodeURIComponent(businessId)}/ai/usage/history?limit=${limit}&offset=${offset}`);
+}
+
+// ---
 // REPORTS
 // ---
 export interface ReportMetrics {

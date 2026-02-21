@@ -1,19 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import OpenAI from 'openai';
+import { AiUsageService } from '../ai/ai-usage.service';
 
 @Injectable()
 export class ReportsService {
   private readonly logger = new Logger(ReportsService.name);
-  private readonly openai: OpenAI;
-  private readonly model = 'gpt-5.2';
 
-  constructor(private readonly prisma: PrismaService) {
-    this.openai = new OpenAI({
-      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-    });
-  }
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly aiUsage: AiUsageService,
+  ) {}
 
   async generateReport(businessId: string, type: string, startDate?: string, endDate?: string) {
     const now = new Date();
@@ -221,17 +217,18 @@ ${type === 'clients' ? `Write a Client Portfolio Analysis with: 1) Portfolio Ove
 
 Use ${currency} for all monetary values. Be specific with numbers. Keep each section concise but insightful. Format with clear section headers using **bold**.`;
 
-      const response = await this.openai.chat.completions.create({
-        model: this.model,
+      const result = await this.aiUsage.callAi({
+        businessId,
+        feature: 'report_narrative',
         messages: [
           { role: 'system', content: `You are a senior business analyst preparing professional reports for ${metrics.business.name}. Write clear, data-driven narratives suitable for board-level presentations. Use ${currency} currency. Be precise and actionable.` },
           { role: 'user', content: prompt },
         ],
-        max_tokens: 1500,
+        maxTokens: 1500,
         temperature: 0.4,
       });
 
-      aiNarrative = response.choices[0]?.message?.content ?? '';
+      aiNarrative = result.content;
     } catch (error) {
       this.logger.error(`Report AI narrative error: ${(error as Error).message}`);
       aiNarrative = 'AI analysis is temporarily unavailable. Please review the data metrics below.';

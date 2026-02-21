@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Inject, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { AiAdvisorService } from './ai-advisor.service';
+import { AiUsageService } from './ai-usage.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 
@@ -7,6 +8,7 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 export class AiController {
   constructor(
     @Inject(AiAdvisorService) private readonly advisor: AiAdvisorService,
+    @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {}
 
   @Get('health')
@@ -54,5 +56,37 @@ export class AiController {
     @Body() body: { title?: string; description?: string; content?: string; url?: string },
   ) {
     return this.advisor.scoreSEO(body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/usage')
+  async getUsageSummary(@Param('businessId') businessId: string) {
+    return this.aiUsage.getUsageSummary(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/usage/history')
+  async getUsageHistory(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.aiUsage.getUsageHistory(
+      businessId,
+      limit ? parseInt(limit, 10) : 50,
+      offset ? parseInt(offset, 10) : 0,
+    );
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/credits')
+  async getCredits(@Param('businessId') businessId: string) {
+    return this.aiUsage.checkCredits(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/billing')
+  async getBilling(@Param('businessId') businessId: string) {
+    return this.aiUsage.getBillingSummary(businessId);
   }
 }
