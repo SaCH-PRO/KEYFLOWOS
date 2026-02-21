@@ -20,7 +20,7 @@ import {
   updateStorefrontConfig,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
-import { onProductsChanged } from "@/lib/product-sync";
+import { onProductsChanged, hasProductChangedSinceLastFetch, markProductsFetched } from "@/lib/product-sync";
 import { StoreHeader } from "./components/store-header";
 import { StoreSettings } from "./components/store-settings";
 import { HoursEditor, DEFAULT_HOURS, type BusinessHoursMap } from "./components/hours-editor";
@@ -111,6 +111,9 @@ export default function StorePage() {
       setServices(loadedServices);
       setStaff(staffRes.data ?? []);
       setCommerceProducts(loadedProducts);
+      if (loadedProducts.length > 0 || !(productsRes as any)?.error) {
+        markProductsFetched();
+      }
       if (bizRes.data) {
         setBusinessData(bizRes.data);
         setStoreSlug(bizRes.data.slug ?? "");
@@ -153,17 +156,25 @@ export default function StorePage() {
   }, [loadData]);
 
   useEffect(() => {
+    if (businessId && hasProductChangedSinceLastFetch()) {
+      void loadData();
+    }
+  }, [businessId, loadData]);
+
+  useEffect(() => {
     const unsub = onProductsChanged(() => {
       void loadData();
     });
 
     const handleFocus = () => {
-      void loadData();
+      if (hasProductChangedSinceLastFetch()) {
+        void loadData();
+      }
     };
     window.addEventListener("focus", handleFocus);
 
     const handleVisibility = () => {
-      if (document.visibilityState === "visible") {
+      if (document.visibilityState === "visible" && hasProductChangedSinceLastFetch()) {
         void loadData();
       }
     };
