@@ -31,6 +31,7 @@ import { LeadFormsModule } from './modules/lead-forms/lead-forms.module';
 import { TemplatesModule } from './modules/templates/templates.module';
 import { EducationModule } from './modules/education/education.module';
 import { CommunityModule } from './modules/community/community.module';
+import { MarketplaceModule } from './modules/marketplace/marketplace.module';
 import { SeedModule } from './core/seed/seed.module';
 
 @Module({
@@ -67,6 +68,7 @@ import { SeedModule } from './core/seed/seed.module';
     TemplatesModule,
     EducationModule,
     CommunityModule,
+    MarketplaceModule,
     SeedModule,
   ],
   controllers: [AppController],

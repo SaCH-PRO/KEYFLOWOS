@@ -32,12 +32,14 @@ import {
   Megaphone,
   GraduationCap,
   FolderKanban,
+  Globe,
 } from "lucide-react";
 
 const navItems = [
   { label: "Command", href: "/app", icon: Zap },
   { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
   { label: "Commerce", href: "/app/commerce", icon: CreditCard },
+  { label: "Marketplace", href: "/app/marketplace", icon: Globe },
   { label: "Bookings", href: "/app/bookings", icon: Calendar },
   { label: "Store", href: "/app/store", icon: Store },
   { label: "Social", href: "/app/social", icon: MessageCircle },
