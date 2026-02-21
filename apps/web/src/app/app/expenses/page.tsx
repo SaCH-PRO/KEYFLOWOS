@@ -37,6 +37,7 @@ import {
 import { API_BASE, getAuthHeaders } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
+import { FeatureGuide } from "@/components/ui/feature-guide";
 import { StatCards } from "@/components/ui/stat-cards";
 
 const CATEGORY_COLORS = [
@@ -306,6 +307,19 @@ export default function ExpensesPage() {
         subtitle="Track and manage your business expenses"
         actionLabel="Add Expense"
         onAction={openAddModal}
+      />
+
+      <FeatureGuide
+        featureKey="expenses"
+        title="Getting Started with Expenses"
+        description="Track business spending, categorize costs, and stay on top of your tax obligations."
+        steps={[
+          { title: "Add Expenses", description: "Log each expense with amount, vendor, date, and category." },
+          { title: "Organize by Category", description: "Create custom categories to sort spending (e.g., Supplies, Travel, Software)." },
+          { title: "Upload Receipts", description: "Attach receipt images to expenses for record-keeping and tax time." },
+          { title: "Review Analytics", description: "See spending breakdowns by category and monthly trends at a glance." },
+          { title: "Estimate Taxes", description: "Use the tax calculator to estimate VAT obligations based on your expenses." },
+        ]}
       />
 
       <StatCards

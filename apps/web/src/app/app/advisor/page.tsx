@@ -31,6 +31,7 @@ import {
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
+import { FeatureGuide } from "@/components/ui/feature-guide";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -158,6 +159,19 @@ export default function AdvisorPage() {
         icon={Brain}
         title="KeyFlow AI Advisor"
         subtitle="Your AI co-founder for strategy, finances, and operations"
+      />
+
+      <FeatureGuide
+        featureKey="advisor"
+        title="Meet Your AI Co-Founder"
+        description="Get strategic business advice, financial forecasts, and simulation scenarios powered by AI."
+        steps={[
+          { title: "Chat with AI", description: "Ask questions about your business, strategy, pricing, or operations in natural language." },
+          { title: "Daily Briefing", description: "Get an AI-generated summary of your business activity, priorities, and suggestions." },
+          { title: "Cash Flow Forecast", description: "View AI-predicted revenue and expense trends for the coming months." },
+          { title: "What-If Scenarios", description: "Simulate business decisions (e.g., raise prices, hire staff) to see projected impact." },
+          { title: "Voice Input", description: "Use the microphone button to speak your questions instead of typing." },
+        ]}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4" style={{ minHeight: "calc(100vh - 200px)" }}>

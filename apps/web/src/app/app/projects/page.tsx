@@ -29,6 +29,7 @@ import {
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
+import { FeatureGuide } from "@/components/ui/feature-guide";
 
 const STATUS_COLUMNS = [
   { key: "ACTIVE", label: "Active", color: "hsl(var(--kf-accent2))" },
@@ -185,6 +186,18 @@ export default function ProjectsPage() {
         subtitle="Manage your projects and tasks"
         actionLabel="New Project"
         onAction={() => setShowNewProject(true)}
+      />
+
+      <FeatureGuide
+        featureKey="projects"
+        title="Getting Started with Projects"
+        description="Organize work into projects with tasks, deadlines, and a visual Kanban board."
+        steps={[
+          { title: "Create a Project", description: "Set up a project with a name, description, status, and priority level." },
+          { title: "Add Tasks", description: "Break projects into tasks with titles, deadlines, and assignees." },
+          { title: "Use Kanban Board", description: "Drag and drop tasks across columns (To Do, In Progress, Done) to track progress." },
+          { title: "Track Status", description: "Monitor project health with status indicators and completion tracking." },
+        ]}
       />
 
       <AnimatePresence>

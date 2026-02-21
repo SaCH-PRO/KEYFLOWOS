@@ -47,6 +47,7 @@ import { StorefrontPreview } from "./components/storefront-preview";
 import { AppearanceCustomizer } from "./components/appearance-customizer";
 import { MerchandisingPanel } from "./components/merchandising-panel";
 import { StoreAnalyticsDashboard } from "./components/store-analytics";
+import { FeatureGuide } from "@/components/ui/feature-guide";
 
 type Banner = { text: string; type: "success" | "error" | "info" | "warning" };
 type DriftedItem = {
@@ -437,6 +438,20 @@ export default function StorePage() {
         storeEnabled={storeEnabled}
         publicUrl={getPublicBookingUrl()}
         onToggleEnabled={toggleStoreEnabled}
+      />
+
+      <FeatureGuide
+        featureKey="store"
+        title="Getting Started with Your Online Store"
+        description="Set up your public storefront where customers can browse services, book appointments, and shop."
+        steps={[
+          { title: "Toggle Store Live", description: "Use the ON/Live switch at the top to make your store visible to customers." },
+          { title: "Add Services & Products", description: "Go to the Catalog tab to add your bookable services and products with prices." },
+          { title: "Customize Appearance", description: "Choose a theme, set your brand colors, hero image, and layout style in the Appearance tab." },
+          { title: "Set Business Hours", description: "Configure your operating hours so customers know when you're available." },
+          { title: "Share Your Link", description: "Copy your public store URL and share it on WhatsApp, social media, or your website." },
+          { title: "Track Performance", description: "Monitor page views, popular items, and conversion rates in the Analytics tab." },
+        ]}
       />
 
       {!storeEnabled && (

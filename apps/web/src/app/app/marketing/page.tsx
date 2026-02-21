@@ -43,6 +43,7 @@ import {
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
+import { FeatureGuide } from "@/components/ui/feature-guide";
 import { TabNav } from "@/components/ui/tab-nav";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -272,6 +273,20 @@ export default function MarketingPage() {
         subtitle={`${campaigns.length} campaigns · ${forms.length} lead forms`}
         actionLabel={activeTab === "campaigns" ? "New Campaign" : "New Form"}
         onAction={activeTab === "campaigns" ? openNewCampaign : openNewForm}
+      />
+
+      <FeatureGuide
+        featureKey="marketing"
+        title="Getting Started with Marketing"
+        description="Reach your audience with email campaigns and capture new leads with custom forms."
+        steps={[
+          { title: "Create a Campaign", description: "Write your email content, choose a subject line, and save as draft." },
+          { title: "Segment Your Audience", description: "Target specific contacts by tags or status (leads, clients, etc.)." },
+          { title: "Send & Track", description: "Send your campaign and monitor open rates, click-through, and delivery stats." },
+          { title: "Build Lead Forms", description: "Create custom forms with fields like name, email, phone, and dropdowns." },
+          { title: "Share Form Links", description: "Get a public URL or embed code to place forms on any website." },
+          { title: "Auto-Add to CRM", description: "Form submissions automatically create contacts in your CRM." },
+        ]}
       />
 
       <TabNav

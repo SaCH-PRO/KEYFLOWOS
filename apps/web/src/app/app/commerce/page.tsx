@@ -30,6 +30,7 @@ import {
   Quote,
 } from "@/lib/client";
 import { PageHeader } from "@/components/ui/page-header";
+import { FeatureGuide } from "@/components/ui/feature-guide";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { Tab, ProductForm, InvoiceLineItem, CATEGORIES, generateItemId } from "./components/commerce-types";
 import CommerceDashboard from "./components/commerce-dashboard";
@@ -390,6 +391,20 @@ export default function CommercePage() {
             </div>
           </div>
         }
+      />
+
+      <FeatureGuide
+        featureKey="commerce"
+        title="Getting Started with Commerce"
+        description="Manage your products, invoices, quotes, and recurring billing all in one place."
+        steps={[
+          { title: "Add Products", description: "Create your product and service catalog with prices, categories, and descriptions." },
+          { title: "Create Invoices", description: "Generate professional invoices, set payment terms, and track payment status." },
+          { title: "Send Quotes", description: "Build quotes for clients, then convert accepted quotes into invoices with one click." },
+          { title: "Set Up Recurring", description: "Automate repeat billing with weekly, monthly, or custom schedules." },
+          { title: "Track Payments", description: "Monitor paid, pending, and overdue invoices. Share payment links via WhatsApp." },
+          { title: "Connect Gmail", description: "Link your Gmail to send quotes and invoices directly via email." },
+        ]}
       />
 
       <CommerceDashboard invoices={invoices} quotes={quotes} products={products} />
