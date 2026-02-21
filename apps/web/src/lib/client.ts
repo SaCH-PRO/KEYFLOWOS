@@ -248,15 +248,18 @@ async function apiGet<T>(path: string, schema: z.ZodSchema<T>, fallback?: T): Pr
       if (typeof json === "object" && json && "message" in json && typeof (json as Record<string, unknown>).message === "string") {
         message = (json as Record<string, string>).message;
       }
+      console.warn(`[apiGet] ${path} failed:`, message);
       return { data: fallback ?? null, error: message };
     }
     const parsed = schema.safeParse(json);
     if (!parsed.success) {
-      return { data: fallback ?? null, error: "Failed to parse response" };
+      console.warn(`[apiGet] ${path} schema validation failed, using raw data`);
+      return { data: json as T, error: null };
     }
     return { data: parsed.data, error: null };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Network error";
+    console.warn(`[apiGet] ${path} error:`, message);
     return { data: fallback ?? null, error: message };
   }
 }
@@ -400,7 +403,6 @@ export async function fetchProducts(businessId: string = DEFAULT_BUSINESS_ID) {
   return apiGet(
     `/commerce/businesses/${encodeURIComponent(businessId)}/products`,
     z.array(productSchema),
-    fallbackProducts,
   );
 }
 

@@ -170,6 +170,21 @@ export default function CommercePage() {
     void load();
   }, [businessId]);
 
+  useEffect(() => {
+    if (!businessId) return;
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && businessId) {
+        const reload = async () => {
+          const productsRes = await fetchProducts(businessId);
+          setProducts((productsRes.data ?? []).map((p) => ({ ...p, currency: p.currency ?? "TTD" } as Product)));
+        };
+        void reload();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [businessId]);
+
   function openAddProduct() {
     setEditingProductId(null);
     setProductForm({
