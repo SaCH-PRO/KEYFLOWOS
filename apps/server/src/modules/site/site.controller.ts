@@ -1,9 +1,9 @@
-import { Controller, Get, Put, Post, Param, Body, Query } from '@nestjs/common';
+import { Controller, Get, Put, Post, Param, Body, Query, Inject } from '@nestjs/common';
 import { SiteService } from './site.service';
 
 @Controller('site')
 export class SiteController {
-  constructor(private readonly siteService: SiteService) {}
+  constructor(@Inject(SiteService) private readonly siteService: SiteService) {}
 
   @Get('health')
   health() {
