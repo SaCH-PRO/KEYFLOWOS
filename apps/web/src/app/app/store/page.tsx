@@ -162,9 +162,17 @@ export default function StorePage() {
     };
     window.addEventListener("focus", handleFocus);
 
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        void loadData();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+
     return () => {
       unsub();
       window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [loadData]);
 
