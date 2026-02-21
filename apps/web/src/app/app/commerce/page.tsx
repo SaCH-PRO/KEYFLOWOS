@@ -606,7 +606,7 @@ export default function CommercePage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto"
             role="dialog"
             aria-modal="true"
             aria-labelledby="product-modal-title"
@@ -616,9 +616,9 @@ export default function CommercePage() {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-lg bg-card rounded-2xl border border-border shadow-2xl overflow-hidden"
+              className="w-full max-w-lg bg-card rounded-2xl border border-border shadow-2xl overflow-hidden my-auto"
             >
-              <div className="p-5 border-b border-border flex items-center justify-between">
+              <div className="p-5 border-b border-border flex items-center justify-between sticky top-0 bg-card z-10">
                 <h2 id="product-modal-title" className="text-lg font-semibold flex items-center gap-2">
                   <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/30 to-secondary/30 flex items-center justify-center">
                     <Package className="w-4 h-4 text-primary" />
@@ -629,7 +629,7 @@ export default function CommercePage() {
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <div className="p-5 space-y-4">
+              <div className="p-5 space-y-4 max-h-[calc(100vh-10rem)] overflow-y-auto">
                 {formError && (
                   <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
                     {formError}
