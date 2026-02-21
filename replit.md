@@ -44,7 +44,9 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **MasterClass (Education):** Micro-course catalog with progress tracking and certificate generation.
 - **Community Hub:** Peer discussion forum with various post types, likes, comments, and cohort-based founder circles.
 - **Projects & Playbooks (Merged):** Unified page at /app/projects with tabbed navigation. Projects tab: Kanban board with task management. Playbooks tab: event-driven automations with triggers and actions. Contextual "How this works" explainer buttons in each tab.
-- **Core Modules:** Identity, CRM, Commerce, Bookings, Social, Projects & Playbooks, Flow (Activity & Search), Reports, Command, Expenses, Webhooks, AI, Email Marketing, Lead Forms, Templates, Education, Community.
+- **Global Commerce / Marketplace:** International selling pipeline at /app/marketplace with 8 tabs: Dashboard (KPI overview), Catalog (product listings with LOCAL/REGIONAL/INTERNATIONAL reach), Orders (cross-border marketplace orders), Shipments (carrier tracking with status timeline), Customs (import/export declarations with HS codes, duties, clearance), Warehousing (multi-warehouse inventory management with reorder alerts), Pre-Orders (deposit tracking, fulfillment), Purchase Orders (supplier procurement). Supports multi-currency, shipping zones, and customs clearance workflow.
+- **AI Usage Billing:** Centralized AI metering via AiUsageService. All AI calls tracked with token/cost logging. Tiered credit system (Free: 10/mo, Flow: 100/mo, KeyFlow: unlimited). Overage billing at TT$2.50/US$0.35 per credit. Billing dashboard in settings.
+- **Core Modules:** Identity, CRM, Commerce, Marketplace, Bookings, Social, Projects & Playbooks, Flow (Activity & Search), Reports, Command, Expenses, Webhooks, AI, Email Marketing, Lead Forms, Templates, Education, Community.
 
 ## External Dependencies
 - **Database:** PostgreSQL

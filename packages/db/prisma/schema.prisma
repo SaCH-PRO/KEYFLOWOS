@@ -120,6 +120,15 @@ model Business {
   landingPages     LandingPage[]
   webhooks         Webhook[]
   aiUsageLogs      AiUsageLog[]
+  marketplaceListings MarketplaceListing[]
+  shippingZones    ShippingZone[]
+  warehouses       Warehouse[]
+  inventoryStocks  InventoryStock[]
+  shipments        Shipment[]
+  customsDeclarations CustomsDeclaration[]
+  preOrders        PreOrder[]
+  purchaseOrders   PurchaseOrder[]
+  marketplaceOrders MarketplaceOrder[]
 
   // Gmail Integration for sending quotes/invoices
   gmailEmail        String?   @map("gmail_email")
@@ -393,6 +402,10 @@ model Product {
   quoteItems      QuoteItem[]
   invoiceItems    InvoiceItem[]
   projectTemplate ProjectTemplate? // Link to a project template
+  marketplaceListings MarketplaceListing[]
+  inventoryStocks InventoryStock[]
+  preOrders       PreOrder[]
+  orderItems      MarketplaceOrderItem[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
@@ -1270,4 +1283,304 @@ model Webhook {
   updatedAt  DateTime @updatedAt @map("updated_at")
   business   Business @relation(fields: [businessId], references: [id])
   @@map("webhooks")
+}
+
+// ---
+// MODULE 18: GLOBAL COMMERCE / MARKETPLACE
+// ---
+
+model MarketplaceListing {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  productId   String   @map("product_id")
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  marketReach  String   @default("LOCAL") @map("market_reach")
+  countries    String[]
+  regions      String[]
+
+  pricingOverrides Json?  @map("pricing_overrides")
+  shippingEnabled  Boolean @default(true) @map("shipping_enabled")
+  digitalDelivery  Boolean @default(false) @map("digital_delivery")
+
+  hsCode          String?  @map("hs_code")
+  originCountry   String?  @map("origin_country")
+  weight          Float?
+  weightUnit      String?  @default("kg") @map("weight_unit")
+  dimensions      Json?
+
+  minOrderQty     Int      @default(1) @map("min_order_qty")
+  maxOrderQty     Int?     @map("max_order_qty")
+  leadTimeDays    Int?     @map("lead_time_days")
+
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId])
+  @@index([marketReach])
+  @@map("marketplace_listings")
+}
+
+model ShippingZone {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  name        String
+  countries   String[]
+  regions     String[]
+  baseFee     Float    @default(0) @map("base_fee")
+  perKgRate   Float    @default(0) @map("per_kg_rate")
+  freeAbove   Float?   @map("free_above")
+  currency    String   @default("TTD")
+  estimatedDays Int?   @map("estimated_days")
+  carrier     String?
+  isActive    Boolean  @default(true) @map("is_active")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId])
+  @@map("shipping_zones")
+}
+
+model Warehouse {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  name        String
+  address     String?
+  city        String?
+  country     String?
+  type        String   @default("STORAGE")
+  capacity    Int?
+  isActive    Boolean  @default(true) @map("is_active")
+
+  inventoryStocks InventoryStock[]
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId])
+  @@map("warehouses")
+}
+
+model InventoryStock {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  productId   String   @map("product_id")
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  warehouseId String   @map("warehouse_id")
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  quantity    Int      @default(0)
+  reserved    Int      @default(0)
+  reorderAt   Int?     @map("reorder_at")
+  costPerUnit Float?   @map("cost_per_unit")
+  currency    String   @default("TTD")
+
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([productId, warehouseId])
+  @@index([businessId])
+  @@map("inventory_stocks")
+}
+
+model MarketplaceOrder {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  orderNumber String   @unique @map("order_number")
+  status      String   @default("PENDING")
+  type        String   @default("STANDARD")
+
+  customerName  String  @map("customer_name")
+  customerEmail String? @map("customer_email")
+  customerPhone String? @map("customer_phone")
+  customerCountry String? @map("customer_country")
+
+  shippingAddress Json?  @map("shipping_address")
+  billingAddress  Json?  @map("billing_address")
+
+  subtotal    Float    @default(0)
+  shippingFee Float    @default(0) @map("shipping_fee")
+  taxAmount   Float    @default(0) @map("tax_amount")
+  dutyAmount  Float    @default(0) @map("duty_amount")
+  discountAmount Float @default(0) @map("discount_amount")
+  total       Float    @default(0)
+  currency    String   @default("TTD")
+
+  paymentStatus  String  @default("UNPAID") @map("payment_status")
+  paymentMethod  String? @map("payment_method")
+  paymentRef     String? @map("payment_ref")
+
+  notes       String?
+  metadata    Json?
+
+  items       MarketplaceOrderItem[]
+  shipments   Shipment[]
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId])
+  @@index([status])
+  @@map("marketplace_orders")
+}
+
+model MarketplaceOrderItem {
+  id        String   @id @default(cuid())
+  orderId   String   @map("order_id")
+  order     MarketplaceOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String   @map("product_id")
+  product   Product  @relation(fields: [productId], references: [id])
+
+  name      String
+  sku       String?
+  quantity  Int
+  unitPrice Float    @map("unit_price")
+  total     Float
+  currency  String   @default("TTD")
+
+  @@index([orderId])
+  @@map("marketplace_order_items")
+}
+
+model Shipment {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  orderId     String?  @map("order_id")
+  order       MarketplaceOrder? @relation(fields: [orderId], references: [id])
+
+  trackingNumber String?  @map("tracking_number")
+  carrier        String?
+  status         String   @default("PREPARING")
+
+  originCountry     String?  @map("origin_country")
+  destinationCountry String? @map("destination_country")
+  destinationAddress Json?   @map("destination_address")
+
+  weight      Float?
+  weightUnit  String?  @default("kg") @map("weight_unit")
+  dimensions  Json?
+
+  shippingCost Float?   @map("shipping_cost")
+  currency     String   @default("TTD")
+
+  estimatedDelivery DateTime? @map("estimated_delivery")
+  shippedAt         DateTime? @map("shipped_at")
+  deliveredAt       DateTime? @map("delivered_at")
+
+  milestones  Json?
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId])
+  @@index([orderId])
+  @@map("shipments")
+}
+
+model CustomsDeclaration {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  declarationType String  @default("EXPORT") @map("declaration_type")
+  referenceNumber String? @map("reference_number")
+  status          String  @default("DRAFT")
+
+  hsCode          String?  @map("hs_code")
+  goodsDescription String? @map("goods_description")
+  originCountry   String?  @map("origin_country")
+  destinationCountry String? @map("destination_country")
+
+  declaredValue   Float?   @map("declared_value")
+  currency        String   @default("TTD")
+  dutyRate        Float?   @map("duty_rate")
+  dutyAmount      Float?   @map("duty_amount")
+  vatAmount       Float?   @map("vat_amount")
+  totalCharges    Float?   @map("total_charges")
+
+  documents       Json?
+  notes           String?
+
+  filedAt         DateTime? @map("filed_at")
+  clearedAt       DateTime? @map("cleared_at")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId])
+  @@map("customs_declarations")
+}
+
+model PreOrder {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  productId   String   @map("product_id")
+  product     Product  @relation(fields: [productId], references: [id])
+
+  customerName  String  @map("customer_name")
+  customerEmail String? @map("customer_email")
+  customerPhone String? @map("customer_phone")
+
+  quantity    Int      @default(1)
+  unitPrice   Float    @map("unit_price")
+  depositAmount Float? @map("deposit_amount")
+  depositPaid   Boolean @default(false) @map("deposit_paid")
+  total       Float
+  currency    String   @default("TTD")
+
+  status      String   @default("PENDING")
+  expectedDate DateTime? @map("expected_date")
+  fulfilledAt  DateTime? @map("fulfilled_at")
+
+  notes       String?
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId])
+  @@index([status])
+  @@map("pre_orders")
+}
+
+model PurchaseOrder {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  poNumber    String   @unique @map("po_number")
+  status      String   @default("DRAFT")
+
+  supplierName  String  @map("supplier_name")
+  supplierEmail String? @map("supplier_email")
+  supplierPhone String? @map("supplier_phone")
+  supplierCountry String? @map("supplier_country")
+
+  items       Json
+  subtotal    Float    @default(0)
+  shippingCost Float   @default(0) @map("shipping_cost")
+  taxAmount   Float    @default(0) @map("tax_amount")
+  total       Float    @default(0)
+  currency    String   @default("TTD")
+
+  expectedDelivery DateTime? @map("expected_delivery")
+  receivedAt       DateTime? @map("received_at")
+
+  notes       String?
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId])
+  @@map("purchase_orders")
 }
