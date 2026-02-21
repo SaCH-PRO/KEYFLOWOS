@@ -41,6 +41,7 @@ import { Send } from "lucide-react";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { saveProductImage, deleteProductImage, fileToDataUrl, getAllProductImages } from "@/lib/image-store";
+import { notifyProductsChanged } from "@/lib/product-sync";
 import { Tab, ProductForm, InvoiceLineItem, CATEGORIES, generateItemId } from "./components/commerce-types";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import CommerceDashboard from "./components/commerce-dashboard";
@@ -294,6 +295,7 @@ export default function CommercePage() {
         setProducts((prev) => prev.map((p) => (p.id === editingProductId ? { ...p, ...data } : p)));
         closeProductForm();
         toast.success("Product updated");
+        notifyProductsChanged();
       }
     } else {
       const { data, error } = await createProduct({
@@ -316,6 +318,7 @@ export default function CommercePage() {
         setProducts((prev) => [data, ...prev]);
         closeProductForm();
         toast.success("Product created");
+        notifyProductsChanged();
       }
     }
   }
@@ -329,6 +332,7 @@ export default function CommercePage() {
     setProducts((prev) => prev.filter((p) => p.id !== productId));
     setDeleteConfirm(null);
     toast.success("Product deleted");
+    notifyProductsChanged();
   }
 
   function resetQuoteForm() {

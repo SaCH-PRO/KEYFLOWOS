@@ -20,6 +20,7 @@ import {
   updateStorefrontConfig,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
+import { onProductsChanged } from "@/lib/product-sync";
 import { StoreHeader } from "./components/store-header";
 import { StoreSettings } from "./components/store-settings";
 import { HoursEditor, DEFAULT_HOURS, type BusinessHoursMap } from "./components/hours-editor";
@@ -149,6 +150,13 @@ export default function StorePage() {
 
   useEffect(() => {
     void loadData();
+  }, [loadData]);
+
+  useEffect(() => {
+    const unsub = onProductsChanged(() => {
+      void loadData();
+    });
+    return unsub;
   }, [loadData]);
 
   function getPublicBookingUrl() {
