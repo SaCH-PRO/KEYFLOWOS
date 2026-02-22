@@ -22,7 +22,7 @@ import {
   TrendingUp,
   UserCheck,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ContactCard,
   ContactCardData,
@@ -131,6 +131,7 @@ function addRecentId(id: string) {
 }
 
 export default function ContactsPage() {
+  const searchParams = useSearchParams();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
@@ -207,6 +208,20 @@ export default function ContactsPage() {
     };
     void initWorkspace();
   }, []);
+
+  useEffect(() => {
+    const googleSuccess = searchParams.get("google_success");
+    const googleError = searchParams.get("google_error");
+    const imported = searchParams.get("imported");
+
+    if (googleSuccess === "true") {
+      toast.success(`Google Contacts imported successfully${imported ? ` (${imported} contacts)` : ""}`);
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (googleError) {
+      toast.error(`Google import failed: ${decodeURIComponent(googleError)}`);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     const timeout = setTimeout(() => setSearch(searchInput.trim()), 300);

@@ -45,9 +45,11 @@ export function ContactImport({ onImportFile, onImportLink, loading, businessId 
   const handleGoogleConnect = async () => {
     setGoogleLoading(true);
     try {
-      const result = await getGoogleContactsAuthUrl(businessId) as { url?: string } | null;
-      if (result?.url) {
-        window.location.href = result.url;
+      const result = await getGoogleContactsAuthUrl(businessId);
+      if (result?.data?.url) {
+        window.location.href = result.data.url;
+      } else {
+        console.error("Google auth URL not received:", result?.error);
       }
     } catch (err) {
       console.error("Failed to get Google auth URL:", err);

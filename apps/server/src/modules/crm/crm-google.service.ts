@@ -239,7 +239,7 @@ export class CrmGoogleService {
           lastName: name?.familyName ?? undefined,
           email: email ?? undefined,
           phone: phone ?? undefined,
-          company: org?.name ?? undefined,
+          companyName: org?.name ?? undefined,
           source: 'google_contacts',
           sourceDetail: person.resourceName,
         });
