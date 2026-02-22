@@ -508,6 +508,7 @@ export class CrmService {
       lastName?: string | null;
       email?: string | null;
       phone?: string | null;
+      companyName?: string | null;
       source?: string | null;
       sourceDetail?: string | null;
       tags?: string[];
@@ -580,6 +581,7 @@ export class CrmService {
       lastName: input.lastName,
       email,
       phone,
+      companyName: input.companyName ?? undefined,
       source: input.source ?? undefined,
       sourceDetail: input.sourceDetail ?? undefined,
       tags,
