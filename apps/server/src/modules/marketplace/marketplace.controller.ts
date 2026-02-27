@@ -17,8 +17,10 @@ export class MarketplaceController {
   getListings(
     @Param('businessId') businessId: string,
     @Query('marketReach') marketReach?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
   ) {
-    return this.marketplaceService.getListings(businessId, { marketReach });
+    return this.marketplaceService.getListings(businessId, { marketReach }, page ? parseInt(page, 10) : 1, pageSize ? parseInt(pageSize, 10) : 50);
   }
 
   @Post('businesses/:businessId/listings')
@@ -115,8 +117,10 @@ export class MarketplaceController {
     @Param('businessId') businessId: string,
     @Query('status') status?: string,
     @Query('type') type?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
   ) {
-    return this.marketplaceService.getOrders(businessId, { status, type });
+    return this.marketplaceService.getOrders(businessId, { status, type }, page ? parseInt(page, 10) : 1, pageSize ? parseInt(pageSize, 10) : 50);
   }
 
   @Get('businesses/:businessId/orders/:orderId')
@@ -145,8 +149,10 @@ export class MarketplaceController {
   getShipments(
     @Param('businessId') businessId: string,
     @Query('status') status?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
   ) {
-    return this.marketplaceService.getShipments(businessId, { status });
+    return this.marketplaceService.getShipments(businessId, { status }, page ? parseInt(page, 10) : 1, pageSize ? parseInt(pageSize, 10) : 50);
   }
 
   @Post('businesses/:businessId/shipments')
@@ -168,8 +174,10 @@ export class MarketplaceController {
     @Param('businessId') businessId: string,
     @Query('status') status?: string,
     @Query('type') type?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
   ) {
-    return this.marketplaceService.getCustomsDeclarations(businessId, { status, type });
+    return this.marketplaceService.getCustomsDeclarations(businessId, { status, type }, page ? parseInt(page, 10) : 1, pageSize ? parseInt(pageSize, 10) : 50);
   }
 
   @Post('businesses/:businessId/customs')
@@ -190,8 +198,10 @@ export class MarketplaceController {
   getPreOrders(
     @Param('businessId') businessId: string,
     @Query('status') status?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
   ) {
-    return this.marketplaceService.getPreOrders(businessId, { status });
+    return this.marketplaceService.getPreOrders(businessId, { status }, page ? parseInt(page, 10) : 1, pageSize ? parseInt(pageSize, 10) : 50);
   }
 
   @Post('businesses/:businessId/pre-orders')
@@ -212,8 +222,10 @@ export class MarketplaceController {
   getPurchaseOrders(
     @Param('businessId') businessId: string,
     @Query('status') status?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
   ) {
-    return this.marketplaceService.getPurchaseOrders(businessId, { status });
+    return this.marketplaceService.getPurchaseOrders(businessId, { status }, page ? parseInt(page, 10) : 1, pageSize ? parseInt(pageSize, 10) : 50);
   }
 
   @Post('businesses/:businessId/purchase-orders')

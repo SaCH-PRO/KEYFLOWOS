@@ -29,8 +29,16 @@ export class CommerceController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/products')
-  listProducts(@Param('businessId') businessId: string) {
-    return this.commerce.listProducts(businessId);
+  listProducts(
+    @Param('businessId') businessId: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.commerce.listProducts(
+      businessId,
+      page ? parseInt(page, 10) : 1,
+      pageSize ? parseInt(pageSize, 10) : 50,
+    );
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -96,8 +104,16 @@ export class CommerceController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/invoices')
-  listInvoices(@Param('businessId') businessId: string) {
-    return this.commerce.listInvoices(businessId);
+  listInvoices(
+    @Param('businessId') businessId: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.commerce.listInvoices(
+      businessId,
+      page ? parseInt(page, 10) : 1,
+      pageSize ? parseInt(pageSize, 10) : 50,
+    );
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -183,8 +199,16 @@ export class CommerceController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/quotes')
-  listQuotes(@Param('businessId') businessId: string) {
-    return this.commerce.listQuotes(businessId);
+  listQuotes(
+    @Param('businessId') businessId: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.commerce.listQuotes(
+      businessId,
+      page ? parseInt(page, 10) : 1,
+      pageSize ? parseInt(pageSize, 10) : 50,
+    );
   }
 
   @Get('quotes/:quoteId')

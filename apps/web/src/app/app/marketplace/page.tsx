@@ -83,30 +83,30 @@ export default function MarketplacePage() {
         }
         case "catalog": {
           const [listRes, prodRes] = await Promise.all([
-            apiGet<any[]>(`${basePath}/listings`),
-            apiGet<any[]>(`/commerce/businesses/${businessId}/products`),
+            apiGet<any>(`${basePath}/listings`),
+            apiGet<any>(`/commerce/businesses/${businessId}/products`),
           ]);
-          if (listRes.data) setListings(listRes.data);
-          if (prodRes.data) setProducts(prodRes.data);
+          if (listRes.data) setListings(listRes.data.data ?? listRes.data);
+          if (prodRes.data) setProducts(prodRes.data.data ?? prodRes.data);
           break;
         }
         case "orders": {
           const [ordRes, prodRes] = await Promise.all([
-            apiGet<any[]>(`${basePath}/orders`),
-            apiGet<any[]>(`/commerce/businesses/${businessId}/products`),
+            apiGet<any>(`${basePath}/orders`),
+            apiGet<any>(`/commerce/businesses/${businessId}/products`),
           ]);
-          if (ordRes.data) setOrders(ordRes.data);
-          if (prodRes.data) setProducts(prodRes.data);
+          if (ordRes.data) setOrders(ordRes.data.data ?? ordRes.data);
+          if (prodRes.data) setProducts(prodRes.data.data ?? prodRes.data);
           break;
         }
         case "shipments": {
-          const { data } = await apiGet<any[]>(`${basePath}/shipments`);
-          if (data) setShipments(data);
+          const { data } = await apiGet<any>(`${basePath}/shipments`);
+          if (data) setShipments(data.data ?? data);
           break;
         }
         case "customs": {
-          const { data } = await apiGet<any[]>(`${basePath}/customs`);
-          if (data) setCustoms(data);
+          const { data } = await apiGet<any>(`${basePath}/customs`);
+          if (data) setCustoms(data.data ?? data);
           break;
         }
         case "warehousing": {
@@ -119,13 +119,13 @@ export default function MarketplacePage() {
           break;
         }
         case "preorders": {
-          const { data } = await apiGet<any[]>(`${basePath}/pre-orders`);
-          if (data) setPreOrders(data);
+          const { data } = await apiGet<any>(`${basePath}/pre-orders`);
+          if (data) setPreOrders(data.data ?? data);
           break;
         }
         case "purchase-orders": {
-          const { data } = await apiGet<any[]>(`${basePath}/purchase-orders`);
-          if (data) setPurchaseOrders(data);
+          const { data } = await apiGet<any>(`${basePath}/purchase-orders`);
+          if (data) setPurchaseOrders(data.data ?? data);
           break;
         }
       }

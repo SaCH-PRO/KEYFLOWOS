@@ -400,47 +400,60 @@ export async function fetchBookings(businessId: string = DEFAULT_BUSINESS_ID) {
 }
 
 export async function fetchProducts(businessId: string = DEFAULT_BUSINESS_ID) {
-  return apiGet(
+  const envelopeSchema = z.object({
+    data: z.array(productSchema),
+    total: z.number(),
+    page: z.number(),
+    pageSize: z.number(),
+    totalPages: z.number(),
+  });
+  const res = await apiGet(
     `/commerce/businesses/${encodeURIComponent(businessId)}/products`,
-    z.array(productSchema),
+    envelopeSchema,
   );
+  return { data: res.data?.data ?? null, error: res.error };
 }
 
 export async function fetchInvoices(businessId: string = DEFAULT_BUSINESS_ID) {
-  return apiGet(
+  const invoiceItemSchema = z.object({
+    id: z.string(),
+    description: z.string(),
+    quantity: z.number(),
+    unitPrice: z.number(),
+    total: z.number(),
+    productId: z.string().nullable().optional(),
+  });
+  const invoiceSchema = z.object({
+    id: z.string(),
+    invoiceNumber: z.string().nullable().optional(),
+    status: z.string(),
+    total: z.union([z.number(), z.string()]),
+    currency: z.string(),
+    issueDate: z.string().nullable().optional(),
+    dueDate: z.string().nullable().optional(),
+    paidAt: z.string().nullable().optional(),
+    contact: z
+      .object({
+        firstName: z.string().nullable().optional(),
+        lastName: z.string().nullable().optional(),
+        email: z.string().nullable().optional(),
+      })
+      .nullable()
+      .optional(),
+    items: z.array(invoiceItemSchema).optional(),
+  });
+  const envelopeSchema = z.object({
+    data: z.array(invoiceSchema),
+    total: z.number(),
+    page: z.number(),
+    pageSize: z.number(),
+    totalPages: z.number(),
+  });
+  const res = await apiGet(
     `/commerce/businesses/${encodeURIComponent(businessId)}/invoices`,
-    z.array(
-      z.object({
-        id: z.string(),
-        invoiceNumber: z.string().nullable().optional(),
-        status: z.string(),
-        total: z.union([z.number(), z.string()]),
-        currency: z.string(),
-        issueDate: z.string().nullable().optional(),
-        dueDate: z.string().nullable().optional(),
-        paidAt: z.string().nullable().optional(),
-        contact: z
-          .object({
-            firstName: z.string().nullable().optional(),
-            lastName: z.string().nullable().optional(),
-            email: z.string().nullable().optional(),
-          })
-          .nullable()
-          .optional(),
-        items: z.array(
-          z.object({
-            id: z.string(),
-            description: z.string(),
-            quantity: z.number(),
-            unitPrice: z.number(),
-            total: z.number(),
-            productId: z.string().nullable().optional(),
-          })
-        ).optional(),
-      }),
-    ),
-    fallbackInvoices,
+    envelopeSchema,
   );
+  return { data: res.data?.data ?? fallbackInvoices, error: res.error };
 }
 
 export async function createContact(input: {
@@ -977,7 +990,8 @@ export type Quote = {
 
 export async function listQuotes(businessId?: string) {
   const bId = businessId ?? DEFAULT_BUSINESS_ID;
-  return apiGetSimple<Quote[]>(`/commerce/businesses/${encodeURIComponent(bId)}/quotes`);
+  const res = await apiGetSimple<{ data: Quote[]; total: number; page: number; pageSize: number; totalPages: number }>(`/commerce/businesses/${encodeURIComponent(bId)}/quotes`);
+  return { data: res.data?.data ?? [], error: res.error };
 }
 
 export async function getQuote(quoteId: string) {
