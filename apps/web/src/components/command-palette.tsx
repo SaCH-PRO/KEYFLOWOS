@@ -156,8 +156,11 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm pt-[12vh]" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm pt-[12vh]" role="presentation" onClick={onClose}>
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette"
         className="w-full max-w-2xl rounded-2xl border border-border/80 bg-slate-950/95 shadow-2xl shadow-primary/20"
         onClick={(e) => e.stopPropagation()}
       >
@@ -165,13 +168,14 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           <Search className="w-4 h-4 text-muted-foreground flex-shrink-0" />
           <input
             ref={inputRef}
+            aria-label="Search everything or type a command"
             className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
             placeholder="Search everything or type a command..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
           {query && (
-            <button onClick={() => setQuery("")} className="text-muted-foreground hover:text-white">
+            <button aria-label="Clear search" onClick={() => setQuery("")} className="text-muted-foreground hover:text-white">
               <X className="w-4 h-4" />
             </button>
           )}

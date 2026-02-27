@@ -57,6 +57,9 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Server-Side Pagination:** Commerce (products, invoices, quotes) and Marketplace (listings, orders, shipments, customs, pre-orders, purchase-orders) list endpoints return `{data, total, page, pageSize, totalPages}` envelope with defaults page=1, pageSize=50, max 100. Frontend API functions unwrap the envelope for backward compatibility.
 - **Global HTTP Exception Filter:** All backend errors return consistent `{statusCode, message, error, timestamp, path}` shape via `GlobalHttpExceptionFilter`. Unknown errors logged at error level and return 500.
 - **CORS Configuration:** Environment-aware CORS — production restricts to specific origins (REPLIT_DEV_DOMAIN, localhost), development allows all origins.
+- **Mass Assignment Protection:** Marketplace service update methods (shipping zones, warehouses, shipments, customs, pre-orders, purchase orders) use explicit field mapping instead of raw object spread to prevent attackers from overwriting internal fields. Order/pre-order prices sourced from database product records, not user input.
+- **Accessibility (ARIA):** Dialog and Drawer shared components include `role="dialog"`, `aria-modal="true"`, `aria-labelledby`, Escape key dismissal, and keyboard-accessible backdrop. Command palette has `role="dialog"` and `aria-label`.
+- **Error Boundaries:** Root-level `error.tsx` and `not-found.tsx` for graceful recovery outside the app layout. App-level `error.tsx`, `loading.tsx`, and `not-found.tsx` for dashboard-scoped errors.
 - **Core Modules:** Identity, CRM, Commerce, Marketplace, Bookings, Social, Projects & Playbooks, Flow (Activity & Search), Reports, Command, Expenses, Webhooks, AI, Email Marketing, Lead Forms, Templates, Education, Community.
 
 ## External Dependencies
