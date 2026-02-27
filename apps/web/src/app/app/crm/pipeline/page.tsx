@@ -27,6 +27,7 @@ import {
   Upload,
   Link2,
   UserPlus,
+  Database,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -70,6 +71,7 @@ import { StatCards } from "@/components/ui/stat-cards";
 import { ContactLists } from "./contact-lists";
 import { DuplicateDetector } from "./duplicate-detector";
 import { CrmProgress } from "./crm-progress";
+import { ContactsDatabase } from "./contacts-database";
 import {
   Contact,
   ContactDetail as ContactDetailAPI,
@@ -199,7 +201,7 @@ export default function ContactsPage() {
   const [googleConnectLoading, setGoogleConnectLoading] = useState(false);
   const [activeListId, setActiveListId] = useState<string | null>(null);
   const [activeListContactIds, setActiveListContactIds] = useState<string[] | null>(null);
-  const [crmViewTab, setCrmViewTab] = useState<"pipeline" | "lists" | "insights" | "engage">("pipeline");
+  const [crmViewTab, setCrmViewTab] = useState<"pipeline" | "lists" | "insights" | "engage" | "database">("pipeline");
   const [listsCount, setListsCount] = useState(0);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [showImportPanel, setShowImportPanel] = useState(false);
@@ -909,12 +911,13 @@ export default function ContactsPage() {
       <TabNav
         tabs={[
           { key: "pipeline", label: "Pipeline", icon: Users },
+          { key: "database", label: "Database", icon: Database },
           { key: "lists", label: "Lists", icon: List },
           { key: "insights", label: "Insights", icon: BarChart3 },
           { key: "engage", label: "Engage", icon: Sparkles },
         ]}
         activeTab={crmViewTab}
-        onTabChange={(t) => setCrmViewTab(t as "pipeline" | "lists" | "insights" | "engage")}
+        onTabChange={(t) => setCrmViewTab(t as "pipeline" | "lists" | "insights" | "engage" | "database")}
       />
 
       <CrmProgress
@@ -998,6 +1001,37 @@ export default function ContactsPage() {
             </div>
           )}
         </div>
+      )}
+
+      {crmViewTab === "database" && businessId && (
+        <ContactsDatabase
+          businessId={businessId}
+          contacts={contacts.map((c) => ({
+            id: c.id,
+            firstName: c.firstName,
+            lastName: c.lastName,
+            email: c.email,
+            phone: c.phone,
+            status: c.status,
+            source: (c as any).source ?? null,
+            tags: Array.isArray((c as any).tags) ? (c as any).tags : [],
+            companyName: (c as any).companyName ?? null,
+            jobTitle: (c as any).jobTitle ?? null,
+            city: (c as any).city ?? null,
+            country: (c as any).country ?? null,
+            preferredChannel: (c as any).preferredChannel ?? null,
+            createdAt: (c as any).createdAt ?? null,
+            addressLine1: (c as any).addressLine1 ?? null,
+            whatsappNumber: (c as any).whatsappNumber ?? null,
+            department: (c as any).department ?? null,
+            industry: (c as any).industry ?? null,
+            lifecycleStage: (c as any).lifecycleStage ?? null,
+            sourceDetail: (c as any).sourceDetail ?? null,
+            notesInternal: (c as any).notesInternal ?? null,
+            updatedAt: (c as any).updatedAt ?? null,
+          }))}
+          onRefresh={() => { void loadContacts(); }}
+        />
       )}
 
       {crmViewTab === "pipeline" && activeListId && (
