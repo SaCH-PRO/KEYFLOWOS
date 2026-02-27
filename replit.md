@@ -39,7 +39,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Professional Invoice Template:** Branded public payment page.
 - **Multi-Gateway Payment System:** Integration with WiPay (Caribbean) and PayPal (international).
 - **Subscription & Billing System:** 3-tier plans (Free, Flow, KeyFlow) with free trial, managing activation, cancellation, and module limits.
-- **Multi-Tenant System:** Data isolation using `businessId` for all operations.
+- **Multi-Tenant System:** Data isolation using `businessId` for all operations. Hardened BusinessGuard rejects requests when businessId is missing, Prisma is unavailable, or DB queries fail (no dev fallbacks). All controllers with business-specific endpoints use `@UseGuards(AuthGuard, BusinessGuard)`.
 - **Commerce Module Overhaul (v2):** Re-architected into 8 focused modules with KPI dashboard, animated navigation, and glassmorphism product cards.
 - **Recurring Invoices:** Auto-generating invoices on various schedules with full item, tax, and discount support.
 - **Contacts Page Overhaul:** Modular split-view layout with reusable components.
