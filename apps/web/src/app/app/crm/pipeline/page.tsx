@@ -824,22 +824,13 @@ export default function ContactsPage() {
                 </button>
               </>
             ) : (
-              <>
-                <button
-                  onClick={() => setSelectMode(true)}
-                  className="kf-btn-secondary inline-flex items-center gap-2 text-sm"
-                >
-                  <CheckSquare className="w-4 h-4" />
-                  <span className="hidden sm:inline">Select</span>
-                </button>
-                <button
-                  onClick={() => setShowAddForm(true)}
-                  className="kf-btn-primary inline-flex items-center gap-2"
-                >
-                  <Plus className="w-4 h-4" />
-                  Add Contact
-                </button>
-              </>
+              <button
+                onClick={() => setShowAddForm(true)}
+                className="kf-btn-primary inline-flex items-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                Add Contact
+              </button>
             )}
           </div>
         }
