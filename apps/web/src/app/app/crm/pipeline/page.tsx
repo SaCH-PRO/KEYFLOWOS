@@ -24,6 +24,9 @@ import {
   List,
   BarChart3,
   Sparkles,
+  Upload,
+  Link2,
+  UserPlus,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -198,6 +201,8 @@ export default function ContactsPage() {
   const [activeListContactIds, setActiveListContactIds] = useState<string[] | null>(null);
   const [crmViewTab, setCrmViewTab] = useState<"pipeline" | "lists" | "insights" | "engage">("pipeline");
   const [listsCount, setListsCount] = useState(0);
+  const [showAddMenu, setShowAddMenu] = useState(false);
+  const [showImportPanel, setShowImportPanel] = useState(false);
 
   useEffect(() => {
     setPinnedIdsState(getPinnedIds());
@@ -830,17 +835,53 @@ export default function ContactsPage() {
         }
       />
 
-      <ConnectionBanner
-        icon={Users}
-        color="#4285F4"
-        title="Google Contacts"
-        description="Import contacts from your Google account with one click"
-        connected={googleContactsImported}
-        connectedDetail="Contacts imported — click Connect to sync again"
-        onConnect={handleGoogleConnect}
-        loading={googleConnectLoading}
-        manageHref="/app/settings/connections"
-      />
+      <div className="relative inline-block">
+        <button
+          onClick={() => setShowAddMenu(!showAddMenu)}
+          className="kf-btn-primary inline-flex items-center gap-2"
+        >
+          <Plus className="w-4 h-4" />
+          Add Contact
+          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showAddMenu ? "rotate-180" : ""}`} />
+        </button>
+        {showAddMenu && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setShowAddMenu(false)} />
+            <div className="absolute left-0 top-full mt-1 z-50 kf-card border border-border shadow-xl rounded-xl py-1 w-52">
+              <button
+                onClick={() => { setShowAddMenu(false); setShowAddForm(true); }}
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-left"
+              >
+                <UserPlus className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+                <div>
+                  <span className="font-medium">Manual</span>
+                  <p className="text-[11px] text-muted-foreground">Fill in contact details</p>
+                </div>
+              </button>
+              <button
+                onClick={() => { setShowAddMenu(false); setShowImportPanel(true); }}
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-left"
+              >
+                <Upload className="w-4 h-4 text-[hsl(var(--kf-accent2))]" />
+                <div>
+                  <span className="font-medium">Import</span>
+                  <p className="text-[11px] text-muted-foreground">CSV, Excel, or vCard file</p>
+                </div>
+              </button>
+              <button
+                onClick={() => { setShowAddMenu(false); handleGoogleConnect(); }}
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-left"
+              >
+                <Link2 className="w-4 h-4 text-blue-500" />
+                <div>
+                  <span className="font-medium">Connect</span>
+                  <p className="text-[11px] text-muted-foreground">Google Contacts sync</p>
+                </div>
+              </button>
+            </div>
+          </>
+        )}
+      </div>
 
       <FeatureGuide
         featureKey="contacts"
@@ -986,12 +1027,14 @@ export default function ContactsPage() {
         )}
       </AnimatePresence>
 
-      <ContactImport
-        onImportFile={handleImportFile}
-        onImportLink={handleImportLink}
-        loading={isPending}
-        businessId={businessId ?? undefined}
-      />
+      {showImportPanel && (
+        <ContactImport
+          onImportFile={handleImportFile}
+          onImportLink={handleImportLink}
+          loading={isPending}
+          businessId={businessId ?? undefined}
+        />
+      )}
 
       <div className="kf-card p-4 space-y-4">
         <div className="flex flex-col sm:flex-row gap-3">
