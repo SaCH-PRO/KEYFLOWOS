@@ -33,6 +33,7 @@ import {
   GraduationCap,
   FolderKanban,
   Globe,
+  Link2,
 } from "lucide-react";
 
 const navGroups = [
@@ -367,6 +368,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                         { label: "New Project", desc: "Organize your work", icon: FolderKanban, href: "/app/projects" },
                         { label: "New Playbook", desc: "Automate a workflow", icon: Zap, href: "/app/projects?tab=automations" },
                         { label: "New Campaign", desc: "Launch outreach", icon: Megaphone, href: "/app/marketing" },
+                        { label: "Manage Connections", desc: "Connect your accounts", icon: Link2, href: "/app/settings/connections" },
                       ].map((action) => {
                         const ActionIcon = action.icon;
                         return (

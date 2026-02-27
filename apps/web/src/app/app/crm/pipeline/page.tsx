@@ -56,6 +56,7 @@ import type { AiInsight } from "@/components/contacts/ai-copilot";
 import { toast } from "sonner";
 import { KanbanSkeleton } from "@/components/ui/skeleton";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { ConnectionBanner } from "@/components/ui/connection-banner";
 import { PageHeader } from "@/components/ui/page-header";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { TabNav } from "@/components/ui/tab-nav";
@@ -84,6 +85,7 @@ import {
   fetchConversationContext,
   generateAiInsight,
   CrmNextAction,
+  getGoogleContactsAuthUrl,
 } from "@/lib/client";
 import { ensureWorkspace, getStoredBusinessId } from "@/lib/workspace";
 
@@ -183,6 +185,8 @@ export default function ContactsPage() {
   const [showBulkTag, setShowBulkTag] = useState(false);
   const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
   const router = useRouter();
+  const [googleContactsImported, setGoogleContactsImported] = useState(false);
+  const [googleConnectLoading, setGoogleConnectLoading] = useState(false);
 
   useEffect(() => {
     setPinnedIdsState(getPinnedIds());
@@ -216,12 +220,47 @@ export default function ContactsPage() {
 
     if (googleSuccess === "true") {
       toast.success(`Google Contacts imported successfully${imported ? ` (${imported} contacts)` : ""}`);
+      setGoogleContactsImported(true);
       window.history.replaceState({}, "", window.location.pathname);
     } else if (googleError) {
       toast.error(`Google import failed: ${decodeURIComponent(googleError)}`);
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, [searchParams]);
+
+  const handleGoogleConnect = useCallback(async () => {
+    if (!businessId) return;
+    setGoogleConnectLoading(true);
+    try {
+      const { data } = await getGoogleContactsAuthUrl(businessId);
+      if (data?.url) {
+        window.location.href = data.url;
+      } else {
+        toast.error("Could not get Google authorization URL");
+        setGoogleConnectLoading(false);
+      }
+    } catch {
+      toast.error("Failed to start Google connection");
+      setGoogleConnectLoading(false);
+    }
+  }, [businessId]);
+
+  const handleGoogleSync = useCallback(async () => {
+    if (!businessId) return;
+    setGoogleConnectLoading(true);
+    try {
+      const { data } = await getGoogleContactsAuthUrl(businessId);
+      if (data?.url) {
+        window.location.href = data.url;
+      } else {
+        toast.error("Could not start sync");
+        setGoogleConnectLoading(false);
+      }
+    } catch {
+      toast.error("Failed to start sync");
+      setGoogleConnectLoading(false);
+    }
+  }, [businessId]);
 
   useEffect(() => {
     const timeout = setTimeout(() => setSearch(searchInput.trim()), 300);
@@ -786,6 +825,18 @@ export default function ContactsPage() {
             )}
           </div>
         }
+      />
+
+      <ConnectionBanner
+        icon={Users}
+        color="#4285F4"
+        title="Google Contacts"
+        description="Import contacts from your Google account with one click"
+        connected={googleContactsImported}
+        connectedDetail="Contacts imported — click Connect to sync again"
+        onConnect={handleGoogleConnect}
+        loading={googleConnectLoading}
+        manageHref="/app/settings/connections"
       />
 
       <FeatureGuide

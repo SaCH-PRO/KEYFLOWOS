@@ -24,6 +24,11 @@ import {
   ToggleRight,
   ClipboardList,
   Code,
+  Facebook,
+  Instagram,
+  Linkedin,
+  Twitter,
+  Share2,
 } from "lucide-react";
 import {
   fetchCampaigns,
@@ -42,11 +47,15 @@ import {
   LeadFormSubmission,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { getGmailAuthUrl } from "@/lib/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { ContactPickerDrawer } from "@/components/contacts";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { TabNav } from "@/components/ui/tab-nav";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ConnectionBanner, ConnectionsSummary } from "@/components/ui/connection-banner";
+import { useConnections } from "@/hooks/use-connections";
+import { useRouter } from "next/navigation";
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: "#94a3b8",
@@ -59,10 +68,36 @@ const FIELD_TYPES = ["text", "email", "phone", "select", "textarea"];
 
 type FormField = { name: string; type: string; label: string; required: boolean };
 
+const SOCIAL_PLATFORM_META: Record<string, { icon: React.ElementType; color: string }> = {
+  facebook: { icon: Facebook, color: "#1877F2" },
+  instagram: { icon: Instagram, color: "#E4405F" },
+  linkedin: { icon: Linkedin, color: "#0A66C2" },
+  twitter: { icon: Twitter, color: "#1DA1F2" },
+};
+
 export default function MarketingPage() {
+  const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"campaigns" | "forms">("campaigns");
   const [loading, setLoading] = useState(true);
+  const { gmailConnected, gmailEmail, socialConnections, loading: connectionsLoading } = useConnections();
+
+  const handleGmailConnect = async () => {
+    if (!businessId) return;
+    const res = await getGmailAuthUrl(businessId);
+    if (res?.data?.url) window.location.href = res.data.url;
+  };
+
+  const socialSummary = ["facebook", "instagram", "linkedin", "twitter"].map((platform) => {
+    const conn = socialConnections.find((c) => c.platform.toLowerCase() === platform);
+    const meta = SOCIAL_PLATFORM_META[platform] || { icon: Share2, color: "#6366f1" };
+    return {
+      name: platform.charAt(0).toUpperCase() + platform.slice(1),
+      icon: meta.icon,
+      color: meta.color,
+      connected: conn?.status === "CONNECTED",
+    };
+  });
 
   const [campaigns, setCampaigns] = useState<EmailCampaign[]>([]);
   const [showCampaignModal, setShowCampaignModal] = useState(false);
@@ -299,6 +334,26 @@ export default function MarketingPage() {
           { title: "Auto-Add to CRM", description: "Form submissions automatically create contacts in your CRM." },
         ]}
       />
+
+      {!connectionsLoading && (
+        <div className="space-y-3">
+          <ConnectionsSummary
+            connections={socialSummary}
+            onManage={() => router.push("/app/settings/connections")}
+          />
+          <ConnectionBanner
+            icon={Mail}
+            color="#EA4335"
+            title="Gmail"
+            description="Connect Gmail to send email campaigns directly from your business email."
+            connected={gmailConnected}
+            connectedDetail={gmailEmail ? `Sending as ${gmailEmail}` : "Gmail connected"}
+            onConnect={handleGmailConnect}
+            loading={connectionsLoading}
+            compact
+          />
+        </div>
+      )}
 
       <TabNav
         tabs={[
