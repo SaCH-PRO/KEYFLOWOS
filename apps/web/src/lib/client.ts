@@ -253,7 +253,7 @@ async function apiGet<T>(path: string, schema: z.ZodSchema<T>, fallback?: T): Pr
     }
     const parsed = schema.safeParse(json);
     if (!parsed.success) {
-      console.warn(`[apiGet] ${path} schema validation failed:`, parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join(', '));
+      console.error(`[apiGet] ${path} schema validation failed:`, parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join(', '));
       return { data: (json as T) ?? fallback ?? null, error: null };
     }
     return { data: parsed.data, error: null };

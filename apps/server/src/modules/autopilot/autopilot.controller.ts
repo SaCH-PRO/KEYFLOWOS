@@ -1,9 +1,10 @@
 import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards, Inject } from '@nestjs/common';
 import { AutopilotService } from './autopilot.service';
+import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 
 @Controller('autopilot/businesses/:businessId')
-@UseGuards(BusinessGuard)
+@UseGuards(AuthGuard, BusinessGuard)
 export class AutopilotController {
   constructor(
     @Inject(AutopilotService) private autopilotService: AutopilotService

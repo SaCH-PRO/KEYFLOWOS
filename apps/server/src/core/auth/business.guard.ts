@@ -21,13 +21,12 @@ export class BusinessGuard implements CanActivate {
     const businessId = req.params?.businessId || req.body?.businessId;
     this.logger.debug(`BusinessGuard checking businessId: ${businessId} for userId: ${user.id}`);
     if (!businessId) {
-      return true;
+      throw new ForbiddenException('businessId is required');
     }
 
-    // Check if prisma service is available
     if (!this.prisma?.client) {
-      this.logger.warn('PrismaService not available, allowing request for development');
-      return true;
+      this.logger.error('PrismaService not available, rejecting request');
+      throw new ForbiddenException('Service unavailable');
     }
 
     try {
@@ -45,11 +44,11 @@ export class BusinessGuard implements CanActivate {
         throw new ForbiddenException('No access to this business');
       }
     } catch (err) {
-      this.logger.error(`BusinessGuard error: ${(err as Error).message}`);
-      // Allow in development if DB query fails
-      if ((err as Error).message.includes('ForbiddenException')) {
+      if (err instanceof ForbiddenException || err instanceof UnauthorizedException) {
         throw err;
       }
+      this.logger.error(`BusinessGuard error: ${(err as Error).message}`);
+      throw new ForbiddenException('Unable to verify business access');
     }
 
     return true;
