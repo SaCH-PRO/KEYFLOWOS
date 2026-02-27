@@ -15,8 +15,9 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 **UI/UX Decisions:**
 - Custom design system with a unique KeyFlow identity, featuring a warm Caribbean-inspired color palette (Sunset Orange, Caribbean Teal).
 - PWA capabilities, Glassmorphism elements, and a dark theme.
-- Redesigned, icon-first, collapsible sidebar.
-- Unified component classes and mobile-optimized navigation.
+- Redesigned, icon-first, collapsible sidebar with grouped sections (CORE, GROW, MANAGE) and left accent bar active state.
+- Unified component classes and mobile-optimized navigation with matching grouped structure.
+- Premium design token system with elevation shadows, glass surfaces, and micro-transitions.
 - Context-aware notifications and flow-themed animations.
 - Toast notification system (sonner) with glassmorphism styling for all CRUD feedback.
 - Glassmorphism ConfirmDialog component replacing all native browser confirm() dialogs.

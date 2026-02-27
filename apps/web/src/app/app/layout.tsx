@@ -35,18 +35,33 @@ import {
   Globe,
 } from "lucide-react";
 
-const navItems = [
-  { label: "Command", href: "/app", icon: Zap },
-  { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
-  { label: "Commerce", href: "/app/commerce", icon: CreditCard },
-  { label: "Marketplace", href: "/app/marketplace", icon: Globe },
-  { label: "Bookings", href: "/app/bookings", icon: Calendar },
-  { label: "Store", href: "/app/store", icon: Store },
-  { label: "Social", href: "/app/social", icon: MessageCircle },
-  { label: "Marketing", href: "/app/marketing", icon: Megaphone },
-  { label: "Expenses", href: "/app/expenses", icon: Receipt },
-  { label: "Projects", href: "/app/projects", icon: FolderKanban },
-  { label: "Reports", href: "/app/reports", icon: BarChart3 },
+const navGroups = [
+  {
+    label: "CORE",
+    items: [
+      { label: "Command", href: "/app", icon: Zap },
+      { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
+      { label: "Commerce", href: "/app/commerce", icon: CreditCard },
+      { label: "Bookings", href: "/app/bookings", icon: Calendar },
+    ],
+  },
+  {
+    label: "GROW",
+    items: [
+      { label: "Marketing", href: "/app/marketing", icon: Megaphone },
+      { label: "Social", href: "/app/social", icon: MessageCircle },
+      { label: "Marketplace", href: "/app/marketplace", icon: Globe },
+      { label: "Store", href: "/app/store", icon: Store },
+    ],
+  },
+  {
+    label: "MANAGE",
+    items: [
+      { label: "Expenses", href: "/app/expenses", icon: Receipt },
+      { label: "Projects", href: "/app/projects", icon: FolderKanban },
+      { label: "Reports", href: "/app/reports", icon: BarChart3 },
+    ],
+  },
 ];
 
 const bottomNavItems = [
@@ -194,7 +209,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           )}
           style={{ background: "hsl(var(--kf-sidebar-bg))" }}
         >
-          <div className="flex items-center gap-3 px-4 py-5 border-b border-border">
+          <div className="relative flex items-center gap-3 px-4 py-5">
             <div 
               className="h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0"
               style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
@@ -206,28 +221,41 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <h1 className="text-lg font-bold tracking-tight">KEYFLOWOS</h1>
               </div>
             )}
+            <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
           </div>
 
-          <div className="flex-1 flex flex-col py-4 px-3 gap-1 overflow-y-auto min-h-0">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = pathname === item.href || (item.href !== "/app" && pathname.startsWith(item.href));
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    "kf-nav-item",
-                    isActive && "active",
-                    sidebarCollapsed && "justify-center px-2"
-                  )}
-                  title={sidebarCollapsed ? item.label : undefined}
-                >
-                  <Icon className="w-5 h-5 flex-shrink-0 kf-nav-icon" />
-                  {!sidebarCollapsed && <span className="text-sm font-medium">{item.label}</span>}
-                </Link>
-              );
-            })}
+          <div className="flex-1 flex flex-col py-3 px-3 overflow-y-auto min-h-0">
+            {navGroups.map((group, groupIdx) => (
+              <div key={group.label} className={cn(groupIdx > 0 && "pt-4")}>
+                {!sidebarCollapsed && (
+                  <div className="kf-section-label">{group.label}</div>
+                )}
+                {sidebarCollapsed && groupIdx > 0 && (
+                  <div className="kf-divider mx-1 mb-1" />
+                )}
+                <div className="flex flex-col gap-0.5">
+                  {group.items.map((item) => {
+                    const Icon = item.icon;
+                    const isActive = pathname === item.href || (item.href !== "/app" && pathname.startsWith(item.href));
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className={cn(
+                          "kf-nav-item",
+                          isActive && "active",
+                          sidebarCollapsed && "justify-center px-2"
+                        )}
+                        title={sidebarCollapsed ? item.label : undefined}
+                      >
+                        <Icon className="w-5 h-5 flex-shrink-0 kf-nav-icon" />
+                        {!sidebarCollapsed && <span className="text-sm font-medium">{item.label}</span>}
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
 
           <div className="mt-auto px-3 pb-4 space-y-1">
@@ -290,6 +318,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <button
                 onClick={() => setPaletteOpen(true)}
                 className="hidden lg:flex items-center gap-2 rounded-xl border border-border bg-muted/30 px-4 py-2 text-sm text-muted-foreground hover:bg-muted/50 transition-colors min-w-[280px]"
+                style={{ boxShadow: "inset 0 1px 3px rgba(0,0,0,0.06)" }}
               >
                 <Search className="w-4 h-4" />
                 <span>Search or press</span>
@@ -328,26 +357,33 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 {addMenuOpen && (
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setAddMenuOpen(false)} />
-                    <div className="absolute right-0 mt-2 w-48 rounded-xl border border-border bg-card shadow-lg p-2 z-50 max-h-[70vh] overflow-y-auto">
+                    <div className="absolute right-0 mt-2 w-64 kf-glass-surface p-2 z-50 max-h-[70vh] overflow-y-auto">
                       {[
-                        { label: "New Contact", href: "/app/crm/pipeline" },
-                        { label: "New Invoice", href: "/app/commerce" },
-                        { label: "New Booking", href: "/app/bookings" },
-                        { label: "New Post", href: "/app/social" },
-                        { label: "New Expense", href: "/app/expenses" },
-                        { label: "New Project", href: "/app/projects" },
-                        { label: "New Playbook", href: "/app/projects?tab=automations" },
-                        { label: "New Campaign", href: "/app/marketing" },
-                      ].map((action) => (
-                        <Link
-                          key={action.label}
-                          href={action.href}
-                          onClick={() => setAddMenuOpen(false)}
-                          className="block px-3 py-2.5 text-sm rounded-lg hover:bg-muted transition-colors"
-                        >
-                          {action.label}
-                        </Link>
-                      ))}
+                        { label: "New Contact", desc: "Add a lead or client", icon: Users, href: "/app/crm/pipeline" },
+                        { label: "New Invoice", desc: "Bill a customer", icon: Receipt, href: "/app/commerce" },
+                        { label: "New Booking", desc: "Schedule an appointment", icon: Calendar, href: "/app/bookings" },
+                        { label: "New Post", desc: "Publish to social", icon: MessageCircle, href: "/app/social" },
+                        { label: "New Expense", desc: "Track a purchase", icon: Receipt, href: "/app/expenses" },
+                        { label: "New Project", desc: "Organize your work", icon: FolderKanban, href: "/app/projects" },
+                        { label: "New Playbook", desc: "Automate a workflow", icon: Zap, href: "/app/projects?tab=automations" },
+                        { label: "New Campaign", desc: "Launch outreach", icon: Megaphone, href: "/app/marketing" },
+                      ].map((action) => {
+                        const ActionIcon = action.icon;
+                        return (
+                          <Link
+                            key={action.label}
+                            href={action.href}
+                            onClick={() => setAddMenuOpen(false)}
+                            className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted transition-colors"
+                          >
+                            <ActionIcon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium">{action.label}</div>
+                              <div className="text-[11px] text-muted-foreground">{action.desc}</div>
+                            </div>
+                          </Link>
+                        );
+                      })}
                     </div>
                   </>
                 )}
@@ -356,7 +392,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <div className="relative" ref={notifRef}>
                 <button 
                   onClick={() => { setNotifOpen((v) => !v); }}
-                  className="relative p-2 rounded-xl border border-border bg-card hover:bg-muted transition-colors"
+                  className={cn(
+                    "relative p-2 rounded-xl border border-border bg-card hover:bg-muted transition-colors",
+                    unreadCount > 0 && "kf-notif-pulse"
+                  )}
                   aria-label="Notifications"
                 >
                   <Bell className="w-5 h-5 text-muted-foreground" />
@@ -369,7 +408,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 {notifOpen && (
                   <>
                     <div className="fixed inset-0 z-[55] md:hidden bg-black/40" onClick={() => setNotifOpen(false)} />
-                    <div className="fixed inset-x-0 bottom-0 top-auto md:absolute md:right-0 md:left-auto md:bottom-auto md:top-full mt-0 md:mt-2 w-full md:w-80 max-h-[70vh] md:max-h-96 overflow-y-auto rounded-t-2xl md:rounded-xl border border-border bg-card shadow-xl z-[56]">
+                    <div className="fixed inset-x-0 bottom-0 top-auto md:absolute md:right-0 md:left-auto md:bottom-auto md:top-full mt-0 md:mt-2 w-full md:w-80 max-h-[70vh] md:max-h-96 overflow-y-auto rounded-t-2xl md:rounded-xl border border-border bg-card/95 backdrop-blur-xl shadow-xl z-[56]">
                       <div className="flex items-center justify-between px-4 py-3 border-b border-border sticky top-0 bg-card z-10">
                         <span className="text-sm font-semibold">Notifications</span>
                         <div className="flex items-center gap-3">
@@ -413,18 +452,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 )}
               </div>
 
-              <button
-                onClick={handleLogout}
-                className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-xl border border-border bg-card text-sm hover:bg-muted transition-colors"
-              >
-                <LogOut className="w-4 h-4" />
-                <span>Log Out</span>
-              </button>
-
-              <div className="hidden sm:flex items-center gap-2">
-                {displayName && (
-                  <span className="hidden sm:inline text-sm font-medium text-foreground">{displayName}</span>
-                )}
+              <div className="hidden sm:flex items-center gap-2.5">
                 {avatarUrl ? (
                   <img 
                     src={avatarUrl} 
@@ -439,6 +467,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     {initials}
                   </div>
                 )}
+                {displayName && (
+                  <span className="hidden md:inline text-sm font-medium text-foreground">{displayName}</span>
+                )}
+                <button
+                  onClick={handleLogout}
+                  className="p-2 rounded-xl border border-border bg-card hover:bg-muted transition-colors"
+                  aria-label="Log out"
+                  title="Log out"
+                >
+                  <LogOut className="w-4 h-4 text-muted-foreground" />
+                </button>
               </div>
             </div>
           </header>
@@ -456,7 +495,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             aria-label="Main navigation"
             style={{ background: "hsl(var(--kf-sidebar-bg))" }}
           >
-            <div className="flex items-center justify-between px-4 py-4 border-b border-border">
+            <div className="relative flex items-center justify-between px-4 py-4">
               <div className="flex items-center gap-3">
                 <div 
                   className="h-9 w-9 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -472,6 +511,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               >
                 <X className="w-5 h-5" />
               </button>
+              <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
             </div>
 
             {displayName && (
@@ -493,50 +533,53 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </div>
             )}
 
-            <div className="flex-1 py-3 px-3 space-y-0.5">
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = pathname === item.href || (item.href !== "/app" && pathname.startsWith(item.href));
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={cn(
-                      "flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium transition-all active:scale-[0.98]",
-                      isActive
-                        ? "text-foreground"
-                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                    )}
-                    style={isActive ? { background: "hsl(var(--kf-accent1) / 0.1)", color: "hsl(var(--kf-accent1))" } : undefined}
-                  >
-                    <Icon className="w-5 h-5 flex-shrink-0" />
-                    {item.label}
-                  </Link>
-                );
-              })}
+            <div className="flex-1 py-3 px-3">
+              {navGroups.map((group, groupIdx) => (
+                <div key={group.label} className={cn(groupIdx > 0 && "pt-3")}>
+                  <div className="kf-section-label">{group.label}</div>
+                  <div className="flex flex-col gap-0.5">
+                    {group.items.map((item) => {
+                      const Icon = item.icon;
+                      const isActive = pathname === item.href || (item.href !== "/app" && pathname.startsWith(item.href));
+                      return (
+                        <Link
+                          key={item.href}
+                          href={item.href}
+                          className={cn(
+                            "kf-nav-item py-3 active:scale-[0.98]",
+                            isActive && "active"
+                          )}
+                        >
+                          <Icon className="w-5 h-5 flex-shrink-0 kf-nav-icon" />
+                          <span className="text-sm font-medium">{item.label}</span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
 
-              <div className="my-2 border-t border-border" />
+              <div className="kf-divider my-3" />
 
-              {bottomNavItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = pathname.startsWith(item.href);
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={cn(
-                      "flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium transition-all active:scale-[0.98]",
-                      isActive
-                        ? "text-foreground"
-                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                    )}
-                    style={isActive ? { background: "hsl(var(--kf-accent1) / 0.1)", color: "hsl(var(--kf-accent1))" } : undefined}
-                  >
-                    <Icon className="w-5 h-5 flex-shrink-0" />
-                    {item.label}
-                  </Link>
-                );
-              })}
+              <div className="flex flex-col gap-0.5">
+                {bottomNavItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = pathname.startsWith(item.href);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={cn(
+                        "kf-nav-item py-3 active:scale-[0.98]",
+                        isActive && "active"
+                      )}
+                    >
+                      <Icon className="w-5 h-5 flex-shrink-0 kf-nav-icon" />
+                      <span className="text-sm font-medium">{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
             </div>
 
             <div className="mt-auto px-3 pb-6 space-y-2 border-t border-border pt-3">
