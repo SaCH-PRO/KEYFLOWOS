@@ -137,7 +137,18 @@ export class MarketplaceService {
 
     return this.prisma.client.shippingZone.update({
       where: { id: zoneId },
-      data,
+      data: {
+        name: data.name,
+        countries: data.countries,
+        regions: data.regions,
+        baseFee: data.baseFee,
+        perKgRate: data.perKgRate,
+        freeAbove: data.freeAbove,
+        currency: data.currency,
+        estimatedDays: data.estimatedDays,
+        carrier: data.carrier,
+        isActive: data.isActive,
+      },
     });
   }
 
@@ -180,7 +191,15 @@ export class MarketplaceService {
 
     return this.prisma.client.warehouse.update({
       where: { id: warehouseId },
-      data,
+      data: {
+        name: data.name,
+        address: data.address,
+        city: data.city,
+        country: data.country,
+        type: data.type,
+        capacity: data.capacity,
+        isActive: data.isActive,
+      },
     });
   }
 
@@ -259,7 +278,7 @@ export class MarketplaceService {
       });
       if (!product) throw new BadRequestException(`Product ${item.productId} not found`);
 
-      const unitPrice = item.unitPrice || product.price;
+      const unitPrice = product.price;
       const total = unitPrice * item.quantity;
       subtotal += total;
 
@@ -411,7 +430,19 @@ export class MarketplaceService {
     });
     if (!shipment) throw new NotFoundException('Shipment not found');
 
-    const updateData: any = { ...data };
+    const updateData: Record<string, unknown> = {
+      trackingNumber: data.trackingNumber,
+      carrier: data.carrier,
+      status: data.status,
+      originCountry: data.originCountry,
+      destinationCountry: data.destinationCountry,
+      destinationAddress: data.destinationAddress,
+      weight: data.weight,
+      weightUnit: data.weightUnit,
+      dimensions: data.dimensions,
+      shippingCost: data.shippingCost,
+      currency: data.currency,
+    };
     if (data.status === 'SHIPPED' && !shipment.shippedAt) {
       updateData.shippedAt = new Date();
     }
@@ -478,7 +509,23 @@ export class MarketplaceService {
     });
     if (!decl) throw new NotFoundException('Customs declaration not found');
 
-    const updateData: any = { ...data };
+    const updateData: Record<string, unknown> = {
+      declarationType: data.declarationType,
+      referenceNumber: data.referenceNumber,
+      hsCode: data.hsCode,
+      goodsDescription: data.goodsDescription,
+      originCountry: data.originCountry,
+      destinationCountry: data.destinationCountry,
+      declaredValue: data.declaredValue,
+      currency: data.currency,
+      dutyRate: data.dutyRate,
+      dutyAmount: data.dutyAmount,
+      vatAmount: data.vatAmount,
+      totalCharges: data.totalCharges,
+      documents: data.documents,
+      notes: data.notes,
+      status: data.status,
+    };
     if (data.status === 'FILED' && !decl.filedAt) {
       updateData.filedAt = new Date();
     }
@@ -498,7 +545,7 @@ export class MarketplaceService {
     });
     if (!product) throw new NotFoundException('Product not found');
 
-    const unitPrice = data.unitPrice || product.price;
+    const unitPrice = product.price;
     const total = unitPrice * (data.quantity || 1);
 
     return this.prisma.client.preOrder.create({
@@ -547,7 +594,15 @@ export class MarketplaceService {
     });
     if (!po) throw new NotFoundException('Pre-order not found');
 
-    const updateData: any = { ...data };
+    const updateData: Record<string, unknown> = {
+      customerName: data.customerName,
+      customerEmail: data.customerEmail,
+      customerPhone: data.customerPhone,
+      quantity: data.quantity,
+      depositAmount: data.depositAmount,
+      notes: data.notes,
+      status: data.status,
+    };
     if (data.status === 'FULFILLED' && !po.fulfilledAt) {
       updateData.fulfilledAt = new Date();
     }
@@ -621,7 +676,16 @@ export class MarketplaceService {
     });
     if (!po) throw new NotFoundException('Purchase order not found');
 
-    const updateData: any = { ...data };
+    const updateData: Record<string, unknown> = {
+      supplierName: data.supplierName,
+      supplierEmail: data.supplierEmail,
+      supplierPhone: data.supplierPhone,
+      supplierCountry: data.supplierCountry,
+      shippingCost: data.shippingCost,
+      taxAmount: data.taxAmount,
+      notes: data.notes,
+      status: data.status,
+    };
     if (data.status === 'RECEIVED' && !po.receivedAt) {
       updateData.receivedAt = new Date();
     }
