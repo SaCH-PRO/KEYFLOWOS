@@ -1,4 +1,4 @@
-import { Body, Controller, Inject, Post, UseGuards, NotFoundException } from '@nestjs/common';
+import { Body, Controller, Inject, Post, Req, UseGuards, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
@@ -7,8 +7,23 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 export class ActionsController {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
+  private async verifyResourceOwnership(userId: string, businessId: string) {
+    const business = await this.prisma.client.business.findFirst({
+      where: {
+        id: businessId,
+        OR: [
+          { ownerId: userId },
+          { members: { some: { userId } } },
+        ],
+      },
+    });
+    if (!business) {
+      throw new ForbiddenException('You do not have access to this resource');
+    }
+  }
+
   @Post('send-receipt')
-  async sendReceipt(@Body() body: { invoiceId: string; contactEmail?: string }) {
+  async sendReceipt(@Body() body: { invoiceId: string; contactEmail?: string }, @Req() req: any) {
     if (!body.invoiceId) {
       throw new NotFoundException('invoiceId required');
     }
@@ -19,6 +34,7 @@ export class ActionsController {
     if (!invoice) {
       throw new NotFoundException('Invoice not found');
     }
+    await this.verifyResourceOwnership(req.user.id, invoice.businessId);
     const contactEmail = body.contactEmail ?? invoice.contact?.email;
     return {
       message: `Receipt prepared for invoice ${invoice.invoiceNumber ?? invoice.id}`,
@@ -40,7 +56,7 @@ export class ActionsController {
   }
 
   @Post('booking-followup')
-  async bookingFollowup(@Body() body: { bookingId: string }) {
+  async bookingFollowup(@Body() body: { bookingId: string }, @Req() req: any) {
     if (!body.bookingId) {
       throw new NotFoundException('bookingId required');
     }
@@ -49,6 +65,7 @@ export class ActionsController {
       include: { contact: true, service: true },
     });
     if (!booking) throw new NotFoundException('Booking not found');
+    await this.verifyResourceOwnership(req.user.id, booking.businessId);
     return {
       message: `Follow-up prepared for booking ${booking.id}`,
       status: booking.status,
