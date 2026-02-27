@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import { AppModule } from './app.module';
 import { GlobalHttpExceptionFilter } from './core/filters/http-exception.filter';
 
@@ -13,6 +15,22 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
+  app.use(helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+  }));
+
+  app.use(
+    rateLimit({
+      windowMs: 60 * 1000,
+      max: 200,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { statusCode: 429, message: 'Too many requests, please try again later', error: 'Too Many Requests' },
+    }),
+  );
+
   const allowedOrigins: string[] = [];
   const replitDevDomain = process.env.REPLIT_DEV_DOMAIN;
   const replitSlug = process.env.REPL_SLUG;

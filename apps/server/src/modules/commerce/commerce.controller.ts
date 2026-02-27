@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Inject, Logger, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Inject, Logger, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { CommerceService } from './commerce.service';
 import { RecurringInvoiceService } from './recurring-invoice.service';
@@ -10,6 +10,7 @@ import { GmailService } from './gmail.service';
 import { UpdateInvoiceStatusDto } from './dto/update-invoice-status.dto';
 import { UpdateQuoteStatusDto } from './dto/update-quote-status.dto';
 import { buildQuoteEmailHtml } from './quote-email.template';
+import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Controller('commerce')
 export class CommerceController {
@@ -20,7 +21,23 @@ export class CommerceController {
     @Inject(RecurringInvoiceService) private readonly recurringInvoices: RecurringInvoiceService,
     @Inject(ReceiptService) private readonly receipts: ReceiptService,
     @Inject(GmailService) private readonly gmail: GmailService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
+
+  private async verifyBusinessAccess(userId: string, businessId: string) {
+    const business = await this.prisma.client.business.findFirst({
+      where: {
+        id: businessId,
+        OR: [
+          { ownerId: userId },
+          { members: { some: { userId } } },
+        ],
+      },
+    });
+    if (!business) {
+      throw new ForbiddenException('You do not have access to this resource');
+    }
+  }
 
   @Get('public/businesses/:businessId/products')
   listPublicProducts(@Param('businessId') businessId: string) {
@@ -71,28 +88,34 @@ export class CommerceController {
 
   @UseGuards(AuthGuard)
   @Patch('invoices/:invoiceId/paid')
-  markInvoicePaid(@Param('invoiceId') invoiceId: string, @Req() req: any) {
+  async markInvoicePaid(@Param('invoiceId') invoiceId: string, @Req() req: any) {
+    const invoice = await this.prisma.client.invoice.findUnique({ where: { id: invoiceId }, select: { businessId: true } });
+    if (invoice) await this.verifyBusinessAccess(req.user.id, invoice.businessId);
     return this.commerce.markInvoicePaid(invoiceId, req?.user?.id);
   }
 
   @UseGuards(AuthGuard)
   @Patch('invoices/:invoiceId/payment-failed')
-  markInvoicePaymentFailed(
+  async markInvoicePaymentFailed(
     @Param('invoiceId') invoiceId: string,
     @Req() req: any,
     @Body() body: { reason?: string },
   ) {
+    const invoice = await this.prisma.client.invoice.findUnique({ where: { id: invoiceId }, select: { businessId: true } });
+    if (invoice) await this.verifyBusinessAccess(req.user.id, invoice.businessId);
     return this.commerce.markInvoicePaymentFailed(invoiceId, req?.user?.id, body?.reason);
   }
 
   @UseGuards(AuthGuard)
   @Patch('invoices/:invoiceId/status/:status')
-  updateInvoiceStatus(
+  async updateInvoiceStatus(
     @Param('invoiceId') invoiceId: string,
     @Param('status') status: string,
     @Req() req: any,
     @Body() body: UpdateInvoiceStatusDto,
   ) {
+    const invoice = await this.prisma.client.invoice.findUnique({ where: { id: invoiceId }, select: { businessId: true } });
+    if (invoice) await this.verifyBusinessAccess(req.user.id, invoice.businessId);
     return this.commerce.updateInvoiceStatus({
       invoiceId,
       status: status.toUpperCase() as 'SENT' | 'OVERDUE' | 'VOID',
@@ -142,6 +165,8 @@ export class CommerceController {
     @Req() req: any,
   ) {
     try {
+      const quote = await this.prisma.client.quote.findUnique({ where: { id: quoteId }, select: { businessId: true } });
+      if (quote) await this.verifyBusinessAccess(req.user.id, quote.businessId);
       this.logger.log(`Updating quote ${quoteId} to status ${status} by user ${req?.user?.id}`);
       const result = await this.commerce.updateQuoteStatus({
         quoteId,
@@ -158,7 +183,9 @@ export class CommerceController {
 
   @UseGuards(AuthGuard)
   @Get('invoices/:invoiceId/receipt')
-  getReceipt(@Param('invoiceId') invoiceId: string) {
+  async getReceipt(@Param('invoiceId') invoiceId: string, @Req() req: any) {
+    const invoice = await this.prisma.client.invoice.findUnique({ where: { id: invoiceId }, select: { businessId: true } });
+    if (invoice) await this.verifyBusinessAccess(req.user.id, invoice.businessId);
     return this.receipts.buildReceipt(invoiceId);
   }
 

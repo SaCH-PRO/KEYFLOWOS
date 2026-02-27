@@ -502,7 +502,28 @@ export class CommerceService {
   async getQuote(quoteId: string) {
     return this.prisma.client.quote.findUnique({
       where: { id: quoteId },
-      include: { contact: true, items: true, invoice: true, business: true },
+      include: {
+        contact: {
+          select: {
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+        items: true,
+        invoice: true,
+        business: {
+          select: {
+            id: true,
+            name: true,
+            logoUrl: true,
+            address: true,
+            phone: true,
+            email: true,
+            website: true,
+          },
+        },
+      },
     });
   }
 

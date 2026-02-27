@@ -3,13 +3,6 @@ import { NextFunction, Request, Response } from 'express';
 import { SupabaseAuthService } from './supabase-auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 
-type DecodedJwt = {
-  sub?: string;
-  user_id?: string;
-  email?: string;
-  role?: string;
-};
-
 @Injectable()
 export class AuthMiddleware implements NestMiddleware {
   private readonly logger = new Logger(AuthMiddleware.name);
@@ -46,33 +39,13 @@ export class AuthMiddleware implements NestMiddleware {
           `Attached user from supabase: id=${user.id} email=${user.email ?? 'n/a'}`,
         );
       } else if (token) {
-        // Fallback: decode JWT locally to avoid blocking when Supabase is unavailable.
-        const decoded = this.decodeJwt(token);
-        const fallbackId = decoded?.sub || decoded?.user_id;
-        if (fallbackId) {
-          this.logger.debug(
-            `Attached user from decoded JWT: id=${fallbackId} email=${decoded?.email ?? 'n/a'}`,
-          );
-          (req as any).user = await this.attachRole(fallbackId, decoded?.email);
-        }
+        this.logger.warn('Token provided but Supabase verification failed — rejecting');
       }
     } catch (err) {
       this.logger.debug(`AuthMiddleware error: ${(err as Error).message}`);
     }
 
     next();
-  }
-
-  private decodeJwt(token: string): DecodedJwt | null {
-    try {
-      const [, payload] = token.split('.');
-      if (!payload) return null;
-      const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
-      const decoded = Buffer.from(normalized, 'base64').toString('utf8');
-      return JSON.parse(decoded);
-    } catch {
-      return null;
-    }
   }
 
   private async attachRole(userId: string, email?: string | null) {
