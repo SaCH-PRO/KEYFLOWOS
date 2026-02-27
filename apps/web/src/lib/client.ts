@@ -53,6 +53,8 @@ const contactSchema = z.object({
   marketingOptIn: z.boolean().nullable().optional(),
   doNotContact: z.boolean().nullable().optional(),
   notesInternal: z.string().nullable().optional(),
+  createdAt: z.string().nullable().optional(),
+  updatedAt: z.string().nullable().optional(),
   meta: contactMetaSchema.optional(),
 });
 
