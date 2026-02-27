@@ -29,12 +29,19 @@ export function PageHeader({
       className="flex flex-col md:flex-row md:items-center md:justify-between gap-4"
     >
       <div>
-        <h1 className="text-xl md:text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <Icon className="w-6 h-6" style={{ color: "hsl(var(--kf-accent1))" }} />
+        <h1 className="text-2xl md:text-3xl font-bold tracking-tight flex items-center gap-3">
+          <div
+            className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{
+              background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
+            }}
+          >
+            <Icon className="w-5 h-5 text-white" />
+          </div>
           {title}
         </h1>
         {subtitle && (
-          <p className="text-sm text-muted-foreground mt-0.5">{subtitle}</p>
+          <p className="text-sm text-muted-foreground mt-1">{subtitle}</p>
         )}
       </div>
       <div className="flex items-center gap-2 flex-wrap">

@@ -48,23 +48,23 @@ export function StatCards({ items, columns = 4 }: StatCardsProps) {
           <motion.div
             key={kpi.label}
             variants={fadeUp}
-            className="kf-card p-4 rounded-xl relative overflow-hidden"
+            className="kf-card kf-card-hover p-4 rounded-xl relative overflow-hidden cursor-default"
           >
             <div className="flex items-start justify-between">
               <div className="space-y-1 flex-1 min-w-0">
-                <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+                <p className="text-[11px] uppercase tracking-widest text-muted-foreground font-medium">
                   {kpi.label}
                 </p>
-                <p className="text-lg font-bold truncate">{kpi.value}</p>
+                <p className="text-xl font-bold truncate">{kpi.value}</p>
                 {kpi.sub && (
                   <p className="text-xs text-muted-foreground">{kpi.sub}</p>
                 )}
               </div>
               <div
-                className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+                className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
                 style={{ background: `${kpi.color}20` }}
               >
-                <Icon className="w-4 h-4" style={{ color: kpi.color }} />
+                <Icon className="w-5 h-5" style={{ color: kpi.color }} />
               </div>
             </div>
           </motion.div>
