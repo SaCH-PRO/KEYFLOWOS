@@ -19,3 +19,5 @@ export { ConversationContext, type ConversationContextData } from "./conversatio
 export { AiCopilot, type AiInsight } from "./ai-copilot";
 export { BroadcastDrawer } from "./broadcast-drawer";
 export { ContactPickerDrawer } from "./contact-picker-drawer";
+export { ContactSelect } from "./contact-select";
+export { ContactChip } from "./contact-chip";

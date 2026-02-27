@@ -38,6 +38,7 @@ import {
   Invoice,
   Contact,
 } from "@/lib/client";
+import { ContactSelect } from "@/components/contacts";
 import {
   INVOICE_STATUS_FILTERS,
   InvoiceLineItem,
@@ -442,21 +443,12 @@ export default function InvoicesPanel({
               {formError && <div className="text-xs text-amber-400 rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2">{formError}</div>}
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 block">Contact (optional)</label>
-                  <select
-                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                    value={invoiceForm.contactId}
-                    onChange={(e) => setInvoiceForm((f: any) => ({ ...f, contactId: e.target.value }))}
-                  >
-                    <option value="">Select contact...</option>
-                    {contacts.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.firstName} {c.lastName} {c.email ? `(${c.email})` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <ContactSelect
+                  value={invoiceForm.contactId}
+                  onChange={(id) => setInvoiceForm((f: any) => ({ ...f, contactId: id }))}
+                  contacts={contacts}
+                  label="Contact (optional)"
+                />
                 <div>
                   <label className="text-xs text-muted-foreground mb-1.5 block">Payment Terms</label>
                   <select

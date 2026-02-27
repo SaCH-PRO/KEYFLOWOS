@@ -628,6 +628,22 @@ export async function fetchSegmentSummary(businessId: string = DEFAULT_BUSINESS_
   );
 }
 
+export async function fetchDuplicateContacts(businessId: string = DEFAULT_BUSINESS_ID) {
+  const duplicateGroupSchema = z.object({
+    field: z.enum(["email", "phone", "name"]),
+    value: z.string(),
+    contacts: z.array(contactSchema),
+  });
+  const duplicatesSchema = z.object({
+    groups: z.array(duplicateGroupSchema),
+  });
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/duplicates`,
+    duplicatesSchema,
+    { groups: [] },
+  );
+}
+
 export async function fetchCrmHighlights(businessId: string = DEFAULT_BUSINESS_ID) {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/highlights`,
@@ -2923,6 +2939,106 @@ export async function createWebhook(businessId: string, data: { url: string; eve
 }
 export async function deleteWebhook(businessId: string, webhookId: string): Promise<ApiResult<void>> {
   return apiDelete<void>(`/businesses/${encodeURIComponent(businessId)}/webhooks/${webhookId}`);
+}
+
+// ---
+// CONTACT LISTS
+// ---
+export interface ContactList {
+  id: string;
+  businessId: string;
+  name: string;
+  description?: string | null;
+  color?: string | null;
+  type: string;
+  filters?: any;
+  contactIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+const contactListSchema = z.object({
+  id: z.string(),
+  businessId: z.string(),
+  name: z.string(),
+  description: z.string().nullable().optional(),
+  color: z.string().nullable().optional(),
+  type: z.string(),
+  filters: z.unknown().nullable().optional(),
+  contactIds: z.array(z.string()),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export async function fetchContactLists(businessId: string = DEFAULT_BUSINESS_ID): Promise<ApiResult<ContactList[]>> {
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/lists`,
+    z.array(contactListSchema),
+    [],
+  );
+}
+
+export async function createContactList(
+  businessId: string,
+  data: { name: string; description?: string; color?: string; type?: string; filters?: any; contactIds?: string[] },
+): Promise<ApiResult<ContactList>> {
+  return apiPost<ContactList>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/lists`,
+    body: data,
+  });
+}
+
+export async function updateContactList(
+  businessId: string,
+  listId: string,
+  data: { name?: string; description?: string; color?: string; type?: string; filters?: any; contactIds?: string[] },
+): Promise<ApiResult<ContactList>> {
+  const url = `${API_BASE}/crm/businesses/${encodeURIComponent(businessId)}/lists/${encodeURIComponent(listId)}`;
+  try {
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) return { data: null, error: (json as any)?.message ?? res.statusText };
+    return { data: json as ContactList, error: null };
+  } catch (e: any) {
+    return { data: null, error: e.message ?? 'Network error' };
+  }
+}
+
+export async function deleteContactList(businessId: string, listId: string): Promise<ApiResult<void>> {
+  return apiDelete<void>(`/crm/businesses/${encodeURIComponent(businessId)}/lists/${encodeURIComponent(listId)}`);
+}
+
+export async function fetchContactListContacts(businessId: string, listId: string): Promise<ApiResult<Contact[]>> {
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/lists/${encodeURIComponent(listId)}/contacts`,
+    z.array(contactSchema),
+    [],
+  );
+}
+
+export async function addContactsToList(
+  businessId: string,
+  listId: string,
+  contactIds: string[],
+): Promise<ApiResult<ContactList>> {
+  return apiPost<ContactList>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/lists/${encodeURIComponent(listId)}/contacts`,
+    body: { contactIds },
+  });
+}
+
+export async function removeContactFromList(
+  businessId: string,
+  listId: string,
+  contactId: string,
+): Promise<ApiResult<void>> {
+  return apiDelete<void>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/lists/${encodeURIComponent(listId)}/contacts/${encodeURIComponent(contactId)}`,
+  );
 }
 
 export { DEFAULT_BUSINESS_ID };

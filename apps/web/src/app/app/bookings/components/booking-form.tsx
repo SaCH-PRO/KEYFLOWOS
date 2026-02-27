@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { Service, StaffMember, Contact } from "./bookings-types";
 import { formatTime } from "./bookings-types";
+import { ContactSelect } from "@/components/contacts";
 
 interface BookingFormProps {
   services: Service[];
@@ -32,7 +33,6 @@ export default function BookingForm({ services, staff, contacts, onSubmit, onCan
   const [bookingServiceId, setBookingServiceId] = useState("");
   const [bookingStaffId, setBookingStaffId] = useState("");
   const [bookingContactId, setBookingContactId] = useState("");
-  const [contactSearch, setContactSearch] = useState("");
 
   const selectedService = useMemo(() => services.find((s) => s.id === bookingServiceId), [services, bookingServiceId]);
 
@@ -42,15 +42,6 @@ export default function BookingForm({ services, staff, contacts, onSubmit, onCan
     const end = new Date(start.getTime() + (selectedService.durationMins ?? 60) * 60 * 1000);
     return end.toISOString();
   }, [bookingDate, bookingTime, selectedService]);
-
-  const filteredContacts = useMemo(() => {
-    if (!contactSearch.trim()) return contacts.slice(0, 10);
-    const q = contactSearch.toLowerCase();
-    return contacts.filter((c) => {
-      const name = `${c.firstName ?? ""} ${c.lastName ?? ""}`.toLowerCase();
-      return name.includes(q) || (c.email?.toLowerCase().includes(q) ?? false);
-    }).slice(0, 10);
-  }, [contacts, contactSearch]);
 
   function handleSubmit() {
     onSubmit({
@@ -130,43 +121,12 @@ export default function BookingForm({ services, staff, contacts, onSubmit, onCan
             </select>
           </div>
           <div className="md:col-span-2">
-            <label className="text-xs text-muted-foreground mb-1.5 block font-medium">Contact (optional)</label>
-            <div className="relative">
-              <input
-                type="text"
-                placeholder="Search contacts..."
-                value={contactSearch}
-                onChange={(e) => {
-                  setContactSearch(e.target.value);
-                  if (!e.target.value.trim()) setBookingContactId("");
-                }}
-                className="kf-input w-full"
-              />
-              {contactSearch.trim() && (
-                <div className="absolute top-full left-0 right-0 mt-1 kf-card rounded-xl border border-border/60 max-h-48 overflow-y-auto z-10">
-                  {filteredContacts.length > 0 ? (
-                    filteredContacts.map((c) => (
-                      <button
-                        key={c.id}
-                        onClick={() => {
-                          setBookingContactId(c.id);
-                          setContactSearch(`${c.firstName ?? ""} ${c.lastName ?? ""}`.trim());
-                        }}
-                        className={`w-full text-left px-3 py-2 text-sm hover:bg-muted/50 transition-colors ${bookingContactId === c.id ? "bg-[hsl(var(--kf-accent1)/0.1)]" : ""}`}
-                      >
-                        <div className="font-medium">{c.firstName} {c.lastName}</div>
-                        {c.email && <div className="text-xs text-muted-foreground">{c.email}</div>}
-                      </button>
-                    ))
-                  ) : (
-                    <div className="px-3 py-2 text-sm text-muted-foreground">No contacts found</div>
-                  )}
-                </div>
-              )}
-              {bookingContactId && !contactSearch.trim() && (
-                <div className="mt-1 text-xs text-emerald-400">Contact selected</div>
-              )}
-            </div>
+            <ContactSelect
+              value={bookingContactId}
+              onChange={(id) => setBookingContactId(id)}
+              contacts={contacts}
+              label="Contact (optional)"
+            />
           </div>
         </div>
         {selectedService && computedEndTime && (

@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Query, Redirect, Req, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Inject, Param, Post, Put, Query, Redirect, Req, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { CrmFlowService } from './crm-flow.service';
 import { CrmGoogleService } from './crm-google.service';
@@ -243,6 +243,12 @@ export class CrmController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/duplicates')
+  findDuplicates(@Param('businessId') businessId: string) {
+    return this.crm.findDuplicates(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/contacts/:contactId/events')
   contactEvents(@Param('businessId') businessId: string, @Param('contactId') contactId: string) {
     return this.crm.listContactEvents({ businessId, contactId });
@@ -345,6 +351,69 @@ export class CrmController {
       accessToken: body.accessToken,
       refreshToken: body.refreshToken,
     });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/lists')
+  listContactLists(@Param('businessId') businessId: string) {
+    return this.crm.listContactLists(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/lists')
+  createContactList(
+    @Param('businessId') businessId: string,
+    @Body() body: { name: string; description?: string; color?: string; type?: string; filters?: any; contactIds?: string[] },
+  ) {
+    return this.crm.createContactList({ businessId, ...body });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Put('businesses/:businessId/lists/:listId')
+  updateContactList(
+    @Param('businessId') businessId: string,
+    @Param('listId') listId: string,
+    @Body() body: { name?: string; description?: string; color?: string; type?: string; filters?: any; contactIds?: string[] },
+  ) {
+    return this.crm.updateContactList({ businessId, listId, ...body });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/lists/:listId')
+  deleteContactList(
+    @Param('businessId') businessId: string,
+    @Param('listId') listId: string,
+  ) {
+    return this.crm.deleteContactList({ businessId, listId });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/lists/:listId/contacts')
+  getContactListContacts(
+    @Param('businessId') businessId: string,
+    @Param('listId') listId: string,
+  ) {
+    return this.crm.getContactListContacts({ businessId, listId });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/lists/:listId/contacts')
+  addContactsToList(
+    @Param('businessId') businessId: string,
+    @Param('listId') listId: string,
+    @Body() body: { contactIds: string[] },
+  ) {
+    return this.crm.addContactsToList({ businessId, listId, contactIds: body.contactIds });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/lists/:listId/contacts/:contactId')
+  removeContactFromList(
+    @Param('businessId') businessId: string,
+    @Param('listId') listId: string,
+    @Param('contactId') contactId: string,
+  ) {
+    return this.crm.removeContactFromList({ businessId, listId, contactId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

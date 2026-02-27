@@ -21,6 +21,7 @@ import {
   CalendarPlus,
   TrendingUp,
   UserCheck,
+  List,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -61,6 +62,8 @@ import { PageHeader } from "@/components/ui/page-header";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { TabNav } from "@/components/ui/tab-nav";
 import { StatCards } from "@/components/ui/stat-cards";
+import { ContactLists } from "./contact-lists";
+import { DuplicateDetector } from "./duplicate-detector";
 import {
   Contact,
   ContactDetail as ContactDetailAPI,
@@ -187,6 +190,9 @@ export default function ContactsPage() {
   const router = useRouter();
   const [googleContactsImported, setGoogleContactsImported] = useState(false);
   const [googleConnectLoading, setGoogleConnectLoading] = useState(false);
+  const [activeListId, setActiveListId] = useState<string | null>(null);
+  const [activeListContactIds, setActiveListContactIds] = useState<string[] | null>(null);
+  const [crmViewTab, setCrmViewTab] = useState<"pipeline" | "lists">("pipeline");
 
   useEffect(() => {
     setPinnedIdsState(getPinnedIds());
@@ -661,6 +667,11 @@ export default function ContactsPage() {
     else if (activeListTab === "recent") list = recentContacts;
     else list = [...contacts];
 
+    if (activeListContactIds && activeListContactIds.length > 0) {
+      const idSet = new Set(activeListContactIds);
+      list = list.filter((c) => idSet.has(c.id));
+    }
+
     if (activeSegment) {
       const now = new Date();
       const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -696,7 +707,7 @@ export default function ContactsPage() {
     });
 
     return list;
-  }, [activeListTab, contacts, pinnedContacts, recentContacts, activeSegment, sortBy]);
+  }, [activeListTab, contacts, pinnedContacts, recentContacts, activeSegment, sortBy, activeListContactIds]);
 
   const totalPages = Math.max(1, Math.ceil(displayContacts.length / pageSize));
   const paginatedContacts = useMemo(() => {
@@ -862,7 +873,46 @@ export default function ContactsPage() {
         ]}
       />
 
-      {flowIntelligence && (
+      <TabNav
+        tabs={[
+          { key: "pipeline", label: "Pipeline", icon: Users },
+          { key: "lists", label: "Lists", icon: List },
+        ]}
+        activeTab={crmViewTab}
+        onTabChange={(t) => setCrmViewTab(t as "pipeline" | "lists")}
+      />
+
+      {businessId && (
+        <DuplicateDetector businessId={businessId} onMergeComplete={() => { void loadContacts(); }} />
+      )}
+
+      {crmViewTab === "lists" && businessId && (
+        <ContactLists
+          businessId={businessId}
+          activeListId={activeListId}
+          onSelectList={(listId, contactIds) => {
+            setActiveListId(listId);
+            setActiveListContactIds(contactIds || null);
+            if (listId) setCrmViewTab("pipeline");
+          }}
+        />
+      )}
+
+      {crmViewTab === "pipeline" && activeListId && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[hsl(var(--kf-accent1))]/10 border border-[hsl(var(--kf-accent1))]/30 text-sm">
+          <List className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+          <span>Filtered by list</span>
+          <button
+            onClick={() => { setActiveListId(null); setActiveListContactIds(null); }}
+            className="ml-auto text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+          >
+            <X className="w-3 h-3" />
+            Clear filter
+          </button>
+        </div>
+      )}
+
+      {crmViewTab === "pipeline" && flowIntelligence && (
         <FlowIntelligence
           data={flowIntelligence}
           onViewCold={() => setStatusFilter("LEAD")}
@@ -870,6 +920,7 @@ export default function ContactsPage() {
         />
       )}
 
+      {crmViewTab === "pipeline" && (
       <div className="grid gap-6 lg:grid-cols-2">
         <NextActionQueue
           actions={nextActions}
@@ -890,8 +941,9 @@ export default function ContactsPage() {
           onViewContact={selectContact}
         />
       </div>
+      )}
 
-      {revenueData && (
+      {crmViewTab === "pipeline" && revenueData && (
         <PredictiveRevenue
           data={revenueData}
           onViewExpiringQuotes={() => {}}
@@ -899,6 +951,8 @@ export default function ContactsPage() {
         />
       )}
 
+      {crmViewTab === "pipeline" && (
+      <>
       <AnimatePresence>
         {showAddForm && (
           <ContactForm
@@ -1254,6 +1308,8 @@ export default function ContactsPage() {
           </motion.div>
         )}
       </AnimatePresence>
+      </>
+      )}
 
       <BroadcastDrawer
         isOpen={showBroadcast}
