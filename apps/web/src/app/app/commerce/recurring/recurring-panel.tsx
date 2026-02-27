@@ -28,6 +28,7 @@ import {
   Product,
   Contact,
 } from "@/lib/client";
+import { ContactSelect } from "@/components/contacts";
 import {
   InvoiceLineItem,
   CATEGORIES,
@@ -284,19 +285,13 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
                     placeholder="e.g. Monthly Retainer, Weekly Service"
                   />
                 </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 block">Contact *</label>
-                  <select
-                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                    value={form.contactId}
-                    onChange={(e) => setForm((f) => ({ ...f, contactId: e.target.value }))}
-                  >
-                    <option value="">Select contact...</option>
-                    {contacts.map((c) => (
-                      <option key={c.id} value={c.id}>{c.firstName} {c.lastName} {c.email ? `(${c.email})` : ""}</option>
-                    ))}
-                  </select>
-                </div>
+                <ContactSelect
+                  value={form.contactId}
+                  onChange={(id) => setForm((f) => ({ ...f, contactId: id }))}
+                  contacts={contacts}
+                  label="Contact"
+                  required
+                />
                 <div>
                   <label className="text-xs text-muted-foreground mb-1.5 block">Frequency *</label>
                   <select

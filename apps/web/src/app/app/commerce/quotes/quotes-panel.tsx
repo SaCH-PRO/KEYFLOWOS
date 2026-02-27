@@ -38,6 +38,7 @@ import {
   Contact,
   Invoice,
 } from "@/lib/client";
+import { ContactSelect } from "@/components/contacts";
 import {
   QUOTE_STATUS_FILTERS,
   InvoiceLineItem,
@@ -466,21 +467,13 @@ export default function QuotesPanel({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Contact *</label>
-              <select
-                className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                value={quoteForm.contactId}
-                onChange={(e) => setQuoteForm((f: any) => ({ ...f, contactId: e.target.value }))}
-              >
-                <option value="">Select contact...</option>
-                {contacts.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.firstName} {c.lastName} {c.email ? `(${c.email})` : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <ContactSelect
+              value={quoteForm.contactId}
+              onChange={(id) => setQuoteForm((f: any) => ({ ...f, contactId: id }))}
+              contacts={contacts}
+              label="Contact"
+              required
+            />
             <Input
               label="Expiry Date"
               type="date"

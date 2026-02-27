@@ -381,6 +381,22 @@ model ContactPlaybook {
   @@map("contact_playbooks")
 }
 
+model ContactList {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  name        String
+  description String?
+  color       String?
+  type        String   @default("MANUAL")
+  filters     Json?
+  contactIds  String[] @map("contact_ids")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId])
+  @@map("contact_lists")
+}
+
 // ---
 // MODULE 3: COMMERCE (QUOTES, INVOICES, PAYMENTS)
 // ---
