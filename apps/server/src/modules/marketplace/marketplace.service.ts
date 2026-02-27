@@ -45,16 +45,26 @@ export class MarketplaceService {
     });
   }
 
-  async getListings(businessId: string, filters?: { marketReach?: string; isActive?: boolean }) {
+  async getListings(businessId: string, filters?: { marketReach?: string; isActive?: boolean }, page = 1, pageSize = 50) {
     const where: any = { businessId };
     if (filters?.marketReach) where.marketReach = filters.marketReach;
     if (filters?.isActive !== undefined) where.isActive = filters.isActive;
 
-    return this.prisma.client.marketplaceListing.findMany({
-      where,
-      include: { product: true },
-      orderBy: { createdAt: 'desc' },
-    });
+    pageSize = Math.min(Math.max(pageSize, 1), 100);
+    page = Math.max(page, 1);
+
+    const [data, total] = await Promise.all([
+      this.prisma.client.marketplaceListing.findMany({
+        where,
+        include: { product: true },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.client.marketplaceListing.count({ where }),
+    ]);
+
+    return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
   }
 
   async updateListing(businessId: string, listingId: string, data: any) {
@@ -295,19 +305,29 @@ export class MarketplaceService {
     });
   }
 
-  async getOrders(businessId: string, filters?: { status?: string; type?: string }) {
+  async getOrders(businessId: string, filters?: { status?: string; type?: string }, page = 1, pageSize = 50) {
     const where: any = { businessId };
     if (filters?.status) where.status = filters.status;
     if (filters?.type) where.type = filters.type;
 
-    return this.prisma.client.marketplaceOrder.findMany({
-      where,
-      include: {
-        items: { include: { product: true } },
-        shipments: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    pageSize = Math.min(Math.max(pageSize, 1), 100);
+    page = Math.max(page, 1);
+
+    const [data, total] = await Promise.all([
+      this.prisma.client.marketplaceOrder.findMany({
+        where,
+        include: {
+          items: { include: { product: true } },
+          shipments: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.client.marketplaceOrder.count({ where }),
+    ]);
+
+    return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
   }
 
   async getOrder(businessId: string, orderId: string) {
@@ -364,15 +384,25 @@ export class MarketplaceService {
     });
   }
 
-  async getShipments(businessId: string, filters?: { status?: string }) {
+  async getShipments(businessId: string, filters?: { status?: string }, page = 1, pageSize = 50) {
     const where: any = { businessId };
     if (filters?.status) where.status = filters.status;
 
-    return this.prisma.client.shipment.findMany({
-      where,
-      include: { order: true },
-      orderBy: { createdAt: 'desc' },
-    });
+    pageSize = Math.min(Math.max(pageSize, 1), 100);
+    page = Math.max(page, 1);
+
+    const [data, total] = await Promise.all([
+      this.prisma.client.shipment.findMany({
+        where,
+        include: { order: true },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.client.shipment.count({ where }),
+    ]);
+
+    return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
   }
 
   async updateShipment(businessId: string, shipmentId: string, data: any) {
@@ -421,15 +451,25 @@ export class MarketplaceService {
     });
   }
 
-  async getCustomsDeclarations(businessId: string, filters?: { status?: string; type?: string }) {
+  async getCustomsDeclarations(businessId: string, filters?: { status?: string; type?: string }, page = 1, pageSize = 50) {
     const where: any = { businessId };
     if (filters?.status) where.status = filters.status;
     if (filters?.type) where.declarationType = filters.type;
 
-    return this.prisma.client.customsDeclaration.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-    });
+    pageSize = Math.min(Math.max(pageSize, 1), 100);
+    page = Math.max(page, 1);
+
+    const [data, total] = await Promise.all([
+      this.prisma.client.customsDeclaration.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.client.customsDeclaration.count({ where }),
+    ]);
+
+    return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
   }
 
   async updateCustomsDeclaration(businessId: string, declId: string, data: any) {
@@ -480,15 +520,25 @@ export class MarketplaceService {
     });
   }
 
-  async getPreOrders(businessId: string, filters?: { status?: string }) {
+  async getPreOrders(businessId: string, filters?: { status?: string }, page = 1, pageSize = 50) {
     const where: any = { businessId };
     if (filters?.status) where.status = filters.status;
 
-    return this.prisma.client.preOrder.findMany({
-      where,
-      include: { product: true },
-      orderBy: { createdAt: 'desc' },
-    });
+    pageSize = Math.min(Math.max(pageSize, 1), 100);
+    page = Math.max(page, 1);
+
+    const [data, total] = await Promise.all([
+      this.prisma.client.preOrder.findMany({
+        where,
+        include: { product: true },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.client.preOrder.count({ where }),
+    ]);
+
+    return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
   }
 
   async updatePreOrder(businessId: string, preOrderId: string, data: any) {
@@ -545,14 +595,24 @@ export class MarketplaceService {
     });
   }
 
-  async getPurchaseOrders(businessId: string, filters?: { status?: string }) {
+  async getPurchaseOrders(businessId: string, filters?: { status?: string }, page = 1, pageSize = 50) {
     const where: any = { businessId };
     if (filters?.status) where.status = filters.status;
 
-    return this.prisma.client.purchaseOrder.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-    });
+    pageSize = Math.min(Math.max(pageSize, 1), 100);
+    page = Math.max(page, 1);
+
+    const [data, total] = await Promise.all([
+      this.prisma.client.purchaseOrder.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.client.purchaseOrder.count({ where }),
+    ]);
+
+    return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
   }
 
   async updatePurchaseOrder(businessId: string, poId: string, data: any) {

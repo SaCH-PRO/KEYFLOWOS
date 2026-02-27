@@ -17,11 +17,20 @@ export class CommerceService {
     @Inject(SubscriptionsService) private readonly subscriptions: SubscriptionsService,
   ) {}
 
-  async listProducts(businessId: string) {
-    return this.prisma.client.product.findMany({
-      where: { businessId, deletedAt: null },
-      orderBy: { createdAt: 'desc' },
-    });
+  async listProducts(businessId: string, page = 1, pageSize = 50) {
+    page = Math.max(page, 1);
+    pageSize = Math.min(Math.max(pageSize, 1), 100);
+    const where = { businessId, deletedAt: null };
+    const [data, total] = await Promise.all([
+      this.prisma.client.product.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.client.product.count({ where }),
+    ]);
+    return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
   }
 
   async listPublicProducts(businessId: string) {
@@ -176,12 +185,21 @@ export class CommerceService {
     return invoice;
   }
 
-  listInvoices(businessId: string) {
-    return this.prisma.client.invoice.findMany({
-      where: { businessId, deletedAt: null },
-      orderBy: { createdAt: 'desc' },
-      include: { contact: true, quote: true, payments: true, items: true },
-    });
+  async listInvoices(businessId: string, page = 1, pageSize = 50) {
+    page = Math.max(page, 1);
+    pageSize = Math.min(Math.max(pageSize, 1), 100);
+    const where = { businessId, deletedAt: null };
+    const [data, total] = await Promise.all([
+      this.prisma.client.invoice.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        include: { contact: true, quote: true, payments: true, items: true },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.client.invoice.count({ where }),
+    ]);
+    return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
   }
 
   async deleteInvoice(invoiceId: string, businessId: string) {
@@ -464,12 +482,21 @@ export class CommerceService {
 
   // ========== QUOTES ==========
 
-  listQuotes(businessId: string) {
-    return this.prisma.client.quote.findMany({
-      where: { businessId, deletedAt: null },
-      orderBy: { createdAt: 'desc' },
-      include: { contact: true, items: true, invoice: true },
-    });
+  async listQuotes(businessId: string, page = 1, pageSize = 50) {
+    page = Math.max(page, 1);
+    pageSize = Math.min(Math.max(pageSize, 1), 100);
+    const where = { businessId, deletedAt: null };
+    const [data, total] = await Promise.all([
+      this.prisma.client.quote.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        include: { contact: true, items: true, invoice: true },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.client.quote.count({ where }),
+    ]);
+    return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
   }
 
   async getQuote(quoteId: string) {
