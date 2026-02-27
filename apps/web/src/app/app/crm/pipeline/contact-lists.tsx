@@ -42,6 +42,7 @@ interface ContactListsProps {
   businessId: string;
   onSelectList: (listId: string | null, contactIds?: string[]) => void;
   activeListId: string | null;
+  onListsLoaded?: (count: number) => void;
 }
 
 const LIST_COLORS = [
@@ -51,7 +52,7 @@ const LIST_COLORS = [
 
 const STATUSES_OPTIONS = ["LEAD", "PROSPECT", "CLIENT", "LOST"];
 
-export function ContactLists({ businessId, onSelectList, activeListId }: ContactListsProps) {
+export function ContactLists({ businessId, onSelectList, activeListId, onListsLoaded }: ContactListsProps) {
   const [lists, setLists] = useState<ContactListData[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -76,6 +77,7 @@ export function ContactLists({ businessId, onSelectList, activeListId }: Contact
       const { data } = await fetchContactLists(businessId);
       if (data) {
         setLists(data as ContactListData[]);
+        onListsLoaded?.((data as ContactListData[]).length);
         const smartLists = (data as ContactListData[]).filter((l) => l.type === "SMART");
         if (smartLists.length > 0) {
           const counts: Record<string, number> = {};
@@ -90,7 +92,7 @@ export function ContactLists({ businessId, onSelectList, activeListId }: Contact
       }
     } catch {}
     setLoading(false);
-  }, [businessId]);
+  }, [businessId, onListsLoaded]);
 
   useEffect(() => {
     loadLists();

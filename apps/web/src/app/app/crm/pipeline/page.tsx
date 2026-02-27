@@ -22,6 +22,8 @@ import {
   TrendingUp,
   UserCheck,
   List,
+  BarChart3,
+  Sparkles,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -64,6 +66,7 @@ import { TabNav } from "@/components/ui/tab-nav";
 import { StatCards } from "@/components/ui/stat-cards";
 import { ContactLists } from "./contact-lists";
 import { DuplicateDetector } from "./duplicate-detector";
+import { CrmProgress } from "./crm-progress";
 import {
   Contact,
   ContactDetail as ContactDetailAPI,
@@ -89,6 +92,7 @@ import {
   generateAiInsight,
   CrmNextAction,
   getGoogleContactsAuthUrl,
+  fetchContactLists,
 } from "@/lib/client";
 import { ensureWorkspace, getStoredBusinessId } from "@/lib/workspace";
 
@@ -192,7 +196,8 @@ export default function ContactsPage() {
   const [googleConnectLoading, setGoogleConnectLoading] = useState(false);
   const [activeListId, setActiveListId] = useState<string | null>(null);
   const [activeListContactIds, setActiveListContactIds] = useState<string[] | null>(null);
-  const [crmViewTab, setCrmViewTab] = useState<"pipeline" | "lists">("pipeline");
+  const [crmViewTab, setCrmViewTab] = useState<"pipeline" | "lists" | "insights" | "engage">("pipeline");
+  const [listsCount, setListsCount] = useState(0);
 
   useEffect(() => {
     setPinnedIdsState(getPinnedIds());
@@ -279,11 +284,12 @@ export default function ContactsPage() {
 
   const loadFlowData = useCallback(async () => {
     if (!businessId) return;
-    const [flowRes, actionsRes, autopilotRes, revenueRes] = await Promise.all([
+    const [flowRes, actionsRes, autopilotRes, revenueRes, listsRes] = await Promise.all([
       fetchFlowIntelligence(businessId),
       fetchNextActions(businessId),
       fetchAutopilotActionsForCrm(businessId),
       fetchPredictiveRevenue(businessId),
+      fetchContactLists(businessId),
     ]);
     if (flowRes.data) setFlowIntelligence(flowRes.data);
     if (actionsRes.data) {
@@ -296,6 +302,7 @@ export default function ContactsPage() {
     }
     if (autopilotRes.data) setAutopilotActions(autopilotRes.data);
     if (revenueRes.data) setRevenueData(revenueRes.data);
+    if (listsRes.data) setListsCount(Array.isArray(listsRes.data) ? listsRes.data.length : 0);
   }, [businessId]);
 
   const loadContacts = useCallback(
@@ -877,12 +884,22 @@ export default function ContactsPage() {
         tabs={[
           { key: "pipeline", label: "Pipeline", icon: Users },
           { key: "lists", label: "Lists", icon: List },
+          { key: "insights", label: "Insights", icon: BarChart3 },
+          { key: "engage", label: "Engage", icon: Sparkles },
         ]}
         activeTab={crmViewTab}
-        onTabChange={(t) => setCrmViewTab(t as "pipeline" | "lists")}
+        onTabChange={(t) => setCrmViewTab(t as "pipeline" | "lists" | "insights" | "engage")}
       />
 
-      {businessId && (
+      <CrmProgress
+        totalContacts={contacts.length}
+        leads={segments["LEAD"] ?? contacts.filter((c) => c.status === "LEAD").length}
+        prospects={segments["PROSPECT"] ?? contacts.filter((c) => c.status === "PROSPECT").length}
+        clients={segments["CLIENT"] ?? contacts.filter((c) => c.status === "CLIENT").length}
+        listsCount={listsCount}
+      />
+
+      {crmViewTab === "pipeline" && businessId && (
         <DuplicateDetector businessId={businessId} onMergeComplete={() => { void loadContacts(); }} />
       )}
 
@@ -895,7 +912,66 @@ export default function ContactsPage() {
             setActiveListContactIds(contactIds || null);
             if (listId) setCrmViewTab("pipeline");
           }}
+          onListsLoaded={(count) => setListsCount(count)}
         />
+      )}
+
+      {crmViewTab === "insights" && (
+        <>
+          {flowIntelligence && (
+            <FlowIntelligence
+              data={flowIntelligence}
+              onViewCold={() => { setStatusFilter("LEAD"); setCrmViewTab("pipeline"); }}
+              onViewReady={() => { setStatusFilter("PROSPECT"); setCrmViewTab("pipeline"); }}
+            />
+          )}
+          {revenueData && (
+            <PredictiveRevenue
+              data={revenueData}
+              onViewExpiringQuotes={() => {}}
+              onViewOverdueInvoices={() => {}}
+            />
+          )}
+          {!flowIntelligence && !revenueData && (
+            <div className="kf-card p-8 text-center">
+              <BarChart3 className="w-10 h-10 mx-auto text-muted-foreground mb-3" />
+              <p className="text-lg font-medium mb-1">Insights Coming Soon</p>
+              <p className="text-muted-foreground text-sm">Add more contacts and activities to unlock AI-powered insights about your pipeline.</p>
+            </div>
+          )}
+        </>
+      )}
+
+      {crmViewTab === "engage" && (
+        <div className="space-y-6">
+          <div className="grid gap-6 lg:grid-cols-2">
+            <NextActionQueue
+              actions={nextActions}
+              onComplete={handleCompleteNextAction}
+              onViewContact={(id) => { selectContact(id); setCrmViewTab("pipeline"); }}
+              onDoAction={handleDoAction}
+            />
+            <AutopilotActions
+              actions={autopilotActions}
+              isPaused={autopilotPaused}
+              onTogglePause={() => setAutopilotPaused(!autopilotPaused)}
+              onApprove={async (id) => {
+                setAutopilotActions((prev) => prev.map((a) => (a.id === id ? { ...a, status: "completed" as const } : a)));
+              }}
+              onDeny={async (id) => {
+                setAutopilotActions((prev) => prev.filter((a) => a.id !== id));
+              }}
+              onViewContact={(id) => { selectContact(id); setCrmViewTab("pipeline"); }}
+            />
+          </div>
+          {nextActions.length === 0 && autopilotActions.length === 0 && (
+            <div className="kf-card p-8 text-center">
+              <Sparkles className="w-10 h-10 mx-auto text-muted-foreground mb-3" />
+              <p className="text-lg font-medium mb-1">All Caught Up</p>
+              <p className="text-muted-foreground text-sm">No pending actions right now. Keep building your pipeline and we'll surface smart next steps.</p>
+            </div>
+          )}
+        </div>
       )}
 
       {crmViewTab === "pipeline" && activeListId && (
@@ -910,45 +986,6 @@ export default function ContactsPage() {
             Clear filter
           </button>
         </div>
-      )}
-
-      {crmViewTab === "pipeline" && flowIntelligence && (
-        <FlowIntelligence
-          data={flowIntelligence}
-          onViewCold={() => setStatusFilter("LEAD")}
-          onViewReady={() => setStatusFilter("PROSPECT")}
-        />
-      )}
-
-      {crmViewTab === "pipeline" && (
-      <div className="grid gap-6 lg:grid-cols-2">
-        <NextActionQueue
-          actions={nextActions}
-          onComplete={handleCompleteNextAction}
-          onViewContact={selectContact}
-          onDoAction={handleDoAction}
-        />
-        <AutopilotActions
-          actions={autopilotActions}
-          isPaused={autopilotPaused}
-          onTogglePause={() => setAutopilotPaused(!autopilotPaused)}
-          onApprove={async (id) => {
-            setAutopilotActions((prev) => prev.map((a) => (a.id === id ? { ...a, status: "completed" as const } : a)));
-          }}
-          onDeny={async (id) => {
-            setAutopilotActions((prev) => prev.filter((a) => a.id !== id));
-          }}
-          onViewContact={selectContact}
-        />
-      </div>
-      )}
-
-      {crmViewTab === "pipeline" && revenueData && (
-        <PredictiveRevenue
-          data={revenueData}
-          onViewExpiringQuotes={() => {}}
-          onViewOverdueInvoices={() => {}}
-        />
       )}
 
       {crmViewTab === "pipeline" && (
