@@ -1113,6 +1113,24 @@ export class CrmService {
       });
   }
 
+  async deleteNote(input: { businessId: string; noteId: string }) {
+    const note = await this.prisma.client.contactNote.findFirst({
+      where: { id: input.noteId, businessId: input.businessId },
+    });
+    if (!note) throw new NotFoundException('Note not found');
+    await this.prisma.client.contactNote.delete({ where: { id: input.noteId } });
+    return { deleted: true };
+  }
+
+  async deleteTask(input: { businessId: string; taskId: string }) {
+    const task = await this.prisma.client.contactTask.findFirst({
+      where: { id: input.taskId, businessId: input.businessId },
+    });
+    if (!task) throw new NotFoundException('Task not found');
+    await this.prisma.client.contactTask.delete({ where: { id: input.taskId } });
+    return { deleted: true };
+  }
+
   async completeTask(input: { businessId: string; taskId: string }) {
     const task = await this.prisma.client.contactTask.findFirst({
       where: { id: input.taskId, businessId: input.businessId },

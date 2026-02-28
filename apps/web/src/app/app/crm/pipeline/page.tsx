@@ -74,6 +74,8 @@ import {
   logContactEvent,
   bulkUpdateContacts,
   bulkDeleteContacts,
+  deleteContactNote,
+  deleteContactTask,
 } from "@/lib/client";
 import { ensureWorkspace, getStoredBusinessId } from "@/lib/workspace";
 
@@ -427,6 +429,28 @@ export default function ContactsPage() {
     if (!businessId) return;
     await completeContactTask(taskId, businessId);
     if (selectedContactId) void loadDetail(selectedContactId);
+  };
+
+  const handleDeleteNote = async (noteId: string) => {
+    if (!businessId) return;
+    try {
+      await deleteContactNote(noteId, businessId);
+      if (selectedContactId) void loadDetail(selectedContactId);
+      toast.success("Note deleted");
+    } catch {
+      toast.error("Failed to delete note");
+    }
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    if (!businessId) return;
+    try {
+      await deleteContactTask(taskId, businessId);
+      if (selectedContactId) void loadDetail(selectedContactId);
+      toast.success("Task deleted");
+    } catch {
+      toast.error("Failed to delete task");
+    }
   };
 
   const handleUpdateStatus = async (status: string) => {
@@ -1029,6 +1053,8 @@ export default function ContactsPage() {
             onAddNote={handleAddNote}
             onAddTask={handleAddTask}
             onCompleteTask={handleCompleteTask}
+            onDeleteNote={handleDeleteNote}
+            onDeleteTask={handleDeleteTask}
             onUpdateStatus={handleUpdateStatus}
             onEdit={() => handleEditContact()}
             onDelete={() => handleDeleteContact()}
@@ -1075,6 +1101,8 @@ export default function ContactsPage() {
                   onAddNote={handleAddNote}
                   onAddTask={handleAddTask}
                   onCompleteTask={handleCompleteTask}
+                  onDeleteNote={handleDeleteNote}
+                  onDeleteTask={handleDeleteTask}
                   onUpdateStatus={handleUpdateStatus}
                   onEdit={() => handleEditContact()}
                   onDelete={() => handleDeleteContact()}

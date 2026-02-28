@@ -34,6 +34,8 @@ export interface PipelineDetailPanelProps {
   onAddNote: (body: string) => Promise<void>;
   onAddTask: (title: string, dueDate?: string) => Promise<void>;
   onCompleteTask: (taskId: string) => Promise<void>;
+  onDeleteNote: (noteId: string) => Promise<void>;
+  onDeleteTask: (taskId: string) => Promise<void>;
   onUpdateStatus: (status: string) => Promise<void>;
   onEdit: () => void;
   onDelete: () => void;
@@ -60,6 +62,8 @@ function PipelineDetailPanelInner({
   onAddNote,
   onAddTask,
   onCompleteTask,
+  onDeleteNote,
+  onDeleteTask,
   onUpdateStatus,
   onEdit,
   onDelete,
@@ -81,6 +85,8 @@ function PipelineDetailPanelInner({
         onAddNote={onAddNote}
         onAddTask={onAddTask}
         onCompleteTask={onCompleteTask}
+        onDeleteNote={onDeleteNote}
+        onDeleteTask={onDeleteTask}
         onUpdateStatus={onUpdateStatus}
         onEdit={onEdit}
         onDelete={onDelete}

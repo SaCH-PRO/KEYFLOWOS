@@ -646,6 +646,14 @@ export async function addContactTask(
   });
 }
 
+export async function deleteContactNote(noteId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiDelete(`/crm/businesses/${encodeURIComponent(businessId)}/notes/${encodeURIComponent(noteId)}`);
+}
+
+export async function deleteContactTask(taskId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiDelete(`/crm/businesses/${encodeURIComponent(businessId)}/tasks/${encodeURIComponent(taskId)}`);
+}
+
 export async function fetchSegmentSummary(businessId: string = DEFAULT_BUSINESS_ID) {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/segments`,
