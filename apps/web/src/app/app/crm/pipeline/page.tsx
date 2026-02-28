@@ -773,7 +773,7 @@ export default function ContactsPage() {
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 6, scale: 0.95 }}
                     transition={{ duration: 0.15 }}
-                    className="absolute left-0 top-full mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl w-[320px] p-4"
+                    className="absolute left-0 top-full mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl w-[520px] p-4"
                   >
                     <div className="flex items-center gap-2 mb-3">
                       <div className="p-1.5 rounded-lg bg-amber-400/10">
@@ -787,7 +787,7 @@ export default function ContactsPage() {
                         <X className="w-3.5 h-3.5 text-muted-foreground" />
                       </button>
                     </div>
-                    <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
                       {[
                         { step: "1", title: "Add Contacts", desc: "Create contacts manually, or they auto-appear from bookings, store orders, and lead forms." },
                         { step: "2", title: "Segment & Filter", desc: "Use smart segments (High Value, New This Week, At Risk) to focus on key contacts." },
