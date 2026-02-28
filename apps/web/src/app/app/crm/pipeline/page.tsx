@@ -866,27 +866,26 @@ export default function ContactsPage() {
         }
       />
 
-      <div className="relative inline-block">
-        <button
-          onClick={() => setShowAddMenu(!showAddMenu)}
-          className="kf-btn-primary inline-flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" />
-          Add Contact
-        </button>
-        <AnimatePresence>
-          {showAddMenu && (
-            <ContactCapture
-              onManualAdd={() => setShowAddForm(true)}
-              onImportFile={handleImportFile}
-              onImportLink={handleImportLink}
-              onClose={() => setShowAddMenu(false)}
-              loading={isPending}
-              businessId={businessId ?? undefined}
-            />
-          )}
-        </AnimatePresence>
-      </div>
+      <button
+        onClick={() => setShowAddMenu(!showAddMenu)}
+        className="kf-btn-primary inline-flex items-center gap-2"
+      >
+        <Plus className="w-4 h-4" />
+        Add Contact
+      </button>
+
+      <AnimatePresence>
+        {showAddMenu && (
+          <ContactCapture
+            onManualAdd={() => setShowAddForm(true)}
+            onImportFile={handleImportFile}
+            onImportLink={handleImportLink}
+            onClose={() => setShowAddMenu(false)}
+            loading={isPending}
+            businessId={businessId ?? undefined}
+          />
+        )}
+      </AnimatePresence>
 
 
       <TabNav

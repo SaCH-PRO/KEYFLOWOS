@@ -188,7 +188,7 @@ export function ContactCapture({ onManualAdd, onImportFile, onImportLink, onClos
         initial={{ opacity: 0, scale: 0.95, y: 8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 8 }}
-        className="fixed left-2 right-2 top-16 sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[440px] z-50 kf-card border border-border shadow-2xl rounded-2xl max-h-[80vh] overflow-y-auto"
+        className="fixed left-2 right-2 top-16 z-50 kf-card border border-border shadow-2xl rounded-2xl max-h-[80vh] overflow-y-auto sm:left-1/2 sm:top-1/2 sm:right-auto sm:bottom-auto sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-[440px]"
       >
         <div className="flex items-center justify-between p-4 pb-2">
           <h2 className="font-semibold text-base">Add Contacts</h2>
