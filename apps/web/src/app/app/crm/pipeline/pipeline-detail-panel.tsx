@@ -7,10 +7,6 @@ import {
   ContactEvent,
   ContactNote,
   ContactTask,
-  ContactHealthScore,
-  RelationshipTimeline,
-  ConversationContext,
-  AiCopilot,
 } from "@/components/contacts";
 import type { HealthMetrics } from "@/components/contacts/contact-health-score";
 import type { JourneyMilestone } from "@/components/contacts/relationship-timeline";
@@ -92,49 +88,14 @@ function PipelineDetailPanelInner({
         onDelete={onDelete}
         onLogEvent={onLogEvent}
         onClose={onClose}
+        healthMetrics={healthMetrics}
+        journeyMilestones={journeyMilestones}
+        conversationContext={conversationContext}
+        aiInsight={aiInsight}
+        aiInsightLoading={aiInsightLoading}
+        onGenerateAiInsight={onGenerateAiInsight}
+        onRefreshConversationContext={onRefreshConversationContext}
       />
-
-      {contact && (
-        <>
-          <AiCopilot
-            contactName={contactName}
-            insight={aiInsight}
-            isLoading={aiInsightLoading}
-            onGenerateInsight={onGenerateAiInsight}
-          />
-
-          {healthMetrics && (
-            <div className="kf-card p-5">
-              <ContactHealthScore
-                metrics={healthMetrics}
-                tip={
-                  healthMetrics.relationship < 60
-                    ? "Schedule a personal check-in call to strengthen this relationship"
-                    : healthMetrics.engagement < 60
-                    ? "Send a personalized offer to re-engage this contact"
-                    : undefined
-                }
-              />
-            </div>
-          )}
-
-          {journeyMilestones.length > 0 && (
-            <div className="kf-card p-5">
-              <RelationshipTimeline contactName={contactName} milestones={journeyMilestones} />
-            </div>
-          )}
-
-          {conversationContext && (
-            <div className="kf-card p-5">
-              <ConversationContext
-                data={conversationContext}
-                contactName={contactName}
-                onRefresh={onRefreshConversationContext}
-              />
-            </div>
-          )}
-        </>
-      )}
     </div>
   );
 }
