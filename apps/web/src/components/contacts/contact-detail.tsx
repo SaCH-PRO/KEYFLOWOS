@@ -188,6 +188,8 @@ export function ContactDetail({
           onDelete={onDelete ? handleDeleteClick : undefined}
           onUpdateStatus={onUpdateStatus}
           onQuickAction={onQuickAction}
+          onLogEvent={onLogEvent}
+          onAddTask={onAddTask}
         />
 
         <ContactDetailStats
@@ -211,7 +213,6 @@ export function ContactDetail({
           onCompleteTask={onCompleteTask}
           onDeleteNote={onDeleteNote ? handleDeleteNote : undefined}
           onDeleteTask={onDeleteTask ? handleDeleteTask : undefined}
-          onLogEvent={onLogEvent}
         />
       </motion.div>
 
