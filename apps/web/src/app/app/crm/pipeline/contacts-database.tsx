@@ -36,6 +36,7 @@ interface ContactsDatabaseProps {
   activeListId: string | null;
   onSelectList: (listId: string | null, contactIds?: string[]) => void;
   onListsLoaded?: (count: number) => void;
+  onSelectContact?: (contactId: string) => void;
 }
 
 type SortField = "firstName" | "lastName" | "email" | "phone" | "status" | "companyName" | "city" | "country" | "source" | "createdAt";
@@ -72,7 +73,7 @@ const EXPORT_OPTIONS: { format: ExportFormat; label: string; desc: string; icon:
   { format: "pdf", label: "PDF", desc: "Printable document", icon: FileText },
 ];
 
-export function ContactsDatabase({ businessId, contacts, onRefresh, activeListId, onSelectList, onListsLoaded }: ContactsDatabaseProps) {
+export function ContactsDatabase({ businessId, contacts, onRefresh, activeListId, onSelectList, onListsLoaded, onSelectContact }: ContactsDatabaseProps) {
   const [showLists, setShowLists] = useState(false);
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
@@ -465,9 +466,10 @@ export function ContactsDatabase({ businessId, contacts, onRefresh, activeListId
                 paginatedContacts.map((contact, idx) => (
                   <tr
                     key={contact.id}
-                    className={`border-b border-border/20 hover:bg-muted/20 transition-colors ${selectedIds.has(contact.id) ? "bg-[hsl(var(--kf-accent1))]/5" : ""}`}
+                    className={`border-b border-border/20 hover:bg-muted/20 transition-colors cursor-pointer ${selectedIds.has(contact.id) ? "bg-[hsl(var(--kf-accent1))]/5" : ""}`}
+                    onClick={() => onSelectContact?.(contact.id)}
                   >
-                    <td className="px-2 py-2">
+                    <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
                         checked={selectedIds.has(contact.id)}
