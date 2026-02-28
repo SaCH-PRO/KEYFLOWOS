@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useTrans
 import type { Contact } from "@/lib/client";
 import type { SmartSegment, ListTab, SortOption } from "../pipeline-toolbar";
 import {
-  fetchContacts, fetchSegmentSummary,
+  fetchContacts,
 } from "@/lib/client";
 import { ensureWorkspace, getStoredBusinessId } from "@/lib/workspace";
 
@@ -114,7 +114,6 @@ export function useContactsData() {
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
 
   const [contacts, setContacts] = useState<Contact[]>([]);
-  const [segments, setSegments] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
@@ -202,20 +201,16 @@ export function useContactsData() {
           nextOffsetRef.current += mapped.length;
           setHasMore(mapped.length === PAGE_SIZE);
         } else {
-          const [{ data: contactData }, { data: segmentData }] = await Promise.all([
-            fetchContacts(businessId, {
+          const { data: contactData } = await fetchContacts(businessId, {
               take: PAGE_SIZE, skip: 0,
               search: search || undefined,
               status: filters.statusFilter !== "ALL" ? filters.statusFilter : undefined,
               includeStats: true,
               signal,
-            }),
-            fetchSegmentSummary(businessId, { signal }),
-          ]);
+            });
           if (signal.aborted) return;
           const mapped = (contactData ?? []).map((c) => ({ ...c, tags: c.tags ?? [] }));
           setContacts(mapped);
-          setSegments(segmentData ?? {});
           nextOffsetRef.current = mapped.length;
           setHasMore(mapped.length === PAGE_SIZE);
         }
@@ -275,7 +270,8 @@ export function useContactsData() {
       staleCutoff: now - SEGMENT_THRESHOLDS.staleDays * 86_400_000,
       atRiskCutoff: now - SEGMENT_THRESHOLDS.atRiskDays * 86_400_000,
     };
-  }, [contacts]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contacts.length]);
 
   const segmentCounts = useMemo(() => {
     const { newCutoff, staleCutoff, atRiskCutoff } = segmentCutoffs;
@@ -339,7 +335,7 @@ export function useContactsData() {
 
   return {
     businessId, workspaceLoading, workspaceError,
-    contacts, setContacts, segments, loading, loadError, hasMore,
+    contacts, setContacts, loading, loadError, hasMore,
     searchInput: filters.searchInput, setSearchInput, search,
     statusFilter: filters.statusFilter, setStatusFilter,
     sortBy: filters.sortBy, setSortBy,
