@@ -239,8 +239,8 @@ export function ContactsDatabase({ businessId, contacts, onRefresh }: ContactsDa
               </button>
               {showExport && (
                 <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowExport(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-50 kf-card border border-border shadow-xl rounded-xl py-1 w-56">
+                  <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" onClick={() => setShowExport(false)} />
+                  <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 w-64 max-h-[85vh] overflow-y-auto">
                     {EXPORT_OPTIONS.map(({ format, label, desc, icon: Icon }) => (
                       <button
                         key={format}
