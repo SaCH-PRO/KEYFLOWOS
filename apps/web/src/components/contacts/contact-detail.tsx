@@ -71,7 +71,12 @@ export type ContactTask = {
   id: string;
   title: string;
   status?: string | null;
+  priority?: string | null;
   dueDate?: string | null;
+  remindAt?: string | null;
+  completedAt?: string | null;
+  source?: string | null;
+  createdAt?: string | null;
 };
 
 export type DetailQuickAction = "create-invoice" | "book-appointment" | "send-quote";
@@ -86,7 +91,7 @@ interface ContactDetailProps {
   onTogglePin?: (id: string) => void;
   onClose?: () => void;
   onAddNote?: (body: string, source?: string) => Promise<void>;
-  onAddTask?: (title: string, dueDate?: string) => Promise<void>;
+  onAddTask?: (title: string, options?: { dueDate?: string; priority?: string; remindAt?: string }) => Promise<void>;
   onCompleteTask?: (taskId: string) => Promise<void>;
   onDeleteNote?: (noteId: string) => Promise<void>;
   onDeleteTask?: (taskId: string) => Promise<void>;

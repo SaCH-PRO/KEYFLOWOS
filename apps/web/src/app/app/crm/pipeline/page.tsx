@@ -419,9 +419,13 @@ export default function ContactsPage() {
     void loadDetail(selectedContactId);
   };
 
-  const handleAddTask = async (title: string, dueDate?: string) => {
+  const handleAddTask = async (title: string, options?: { dueDate?: string; priority?: string; remindAt?: string }) => {
     if (!selectedContactId || !businessId) return;
-    await addContactTask(selectedContactId, title, { dueDate }, businessId);
+    await addContactTask(selectedContactId, title, {
+      dueDate: options?.dueDate,
+      priority: options?.priority as "NORMAL" | "HIGH" | "LOW" | undefined,
+      remindAt: options?.remindAt,
+    }, businessId);
     void loadDetail(selectedContactId);
   };
 

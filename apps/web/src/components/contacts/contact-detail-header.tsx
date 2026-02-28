@@ -63,7 +63,7 @@ interface ContactDetailHeaderProps {
   onUpdateStatus?: (status: string) => Promise<void>;
   onQuickAction?: (contactId: string, action: DetailQuickAction) => void;
   onLogEvent?: (type: string, description?: string) => Promise<void>;
-  onAddTask?: (title: string, dueDate?: string) => Promise<void>;
+  onAddTask?: (title: string, options?: { dueDate?: string; priority?: string; remindAt?: string }) => Promise<void>;
 }
 
 export function ContactDetailHeader({
@@ -129,7 +129,7 @@ export function ContactDetailHeader({
     const due = new Date();
     due.setDate(due.getDate() + days);
     const label = days === 1 ? "tomorrow" : days === 3 ? "in 3 days" : "in 1 week";
-    await onAddTask(`Follow up with ${contact.firstName || "contact"} ${label}`, due.toISOString());
+    await onAddTask(`Follow up with ${contact.firstName || "contact"} ${label}`, { dueDate: due.toISOString(), priority: "HIGH" });
     onLogEvent?.("followup.scheduled", `Follow-up in ${days} day(s)`);
     setFollowUpLoading(false);
     setShowFollowUp(false);

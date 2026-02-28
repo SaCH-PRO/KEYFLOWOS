@@ -183,7 +183,7 @@ export class CrmController {
       assigneeId: body.assigneeId,
       remindAt: body.remindAt,
       creatorId: req?.user?.id,
-      source: 'crm',
+      source: body.source || 'crm',
     });
   }
 
