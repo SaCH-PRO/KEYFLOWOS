@@ -28,6 +28,7 @@ interface ContactCaptureProps {
   onImportFile: (type: FileType | "image", file: File) => Promise<void>;
   onImportLink: (url: string) => Promise<void>;
   onClose: () => void;
+  onScanSuccess?: () => void;
   loading?: boolean;
   businessId?: string;
 }
@@ -44,7 +45,7 @@ const MODES: { key: CaptureMode; label: string; sublabel: string; icon: typeof U
   { key: "url", label: "URL", sublabel: "Link to file", icon: Globe, color: "#10b981" },
 ];
 
-export function ContactCapture({ onManualAdd, onImportFile, onImportLink, onClose, loading, businessId }: ContactCaptureProps) {
+export function ContactCapture({ onManualAdd, onImportFile, onImportLink, onClose, onScanSuccess, loading, businessId }: ContactCaptureProps) {
   const [activeMode, setActiveMode] = useState<CaptureMode | null>(null);
   const [fileType, setFileType] = useState<FileType>("csv");
   const [file, setFile] = useState<File | null>(null);
@@ -83,6 +84,10 @@ export function ContactCapture({ onManualAdd, onImportFile, onImportLink, onClos
     setIsDragging(false);
     const droppedFile = e.dataTransfer.files[0];
     if (droppedFile) {
+      if (droppedFile.size > 10 * 1024 * 1024) {
+        toast.error(`File is too large (${formatFileSize(droppedFile.size)}). Maximum size is 10MB.`);
+        return;
+      }
       const ext = droppedFile.name.split(".").pop()?.toLowerCase();
       if (ext === "csv") setFileType("csv");
       else if (ext === "xlsx" || ext === "xls") setFileType("xlsx");
@@ -93,7 +98,13 @@ export function ContactCapture({ onManualAdd, onImportFile, onImportLink, onClos
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
-    if (selectedFile) setFile(selectedFile);
+    if (selectedFile) {
+      if (selectedFile.size > 10 * 1024 * 1024) {
+        toast.error(`File is too large (${formatFileSize(selectedFile.size)}). Maximum size is 10MB.`);
+        return;
+      }
+      setFile(selectedFile);
+    }
   };
 
   const handleFileImport = async () => {
@@ -147,6 +158,7 @@ export function ContactCapture({ onManualAdd, onImportFile, onImportLink, onClos
       const name = [result.extracted?.firstName, result.extracted?.lastName].filter(Boolean).join(" ") || "Contact";
       setScanResult(`${name} added!`);
       toast.success(`${name} created from scan`);
+      onScanSuccess?.();
       setTimeout(() => { onClose(); }, 1500);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Could not process this image";
@@ -435,7 +447,7 @@ export function ContactCapture({ onManualAdd, onImportFile, onImportLink, onClos
                         {isDragging ? "Drop file here" : "Drop or tap to upload"}
                       </p>
                       <p className="text-[11px] text-muted-foreground">
-                        {fileType.toUpperCase()} files up to 5MB
+                        {fileType.toUpperCase()} files up to 10MB
                       </p>
                     </>
                   )}

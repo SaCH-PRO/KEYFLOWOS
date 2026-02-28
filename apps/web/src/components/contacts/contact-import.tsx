@@ -19,6 +19,7 @@ import {
   Table,
 } from "lucide-react";
 import { getGoogleContactsAuthUrl } from "@/lib/client";
+import { toast } from "sonner";
 
 type ImportMethod = "file" | "url" | "google";
 type FileType = "csv" | "xlsx" | "vcf";
@@ -266,10 +267,10 @@ export function ContactImport({ onImportFile, onImportLink, loading, businessId 
       if (result?.data?.url) {
         window.location.href = result.data.url;
       } else {
-        console.error("Google auth URL not received:", result?.error);
+        toast.error("Could not get Google authorization URL");
       }
-    } catch (err) {
-      console.error("Failed to get Google auth URL:", err);
+    } catch {
+      toast.error("Failed to start Google connection");
     } finally {
       setGoogleLoading(false);
     }
@@ -341,19 +342,31 @@ export function ContactImport({ onImportFile, onImportLink, loading, businessId 
 
   const handleFileImport = async () => {
     if (!file) return;
-    await onImportFile(fileType, file);
-    setFile(null);
-    setMappingState(null);
-    setUploadSuccess(true);
-    setTimeout(() => setUploadSuccess(false), 3000);
+    try {
+      await onImportFile(fileType, file);
+      toast.success("Contacts imported successfully");
+      setFile(null);
+      setMappingState(null);
+      setUploadSuccess(true);
+      setTimeout(() => setUploadSuccess(false), 3000);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Import failed";
+      toast.error(msg);
+    }
   };
 
   const handleLinkImport = async () => {
     if (!link.trim()) return;
-    await onImportLink(link.trim());
-    setLink("");
-    setUploadSuccess(true);
-    setTimeout(() => setUploadSuccess(false), 3000);
+    try {
+      await onImportLink(link.trim());
+      toast.success("Contacts imported from URL");
+      setLink("");
+      setUploadSuccess(true);
+      setTimeout(() => setUploadSuccess(false), 3000);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Import from URL failed";
+      toast.error(msg);
+    }
   };
 
   const downloadTemplate = () => {
