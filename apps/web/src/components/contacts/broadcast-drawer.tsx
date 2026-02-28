@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, type PanInfo } from "framer-motion";
 import { X, MessageCircle, Mail, Send, Users, Copy, Check, AlertCircle } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 import type { ContactCardData } from "./contact-card";
@@ -80,9 +80,22 @@ export function BroadcastDrawer({ isOpen, onClose, selectedContacts, onDeselectA
           animate={{ y: 0 }}
           exit={{ y: "100%" }}
           transition={{ type: "spring", damping: 25 }}
+          drag="y"
+          dragConstraints={{ top: 0, bottom: 0 }}
+          dragElastic={{ top: 0, bottom: 0.6 }}
+          onDragEnd={(_: any, info: PanInfo) => {
+            if (info.offset.y > 100 || info.velocity.y > 500) onClose();
+          }}
           onClick={(e) => e.stopPropagation()}
           className="w-full md:max-w-lg md:mx-4 max-h-[85vh] overflow-y-auto rounded-t-2xl md:rounded-2xl kf-card border-t md:border border-border"
         >
+          <button
+            onClick={onClose}
+            className="w-full flex items-center justify-center py-2 cursor-pointer active:bg-muted/30 transition-colors md:hidden"
+            aria-label="Close drawer"
+          >
+            <div className="w-12 h-1 bg-muted-foreground/40 rounded-full" />
+          </button>
           <div className="sticky top-0 z-10 flex items-center justify-between p-4 border-b border-border" style={{ background: "hsl(var(--kf-sidebar-bg))" }}>
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}>
