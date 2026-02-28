@@ -100,25 +100,37 @@ export function useContactActions({
 
   const handleAddNote = async (body: string, source?: string) => {
     if (!selectedContactId || !businessId) return;
-    await addContactNote(selectedContactId, body, businessId, source);
-    void loadDetail(selectedContactId);
+    try {
+      await addContactNote(selectedContactId, body, businessId, source);
+      void loadDetail(selectedContactId);
+    } catch {
+      toast.error("Failed to add note");
+    }
   };
 
   const handleAddTask = async (title: string, options?: { dueDate?: string; priority?: string; remindAt?: string }) => {
     if (!selectedContactId || !businessId) return;
-    await addContactTask(selectedContactId, title, {
-      dueDate: options?.dueDate,
-      priority: options?.priority as "NORMAL" | "HIGH" | "LOW" | undefined,
-      remindAt: options?.remindAt,
-    }, businessId);
-    void loadDetail(selectedContactId);
+    try {
+      await addContactTask(selectedContactId, title, {
+        dueDate: options?.dueDate,
+        priority: options?.priority as "NORMAL" | "HIGH" | "LOW" | undefined,
+        remindAt: options?.remindAt,
+      }, businessId);
+      void loadDetail(selectedContactId);
+    } catch {
+      toast.error("Failed to add task");
+    }
   };
 
   const handleCompleteTask = async (taskId: string, currentStatus?: string) => {
     if (!businessId) return;
-    if (currentStatus === "DONE") await reopenContactTask(taskId, businessId);
-    else await completeContactTask(taskId, businessId);
-    if (selectedContactId) void loadDetail(selectedContactId);
+    try {
+      if (currentStatus === "DONE") await reopenContactTask(taskId, businessId);
+      else await completeContactTask(taskId, businessId);
+      if (selectedContactId) void loadDetail(selectedContactId);
+    } catch {
+      toast.error("Failed to update task status");
+    }
   };
 
   const handleDeleteNote = async (noteId: string) => {
@@ -214,16 +226,28 @@ export function useContactActions({
 
   const handleImportFile = async (type: "csv" | "xlsx" | "vcf" | "image", file: File) => {
     if (!businessId) return;
-    await importContactsFromFile({ businessId, type, file });
-    void loadContacts();
-    void loadFlowData();
+    try {
+      await importContactsFromFile({ businessId, type, file });
+      void loadContacts();
+      void loadFlowData();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Import failed";
+      toast.error(msg);
+      throw err;
+    }
   };
 
   const handleImportLink = async (url: string) => {
     if (!businessId) return;
-    await importContactsFromLink(url, businessId);
-    void loadContacts();
-    void loadFlowData();
+    try {
+      await importContactsFromLink(url, businessId);
+      void loadContacts();
+      void loadFlowData();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Import from URL failed";
+      toast.error(msg);
+      throw err;
+    }
   };
 
   const handleUpdateNote = useCallback(async (noteId: string, data: { body?: string; source?: string }) => {

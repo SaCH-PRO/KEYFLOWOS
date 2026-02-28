@@ -73,6 +73,7 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
             onImportFile={handleImportFile}
             onImportLink={handleImportLink}
             onClose={() => setShowAddMenu(false)}
+            onScanSuccess={() => { void loadContacts(); void loadFlowData(); }}
             loading={isPending}
             businessId={businessId ?? undefined}
           />
