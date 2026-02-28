@@ -29,23 +29,6 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
   const detailAbortRef = useRef<AbortController | null>(null);
   const aiAbortRef = useRef<AbortController | null>(null);
 
-  const loadContactEnhancements = useCallback(
-    async (contactId: string, signal?: AbortSignal) => {
-      if (!businessId) return;
-      const results = await Promise.allSettled([
-        fetchContactHealthMetrics(contactId, businessId, { signal }),
-        fetchContactJourney(contactId, businessId, { signal }),
-        fetchConversationContext(contactId, businessId, { signal }),
-      ]);
-      if (signal?.aborted) return;
-      if (results[0].status === "fulfilled" && results[0].value.data) setHealthMetrics(results[0].value.data);
-      if (results[1].status === "fulfilled" && results[1].value.data) setJourneyMilestones(results[1].value.data);
-      if (results[2].status === "fulfilled" && results[2].value.data) setConversationContext(results[2].value.data);
-      setAiInsight(null);
-    },
-    [businessId],
-  );
-
   const loadDetail = useCallback(
     async (contactId: string) => {
       if (!businessId) return;
@@ -173,7 +156,7 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
     healthMetrics, journeyMilestones, conversationContext,
     aiInsight, aiInsightLoading,
     selectedContact, detailEvents, detailNotes, detailTasks, contactName,
-    loadDetail, selectContact, loadContactEnhancements,
+    loadDetail, selectContact,
     handleGenerateAiInsight, handleRefreshConversationContext,
   };
 }

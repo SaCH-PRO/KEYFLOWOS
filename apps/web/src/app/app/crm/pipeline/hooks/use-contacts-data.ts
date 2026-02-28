@@ -244,10 +244,15 @@ export function useContactsData() {
     dispatch({ type: "TOGGLE_SELECT", payload: id });
   }, []);
 
+  const contactsRef = useRef(contacts);
+  contactsRef.current = contacts;
+
   const handleSelectAll = useCallback(() => {
-    if (filters.selectedIds.size === contacts.length) dispatch({ type: "SET_SELECTED_IDS", payload: new Set() });
-    else dispatch({ type: "SET_SELECTED_IDS", payload: new Set(contacts.map((c) => c.id)) });
-  }, [contacts, filters.selectedIds.size]);
+    const currentContacts = contactsRef.current;
+    const currentSelected = selectedIdsRef.current;
+    if (currentSelected.size === currentContacts.length) dispatch({ type: "SET_SELECTED_IDS", payload: new Set() });
+    else dispatch({ type: "SET_SELECTED_IDS", payload: new Set(currentContacts.map((c) => c.id)) });
+  }, []);
 
   const handleToggleSelectMode = useCallback(() => {
     dispatch({ type: "TOGGLE_SELECT_MODE" });
@@ -263,22 +268,28 @@ export function useContactsData() {
     return recentIds.map((id) => contacts.find((c) => c.id === id)).filter(Boolean) as Contact[];
   }, [contacts, recentIds]);
 
+  const segmentCutoffs = useMemo(() => {
+    const now = Date.now();
+    return {
+      newCutoff: now - SEGMENT_THRESHOLDS.newThisWeekDays * 86_400_000,
+      staleCutoff: now - SEGMENT_THRESHOLDS.staleDays * 86_400_000,
+      atRiskCutoff: now - SEGMENT_THRESHOLDS.atRiskDays * 86_400_000,
+    };
+  }, [contacts]);
+
   const segmentCounts = useMemo(() => {
-    const now = new Date();
-    const newCutoff = new Date(now.getTime() - SEGMENT_THRESHOLDS.newThisWeekDays * 24 * 60 * 60 * 1000);
-    const staleCutoff = new Date(now.getTime() - SEGMENT_THRESHOLDS.staleDays * 24 * 60 * 60 * 1000);
-    const atRiskCutoff = new Date(now.getTime() - SEGMENT_THRESHOLDS.atRiskDays * 24 * 60 * 60 * 1000);
+    const { newCutoff, staleCutoff, atRiskCutoff } = segmentCutoffs;
     const counts: Record<SmartSegment, number> = { "high-value": 0, "needs-followup": 0, "new-this-week": 0, "at-risk": 0, "stale": 0 };
     for (const c of contacts) {
       const meta = c.meta;
       if ((meta?.totalRevenue && meta.totalRevenue > SEGMENT_THRESHOLDS.highValueRevenue) || (meta?.invoiceCount && meta.invoiceCount > SEGMENT_THRESHOLDS.highValueInvoiceCount)) counts["high-value"]++;
       if ((meta?.overdueTasks && meta.overdueTasks > 0) || (meta?.unpaidInvoices && meta.unpaidInvoices > 0)) counts["needs-followup"]++;
-      if (c.createdAt && new Date(c.createdAt) > newCutoff) counts["new-this-week"]++;
-      if (c.status === "CLIENT" && meta?.lastInteractionAt && new Date(meta.lastInteractionAt) < atRiskCutoff) counts["at-risk"]++;
-      if (meta?.lastInteractionAt && new Date(meta.lastInteractionAt) < staleCutoff) counts["stale"]++;
+      if (c.createdAt && new Date(c.createdAt).getTime() > newCutoff) counts["new-this-week"]++;
+      if (c.status === "CLIENT" && meta?.lastInteractionAt && new Date(meta.lastInteractionAt).getTime() < atRiskCutoff) counts["at-risk"]++;
+      if (meta?.lastInteractionAt && new Date(meta.lastInteractionAt).getTime() < staleCutoff) counts["stale"]++;
     }
     return counts;
-  }, [contacts]);
+  }, [contacts, segmentCutoffs]);
 
   const displayContacts = useMemo(() => {
     let list: Contact[];
@@ -292,18 +303,15 @@ export function useContactsData() {
     }
 
     if (filters.activeSegment) {
-      const now = new Date();
-      const newCutoff = new Date(now.getTime() - SEGMENT_THRESHOLDS.newThisWeekDays * 24 * 60 * 60 * 1000);
-      const staleCutoff = new Date(now.getTime() - SEGMENT_THRESHOLDS.staleDays * 24 * 60 * 60 * 1000);
-      const atRiskCutoff = new Date(now.getTime() - SEGMENT_THRESHOLDS.atRiskDays * 24 * 60 * 60 * 1000);
+      const { newCutoff, staleCutoff, atRiskCutoff } = segmentCutoffs;
       list = list.filter((c) => {
         const meta = c.meta;
         switch (filters.activeSegment) {
           case "high-value": return (meta?.totalRevenue && meta.totalRevenue > SEGMENT_THRESHOLDS.highValueRevenue) || (meta?.invoiceCount && meta.invoiceCount > SEGMENT_THRESHOLDS.highValueInvoiceCount);
           case "needs-followup": return (meta?.overdueTasks && meta.overdueTasks > 0) || (meta?.unpaidInvoices && meta.unpaidInvoices > 0);
-          case "new-this-week": return c.createdAt && new Date(c.createdAt) > newCutoff;
-          case "at-risk": return c.status === "CLIENT" && meta?.lastInteractionAt && new Date(meta.lastInteractionAt) < atRiskCutoff;
-          case "stale": return meta?.lastInteractionAt && new Date(meta.lastInteractionAt) < staleCutoff;
+          case "new-this-week": return c.createdAt && new Date(c.createdAt).getTime() > newCutoff;
+          case "at-risk": return c.status === "CLIENT" && meta?.lastInteractionAt && new Date(meta.lastInteractionAt).getTime() < atRiskCutoff;
+          case "stale": return meta?.lastInteractionAt && new Date(meta.lastInteractionAt).getTime() < staleCutoff;
           default: return true;
         }
       });
@@ -327,7 +335,7 @@ export function useContactsData() {
     });
 
     return list;
-  }, [filters.activeListTab, contacts, pinnedContacts, recentContacts, filters.activeSegment, filters.sortBy, filters.activeListContactIds]);
+  }, [filters.activeListTab, contacts, pinnedContacts, recentContacts, filters.activeSegment, filters.sortBy, filters.activeListContactIds, segmentCutoffs]);
 
   return {
     businessId, workspaceLoading, workspaceError,

@@ -59,7 +59,7 @@ export function useFlowIntelligence(businessId: string | null) {
     }
   }, [businessId]);
 
-  const handleCompleteNextAction = async (actionId: string) => {
+  const handleCompleteNextAction = useCallback(async (actionId: string) => {
     if (!businessId) return;
     try {
       await completeNextAction(actionId, businessId);
@@ -67,7 +67,7 @@ export function useFlowIntelligence(businessId: string | null) {
     } catch {
       toast.error("Failed to complete action");
     }
-  };
+  }, [businessId]);
 
   const handleApproveAutopilot = useCallback(async (id: string) => {
     if (!businessId) return;

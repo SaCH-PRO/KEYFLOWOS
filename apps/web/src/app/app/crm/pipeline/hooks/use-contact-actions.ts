@@ -1,10 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type { ContactFormData } from "@/components/contacts/contact-form";
-import type { ContactCardData } from "@/components/contacts/contact-card";
 import type { ContactDetailData } from "@/components/contacts/contact-detail";
 import type { QuickActionType } from "@/components/contacts";
 import type { Contact, ContactDetail as ContactDetailAPI } from "@/lib/client";
@@ -43,6 +42,15 @@ export function useContactActions({
   loadContacts, loadDetail, loadFlowData,
 }: UseContactActionsParams) {
   const router = useRouter();
+
+  const contactsRef = useRef(contacts);
+  contactsRef.current = contacts;
+  const selectedIdsRef = useRef(selectedIds);
+  selectedIdsRef.current = selectedIds;
+  const selectedContactIdRef = useRef(selectedContactId);
+  selectedContactIdRef.current = selectedContactId;
+  const contactDetailRef = useRef(contactDetail);
+  contactDetailRef.current = contactDetail;
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingContact, setEditingContact] = useState<ContactFormData | null>(null);
@@ -98,121 +106,137 @@ export function useContactActions({
     }
   };
 
-  const handleAddNote = async (body: string, source?: string) => {
-    if (!selectedContactId || !businessId) return;
+  const handleAddNote = useCallback(async (body: string, source?: string) => {
+    const cid = selectedContactIdRef.current;
+    const cd = contactDetailRef.current;
+    if (!cid || !businessId) return;
     const tempId = `temp-${Date.now()}`;
-    const optimisticNote = { id: tempId, body, source: source || "general", contactId: selectedContactId, createdAt: new Date().toISOString() };
-    if (contactDetail) {
-      setContactDetail({ ...contactDetail, notes: [optimisticNote, ...(contactDetail.notes ?? [])] });
+    const optimisticNote = { id: tempId, body, source: source || "general", contactId: cid, createdAt: new Date().toISOString() };
+    if (cd) {
+      setContactDetail({ ...cd, notes: [optimisticNote, ...(cd.notes ?? [])] });
     }
     try {
-      await addContactNote(selectedContactId, body, businessId, source);
-      void loadDetail(selectedContactId);
+      await addContactNote(cid, body, businessId, source);
+      void loadDetail(cid);
     } catch {
-      if (contactDetail) {
-        setContactDetail({ ...contactDetail, notes: (contactDetail.notes ?? []).filter((n) => n.id !== tempId) });
+      const cdNow = contactDetailRef.current;
+      if (cdNow) {
+        setContactDetail({ ...cdNow, notes: (cdNow.notes ?? []).filter((n) => n.id !== tempId) });
       }
       toast.error("Failed to add note");
     }
-  };
+  }, [businessId, setContactDetail, loadDetail]);
 
-  const handleAddTask = async (title: string, options?: { dueDate?: string; priority?: string; remindAt?: string }) => {
-    if (!selectedContactId || !businessId) return;
+  const handleAddTask = useCallback(async (title: string, options?: { dueDate?: string; priority?: string; remindAt?: string }) => {
+    const cid = selectedContactIdRef.current;
+    const cd = contactDetailRef.current;
+    if (!cid || !businessId) return;
     const tempId = `temp-${Date.now()}`;
     const optimisticTask = {
       id: tempId, title, status: "OPEN", priority: options?.priority || "NORMAL",
       dueDate: options?.dueDate || null, remindAt: options?.remindAt || null,
-      completedAt: null, source: null, contactId: selectedContactId, createdAt: new Date().toISOString(),
+      completedAt: null, source: null, contactId: cid, createdAt: new Date().toISOString(),
     };
-    if (contactDetail) {
-      setContactDetail({ ...contactDetail, tasks: [optimisticTask, ...(contactDetail.tasks ?? [])] });
+    if (cd) {
+      setContactDetail({ ...cd, tasks: [optimisticTask, ...(cd.tasks ?? [])] });
     }
     try {
-      await addContactTask(selectedContactId, title, {
+      await addContactTask(cid, title, {
         dueDate: options?.dueDate,
         priority: options?.priority as "NORMAL" | "HIGH" | "LOW" | undefined,
         remindAt: options?.remindAt,
       }, businessId);
-      void loadDetail(selectedContactId);
+      void loadDetail(cid);
     } catch {
-      if (contactDetail) {
-        setContactDetail({ ...contactDetail, tasks: (contactDetail.tasks ?? []).filter((t) => t.id !== tempId) });
+      const cdNow = contactDetailRef.current;
+      if (cdNow) {
+        setContactDetail({ ...cdNow, tasks: (cdNow.tasks ?? []).filter((t) => t.id !== tempId) });
       }
       toast.error("Failed to add task");
     }
-  };
+  }, [businessId, setContactDetail, loadDetail]);
 
-  const handleCompleteTask = async (taskId: string, currentStatus?: string) => {
+  const handleCompleteTask = useCallback(async (taskId: string, currentStatus?: string) => {
     if (!businessId) return;
     try {
       if (currentStatus === "DONE") await reopenContactTask(taskId, businessId);
       else await completeContactTask(taskId, businessId);
-      if (selectedContactId) void loadDetail(selectedContactId);
+      const cid = selectedContactIdRef.current;
+      if (cid) void loadDetail(cid);
     } catch {
       toast.error("Failed to update task status");
     }
-  };
+  }, [businessId, loadDetail]);
 
-  const handleDeleteNote = async (noteId: string) => {
+  const handleDeleteNote = useCallback(async (noteId: string) => {
     if (!businessId) return;
-    const backup = contactDetail ? [...(contactDetail.notes ?? [])] : null;
-    if (contactDetail) {
-      setContactDetail({ ...contactDetail, notes: (contactDetail.notes ?? []).filter((n) => n.id !== noteId) });
+    const cd = contactDetailRef.current;
+    const backup = cd ? [...(cd.notes ?? [])] : null;
+    if (cd) {
+      setContactDetail({ ...cd, notes: (cd.notes ?? []).filter((n) => n.id !== noteId) });
     }
     try {
       await deleteContactNote(noteId, businessId);
-      if (selectedContactId) void loadDetail(selectedContactId);
+      const cid = selectedContactIdRef.current;
+      if (cid) void loadDetail(cid);
       toast.success("Note deleted");
     } catch {
-      if (contactDetail && backup) setContactDetail({ ...contactDetail, notes: backup });
+      const cdNow = contactDetailRef.current;
+      if (cdNow && backup) setContactDetail({ ...cdNow, notes: backup });
       toast.error("Failed to delete note");
     }
-  };
+  }, [businessId, setContactDetail, loadDetail]);
 
-  const handleDeleteTask = async (taskId: string) => {
+  const handleDeleteTask = useCallback(async (taskId: string) => {
     if (!businessId) return;
-    const backup = contactDetail ? [...(contactDetail.tasks ?? [])] : null;
-    if (contactDetail) {
-      setContactDetail({ ...contactDetail, tasks: (contactDetail.tasks ?? []).filter((t) => t.id !== taskId) });
+    const cd = contactDetailRef.current;
+    const backup = cd ? [...(cd.tasks ?? [])] : null;
+    if (cd) {
+      setContactDetail({ ...cd, tasks: (cd.tasks ?? []).filter((t) => t.id !== taskId) });
     }
     try {
       await deleteContactTask(taskId, businessId);
-      if (selectedContactId) void loadDetail(selectedContactId);
+      const cid = selectedContactIdRef.current;
+      if (cid) void loadDetail(cid);
       toast.success("Task deleted");
     } catch {
-      if (contactDetail && backup) setContactDetail({ ...contactDetail, tasks: backup });
+      const cdNow = contactDetailRef.current;
+      if (cdNow && backup) setContactDetail({ ...cdNow, tasks: backup });
       toast.error("Failed to delete task");
     }
-  };
+  }, [businessId, setContactDetail, loadDetail]);
 
-  const handleUpdateStatus = async (status: string) => {
-    if (!selectedContactId || !businessId) return;
+  const handleUpdateStatus = useCallback(async (status: string) => {
+    const cid = selectedContactIdRef.current;
+    const cd = contactDetailRef.current;
+    if (!cid || !businessId) return;
     try {
-      await updateContact({ businessId, contactId: selectedContactId, status });
-      setContacts((prev) => prev.map((c) => (c.id === selectedContactId ? { ...c, status } : c)));
-      if (contactDetail) {
+      await updateContact({ businessId, contactId: cid, status });
+      setContacts((prev) => prev.map((c) => (c.id === cid ? { ...c, status } : c)));
+      if (cd) {
         setContactDetail({
-          ...contactDetail,
-          contact: contactDetail.contact ? { ...contactDetail.contact, status } : null,
+          ...cd,
+          contact: cd.contact ? { ...cd.contact, status } : null,
         });
       }
       void loadFlowData();
       toast.success("Status updated");
     } catch { toast.error("Failed to update status"); }
-  };
+  }, [businessId, setContacts, setContactDetail, loadFlowData]);
 
-  const handleLogEvent = async (type: string, description?: string) => {
-    if (!selectedContactId || !businessId) return;
+  const handleLogEvent = useCallback(async (type: string, description?: string) => {
+    const cid = selectedContactIdRef.current;
+    if (!cid || !businessId) return;
     try {
-      await logContactEvent(selectedContactId, { type, description }, businessId);
-      void loadDetail(selectedContactId);
+      await logContactEvent(cid, { type, description }, businessId);
+      void loadDetail(cid);
     } catch (err) {
       console.error("Failed to log event:", err);
     }
-  };
+  }, [businessId, loadDetail]);
 
   const handleEditContact = useCallback(() => {
-    const c = contactDetail?.contact;
+    const c = contactDetailRef.current?.contact;
     if (!c) return;
     setSelectedContactId(c.id);
     setEditingContact({
@@ -238,7 +262,7 @@ export function useContactActions({
     });
     setShowMobileDetail(false);
     setShowAddForm(true);
-  }, [contactDetail, setSelectedContactId, setShowMobileDetail]);
+  }, [setSelectedContactId, setShowMobileDetail]);
 
   const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -249,12 +273,13 @@ export function useContactActions({
   }, []);
 
   const handleDeleteContact = useCallback(async (contact?: { id: string }) => {
-    const id = contact?.id || selectedContactId;
+    const currentSelectedId = selectedContactIdRef.current;
+    const id = contact?.id || currentSelectedId;
     if (!id || !businessId) return;
-    const backup = contacts.find((c) => c.id === id);
+    const backup = contactsRef.current.find((c) => c.id === id);
     if (!backup) return;
 
-    const wasSelected = selectedContactId === id;
+    const wasSelected = currentSelectedId === id;
     setContacts((prev) => prev.filter((c) => c.id !== id));
     if (wasSelected) { setSelectedContactId(null); setContactDetail(null); }
     setShowMobileDetail(false);
@@ -290,7 +315,7 @@ export function useContactActions({
         toast.error("Failed to delete contact — restored");
       }
     }, 5500);
-  }, [businessId, contacts, selectedContactId, loadFlowData, setContacts, setSelectedContactId, setContactDetail, setShowMobileDetail]);
+  }, [businessId, loadFlowData, setContacts, setSelectedContactId, setContactDetail, setShowMobileDetail]);
 
   const handleImportFile = async (type: "csv" | "xlsx" | "vcf" | "image", file: File) => {
     if (!businessId) return;
@@ -386,51 +411,51 @@ export function useContactActions({
   }, [router]);
 
   const handleBulkStatusChange = useCallback(async (newStatus: string) => {
-    if (!businessId || selectedIds.size === 0) return;
+    const ids = selectedIdsRef.current;
+    if (!businessId || ids.size === 0) return;
     try {
-      await bulkUpdateContacts({ businessId, contactIds: Array.from(selectedIds), status: newStatus });
-      setContacts((prev) => prev.map((c) => selectedIds.has(c.id) ? { ...c, status: newStatus } : c));
+      await bulkUpdateContacts({ businessId, contactIds: Array.from(ids), status: newStatus });
+      setContacts((prev) => prev.map((c) => ids.has(c.id) ? { ...c, status: newStatus } : c));
       setSelectedIds(new Set());
       setSelectMode(false);
-      toast.success(`Updated ${selectedIds.size} contact${selectedIds.size !== 1 ? "s" : ""}`);
+      toast.success(`Updated ${ids.size} contact${ids.size !== 1 ? "s" : ""}`);
     } catch { toast.error("Failed to update contacts"); }
-  }, [businessId, selectedIds, setContacts, setSelectedIds, setSelectMode]);
+  }, [businessId, setContacts, setSelectedIds, setSelectMode]);
 
   const handleBulkTag = useCallback(async (tag: string) => {
-    if (!businessId || selectedIds.size === 0 || !tag.trim()) return;
+    const ids = selectedIdsRef.current;
+    if (!businessId || ids.size === 0 || !tag.trim()) return;
     try {
-      await bulkUpdateContacts({ businessId, contactIds: Array.from(selectedIds), addTags: [tag.trim()] });
+      await bulkUpdateContacts({ businessId, contactIds: Array.from(ids), addTags: [tag.trim()] });
       setContacts((prev) => prev.map((c) => {
-        if (!selectedIds.has(c.id)) return c;
+        if (!ids.has(c.id)) return c;
         const tags = c.tags ?? [];
         return tags.includes(tag.trim()) ? c : { ...c, tags: [...tags, tag.trim()] };
       }));
-      toast.success(`Tagged ${selectedIds.size} contact${selectedIds.size !== 1 ? "s" : ""}`);
+      toast.success(`Tagged ${ids.size} contact${ids.size !== 1 ? "s" : ""}`);
     } catch { toast.error("Failed to tag contacts"); }
-  }, [businessId, selectedIds, setContacts]);
+  }, [businessId, setContacts]);
 
   const handleBulkDelete = useCallback(async () => {
-    if (!businessId || selectedIds.size === 0) return;
+    const ids = selectedIdsRef.current;
+    if (!businessId || ids.size === 0) return;
     setConfirmState({
       open: true,
       action: async () => {
+        const currentIds = selectedIdsRef.current;
+        const currentSelectedId = selectedContactIdRef.current;
         try {
-          await bulkDeleteContacts({ businessId, contactIds: Array.from(selectedIds) });
-          setContacts((prev) => prev.filter((c) => !selectedIds.has(c.id)));
-          if (selectedContactId && selectedIds.has(selectedContactId)) { setSelectedContactId(null); setContactDetail(null); }
+          await bulkDeleteContacts({ businessId, contactIds: Array.from(currentIds) });
+          setContacts((prev) => prev.filter((c) => !currentIds.has(c.id)));
+          if (currentSelectedId && currentIds.has(currentSelectedId)) { setSelectedContactId(null); setContactDetail(null); }
           setSelectedIds(new Set());
           setSelectMode(false);
           void loadFlowData();
-          toast.success(`Deleted ${selectedIds.size} contact${selectedIds.size !== 1 ? "s" : ""}`);
+          toast.success(`Deleted ${currentIds.size} contact${currentIds.size !== 1 ? "s" : ""}`);
         } catch { toast.error("Failed to delete contacts"); }
       },
     });
-  }, [businessId, selectedIds, selectedContactId, loadFlowData, setContacts, setSelectedIds, setSelectMode, setSelectedContactId, setContactDetail]);
-
-  const selectedContactsForBroadcast = useMemo(
-    () => contacts.filter((c) => selectedIds.has(c.id)) as ContactCardData[],
-    [contacts, selectedIds],
-  );
+  }, [businessId, loadFlowData, setContacts, setSelectedIds, setSelectMode, setSelectedContactId, setContactDetail]);
 
   return {
     showAddForm, setShowAddForm,
@@ -439,7 +464,6 @@ export function useContactActions({
     showBroadcast, setShowBroadcast,
     showGuide, setShowGuide,
     confirmState, setConfirmState,
-    selectedContactsForBroadcast,
     handleSubmitContact, handleAddNote, handleAddTask, handleCompleteTask,
     handleDeleteNote, handleDeleteTask, handleUpdateStatus, handleLogEvent,
     handleEditContact, handleDeleteContact,
