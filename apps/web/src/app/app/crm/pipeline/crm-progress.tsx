@@ -13,8 +13,7 @@ import {
   TrendingUp,
   MessageCircle,
   ArrowRight,
-  ChevronDown,
-  ChevronUp,
+  X,
 } from "lucide-react";
 
 interface CrmMilestone {
@@ -47,20 +46,7 @@ export function CrmProgress({
   listsCount = 0,
   broadcastsSent = 0,
 }: CrmProgressProps) {
-  const [expanded, setExpanded] = useState(false);
-
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored === "true") setExpanded(true);
-    } catch {}
-  }, []);
-
-  const toggle = () => {
-    const next = !expanded;
-    setExpanded(next);
-    try { localStorage.setItem(STORAGE_KEY, String(next)); } catch {}
-  };
+  const [open, setOpen] = useState(false);
 
   const milestones: CrmMilestone[] = useMemo(() => [
     { id: "first-5", title: "Getting Started", description: "Add 5 contacts", icon: UserPlus, target: 5, current: Math.min(totalContacts, 5), xp: 25, color: "hsl(var(--kf-accent1))" },
@@ -74,133 +60,164 @@ export function CrmProgress({
   const completedCount = milestones.filter((m) => m.current >= m.target).length;
   const totalXp = milestones.filter((m) => m.current >= m.target).reduce((sum, m) => sum + m.xp, 0);
   const overallProgress = milestones.length > 0 ? Math.round((completedCount / milestones.length) * 100) : 0;
-
   const conversionRate = totalContacts > 0 ? Math.round((clients / totalContacts) * 100) : 0;
   const pipelineHealth = totalContacts > 0 ? Math.round(((leads + prospects) / totalContacts) * 100) : 0;
 
   return (
-    <div className="kf-card overflow-hidden">
+    <>
       <button
-        onClick={toggle}
-        className="w-full p-3 flex items-center justify-between hover:bg-muted/30 transition-colors"
+        onClick={() => setOpen(true)}
+        className="fixed bottom-6 right-6 z-40 group"
+        aria-label="Open CRM Momentum missions"
       >
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-[hsl(var(--kf-accent1))]/10">
-            <Zap className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
-          </div>
-          <div className="text-left">
-            <h3 className="text-sm font-semibold">CRM Momentum</h3>
-            <p className="text-xs text-muted-foreground">{completedCount}/{milestones.length} milestones · {totalXp} XP</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="hidden sm:flex items-center gap-1.5 h-2 w-24 bg-muted rounded-full overflow-hidden">
-            <div
-              className="h-full rounded-full transition-all duration-500"
-              style={{ width: `${overallProgress}%`, background: "linear-gradient(90deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
-            />
-          </div>
-          {expanded ? (
-            <ChevronUp className="w-4 h-4 text-muted-foreground" />
-          ) : (
-            <ChevronDown className="w-4 h-4 text-muted-foreground" />
+        <div className="relative p-3 rounded-full bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] shadow-lg shadow-[hsl(var(--kf-accent1))]/25 hover:shadow-xl hover:shadow-[hsl(var(--kf-accent1))]/40 hover:scale-110 transition-all duration-200">
+          <Zap className="w-5 h-5 text-white" />
+          {completedCount > 0 && completedCount < milestones.length && (
+            <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-white text-[10px] font-bold text-[hsl(var(--kf-accent1))] flex items-center justify-center shadow-sm">
+              {completedCount}
+            </span>
           )}
+          {completedCount === milestones.length && (
+            <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-amber-400 text-[10px] flex items-center justify-center shadow-sm">
+              <Star className="w-3 h-3 text-white" />
+            </span>
+          )}
+        </div>
+        <div className="absolute bottom-full right-0 mb-2 px-2.5 py-1 rounded-lg bg-card border border-border text-xs font-medium whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg">
+          {totalXp} XP · {completedCount}/{milestones.length} missions
         </div>
       </button>
 
       <AnimatePresence>
-        {expanded && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.2 }}
-            className="border-t border-border/30"
-          >
-            <div className="p-4">
-              <div className="h-2 bg-muted rounded-full overflow-hidden mb-3">
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${overallProgress}%` }}
-                  transition={{ duration: 0.8, ease: "easeOut" }}
-                  className="h-full rounded-full"
-                  style={{ background: "linear-gradient(90deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
-                />
+        {open && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
+              onClick={() => setOpen(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 40, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 40, scale: 0.95 }}
+              transition={{ type: "spring", damping: 25, stiffness: 350 }}
+              className="fixed bottom-20 right-6 z-50 w-[340px] max-h-[70vh] overflow-y-auto kf-card border border-border shadow-2xl rounded-2xl"
+              role="dialog"
+              aria-modal="true"
+              aria-label="CRM Momentum"
+            >
+              <div className="sticky top-0 z-10 bg-card/95 backdrop-blur-md border-b border-border/30 p-4 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-1.5 rounded-lg bg-gradient-to-br from-[hsl(var(--kf-accent1))]/20 to-[hsl(var(--kf-accent2))]/20">
+                    <Zap className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold">CRM Momentum</h3>
+                    <p className="text-[11px] text-muted-foreground">{totalXp} XP earned</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setOpen(false)}
+                  className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors"
+                  aria-label="Close"
+                >
+                  <X className="w-4 h-4 text-muted-foreground" />
+                </button>
               </div>
 
-              <div className="grid grid-cols-3 gap-3 mb-4">
-                <div className="text-center p-2 rounded-lg bg-muted/30">
-                  <div className="text-xs text-muted-foreground mb-0.5">Pipeline</div>
-                  <div className="flex items-center justify-center gap-1">
-                    <TrendingUp className="w-3 h-3" style={{ color: "hsl(var(--kf-accent2))" }} />
-                    <span className="text-sm font-semibold">{pipelineHealth}%</span>
+              <div className="p-4 space-y-4">
+                <div>
+                  <div className="flex items-center justify-between text-xs mb-1.5">
+                    <span className="text-muted-foreground">Overall Progress</span>
+                    <span className="font-semibold">{overallProgress}%</span>
                   </div>
-                  <div className="text-[10px] text-muted-foreground">active leads</div>
-                </div>
-                <div className="text-center p-2 rounded-lg bg-muted/30">
-                  <div className="text-xs text-muted-foreground mb-0.5">Conversion</div>
-                  <div className="flex items-center justify-center gap-1">
-                    <ArrowRight className="w-3 h-3" style={{ color: "hsl(150 60% 40%)" }} />
-                    <span className="text-sm font-semibold">{conversionRate}%</span>
-                  </div>
-                  <div className="text-[10px] text-muted-foreground">to client</div>
-                </div>
-                <div className="text-center p-2 rounded-lg bg-muted/30">
-                  <div className="text-xs text-muted-foreground mb-0.5">Reach</div>
-                  <div className="flex items-center justify-center gap-1">
-                    <MessageCircle className="w-3 h-3" style={{ color: "hsl(200 70% 50%)" }} />
-                    <span className="text-sm font-semibold">{broadcastsSent}</span>
-                  </div>
-                  <div className="text-[10px] text-muted-foreground">broadcasts</div>
-                </div>
-              </div>
-
-              <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-                {milestones.map((m, i) => {
-                  const done = m.current >= m.target;
-                  const progress = Math.min((m.current / m.target) * 100, 100);
-                  const Icon = m.icon;
-                  return (
+                  <div className="h-2 bg-muted rounded-full overflow-hidden">
                     <motion.div
-                      key={m.id}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: i * 0.05 }}
-                      className={`flex-shrink-0 w-[120px] p-3 rounded-xl border transition-all ${
-                        done
-                          ? "border-[hsl(var(--kf-accent1))]/40 bg-[hsl(var(--kf-accent1))]/5"
-                          : "border-border/50 bg-muted/20 hover:border-border"
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5 mb-2">
-                        <div
-                          className={`p-1 rounded-md ${done ? "bg-[hsl(var(--kf-accent1))]/20" : "bg-muted/50"}`}
+                      initial={{ width: 0 }}
+                      animate={{ width: `${overallProgress}%` }}
+                      transition={{ duration: 0.8, ease: "easeOut" }}
+                      className="h-full rounded-full"
+                      style={{ background: "linear-gradient(90deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="text-center p-2 rounded-xl bg-muted/30">
+                    <TrendingUp className="w-3.5 h-3.5 mx-auto mb-0.5" style={{ color: "hsl(var(--kf-accent2))" }} />
+                    <span className="text-sm font-semibold block">{pipelineHealth}%</span>
+                    <span className="text-[10px] text-muted-foreground">Pipeline</span>
+                  </div>
+                  <div className="text-center p-2 rounded-xl bg-muted/30">
+                    <ArrowRight className="w-3.5 h-3.5 mx-auto mb-0.5" style={{ color: "hsl(150 60% 40%)" }} />
+                    <span className="text-sm font-semibold block">{conversionRate}%</span>
+                    <span className="text-[10px] text-muted-foreground">Conversion</span>
+                  </div>
+                  <div className="text-center p-2 rounded-xl bg-muted/30">
+                    <MessageCircle className="w-3.5 h-3.5 mx-auto mb-0.5" style={{ color: "hsl(200 70% 50%)" }} />
+                    <span className="text-sm font-semibold block">{broadcastsSent}</span>
+                    <span className="text-[10px] text-muted-foreground">Reach</span>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Missions</h4>
+                  <div className="space-y-2">
+                    {milestones.map((m, i) => {
+                      const done = m.current >= m.target;
+                      const progress = Math.min((m.current / m.target) * 100, 100);
+                      const Icon = m.icon;
+                      return (
+                        <motion.div
+                          key={m.id}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: i * 0.04 }}
+                          className={`flex items-center gap-3 p-2.5 rounded-xl border transition-all ${
+                            done
+                              ? "border-[hsl(var(--kf-accent1))]/30 bg-[hsl(var(--kf-accent1))]/5"
+                              : "border-border/40 bg-muted/10"
+                          }`}
                         >
-                          <Icon className="w-3.5 h-3.5" style={{ color: done ? m.color : "hsl(var(--kf-muted-foreground))" }} />
-                        </div>
-                        {done && (
-                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[hsl(var(--kf-accent1))]/20 text-[hsl(var(--kf-accent1))]">
-                            +{m.xp}
-                          </span>
-                        )}
-                      </div>
-                      <p className={`text-xs font-medium mb-0.5 ${done ? "" : "text-muted-foreground"}`}>{m.title}</p>
-                      <p className="text-[10px] text-muted-foreground mb-2">{m.description}</p>
-                      <div className="h-1 bg-muted rounded-full overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all duration-500"
-                          style={{ width: `${progress}%`, backgroundColor: done ? m.color : "hsl(var(--kf-muted-foreground))" }}
-                        />
-                      </div>
-                      <p className="text-[10px] text-muted-foreground mt-1">{m.current}/{m.target}</p>
-                    </motion.div>
-                  );
-                })}
+                          <div
+                            className={`p-1.5 rounded-lg flex-shrink-0 ${done ? "bg-[hsl(var(--kf-accent1))]/15" : "bg-muted/40"}`}
+                          >
+                            <Icon className="w-3.5 h-3.5" style={{ color: done ? m.color : "hsl(var(--kf-muted-foreground))" }} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between mb-0.5">
+                              <span className={`text-xs font-medium ${done ? "" : "text-muted-foreground"}`}>{m.title}</span>
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                                done
+                                  ? "bg-[hsl(var(--kf-accent1))]/20 text-[hsl(var(--kf-accent1))]"
+                                  : "bg-muted/40 text-muted-foreground"
+                              }`}>
+                                +{m.xp} XP
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-muted-foreground mb-1">{m.description}</p>
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden">
+                                <div
+                                  className="h-full rounded-full transition-all duration-500"
+                                  style={{ width: `${progress}%`, backgroundColor: done ? m.color : "hsl(var(--kf-muted-foreground))" }}
+                                />
+                              </div>
+                              <span className="text-[10px] text-muted-foreground flex-shrink-0">{m.current}/{m.target}</span>
+                            </div>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
-            </div>
-          </motion.div>
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
-    </div>
+    </>
   );
 }
