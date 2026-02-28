@@ -78,7 +78,7 @@ function PipelineContactListInner({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 lg:overflow-y-auto lg:min-h-0">
       {contacts.map((contact, index) => (
         <ContactCard
           key={contact.id}

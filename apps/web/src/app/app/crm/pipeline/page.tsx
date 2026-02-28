@@ -758,7 +758,7 @@ export default function ContactsPage() {
   }
 
   return (
-    <div className="space-y-6" aria-label="CRM Pipeline">
+    <div className="flex flex-col h-full gap-4" aria-label="CRM Pipeline">
       <PageHeader
         icon={Users}
         title="Contacts"
@@ -844,7 +844,7 @@ export default function ContactsPage() {
       )}
 
       {crmViewTab === "insights" && (
-        <>
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-6">
           {flowIntelligence && (
             <FlowIntelligence
               data={flowIntelligence}
@@ -866,11 +866,11 @@ export default function ContactsPage() {
               <p className="text-muted-foreground text-sm">Add more contacts and activities to unlock AI-powered insights about your pipeline.</p>
             </div>
           )}
-        </>
+        </div>
       )}
 
       {crmViewTab === "engage" && (
-        <div className="space-y-6">
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-6">
           <div className="grid gap-6 lg:grid-cols-2">
             <NextActionQueue
               actions={nextActions}
@@ -902,6 +902,7 @@ export default function ContactsPage() {
       )}
 
       {crmViewTab === "database" && businessId && (
+        <div className="flex-1 min-h-0 overflow-y-auto">
         <ContactsDatabase
           businessId={businessId}
           contacts={contacts.map((c) => ({
@@ -949,6 +950,7 @@ export default function ContactsPage() {
           }}
           onListsLoaded={(count) => setListsCount(count)}
         />
+        </div>
       )}
 
       {crmViewTab === "pipeline" && activeListId && (
@@ -966,7 +968,7 @@ export default function ContactsPage() {
       )}
 
       {crmViewTab === "pipeline" && (
-      <>
+      <div className="flex-1 min-h-0 flex flex-col gap-4">
       <AnimatePresence>
         {showAddMenu && (
           <ContactCapture
@@ -1026,7 +1028,7 @@ export default function ContactsPage() {
         onAddContact={() => setShowAddMenu(!showAddMenu)}
       />
 
-      <div className="grid gap-6 lg:grid-cols-[1fr,450px]">
+      <div className="flex-1 min-h-0 grid gap-6 lg:grid-cols-[1fr,450px] overflow-y-auto lg:overflow-hidden">
         <PipelineContactList
           contacts={displayContacts as ContactCardData[]}
           loading={loading}
@@ -1045,7 +1047,7 @@ export default function ContactsPage() {
           onAddContact={() => setShowAddForm(true)}
         />
 
-        <div className="hidden lg:block sticky top-4 max-h-[calc(100vh-2rem)]">
+        <div className="hidden lg:flex lg:flex-col lg:overflow-hidden lg:min-h-0">
           <PipelineDetailPanel
             contact={selectedContact}
             events={detailEvents}
@@ -1140,7 +1142,7 @@ export default function ContactsPage() {
           </motion.div>
         )}
       </AnimatePresence>
-      </>
+      </div>
       )}
 
       <BroadcastDrawer
