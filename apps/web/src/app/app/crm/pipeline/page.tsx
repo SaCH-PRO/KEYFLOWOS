@@ -98,7 +98,7 @@ import {
 import { ensureWorkspace, getStoredBusinessId } from "@/lib/workspace";
 
 const STATUSES = ["ALL", "LEAD", "PROSPECT", "CLIENT", "LOST"] as const;
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 25;
 const PINNED_KEY = "kf_pinned_contacts";
 const RECENT_KEY = "kf_recent_contacts";
 const MAX_RECENT = 8;
@@ -187,7 +187,8 @@ export default function ContactsPage() {
   const [showSort, setShowSort] = useState(false);
   const [activeSegment, setActiveSegment] = useState<SmartSegment | null>(null);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 640;
+  const [pageSize, setPageSize] = useState(isMobile ? 10 : 20);
   const [bulkStatus, setBulkStatus] = useState<string | null>(null);
   const [bulkTagInput, setBulkTagInput] = useState("");
   const [showBulkTag, setShowBulkTag] = useState(false);
