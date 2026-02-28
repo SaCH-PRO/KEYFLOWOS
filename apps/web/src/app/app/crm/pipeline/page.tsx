@@ -1123,22 +1123,9 @@ export default function ContactsPage() {
             />
           </div>
           <div className="flex items-center gap-1">
-            {STATUSES.filter((s) => s !== "ALL").map((s) => (
-              <button
-                key={s}
-                onClick={() => setStatusFilter(statusFilter === s ? "ALL" : s)}
-                className={`px-2.5 py-1.5 text-[11px] font-medium rounded-lg transition-all hidden sm:block ${
-                  statusFilter === s
-                    ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] ring-1 ring-[hsl(var(--kf-accent1))]/30"
-                    : "text-muted-foreground hover:bg-muted/50"
-                }`}
-              >
-                {s.charAt(0) + s.slice(1).toLowerCase()}
-              </button>
-            ))}
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className={`sm:hidden p-2 rounded-lg transition-all ${showFilters ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground hover:bg-muted/50"}`}
+              className={`p-2 rounded-lg transition-all ${showFilters ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground hover:bg-muted/50"}`}
               aria-label="Filters"
             >
               <Filter className="w-4 h-4" />
@@ -1185,7 +1172,7 @@ export default function ContactsPage() {
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
               exit={{ opacity: 0, height: 0 }}
-              className="sm:hidden flex flex-wrap gap-1.5"
+              className="flex flex-wrap gap-1.5"
             >
               {STATUSES.map((s) => (
                 <button
