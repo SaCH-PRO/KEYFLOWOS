@@ -47,6 +47,8 @@ interface ContactDetailTabsProps {
   onCompleteTask?: (taskId: string, currentStatus?: string) => Promise<void>;
   onDeleteNote?: (noteId: string) => Promise<void>;
   onDeleteTask?: (taskId: string) => Promise<void>;
+  onUpdateNote?: (noteId: string, data: { body?: string; source?: string }) => Promise<void>;
+  onUpdateTask?: (taskId: string, data: { title?: string; dueDate?: string; priority?: string; remindAt?: string }) => Promise<void>;
   healthMetrics?: HealthMetricsData | null;
   journeyMilestones?: JourneyMilestoneData[];
   conversationContext?: ConversationContextData | null;
@@ -60,6 +62,7 @@ export function ContactDetailTabs({
   contact, events, notes, tasks,
   activeTab, onSetActiveTab,
   onAddNote, onAddTask, onCompleteTask, onDeleteNote, onDeleteTask,
+  onUpdateNote, onUpdateTask,
   healthMetrics, journeyMilestones = [],
   conversationContext, aiInsight, aiInsightLoading,
   onGenerateAiInsight, onRefreshConversationContext,
@@ -95,12 +98,12 @@ export function ContactDetailTabs({
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className={`space-y-3 pt-3 pb-6 ${activeTab === "notes" ? "" : "hidden"}`}>
           <TabErrorBoundary resetKey="notes">
-            <NotesTabPanel contact={contact} notes={notes} onAddNote={onAddNote} onAddTask={onAddTask} onDeleteNote={onDeleteNote} />
+            <NotesTabPanel contact={contact} notes={notes} onAddNote={onAddNote} onAddTask={onAddTask} onDeleteNote={onDeleteNote} onUpdateNote={onUpdateNote} />
           </TabErrorBoundary>
         </div>
         <div className={`space-y-3 pt-3 pb-6 ${activeTab === "tasks" ? "" : "hidden"}`}>
           <TabErrorBoundary resetKey="tasks">
-            <TasksTabPanel contact={contact} tasks={tasks} onAddTask={onAddTask} onAddNote={onAddNote} onCompleteTask={onCompleteTask} onDeleteTask={onDeleteTask} />
+            <TasksTabPanel contact={contact} tasks={tasks} onAddTask={onAddTask} onAddNote={onAddNote} onCompleteTask={onCompleteTask} onDeleteTask={onDeleteTask} onUpdateTask={onUpdateTask} />
           </TabErrorBoundary>
         </div>
         <div className={`space-y-3 pt-3 pb-6 ${activeTab === "timeline" ? "" : "hidden"}`}>

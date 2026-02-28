@@ -32,6 +32,8 @@ export interface PipelineDetailPanelProps {
   onCompleteTask: (taskId: string, currentStatus?: string) => Promise<void>;
   onDeleteNote: (noteId: string) => Promise<void>;
   onDeleteTask: (taskId: string) => Promise<void>;
+  onUpdateNote: (noteId: string, data: { body?: string; source?: string }) => Promise<void>;
+  onUpdateTask: (taskId: string, data: { title?: string; dueDate?: string; priority?: string; remindAt?: string }) => Promise<void>;
   onUpdateStatus: (status: string) => Promise<void>;
   onEdit: () => void;
   onDelete: () => void;
@@ -60,6 +62,8 @@ function PipelineDetailPanelInner({
   onCompleteTask,
   onDeleteNote,
   onDeleteTask,
+  onUpdateNote,
+  onUpdateTask,
   onUpdateStatus,
   onEdit,
   onDelete,
@@ -83,6 +87,8 @@ function PipelineDetailPanelInner({
         onCompleteTask={onCompleteTask}
         onDeleteNote={onDeleteNote}
         onDeleteTask={onDeleteTask}
+        onUpdateNote={onUpdateNote}
+        onUpdateTask={onUpdateTask}
         onUpdateStatus={onUpdateStatus}
         onEdit={onEdit}
         onDelete={onDelete}

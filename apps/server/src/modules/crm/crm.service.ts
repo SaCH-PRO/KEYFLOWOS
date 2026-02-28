@@ -1167,6 +1167,22 @@ export class CrmService {
       });
   }
 
+  async updateNote(input: { businessId: string; noteId: string; body?: string; source?: string }) {
+    const note = await this.prisma.client.contactNote.findFirst({
+      where: { id: input.noteId, businessId: input.businessId },
+    });
+    if (!note) throw new NotFoundException('Note not found');
+    const data: any = {};
+    if (input.body !== undefined) data.body = input.body;
+    if (input.source !== undefined) data.source = input.source;
+    const updated = await this.prisma.client.contactNote.update({
+      where: { id: input.noteId },
+      data,
+    });
+    await this.logEvent(input.businessId, note.contactId, 'note.updated', { noteId: note.id });
+    return updated;
+  }
+
   async deleteNote(input: { businessId: string; noteId: string }) {
     const note = await this.prisma.client.contactNote.findFirst({
       where: { id: input.noteId, businessId: input.businessId },
@@ -1175,6 +1191,24 @@ export class CrmService {
     await this.prisma.client.contactNote.delete({ where: { id: input.noteId } });
     await this.logEvent(input.businessId, note.contactId, 'note.deleted', { noteId: note.id, body: note.body?.slice(0, 100) });
     return { deleted: true };
+  }
+
+  async updateTask(input: { businessId: string; taskId: string; title?: string; dueDate?: string; priority?: string; remindAt?: string }) {
+    const task = await this.prisma.client.contactTask.findFirst({
+      where: { id: input.taskId, businessId: input.businessId },
+    });
+    if (!task) throw new NotFoundException('Task not found');
+    const data: any = {};
+    if (input.title !== undefined) data.title = input.title;
+    if (input.dueDate !== undefined) data.dueDate = input.dueDate ? new Date(input.dueDate) : null;
+    if (input.priority !== undefined) data.priority = input.priority;
+    if (input.remindAt !== undefined) data.remindAt = input.remindAt ? new Date(input.remindAt) : null;
+    const updated = await this.prisma.client.contactTask.update({
+      where: { id: input.taskId },
+      data,
+    });
+    await this.logEvent(input.businessId, task.contactId, 'task.updated', { taskId: task.id, title: updated.title });
+    return updated;
   }
 
   async deleteTask(input: { businessId: string; taskId: string }) {
@@ -1213,6 +1247,24 @@ export class CrmService {
     });
     await this.logEvent(input.businessId, task.contactId, 'task.reopened', { taskId: task.id, title: task.title });
     return updated;
+  }
+
+  async approveAutopilotAction(input: { businessId: string; actionId: string }) {
+    const parts = input.actionId.split('_');
+    const contactId = parts.slice(0, -2).join('_') || input.actionId;
+    await this.logEvent(input.businessId, contactId, 'autopilot.approved', {
+      actionId: input.actionId,
+    });
+    return { approved: true, actionId: input.actionId };
+  }
+
+  async denyAutopilotAction(input: { businessId: string; actionId: string }) {
+    const parts = input.actionId.split('_');
+    const contactId = parts.slice(0, -2).join('_') || input.actionId;
+    await this.logEvent(input.businessId, contactId, 'autopilot.denied', {
+      actionId: input.actionId,
+    });
+    return { denied: true, actionId: input.actionId };
   }
 
   private logEvent(

@@ -147,7 +147,7 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
               {onTogglePin && (
                 <button
                   onClick={handlePin}
-                  className={`p-0.5 rounded transition-colors flex-shrink-0 ${isPinned ? "text-yellow-400" : "text-muted-foreground opacity-0 group-hover:opacity-100"}`}
+                  className={`p-0.5 rounded transition-colors flex-shrink-0 ${isPinned ? "text-yellow-400" : "text-muted-foreground md:opacity-0 md:group-hover:opacity-100"}`}
                   title={isPinned ? "Unpin" : "Pin contact"}
                 >
                   <Star className={`w-3.5 h-3.5 ${isPinned ? "fill-current" : ""}`} />
@@ -159,7 +159,7 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
                 <div className="relative" ref={actionsRef}>
                   <button
                     onClick={(e) => { e.stopPropagation(); setShowActions(!showActions); }}
-                    className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors opacity-0 group-hover:opacity-100"
+                    className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors md:opacity-0 md:group-hover:opacity-100 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center"
                     title="Quick actions"
                   >
                     <MoreHorizontal className="w-3.5 h-3.5" />
@@ -184,7 +184,7 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
               )}
               <button
                 onClick={handleDelete}
-                className="p-1.5 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                className="p-1.5 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors md:opacity-0 md:group-hover:opacity-100 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center"
                 title="Delete contact"
               >
                 <Trash2 className="w-3.5 h-3.5" />

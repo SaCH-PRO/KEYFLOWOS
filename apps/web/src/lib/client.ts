@@ -647,12 +647,40 @@ export async function addContactTask(
   });
 }
 
+export async function updateContactNote(noteId: string, data: { body?: string; source?: string }, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPatch({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/notes/${encodeURIComponent(noteId)}`,
+    body: data,
+  });
+}
+
 export async function deleteContactNote(noteId: string, businessId: string = DEFAULT_BUSINESS_ID) {
   return apiDelete(`/crm/businesses/${encodeURIComponent(businessId)}/notes/${encodeURIComponent(noteId)}`);
 }
 
+export async function updateContactTask(taskId: string, data: { title?: string; dueDate?: string; priority?: string; remindAt?: string }, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPatch({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/tasks/${encodeURIComponent(taskId)}`,
+    body: data,
+  });
+}
+
 export async function deleteContactTask(taskId: string, businessId: string = DEFAULT_BUSINESS_ID) {
   return apiDelete(`/crm/businesses/${encodeURIComponent(businessId)}/tasks/${encodeURIComponent(taskId)}`);
+}
+
+export async function approveAutopilotAction(actionId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/autopilot-actions/${encodeURIComponent(actionId)}/approve`,
+    body: {},
+  });
+}
+
+export async function denyAutopilotAction(actionId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/autopilot-actions/${encodeURIComponent(actionId)}/deny`,
+    body: {},
+  });
 }
 
 export async function fetchSegmentSummary(businessId: string = DEFAULT_BUSINESS_ID) {
