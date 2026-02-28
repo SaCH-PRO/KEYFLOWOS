@@ -1,36 +1,15 @@
 "use client";
 
-import { memo, useCallback } from "react";
+import { memo, useCallback, useRef, Fragment } from "react";
 import {
-  Search,
   ChevronDown,
   ChevronUp,
   ArrowUpDown,
-  X,
+  UserX,
+  SearchX,
 } from "lucide-react";
 import type { LocalContact } from "@/lib/contacts-db";
-import type { SortField, SortDir } from "./hooks/use-database-state";
-
-type ColumnDef = {
-  key: SortField | "tags" | "jobTitle";
-  label: string;
-  width: string;
-};
-
-const VISIBLE_COLUMNS: ColumnDef[] = [
-  { key: "firstName", label: "First Name", width: "w-[120px]" },
-  { key: "lastName", label: "Last Name", width: "w-[120px]" },
-  { key: "email", label: "Email", width: "w-[200px]" },
-  { key: "phone", label: "Phone", width: "w-[130px]" },
-  { key: "status", label: "Status", width: "w-[90px]" },
-  { key: "companyName", label: "Company", width: "w-[160px]" },
-  { key: "jobTitle", label: "Job Title", width: "w-[140px]" },
-  { key: "city", label: "City", width: "w-[110px]" },
-  { key: "country", label: "Country", width: "w-[110px]" },
-  { key: "source", label: "Source", width: "w-[100px]" },
-  { key: "tags", label: "Tags", width: "w-[150px]" },
-  { key: "createdAt", label: "Created", width: "w-[100px]" },
-];
+import type { SortField, SortDir, ColumnDef } from "./hooks/use-database-state";
 
 const STATUS_COLORS: Record<string, string> = {
   LEAD: "bg-amber-500/20 text-amber-400",
@@ -61,6 +40,58 @@ function getCellValue(contact: LocalContact, key: string): string {
   }
 }
 
+function HighlightedText({ text, search }: { text: string; search: string }) {
+  if (!search || !text) return <>{text}</>;
+  const terms = search.toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return <>{text}</>;
+
+  const lowerText = text.toLowerCase();
+  const ranges: [number, number][] = [];
+
+  for (const term of terms) {
+    let start = 0;
+    while (start < lowerText.length) {
+      const idx = lowerText.indexOf(term, start);
+      if (idx === -1) break;
+      ranges.push([idx, idx + term.length]);
+      start = idx + 1;
+    }
+  }
+
+  if (ranges.length === 0) return <>{text}</>;
+
+  ranges.sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [ranges[0]];
+  for (let i = 1; i < ranges.length; i++) {
+    const last = merged[merged.length - 1];
+    if (ranges[i][0] <= last[1]) {
+      last[1] = Math.max(last[1], ranges[i][1]);
+    } else {
+      merged.push(ranges[i]);
+    }
+  }
+
+  const parts: JSX.Element[] = [];
+  let cursor = 0;
+  for (let i = 0; i < merged.length; i++) {
+    const [s, e] = merged[i];
+    if (cursor < s) {
+      parts.push(<Fragment key={`t${i}`}>{text.slice(cursor, s)}</Fragment>);
+    }
+    parts.push(
+      <mark key={`h${i}`} className="bg-[hsl(var(--kf-accent1))]/25 text-inherit rounded-sm px-px">
+        {text.slice(s, e)}
+      </mark>
+    );
+    cursor = e;
+  }
+  if (cursor < text.length) {
+    parts.push(<Fragment key="end">{text.slice(cursor)}</Fragment>);
+  }
+
+  return <>{parts}</>;
+}
+
 interface DatabaseTableProps {
   contacts: LocalContact[];
   page: number;
@@ -76,9 +107,10 @@ interface DatabaseTableProps {
   onSelectContact?: (contactId: string) => void;
   isSortable: (key: string) => boolean;
   search: string;
+  columns: ColumnDef[];
 }
 
-function TagsCell({ value }: { value: string }) {
+function TagsCell({ value, search }: { value: string; search: string }) {
   if (!value) return null;
   const tags = value.split(", ").filter(Boolean);
   const visible = tags.slice(0, 3);
@@ -88,11 +120,13 @@ function TagsCell({ value }: { value: string }) {
     <div className="flex flex-wrap gap-1">
       {visible.map((tag) => (
         <span key={tag} className="px-1.5 py-0.5 text-[10px] rounded bg-muted/50 text-muted-foreground">
-          {tag}
+          <HighlightedText text={tag} search={search} />
         </span>
       ))}
       {overflow > 0 && (
-        <span className="text-[10px] text-muted-foreground">+{overflow}</span>
+        <span className="text-[10px] text-muted-foreground" title={tags.slice(3).join(", ")}>
+          +{overflow}
+        </span>
       )}
     </div>
   );
@@ -113,10 +147,31 @@ function DatabaseTableInner({
   onSelectContact,
   isSortable,
   search,
+  columns,
 }: DatabaseTableProps) {
+  const tbodyRef = useRef<HTMLTableSectionElement>(null);
+
   const handleCheckboxRef = useCallback((el: HTMLInputElement | null) => {
     if (el) el.indeterminate = somePageSelected && !allPageSelected;
   }, [somePageSelected, allPageSelected]);
+
+  const handleRowKeyDown = useCallback((e: React.KeyboardEvent<HTMLTableRowElement>, contactId: string, idx: number) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onSelectContact?.(contactId);
+    } else if (e.key === "x" || e.key === "X") {
+      e.preventDefault();
+      onToggleSelect(contactId);
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      const rows = tbodyRef.current?.querySelectorAll<HTMLElement>("tr[tabindex]");
+      if (rows && idx + 1 < rows.length) rows[idx + 1].focus();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      const rows = tbodyRef.current?.querySelectorAll<HTMLElement>("tr[tabindex]");
+      if (rows && idx - 1 >= 0) rows[idx - 1].focus();
+    }
+  }, [onSelectContact]);
 
   return (
     <div className="overflow-x-auto rounded-lg border border-border/40">
@@ -134,7 +189,7 @@ function DatabaseTableInner({
               />
             </th>
             <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground w-[40px]">#</th>
-            {VISIBLE_COLUMNS.map((col) => {
+            {columns.map((col) => {
               const sortable = isSortable(col.key);
               const isActive = sortField === col.key;
               const ariaSortValue = isActive ? (sortDir === "asc" ? "ascending" : "descending") : undefined;
@@ -145,7 +200,9 @@ function DatabaseTableInner({
                   className={`px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground ${col.width} ${sortable ? "cursor-pointer hover:text-foreground select-none" : ""}`}
                   onClick={sortable ? () => onSort(col.key as SortField) : undefined}
                   aria-sort={ariaSortValue}
-                  role={sortable ? "columnheader" : undefined}
+                  role="columnheader"
+                  tabIndex={sortable ? 0 : undefined}
+                  onKeyDown={sortable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSort(col.key as SortField); } } : undefined}
                 >
                   <span className="inline-flex items-center gap-1">
                     {col.label}
@@ -163,11 +220,25 @@ function DatabaseTableInner({
             })}
           </tr>
         </thead>
-        <tbody>
+        <tbody ref={tbodyRef}>
           {contacts.length === 0 ? (
             <tr>
-              <td colSpan={VISIBLE_COLUMNS.length + 2} className="px-4 py-8 text-center text-muted-foreground text-sm">
-                {search ? "No contacts match your search" : "No contacts found"}
+              <td colSpan={columns.length + 2} className="px-4 py-12 text-center">
+                <div className="flex flex-col items-center gap-2">
+                  {search ? (
+                    <>
+                      <SearchX className="w-8 h-8 text-muted-foreground/40" />
+                      <p className="text-sm text-muted-foreground">No contacts match "{search}"</p>
+                      <p className="text-xs text-muted-foreground/60">Try adjusting your search or filters</p>
+                    </>
+                  ) : (
+                    <>
+                      <UserX className="w-8 h-8 text-muted-foreground/40" />
+                      <p className="text-sm text-muted-foreground">No contacts found</p>
+                      <p className="text-xs text-muted-foreground/60">Sync your contacts or add new ones to get started</p>
+                    </>
+                  )}
+                </div>
               </td>
             </tr>
           ) : (
@@ -176,10 +247,12 @@ function DatabaseTableInner({
               return (
                 <tr
                   key={contact.id}
-                  className={`border-b border-border/20 hover:bg-muted/20 transition-colors cursor-pointer ${isSelected ? "bg-[hsl(var(--kf-accent1))]/5" : ""}`}
+                  className={`border-b border-border/20 hover:bg-muted/20 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--kf-accent1))]/50 focus-visible:ring-inset ${isSelected ? "bg-[hsl(var(--kf-accent1))]/5" : ""}`}
                   onClick={() => onSelectContact?.(contact.id)}
+                  onKeyDown={(e) => handleRowKeyDown(e, contact.id, idx)}
                   role="row"
                   aria-selected={isSelected}
+                  tabIndex={0}
                 >
                   <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
                     <input
@@ -193,15 +266,19 @@ function DatabaseTableInner({
                   <td className="px-3 py-2 text-xs text-muted-foreground">
                     {(page - 1) * pageSize + idx + 1}
                   </td>
-                  {VISIBLE_COLUMNS.map((col) => {
+                  {columns.map((col) => {
                     const val = getCellValue(contact, col.key);
 
                     if (col.key === "status") {
                       return (
                         <td key={col.key} className={`px-3 py-2 ${col.width}`}>
-                          <span className={`px-2 py-0.5 text-[11px] font-medium rounded-full ${STATUS_COLORS[val] || "bg-muted text-muted-foreground"}`}>
-                            {val}
-                          </span>
+                          {val ? (
+                            <span className={`px-2 py-0.5 text-[11px] font-medium rounded-full ${STATUS_COLORS[val] || "bg-muted text-muted-foreground"}`}>
+                              {val}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground/40">—</span>
+                          )}
                         </td>
                       );
                     }
@@ -209,14 +286,14 @@ function DatabaseTableInner({
                     if (col.key === "tags") {
                       return (
                         <td key={col.key} className={`px-3 py-2 ${col.width}`}>
-                          <TagsCell value={val} />
+                          <TagsCell value={val} search={search} />
                         </td>
                       );
                     }
 
                     return (
                       <td key={col.key} className={`px-3 py-2 text-sm truncate max-w-[200px] ${col.width}`}>
-                        {val || <span className="text-muted-foreground/40">—</span>}
+                        {val ? <HighlightedText text={val} search={search} /> : <span className="text-muted-foreground/40">—</span>}
                       </td>
                     );
                   })}

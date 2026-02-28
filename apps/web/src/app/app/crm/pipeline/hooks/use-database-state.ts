@@ -19,6 +19,56 @@ export interface ListSummary {
   contactCount: number;
 }
 
+export type ColumnKey = SortField | "tags" | "jobTitle";
+
+export interface ColumnDef {
+  key: ColumnKey;
+  label: string;
+  width: string;
+  mobileHidden?: boolean;
+}
+
+export const ALL_COLUMNS: ColumnDef[] = [
+  { key: "firstName", label: "First Name", width: "w-[120px]" },
+  { key: "lastName", label: "Last Name", width: "w-[120px]" },
+  { key: "email", label: "Email", width: "w-[200px]" },
+  { key: "phone", label: "Phone", width: "w-[130px]", mobileHidden: true },
+  { key: "status", label: "Status", width: "w-[90px]" },
+  { key: "companyName", label: "Company", width: "w-[160px]", mobileHidden: true },
+  { key: "jobTitle", label: "Job Title", width: "w-[140px]", mobileHidden: true },
+  { key: "city", label: "City", width: "w-[110px]", mobileHidden: true },
+  { key: "country", label: "Country", width: "w-[110px]", mobileHidden: true },
+  { key: "source", label: "Source", width: "w-[100px]", mobileHidden: true },
+  { key: "tags", label: "Tags", width: "w-[150px]", mobileHidden: true },
+  { key: "createdAt", label: "Created", width: "w-[100px]", mobileHidden: true },
+];
+
+const DEFAULT_VISIBLE_KEYS: ColumnKey[] = [
+  "firstName", "lastName", "email", "phone", "status",
+  "companyName", "jobTitle", "city", "country", "source",
+  "tags", "createdAt",
+];
+
+const STORAGE_KEY = "kf_db_visible_cols";
+
+function loadVisibleColumns(): Set<ColumnKey> {
+  if (typeof window === "undefined") return new Set(DEFAULT_VISIBLE_KEYS);
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved) as ColumnKey[];
+      if (Array.isArray(parsed) && parsed.length > 0) return new Set(parsed);
+    }
+  } catch { /* ignore */ }
+  return new Set(DEFAULT_VISIBLE_KEYS);
+}
+
+function saveVisibleColumns(keys: Set<ColumnKey>) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([...keys]));
+  } catch { /* ignore */ }
+}
+
 const SORTABLE_FIELDS = new Set<string>([
   "firstName", "lastName", "email", "phone", "status",
   "companyName", "city", "country", "source", "createdAt",
@@ -80,12 +130,16 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
   const [usingCache, setUsingCache] = useState(false);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [allPagesSelected, setAllPagesSelected] = useState(false);
   const [bulkActing, setBulkActing] = useState(false);
   const [activeBulkAction, setActiveBulkAction] = useState<BulkAction>(null);
   const [bulkTagInput, setBulkTagInput] = useState("");
 
   const [availableLists, setAvailableLists] = useState<ListSummary[]>([]);
   const [listsRefreshToken, setListsRefreshToken] = useState(0);
+
+  const [visibleColumns, setVisibleColumns] = useState<Set<ColumnKey>>(() => loadVisibleColumns());
+  const [showColumnPicker, setShowColumnPicker] = useState(false);
 
   const [confirmState, setConfirmState] = useState<{
     open: boolean;
@@ -144,13 +198,14 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     }
 
     if (search) {
+      const terms = search.split(/\s+/).filter(Boolean);
       list = list.filter((c) => {
         const searchable = [
           c.firstName, c.lastName, c.email, c.phone,
           c.companyName, c.jobTitle, c.city, c.country,
           c.source, ...(c.tags || []),
         ].filter(Boolean).join(" ").toLowerCase();
-        return searchable.includes(search);
+        return terms.every((term) => searchable.includes(term));
       });
     }
 
@@ -172,6 +227,15 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
   const filteredContactsRef = useRef(filteredContacts);
   filteredContactsRef.current = filteredContacts;
 
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = { ALL: activeContacts.length };
+    for (const c of activeContacts) {
+      const s = c.status || "UNKNOWN";
+      counts[s] = (counts[s] || 0) + 1;
+    }
+    return counts;
+  }, [activeContacts]);
+
   const totalPages = Math.max(1, Math.ceil(filteredContacts.length / pageSize));
 
   const paginatedContacts = useMemo(() => {
@@ -181,6 +245,22 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
 
   const allPageSelected = paginatedContacts.length > 0 && paginatedContacts.every((c) => selectedIds.has(c.id));
   const somePageSelected = paginatedContacts.some((c) => selectedIds.has(c.id));
+
+  const effectiveSelectedCount = allPagesSelected ? filteredContacts.length : selectedIds.size;
+
+  const visibleColumnDefs = useMemo(() => {
+    return ALL_COLUMNS.filter((col) => {
+      if (!visibleColumns.has(col.key)) return false;
+      if (isMobile && col.mobileHidden) return false;
+      return true;
+    });
+  }, [visibleColumns, isMobile]);
+
+  useEffect(() => {
+    if (allPagesSelected) {
+      setSelectedIds(new Set(filteredContacts.map((c) => c.id)));
+    }
+  }, [allPagesSelected, filteredContacts]);
 
   const handleSync = useCallback(async () => {
     setSyncing(true);
@@ -221,6 +301,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
   }, []);
 
   const toggleSelect = useCallback((id: string) => {
+    setAllPagesSelected(false);
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -236,12 +317,18 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
       const next = new Set(prev);
       if (allSelected) {
         pageIds.forEach((id) => next.delete(id));
+        setAllPagesSelected(false);
       } else {
         pageIds.forEach((id) => next.add(id));
       }
       return next;
     });
   }, [paginatedContacts]);
+
+  const handleSelectAllPages = useCallback(() => {
+    setAllPagesSelected(true);
+    setSelectedIds(new Set(filteredContacts.map((c) => c.id)));
+  }, [filteredContacts]);
 
   const handleBulkStatusChange = useCallback(async (status: string) => {
     setBulkActing(true);
@@ -251,6 +338,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
       if (res.error) throw new Error(res.error);
       toast.success(`Updated ${ids.length} contacts to ${status}`);
       setSelectedIds(new Set());
+      setAllPagesSelected(false);
       setActiveBulkAction(null);
       onRefresh();
     } catch (err: unknown) {
@@ -271,6 +359,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
       if (res.error) throw new Error(res.error);
       toast.success(`Added tags to ${ids.length} contacts`);
       setSelectedIds(new Set());
+      setAllPagesSelected(false);
       setActiveBulkAction(null);
       setBulkTagInput("");
       onRefresh();
@@ -291,6 +380,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
       const listName = availableLists.find((l) => l.id === listId)?.name || "list";
       toast.success(`Added ${ids.length} contacts to "${listName}"`);
       setSelectedIds(new Set());
+      setAllPagesSelected(false);
       setActiveBulkAction(null);
       setListsRefreshToken((t) => t + 1);
     } catch (err: unknown) {
@@ -313,6 +403,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
           if (res.error) throw new Error(res.error);
           toast.success(`Deleted ${ids.length} contacts`);
           setSelectedIds(new Set());
+          setAllPagesSelected(false);
           onRefresh();
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : "Bulk delete failed";
@@ -330,6 +421,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
 
   const clearSelection = useCallback(() => {
     setSelectedIds(new Set());
+    setAllPagesSelected(false);
     setActiveBulkAction(null);
   }, []);
 
@@ -351,6 +443,26 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
   const handleListsChanged = useCallback((lists: ListSummary[]) => {
     setAvailableLists(lists);
   }, []);
+
+  const toggleColumn = useCallback((key: ColumnKey) => {
+    setVisibleColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        if (next.size <= 2) {
+          toast.error("At least 2 columns must remain visible");
+          return prev;
+        }
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      saveVisibleColumns(next);
+      return next;
+    });
+  }, []);
+
+  const toggleColumnPicker = useCallback(() => setShowColumnPicker((p) => !p), []);
+  const closeColumnPicker = useCallback(() => setShowColumnPicker(false), []);
 
   return {
     isMobile,
@@ -375,6 +487,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     totalPages,
 
     selectedIds,
+    allPagesSelected,
     bulkActing,
     activeBulkAction,
     setActiveBulkAction,
@@ -382,10 +495,20 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     setBulkTagInput,
     allPageSelected,
     somePageSelected,
+    effectiveSelectedCount,
 
     availableLists,
     listsRefreshToken,
     handleListsChanged,
+
+    statusCounts,
+
+    visibleColumns,
+    visibleColumnDefs,
+    showColumnPicker,
+    toggleColumn,
+    toggleColumnPicker,
+    closeColumnPicker,
 
     confirmState,
     handleConfirmClose,
@@ -395,6 +518,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     handleSort,
     toggleSelect,
     toggleSelectAll,
+    handleSelectAllPages,
     handleBulkStatusChange,
     handleBulkAddTags,
     handleBulkAddToList,
