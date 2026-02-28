@@ -10,6 +10,8 @@ import {
   Receipt,
   CalendarCheck,
   History,
+  BarChart3,
+  ChevronRight,
 } from "lucide-react";
 import type { ContactDetailData, ContactEvent, DetailQuickAction } from "./contact-detail";
 
@@ -48,6 +50,42 @@ const EVENT_LABELS: Record<string, string> = {
   "followup.scheduled": "Follow-up set",
 };
 
+function CollapsibleCard({
+  icon: Icon,
+  title,
+  children,
+  defaultOpen = false,
+  hasData = false,
+  badge,
+}: {
+  icon: typeof TrendingUp;
+  title: string;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+  hasData?: boolean;
+  badge?: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <div className="rounded-xl bg-muted/30 border border-border/50 overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between p-3 hover:bg-muted/20 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <Icon className="w-3.5 h-3.5 text-muted-foreground" />
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{title}</span>
+          {hasData && <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--kf-accent2))]" />}
+          {badge}
+        </div>
+        <ChevronRight className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open && <div className="px-3 pb-3">{children}</div>}
+    </div>
+  );
+}
+
 function LeadScoreGauge({ score }: { score: number }) {
   const clampedScore = Math.max(0, Math.min(100, score));
   const color =
@@ -78,7 +116,7 @@ function LeadScoreTooltip() {
   return (
     <div className="relative inline-block">
       <button
-        onClick={() => setOpen(!open)}
+        onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
         className="p-0.5 text-muted-foreground hover:text-foreground transition-colors"
         title="How is lead score calculated?"
       >
@@ -128,77 +166,78 @@ export function ContactDetailStats({ contact, events, onSetActiveTab, onQuickAct
     contact.meta?.lastInteractionAt ||
     contact.meta?.nextDueTaskAt;
 
+  const hasFinancial = (contact.meta?.totalRevenue ?? 0) > 0 ||
+    (contact.meta?.invoiceCount ?? 0) > 0 ||
+    (contact.meta?.bookingCount ?? 0) > 0;
+
   const recentEvents = events.slice(0, 3);
+
+  const scoreBadge = contact.meta?.leadScore != null ? (
+    <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-muted font-medium">
+      {contact.meta.leadScore >= 70 ? "Hot" : contact.meta.leadScore >= 40 ? "Warm" : "Cold"}
+    </span>
+  ) : null;
 
   return (
     <>
-      {hasAnyMetric ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
-          <div className="kf-stat-card p-3">
-            <div className="flex items-center gap-1 text-muted-foreground text-xs mb-1">
-              <TrendingUp className="w-3 h-3" />
-              <span>Lead Score</span>
-              <LeadScoreTooltip />
+      <CollapsibleCard icon={TrendingUp} title="Metrics" hasData={!!hasAnyMetric} badge={scoreBadge}>
+        {hasAnyMetric ? (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+            <div className="kf-stat-card p-3">
+              <div className="flex items-center gap-1 text-muted-foreground text-xs mb-1">
+                <TrendingUp className="w-3 h-3" />
+                <span>Lead Score</span>
+                <LeadScoreTooltip />
+              </div>
+              {contact.meta?.leadScore != null ? (
+                <LeadScoreGauge score={contact.meta.leadScore} />
+              ) : (
+                <p className="text-xs text-muted-foreground mt-1">Interacting builds score</p>
+              )}
             </div>
-            {contact.meta?.leadScore != null ? (
-              <LeadScoreGauge score={contact.meta.leadScore} />
-            ) : (
-              <p className="text-xs text-muted-foreground mt-1">Interacting builds score</p>
-            )}
+            <div className="kf-stat-card p-3">
+              <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1">
+                <DollarSign className="w-3 h-3" />
+                Outstanding
+              </div>
+              <div className="text-lg font-semibold" style={{ color: (contact.meta?.outstandingBalance ?? 0) > 0 ? "hsl(var(--kf-accent1))" : undefined }}>
+                {contact.meta?.outstandingBalance != null && contact.meta.outstandingBalance > 0
+                  ? `TTD ${contact.meta.outstandingBalance.toLocaleString()}`
+                  : <span className="text-sm font-normal text-muted-foreground">All clear</span>}
+              </div>
+            </div>
+            <div className="kf-stat-card p-3">
+              <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1">
+                <Clock className="w-3 h-3" />
+                Last Activity
+              </div>
+              <div className="text-xs font-medium">
+                {contact.meta?.lastInteractionAt
+                  ? relativeTime(contact.meta.lastInteractionAt)
+                  : <span className="text-muted-foreground">Send a message to start</span>}
+              </div>
+            </div>
+            <div className="kf-stat-card p-3">
+              <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1">
+                <Calendar className="w-3 h-3" />
+                Next Task
+              </div>
+              <div className="text-xs font-medium">
+                {contact.meta?.nextDueTaskAt
+                  ? relativeTime(contact.meta.nextDueTaskAt)
+                  : <span className="text-muted-foreground">No tasks yet</span>}
+              </div>
+            </div>
           </div>
-          <div className="kf-stat-card p-3">
-            <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1">
-              <DollarSign className="w-3 h-3" />
-              Outstanding
-            </div>
-            <div className="text-lg font-semibold" style={{ color: (contact.meta?.outstandingBalance ?? 0) > 0 ? "hsl(var(--kf-accent1))" : undefined }}>
-              {contact.meta?.outstandingBalance != null && contact.meta.outstandingBalance > 0
-                ? `TTD ${contact.meta.outstandingBalance.toLocaleString()}`
-                : <span className="text-sm font-normal text-muted-foreground">All clear</span>}
-            </div>
-          </div>
-          <div className="kf-stat-card p-3">
-            <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1">
-              <Clock className="w-3 h-3" />
-              Last Activity
-            </div>
-            <div className="text-xs font-medium">
-              {contact.meta?.lastInteractionAt
-                ? relativeTime(contact.meta.lastInteractionAt)
-                : <span className="text-muted-foreground">Send a message to start</span>}
-            </div>
-          </div>
-          <div className="kf-stat-card p-3">
-            <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1">
-              <Calendar className="w-3 h-3" />
-              Next Task
-            </div>
-            <div className="text-xs font-medium">
-              {contact.meta?.nextDueTaskAt
-                ? relativeTime(contact.meta.nextDueTaskAt)
-                : <span className="text-muted-foreground">No tasks yet</span>}
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/30 border border-border/50 text-sm">
-          <div className="hidden sm:flex items-center gap-2 flex-1">
-            <TrendingUp className="w-3.5 h-3.5 text-muted-foreground" />
-            <span className="text-muted-foreground text-xs">Score: —</span>
-          </div>
-          <div className="hidden sm:flex items-center gap-2 flex-1">
-            <DollarSign className="w-3.5 h-3.5 text-muted-foreground" />
-            <span className="text-muted-foreground text-xs">Balance: $0</span>
-          </div>
-          <div className="flex items-center gap-2 flex-1">
+        ) : (
+          <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/20 text-sm">
             <Clock className="w-3.5 h-3.5 text-muted-foreground" />
             <span className="text-muted-foreground text-xs">No activity yet — send a message to get started</span>
           </div>
-        </div>
-      )}
+        )}
+      </CollapsibleCard>
 
-      <div className="p-3 rounded-xl bg-muted/30 border border-border/50">
-        <p className="text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wider">Financial Summary</p>
+      <CollapsibleCard icon={BarChart3} title="Financial Summary" hasData={hasFinancial}>
         <div className="grid grid-cols-3 gap-3 text-center">
           <div>
             <p className="text-lg font-semibold" style={{ color: "hsl(var(--kf-accent2))" }}>
@@ -235,22 +274,10 @@ export function ContactDetailStats({ contact, events, onSetActiveTab, onQuickAct
             </p>
           </div>
         </div>
-      </div>
+      </CollapsibleCard>
 
       {recentEvents.length > 0 && (
-        <div className="p-3 rounded-xl bg-muted/30 border border-border/50">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <History className="w-3.5 h-3.5 text-muted-foreground" />
-              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Recent Activity</p>
-            </div>
-            <button
-              onClick={() => onSetActiveTab("timeline")}
-              className="text-[10px] text-[hsl(var(--kf-accent2))] hover:underline"
-            >
-              View all
-            </button>
-          </div>
+        <CollapsibleCard icon={History} title="Recent Activity" hasData={recentEvents.length > 0}>
           <div className="space-y-1.5">
             {recentEvents.map((event) => (
               <div key={event.id} className="flex items-center justify-between text-xs">
@@ -261,7 +288,13 @@ export function ContactDetailStats({ contact, events, onSetActiveTab, onQuickAct
               </div>
             ))}
           </div>
-        </div>
+          <button
+            onClick={() => onSetActiveTab("timeline")}
+            className="mt-2 text-[10px] text-[hsl(var(--kf-accent2))] hover:underline"
+          >
+            View all
+          </button>
+        </CollapsibleCard>
       )}
     </>
   );
