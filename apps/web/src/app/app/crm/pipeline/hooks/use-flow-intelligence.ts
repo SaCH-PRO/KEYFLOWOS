@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { FlowIntelligenceData } from "@/components/contacts/flow-intelligence";
 import type { NextAction as NextActionUI } from "@/components/contacts/next-action-queue";
@@ -21,31 +21,41 @@ export function useFlowIntelligence(businessId: string | null) {
   const [autopilotPaused, setAutopilotPaused] = useState(false);
   const [revenueData, setRevenueData] = useState<RevenueData | null>(null);
   const [flowDataLoading, setFlowDataLoading] = useState(false);
+  const flowAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => { flowAbortRef.current?.abort(); };
+  }, []);
 
   const loadFlowData = useCallback(async () => {
     if (!businessId) return;
+    flowAbortRef.current?.abort();
+    const controller = new AbortController();
+    flowAbortRef.current = controller;
     setFlowDataLoading(true);
     try {
-      const [flowRes, actionsRes, autopilotRes, revenueRes] = await Promise.all([
-        fetchFlowIntelligence(businessId),
-        fetchNextActions(businessId),
-        fetchAutopilotActionsForCrm(businessId),
-        fetchPredictiveRevenue(businessId),
+      const [flowRes, actionsRes, autopilotRes, revenueRes] = await Promise.allSettled([
+        fetchFlowIntelligence(businessId, { signal: controller.signal }),
+        fetchNextActions(businessId, { signal: controller.signal }),
+        fetchAutopilotActionsForCrm(businessId, { signal: controller.signal }),
+        fetchPredictiveRevenue(businessId, { signal: controller.signal }),
       ]);
-      if (flowRes.data) setFlowIntelligence(flowRes.data);
-      if (actionsRes.data) {
-        setNextActions(actionsRes.data.map((a) => ({
+      if (controller.signal.aborted) return;
+      if (flowRes.status === "fulfilled" && flowRes.value.data) setFlowIntelligence(flowRes.value.data);
+      if (actionsRes.status === "fulfilled" && actionsRes.value.data) {
+        setNextActions(actionsRes.value.data.map((a) => ({
           id: a.id, type: a.type, contactId: a.contactId, contactName: a.contactName,
           description: a.description, aiDraft: a.aiDraft, estimatedTime: a.estimatedTime,
           priority: a.priority, dueDate: a.dueDate, value: a.value,
         })));
       }
-      if (autopilotRes.data) setAutopilotActions(autopilotRes.data);
-      if (revenueRes.data) setRevenueData(revenueRes.data);
-    } catch {
+      if (autopilotRes.status === "fulfilled" && autopilotRes.value.data) setAutopilotActions(autopilotRes.value.data);
+      if (revenueRes.status === "fulfilled" && revenueRes.value.data) setRevenueData(revenueRes.value.data);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       toast.error("Failed to load flow intelligence");
     } finally {
-      setFlowDataLoading(false);
+      if (!controller.signal.aborted) setFlowDataLoading(false);
     }
   }, [businessId]);
 

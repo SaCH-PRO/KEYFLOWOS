@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type { ContactFormData } from "@/components/contacts/contact-form";
@@ -241,6 +241,12 @@ export function useContactActions({
   }, [contactDetail, setSelectedContactId, setShowMobileDetail]);
 
   const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+    };
+  }, []);
 
   const handleDeleteContact = useCallback(async (contact?: { id: string }) => {
     const id = contact?.id || selectedContactId;
