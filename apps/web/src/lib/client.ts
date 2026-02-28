@@ -821,6 +821,13 @@ export async function completeContactTask(taskId: string, businessId: string = D
   });
 }
 
+export async function reopenContactTask(taskId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<ContactTask>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/tasks/${encodeURIComponent(taskId)}/reopen`,
+    body: {},
+  });
+}
+
 export async function mergeContacts(input: { businessId?: string; contactId: string; duplicateId: string }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<Contact>({

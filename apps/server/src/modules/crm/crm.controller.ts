@@ -197,6 +197,15 @@ export class CrmController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/tasks/:taskId/reopen')
+  reopenTask(
+    @Param('businessId') businessId: string,
+    @Param('taskId') taskId: string,
+  ) {
+    return this.crm.reopenTask({ businessId, taskId });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Delete('businesses/:businessId/notes/:noteId')
   deleteNote(
     @Param('businessId') businessId: string,

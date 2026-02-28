@@ -29,7 +29,7 @@ export interface PipelineDetailPanelProps {
   onTogglePin: (id: string) => void;
   onAddNote: (body: string, source?: string) => Promise<void>;
   onAddTask: (title: string, options?: { dueDate?: string; priority?: string; remindAt?: string }) => Promise<void>;
-  onCompleteTask: (taskId: string) => Promise<void>;
+  onCompleteTask: (taskId: string, currentStatus?: string) => Promise<void>;
   onDeleteNote: (noteId: string) => Promise<void>;
   onDeleteTask: (taskId: string) => Promise<void>;
   onUpdateStatus: (status: string) => Promise<void>;
