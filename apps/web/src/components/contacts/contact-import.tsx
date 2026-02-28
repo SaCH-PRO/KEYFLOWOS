@@ -27,9 +27,9 @@ interface ContactImportProps {
   businessId?: string;
 }
 
-const CSV_TEMPLATE = `firstName,lastName,email,phone,company,address,city,country,status
-John,Doe,john@example.com,+1868123456,Acme Corp,123 Main Street,Port of Spain,Trinidad,LEAD
-Jane,Smith,jane@example.com,+1868654321,Tech Inc,456 Oak Avenue,San Fernando,Trinidad,PROSPECT`;
+const CSV_TEMPLATE = `firstName,lastName,displayName,email,secondaryEmail,phone,secondaryPhone,whatsapp,status,company,jobTitle,department,industry,segment,address,addressLine2,city,state,postalCode,country,timezone,preferredChannel,language,lifecycleStage,tags,marketingOptIn,doNotContact,notes
+John,Doe,Johnny D,john@example.com,john.personal@mail.com,+1868123456,+1868111222,+1868123456,LEAD,Acme Corp,Marketing Manager,Marketing,Technology,Enterprise,123 Main Street,Suite 4,Port of Spain,Trinidad,00100,Trinidad,America/Port_of_Spain,whatsapp,en,Awareness,"vip,tech",Yes,No,Key decision maker
+Jane,Smith,,jane@example.com,,+1868654321,,,PROSPECT,Tech Inc,CEO,,Services,SMB,456 Oak Avenue,,San Fernando,Trinidad,,Trinidad,,email,en,Consideration,local,Yes,No,`;
 
 export function ContactImport({ onImportFile, onImportLink, loading, businessId }: ContactImportProps) {
   const [expanded, setExpanded] = useState(false);
