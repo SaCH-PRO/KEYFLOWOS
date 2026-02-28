@@ -117,7 +117,7 @@ export function ContactDetail({
   onQuickAction,
   onLogEvent,
 }: ContactDetailProps) {
-  const [activeTab, setActiveTab] = useState<string>("timeline");
+  const [activeTab, setActiveTab] = useState<string>("notes");
   const [confirmState, setConfirmState] = useState<{ open: boolean; action: () => void }>({
     open: false,
     action: () => {},
