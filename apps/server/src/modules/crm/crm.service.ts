@@ -702,6 +702,16 @@ export class CrmService {
       );
     }
 
+    if (input.status && existing?.status !== input.status) {
+      await this.logEvent(
+        input.businessId,
+        input.contactId,
+        'status.changed',
+        { from: existing?.status, to: input.status },
+        { actorType: 'USER', source: 'crm' },
+      );
+    }
+
     const payload: ContactUpdatedPayload = {
       contact: updated,
       businessId: input.businessId,
@@ -803,7 +813,14 @@ export class CrmService {
   }
 
   async softDeleteContact(input: { businessId: string; contactId: string }) {
-    await this.assertContact(input.businessId, input.contactId);
+    const contact = await this.assertContact(input.businessId, input.contactId);
+    await this.logEvent(
+      input.businessId,
+      input.contactId,
+      'contact.deleted',
+      { name: `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() },
+      { actorType: 'USER', source: 'crm' },
+    );
     return this.prisma.client.contact.update({ where: { id: input.contactId }, data: { deletedAt: new Date() } });
   }
 
@@ -826,6 +843,13 @@ export class CrmService {
         });
       });
       const results = await this.prisma.client.$transaction(ops);
+      const eventOps = contacts.map((c) =>
+        this.logEvent(input.businessId, c.id, 'bulk.updated', {
+          ...(input.status ? { status: input.status } : {}),
+          ...(input.addTags ? { addedTags: input.addTags } : {}),
+        }),
+      );
+      await Promise.allSettled(eventOps);
       return { updated: results.length };
     }
     if (Object.keys(data).length === 0) {
@@ -835,6 +859,10 @@ export class CrmService {
       where: { id: { in: input.contactIds }, businessId: input.businessId, deletedAt: null },
       data,
     });
+    const eventOps = input.contactIds.map((cid) =>
+      this.logEvent(input.businessId, cid, 'bulk.updated', { status: input.status }),
+    );
+    await Promise.allSettled(eventOps);
     return { updated: result.count };
   }
 
@@ -842,6 +870,10 @@ export class CrmService {
     if (!input.contactIds || input.contactIds.length === 0) {
       throw new BadRequestException('contactIds is required');
     }
+    const eventOps = input.contactIds.map((cid) =>
+      this.logEvent(input.businessId, cid, 'contact.deleted', { bulk: true }),
+    );
+    await Promise.allSettled(eventOps);
     const result = await this.prisma.client.contact.updateMany({
       where: { id: { in: input.contactIds }, businessId: input.businessId, deletedAt: null },
       data: { deletedAt: new Date() },
@@ -1123,6 +1155,7 @@ export class CrmService {
     });
     if (!note) throw new NotFoundException('Note not found');
     await this.prisma.client.contactNote.delete({ where: { id: input.noteId } });
+    await this.logEvent(input.businessId, note.contactId, 'note.deleted', { noteId: note.id, body: note.body?.slice(0, 100) });
     return { deleted: true };
   }
 
@@ -1132,6 +1165,7 @@ export class CrmService {
     });
     if (!task) throw new NotFoundException('Task not found');
     await this.prisma.client.contactTask.delete({ where: { id: input.taskId } });
+    await this.logEvent(input.businessId, task.contactId, 'task.deleted', { taskId: task.id, title: task.title });
     return { deleted: true };
   }
 

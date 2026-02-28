@@ -44,6 +44,9 @@ import {
   RefreshCw,
   Star,
   Gift,
+  Trash,
+  UserX,
+  Tags,
 } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 import type { ContactDetailData, ContactEvent, ContactNote, ContactTask } from "./contact-detail";
@@ -52,11 +55,17 @@ const EVENT_LABELS: Record<string, string> = {
   "contact.created": "Contact created",
   "contact.updated": "Contact updated",
   "contact.merged": "Contacts merged",
+  "contact.deleted": "Contact deleted",
+  "contact.imported": "Contact imported",
+  "contact.imported_from_media": "Contact scanned",
+  "status.changed": "Status changed",
   "STATUS_CHANGED": "Status changed",
   "invoice.created": "Invoice created",
   "invoice.sent": "Invoice sent",
   "invoice.paid": "Invoice paid",
   "invoice.overdue": "Invoice overdue",
+  "invoice.void": "Invoice voided",
+  "invoice.payment_failed": "Payment failed",
   "booking.created": "Booking made",
   "booking.confirmed": "Booking confirmed",
   "booking.completed": "Booking completed",
@@ -64,28 +73,39 @@ const EVENT_LABELS: Record<string, string> = {
   "quote.created": "Quote sent",
   "quote.sent": "Quote sent",
   "quote.accepted": "Quote accepted",
+  "quote.rejected": "Quote rejected",
   "note.added": "Note added",
   "note.created": "Note added",
+  "note.deleted": "Note deleted",
   "task.created": "Task created",
   "task.completed": "Task completed",
   "task.reopened": "Task reopened",
+  "task.deleted": "Task deleted",
   "email.sent": "Email sent",
   "whatsapp.sent": "WhatsApp message sent",
   "message.copied": "Message copied",
   "form.submitted": "Form submitted",
   "followup.scheduled": "Follow-up scheduled",
   "automation.run": "Automation triggered",
+  "automation.executed": "Automation executed",
+  "bulk.updated": "Bulk updated",
 };
 
 const EVENT_ICONS: Record<string, { icon: typeof MessageSquare; color: string }> = {
   "contact.created": { icon: Sparkles, color: "hsl(var(--kf-accent1))" },
   "contact.updated": { icon: RefreshCw, color: "hsl(var(--kf-muted-foreground))" },
   "contact.merged": { icon: Users, color: "hsl(var(--kf-accent2))" },
+  "contact.deleted": { icon: UserX, color: "hsl(0 84% 60%)" },
+  "contact.imported": { icon: Users, color: "hsl(var(--kf-accent2))" },
+  "contact.imported_from_media": { icon: Sparkles, color: "hsl(var(--kf-accent2))" },
+  "status.changed": { icon: TrendingUp, color: "hsl(var(--kf-accent2))" },
   "STATUS_CHANGED": { icon: TrendingUp, color: "hsl(var(--kf-accent2))" },
   "invoice.created": { icon: FileText, color: "hsl(217 91% 60%)" },
   "invoice.sent": { icon: Mail, color: "hsl(217 91% 60%)" },
   "invoice.paid": { icon: DollarSign, color: "hsl(142 76% 36%)" },
   "invoice.overdue": { icon: AlertTriangle, color: "hsl(0 84% 60%)" },
+  "invoice.void": { icon: AlertCircle, color: "hsl(var(--kf-muted-foreground))" },
+  "invoice.payment_failed": { icon: AlertTriangle, color: "hsl(0 84% 60%)" },
   "booking.created": { icon: Calendar, color: "hsl(var(--kf-accent2))" },
   "booking.confirmed": { icon: CheckCircle2, color: "hsl(142 76% 36%)" },
   "booking.completed": { icon: Star, color: "hsl(45 93% 47%)" },
@@ -93,17 +113,22 @@ const EVENT_ICONS: Record<string, { icon: typeof MessageSquare; color: string }>
   "quote.created": { icon: FileText, color: "hsl(217 91% 60%)" },
   "quote.sent": { icon: Mail, color: "hsl(217 91% 60%)" },
   "quote.accepted": { icon: CheckCircle2, color: "hsl(142 76% 36%)" },
+  "quote.rejected": { icon: AlertCircle, color: "hsl(0 84% 60%)" },
   "note.added": { icon: StickyNote, color: "hsl(var(--kf-muted-foreground))" },
   "note.created": { icon: StickyNote, color: "hsl(var(--kf-muted-foreground))" },
+  "note.deleted": { icon: Trash, color: "hsl(var(--kf-muted-foreground))" },
   "task.created": { icon: ListTodo, color: "hsl(var(--kf-accent2))" },
   "task.completed": { icon: CheckCircle2, color: "hsl(142 76% 36%)" },
   "task.reopened": { icon: RefreshCw, color: "hsl(var(--kf-accent1))" },
+  "task.deleted": { icon: Trash, color: "hsl(var(--kf-muted-foreground))" },
   "email.sent": { icon: Mail, color: "hsl(217 91% 60%)" },
   "whatsapp.sent": { icon: MessageCircle, color: "hsl(142 76% 36%)" },
   "message.copied": { icon: Copy, color: "hsl(var(--kf-muted-foreground))" },
   "form.submitted": { icon: FileText, color: "hsl(var(--kf-accent1))" },
   "followup.scheduled": { icon: Bell, color: "hsl(var(--kf-accent1))" },
   "automation.run": { icon: Zap, color: "hsl(var(--kf-accent2))" },
+  "automation.executed": { icon: Zap, color: "hsl(var(--kf-accent2))" },
+  "bulk.updated": { icon: Tags, color: "hsl(var(--kf-accent2))" },
 };
 
 const MILESTONE_ICONS: Record<string, { icon: typeof MessageSquare; color: string }> = {
@@ -1104,6 +1129,15 @@ export function ContactDetailTabs({
                                   {new Date(event.createdAt).toLocaleString("en-TT", { dateStyle: "medium", timeStyle: "short" })}
                                 </span>
                               </div>
+                              {event.type === "status.changed" && (event.data as any)?.from && (event.data as any)?.to && (
+                                <p className="text-xs text-muted-foreground mt-0.5">{(event.data as any).from} → {(event.data as any).to}</p>
+                              )}
+                              {event.type === "bulk.updated" && (event.data as any)?.status && (
+                                <p className="text-xs text-muted-foreground mt-0.5">Status → {(event.data as any).status}</p>
+                              )}
+                              {event.type === "bulk.updated" && (event.data as any)?.addedTags && (
+                                <p className="text-xs text-muted-foreground mt-0.5">Tags: {(event.data as any).addedTags.join(", ")}</p>
+                              )}
                               <div className="flex items-center gap-0.5 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <button
                                   onClick={() => handleCopyEvent(event.id, `${EVENT_LABELS[event.type] || event.type} — ${new Date(event.createdAt).toLocaleString("en-TT")}`)}
