@@ -621,10 +621,10 @@ export async function logContactEvent(
   });
 }
 
-export async function addContactNote(contactId: string, body: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function addContactNote(contactId: string, body: string, businessId: string = DEFAULT_BUSINESS_ID, source?: string) {
   return apiPost<ContactNote>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/notes`,
-    body: { body },
+    body: { body, ...(source ? { source } : {}) },
   });
 }
 

@@ -1,7 +1,7 @@
 # KEYFLOWOS Monorepo
 
 ## Overview
-KEYFLOWOS is an AI-powered operating system designed to streamline operations for service businesses, aiming for 80-90% automation. It eliminates the "tool maze" by offering pre-built Playbooks, a unified "Command" center with AI-powered command bar, voice input, and integrated business intelligence. The system is envisioned as an Operating System for business ownership, integrating six core engines: LaunchFlow, OperateAI, GrowthStack, ProfitLens, ScaleHub, and MasterClass Mode.
+KEYFLOWOS is an AI-powered operating system designed to automate operations for service businesses, aiming for 80-90% automation. It offers pre-built Playbooks and a unified "Command" center with an AI-powered command bar, voice input, and integrated business intelligence. The system integrates six core engines: LaunchFlow, OperateAI, GrowthStack, ProfitLens, ScaleHub, and MasterClass Mode.
 
 ## User Preferences
 - Caribbean localization (TTD currency, Trinidad timezone)
@@ -13,65 +13,62 @@ KEYFLOWOS is an AI-powered operating system designed to streamline operations fo
 The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a NestJS backend API (`apps/server`), with PostgreSQL managed by Prisma.
 
 **UI/UX Decisions:**
-- Custom design system with a unique KeyFlow identity, featuring a warm Caribbean-inspired color palette (Sunset Orange, Caribbean Teal).
-- PWA capabilities, Glassmorphism elements, and a dark theme.
-- Redesigned, icon-first, collapsible sidebar with grouped sections (CORE, GROW, MANAGE) and left accent bar active state.
-- Unified component classes and mobile-optimized navigation with matching grouped structure.
+- Custom design system with a warm Caribbean-inspired color palette (Sunset Orange, Caribbean Teal), Glassmorphism elements, and a dark theme.
+- PWA capabilities and mobile-optimized navigation.
+- Redesigned, icon-first, collapsible sidebar with grouped sections (CORE, GROW, MANAGE).
 - Premium design token system with elevation shadows, glass surfaces, and micro-transitions.
-- Context-aware notifications and flow-themed animations.
-- Toast notification system (sonner) with glassmorphism styling for all CRUD feedback.
-- Glassmorphism ConfirmDialog component replacing all native browser confirm() dialogs.
-- Skeleton loading states (stat cards, tables, charts, kanban, dashboards) replacing generic spinners.
-- Next.js error.tsx, loading.tsx, and not-found.tsx boundaries for graceful error recovery.
-- Search debouncing (300ms) on all search inputs to reduce API calls.
-- Client-side pagination with page size selector on lists (expenses, CRM contacts, marketplace).
-- Core accessibility: ARIA labels, roles (tablist/tab, navigation, main, dialog), aria-selected on tabs.
-- Component decomposition: Marketplace (9 files), Reports (8 files), Store (6 files), CRM Pipeline (5 files: page + PipelineToolbar + PipelineContactList + PipelineDetailPanel + BulkActionBar), ContactDetail (5 files: contact-detail + contact-detail-header + contact-detail-stats + contact-detail-info + contact-detail-tabs) extracted from monolithic pages.
-- ContactDetail UX improvements: (1) Quick actions (Invoice/Book/Quote) moved to header right after communication bar for above-fold visibility, (2) Smart empty states — dashes replaced with contextual CTAs ("Create first?", "Book one?", "Send a message to start") wired to onQuickAction, (3) Recent activity inline — last 3 timeline events shown above tabs with relative timestamps and "View all" link, (4) Compact mobile layout — new contacts without metrics show a single-row summary instead of empty stat cards, (5) Lead score explainer — info tooltip showing score factor breakdown (email +10, phone +5, activity +20, invoices +25, bookings +15, engagement +25) with Hot/Warm/Cold labels.
-- Popup positioning rule: Mobile-first responsive popups. On mobile (`<sm`): `fixed left-2 right-2 top-20` for full-width cards near top with vertical scroll. On desktop (`sm:`): `sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-2` dropping from button, or centered `sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2`. Always `max-h-[80vh] overflow-y-auto` and backdrop overlay `bg-black/30 backdrop-blur-sm`. Guide grids use `grid-cols-1 sm:grid-cols-2` for vertical stacking on mobile.
+- Context-aware notifications, flow-themed animations, and a glassmorphism toast notification system.
+- Custom Glassmorphism ConfirmDialog component for all confirmations.
+- Skeleton loading states for improved user experience.
+- Graceful error handling with Next.js `error.tsx`, `loading.tsx`, and `not-found.tsx` boundaries.
+- Search debouncing (300ms) and client-side pagination with page size selector.
+- Core accessibility features including ARIA labels and roles.
+- Component decomposition for modularity (e.g., Marketplace, Reports, Store, CRM Pipeline, ContactDetail).
+- ContactDetail UX improvements include quick actions, smart empty states, recent activity display, compact mobile layout, and lead score explainers.
+- Responsive popup positioning for mobile and desktop views.
 
 **Technical Implementations & Features:**
-- **Business Autopilot System:** AI-powered operations with quick-start onboarding, business archetype inference, revenue model detection, task orchestration, and a Legal & Compliance Module.
-- **Command Center (formerly Cockpit):** Unified command page at /app with AI command bar, voice input, integrated KeyFlow AI chat, dashboard metrics, daily briefing, cash flow forecast, what-if simulator, prioritized tasks, and revenue insights with WhatsApp deep links. KeyFlow AI is fully embedded into Command (no separate page).
-- **Online Store & Public Booking Page:** Modular storefront management and a 4-step public booking flow with merchandising, social proof, analytics, and WhatsApp sharing.
+- **Business Autopilot System:** AI-powered operations with onboarding, business archetype inference, revenue model detection, task orchestration, and a Legal & Compliance Module.
+- **Command Center:** Unified command page (`/app`) with AI command bar, voice input, integrated KeyFlow AI chat, dashboard metrics, daily briefing, cash flow forecast, what-if simulator, prioritized tasks, and revenue insights.
+- **Online Store & Public Booking Page:** Modular storefront management and a 4-step public booking flow.
 - **Notification System:** Real-time notifications for key business events.
-- **Gamification System:** Global tiered missions system with XP rewards. `MissionsButton` component auto-included in every `PageHeader`. 5 tiers: Now (quick wins ~10-25 XP), Short Term (~50-100 XP), Medium Term (~150-300 XP), Long Term (~500-1000 XP), Special Missions (~200-500 XP). Collapsible tier sections with progress bars. Data sourced from backend gamification stats API (achievements, challenges, streaks). Old CRM-specific FAB removed.
-- **PageHeader Consistency:** Every page uses `PageHeader` with: gradient icon, title, lightbulb guide button (titleExtra), missions button (auto), subtitle. FeatureGuide component fully deprecated — all guides are inline lightbulb popups.
+- **Gamification System:** Global tiered missions system with XP rewards.
+- **PageHeader Consistency:** Standardized `PageHeader` component across all pages.
 - **Personalized Auth & Onboarding:** Redesigned glassmorphism sign-up/sign-in, Google OAuth, and an onboarding wizard.
-- **Quote-to-Invoice Workflow:** Comprehensive quote management (CRUD, tax/discount) with conversion to invoices.
-- **Invoice Tax & Discount System:** Editable tax rates and percentage/fixed discounts with live previews.
+- **Quote-to-Invoice Workflow:** Comprehensive quote management with conversion to invoices, including tax and discount systems.
 - **Professional Invoice Template:** Branded public payment page.
 - **Multi-Gateway Payment System:** Integration with WiPay (Caribbean) and PayPal (international).
-- **Subscription & Billing System:** 3-tier plans (Free, Flow, KeyFlow) with free trial, managing activation, cancellation, and module limits.
-- **Multi-Tenant System:** Data isolation using `businessId` for all operations. Hardened BusinessGuard rejects requests when businessId is missing, Prisma is unavailable, or DB queries fail (no dev fallbacks). All controllers with business-specific endpoints use `@UseGuards(AuthGuard, BusinessGuard)`.
-- **Commerce Module Overhaul (v2):** Re-architected into 8 focused modules with KPI dashboard, animated navigation, and glassmorphism product cards.
-- **Recurring Invoices:** Auto-generating invoices on various schedules with full item, tax, and discount support.
-- **Unified Contact Capture:** Single `ContactCapture` modal replaces old dropdown + import panel. Presents 5 capture modes in a 2-column grid: Manual (opens form), Scan (camera/gallery with AI Vision OCR via `/crm/businesses/:id/import/scan`), File Upload (CSV/XLSX/vCard with drag-drop), Google Sync (OAuth flow), URL Import. Animated sub-views with back navigation. Scan uses OpenAI Vision to extract contact info from business cards/photos.
-- **Contacts Module (Pluggable):** Fully modular CRM system with reusable pluggable components. `ContactSelect` combobox (search-as-you-type, quick-add, keyboard nav, ARIA) replaces ad-hoc selectors across Commerce (invoices, quotes, recurring) and Bookings. `ContactChip` for inline display. `useContactSearch` hook with 300ms debounce. Contact Lists/Groups (MANUAL + SMART with dynamic resolution via API) via `ContactList` Prisma model. Duplicate Detection endpoint identifies matching email/phone/name groups with merge capability. 4-tab layout: Pipeline (contact feed + split detail), Database (spreadsheet-like table view with IndexedDB local caching, sortable columns, search, status filters, pagination, multi-format export — CSV, Excel/XLSX, vCard, PDF, and collapsible Contact Lists section for CRUD with filter builder), Insights (FlowIntelligence + PredictiveRevenue), Engage (NextActionQueue + AutopilotActions). CRM Momentum gamification strip with milestone progress (Getting Started, Building Network, Community Builder, First Client, Client Magnet, Organized Pro), XP tracking, pipeline health %, conversion rate %, and broadcast reach metrics. Lifecycle bulk stage management. Modular split-view layout with AI copilot, health scores, predictive revenue, and relationship timeline. Enriched ContactForm with collapsible sections (Basic Info, Professional, Contact Details, Address, Preferences, Notes) exposing all Prisma fields. Enriched ContactDetail with Professional, Contact Methods, Full Address, Preferences, and Internal Notes cards. Auto-logged communication events (WhatsApp/Email/Copy) with follow-up reminder scheduling (1d/3d/1w). Bulk edit in Database tab (checkbox selection, select all, floating action bar for status/tags/delete with transactional tag merge). Full-field export (CSV/XLSX/vCard/PDF) including all enriched fields. Google Contacts OAuth sync via ContactCapture.
-- **Settings Feature:** Modular business settings including basic info, social links, branding, logo upload, and Google Calendar OAuth. Connections hub for Google Calendar, Gmail, Social Media (OAuth + manual), and payment gateways.
-- **Contextual Connection System:** Reusable `ConnectionBanner` component and `useConnections` hook. Modules (Marketing, CRM, Commerce, Bookings) surface relevant connection prompts in-context — users can connect accounts without navigating to Settings. Quick-access "Manage Connections" link in header dropdown.
-- **Expense Tracking (v2):** Comprehensive expense management with category/vendor/payment method tracking, budget system with alerts, vendor analytics, period-over-period comparison, CSV export, receipt upload/preview, tag system, recurring expense support, tax estimator, and tabbed UI (Overview, Budgets, Vendors, Categories).
-- **AI Co-Founder (KeyFlow AI):** OpenAI-powered business advisor integrated into Command page with multi-turn chat, daily briefings, predictive cash flow forecasting, and what-if scenario simulation.
+- **Subscription & Billing System:** 3-tier plans (Free, Flow, KeyFlow) with free trial and module limits.
+- **Multi-Tenant System:** Data isolation using `businessId` with robust `BusinessGuard` protection.
+- **Commerce Module Overhaul (v2):** Re-architected into 8 focused modules with KPI dashboard and glassmorphism product cards.
+- **Recurring Invoices:** Auto-generating invoices on various schedules.
+- **Unified Contact Capture:** Single modal for contact capture with multiple modes: Manual, Scan (AI Vision OCR), File Upload, Google Sync, URL Import.
+- **Contacts Module (Pluggable):** Modular CRM system with reusable components like `ContactSelect`, `ContactChip`, and `useContactSearch` hook. Includes Contact Lists/Groups, Duplicate Detection, Pipeline, Database, Insights, and Engage tabs. Features CRM Momentum gamification and AI copilot. Enriched `ContactForm` and `ContactDetail` with detailed fields and auto-logged communication events. Bulk edit functionality.
+- **Settings Feature:** Modular business settings including branding, social links, and connections hub (Google Calendar, Gmail, Social Media, payment gateways).
+- **Contextual Connection System:** Reusable `ConnectionBanner` and `useConnections` hook to surface relevant connection prompts within modules.
+- **Expense Tracking (v2):** Comprehensive expense management with categories, vendors, budgets, alerts, vendor analytics, and recurring expense support.
+- **AI Co-Founder (KeyFlow AI):** OpenAI-powered business advisor integrated into Command page.
 - **Email Marketing:** Campaign management with segmentation and delivery tracking.
-- **Lead Capture Forms:** Form builder with custom fields, public submission, auto-CRM contact creation, and embed code generation.
-- **Business Templates:** 10 industry-specific presets to seed business data.
-- **MasterClass (Education):** Micro-course catalog with progress tracking and certificate generation.
-- **Community Hub:** Peer discussion forum with various post types, likes, comments, and cohort-based founder circles.
-- **Projects & Playbooks (Merged):** Unified page at /app/projects with tabbed navigation. Projects tab: Kanban board with task management. Playbooks tab: event-driven automations with triggers and actions. Contextual "How this works" explainer buttons in each tab.
-- **Global Commerce / Marketplace:** International selling pipeline at /app/marketplace with 8 tabs: Dashboard (KPI overview), Catalog (product listings with LOCAL/REGIONAL/INTERNATIONAL reach), Orders (cross-border marketplace orders), Shipments (carrier tracking with status timeline), Customs (import/export declarations with HS codes, duties, clearance), Warehousing (multi-warehouse inventory management with reorder alerts), Pre-Orders (deposit tracking, fulfillment), Purchase Orders (supplier procurement). Supports multi-currency, shipping zones, and customs clearance workflow.
-- **AI Usage Billing:** Centralized AI metering via AiUsageService. All AI calls tracked with token/cost logging. Tiered credit system (Free: 10/mo, Flow: 100/mo, KeyFlow: unlimited). Overage billing at TT$2.50/US$0.35 per credit. Billing dashboard in settings.
-- **Server-Side Pagination:** Commerce (products, invoices, quotes) and Marketplace (listings, orders, shipments, customs, pre-orders, purchase-orders) list endpoints return `{data, total, page, pageSize, totalPages}` envelope with defaults page=1, pageSize=50, max 100. Frontend API functions unwrap the envelope for backward compatibility.
-- **Global HTTP Exception Filter:** All backend errors return consistent `{statusCode, message, error, timestamp, path}` shape via `GlobalHttpExceptionFilter`. Unknown errors logged at error level and return 500.
-- **CORS Configuration:** Environment-aware CORS — production restricts to specific origins (REPLIT_DEV_DOMAIN, localhost), development allows all origins.
-- **Mass Assignment Protection:** Marketplace service update methods (shipping zones, warehouses, shipments, customs, pre-orders, purchase orders) use explicit field mapping instead of raw object spread to prevent attackers from overwriting internal fields. Order/pre-order prices sourced from database product records, not user input.
-- **Accessibility (ARIA):** Dialog and Drawer shared components include `role="dialog"`, `aria-modal="true"`, `aria-labelledby`, Escape key dismissal, and keyboard-accessible backdrop. Command palette has `role="dialog"` and `aria-label`.
-- **Error Boundaries:** Root-level `error.tsx` and `not-found.tsx` for graceful recovery outside the app layout. App-level `error.tsx`, `loading.tsx`, and `not-found.tsx` for dashboard-scoped errors.
+- **Lead Capture Forms:** Form builder with custom fields and auto-CRM contact creation.
+- **Business Templates:** 10 industry-specific presets.
+- **MasterClass (Education):** Micro-course catalog with progress tracking.
+- **Community Hub:** Peer discussion forum and cohort-based founder circles.
+- **Projects & Playbooks (Merged):** Unified page (`/app/projects`) with Kanban board for tasks and event-driven automations.
+- **Global Commerce / Marketplace:** International selling pipeline (`/app/marketplace`) with tabs for Dashboard, Catalog, Orders, Shipments, Customs, Warehousing, Pre-Orders, and Purchase Orders. Supports multi-currency and customs clearance.
+- **AI Usage Billing:** Centralized AI metering with token/cost logging and a tiered credit system.
+- **Server-Side Pagination:** Standardized pagination for commerce and marketplace list endpoints.
+- **Global HTTP Exception Filter:** Consistent error response format for all backend errors.
+- **CORS Configuration:** Environment-aware CORS settings.
+- **Mass Assignment Protection:** Explicit field mapping for sensitive updates to prevent security vulnerabilities.
+- **Accessibility (ARIA):** Dialog, Drawer, and Command palette components include ARIA attributes.
+- **Error Boundaries:** Root and app-level error boundaries for graceful recovery.
+- **Pluggable Notes System:** Contact notes with categories, search, filter, pinning, and integration with other modules.
 - **Core Modules:** Identity, CRM, Commerce, Marketplace, Bookings, Social, Projects & Playbooks, Flow (Activity & Search), Reports, Command, Expenses, Webhooks, AI, Email Marketing, Lead Forms, Templates, Education, Community.
 
 ## External Dependencies
 - **Database:** PostgreSQL
 - **Authentication:** Supabase Auth
-- **AI:** OpenAI via Replit AI Integrations (gpt-5.2)
+- **AI:** OpenAI via Replit AI Integrations
 - **Google Services:** Google Calendar Integration, Google Sign-In, Gmail Integration, Google Contacts OAuth Sync
 - **Payment Gateways:** WiPay, PayPal
 - **Package Manager:** pnpm
