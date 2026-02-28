@@ -197,6 +197,24 @@ export class CrmController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/notes/:noteId')
+  deleteNote(
+    @Param('businessId') businessId: string,
+    @Param('noteId') noteId: string,
+  ) {
+    return this.crm.deleteNote({ businessId, noteId });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/tasks/:taskId')
+  deleteTask(
+    @Param('businessId') businessId: string,
+    @Param('taskId') taskId: string,
+  ) {
+    return this.crm.deleteTask({ businessId, taskId });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/import/file')
   @UseInterceptors(
     FileInterceptor('file', {
