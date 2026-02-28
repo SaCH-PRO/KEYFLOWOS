@@ -171,7 +171,7 @@ export function ContactsDatabase({
                     aria-hidden="true"
                   />
                   <div
-                    className="fixed left-2 right-2 top-20 sm:absolute sm:left-auto sm:top-full sm:right-0 sm:mt-2 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 sm:w-72 max-h-[60vh] overflow-y-auto"
+                    className="fixed left-2 right-2 top-20 sm:absolute sm:left-auto sm:top-full sm:right-0 sm:mt-2 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 sm:w-80 max-h-[60vh] overflow-y-auto"
                     role="group"
                     aria-label="Toggle columns"
                   >
