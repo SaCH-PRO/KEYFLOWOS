@@ -34,7 +34,8 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Command Center (formerly Cockpit):** Unified command page at /app with AI command bar, voice input, integrated KeyFlow AI chat, dashboard metrics, daily briefing, cash flow forecast, what-if simulator, prioritized tasks, and revenue insights with WhatsApp deep links. KeyFlow AI is fully embedded into Command (no separate page).
 - **Online Store & Public Booking Page:** Modular storefront management and a 4-step public booking flow with merchandising, social proof, analytics, and WhatsApp sharing.
 - **Notification System:** Real-time notifications for key business events.
-- **Gamification System:** Points, levels, achievements, streaks, and challenges for engagement.
+- **Gamification System:** Global tiered missions system with XP rewards. `MissionsButton` component auto-included in every `PageHeader`. 5 tiers: Now (quick wins ~10-25 XP), Short Term (~50-100 XP), Medium Term (~150-300 XP), Long Term (~500-1000 XP), Special Missions (~200-500 XP). Collapsible tier sections with progress bars. Data sourced from backend gamification stats API (achievements, challenges, streaks). Old CRM-specific FAB removed.
+- **PageHeader Consistency:** Every page uses `PageHeader` with: gradient icon, title, lightbulb guide button (titleExtra), missions button (auto), subtitle. FeatureGuide component fully deprecated — all guides are inline lightbulb popups.
 - **Personalized Auth & Onboarding:** Redesigned glassmorphism sign-up/sign-in, Google OAuth, and an onboarding wizard.
 - **Quote-to-Invoice Workflow:** Comprehensive quote management (CRUD, tax/discount) with conversion to invoices.
 - **Invoice Tax & Discount System:** Editable tax rates and percentage/fixed discounts with live previews.

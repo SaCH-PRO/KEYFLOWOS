@@ -70,7 +70,6 @@ import { TabNav } from "@/components/ui/tab-nav";
 import { StatCards } from "@/components/ui/stat-cards";
 import { ContactLists } from "./contact-lists";
 import { DuplicateDetector } from "./duplicate-detector";
-import { CrmProgress } from "./crm-progress";
 import { ContactsDatabase } from "./contacts-database";
 import {
   Contact,
@@ -976,14 +975,6 @@ export default function ContactsPage() {
         ]}
         activeTab={crmViewTab}
         onTabChange={(t) => setCrmViewTab(t as "pipeline" | "lists" | "insights" | "engage" | "database")}
-      />
-
-      <CrmProgress
-        totalContacts={contacts.length}
-        leads={segments["LEAD"] ?? contacts.filter((c) => c.status === "LEAD").length}
-        prospects={segments["PROSPECT"] ?? contacts.filter((c) => c.status === "PROSPECT").length}
-        clients={segments["CLIENT"] ?? contacts.filter((c) => c.status === "CLIENT").length}
-        listsCount={listsCount}
       />
 
       {crmViewTab === "pipeline" && businessId && (

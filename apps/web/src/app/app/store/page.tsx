@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AlertCircle, Send, Lightbulb, X } from "lucide-react";
+import { MissionsButton } from "@/components/ui/missions-button";
 import {
   Service,
   StaffMember,
@@ -443,6 +444,7 @@ export default function StorePage() {
               )}
             </AnimatePresence>
           </div>
+          <MissionsButton />
         </div>
         <button
           onClick={() => setShowContactPicker(true)}
