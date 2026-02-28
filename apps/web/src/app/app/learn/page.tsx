@@ -325,7 +325,7 @@ export default function LearnPage() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -4 }}
                     transition={{ duration: 0.12 }}
-                    className="absolute left-0 top-full mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl w-[90vw] max-w-[700px] max-h-[85vh] overflow-y-auto p-5"
+                    className="fixed left-2 right-2 top-20 sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl sm:w-[90vw] sm:max-w-[700px] max-h-[80vh] overflow-y-auto p-5"
                   >
                     <div className="flex items-center gap-2 mb-3">
                       <div className="p-1.5 rounded-lg bg-amber-400/10">
@@ -339,7 +339,7 @@ export default function LearnPage() {
                         <X className="w-3.5 h-3.5 text-muted-foreground" />
                       </button>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {[
                         { step: "1", title: "Browse Courses", desc: "Explore courses by difficulty level (Beginner, Intermediate, Advanced)." },
                         { step: "2", title: "Enroll", desc: "Click any course to see the curriculum, then enroll to start learning." },
