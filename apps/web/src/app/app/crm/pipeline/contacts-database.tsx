@@ -171,32 +171,34 @@ export function ContactsDatabase({
                     aria-hidden="true"
                   />
                   <div
-                    className="fixed left-2 right-2 top-20 sm:absolute sm:left-auto sm:top-full sm:right-0 sm:mt-2 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 sm:w-52 max-h-[60vh] overflow-y-auto"
+                    className="fixed left-2 right-2 top-20 sm:absolute sm:left-auto sm:top-full sm:right-0 sm:mt-2 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 sm:w-72 max-h-[60vh] overflow-y-auto"
                     role="group"
                     aria-label="Toggle columns"
                   >
                   <div className="px-3 py-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                     Show / Hide Columns
                   </div>
+                  <div className="grid grid-cols-2 gap-x-1">
                   {ALL_COLUMNS.map((col) => {
                     const isVisible = db.visibleColumns.has(col.key);
                     return (
                       <button
                         key={col.key}
                         onClick={() => db.toggleColumn(col.key as ColumnKey)}
-                        className="w-full flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-muted/50 transition-colors text-left"
+                        className="flex items-center gap-2 px-3 py-2 text-xs hover:bg-muted/50 transition-colors text-left"
                         role="checkbox"
                         aria-checked={isVisible}
                       >
-                        <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${isVisible ? "bg-[hsl(var(--kf-accent1))] border-[hsl(var(--kf-accent1))]" : "border-border"}`}>
+                        <div className={`w-4 h-4 shrink-0 rounded border flex items-center justify-center transition-colors ${isVisible ? "bg-[hsl(var(--kf-accent1))] border-[hsl(var(--kf-accent1))]" : "border-border"}`}>
                           {isVisible && <Check className="w-3 h-3 text-white" />}
                         </div>
-                        <span className={isVisible ? "text-foreground" : "text-muted-foreground"}>
+                        <span className={`truncate ${isVisible ? "text-foreground" : "text-muted-foreground"}`}>
                           {col.label}
                         </span>
                       </button>
                     );
                   })}
+                  </div>
                   </div>
                 </>
               )}
