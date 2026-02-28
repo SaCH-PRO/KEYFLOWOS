@@ -83,7 +83,8 @@ export function ContactsDatabase({ businessId, contacts, onRefresh, activeListId
   const [exporting, setExporting] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 640;
+  const [pageSize, setPageSize] = useState(isMobile ? 15 : 25);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [cachedContacts, setCachedLocal] = useState<LocalContact[]>([]);
@@ -117,10 +118,10 @@ export function ContactsDatabase({ businessId, contacts, onRefresh, activeListId
   useEffect(() => {
     if (contacts.length > 0) {
       setUsingCache(false);
+      setCachedLocal([]);
       cacheContacts(contacts as LocalContact[]).then(() => {
         setLastSyncTime();
         getLastSyncTime().then(setLastSync);
-        setCachedLocal(contacts as LocalContact[]);
       });
     } else if (cachedContacts.length > 0) {
       setUsingCache(true);
@@ -526,9 +527,10 @@ export function ContactsDatabase({ businessId, contacts, onRefresh, activeListId
               onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
               className="bg-white/5 border border-border/40 rounded px-2 py-1 text-xs"
             >
+              <option value={10}>10</option>
+              <option value={15}>15</option>
               <option value={25}>25</option>
               <option value={50}>50</option>
-              <option value={100}>100</option>
             </select>
             <span className="hidden sm:inline">
               Showing {Math.min((page - 1) * pageSize + 1, filteredContacts.length)}-{Math.min(page * pageSize, filteredContacts.length)} of {filteredContacts.length}

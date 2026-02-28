@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, memo } from "react";
 import { motion } from "framer-motion";
 import { Mail, Phone, Building2, Tag, Trash2, MessageCircle, Star, Globe, FileText, CalendarCheck, UserPlus, Upload, Sparkles, MoreHorizontal, Receipt, Calendar, FileSignature } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
@@ -70,7 +70,7 @@ interface ContactCardProps {
   index?: number;
 }
 
-export function ContactCard({ contact, isSelected, selectable, selected, onToggleSelect, isPinned, onTogglePin, onClick, onDelete, onQuickAction, index = 0 }: ContactCardProps) {
+export const ContactCard = memo(function ContactCard({ contact, isSelected, selectable, selected, onToggleSelect, isPinned, onTogglePin, onClick, onDelete, onQuickAction, index = 0 }: ContactCardProps) {
   const [showActions, setShowActions] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
   const fullName = `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "Unnamed";
@@ -113,7 +113,7 @@ export function ContactCard({ contact, isSelected, selectable, selected, onToggl
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.03 }}
+      transition={{ delay: index < 10 ? index * 0.03 : 0 }}
       onClick={onClick}
       className={`kf-card p-4 cursor-pointer transition-all hover:scale-[1.01] group ${
         isSelected ? "ring-2 ring-[hsl(var(--kf-accent1))]" : ""
@@ -316,4 +316,4 @@ export function ContactCard({ contact, isSelected, selectable, selected, onToggl
       </div>
     </motion.div>
   );
-}
+});
