@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type { ContactFormData } from "@/components/contacts/contact-form";
@@ -100,16 +100,33 @@ export function useContactActions({
 
   const handleAddNote = async (body: string, source?: string) => {
     if (!selectedContactId || !businessId) return;
+    const tempId = `temp-${Date.now()}`;
+    const optimisticNote = { id: tempId, body, source: source || "general", contactId: selectedContactId, createdAt: new Date().toISOString() };
+    if (contactDetail) {
+      setContactDetail({ ...contactDetail, notes: [optimisticNote, ...(contactDetail.notes ?? [])] });
+    }
     try {
       await addContactNote(selectedContactId, body, businessId, source);
       void loadDetail(selectedContactId);
     } catch {
+      if (contactDetail) {
+        setContactDetail({ ...contactDetail, notes: (contactDetail.notes ?? []).filter((n) => n.id !== tempId) });
+      }
       toast.error("Failed to add note");
     }
   };
 
   const handleAddTask = async (title: string, options?: { dueDate?: string; priority?: string; remindAt?: string }) => {
     if (!selectedContactId || !businessId) return;
+    const tempId = `temp-${Date.now()}`;
+    const optimisticTask = {
+      id: tempId, title, status: "OPEN", priority: options?.priority || "NORMAL",
+      dueDate: options?.dueDate || null, remindAt: options?.remindAt || null,
+      completedAt: null, source: null, contactId: selectedContactId, createdAt: new Date().toISOString(),
+    };
+    if (contactDetail) {
+      setContactDetail({ ...contactDetail, tasks: [optimisticTask, ...(contactDetail.tasks ?? [])] });
+    }
     try {
       await addContactTask(selectedContactId, title, {
         dueDate: options?.dueDate,
@@ -118,6 +135,9 @@ export function useContactActions({
       }, businessId);
       void loadDetail(selectedContactId);
     } catch {
+      if (contactDetail) {
+        setContactDetail({ ...contactDetail, tasks: (contactDetail.tasks ?? []).filter((t) => t.id !== tempId) });
+      }
       toast.error("Failed to add task");
     }
   };
@@ -135,20 +155,34 @@ export function useContactActions({
 
   const handleDeleteNote = async (noteId: string) => {
     if (!businessId) return;
+    const backup = contactDetail ? [...(contactDetail.notes ?? [])] : null;
+    if (contactDetail) {
+      setContactDetail({ ...contactDetail, notes: (contactDetail.notes ?? []).filter((n) => n.id !== noteId) });
+    }
     try {
       await deleteContactNote(noteId, businessId);
       if (selectedContactId) void loadDetail(selectedContactId);
       toast.success("Note deleted");
-    } catch { toast.error("Failed to delete note"); }
+    } catch {
+      if (contactDetail && backup) setContactDetail({ ...contactDetail, notes: backup });
+      toast.error("Failed to delete note");
+    }
   };
 
   const handleDeleteTask = async (taskId: string) => {
     if (!businessId) return;
+    const backup = contactDetail ? [...(contactDetail.tasks ?? [])] : null;
+    if (contactDetail) {
+      setContactDetail({ ...contactDetail, tasks: (contactDetail.tasks ?? []).filter((t) => t.id !== taskId) });
+    }
     try {
       await deleteContactTask(taskId, businessId);
       if (selectedContactId) void loadDetail(selectedContactId);
       toast.success("Task deleted");
-    } catch { toast.error("Failed to delete task"); }
+    } catch {
+      if (contactDetail && backup) setContactDetail({ ...contactDetail, tasks: backup });
+      toast.error("Failed to delete task");
+    }
   };
 
   const handleUpdateStatus = async (status: string) => {
@@ -206,23 +240,51 @@ export function useContactActions({
     setShowAddForm(true);
   }, [contactDetail, setSelectedContactId, setShowMobileDetail]);
 
+  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleDeleteContact = useCallback(async (contact?: { id: string }) => {
     const id = contact?.id || selectedContactId;
     if (!id || !businessId) return;
-    setConfirmState({
-      open: true,
-      action: async () => {
-        try {
-          await deleteContact(id, businessId);
-          setContacts((prev) => prev.filter((c) => c.id !== id));
-          if (selectedContactId === id) { setSelectedContactId(null); setContactDetail(null); }
-          setShowMobileDetail(false);
-          void loadFlowData();
-          toast.success("Contact deleted");
-        } catch { toast.error("Failed to delete contact"); }
+    const backup = contacts.find((c) => c.id === id);
+    if (!backup) return;
+
+    const wasSelected = selectedContactId === id;
+    setContacts((prev) => prev.filter((c) => c.id !== id));
+    if (wasSelected) { setSelectedContactId(null); setContactDetail(null); }
+    setShowMobileDetail(false);
+
+    let undone = false;
+    if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+
+    const restore = () => {
+      setContacts((prev) => [backup, ...prev]);
+      if (wasSelected) { setSelectedContactId(id); }
+    };
+
+    toast("Contact deleted", {
+      action: {
+        label: "Undo",
+        onClick: () => {
+          undone = true;
+          if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+          restore();
+          toast.success("Contact restored");
+        },
       },
+      duration: 5000,
     });
-  }, [businessId, selectedContactId, loadFlowData, setContacts, setSelectedContactId, setContactDetail, setShowMobileDetail]);
+
+    deleteTimerRef.current = setTimeout(async () => {
+      if (undone) return;
+      try {
+        await deleteContact(id, businessId);
+        void loadFlowData();
+      } catch {
+        restore();
+        toast.error("Failed to delete contact — restored");
+      }
+    }, 5500);
+  }, [businessId, contacts, selectedContactId, loadFlowData, setContacts, setSelectedContactId, setContactDetail, setShowMobileDetail]);
 
   const handleImportFile = async (type: "csv" | "xlsx" | "vcf" | "image", file: File) => {
     if (!businessId) return;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useTransition } from "react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import type { Contact } from "@/lib/client";
@@ -14,6 +14,14 @@ const PAGE_SIZE = 25;
 const PINNED_KEY = "kf_pinned_contacts";
 const RECENT_KEY = "kf_recent_contacts";
 const MAX_RECENT = 8;
+
+export const SEGMENT_THRESHOLDS = {
+  highValueRevenue: 500,
+  highValueInvoiceCount: 3,
+  newThisWeekDays: 7,
+  staleDays: 30,
+  atRiskDays: 30,
+} as const;
 
 function getPinnedIds(): string[] {
   if (typeof window === "undefined") return [];
@@ -32,8 +40,77 @@ function addRecentId(id: string) {
   localStorage.setItem(RECENT_KEY, JSON.stringify(ids.slice(0, MAX_RECENT)));
 }
 
+interface FilterState {
+  searchInput: string;
+  statusFilter: string;
+  sortBy: SortOption;
+  activeSegment: SmartSegment | null;
+  activeListTab: ListTab;
+  activeListId: string | null;
+  activeListContactIds: string[] | null;
+  listsCount: number;
+  crmViewTab: "pipeline" | "insights" | "engage" | "database";
+  selectMode: boolean;
+  selectedIds: Set<string>;
+}
+
+type FilterAction =
+  | { type: "SET_SEARCH_INPUT"; payload: string }
+  | { type: "SET_STATUS_FILTER"; payload: string }
+  | { type: "SET_SORT_BY"; payload: SortOption }
+  | { type: "SET_ACTIVE_SEGMENT"; payload: SmartSegment | null }
+  | { type: "SET_ACTIVE_LIST_TAB"; payload: ListTab }
+  | { type: "SET_ACTIVE_LIST_ID"; payload: string | null }
+  | { type: "SET_ACTIVE_LIST_CONTACT_IDS"; payload: string[] | null }
+  | { type: "SET_LISTS_COUNT"; payload: number }
+  | { type: "SET_CRM_VIEW_TAB"; payload: "pipeline" | "insights" | "engage" | "database" }
+  | { type: "SET_SELECT_MODE"; payload: boolean }
+  | { type: "SET_SELECTED_IDS"; payload: Set<string> }
+  | { type: "TOGGLE_SELECT_MODE" }
+  | { type: "TOGGLE_SELECT"; payload: string };
+
+const initialFilterState: FilterState = {
+  searchInput: "",
+  statusFilter: "ALL",
+  sortBy: "newest",
+  activeSegment: null,
+  activeListTab: "all",
+  activeListId: null,
+  activeListContactIds: null,
+  listsCount: 0,
+  crmViewTab: "pipeline",
+  selectMode: false,
+  selectedIds: new Set(),
+};
+
+function filterReducer(state: FilterState, action: FilterAction): FilterState {
+  switch (action.type) {
+    case "SET_SEARCH_INPUT": return { ...state, searchInput: action.payload };
+    case "SET_STATUS_FILTER": return { ...state, statusFilter: action.payload };
+    case "SET_SORT_BY": return { ...state, sortBy: action.payload };
+    case "SET_ACTIVE_SEGMENT": return { ...state, activeSegment: action.payload };
+    case "SET_ACTIVE_LIST_TAB": return { ...state, activeListTab: action.payload };
+    case "SET_ACTIVE_LIST_ID": return { ...state, activeListId: action.payload };
+    case "SET_ACTIVE_LIST_CONTACT_IDS": return { ...state, activeListContactIds: action.payload };
+    case "SET_LISTS_COUNT": return { ...state, listsCount: action.payload };
+    case "SET_CRM_VIEW_TAB": return { ...state, crmViewTab: action.payload };
+    case "SET_SELECT_MODE": return { ...state, selectMode: action.payload };
+    case "SET_SELECTED_IDS": return { ...state, selectedIds: action.payload };
+    case "TOGGLE_SELECT_MODE": return state.selectMode
+      ? { ...state, selectMode: false, selectedIds: new Set() }
+      : { ...state, selectMode: true };
+    case "TOGGLE_SELECT": {
+      const next = new Set(state.selectedIds);
+      if (next.has(action.payload)) next.delete(action.payload); else next.add(action.payload);
+      return { ...state, selectedIds: next };
+    }
+    default: return state;
+  }
+}
+
 export function useContactsData() {
   const searchParams = useSearchParams();
+  const [filters, dispatch] = useReducer(filterReducer, initialFilterState);
 
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
@@ -46,22 +123,31 @@ export function useContactsData() {
   const nextOffsetRef = useRef(0);
 
   const [search, setSearch] = useState("");
-  const [searchInput, setSearchInput] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("ALL");
 
   const [isPending, startTransition] = useTransition();
 
   const [pinnedIds, setPinnedIdsState] = useState<string[]>([]);
   const [recentIds, setRecentIds] = useState<string[]>([]);
-  const [selectMode, setSelectMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [activeListTab, setActiveListTab] = useState<ListTab>("all");
-  const [sortBy, setSortBy] = useState<SortOption>("newest");
-  const [activeSegment, setActiveSegment] = useState<SmartSegment | null>(null);
-  const [activeListId, setActiveListId] = useState<string | null>(null);
-  const [activeListContactIds, setActiveListContactIds] = useState<string[] | null>(null);
-  const [listsCount, setListsCount] = useState(0);
-  const [crmViewTab, setCrmViewTab] = useState<"pipeline" | "insights" | "engage" | "database">("pipeline");
+
+  const setSearchInput = useCallback((v: string) => dispatch({ type: "SET_SEARCH_INPUT", payload: v }), []);
+  const setStatusFilter = useCallback((v: string) => dispatch({ type: "SET_STATUS_FILTER", payload: v }), []);
+  const setSortBy = useCallback((v: SortOption) => dispatch({ type: "SET_SORT_BY", payload: v }), []);
+  const setActiveSegment = useCallback((v: SmartSegment | null) => dispatch({ type: "SET_ACTIVE_SEGMENT", payload: v }), []);
+  const setActiveListTab = useCallback((v: ListTab) => dispatch({ type: "SET_ACTIVE_LIST_TAB", payload: v }), []);
+  const setActiveListId = useCallback((v: string | null) => dispatch({ type: "SET_ACTIVE_LIST_ID", payload: v }), []);
+  const setActiveListContactIds = useCallback((v: string[] | null) => dispatch({ type: "SET_ACTIVE_LIST_CONTACT_IDS", payload: v }), []);
+  const setListsCount = useCallback((v: number) => dispatch({ type: "SET_LISTS_COUNT", payload: v }), []);
+  const setCrmViewTab = useCallback((v: "pipeline" | "insights" | "engage" | "database") => dispatch({ type: "SET_CRM_VIEW_TAB", payload: v }), []);
+  const setSelectMode = useCallback((v: boolean) => {
+    dispatch({ type: "SET_SELECT_MODE", payload: v });
+  }, []);
+  const setSelectedIds = useCallback((v: Set<string> | ((prev: Set<string>) => Set<string>)) => {
+    if (typeof v === "function") {
+      dispatch({ type: "SET_SELECTED_IDS", payload: v(filters.selectedIds) });
+    } else {
+      dispatch({ type: "SET_SELECTED_IDS", payload: v });
+    }
+  }, [filters.selectedIds]);
 
   useEffect(() => {
     setPinnedIdsState(getPinnedIds());
@@ -95,9 +181,9 @@ export function useContactsData() {
   }, [searchParams]);
 
   useEffect(() => {
-    const timeout = setTimeout(() => setSearch(searchInput.trim()), 300);
+    const timeout = setTimeout(() => setSearch(filters.searchInput.trim()), 300);
     return () => clearTimeout(timeout);
-  }, [searchInput]);
+  }, [filters.searchInput]);
 
   const loadContacts = useCallback(
     async (opts?: { append?: boolean }) => {
@@ -109,7 +195,7 @@ export function useContactsData() {
           const { data } = await fetchContacts(businessId, {
             take: PAGE_SIZE, skip: nextOffsetRef.current,
             search: search || undefined,
-            status: statusFilter !== "ALL" ? statusFilter : undefined,
+            status: filters.statusFilter !== "ALL" ? filters.statusFilter : undefined,
             includeStats: true,
           });
           const mapped = (data ?? []).map((c) => ({ ...c, tags: c.tags ?? [] }));
@@ -121,7 +207,7 @@ export function useContactsData() {
             fetchContacts(businessId, {
               take: PAGE_SIZE, skip: 0,
               search: search || undefined,
-              status: statusFilter !== "ALL" ? statusFilter : undefined,
+              status: filters.statusFilter !== "ALL" ? filters.statusFilter : undefined,
               includeStats: true,
             }),
             fetchSegmentSummary(businessId),
@@ -139,7 +225,7 @@ export function useContactsData() {
         setLoading(false);
       }
     },
-    [businessId, search, statusFilter],
+    [businessId, search, filters.statusFilter],
   );
 
   const handleTogglePin = useCallback((id: string) => {
@@ -151,20 +237,16 @@ export function useContactsData() {
   }, []);
 
   const handleToggleSelect = useCallback((id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
+    dispatch({ type: "TOGGLE_SELECT", payload: id });
   }, []);
 
   const handleSelectAll = useCallback(() => {
-    if (selectedIds.size === contacts.length) setSelectedIds(new Set());
-    else setSelectedIds(new Set(contacts.map((c) => c.id)));
-  }, [contacts, selectedIds.size]);
+    if (filters.selectedIds.size === contacts.length) dispatch({ type: "SET_SELECTED_IDS", payload: new Set() });
+    else dispatch({ type: "SET_SELECTED_IDS", payload: new Set(contacts.map((c) => c.id)) });
+  }, [contacts, filters.selectedIds.size]);
 
   const handleToggleSelectMode = useCallback(() => {
-    setSelectMode((prev) => { if (prev) setSelectedIds(new Set()); return !prev; });
+    dispatch({ type: "TOGGLE_SELECT_MODE" });
   }, []);
 
   const trackRecent = useCallback((id: string) => {
@@ -179,43 +261,45 @@ export function useContactsData() {
 
   const segmentCounts = useMemo(() => {
     const now = new Date();
-    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const newCutoff = new Date(now.getTime() - SEGMENT_THRESHOLDS.newThisWeekDays * 24 * 60 * 60 * 1000);
+    const staleCutoff = new Date(now.getTime() - SEGMENT_THRESHOLDS.staleDays * 24 * 60 * 60 * 1000);
+    const atRiskCutoff = new Date(now.getTime() - SEGMENT_THRESHOLDS.atRiskDays * 24 * 60 * 60 * 1000);
     const counts: Record<SmartSegment, number> = { "high-value": 0, "needs-followup": 0, "new-this-week": 0, "at-risk": 0, "stale": 0 };
     for (const c of contacts) {
       const meta = c.meta;
-      if ((meta?.totalRevenue && meta.totalRevenue > 500) || (meta?.invoiceCount && meta.invoiceCount > 3)) counts["high-value"]++;
+      if ((meta?.totalRevenue && meta.totalRevenue > SEGMENT_THRESHOLDS.highValueRevenue) || (meta?.invoiceCount && meta.invoiceCount > SEGMENT_THRESHOLDS.highValueInvoiceCount)) counts["high-value"]++;
       if ((meta?.overdueTasks && meta.overdueTasks > 0) || (meta?.unpaidInvoices && meta.unpaidInvoices > 0)) counts["needs-followup"]++;
-      if (c.createdAt && new Date(c.createdAt) > weekAgo) counts["new-this-week"]++;
-      if (c.status === "CLIENT" && meta?.lastInteractionAt && new Date(meta.lastInteractionAt) < thirtyDaysAgo) counts["at-risk"]++;
-      if (meta?.lastInteractionAt && new Date(meta.lastInteractionAt) < thirtyDaysAgo) counts["stale"]++;
+      if (c.createdAt && new Date(c.createdAt) > newCutoff) counts["new-this-week"]++;
+      if (c.status === "CLIENT" && meta?.lastInteractionAt && new Date(meta.lastInteractionAt) < atRiskCutoff) counts["at-risk"]++;
+      if (meta?.lastInteractionAt && new Date(meta.lastInteractionAt) < staleCutoff) counts["stale"]++;
     }
     return counts;
   }, [contacts]);
 
   const displayContacts = useMemo(() => {
     let list: Contact[];
-    if (activeListTab === "pinned") list = pinnedContacts;
-    else if (activeListTab === "recent") list = recentContacts;
+    if (filters.activeListTab === "pinned") list = pinnedContacts;
+    else if (filters.activeListTab === "recent") list = recentContacts;
     else list = [...contacts];
 
-    if (activeListContactIds && activeListContactIds.length > 0) {
-      const idSet = new Set(activeListContactIds);
+    if (filters.activeListContactIds && filters.activeListContactIds.length > 0) {
+      const idSet = new Set(filters.activeListContactIds);
       list = list.filter((c) => idSet.has(c.id));
     }
 
-    if (activeSegment) {
+    if (filters.activeSegment) {
       const now = new Date();
-      const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const newCutoff = new Date(now.getTime() - SEGMENT_THRESHOLDS.newThisWeekDays * 24 * 60 * 60 * 1000);
+      const staleCutoff = new Date(now.getTime() - SEGMENT_THRESHOLDS.staleDays * 24 * 60 * 60 * 1000);
+      const atRiskCutoff = new Date(now.getTime() - SEGMENT_THRESHOLDS.atRiskDays * 24 * 60 * 60 * 1000);
       list = list.filter((c) => {
         const meta = c.meta;
-        switch (activeSegment) {
-          case "high-value": return (meta?.totalRevenue && meta.totalRevenue > 500) || (meta?.invoiceCount && meta.invoiceCount > 3);
+        switch (filters.activeSegment) {
+          case "high-value": return (meta?.totalRevenue && meta.totalRevenue > SEGMENT_THRESHOLDS.highValueRevenue) || (meta?.invoiceCount && meta.invoiceCount > SEGMENT_THRESHOLDS.highValueInvoiceCount);
           case "needs-followup": return (meta?.overdueTasks && meta.overdueTasks > 0) || (meta?.unpaidInvoices && meta.unpaidInvoices > 0);
-          case "new-this-week": return c.createdAt && new Date(c.createdAt) > weekAgo;
-          case "at-risk": return c.status === "CLIENT" && meta?.lastInteractionAt && new Date(meta.lastInteractionAt) < thirtyDaysAgo;
-          case "stale": return meta?.lastInteractionAt && new Date(meta.lastInteractionAt) < thirtyDaysAgo;
+          case "new-this-week": return c.createdAt && new Date(c.createdAt) > newCutoff;
+          case "at-risk": return c.status === "CLIENT" && meta?.lastInteractionAt && new Date(meta.lastInteractionAt) < atRiskCutoff;
+          case "stale": return meta?.lastInteractionAt && new Date(meta.lastInteractionAt) < staleCutoff;
           default: return true;
         }
       });
@@ -224,7 +308,7 @@ export function useContactsData() {
     list.sort((a, b) => {
       const metaA = a.meta;
       const metaB = b.meta;
-      switch (sortBy) {
+      switch (filters.sortBy) {
         case "name": {
           const nameA = `${a.firstName ?? ""} ${a.lastName ?? ""}`.trim().toLowerCase();
           const nameB = `${b.firstName ?? ""} ${b.lastName ?? ""}`.trim().toLowerCase();
@@ -239,18 +323,22 @@ export function useContactsData() {
     });
 
     return list;
-  }, [activeListTab, contacts, pinnedContacts, recentContacts, activeSegment, sortBy, activeListContactIds]);
+  }, [filters.activeListTab, contacts, pinnedContacts, recentContacts, filters.activeSegment, filters.sortBy, filters.activeListContactIds]);
 
   return {
     businessId, workspaceLoading, workspaceError,
     contacts, setContacts, segments, loading, hasMore,
-    searchInput, setSearchInput, search, statusFilter, setStatusFilter,
-    sortBy, setSortBy, activeSegment, setActiveSegment,
-    activeListTab, setActiveListTab,
-    selectMode, setSelectMode, selectedIds, setSelectedIds,
-    activeListId, setActiveListId, activeListContactIds, setActiveListContactIds,
-    listsCount, setListsCount,
-    crmViewTab, setCrmViewTab,
+    searchInput: filters.searchInput, setSearchInput, search,
+    statusFilter: filters.statusFilter, setStatusFilter,
+    sortBy: filters.sortBy, setSortBy,
+    activeSegment: filters.activeSegment, setActiveSegment,
+    activeListTab: filters.activeListTab, setActiveListTab,
+    selectMode: filters.selectMode, setSelectMode,
+    selectedIds: filters.selectedIds, setSelectedIds,
+    activeListId: filters.activeListId, setActiveListId,
+    activeListContactIds: filters.activeListContactIds, setActiveListContactIds,
+    listsCount: filters.listsCount, setListsCount,
+    crmViewTab: filters.crmViewTab, setCrmViewTab,
     isPending, startTransition,
     pinnedIds, pinnedContacts, recentContacts,
     displayContacts, segmentCounts,

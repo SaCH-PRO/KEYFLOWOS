@@ -53,10 +53,15 @@ export function useContactsPipeline() {
     if (businessId) {
       startTransition(() => {
         void loadContacts();
-        void loadFlowData();
       });
     }
-  }, [businessId, contactsData.search, contactsData.statusFilter, loadContacts, loadFlowData, startTransition]);
+  }, [businessId, contactsData.search, contactsData.statusFilter, loadContacts, startTransition]);
+
+  useEffect(() => {
+    if (businessId) {
+      void loadFlowData();
+    }
+  }, [businessId, loadFlowData]);
 
   const detailPanelProps: Omit<PipelineDetailPanelProps, "onClose"> = {
     contact: detail.selectedContact,

@@ -43,7 +43,7 @@ export function useFlowIntelligence(businessId: string | null) {
       if (autopilotRes.data) setAutopilotActions(autopilotRes.data);
       if (revenueRes.data) setRevenueData(revenueRes.data);
     } catch {
-      console.error("Failed to load flow data");
+      toast.error("Failed to load flow intelligence");
     } finally {
       setFlowDataLoading(false);
     }
@@ -51,8 +51,12 @@ export function useFlowIntelligence(businessId: string | null) {
 
   const handleCompleteNextAction = async (actionId: string) => {
     if (!businessId) return;
-    await completeNextAction(actionId, businessId);
-    setNextActions((prev) => prev.filter((a) => a.id !== actionId));
+    try {
+      await completeNextAction(actionId, businessId);
+      setNextActions((prev) => prev.filter((a) => a.id !== actionId));
+    } catch {
+      toast.error("Failed to complete action");
+    }
   };
 
   const handleApproveAutopilot = useCallback(async (id: string) => {
