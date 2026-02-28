@@ -67,7 +67,6 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ConnectionBanner } from "@/components/ui/connection-banner";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
-import { StatCards } from "@/components/ui/stat-cards";
 import { ContactLists } from "./contact-lists";
 import { DuplicateDetector } from "./duplicate-detector";
 import { ContactsDatabase } from "./contacts-database";
@@ -955,15 +954,6 @@ export default function ContactsPage() {
         )}
       </div>
 
-
-      <StatCards
-        items={[
-          { label: "Total", value: contacts.length, icon: Users, color: "hsl(var(--kf-accent1))" },
-          { label: "Leads", value: segments["LEAD"] ?? contacts.filter((c) => c.status === "LEAD").length, icon: Star, color: "hsl(var(--kf-accent2))" },
-          { label: "Prospects", value: segments["PROSPECT"] ?? contacts.filter((c) => c.status === "PROSPECT").length, icon: Filter, color: "hsl(200 70% 50%)" },
-          { label: "Clients", value: segments["CLIENT"] ?? contacts.filter((c) => c.status === "CLIENT").length, icon: CheckSquare, color: "hsl(150 60% 40%)" },
-        ]}
-      />
 
       <TabNav
         tabs={[
