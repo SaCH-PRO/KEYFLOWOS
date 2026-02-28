@@ -53,7 +53,7 @@ export async function apiPost<T>({ path, body, init }: FetchOptions): Promise<Ap
   }
 }
 
-export async function apiGet<T>(path: string): Promise<ApiResponse<T>> {
+export async function apiGet<T>(path: string, opts?: { signal?: AbortSignal }): Promise<ApiResponse<T>> {
   try {
     const sep = path.includes("?") ? "&" : "?";
     const url = `${API_BASE}${path}${sep}_t=${Date.now()}`;
@@ -61,6 +61,7 @@ export async function apiGet<T>(path: string): Promise<ApiResponse<T>> {
       method: "GET",
       headers: buildHeaders(),
       cache: "no-store",
+      signal: opts?.signal,
     });
     const data: unknown = await res.json().catch(() => null);
     if (!res.ok) {

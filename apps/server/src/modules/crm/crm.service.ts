@@ -282,7 +282,7 @@ export class CrmService {
     if (typeof input.doNotContact === 'boolean') where.doNotContact = input.doNotContact;
 
     const skip = input.skip ?? 0;
-    const take = input.take ?? 50;
+    const take = Math.min(input.take ?? 50, 100);
     const contacts = await this.prisma.client.contact.findMany({
       where,
       orderBy: { createdAt: 'desc' },
@@ -425,7 +425,7 @@ export class CrmService {
       };
     });
     if (updates.length > 0) {
-      void Promise.all(
+      void this.prisma.client.$transaction(
         updates.map((u) =>
           this.prisma.client.contact.update({
             where: { id: u.id },

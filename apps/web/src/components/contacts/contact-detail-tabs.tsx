@@ -1,12 +1,13 @@
 "use client";
 
-import React from "react";
-import { MessageSquare, ListTodo, History, AlertCircle } from "lucide-react";
+import React, { Suspense, useRef } from "react";
+import { MessageSquare, ListTodo, History, AlertCircle, Loader2 } from "lucide-react";
 import type { ContactDetailData, ContactEvent, ContactNote, ContactTask } from "./contact-detail";
 import type { HealthMetricsData, JourneyMilestoneData, ConversationContextData, AiInsightData } from "./tab-constants";
-import { NotesTabPanel } from "./notes-tab-panel";
-import { TasksTabPanel } from "./tasks-tab-panel";
-import { TimelineTabPanel } from "./timeline-tab-panel";
+
+const NotesTabPanel = React.lazy(() => import("./notes-tab-panel").then(m => ({ default: m.NotesTabPanel })));
+const TasksTabPanel = React.lazy(() => import("./tasks-tab-panel").then(m => ({ default: m.TasksTabPanel })));
+const TimelineTabPanel = React.lazy(() => import("./timeline-tab-panel").then(m => ({ default: m.TimelineTabPanel })));
 
 class TabErrorBoundary extends React.Component<
   { children: React.ReactNode; resetKey: string },
@@ -67,6 +68,11 @@ export function ContactDetailTabs({
   conversationContext, aiInsight, aiInsightLoading,
   onGenerateAiInsight, onRefreshConversationContext,
 }: ContactDetailTabsProps) {
+  const activatedTabs = useRef(new Set<string>(["notes"]));
+  if (!activatedTabs.current.has(activeTab)) {
+    activatedTabs.current.add(activeTab);
+  }
+
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="flex border-b border-border overflow-x-auto shrink-0" role="tablist">
@@ -96,27 +102,35 @@ export function ContactDetailTabs({
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto">
-        <div className={`space-y-3 pt-3 pb-6 ${activeTab === "notes" ? "" : "hidden"}`}>
-          <TabErrorBoundary resetKey="notes">
-            <NotesTabPanel contact={contact} notes={notes} onAddNote={onAddNote} onAddTask={onAddTask} onDeleteNote={onDeleteNote} onUpdateNote={onUpdateNote} />
-          </TabErrorBoundary>
-        </div>
-        <div className={`space-y-3 pt-3 pb-6 ${activeTab === "tasks" ? "" : "hidden"}`}>
-          <TabErrorBoundary resetKey="tasks">
-            <TasksTabPanel contact={contact} tasks={tasks} onAddTask={onAddTask} onAddNote={onAddNote} onCompleteTask={onCompleteTask} onDeleteTask={onDeleteTask} onUpdateTask={onUpdateTask} />
-          </TabErrorBoundary>
-        </div>
-        <div className={`space-y-3 pt-3 pb-6 ${activeTab === "timeline" ? "" : "hidden"}`}>
-          <TabErrorBoundary resetKey="timeline">
-            <TimelineTabPanel
-              contact={contact} events={events}
-              healthMetrics={healthMetrics} journeyMilestones={journeyMilestones}
-              conversationContext={conversationContext} aiInsight={aiInsight} aiInsightLoading={aiInsightLoading}
-              onGenerateAiInsight={onGenerateAiInsight} onRefreshConversationContext={onRefreshConversationContext}
-              onAddNote={onAddNote} onAddTask={onAddTask}
-            />
-          </TabErrorBoundary>
-        </div>
+        <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>}>
+          {activatedTabs.current.has("notes") && (
+            <div className={`space-y-3 pt-3 pb-6 ${activeTab === "notes" ? "" : "hidden"}`}>
+              <TabErrorBoundary resetKey="notes">
+                <NotesTabPanel contact={contact} notes={notes} onAddNote={onAddNote} onAddTask={onAddTask} onDeleteNote={onDeleteNote} onUpdateNote={onUpdateNote} />
+              </TabErrorBoundary>
+            </div>
+          )}
+          {activatedTabs.current.has("tasks") && (
+            <div className={`space-y-3 pt-3 pb-6 ${activeTab === "tasks" ? "" : "hidden"}`}>
+              <TabErrorBoundary resetKey="tasks">
+                <TasksTabPanel contact={contact} tasks={tasks} onAddTask={onAddTask} onAddNote={onAddNote} onCompleteTask={onCompleteTask} onDeleteTask={onDeleteTask} onUpdateTask={onUpdateTask} />
+              </TabErrorBoundary>
+            </div>
+          )}
+          {activatedTabs.current.has("timeline") && (
+            <div className={`space-y-3 pt-3 pb-6 ${activeTab === "timeline" ? "" : "hidden"}`}>
+              <TabErrorBoundary resetKey="timeline">
+                <TimelineTabPanel
+                  contact={contact} events={events}
+                  healthMetrics={healthMetrics} journeyMilestones={journeyMilestones}
+                  conversationContext={conversationContext} aiInsight={aiInsight} aiInsightLoading={aiInsightLoading}
+                  onGenerateAiInsight={onGenerateAiInsight} onRefreshConversationContext={onRefreshConversationContext}
+                  onAddNote={onAddNote} onAddTask={onAddTask}
+                />
+              </TabErrorBoundary>
+            </div>
+          )}
+        </Suspense>
       </div>
     </div>
   );

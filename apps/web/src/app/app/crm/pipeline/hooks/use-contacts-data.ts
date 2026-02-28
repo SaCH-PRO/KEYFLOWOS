@@ -185,10 +185,20 @@ export function useContactsData() {
     return () => clearTimeout(timeout);
   }, [filters.searchInput]);
 
+  const contactsAbortRef = useRef<AbortController | null>(null);
+
   const loadContacts = useCallback(
     async (opts?: { append?: boolean }) => {
       if (!businessId) return;
       const append = opts?.append ?? false;
+
+      if (contactsAbortRef.current) {
+        contactsAbortRef.current.abort();
+      }
+      const controller = new AbortController();
+      contactsAbortRef.current = controller;
+      const { signal } = controller;
+
       setLoading(true);
       try {
         if (append) {
@@ -197,7 +207,9 @@ export function useContactsData() {
             search: search || undefined,
             status: filters.statusFilter !== "ALL" ? filters.statusFilter : undefined,
             includeStats: true,
+            signal,
           });
+          if (signal.aborted) return;
           const mapped = (data ?? []).map((c) => ({ ...c, tags: c.tags ?? [] }));
           setContacts((prev) => [...prev, ...mapped]);
           nextOffsetRef.current += mapped.length;
@@ -209,20 +221,25 @@ export function useContactsData() {
               search: search || undefined,
               status: filters.statusFilter !== "ALL" ? filters.statusFilter : undefined,
               includeStats: true,
+              signal,
             }),
-            fetchSegmentSummary(businessId),
+            fetchSegmentSummary(businessId, { signal }),
           ]);
+          if (signal.aborted) return;
           const mapped = (contactData ?? []).map((c) => ({ ...c, tags: c.tags ?? [] }));
           setContacts(mapped);
           setSegments(segmentData ?? {});
           nextOffsetRef.current = mapped.length;
           setHasMore(mapped.length === PAGE_SIZE);
         }
-      } catch (error) {
+      } catch (error: unknown) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
         console.error("Failed to load contacts", error);
         toast.error("Failed to load contacts");
       } finally {
-        setLoading(false);
+        if (!signal.aborted) {
+          setLoading(false);
+        }
       }
     },
     [businessId, search, filters.statusFilter],

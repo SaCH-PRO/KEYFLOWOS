@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Inject, Param, Patch, Post, Put, Query, Redirect, Req, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpException, HttpStatus, Inject, Param, Patch, Post, Put, Query, Redirect, Req, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { CrmFlowService } from './crm-flow.service';
 import { CrmGoogleService } from './crm-google.service';
@@ -14,6 +14,20 @@ import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
 import { memoryStorage } from 'multer';
 import type { Express, Response } from 'express';
+
+const AI_RATE_LIMIT = 10;
+const AI_RATE_WINDOW_MS = 60_000;
+const aiRateMap = new Map<string, number[]>();
+
+function checkAiRateLimit(businessId: string) {
+  const now = Date.now();
+  const timestamps = (aiRateMap.get(businessId) ?? []).filter((t) => now - t < AI_RATE_WINDOW_MS);
+  if (timestamps.length >= AI_RATE_LIMIT) {
+    throw new HttpException('AI rate limit exceeded. Please wait a moment before trying again.', HttpStatus.TOO_MANY_REQUESTS);
+  }
+  timestamps.push(now);
+  aiRateMap.set(businessId, timestamps);
+}
 
 @Controller('crm')
 export class CrmController {
@@ -332,6 +346,7 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @UploadedFile() image: Express.Multer.File,
   ) {
+    checkAiRateLimit(businessId);
     if (!image || !image.buffer) {
       throw new BadRequestException('Image file is required');
     }
@@ -623,6 +638,7 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
   ) {
+    checkAiRateLimit(businessId);
     return this.flow.generateAiInsight(businessId, contactId);
   }
 }

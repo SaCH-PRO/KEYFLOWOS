@@ -110,6 +110,63 @@ function PipelineContactListInner({
     handleScroll,
   } = useVirtualScroll(contacts.length, enableVirtual);
 
+  const [focusedIndex, setFocusedIndex] = useState(-1);
+  const listRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Map<number, HTMLElement>>(new Map());
+
+  useEffect(() => {
+    setFocusedIndex(-1);
+  }, [contacts.length, activeListTab]);
+
+  const scrollItemIntoView = useCallback((index: number) => {
+    const el = itemRefs.current.get(index);
+    if (el) {
+      el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    } else if (isVirtual && containerRef.current) {
+      const targetTop = index * ROW_HEIGHT;
+      containerRef.current.scrollTo({ top: targetTop, behavior: "smooth" });
+    }
+  }, [isVirtual, containerRef]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (contacts.length === 0) return;
+
+      switch (e.key) {
+        case "ArrowDown": {
+          e.preventDefault();
+          const next = Math.min(focusedIndex + 1, contacts.length - 1);
+          setFocusedIndex(next);
+          scrollItemIntoView(next);
+          break;
+        }
+        case "ArrowUp": {
+          e.preventDefault();
+          const prev = Math.max(focusedIndex - 1, 0);
+          setFocusedIndex(prev);
+          scrollItemIntoView(prev);
+          break;
+        }
+        case "Enter": {
+          e.preventDefault();
+          if (focusedIndex >= 0 && focusedIndex < contacts.length) {
+            onSelectContact(contacts[focusedIndex].id);
+          }
+          break;
+        }
+      }
+    },
+    [contacts, focusedIndex, onSelectContact, scrollItemIntoView]
+  );
+
+  const setItemRef = useCallback((index: number, el: HTMLElement | null) => {
+    if (el) {
+      itemRefs.current.set(index, el);
+    } else {
+      itemRefs.current.delete(index);
+    }
+  }, []);
+
   if (loading && contacts.length === 0) {
     return (
       <div className="kf-card p-8 text-center">
@@ -160,33 +217,47 @@ function PipelineContactListInner({
     </button>
   );
 
+  const renderContactItem = (contact: ContactCardData, absoluteIndex: number) => (
+    <div
+      key={contact.id}
+      ref={(el) => setItemRef(absoluteIndex, el)}
+      role="option"
+      aria-selected={selectedContactId === contact.id}
+      data-focused={focusedIndex === absoluteIndex || undefined}
+      className={focusedIndex === absoluteIndex ? "ring-2 ring-primary rounded-lg" : ""}
+    >
+      <ContactCard
+        contact={contact}
+        isSelected={selectedContactId === contact.id}
+        selectable={selectMode}
+        selected={selectedIds.has(contact.id)}
+        onToggleSelect={onToggleSelect}
+        isPinned={pinnedIds.includes(contact.id)}
+        onTogglePin={onTogglePin}
+        onClick={() => onSelectContact(contact.id)}
+        onDelete={onDelete}
+        onQuickAction={onQuickAction}
+        index={absoluteIndex}
+      />
+    </div>
+  );
+
   if (isVirtual) {
     return (
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="max-h-[calc(100vh-16rem)] overflow-y-auto"
+        onKeyDown={handleKeyDown}
+        role="listbox"
+        aria-label="Contacts list"
+        tabIndex={0}
+        className="max-h-[calc(100vh-16rem)] overflow-y-auto outline-none"
         style={{ willChange: "transform" }}
       >
         <div style={{ height: totalHeight, position: "relative" }}>
           <div style={{ position: "absolute", top: 0, left: 0, right: 0, transform: `translateY(${offsetY}px)` }}>
             <div className="space-y-3">
-              {visibleContacts.map((contact, i) => (
-                <ContactCard
-                  key={contact.id}
-                  contact={contact}
-                  isSelected={selectedContactId === contact.id}
-                  selectable={selectMode}
-                  selected={selectedIds.has(contact.id)}
-                  onToggleSelect={onToggleSelect}
-                  isPinned={pinnedIds.includes(contact.id)}
-                  onTogglePin={onTogglePin}
-                  onClick={() => onSelectContact(contact.id)}
-                  onDelete={onDelete}
-                  onQuickAction={onQuickAction}
-                  index={startIndex + i}
-                />
-              ))}
+              {visibleContacts.map((contact, i) => renderContactItem(contact, startIndex + i))}
             </div>
           </div>
         </div>
@@ -196,23 +267,15 @@ function PipelineContactListInner({
   }
 
   return (
-    <div className="space-y-3">
-      {visibleContacts.map((contact, index) => (
-        <ContactCard
-          key={contact.id}
-          contact={contact}
-          isSelected={selectedContactId === contact.id}
-          selectable={selectMode}
-          selected={selectedIds.has(contact.id)}
-          onToggleSelect={onToggleSelect}
-          isPinned={pinnedIds.includes(contact.id)}
-          onTogglePin={onTogglePin}
-          onClick={() => onSelectContact(contact.id)}
-          onDelete={onDelete}
-          onQuickAction={onQuickAction}
-          index={index}
-        />
-      ))}
+    <div
+      ref={listRef}
+      role="listbox"
+      aria-label="Contacts list"
+      tabIndex={0}
+      onKeyDown={handleKeyDown}
+      className="space-y-3 outline-none"
+    >
+      {visibleContacts.map((contact, index) => renderContactItem(contact, index))}
       {loadMoreButton}
     </div>
   );

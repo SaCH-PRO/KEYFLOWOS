@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ContactDetailData } from "@/components/contacts/contact-detail";
 import type { ContactEvent, ContactNote, ContactTask } from "@/components/contacts/contact-detail";
 import type { HealthMetrics } from "@/components/contacts/contact-health-score";
@@ -25,6 +25,8 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
   const [aiInsight, setAiInsight] = useState<AiInsight | null>(null);
   const [aiInsightLoading, setAiInsightLoading] = useState(false);
 
+  const detailAbortRef = useRef<AbortController | null>(null);
+
   const loadContactEnhancements = useCallback(
     async (contactId: string) => {
       if (!businessId) return;
@@ -44,21 +46,35 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
   const loadDetail = useCallback(
     async (contactId: string) => {
       if (!businessId) return;
+
+      if (detailAbortRef.current) {
+        detailAbortRef.current.abort();
+      }
+      const controller = new AbortController();
+      detailAbortRef.current = controller;
+      const { signal } = controller;
+
       setDetailLoading(true);
       try {
         const results = await Promise.allSettled([
-          fetchContactDetail(contactId, businessId),
-          fetchContactHealthMetrics(contactId, businessId),
-          fetchContactJourney(contactId, businessId),
-          fetchConversationContext(contactId, businessId),
+          fetchContactDetail(contactId, businessId, { signal }),
+          fetchContactHealthMetrics(contactId, businessId, { signal }),
+          fetchContactJourney(contactId, businessId, { signal }),
+          fetchConversationContext(contactId, businessId, { signal }),
         ]);
+        if (signal.aborted) return;
         if (results[0].status === "fulfilled") setContactDetail(results[0].value.data ?? null);
         if (results[1].status === "fulfilled" && results[1].value.data) setHealthMetrics(results[1].value.data);
         if (results[2].status === "fulfilled" && results[2].value.data) setJourneyMilestones(results[2].value.data);
         if (results[3].status === "fulfilled" && results[3].value.data) setConversationContext(results[3].value.data);
         setAiInsight(null);
+      } catch (err: unknown) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        throw err;
       } finally {
-        setDetailLoading(false);
+        if (!signal.aborted) {
+          setDetailLoading(false);
+        }
       }
     },
     [businessId],
@@ -95,6 +111,14 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
       void loadDetail(contacts[0].id);
     }
   }, [contacts, selectedContactId, loadDetail]);
+
+  useEffect(() => {
+    return () => {
+      if (detailAbortRef.current) {
+        detailAbortRef.current.abort();
+      }
+    };
+  }, []);
 
   const selectedContact = useMemo<ContactDetailData | null>(() => {
     if (!contactDetail?.contact) return null;
