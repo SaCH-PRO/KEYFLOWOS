@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "sonner";
 import {
-  Users, X, BarChart3, Sparkles, Database, Lightbulb,
+  Users, BarChart3, Sparkles, Database,
 } from "lucide-react";
 import {
   ContactCardData,
@@ -19,6 +19,7 @@ import { ContactsDatabase } from "./contacts-database";
 import { InsightsTab } from "./insights-tab";
 import { EngageTab } from "./engage-tab";
 import { MemoizedPipelineTabContent as PipelineTabContent } from "./pipeline-tab-content";
+import { GettingStartedGuide } from "./getting-started-guide";
 import { useContactsPipeline } from "./use-contacts-pipeline";
 
 export default function ContactsPage() {
@@ -84,6 +85,10 @@ export default function ContactsPage() {
   const handleViewReady = useCallback(() => { setStatusFilter("PROSPECT"); setCrmViewTab("pipeline"); }, [setStatusFilter, setCrmViewTab]);
   const handleViewEngageContact = useCallback((id: string) => { selectContact(id); setCrmViewTab("pipeline"); }, [selectContact, setCrmViewTab]);
   const handleToggleAutopilotPause = useCallback(() => setAutopilotPaused(!autopilotPaused), [autopilotPaused, setAutopilotPaused]);
+  const handleToggleGuide = useCallback(() => setShowGuide(!showGuide), [showGuide, setShowGuide]);
+  const handleGuideAddContact = useCallback(() => state.setShowAddMenu(true), [state.setShowAddMenu]);
+  const handleGuideSegment = useCallback((segment: string) => { state.setActiveSegment(segment as any); setCrmViewTab("pipeline"); }, [state.setActiveSegment, setCrmViewTab]);
+  const handleGuideSelectMode = useCallback(() => { state.handleToggleSelectMode(); setCrmViewTab("pipeline"); }, [state.handleToggleSelectMode, setCrmViewTab]);
 
   const databaseContacts = useMemo(() => contacts.map((c) => ({
     id: c.id,
@@ -130,70 +135,13 @@ export default function ContactsPage() {
         title="Contacts"
         subtitle="Your AI-powered contact management hub"
         titleExtra={
-          <div className="relative">
-            <button
-              onClick={() => setShowGuide(!showGuide)}
-              className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
-                showGuide
-                  ? "bg-amber-400 text-white shadow-md shadow-amber-400/40 scale-110"
-                  : "bg-amber-400/15 text-amber-400 hover:bg-amber-400/25 hover:shadow-sm hover:shadow-amber-400/20 hover:scale-105"
-              }`}
-              aria-label="Getting started guide"
-              title="Getting started guide"
-            >
-              <Lightbulb className="w-3.5 h-3.5" />
-            </button>
-            <AnimatePresence>
-              {showGuide && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowGuide(false)} />
-                  <motion.div
-                    role="dialog"
-                    aria-modal="true"
-                    aria-label="Getting started guide"
-                    initial={{ opacity: 0, y: -4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    transition={{ duration: 0.12 }}
-                    className="fixed left-2 right-2 top-20 sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl sm:w-[90vw] sm:max-w-[700px] max-h-[80vh] overflow-y-auto p-5"
-                  >
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="p-1.5 rounded-lg bg-amber-400/10">
-                        <Lightbulb className="w-4 h-4 text-amber-400" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-semibold">Getting Started</h4>
-                        <p className="text-[11px] text-muted-foreground">Your quick-start guide</p>
-                      </div>
-                      <button onClick={() => setShowGuide(false)} className="ml-auto p-1 rounded hover:bg-muted/50">
-                        <X className="w-3.5 h-3.5 text-muted-foreground" />
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {[
-                        { step: "1", title: "Add Contacts", desc: "Create contacts manually, or they auto-appear from bookings, store orders, and lead forms." },
-                        { step: "2", title: "Segment & Filter", desc: "Use smart segments (High Value, New This Week, At Risk) to focus on key contacts." },
-                        { step: "3", title: "Track Revenue", desc: "See total revenue, invoice count, and booking history for each contact." },
-                        { step: "4", title: "Communicate", desc: "Reach out via WhatsApp, email, or phone directly from any contact card." },
-                        { step: "5", title: "Broadcast Messages", desc: "Select multiple contacts and send bulk WhatsApp or email messages." },
-                        { step: "6", title: "Quick Actions", desc: "Create invoices, send quotes, or book appointments directly from a contact." },
-                      ].map((item) => (
-                        <div key={item.step} className="flex gap-2.5 p-2 rounded-xl hover:bg-muted/30 transition-colors">
-                          <div className="w-5 h-5 rounded-full bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">
-                            {item.step}
-                          </div>
-                          <div>
-                            <p className="text-xs font-medium">{item.title}</p>
-                            <p className="text-[10px] text-muted-foreground leading-relaxed">{item.desc}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </motion.div>
-                </>
-              )}
-            </AnimatePresence>
-          </div>
+          <GettingStartedGuide
+            isOpen={showGuide}
+            onToggle={handleToggleGuide}
+            onAddContact={handleGuideAddContact}
+            onSegmentChange={handleGuideSegment}
+            onToggleSelectMode={handleGuideSelectMode}
+          />
         }
       />
 
