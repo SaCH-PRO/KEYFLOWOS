@@ -100,6 +100,13 @@ interface ContactDetailProps {
   onDelete?: () => void;
   onQuickAction?: (contactId: string, action: DetailQuickAction) => void;
   onLogEvent?: (type: string, description?: string) => Promise<void>;
+  healthMetrics?: { engagement: number; payment: number; responsiveness: number; relationship: number } | null;
+  journeyMilestones?: Array<{ id: string; type: string; title: string; description?: string; date: string; value?: number; isNext?: boolean }>;
+  conversationContext?: { lastDiscussed?: string; concerns?: string[]; preferences?: string[]; suggestedOpening?: string; sentiment?: string; engagementLevel?: string } | null;
+  aiInsight?: { summary: string; nextBestAction: string; reasoning?: string; confidence: number; suggestedMessage?: string; tags?: string[] } | null;
+  aiInsightLoading?: boolean;
+  onGenerateAiInsight?: () => Promise<void>;
+  onRefreshConversationContext?: () => Promise<void>;
 }
 
 export function ContactDetail({
@@ -121,6 +128,13 @@ export function ContactDetail({
   onDelete,
   onQuickAction,
   onLogEvent,
+  healthMetrics,
+  journeyMilestones,
+  conversationContext,
+  aiInsight,
+  aiInsightLoading,
+  onGenerateAiInsight,
+  onRefreshConversationContext,
 }: ContactDetailProps) {
   const [activeTab, setActiveTab] = useState<string>("notes");
   const [confirmState, setConfirmState] = useState<{ open: boolean; action: () => void }>({
@@ -218,6 +232,13 @@ export function ContactDetail({
           onCompleteTask={onCompleteTask}
           onDeleteNote={onDeleteNote ? handleDeleteNote : undefined}
           onDeleteTask={onDeleteTask ? handleDeleteTask : undefined}
+          healthMetrics={healthMetrics}
+          journeyMilestones={journeyMilestones}
+          conversationContext={conversationContext}
+          aiInsight={aiInsight}
+          aiInsightLoading={aiInsightLoading}
+          onGenerateAiInsight={onGenerateAiInsight}
+          onRefreshConversationContext={onRefreshConversationContext}
         />
       </motion.div>
 
