@@ -67,7 +67,6 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ConnectionBanner } from "@/components/ui/connection-banner";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
-import { ContactLists } from "./contact-lists";
 import { DuplicateDetector } from "./duplicate-detector";
 import { ContactsDatabase } from "./contacts-database";
 import {
@@ -94,7 +93,6 @@ import {
   fetchConversationContext,
   generateAiInsight,
   CrmNextAction,
-  fetchContactLists,
 } from "@/lib/client";
 import { ensureWorkspace, getStoredBusinessId } from "@/lib/workspace";
 
@@ -197,7 +195,7 @@ export default function ContactsPage() {
   const [googleContactsImported, setGoogleContactsImported] = useState(false);
   const [activeListId, setActiveListId] = useState<string | null>(null);
   const [activeListContactIds, setActiveListContactIds] = useState<string[] | null>(null);
-  const [crmViewTab, setCrmViewTab] = useState<"pipeline" | "lists" | "insights" | "engage" | "database">("pipeline");
+  const [crmViewTab, setCrmViewTab] = useState<"pipeline" | "insights" | "engage" | "database">("pipeline");
   const [listsCount, setListsCount] = useState(0);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
@@ -254,12 +252,11 @@ export default function ContactsPage() {
 
   const loadFlowData = useCallback(async () => {
     if (!businessId) return;
-    const [flowRes, actionsRes, autopilotRes, revenueRes, listsRes] = await Promise.all([
+    const [flowRes, actionsRes, autopilotRes, revenueRes] = await Promise.all([
       fetchFlowIntelligence(businessId),
       fetchNextActions(businessId),
       fetchAutopilotActionsForCrm(businessId),
       fetchPredictiveRevenue(businessId),
-      fetchContactLists(businessId),
     ]);
     if (flowRes.data) setFlowIntelligence(flowRes.data);
     if (actionsRes.data) {
@@ -272,7 +269,6 @@ export default function ContactsPage() {
     }
     if (autopilotRes.data) setAutopilotActions(autopilotRes.data);
     if (revenueRes.data) setRevenueData(revenueRes.data);
-    if (listsRes.data) setListsCount(Array.isArray(listsRes.data) ? listsRes.data.length : 0);
   }, [businessId]);
 
   const loadContacts = useCallback(
@@ -897,29 +893,15 @@ export default function ContactsPage() {
         tabs={[
           { key: "pipeline", label: "Pipeline", icon: Users },
           { key: "database", label: "Database", icon: Database },
-          { key: "lists", label: "Lists", icon: List },
           { key: "insights", label: "Insights", icon: BarChart3 },
           { key: "engage", label: "Engage", icon: Sparkles },
         ]}
         activeTab={crmViewTab}
-        onTabChange={(t) => setCrmViewTab(t as "pipeline" | "lists" | "insights" | "engage" | "database")}
+        onTabChange={(t) => setCrmViewTab(t as "pipeline" | "insights" | "engage" | "database")}
       />
 
       {crmViewTab === "pipeline" && businessId && (
         <DuplicateDetector businessId={businessId} onMergeComplete={() => { void loadContacts(); }} />
-      )}
-
-      {crmViewTab === "lists" && businessId && (
-        <ContactLists
-          businessId={businessId}
-          activeListId={activeListId}
-          onSelectList={(listId, contactIds) => {
-            setActiveListId(listId);
-            setActiveListContactIds(contactIds || null);
-            if (listId) setCrmViewTab("pipeline");
-          }}
-          onListsLoaded={(count) => setListsCount(count)}
-        />
       )}
 
       {crmViewTab === "insights" && (
@@ -1008,6 +990,13 @@ export default function ContactsPage() {
             updatedAt: (c as any).updatedAt ?? null,
           }))}
           onRefresh={() => { void loadContacts(); }}
+          activeListId={activeListId}
+          onSelectList={(listId, contactIds) => {
+            setActiveListId(listId);
+            setActiveListContactIds(contactIds || null);
+            if (listId) setCrmViewTab("pipeline");
+          }}
+          onListsLoaded={(count) => setListsCount(count)}
         />
       )}
 
