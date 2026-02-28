@@ -767,13 +767,13 @@ export default function ContactsPage() {
             <AnimatePresence>
               {showGuide && (
                 <>
-                  <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" onClick={() => setShowGuide(false)} />
+                  <div className="fixed inset-0 z-40" onClick={() => setShowGuide(false)} />
                   <motion.div
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.95 }}
-                    transition={{ duration: 0.15 }}
-                    className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 kf-card border border-border shadow-2xl rounded-2xl w-[90vw] max-w-[700px] max-h-[85vh] overflow-y-auto p-5"
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.12 }}
+                    className="absolute left-0 top-full mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl w-[90vw] max-w-[700px] max-h-[85vh] overflow-y-auto p-5"
                   >
                     <div className="flex items-center gap-2 mb-3">
                       <div className="p-1.5 rounded-lg bg-amber-400/10">
