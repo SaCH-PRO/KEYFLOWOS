@@ -19,6 +19,7 @@ import {
   Send,
   HelpCircle,
   Lightbulb,
+  X,
 } from "lucide-react";
 import { Button, Input } from "@keyflow/ui";
 import {
@@ -717,6 +718,7 @@ export default function ProjectsPage() {
   const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [showContactPicker, setShowContactPicker] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
 
   const activeTab = searchParams.get("tab") === "automations" ? "automations" : "projects";
 
@@ -735,6 +737,69 @@ export default function ProjectsPage() {
         icon={FolderKanban}
         title="Projects & Playbooks"
         subtitle="Manage work and automate your business flows"
+        titleExtra={
+          <div className="relative">
+            <button
+              onClick={() => setShowGuide(!showGuide)}
+              className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
+                showGuide
+                  ? "bg-amber-400 text-white shadow-md shadow-amber-400/40 scale-110"
+                  : "bg-amber-400/15 text-amber-400 hover:bg-amber-400/25 hover:shadow-sm hover:shadow-amber-400/20 hover:scale-105"
+              }`}
+              aria-label="Getting started guide"
+              title="Getting started guide"
+            >
+              <Lightbulb className="w-3.5 h-3.5" />
+            </button>
+            <AnimatePresence>
+              {showGuide && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowGuide(false)} />
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.12 }}
+                    className="absolute left-0 top-full mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl w-[90vw] max-w-[700px] max-h-[85vh] overflow-y-auto p-5"
+                  >
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="p-1.5 rounded-lg bg-amber-400/10">
+                        <Lightbulb className="w-4 h-4 text-amber-400" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-semibold">Getting Started</h4>
+                        <p className="text-[11px] text-muted-foreground">Your quick-start guide</p>
+                      </div>
+                      <button onClick={() => setShowGuide(false)} className="ml-auto p-1 rounded hover:bg-muted/50">
+                        <X className="w-3.5 h-3.5 text-muted-foreground" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { step: "1", title: "Create Projects", desc: "Click '+ New Project' to set up a project with a name and color for organizing work." },
+                        { step: "2", title: "Add Tasks", desc: "Expand a project and add tasks — check them off as you complete each action item." },
+                        { step: "3", title: "Use Kanban Board", desc: "Projects are displayed in columns by status: Active, In Progress, Completed, and On Hold." },
+                        { step: "4", title: "Set Up Playbooks", desc: "Create automation playbooks that trigger actions based on business events." },
+                        { step: "5", title: "Automate Workflows", desc: "Connect triggers like invoice paid or booking created to automatic actions." },
+                        { step: "6", title: "Track Progress", desc: "Monitor task completion with progress bars and move projects between statuses." },
+                      ].map((item) => (
+                        <div key={item.step} className="flex gap-2.5 p-2 rounded-xl hover:bg-muted/30 transition-colors">
+                          <div className="w-5 h-5 rounded-full bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">
+                            {item.step}
+                          </div>
+                          <div>
+                            <p className="text-xs font-medium">{item.title}</p>
+                            <p className="text-[10px] text-muted-foreground leading-relaxed">{item.desc}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+          </div>
+        }
         rightSlot={
           <button
             onClick={() => setShowContactPicker(true)}

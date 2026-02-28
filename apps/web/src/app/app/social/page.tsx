@@ -19,6 +19,7 @@ import {
   CheckCircle2,
   TrendingUp,
   MessageCircle,
+  Lightbulb,
 } from "lucide-react";
 import {
   SocialPost,
@@ -42,7 +43,6 @@ import { AnalyticsPanel } from "./components/analytics-stub";
 import { PageHeader } from "@/components/ui/page-header";
 import { ContactPickerDrawer } from "@/components/contacts";
 import { Send } from "lucide-react";
-import { FeatureGuide } from "@/components/ui/feature-guide";
 import { StatCards } from "@/components/ui/stat-cards";
 import { TabNav } from "@/components/ui/tab-nav";
 
@@ -77,6 +77,7 @@ export default function SocialPage() {
   const [editingPost, setEditingPost] = useState<SocialPost | null>(null);
   const [showContactPicker, setShowContactPicker] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
 
   const [connections, setConnections] = useState<SocialConnection[]>([]);
 
@@ -236,6 +237,67 @@ export default function SocialPage() {
         subtitle="Content calendar, scheduling & publishing"
         actionLabel="New Post"
         onAction={() => { setShowComposer(true); setEditingPost(null); }}
+        titleExtra={
+          <div className="relative">
+            <button
+              onClick={() => setShowGuide(!showGuide)}
+              className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
+                showGuide
+                  ? "bg-amber-400 text-white shadow-md shadow-amber-400/40 scale-110"
+                  : "bg-amber-400/15 text-amber-400 hover:bg-amber-400/25 hover:shadow-sm hover:shadow-amber-400/20 hover:scale-105"
+              }`}
+              aria-label="Getting started guide"
+              title="Getting started guide"
+            >
+              <Lightbulb className="w-3.5 h-3.5" />
+            </button>
+            <AnimatePresence>
+              {showGuide && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowGuide(false)} />
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.12 }}
+                    className="absolute left-0 top-full mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl w-[90vw] max-w-[700px] max-h-[85vh] overflow-y-auto p-5"
+                  >
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="p-1.5 rounded-lg bg-amber-400/10">
+                        <Lightbulb className="w-4 h-4 text-amber-400" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-semibold">Getting Started</h4>
+                        <p className="text-[11px] text-muted-foreground">Your quick-start guide</p>
+                      </div>
+                      <button onClick={() => setShowGuide(false)} className="ml-auto p-1 rounded hover:bg-muted/50">
+                        <X className="w-3.5 h-3.5 text-muted-foreground" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { step: "1", title: "Connect Accounts", desc: "Link your Facebook, Instagram, LinkedIn, or TikTok accounts." },
+                        { step: "2", title: "Create Posts", desc: "Write content, add images, and choose which platforms to post to." },
+                        { step: "3", title: "Schedule Ahead", desc: "Set a date and time to auto-publish posts when your audience is active." },
+                        { step: "4", title: "Track Performance", desc: "Monitor engagement, reach, and publishing stats in the analytics tab." },
+                      ].map((item) => (
+                        <div key={item.step} className="flex gap-2.5 p-2 rounded-xl hover:bg-muted/30 transition-colors">
+                          <div className="w-5 h-5 rounded-full bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">
+                            {item.step}
+                          </div>
+                          <div>
+                            <p className="text-xs font-medium">{item.title}</p>
+                            <p className="text-[10px] text-muted-foreground leading-relaxed">{item.desc}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+          </div>
+        }
         rightSlot={
           <button
             onClick={() => setShowContactPicker(true)}
@@ -245,18 +307,6 @@ export default function SocialPage() {
             Broadcast
           </button>
         }
-      />
-
-      <FeatureGuide
-        featureKey="social"
-        title="Getting Started with Social Media"
-        description="Plan, create, and schedule social media content across all your platforms."
-        steps={[
-          { title: "Connect Accounts", description: "Link your Facebook, Instagram, LinkedIn, or TikTok accounts." },
-          { title: "Create Posts", description: "Write content, add images, and choose which platforms to post to." },
-          { title: "Schedule Ahead", description: "Set a date and time to auto-publish posts when your audience is active." },
-          { title: "Track Performance", description: "Monitor engagement, reach, and publishing stats in the analytics tab." },
-        ]}
       />
 
       <StatCards items={kpiCards} />

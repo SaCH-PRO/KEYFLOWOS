@@ -10,6 +10,7 @@ import {
   Unlink,
   AlertCircle,
   X,
+  Lightbulb,
 } from "lucide-react";
 import {
   Booking,
@@ -39,7 +40,6 @@ import { contactName } from "./components/bookings-types";
 import { PageHeader } from "@/components/ui/page-header";
 import { ContactPickerDrawer } from "@/components/contacts";
 import { Send } from "lucide-react";
-import { FeatureGuide } from "@/components/ui/feature-guide";
 import BookingsDashboard from "./components/bookings-dashboard";
 import WeekCalendar from "./components/week-calendar";
 import BookingList from "./components/booking-list";
@@ -74,6 +74,7 @@ export default function BookingsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
+  const [showGuide, setShowGuide] = useState(false);
 
   useEffect(() => {
     const calendarParam = searchParams?.get("calendar");
@@ -251,6 +252,69 @@ export default function BookingsPage() {
         icon={Calendar}
         title="Bookings"
         subtitle="Schedule, manage services & staff"
+        titleExtra={
+          <div className="relative">
+            <button
+              onClick={() => setShowGuide(!showGuide)}
+              className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
+                showGuide
+                  ? "bg-amber-400 text-white shadow-md shadow-amber-400/40 scale-110"
+                  : "bg-amber-400/15 text-amber-400 hover:bg-amber-400/25 hover:shadow-sm hover:shadow-amber-400/20 hover:scale-105"
+              }`}
+              aria-label="Getting started guide"
+              title="Getting started guide"
+            >
+              <Lightbulb className="w-3.5 h-3.5" />
+            </button>
+            <AnimatePresence>
+              {showGuide && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowGuide(false)} />
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.12 }}
+                    className="absolute left-0 top-full mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl w-[90vw] max-w-[700px] max-h-[85vh] overflow-y-auto p-5"
+                  >
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="p-1.5 rounded-lg bg-amber-400/10">
+                        <Lightbulb className="w-4 h-4 text-amber-400" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-semibold">Getting Started</h4>
+                        <p className="text-[11px] text-muted-foreground">Your quick-start guide</p>
+                      </div>
+                      <button onClick={() => setShowGuide(false)} className="ml-auto p-1 rounded hover:bg-muted/50">
+                        <X className="w-3.5 h-3.5 text-muted-foreground" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { step: "1", title: "Add Services", desc: "Define your bookable services with duration, pricing, and descriptions." },
+                        { step: "2", title: "Add Staff", desc: "Add team members who can be assigned to bookings." },
+                        { step: "3", title: "Share Booking Link", desc: "Your public storefront lets customers browse services and book online." },
+                        { step: "4", title: "Manage Schedule", desc: "View bookings on the calendar, confirm or cancel appointments." },
+                        { step: "5", title: "Connect Google Calendar", desc: "Sync bookings to your Google Calendar for real-time availability." },
+                        { step: "6", title: "Track Stats", desc: "Monitor booking volume, revenue, and completion rates from the dashboard." },
+                      ].map((item) => (
+                        <div key={item.step} className="flex gap-2.5 p-2 rounded-xl hover:bg-muted/30 transition-colors">
+                          <div className="w-5 h-5 rounded-full bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">
+                            {item.step}
+                          </div>
+                          <div>
+                            <p className="text-xs font-medium">{item.title}</p>
+                            <p className="text-[10px] text-muted-foreground leading-relaxed">{item.desc}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+          </div>
+        }
         actionLabel="New Booking"
         onAction={() => setShowCreateBooking(true)}
         rightSlot={
@@ -289,19 +353,6 @@ export default function BookingsPage() {
         }
       />
 
-      <FeatureGuide
-        featureKey="bookings"
-        title="Getting Started with Bookings"
-        description="Set up your services, manage your team, and let customers book appointments online."
-        steps={[
-          { title: "Add Services", description: "Define your bookable services with duration, pricing, and descriptions." },
-          { title: "Add Staff", description: "Add team members who can be assigned to bookings." },
-          { title: "Share Booking Link", description: "Your public storefront lets customers browse services and book online." },
-          { title: "Manage Schedule", description: "View bookings on the calendar, confirm or cancel appointments." },
-          { title: "Connect Google Calendar", description: "Sync bookings to your Google Calendar for real-time availability." },
-          { title: "Track Stats", description: "Monitor booking volume, revenue, and completion rates from the dashboard." },
-        ]}
-      />
 
       <AnimatePresence>
         {banner && (

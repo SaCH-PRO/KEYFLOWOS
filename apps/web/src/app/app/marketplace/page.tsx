@@ -13,12 +13,13 @@ import {
   ClipboardList,
   TrendingUp,
   Loader2,
+  Lightbulb,
+  X,
 } from "lucide-react";
 import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { DashboardSkeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/ui/page-header";
-import { FeatureGuide } from "@/components/ui/feature-guide";
 import { Modal, FormField, inputClass, selectClass } from "./components/marketplace-utils";
 import { DashboardTab } from "./components/dashboard-tab";
 import { CatalogTab } from "./components/catalog-tab";
@@ -63,6 +64,7 @@ export default function MarketplacePage() {
   const [editingItem, setEditingItem] = useState<any>(null);
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [saving, setSaving] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -294,19 +296,68 @@ export default function MarketplacePage() {
         subtitle="Manage your marketplace, shipments, customs & warehousing"
         actionLabel={activeTab !== "dashboard" ? getActionLabel() : undefined}
         onAction={activeTab !== "dashboard" ? handleAction : undefined}
-      />
-
-      <FeatureGuide
-        featureKey="marketplace"
-        title="Getting Started with Global Commerce"
-        description="Expand your business reach with marketplace listings, international shipping, customs management, and warehousing."
-        steps={[
-          { title: "List Products", description: "Publish products to the marketplace with local, regional, or international reach." },
-          { title: "Manage Orders", description: "Process customer orders from confirmation through delivery." },
-          { title: "Track Shipments", description: "Monitor shipments with carrier tracking and status updates." },
-          { title: "Handle Customs", description: "File customs declarations for international trade with HS codes." },
-          { title: "Warehouse Stock", description: "Manage warehouse locations and inventory levels across regions." },
-        ]}
+        titleExtra={
+          <div className="relative">
+            <button
+              onClick={() => setShowGuide(!showGuide)}
+              className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
+                showGuide
+                  ? "bg-amber-400 text-white shadow-md shadow-amber-400/40 scale-110"
+                  : "bg-amber-400/15 text-amber-400 hover:bg-amber-400/25 hover:shadow-sm hover:shadow-amber-400/20 hover:scale-105"
+              }`}
+              aria-label="Getting started guide"
+              title="Getting started guide"
+            >
+              <Lightbulb className="w-3.5 h-3.5" />
+            </button>
+            <AnimatePresence>
+              {showGuide && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowGuide(false)} />
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.12 }}
+                    className="absolute left-0 top-full mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl w-[90vw] max-w-[700px] max-h-[85vh] overflow-y-auto p-5"
+                  >
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="p-1.5 rounded-lg bg-amber-400/10">
+                        <Lightbulb className="w-4 h-4 text-amber-400" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-semibold">Getting Started</h4>
+                        <p className="text-[11px] text-muted-foreground">Your quick-start guide</p>
+                      </div>
+                      <button onClick={() => setShowGuide(false)} className="ml-auto p-1 rounded hover:bg-muted/50">
+                        <X className="w-3.5 h-3.5 text-muted-foreground" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { step: "1", title: "List Products", desc: "Publish products to the marketplace with local, regional, or international reach." },
+                        { step: "2", title: "Manage Orders", desc: "Process customer orders from confirmation through delivery." },
+                        { step: "3", title: "Track Shipments", desc: "Monitor shipments with carrier tracking and status updates." },
+                        { step: "4", title: "Handle Customs", desc: "File customs declarations for international trade with HS codes." },
+                        { step: "5", title: "Warehouse Stock", desc: "Manage warehouse locations and inventory levels across regions." },
+                      ].map((item) => (
+                        <div key={item.step} className="flex gap-2.5 p-2 rounded-xl hover:bg-muted/30 transition-colors">
+                          <div className="w-5 h-5 rounded-full bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">
+                            {item.step}
+                          </div>
+                          <div>
+                            <p className="text-xs font-medium">{item.title}</p>
+                            <p className="text-[10px] text-muted-foreground leading-relaxed">{item.desc}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+          </div>
+        }
       />
 
       <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-hide">

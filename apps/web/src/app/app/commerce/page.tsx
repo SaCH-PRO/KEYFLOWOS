@@ -19,6 +19,7 @@ import {
   Trash2,
   Link2,
   Wallet,
+  Lightbulb,
 } from "lucide-react";
 import {
   createProduct,
@@ -40,7 +41,6 @@ import { apiGet } from "@/lib/api";
 import { PageHeader } from "@/components/ui/page-header";
 import { ContactPickerDrawer } from "@/components/contacts";
 import { Send } from "lucide-react";
-import { FeatureGuide } from "@/components/ui/feature-guide";
 import { ConnectionBanner } from "@/components/ui/connection-banner";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { saveProductImage, deleteProductImage, fileToDataUrl, getAllProductImages } from "@/lib/image-store";
@@ -109,6 +109,7 @@ export default function CommercePage() {
   const [confirmDisconnectGmail, setConfirmDisconnectGmail] = useState(false);
   const [paymentGateways, setPaymentGateways] = useState<{ wipay: boolean; paypal: boolean }>({ wipay: false, paypal: false });
 
+  const [showGuide, setShowGuide] = useState(false);
   const [recurringTriggerNew, setRecurringTriggerNew] = useState(0);
   const [showInvoiceBuilder, setShowInvoiceBuilder] = useState(false);
   const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null);
@@ -414,6 +415,69 @@ export default function CommercePage() {
         icon={CreditCard}
         title="Commerce"
         subtitle="Manage invoices, payments and quotes"
+        titleExtra={
+          <div className="relative">
+            <button
+              onClick={() => setShowGuide(!showGuide)}
+              className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
+                showGuide
+                  ? "bg-amber-400 text-white shadow-md shadow-amber-400/40 scale-110"
+                  : "bg-amber-400/15 text-amber-400 hover:bg-amber-400/25 hover:shadow-sm hover:shadow-amber-400/20 hover:scale-105"
+              }`}
+              aria-label="Getting started guide"
+              title="Getting started guide"
+            >
+              <Lightbulb className="w-3.5 h-3.5" />
+            </button>
+            <AnimatePresence>
+              {showGuide && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowGuide(false)} />
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.12 }}
+                    className="absolute left-0 top-full mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl w-[90vw] max-w-[700px] max-h-[85vh] overflow-y-auto p-5"
+                  >
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="p-1.5 rounded-lg bg-amber-400/10">
+                        <Lightbulb className="w-4 h-4 text-amber-400" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-semibold">Getting Started</h4>
+                        <p className="text-[11px] text-muted-foreground">Your quick-start guide</p>
+                      </div>
+                      <button onClick={() => setShowGuide(false)} className="ml-auto p-1 rounded hover:bg-muted/50">
+                        <X className="w-3.5 h-3.5 text-muted-foreground" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { step: "1", title: "Add Products", desc: "Create your product and service catalog with prices, categories, and descriptions." },
+                        { step: "2", title: "Create Invoices", desc: "Generate professional invoices, set payment terms, and track payment status." },
+                        { step: "3", title: "Send Quotes", desc: "Build quotes for clients, then convert accepted quotes into invoices with one click." },
+                        { step: "4", title: "Set Up Recurring", desc: "Automate repeat billing with weekly, monthly, or custom schedules." },
+                        { step: "5", title: "Track Payments", desc: "Monitor paid, pending, and overdue invoices. Share payment links via WhatsApp." },
+                        { step: "6", title: "Connect Gmail", desc: "Link your Gmail to send quotes and invoices directly via email." },
+                      ].map((item) => (
+                        <div key={item.step} className="flex gap-2.5 p-2 rounded-xl hover:bg-muted/30 transition-colors">
+                          <div className="w-5 h-5 rounded-full bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">
+                            {item.step}
+                          </div>
+                          <div>
+                            <p className="text-xs font-medium">{item.title}</p>
+                            <p className="text-[10px] text-muted-foreground leading-relaxed">{item.desc}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+          </div>
+        }
         rightSlot={
           <div className="flex items-center gap-3">
             <button
@@ -486,19 +550,6 @@ export default function CommercePage() {
         }
       />
 
-      <FeatureGuide
-        featureKey="commerce"
-        title="Getting Started with Commerce"
-        description="Manage your products, invoices, quotes, and recurring billing all in one place."
-        steps={[
-          { title: "Add Products", description: "Create your product and service catalog with prices, categories, and descriptions." },
-          { title: "Create Invoices", description: "Generate professional invoices, set payment terms, and track payment status." },
-          { title: "Send Quotes", description: "Build quotes for clients, then convert accepted quotes into invoices with one click." },
-          { title: "Set Up Recurring", description: "Automate repeat billing with weekly, monthly, or custom schedules." },
-          { title: "Track Payments", description: "Monitor paid, pending, and overdue invoices. Share payment links via WhatsApp." },
-          { title: "Connect Gmail", description: "Link your Gmail to send quotes and invoices directly via email." },
-        ]}
-      />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <ConnectionBanner

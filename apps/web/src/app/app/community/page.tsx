@@ -17,6 +17,7 @@ import {
   ChevronLeft,
   UserPlus,
   UserMinus,
+  Lightbulb,
 } from "lucide-react";
 import {
   fetchCommunityPosts,
@@ -34,7 +35,6 @@ import {
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
-import { FeatureGuide } from "@/components/ui/feature-guide";
 
 const POST_TYPE_CONFIG: Record<string, { label: string; color: string; bg: string; icon: typeof MessageSquare }> = {
   DISCUSSION: { label: "Discussion", color: "text-blue-400", bg: "bg-blue-500/20", icon: MessageCircle },
@@ -75,6 +75,7 @@ export default function CommunityPage() {
   const [commentText, setCommentText] = useState("");
   const [submittingComment, setSubmittingComment] = useState(false);
   const [joiningCohort, setJoiningCohort] = useState<string | null>(null);
+  const [showGuide, setShowGuide] = useState(false);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -308,18 +309,71 @@ export default function CommunityPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader icon={Users} title="Community" subtitle="Connect with fellow entrepreneurs" />
-
-      <FeatureGuide
-        featureKey="community"
-        title="Getting Started with Community"
-        description="Connect with fellow entrepreneurs, share wins, ask questions, and join founder circles."
-        steps={[
-          { title: "Browse the Feed", description: "Read posts from other business owners covering discussions, questions, wins, and resources." },
-          { title: "Create a Post", description: "Share your experience, ask for advice, or celebrate a business milestone." },
-          { title: "Engage", description: "Like and comment on posts to build connections and help other founders." },
-          { title: "Join Cohorts", description: "Browse founder circles and join groups of entrepreneurs in similar industries." },
-        ]}
+      <PageHeader
+        icon={Users}
+        title="Community"
+        subtitle="Connect with fellow entrepreneurs"
+        titleExtra={
+          <div className="relative">
+            <button
+              onClick={() => setShowGuide(!showGuide)}
+              className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
+                showGuide
+                  ? "bg-amber-400 text-white shadow-md shadow-amber-400/40 scale-110"
+                  : "bg-amber-400/15 text-amber-400 hover:bg-amber-400/25 hover:shadow-sm hover:shadow-amber-400/20 hover:scale-105"
+              }`}
+              aria-label="Getting started guide"
+              title="Getting started guide"
+            >
+              <Lightbulb className="w-3.5 h-3.5" />
+            </button>
+            <AnimatePresence>
+              {showGuide && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowGuide(false)} />
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.12 }}
+                    className="absolute left-0 top-full mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl w-[90vw] max-w-[700px] max-h-[85vh] overflow-y-auto p-5"
+                  >
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="p-1.5 rounded-lg bg-amber-400/10">
+                        <Lightbulb className="w-4 h-4 text-amber-400" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-semibold">Getting Started</h4>
+                        <p className="text-[11px] text-muted-foreground">Your quick-start guide</p>
+                      </div>
+                      <button onClick={() => setShowGuide(false)} className="ml-auto p-1 rounded hover:bg-muted/50">
+                        <X className="w-3.5 h-3.5 text-muted-foreground" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { step: "1", title: "Browse the Feed", desc: "Read posts from other business owners covering discussions, questions, wins, and resources." },
+                        { step: "2", title: "Create a Post", desc: "Share your experience, ask for advice, or celebrate a business milestone." },
+                        { step: "3", title: "Engage", desc: "Like and comment on posts to build connections and help other founders." },
+                        { step: "4", title: "Join Cohorts", desc: "Browse founder circles and join groups of entrepreneurs in similar industries." },
+                      ].map((item) => (
+                        <div key={item.step} className="flex gap-2.5 p-2 rounded-xl hover:bg-muted/30 transition-colors">
+                          <div className="w-5 h-5 rounded-full bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">
+                            {item.step}
+                          </div>
+                          <div>
+                            <p className="text-xs font-medium">{item.title}</p>
+                            <p className="text-[10px] text-muted-foreground leading-relaxed">{item.desc}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+          </div>
+        }
       />
 
       <div className="flex items-center gap-1 border-b border-white/10 pb-0">
