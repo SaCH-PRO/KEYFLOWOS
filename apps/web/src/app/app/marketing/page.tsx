@@ -29,6 +29,7 @@ import {
   Linkedin,
   Twitter,
   Share2,
+  Lightbulb,
 } from "lucide-react";
 import {
   fetchCampaigns,
@@ -50,7 +51,6 @@ import { getStoredBusinessId } from "@/lib/workspace";
 import { getGmailAuthUrl } from "@/lib/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { ContactPickerDrawer } from "@/components/contacts";
-import { FeatureGuide } from "@/components/ui/feature-guide";
 import { TabNav } from "@/components/ui/tab-nav";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConnectionBanner, ConnectionsSummary } from "@/components/ui/connection-banner";
@@ -115,6 +115,7 @@ export default function MarketingPage() {
   const [copiedEmbed, setCopiedEmbed] = useState<string | null>(null);
   const [availableTags, setAvailableTags] = useState<string[]>([]);
   const [showContactPicker, setShowContactPicker] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -310,6 +311,69 @@ export default function MarketingPage() {
         subtitle={`${campaigns.length} campaigns · ${forms.length} lead forms`}
         actionLabel={activeTab === "campaigns" ? "New Campaign" : "New Form"}
         onAction={activeTab === "campaigns" ? openNewCampaign : openNewForm}
+        titleExtra={
+          <div className="relative">
+            <button
+              onClick={() => setShowGuide(!showGuide)}
+              className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
+                showGuide
+                  ? "bg-amber-400 text-white shadow-md shadow-amber-400/40 scale-110"
+                  : "bg-amber-400/15 text-amber-400 hover:bg-amber-400/25 hover:shadow-sm hover:shadow-amber-400/20 hover:scale-105"
+              }`}
+              aria-label="Getting started guide"
+              title="Getting started guide"
+            >
+              <Lightbulb className="w-3.5 h-3.5" />
+            </button>
+            <AnimatePresence>
+              {showGuide && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowGuide(false)} />
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.12 }}
+                    className="absolute left-0 top-full mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl w-[90vw] max-w-[700px] max-h-[85vh] overflow-y-auto p-5"
+                  >
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="p-1.5 rounded-lg bg-amber-400/10">
+                        <Lightbulb className="w-4 h-4 text-amber-400" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-semibold">Getting Started</h4>
+                        <p className="text-[11px] text-muted-foreground">Your quick-start guide</p>
+                      </div>
+                      <button onClick={() => setShowGuide(false)} className="ml-auto p-1 rounded hover:bg-muted/50">
+                        <X className="w-3.5 h-3.5 text-muted-foreground" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { step: "1", title: "Create a Campaign", desc: "Write your email content, choose a subject line, and save as draft." },
+                        { step: "2", title: "Segment Your Audience", desc: "Target specific contacts by tags or status (leads, clients, etc.)." },
+                        { step: "3", title: "Send & Track", desc: "Send your campaign and monitor open rates, click-through, and delivery stats." },
+                        { step: "4", title: "Build Lead Forms", desc: "Create custom forms with fields like name, email, phone, and dropdowns." },
+                        { step: "5", title: "Share Form Links", desc: "Get a public URL or embed code to place forms on any website." },
+                        { step: "6", title: "Auto-Add to CRM", desc: "Form submissions automatically create contacts in your CRM." },
+                      ].map((item) => (
+                        <div key={item.step} className="flex gap-2.5 p-2 rounded-xl hover:bg-muted/30 transition-colors">
+                          <div className="w-5 h-5 rounded-full bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">
+                            {item.step}
+                          </div>
+                          <div>
+                            <p className="text-xs font-medium">{item.title}</p>
+                            <p className="text-[10px] text-muted-foreground leading-relaxed">{item.desc}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+          </div>
+        }
         rightSlot={
           <button
             onClick={() => setShowContactPicker(true)}
@@ -319,20 +383,6 @@ export default function MarketingPage() {
             Broadcast
           </button>
         }
-      />
-
-      <FeatureGuide
-        featureKey="marketing"
-        title="Getting Started with Marketing"
-        description="Reach your audience with email campaigns and capture new leads with custom forms."
-        steps={[
-          { title: "Create a Campaign", description: "Write your email content, choose a subject line, and save as draft." },
-          { title: "Segment Your Audience", description: "Target specific contacts by tags or status (leads, clients, etc.)." },
-          { title: "Send & Track", description: "Send your campaign and monitor open rates, click-through, and delivery stats." },
-          { title: "Build Lead Forms", description: "Create custom forms with fields like name, email, phone, and dropdowns." },
-          { title: "Share Form Links", description: "Get a public URL or embed code to place forms on any website." },
-          { title: "Auto-Add to CRM", description: "Form submissions automatically create contacts in your CRM." },
-        ]}
       />
 
       {!connectionsLoading && (

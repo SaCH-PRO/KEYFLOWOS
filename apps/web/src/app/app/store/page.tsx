@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertCircle, Send } from "lucide-react";
+import { AlertCircle, Send, Lightbulb, X } from "lucide-react";
 import {
   Service,
   StaffMember,
@@ -29,7 +29,6 @@ import { StorefrontPreview } from "./components/storefront-preview";
 import { AppearanceCustomizer } from "./components/appearance-customizer";
 import { MerchandisingPanel } from "./components/merchandising-panel";
 import { StoreAnalyticsDashboard } from "./components/store-analytics";
-import { FeatureGuide } from "@/components/ui/feature-guide";
 import { ContactPickerDrawer } from "@/components/contacts";
 import { StoreBanner } from "./components/store-banner";
 import { StoreTabs } from "./components/store-tabs";
@@ -72,6 +71,7 @@ export default function StorePage() {
   const [driftedItems, setDriftedItems] = useState<DriftedItem[]>([]);
   const [showContactPicker, setShowContactPicker] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
 
   const [storefrontConfig, setStorefrontConfig] = useState<StorefrontConfig>({
     hero: {},
@@ -376,12 +376,73 @@ export default function StorePage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
-        <div className="flex-1">
+        <div className="flex-1 flex items-center gap-2">
           <StoreHeader
             storeEnabled={storeEnabled}
             publicUrl={getPublicBookingUrl()}
             onToggleEnabled={toggleStoreEnabled}
           />
+          <div className="relative">
+            <button
+              onClick={() => setShowGuide(!showGuide)}
+              className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
+                showGuide
+                  ? "bg-amber-400 text-white shadow-md shadow-amber-400/40 scale-110"
+                  : "bg-amber-400/15 text-amber-400 hover:bg-amber-400/25 hover:shadow-sm hover:shadow-amber-400/20 hover:scale-105"
+              }`}
+              aria-label="Getting started guide"
+              title="Getting started guide"
+            >
+              <Lightbulb className="w-3.5 h-3.5" />
+            </button>
+            <AnimatePresence>
+              {showGuide && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowGuide(false)} />
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.12 }}
+                    className="absolute left-0 top-full mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl w-[90vw] max-w-[700px] max-h-[85vh] overflow-y-auto p-5"
+                  >
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="p-1.5 rounded-lg bg-amber-400/10">
+                        <Lightbulb className="w-4 h-4 text-amber-400" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-semibold">Getting Started</h4>
+                        <p className="text-[11px] text-muted-foreground">Your quick-start guide</p>
+                      </div>
+                      <button onClick={() => setShowGuide(false)} className="ml-auto p-1 rounded hover:bg-muted/50">
+                        <X className="w-3.5 h-3.5 text-muted-foreground" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { step: "1", title: "Toggle Store Live", desc: "Use the ON/Live switch at the top to make your store visible to customers." },
+                        { step: "2", title: "Add Services & Products", desc: "Go to the Catalog tab to add your bookable services and products with prices." },
+                        { step: "3", title: "Customize Appearance", desc: "Choose a theme, set your brand colors, hero image, and layout style in the Appearance tab." },
+                        { step: "4", title: "Set Business Hours", desc: "Configure your operating hours so customers know when you're available." },
+                        { step: "5", title: "Share Your Link", desc: "Copy your public store URL and share it on WhatsApp, social media, or your website." },
+                        { step: "6", title: "Track Performance", desc: "Monitor page views, popular items, and conversion rates in the Analytics tab." },
+                      ].map((item) => (
+                        <div key={item.step} className="flex gap-2.5 p-2 rounded-xl hover:bg-muted/30 transition-colors">
+                          <div className="w-5 h-5 rounded-full bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">
+                            {item.step}
+                          </div>
+                          <div>
+                            <p className="text-xs font-medium">{item.title}</p>
+                            <p className="text-[10px] text-muted-foreground leading-relaxed">{item.desc}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
         <button
           onClick={() => setShowContactPicker(true)}
@@ -391,20 +452,6 @@ export default function StorePage() {
           Broadcast
         </button>
       </div>
-
-      <FeatureGuide
-        featureKey="store"
-        title="Getting Started with Your Online Store"
-        description="Set up your public storefront where customers can browse services, book appointments, and shop."
-        steps={[
-          { title: "Toggle Store Live", description: "Use the ON/Live switch at the top to make your store visible to customers." },
-          { title: "Add Services & Products", description: "Go to the Catalog tab to add your bookable services and products with prices." },
-          { title: "Customize Appearance", description: "Choose a theme, set your brand colors, hero image, and layout style in the Appearance tab." },
-          { title: "Set Business Hours", description: "Configure your operating hours so customers know when you're available." },
-          { title: "Share Your Link", description: "Copy your public store URL and share it on WhatsApp, social media, or your website." },
-          { title: "Track Performance", description: "Monitor page views, popular items, and conversion rates in the Analytics tab." },
-        ]}
-      />
 
       {!storeEnabled && (
         <div

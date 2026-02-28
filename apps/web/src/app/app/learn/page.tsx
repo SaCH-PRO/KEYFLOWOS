@@ -13,6 +13,8 @@ import {
   Award,
   Play,
   ArrowRight,
+  Lightbulb,
+  X,
 } from "lucide-react";
 import {
   fetchCourses,
@@ -25,7 +27,6 @@ import {
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
-import { FeatureGuide } from "@/components/ui/feature-guide";
 
 const DIFFICULTY_COLORS: Record<string, { bg: string; text: string }> = {
   BEGINNER: { bg: "bg-green-500/20", text: "text-green-400" },
@@ -70,6 +71,7 @@ export default function LearnPage() {
   const [selectedEnrollment, setSelectedEnrollment] = useState<CourseEnrollment | null>(null);
   const [activeLesson, setActiveLesson] = useState<string | null>(null);
   const [enrollingId, setEnrollingId] = useState<string | null>(null);
+  const [showGuide, setShowGuide] = useState(false);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -300,18 +302,67 @@ export default function LearnPage() {
         icon={GraduationCap}
         title="MasterClass"
         subtitle="Level up your business skills"
-      />
-
-      <FeatureGuide
-        featureKey="learn"
-        title="Getting Started with MasterClass"
-        description="Level up your business skills with bite-sized courses, progress tracking, and certificates."
-        steps={[
-          { title: "Browse Courses", description: "Explore courses by difficulty level (Beginner, Intermediate, Advanced)." },
-          { title: "Enroll", description: "Click any course to see the curriculum, then enroll to start learning." },
-          { title: "Complete Lessons", description: "Work through lessons at your own pace. Your progress is saved automatically." },
-          { title: "Earn Certificates", description: "Complete all lessons in a course to unlock a downloadable certificate." },
-        ]}
+        titleExtra={
+          <div className="relative">
+            <button
+              onClick={() => setShowGuide(!showGuide)}
+              className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
+                showGuide
+                  ? "bg-amber-400 text-white shadow-md shadow-amber-400/40 scale-110"
+                  : "bg-amber-400/15 text-amber-400 hover:bg-amber-400/25 hover:shadow-sm hover:shadow-amber-400/20 hover:scale-105"
+              }`}
+              aria-label="Getting started guide"
+              title="Getting started guide"
+            >
+              <Lightbulb className="w-3.5 h-3.5" />
+            </button>
+            <AnimatePresence>
+              {showGuide && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowGuide(false)} />
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.12 }}
+                    className="absolute left-0 top-full mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl w-[90vw] max-w-[700px] max-h-[85vh] overflow-y-auto p-5"
+                  >
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="p-1.5 rounded-lg bg-amber-400/10">
+                        <Lightbulb className="w-4 h-4 text-amber-400" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-semibold">Getting Started</h4>
+                        <p className="text-[11px] text-muted-foreground">Your quick-start guide</p>
+                      </div>
+                      <button onClick={() => setShowGuide(false)} className="ml-auto p-1 rounded hover:bg-muted/50">
+                        <X className="w-3.5 h-3.5 text-muted-foreground" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { step: "1", title: "Browse Courses", desc: "Explore courses by difficulty level (Beginner, Intermediate, Advanced)." },
+                        { step: "2", title: "Enroll", desc: "Click any course to see the curriculum, then enroll to start learning." },
+                        { step: "3", title: "Complete Lessons", desc: "Work through lessons at your own pace. Your progress is saved automatically." },
+                        { step: "4", title: "Earn Certificates", desc: "Complete all lessons in a course to unlock a downloadable certificate." },
+                      ].map((item) => (
+                        <div key={item.step} className="flex gap-2.5 p-2 rounded-xl hover:bg-muted/30 transition-colors">
+                          <div className="w-5 h-5 rounded-full bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">
+                            {item.step}
+                          </div>
+                          <div>
+                            <p className="text-xs font-medium">{item.title}</p>
+                            <p className="text-[10px] text-muted-foreground leading-relaxed">{item.desc}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+          </div>
+        }
       />
 
       {enrolledCourses.length > 0 && (
