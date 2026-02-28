@@ -9,8 +9,9 @@ import {
   Tag,
   Trash2,
   X,
+  List,
 } from "lucide-react";
-import type { BulkAction } from "./hooks/use-database-state";
+import type { BulkAction, ListSummary } from "./hooks/use-database-state";
 
 const STATUSES = ["LEAD", "PROSPECT", "CLIENT", "LOST"];
 
@@ -30,8 +31,10 @@ interface DatabaseBulkBarProps {
   onBulkTagInputChange: (value: string) => void;
   onBulkStatusChange: (status: string) => void;
   onBulkAddTags: (tagInput: string) => void;
+  onBulkAddToList: (listId: string) => void;
   onBulkDelete: () => void;
   onClearSelection: () => void;
+  availableLists: ListSummary[];
 }
 
 function DatabaseBulkBarInner({
@@ -43,8 +46,10 @@ function DatabaseBulkBarInner({
   onBulkTagInputChange,
   onBulkStatusChange,
   onBulkAddTags,
+  onBulkAddToList,
   onBulkDelete,
   onClearSelection,
+  availableLists,
 }: DatabaseBulkBarProps) {
   const toggleStatusAction = useCallback(() => {
     onSetBulkAction(activeBulkAction === "status" ? null : "status");
@@ -54,6 +59,10 @@ function DatabaseBulkBarInner({
     onSetBulkAction(activeBulkAction === "tags" ? null : "tags");
   }, [activeBulkAction, onSetBulkAction]);
 
+  const toggleAddToListAction = useCallback(() => {
+    onSetBulkAction(activeBulkAction === "addToList" ? null : "addToList");
+  }, [activeBulkAction, onSetBulkAction]);
+
   const handleApplyTags = useCallback(() => {
     onBulkAddTags(bulkTagInput);
   }, [bulkTagInput, onBulkAddTags]);
@@ -61,6 +70,8 @@ function DatabaseBulkBarInner({
   const handleTagKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter") onBulkAddTags(bulkTagInput);
   }, [bulkTagInput, onBulkAddTags]);
+
+  const manualLists = availableLists.filter((l) => l.type === "MANUAL");
 
   return (
     <AnimatePresence>
@@ -120,6 +131,7 @@ function DatabaseBulkBarInner({
               disabled={bulkActing}
               className="kf-btn-secondary inline-flex items-center gap-1.5 text-xs"
               aria-label="Add tags to selected contacts"
+              aria-haspopup="true"
               aria-expanded={activeBulkAction === "tags"}
             >
               <Tag className="w-3.5 h-3.5" />
@@ -144,6 +156,51 @@ function DatabaseBulkBarInner({
                 >
                   Apply Tags
                 </button>
+              </div>
+            )}
+          </div>
+
+          <div className="relative">
+            <button
+              onClick={toggleAddToListAction}
+              disabled={bulkActing}
+              className="kf-btn-secondary inline-flex items-center gap-1.5 text-xs"
+              aria-label="Add selected contacts to a list"
+              aria-haspopup="listbox"
+              aria-expanded={activeBulkAction === "addToList"}
+            >
+              <List className="w-3.5 h-3.5" />
+              Add to List
+              <ChevronDown className="w-3 h-3" />
+            </button>
+            {activeBulkAction === "addToList" && (
+              <div
+                className="absolute bottom-full left-0 mb-2 kf-card border border-border shadow-xl rounded-lg py-1 w-48 z-50 max-h-48 overflow-y-auto"
+                role="listbox"
+                aria-label="Select a list"
+              >
+                {manualLists.length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-muted-foreground">
+                    No manual lists yet. Create one first.
+                  </div>
+                ) : (
+                  manualLists.map((list) => (
+                    <button
+                      key={list.id}
+                      onClick={() => onBulkAddToList(list.id)}
+                      disabled={bulkActing}
+                      className="w-full text-left px-3 py-2 text-xs hover:bg-muted/50 transition-colors disabled:opacity-50 flex items-center gap-2"
+                      role="option"
+                    >
+                      <div
+                        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: list.color || "#888" }}
+                      />
+                      <span className="truncate flex-1">{list.name}</span>
+                      <span className="text-[10px] text-muted-foreground">{list.contactCount}</span>
+                    </button>
+                  ))
+                )}
               </div>
             )}
           </div>

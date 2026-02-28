@@ -262,8 +262,10 @@ export function ContactsDatabase({
         onBulkTagInputChange={db.setBulkTagInput}
         onBulkStatusChange={db.handleBulkStatusChange}
         onBulkAddTags={db.handleBulkAddTags}
+        onBulkAddToList={db.handleBulkAddToList}
         onBulkDelete={db.handleBulkDelete}
         onClearSelection={db.clearSelection}
+        availableLists={db.availableLists}
       />
 
       <div className="kf-card">
@@ -298,6 +300,8 @@ export function ContactsDatabase({
                   activeListId={activeListId}
                   onSelectList={onSelectList}
                   onListsLoaded={onListsLoaded}
+                  onListsChanged={db.handleListsChanged}
+                  refreshToken={db.listsRefreshToken}
                 />
               </div>
             </motion.div>
