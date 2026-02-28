@@ -731,6 +731,24 @@ export async function createContactFromOcr(params: {
   });
 }
 
+export async function scanContactImage(imageFile: File, businessId: string = DEFAULT_BUSINESS_ID) {
+  const url = `${API_BASE}/crm/businesses/${encodeURIComponent(businessId)}/import/scan`;
+  const formData = new FormData();
+  formData.append('image', imageFile);
+  const headers = getAuthHeaders();
+  const res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+  const payload = await res.json().catch(() => null);
+  if (!res.ok || !payload) {
+    const message = payload?.message || res.statusText || 'Scan failed';
+    throw new Error(message);
+  }
+  return payload;
+}
+
 export async function completeContactTask(taskId: string, businessId: string = DEFAULT_BUSINESS_ID) {
   return apiPost<ContactTask>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/tasks/${encodeURIComponent(taskId)}/complete`,

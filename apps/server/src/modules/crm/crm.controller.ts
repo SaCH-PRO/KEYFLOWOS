@@ -231,6 +231,38 @@ export class CrmController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/import/scan')
+  @UseInterceptors(
+    FileInterceptor('image', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  async scanContactImage(
+    @Param('businessId') businessId: string,
+    @UploadedFile() image: Express.Multer.File,
+  ) {
+    if (!image || !image.buffer) {
+      throw new BadRequestException('Image file is required');
+    }
+    const base64 = `data:${image.mimetype || 'image/jpeg'};base64,${image.buffer.toString('base64')}`;
+    const extracted = await this.vision.extractContactFromImage(base64);
+    if (!extracted.firstName && !extracted.lastName && !extracted.email && !extracted.phone) {
+      throw new BadRequestException('Could not extract any contact information from this image. Try a clearer photo.');
+    }
+    const contact = await this.crm.findOrCreateContact(businessId, {
+      firstName: extracted.firstName,
+      lastName: extracted.lastName,
+      email: extracted.email,
+      phone: extracted.phone,
+      companyName: extracted.companyName,
+      source: 'scan',
+      sourceDetail: 'business_card',
+    });
+    return { contact, extracted };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/imports')
   listImports(@Param('businessId') businessId: string) {
     return this.crmImport.listImports(businessId);
