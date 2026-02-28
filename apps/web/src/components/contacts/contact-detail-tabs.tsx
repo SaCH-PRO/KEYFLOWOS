@@ -68,6 +68,7 @@ const EVENT_LABELS: Record<string, string> = {
   "note.created": "Note added",
   "task.created": "Task created",
   "task.completed": "Task completed",
+  "task.reopened": "Task reopened",
   "email.sent": "Email sent",
   "whatsapp.sent": "WhatsApp message sent",
   "message.copied": "Message copied",
@@ -96,6 +97,7 @@ const EVENT_ICONS: Record<string, { icon: typeof MessageSquare; color: string }>
   "note.created": { icon: StickyNote, color: "hsl(var(--kf-muted-foreground))" },
   "task.created": { icon: ListTodo, color: "hsl(var(--kf-accent2))" },
   "task.completed": { icon: CheckCircle2, color: "hsl(142 76% 36%)" },
+  "task.reopened": { icon: RefreshCw, color: "hsl(var(--kf-accent1))" },
   "email.sent": { icon: Mail, color: "hsl(217 91% 60%)" },
   "whatsapp.sent": { icon: MessageCircle, color: "hsl(142 76% 36%)" },
   "message.copied": { icon: Copy, color: "hsl(var(--kf-muted-foreground))" },
@@ -239,7 +241,7 @@ interface ContactDetailTabsProps {
   onSetActiveTab: (tab: string) => void;
   onAddNote?: (body: string, source?: string) => Promise<void>;
   onAddTask?: (title: string, options?: { dueDate?: string; priority?: string; remindAt?: string }) => Promise<void>;
-  onCompleteTask?: (taskId: string) => Promise<void>;
+  onCompleteTask?: (taskId: string, currentStatus?: string) => Promise<void>;
   onDeleteNote?: (noteId: string) => Promise<void>;
   onDeleteTask?: (taskId: string) => Promise<void>;
   healthMetrics?: HealthMetricsData | null;
@@ -1502,16 +1504,20 @@ export function ContactDetailTabs({
                     >
                       <div className="p-3">
                         <div className="flex items-start gap-2">
-                          {onCompleteTask && !isDone && (
+                          {onCompleteTask && (
                             <button
-                              onClick={() => onCompleteTask(task.id)}
-                              className="mt-0.5 shrink-0 w-5 h-5 rounded-full border-2 border-muted-foreground/40 hover:border-[hsl(var(--kf-accent2))] hover:bg-[hsl(var(--kf-accent2))]/10 transition-colors flex items-center justify-center"
-                              title="Complete task"
+                              onClick={() => onCompleteTask(task.id, task.status ?? undefined)}
+                              className={`mt-0.5 shrink-0 w-5 h-5 rounded-full border-2 transition-colors flex items-center justify-center ${
+                                isDone
+                                  ? "border-[hsl(var(--kf-accent2))] bg-[hsl(var(--kf-accent2))]/20 hover:border-muted-foreground/40 hover:bg-transparent"
+                                  : "border-muted-foreground/40 hover:border-[hsl(var(--kf-accent2))] hover:bg-[hsl(var(--kf-accent2))]/10"
+                              }`}
+                              title={isDone ? "Mark as incomplete" : "Complete task"}
                             >
-                              <Check className="w-3 h-3 opacity-0 group-hover:opacity-30 text-[hsl(var(--kf-accent2))]" />
+                              <Check className={`w-3 h-3 ${isDone ? "text-[hsl(var(--kf-accent2))]" : "opacity-0 group-hover:opacity-30 text-[hsl(var(--kf-accent2))]"}`} />
                             </button>
                           )}
-                          {isDone && (
+                          {isDone && !onCompleteTask && (
                             <CheckCircle2 className="mt-0.5 shrink-0 w-5 h-5" style={{ color: "hsl(var(--kf-accent2))" }} />
                           )}
 

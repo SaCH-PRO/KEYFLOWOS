@@ -1145,6 +1145,20 @@ export class CrmService {
     return updated;
   }
 
+  async reopenTask(input: { businessId: string; taskId: string }) {
+    const task = await this.prisma.client.contactTask.findFirst({
+      where: { id: input.taskId, businessId: input.businessId },
+    });
+    if (!task) throw new NotFoundException('Task not found');
+
+    const updated = await this.prisma.client.contactTask.update({
+      where: { id: input.taskId },
+      data: { status: 'OPEN', completedAt: null },
+    });
+    await this.logEvent(input.businessId, task.contactId, 'task.reopened', { taskId: task.id, title: task.title });
+    return updated;
+  }
+
   private logEvent(
     businessId: string,
     contactId: string,

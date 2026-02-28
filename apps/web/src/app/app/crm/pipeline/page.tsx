@@ -54,6 +54,7 @@ import {
   addContactNote,
   addContactTask,
   completeContactTask,
+  reopenContactTask,
   createContact,
   deleteContact,
   fetchContactDetail,
@@ -429,9 +430,13 @@ export default function ContactsPage() {
     void loadDetail(selectedContactId);
   };
 
-  const handleCompleteTask = async (taskId: string) => {
+  const handleCompleteTask = async (taskId: string, currentStatus?: string) => {
     if (!businessId) return;
-    await completeContactTask(taskId, businessId);
+    if (currentStatus === "DONE") {
+      await reopenContactTask(taskId, businessId);
+    } else {
+      await completeContactTask(taskId, businessId);
+    }
     if (selectedContactId) void loadDetail(selectedContactId);
   };
 
