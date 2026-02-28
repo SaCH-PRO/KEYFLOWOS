@@ -24,7 +24,9 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - Search debouncing (300ms) and client-side pagination with page size selector.
 - Core accessibility features including ARIA labels and roles.
 - Component decomposition for modularity (e.g., Marketplace, Reports, Store, CRM Pipeline, ContactDetail).
+- CRM Pipeline architecture: `useContactsPipeline` hook → thin `page.tsx` → per-tab components → `contact-detail-tabs.tsx` slim orchestrator with `TabErrorBoundary` → `notes-tab-panel.tsx`, `tasks-tab-panel.tsx`, `timeline-tab-panel.tsx` → shared `tab-constants.ts`.
 - ContactDetail UX improvements include quick actions, smart empty states, recent activity display, compact mobile layout, and lead score explainers.
+- All three detail tabs (Notes, Tasks, Timeline) render simultaneously with CSS `hidden` toggle to preserve state across tab switches.
 - Responsive popup positioning for mobile and desktop views.
 
 **Technical Implementations & Features:**
