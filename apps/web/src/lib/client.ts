@@ -2252,20 +2252,23 @@ const aiInsightSchema = z.object({
 
 export type AiInsight = z.infer<typeof aiInsightSchema>;
 
-export async function fetchFlowIntelligence(businessId?: string): Promise<ApiResult<FlowIntelligenceData>> {
+export async function fetchFlowIntelligence(businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<FlowIntelligenceData>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiGet(
     `/crm/businesses/${encodeURIComponent(bid)}/flow-intelligence`,
     flowIntelligenceSchema,
+    undefined,
+    { signal: opts?.signal },
   );
 }
 
-export async function fetchNextActions(businessId?: string): Promise<ApiResult<CrmNextAction[]>> {
+export async function fetchNextActions(businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<CrmNextAction[]>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiGet(
     `/crm/businesses/${encodeURIComponent(bid)}/next-actions`,
     z.array(crmNextActionSchema),
     [],
+    { signal: opts?.signal },
   );
 }
 
@@ -2277,12 +2280,13 @@ export async function completeNextAction(actionId: string, businessId?: string) 
   });
 }
 
-export async function fetchAutopilotActionsForCrm(businessId?: string): Promise<ApiResult<AutopilotActionData[]>> {
+export async function fetchAutopilotActionsForCrm(businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<AutopilotActionData[]>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiGet(
     `/crm/businesses/${encodeURIComponent(bid)}/autopilot-actions`,
     z.array(autopilotActionSchema),
     [],
+    { signal: opts?.signal },
   );
 }
 
@@ -2306,11 +2310,13 @@ export async function fetchContactJourney(contactId: string, businessId?: string
   );
 }
 
-export async function fetchPredictiveRevenue(businessId?: string): Promise<ApiResult<RevenueData>> {
+export async function fetchPredictiveRevenue(businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<RevenueData>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiGet(
     `/crm/businesses/${encodeURIComponent(bid)}/predictive-revenue`,
     revenueDataSchema,
+    undefined,
+    { signal: opts?.signal },
   );
 }
 
