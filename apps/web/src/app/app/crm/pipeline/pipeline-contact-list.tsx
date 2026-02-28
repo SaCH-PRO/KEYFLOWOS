@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Plus, Users, RefreshCw } from "lucide-react";
+import { Plus, Users, RefreshCw, AlertTriangle } from "lucide-react";
 import { ContactCard, ContactCardData } from "@/components/contacts";
 import type { QuickActionType } from "@/components/contacts";
 import type { ListTab } from "./pipeline-toolbar";
@@ -67,6 +67,7 @@ function useVirtualScroll(itemCount: number, enabled: boolean) {
 export interface PipelineContactListProps {
   contacts: ContactCardData[];
   loading: boolean;
+  loadError?: string | null;
   hasMore: boolean;
   activeListTab: ListTab;
   selectedContactId: string | null;
@@ -79,12 +80,14 @@ export interface PipelineContactListProps {
   onDelete: (contact?: ContactCardData) => void;
   onQuickAction: (contactId: string, action: QuickActionType) => void;
   onLoadMore: () => void;
+  onRetry?: () => void;
   onAddContact: () => void;
 }
 
 function PipelineContactListInner({
   contacts,
   loading,
+  loadError,
   hasMore,
   activeListTab,
   selectedContactId,
@@ -97,6 +100,7 @@ function PipelineContactListInner({
   onDelete,
   onQuickAction,
   onLoadMore,
+  onRetry,
   onAddContact,
 }: PipelineContactListProps) {
   const enableVirtual = contacts.length >= VIRTUAL_SCROLL_THRESHOLD;
@@ -172,6 +176,25 @@ function PipelineContactListInner({
       <div className="kf-card p-8 text-center">
         <RefreshCw className="w-8 h-8 animate-spin mx-auto text-muted-foreground mb-3" />
         <p className="text-muted-foreground">Loading contacts...</p>
+      </div>
+    );
+  }
+
+  if (loadError && contacts.length === 0) {
+    return (
+      <div className="kf-card p-8 text-center" role="alert">
+        <AlertTriangle className="w-10 h-10 mx-auto text-red-400 mb-3" />
+        <p className="text-sm font-medium text-foreground mb-1">Could not load contacts</p>
+        <p className="text-xs text-muted-foreground mb-4">{loadError}</p>
+        {onRetry && (
+          <button
+            onClick={onRetry}
+            className="kf-btn-primary inline-flex items-center gap-2"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Try Again
+          </button>
+        )}
       </div>
     );
   }

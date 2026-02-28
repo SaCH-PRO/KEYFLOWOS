@@ -119,6 +119,7 @@ export function useContactsData() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [segments, setSegments] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const nextOffsetRef = useRef(0);
 
@@ -200,6 +201,7 @@ export function useContactsData() {
       const { signal } = controller;
 
       setLoading(true);
+      setLoadError(null);
       try {
         if (append) {
           const { data } = await fetchContacts(businessId, {
@@ -235,7 +237,7 @@ export function useContactsData() {
       } catch (error: unknown) {
         if (error instanceof DOMException && error.name === "AbortError") return;
         console.error("Failed to load contacts", error);
-        toast.error("Failed to load contacts");
+        setLoadError("Failed to load contacts. Please try again.");
       } finally {
         if (!signal.aborted) {
           setLoading(false);
@@ -344,7 +346,7 @@ export function useContactsData() {
 
   return {
     businessId, workspaceLoading, workspaceError,
-    contacts, setContacts, segments, loading, hasMore,
+    contacts, setContacts, segments, loading, loadError, hasMore,
     searchInput: filters.searchInput, setSearchInput, search,
     statusFilter: filters.statusFilter, setStatusFilter,
     sortBy: filters.sortBy, setSortBy,

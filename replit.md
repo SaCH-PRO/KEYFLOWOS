@@ -28,6 +28,8 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - ContactDetail UX improvements include quick actions, smart empty states, recent activity display, compact mobile layout, and lead score explainers.
 - All three detail tabs (Notes, Tasks, Timeline) render simultaneously with CSS `hidden` toggle to preserve state across tab switches.
 - Responsive popup positioning for mobile and desktop views.
+- Pipeline performance: Memoized `detailPanelProps` via `useMemo`, memoized database contacts mapping, stable useEffect dependencies (no `state` object in deps), focus management (detail panel auto-focused on selection, list focus restored on close).
+- Inline error/retry UI for contacts loading failures (replaces toast-only errors).
 
 **Technical Implementations & Features:**
 - **Business Autopilot System:** AI-powered operations with onboarding, business archetype inference, revenue model detection, task orchestration, and a Legal & Compliance Module.

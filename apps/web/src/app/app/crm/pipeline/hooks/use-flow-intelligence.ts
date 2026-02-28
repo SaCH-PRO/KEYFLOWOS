@@ -82,15 +82,18 @@ export function useFlowIntelligence(businessId: string | null) {
 
   const handleDenyAutopilot = useCallback(async (id: string) => {
     if (!businessId) return;
-    const backup = autopilotActions;
-    setAutopilotActions((prev) => prev.filter((a) => a.id !== id));
+    let backup: AutopilotAction[] = [];
+    setAutopilotActions((prev) => {
+      backup = prev;
+      return prev.filter((a) => a.id !== id);
+    });
     try {
       await denyAutopilotActionApi(id, businessId);
     } catch {
       setAutopilotActions(backup);
       toast.error("Failed to deny action");
     }
-  }, [businessId, autopilotActions]);
+  }, [businessId]);
 
   return {
     flowIntelligence, flowDataLoading,
