@@ -182,13 +182,11 @@ export function ContactDetail({
         <ContactDetailHeader
           contact={contact}
           isPinned={isPinned}
-          activeTab={activeTab}
           onTogglePin={onTogglePin}
           onClose={onClose}
           onEdit={onEdit}
           onDelete={onDelete ? handleDeleteClick : undefined}
           onUpdateStatus={onUpdateStatus}
-          onSetActiveTab={setActiveTab}
           onQuickAction={onQuickAction}
         />
 
