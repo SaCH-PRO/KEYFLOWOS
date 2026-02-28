@@ -135,7 +135,7 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto"
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-6 sm:pt-8 overflow-y-auto"
       onClick={(e) => e.target === e.currentTarget && onCancel()}
       role="dialog"
       aria-modal="true"
@@ -145,9 +145,9 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.95, opacity: 0 }}
-        className="w-full max-w-lg bg-card rounded-2xl border border-border shadow-2xl overflow-hidden my-auto"
+        className="w-full max-w-lg bg-card rounded-2xl border border-border shadow-2xl flex flex-col max-h-[85vh] mb-4"
       >
-      <div className="p-5 border-b border-border flex items-center justify-between sticky top-0 bg-card z-10">
+      <div className="p-5 border-b border-border flex items-center justify-between shrink-0">
         <h3 id="contact-form-title" className="text-lg font-semibold flex items-center gap-2">
           <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/30 to-secondary/30 flex items-center justify-center">
             <User className="w-4 h-4 text-primary" />
@@ -159,7 +159,7 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
         </button>
       </div>
 
-      <div className="p-5 space-y-3 max-h-[calc(100vh-10rem)] overflow-y-auto">
+      <div className="p-5 space-y-3 overflow-y-auto flex-1 min-h-0">
 
         <SectionHeader label="Basic Info" icon={User} open={sections.basic} onToggle={() => toggle("basic")} />
         {sections.basic && (
@@ -447,7 +447,7 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
 
       </div>
 
-      <div className="p-5 border-t border-border flex gap-3 sticky bottom-0 bg-card z-10">
+      <div className="p-5 border-t border-border flex gap-3 shrink-0">
         <button
           onClick={handleSubmit}
           disabled={loading || !form.firstName.trim()}
