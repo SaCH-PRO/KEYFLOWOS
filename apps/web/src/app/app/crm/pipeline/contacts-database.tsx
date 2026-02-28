@@ -16,16 +16,21 @@ import {
   Filter,
   HardDrive,
   Cloud,
+  List,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { LocalContact } from "@/lib/contacts-db";
 import { cacheContacts, getCachedContacts, getLastSyncTime, setLastSyncTime } from "@/lib/contacts-db";
 import { exportContacts, type ExportFormat } from "@/lib/contacts-export";
+import { ContactLists } from "./contact-lists";
 
 interface ContactsDatabaseProps {
   businessId: string;
   contacts: LocalContact[];
   onRefresh: () => void;
+  activeListId: string | null;
+  onSelectList: (listId: string | null, contactIds?: string[]) => void;
+  onListsLoaded?: (count: number) => void;
 }
 
 type SortField = "firstName" | "lastName" | "email" | "phone" | "status" | "companyName" | "city" | "country" | "source" | "createdAt";
@@ -60,7 +65,8 @@ const EXPORT_OPTIONS: { format: ExportFormat; label: string; desc: string; icon:
   { format: "pdf", label: "PDF", desc: "Printable document", icon: FileText },
 ];
 
-export function ContactsDatabase({ businessId, contacts, onRefresh }: ContactsDatabaseProps) {
+export function ContactsDatabase({ businessId, contacts, onRefresh, activeListId, onSelectList, onListsLoaded }: ContactsDatabaseProps) {
+  const [showLists, setShowLists] = useState(false);
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [sortField, setSortField] = useState<SortField>("firstName");
@@ -434,6 +440,44 @@ export function ContactsDatabase({ businessId, contacts, onRefresh }: ContactsDa
             </button>
           </div>
         </div>
+      </div>
+
+      <div className="kf-card">
+        <button
+          onClick={() => setShowLists(!showLists)}
+          className="w-full flex items-center justify-between p-4 hover:bg-muted/20 transition-colors rounded-xl"
+        >
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 rounded-lg bg-[hsl(var(--kf-accent1))]/10">
+              <List className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+            </div>
+            <div className="text-left">
+              <h3 className="text-sm font-semibold">Contact Lists</h3>
+              <p className="text-xs text-muted-foreground">Organize contacts into manual or smart lists</p>
+            </div>
+          </div>
+          <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${showLists ? "rotate-180" : ""}`} />
+        </button>
+        <AnimatePresence>
+          {showLists && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="overflow-hidden"
+            >
+              <div className="px-4 pb-4 border-t border-border/30">
+                <ContactLists
+                  businessId={businessId}
+                  activeListId={activeListId}
+                  onSelectList={onSelectList}
+                  onListsLoaded={onListsLoaded}
+                />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );
