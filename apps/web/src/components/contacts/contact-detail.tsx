@@ -189,10 +189,13 @@ export function ContactDetail({
           onDelete={onDelete ? handleDeleteClick : undefined}
           onUpdateStatus={onUpdateStatus}
           onSetActiveTab={setActiveTab}
+          onQuickAction={onQuickAction}
         />
 
         <ContactDetailStats
           contact={contact}
+          events={events}
+          onSetActiveTab={setActiveTab}
           onQuickAction={onQuickAction}
         />
 
