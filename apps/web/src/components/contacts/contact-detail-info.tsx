@@ -10,7 +10,7 @@ import {
   Megaphone,
   ShieldAlert,
   ShieldCheck,
-  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import type { ContactDetailData } from "./contact-detail";
 
@@ -27,7 +27,7 @@ function CollapsibleSection({
   defaultOpen?: boolean;
   hasData?: boolean;
 }) {
-  const [open, setOpen] = useState(defaultOpen || hasData);
+  const [open, setOpen] = useState(defaultOpen);
 
   return (
     <div className="rounded-xl bg-muted/30 border border-border/50 overflow-hidden">
@@ -40,7 +40,7 @@ function CollapsibleSection({
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{title}</span>
           {hasData && <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--kf-accent2))]" />}
         </div>
-        <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+        <ChevronRight className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
       </button>
       {open && <div className="px-3 pb-3">{children}</div>}
     </div>
@@ -64,6 +64,7 @@ export function ContactDetailInfo({ contact }: ContactDetailInfoProps) {
   const hasProfessional = !!(contact.companyName || contact.jobTitle || contact.department || contact.industry);
   const hasContactMethods = !!(contact.secondaryEmail || contact.secondaryPhone || contact.whatsappNumber || contact.preferredChannel || contact.language);
   const hasAddress = !!(contact.addressLine1 || contact.addressLine2 || contact.city || contact.state || contact.postalCode || contact.country || contact.timezone);
+  const hasPreferences = contact.marketingOptIn != null || contact.doNotContact != null || contact.lifecycleStage || contact.segment;
 
   return (
     <>
@@ -112,7 +113,7 @@ export function ContactDetailInfo({ contact }: ContactDetailInfoProps) {
         </div>
       </CollapsibleSection>
 
-      <CollapsibleSection icon={Tag} title="Preferences" defaultOpen>
+      <CollapsibleSection icon={Tag} title="Preferences" hasData={!!hasPreferences}>
         <div className="flex flex-wrap gap-2 mb-2">
           {contact.marketingOptIn === true && (
             <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-500 border border-emerald-500/30">
