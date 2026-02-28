@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   X, User, Mail, Phone, Building2, Tag, Briefcase, MessageSquare,
   FileText, MapPin, ChevronDown, Globe, Shield, ToggleLeft
 } from "lucide-react";
+import { validateEmail, validatePhone } from "@/lib/validators";
+import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 
 const STATUSES = ["LEAD", "PROSPECT", "CLIENT", "LOST"] as const;
 const CHANNELS = ["WhatsApp", "Email", "SMS", "Call", "Instagram DM"] as const;
@@ -50,6 +52,8 @@ export interface ContactFormData {
   notesInternal: string;
 }
 
+type ValidationErrors = Partial<Record<keyof ContactFormData, string>>;
+
 function SectionHeader({ label, icon: Icon, open, onToggle }: { label: string; icon: React.ElementType; open: boolean; onToggle: () => void }) {
   return (
     <button
@@ -62,6 +66,11 @@ function SectionHeader({ label, icon: Icon, open, onToggle }: { label: string; i
       <ChevronDown className={`w-3.5 h-3.5 ml-auto transition-transform ${open ? "rotate-180" : ""}`} />
     </button>
   );
+}
+
+function FieldError({ error }: { error?: string }) {
+  if (!error) return null;
+  return <p className="text-xs text-destructive mt-0.5">{error}</p>;
 }
 
 export function ContactForm({ onSubmit, onCancel, loading, initialValues }: ContactFormProps) {
@@ -100,12 +109,24 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
     notesInternal: "",
   };
 
-  const [form, setForm] = useState<ContactFormData>({
+  const initial = useMemo(() => ({
     ...defaults,
     ...Object.fromEntries(
       Object.entries(initialValues || {}).filter(([, v]) => v !== undefined && v !== null)
     ),
-  });
+  }), []);
+
+  const [form, setForm] = useState<ContactFormData>(initial);
+  const [errors, setErrors] = useState<ValidationErrors>({});
+  const [touched, setTouched] = useState<Partial<Record<keyof ContactFormData, boolean>>>({});
+
+  const isDirty = useMemo(() => {
+    return (Object.keys(form) as (keyof ContactFormData)[]).some(
+      (key) => form[key] !== initial[key]
+    );
+  }, [form, initial]);
+
+  useUnsavedChanges(isDirty);
 
   const [sections, setSections] = useState({
     basic: true,
@@ -119,15 +140,75 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
   const toggle = (key: keyof typeof sections) =>
     setSections((s) => ({ ...s, [key]: !s[key] }));
 
+  const validate = useCallback((data: ContactFormData): ValidationErrors => {
+    const errs: ValidationErrors = {};
+    const emailErr = validateEmail(data.email);
+    if (emailErr) errs.email = emailErr;
+    const phoneErr = validatePhone(data.phone);
+    if (phoneErr) errs.phone = phoneErr;
+    const secEmailErr = validateEmail(data.secondaryEmail);
+    if (secEmailErr) errs.secondaryEmail = secEmailErr;
+    const secPhoneErr = validatePhone(data.secondaryPhone);
+    if (secPhoneErr) errs.secondaryPhone = secPhoneErr;
+    return errs;
+  }, []);
+
+  const validateField = useCallback((key: keyof ContactFormData, value: string) => {
+    let error: string | null = null;
+    if (key === "email" || key === "secondaryEmail") {
+      error = validateEmail(value);
+    } else if (key === "phone" || key === "secondaryPhone") {
+      error = validatePhone(value);
+    }
+    setErrors((prev) => {
+      const next = { ...prev };
+      if (error) {
+        next[key] = error;
+      } else {
+        delete next[key];
+      }
+      return next;
+    });
+  }, []);
+
   const handleSubmit = async () => {
+    const validationErrors = validate(form);
+    setErrors(validationErrors);
+    const allTouched: Partial<Record<keyof ContactFormData, boolean>> = {};
+    for (const key of Object.keys(validationErrors) as (keyof ContactFormData)[]) {
+      allTouched[key] = true;
+    }
+    setTouched((prev) => ({ ...prev, ...allTouched }));
+    if (Object.keys(validationErrors).length > 0) return;
     await onSubmit(form);
     setForm({ ...defaults });
+    setErrors({});
+    setTouched({});
   };
+
+  const handleCancel = () => {
+    if (isDirty) {
+      const confirmed = window.confirm("You have unsaved changes. Are you sure you want to close?");
+      if (!confirmed) return;
+    }
+    onCancel();
+  };
+
+  const hasErrors = Object.keys(errors).length > 0;
 
   const field = (key: keyof ContactFormData) => ({
     value: form[key] as string,
-    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-      setForm((p) => ({ ...p, [key]: e.target.value })),
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      const val = e.target.value;
+      setForm((p) => ({ ...p, [key]: val }));
+      if (touched[key]) {
+        validateField(key, val);
+      }
+    },
+    onBlur: () => {
+      setTouched((p) => ({ ...p, [key]: true }));
+      validateField(key, form[key] as string);
+    },
   });
 
   return (
@@ -136,7 +217,7 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-6 sm:pt-8 overflow-y-auto"
-      onClick={(e) => e.target === e.currentTarget && onCancel()}
+      onClick={(e) => e.target === e.currentTarget && handleCancel()}
       role="dialog"
       aria-modal="true"
       aria-labelledby="contact-form-title"
@@ -154,7 +235,7 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
           </div>
           {isEditing ? "Edit Contact" : "Add New Contact"}
         </h3>
-        <button onClick={onCancel} className="p-1.5 hover:bg-muted rounded-lg transition-colors">
+        <button onClick={handleCancel} className="p-1.5 hover:bg-muted rounded-lg transition-colors">
           <X className="w-5 h-5 text-muted-foreground" />
         </button>
       </div>
@@ -184,13 +265,15 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
                 <label className="text-xs text-muted-foreground flex items-center gap-1">
                   <Mail className="w-3 h-3" /> Email
                 </label>
-                <input type="email" placeholder="john@example.com" {...field("email")} className="kf-input w-full" />
+                <input type="email" placeholder="john@example.com" {...field("email")} className={`kf-input w-full ${touched.email && errors.email ? "border-destructive ring-1 ring-destructive" : ""}`} />
+                <FieldError error={touched.email ? errors.email : undefined} />
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs text-muted-foreground flex items-center gap-1">
                   <Phone className="w-3 h-3" /> Phone
                 </label>
-                <input type="tel" placeholder="+1 868 123 4567" {...field("phone")} className="kf-input w-full" />
+                <input type="tel" placeholder="+1 868 123 4567" {...field("phone")} className={`kf-input w-full ${touched.phone && errors.phone ? "border-destructive ring-1 ring-destructive" : ""}`} />
+                <FieldError error={touched.phone ? errors.phone : undefined} />
               </div>
             </div>
 
@@ -299,13 +382,15 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
                 <label className="text-xs text-muted-foreground flex items-center gap-1">
                   <Mail className="w-3 h-3" /> Secondary Email
                 </label>
-                <input type="email" placeholder="alt@example.com" {...field("secondaryEmail")} className="kf-input w-full" />
+                <input type="email" placeholder="alt@example.com" {...field("secondaryEmail")} className={`kf-input w-full ${touched.secondaryEmail && errors.secondaryEmail ? "border-destructive ring-1 ring-destructive" : ""}`} />
+                <FieldError error={touched.secondaryEmail ? errors.secondaryEmail : undefined} />
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs text-muted-foreground flex items-center gap-1">
                   <Phone className="w-3 h-3" /> Secondary Phone
                 </label>
-                <input type="tel" placeholder="+1 868 765 4321" {...field("secondaryPhone")} className="kf-input w-full" />
+                <input type="tel" placeholder="+1 868 765 4321" {...field("secondaryPhone")} className={`kf-input w-full ${touched.secondaryPhone && errors.secondaryPhone ? "border-destructive ring-1 ring-destructive" : ""}`} />
+                <FieldError error={touched.secondaryPhone ? errors.secondaryPhone : undefined} />
               </div>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
@@ -450,12 +535,12 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
       <div className="p-5 border-t border-border flex gap-3 shrink-0">
         <button
           onClick={handleSubmit}
-          disabled={loading || !form.firstName.trim()}
+          disabled={loading || !form.firstName.trim() || hasErrors}
           className="kf-btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {loading ? "Saving..." : isEditing ? "Update Contact" : "Save Contact"}
         </button>
-        <button onClick={onCancel} disabled={loading} className="kf-btn-secondary disabled:opacity-50">
+        <button onClick={handleCancel} disabled={loading} className="kf-btn-secondary disabled:opacity-50">
           Cancel
         </button>
       </div>

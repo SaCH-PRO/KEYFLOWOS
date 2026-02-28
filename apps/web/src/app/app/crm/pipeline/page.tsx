@@ -1,6 +1,9 @@
 "use client";
 
+import { useEffect, useRef } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
+import { toast } from "sonner";
 import {
   Users, X, BarChart3, Sparkles, Database, Lightbulb,
 } from "lucide-react";
@@ -19,7 +22,31 @@ import { PipelineTabContent } from "./pipeline-tab-content";
 import { useContactsPipeline } from "./use-contacts-pipeline";
 
 export default function ContactsPage() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const googleHandled = useRef(false);
   const state = useContactsPipeline();
+
+  useEffect(() => {
+    if (googleHandled.current) return;
+    const googleSuccess = searchParams.get("google_success");
+    const googleError = searchParams.get("google_error");
+    const imported = searchParams.get("imported");
+    if (googleSuccess) {
+      googleHandled.current = true;
+      toast.success(`Google Contacts imported successfully${imported ? ` (${imported} contacts)` : ""}`);
+      router.replace("/app/crm/pipeline");
+      state.loadContacts();
+      state.loadFlowData();
+    } else if (googleError) {
+      googleHandled.current = true;
+      const msg = googleError === "missing_params" ? "Missing OAuth parameters"
+        : googleError === "invalid_state" ? "Invalid OAuth state — please try again"
+        : decodeURIComponent(googleError);
+      toast.error(`Google import failed: ${msg}`);
+      router.replace("/app/crm/pipeline");
+    }
+  }, [searchParams, router, state]);
 
   const {
     workspaceLoading, workspaceError, businessId,
@@ -35,9 +62,10 @@ export default function ContactsPage() {
     flowIntelligence, flowDataLoading, revenueData,
     setStatusFilter,
     nextActions, autopilotActions, autopilotPaused,
-    setAutopilotPaused, setAutopilotActions,
+    setAutopilotPaused,
     handleCompleteNextAction, handleDoAction,
     handleViewExpiringQuotes, handleViewOverdueInvoices,
+    handleApproveAutopilot, handleDenyAutopilot,
     selectContact,
   } = state;
 
@@ -207,6 +235,7 @@ export default function ContactsPage() {
             <InsightsTab
               flowIntelligence={flowIntelligence}
               revenueData={revenueData}
+              contacts={contacts}
               loading={flowDataLoading}
               onViewCold={() => { setStatusFilter("LEAD"); setCrmViewTab("pipeline"); }}
               onViewReady={() => { setStatusFilter("PROSPECT"); setCrmViewTab("pipeline"); }}
@@ -233,12 +262,8 @@ export default function ContactsPage() {
               onViewContact={(id) => { selectContact(id); setCrmViewTab("pipeline"); }}
               onDoAction={handleDoAction}
               onTogglePause={() => setAutopilotPaused(!autopilotPaused)}
-              onApprove={async (id) => {
-                setAutopilotActions((prev) => prev.map((a) => (a.id === id ? { ...a, status: "completed" as const } : a)));
-              }}
-              onDeny={async (id) => {
-                setAutopilotActions((prev) => prev.filter((a) => a.id !== id));
-              }}
+              onApprove={handleApproveAutopilot}
+              onDeny={handleDenyAutopilot}
             />
           </motion.div>
         )}

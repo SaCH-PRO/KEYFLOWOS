@@ -206,6 +206,16 @@ export class CrmController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/notes/:noteId')
+  updateNote(
+    @Param('businessId') businessId: string,
+    @Param('noteId') noteId: string,
+    @Body() body: { body?: string; source?: string },
+  ) {
+    return this.crm.updateNote({ businessId, noteId, body: body.body, source: body.source });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Delete('businesses/:businessId/notes/:noteId')
   deleteNote(
     @Param('businessId') businessId: string,
@@ -215,12 +225,47 @@ export class CrmController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/tasks/:taskId')
+  updateTask(
+    @Param('businessId') businessId: string,
+    @Param('taskId') taskId: string,
+    @Body() body: { title?: string; dueDate?: string; priority?: string; remindAt?: string },
+  ) {
+    return this.crm.updateTask({
+      businessId,
+      taskId,
+      title: body.title,
+      dueDate: body.dueDate,
+      priority: body.priority,
+      remindAt: body.remindAt,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Delete('businesses/:businessId/tasks/:taskId')
   deleteTask(
     @Param('businessId') businessId: string,
     @Param('taskId') taskId: string,
   ) {
     return this.crm.deleteTask({ businessId, taskId });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/autopilot-actions/:actionId/approve')
+  approveAutopilotAction(
+    @Param('businessId') businessId: string,
+    @Param('actionId') actionId: string,
+  ) {
+    return this.crm.approveAutopilotAction({ businessId, actionId });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/autopilot-actions/:actionId/deny')
+  denyAutopilotAction(
+    @Param('businessId') businessId: string,
+    @Param('actionId') actionId: string,
+  ) {
+    return this.crm.denyAutopilotAction({ businessId, actionId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

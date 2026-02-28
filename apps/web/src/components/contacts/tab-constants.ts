@@ -157,30 +157,49 @@ export function getPriorityConfig(priority?: string | null) {
   return TASK_PRIORITIES.find((p) => p.key === priority) || TASK_PRIORITIES[1];
 }
 
+const TZ = "America/Port_of_Spain";
+
+function toTZDateString(date: Date): string {
+  return date.toLocaleDateString("en-US", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" });
+}
+
+function getTZDayDiff(date: Date, now: Date): number {
+  const dateDay = toTZDateString(date);
+  const nowDay = toTZDateString(now);
+  const [dm, dd, dy] = dateDay.split("/").map(Number);
+  const [nm, nd, ny] = nowDay.split("/").map(Number);
+  const dateUTC = Date.UTC(dy, dm - 1, dd);
+  const nowUTC = Date.UTC(ny, nm - 1, nd);
+  return Math.round((dateUTC - nowUTC) / (1000 * 60 * 60 * 24));
+}
+
 export function isOverdue(task: { status?: string | null; dueDate?: string | null }) {
   if (task.status === "DONE" || !task.dueDate) return false;
-  return new Date(task.dueDate) < new Date();
+  const due = new Date(task.dueDate);
+  const now = new Date();
+  return getTZDayDiff(due, now) < 0;
 }
 
 export function isDueSoon(task: { status?: string | null; dueDate?: string | null }) {
   if (task.status === "DONE" || !task.dueDate) return false;
-  const due = new Date(task.dueDate);
-  const now = new Date();
-  const diff = due.getTime() - now.getTime();
-  return diff > 0 && diff < 24 * 60 * 60 * 1000;
+  const diff = getTZDayDiff(new Date(task.dueDate), new Date());
+  return diff === 0 || diff === 1;
 }
 
 export function formatRelativeDate(dateStr: string) {
   const date = new Date(dateStr);
   const now = new Date();
-  const diffMs = date.getTime() - now.getTime();
-  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+  const diffDays = getTZDayDiff(date, now);
   if (diffDays === 0) return "Today";
   if (diffDays === 1) return "Tomorrow";
   if (diffDays === -1) return "Yesterday";
   if (diffDays < -1) return `${Math.abs(diffDays)} days ago`;
   if (diffDays <= 7) return `In ${diffDays} days`;
-  return date.toLocaleDateString("en-TT", { dateStyle: "medium" });
+  return new Intl.DateTimeFormat("en-TT", { dateStyle: "medium", timeZone: TZ }).format(date);
+}
+
+export function formatDateTimeTZ(dateStr: string) {
+  return new Intl.DateTimeFormat("en-TT", { dateStyle: "medium", timeZone: TZ }).format(new Date(dateStr));
 }
 
 export interface JourneyMilestoneData {

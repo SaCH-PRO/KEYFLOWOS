@@ -95,6 +95,8 @@ interface ContactDetailProps {
   onCompleteTask?: (taskId: string, currentStatus?: string) => Promise<void>;
   onDeleteNote?: (noteId: string) => Promise<void>;
   onDeleteTask?: (taskId: string) => Promise<void>;
+  onUpdateNote?: (noteId: string, data: { body?: string; source?: string }) => Promise<void>;
+  onUpdateTask?: (taskId: string, data: { title?: string; dueDate?: string; priority?: string; remindAt?: string }) => Promise<void>;
   onUpdateStatus?: (status: string) => Promise<void>;
   onEdit?: () => void;
   onDelete?: () => void;
@@ -123,6 +125,8 @@ export function ContactDetail({
   onCompleteTask,
   onDeleteNote,
   onDeleteTask,
+  onUpdateNote,
+  onUpdateTask,
   onUpdateStatus,
   onEdit,
   onDelete,
@@ -276,6 +280,8 @@ export function ContactDetail({
             onCompleteTask={onCompleteTask}
             onDeleteNote={onDeleteNote ? handleDeleteNote : undefined}
             onDeleteTask={onDeleteTask ? handleDeleteTask : undefined}
+            onUpdateNote={onUpdateNote}
+            onUpdateTask={onUpdateTask}
             healthMetrics={healthMetrics}
             journeyMilestones={journeyMilestones}
             conversationContext={conversationContext}
