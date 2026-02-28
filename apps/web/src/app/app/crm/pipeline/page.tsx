@@ -15,10 +15,11 @@ import { KanbanSkeleton } from "@/components/ui/skeleton";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
+import type { SmartSegment } from "./pipeline-toolbar";
 import { ContactsDatabase } from "./contacts-database";
 import { InsightsTab } from "./insights-tab";
 import { EngageTab } from "./engage-tab";
-import { MemoizedPipelineTabContent as PipelineTabContent } from "./pipeline-tab-content";
+import { PipelineTabContent } from "./pipeline-tab-content";
 import { GettingStartedGuide } from "./getting-started-guide";
 import { useContactsPipeline } from "./use-contacts-pipeline";
 
@@ -70,9 +71,12 @@ export default function ContactsPage() {
     }
   }, [searchParams, router, loadContacts, loadFlowData]);
 
+  const confirmStateRef = useRef(confirmState);
+  confirmStateRef.current = confirmState;
+
   const handleCloseBroadcast = useCallback(() => setShowBroadcast(false), [setShowBroadcast]);
   const handleDeselectAll = useCallback(() => { setSelectedIds(new Set()); setSelectMode(false); }, [setSelectedIds, setSelectMode]);
-  const handleConfirmAction = useCallback(() => { confirmState.action(); setConfirmState({ open: false, action: () => {} }); }, [confirmState, setConfirmState]);
+  const handleConfirmAction = useCallback(() => { confirmStateRef.current.action(); setConfirmState({ open: false, action: () => {} }); }, [setConfirmState]);
   const handleCancelConfirm = useCallback(() => setConfirmState({ open: false, action: () => {} }), [setConfirmState]);
   const handleRefreshContacts = useCallback(() => { void loadContacts(); }, [loadContacts]);
   const handleSelectList = useCallback((listId: string | null, contactIds?: string[] | null) => {
@@ -84,11 +88,12 @@ export default function ContactsPage() {
   const handleViewCold = useCallback(() => { setStatusFilter("LEAD"); setCrmViewTab("pipeline"); }, [setStatusFilter, setCrmViewTab]);
   const handleViewReady = useCallback(() => { setStatusFilter("PROSPECT"); setCrmViewTab("pipeline"); }, [setStatusFilter, setCrmViewTab]);
   const handleViewEngageContact = useCallback((id: string) => { selectContact(id); setCrmViewTab("pipeline"); }, [selectContact, setCrmViewTab]);
-  const handleToggleAutopilotPause = useCallback(() => setAutopilotPaused(!autopilotPaused), [autopilotPaused, setAutopilotPaused]);
-  const handleToggleGuide = useCallback(() => setShowGuide(!showGuide), [showGuide, setShowGuide]);
+  const handleToggleAutopilotPause = useCallback(() => setAutopilotPaused((prev: boolean) => !prev), [setAutopilotPaused]);
+  const handleToggleGuide = useCallback(() => setShowGuide((prev: boolean) => !prev), [setShowGuide]);
   const handleGuideAddContact = useCallback(() => state.setShowAddMenu(true), [state.setShowAddMenu]);
-  const handleGuideSegment = useCallback((segment: string) => { state.setActiveSegment(segment as any); setCrmViewTab("pipeline"); }, [state.setActiveSegment, setCrmViewTab]);
+  const handleGuideSegment = useCallback((segment: string) => { state.setActiveSegment(segment as SmartSegment); setCrmViewTab("pipeline"); }, [state.setActiveSegment, setCrmViewTab]);
   const handleGuideSelectMode = useCallback(() => { state.handleToggleSelectMode(); setCrmViewTab("pipeline"); }, [state.handleToggleSelectMode, setCrmViewTab]);
+  const handleTabChange = useCallback((t: string) => setCrmViewTab(t as "pipeline" | "insights" | "engage" | "database"), [setCrmViewTab]);
 
   const databaseContacts = useMemo(() => contacts.map((c) => ({
     id: c.id,
@@ -153,7 +158,7 @@ export default function ContactsPage() {
           { key: "engage", label: "Engage", icon: Sparkles },
         ]}
         activeTab={crmViewTab}
-        onTabChange={(t) => setCrmViewTab(t as "pipeline" | "insights" | "engage" | "database")}
+        onTabChange={handleTabChange}
       />
 
       <AnimatePresence mode="wait">

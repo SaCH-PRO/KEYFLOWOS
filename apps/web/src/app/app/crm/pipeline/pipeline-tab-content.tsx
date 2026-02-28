@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { AnimatePresence, motion, type PanInfo } from "framer-motion";
 import { X, List } from "lucide-react";
 import {
@@ -52,7 +52,8 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
   const prevSelectedRef = useRef<string | null>(null);
 
   const handleRefresh = useCallback(() => { void loadContacts(); void loadFlowData(); }, [loadContacts, loadFlowData]);
-  const handleAddContact = useCallback(() => setShowAddMenu(!showAddMenu), [setShowAddMenu, showAddMenu]);
+  const handleToggleAddMenu = useCallback(() => setShowAddMenu((prev: boolean) => !prev), [setShowAddMenu]);
+  const handleCloseAddMenu = useCallback(() => setShowAddMenu(false), [setShowAddMenu]);
   const handleMergeComplete = useCallback(() => { void loadContacts(); }, [loadContacts]);
   const handleLoadMore = useCallback(() => loadContacts({ append: true }), [loadContacts]);
   const handleRetry = useCallback(() => { void loadContacts(); }, [loadContacts]);
@@ -60,6 +61,7 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
   const handleOpenBroadcast = useCallback(() => setShowBroadcast(true), [setShowBroadcast]);
   const handleScanSuccess = useCallback(() => { void loadContacts(); void loadFlowData(); }, [loadContacts, loadFlowData]);
   const handleCancelForm = useCallback(() => { setShowAddForm(false); setEditingContact(null); }, [setShowAddForm, setEditingContact]);
+  const handleClearListFilter = useCallback(() => { setActiveListId(null); setActiveListContactIds(null); }, [setActiveListId, setActiveListContactIds]);
 
   useEffect(() => {
     if (selectedContactId && selectedContactId !== prevSelectedRef.current) {
@@ -89,7 +91,7 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
           <List className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
           <span>Filtered by list</span>
           <button
-            onClick={() => { setActiveListId(null); setActiveListContactIds(null); }}
+            onClick={handleClearListFilter}
             className="ml-auto text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
           >
             <X className="w-3 h-3" />
@@ -105,7 +107,7 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
             onImportFile={handleImportFile}
             onImportLink={handleImportLink}
             onDeviceImport={handleDeviceImport}
-            onClose={() => setShowAddMenu(false)}
+            onClose={handleCloseAddMenu}
             onScanSuccess={handleScanSuccess}
             loading={isPending}
             businessId={businessId ?? undefined}
@@ -156,7 +158,7 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
         selectMode={selectMode}
         onToggleSelectMode={handleToggleSelectMode}
         onRefresh={handleRefresh}
-        onAddContact={handleAddContact}
+        onAddContact={handleToggleAddMenu}
       />
 
       <div className="grid gap-6 lg:grid-cols-[1fr,450px]">
@@ -230,5 +232,3 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
     </div>
   );
 }
-
-export const MemoizedPipelineTabContent = React.memo(PipelineTabContent);
