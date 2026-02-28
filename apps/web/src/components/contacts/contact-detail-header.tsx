@@ -8,7 +8,6 @@ import {
   Trash2,
   X,
   MessageCircle,
-  Send,
   Globe,
   CalendarCheck,
   FileText,
@@ -42,26 +41,22 @@ const SOURCE_CONFIG: Record<string, { label: string; icon: typeof Globe }> = {
 interface ContactDetailHeaderProps {
   contact: ContactDetailData;
   isPinned?: boolean;
-  activeTab: string;
   onTogglePin?: (id: string) => void;
   onClose?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
   onUpdateStatus?: (status: string) => Promise<void>;
-  onSetActiveTab: (tab: string) => void;
   onQuickAction?: (contactId: string, action: DetailQuickAction) => void;
 }
 
 export function ContactDetailHeader({
   contact,
   isPinned,
-  activeTab,
   onTogglePin,
   onClose,
   onEdit,
   onDelete,
   onUpdateStatus,
-  onSetActiveTab,
   onQuickAction,
 }: ContactDetailHeaderProps) {
   const fullName = `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "Unnamed";
@@ -208,14 +203,6 @@ export function ContactDetailHeader({
             <span className="hidden sm:inline text-emerald-500 text-xs">WhatsApp</span>
           </a>
         )}
-        <button
-          onClick={() => onSetActiveTab("compose")}
-          className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg transition-colors text-sm ${activeTab === "compose" ? "bg-[hsl(var(--kf-accent1))]/10" : "hover:bg-[hsl(var(--kf-accent1))]/10"}`}
-          title="Quick compose"
-        >
-          <Send className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-          <span className="hidden sm:inline text-xs" style={{ color: "hsl(var(--kf-accent1))" }}>Compose</span>
-        </button>
       </div>
 
       {onQuickAction && (
