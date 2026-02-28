@@ -156,10 +156,10 @@ export function ContactDetailTabs({
     <>
       <div className="flex border-b border-border overflow-x-auto" role="tablist">
         {[
-          { key: "timeline", label: "Timeline", icon: History },
           { key: "notes", label: "Notes", icon: MessageSquare, count: notes.length },
           { key: "tasks", label: "Tasks", icon: ListTodo, count: tasks.filter((t) => t.status !== "DONE").length },
           { key: "compose", label: "Compose", icon: Send },
+          { key: "timeline", label: "Timeline", icon: History },
         ].map(({ key, label, icon: Icon, count }) => (
           <button
             key={key}
