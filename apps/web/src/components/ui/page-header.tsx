@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { Plus } from "lucide-react";
+import { MissionsButton } from "./missions-button";
 
 interface PageHeaderProps {
   icon: React.ElementType;
@@ -42,6 +43,7 @@ export function PageHeader({
           </div>
           {title}
           {titleExtra}
+          <MissionsButton />
         </h1>
         {subtitle && (
           <p className="text-sm text-muted-foreground mt-1">{subtitle}</p>
