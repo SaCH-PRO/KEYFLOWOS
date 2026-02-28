@@ -832,17 +832,20 @@ export default function ContactsPage() {
                     <ChevronDown className="w-3 h-3" />
                   </button>
                   {bulkStatus === "open" && (
-                    <div className="absolute top-full mt-1 right-0 z-50 kf-card border border-border shadow-xl rounded-xl py-1 w-36">
-                      {(["LEAD", "PROSPECT", "CLIENT", "LOST"] as const).map((s) => (
-                        <button
-                          key={s}
-                          onClick={() => handleBulkStatusChange(s)}
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-muted/50 transition-colors"
-                        >
-                          {s}
-                        </button>
-                      ))}
-                    </div>
+                    <>
+                      <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" onClick={() => setBulkStatus(null)} />
+                      <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 w-44 max-h-[85vh] overflow-y-auto">
+                        {(["LEAD", "PROSPECT", "CLIENT", "LOST"] as const).map((s) => (
+                          <button
+                            key={s}
+                            onClick={() => handleBulkStatusChange(s)}
+                            className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors"
+                          >
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                    </>
                   )}
                 </div>
                 <div className="relative">
@@ -855,24 +858,28 @@ export default function ContactsPage() {
                     Tag
                   </button>
                   {showBulkTag && (
-                    <div className="absolute top-full mt-1 right-0 z-50 kf-card border border-border shadow-xl rounded-xl p-3 w-52">
-                      <input
-                        type="text"
-                        placeholder="Enter tag name..."
-                        value={bulkTagInput}
-                        onChange={(e) => setBulkTagInput(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") handleBulkTag(bulkTagInput); }}
-                        className="kf-input w-full text-sm mb-2"
-                        autoFocus
-                      />
-                      <button
-                        onClick={() => handleBulkTag(bulkTagInput)}
-                        disabled={!bulkTagInput.trim()}
-                        className="kf-btn-primary w-full text-sm disabled:opacity-50"
-                      >
-                        Apply Tag
-                      </button>
-                    </div>
+                    <>
+                      <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" onClick={() => setShowBulkTag(false)} />
+                      <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 kf-card border border-border shadow-2xl rounded-xl p-4 w-64 max-h-[85vh] overflow-y-auto">
+                        <p className="text-xs font-semibold text-muted-foreground mb-2">Add Tag</p>
+                        <input
+                          type="text"
+                          placeholder="Enter tag name..."
+                          value={bulkTagInput}
+                          onChange={(e) => setBulkTagInput(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleBulkTag(bulkTagInput); }}
+                          className="kf-input w-full text-sm mb-2"
+                          autoFocus
+                        />
+                        <button
+                          onClick={() => handleBulkTag(bulkTagInput)}
+                          disabled={!bulkTagInput.trim()}
+                          className="kf-btn-primary w-full text-sm disabled:opacity-50"
+                        >
+                          Apply Tag
+                        </button>
+                      </div>
+                    </>
                   )}
                 </div>
                 <button
@@ -908,8 +915,8 @@ export default function ContactsPage() {
         </button>
         {showAddMenu && (
           <>
-            <div className="fixed inset-0 z-40" onClick={() => setShowAddMenu(false)} />
-            <div className="absolute left-0 top-full mt-1 z-50 kf-card border border-border shadow-xl rounded-xl py-1 w-52">
+            <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" onClick={() => setShowAddMenu(false)} />
+            <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 w-64 max-h-[85vh] overflow-y-auto">
               <button
                 onClick={() => { setShowAddMenu(false); setShowAddForm(true); }}
                 className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-left"
@@ -1147,17 +1154,20 @@ export default function ContactsPage() {
               <span className="hidden sm:inline">Sort</span>
             </button>
             {showSort && (
-              <div className="absolute top-full mt-1 right-0 z-50 kf-card border border-border shadow-xl rounded-xl py-1 w-44">
-                {SORT_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => { setSortBy(opt.value); setShowSort(false); }}
-                    className={`w-full text-left px-3 py-2 text-sm hover:bg-muted/50 transition-colors ${sortBy === opt.value ? "text-[hsl(var(--kf-accent1))] font-medium" : ""}`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
+              <>
+                <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" onClick={() => setShowSort(false)} />
+                <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 w-48 max-h-[85vh] overflow-y-auto">
+                  {SORT_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => { setSortBy(opt.value); setShowSort(false); }}
+                      className={`w-full text-left px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors ${sortBy === opt.value ? "text-[hsl(var(--kf-accent1))] font-medium" : ""}`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </>
             )}
           </div>
           <button
