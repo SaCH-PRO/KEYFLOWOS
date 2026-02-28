@@ -11,6 +11,7 @@ interface PageHeaderProps {
   actionIcon?: React.ElementType;
   onAction?: () => void;
   rightSlot?: React.ReactNode;
+  titleExtra?: React.ReactNode;
 }
 
 export function PageHeader({
@@ -21,6 +22,7 @@ export function PageHeader({
   actionIcon: ActionIcon = Plus,
   onAction,
   rightSlot,
+  titleExtra,
 }: PageHeaderProps) {
   return (
     <motion.div
@@ -39,6 +41,7 @@ export function PageHeader({
             <Icon className="w-5 h-5 text-white" />
           </div>
           {title}
+          {titleExtra}
         </h1>
         {subtitle && (
           <p className="text-sm text-muted-foreground mt-1">{subtitle}</p>
