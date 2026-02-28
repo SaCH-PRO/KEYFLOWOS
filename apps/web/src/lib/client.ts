@@ -15,6 +15,9 @@ const contactMetaSchema = z.object({
   bookingsRecent: z.number().optional(),
   leadScore: z.number().optional(),
   predictedNextBookingAt: z.string().nullable().optional(),
+  totalRevenue: z.number().optional(),
+  invoiceCount: z.number().optional(),
+  bookingCount: z.number().optional(),
 });
 
 const contactSchema = z.object({

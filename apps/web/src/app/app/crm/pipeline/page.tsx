@@ -1,42 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import {
-  Plus,
-  Search,
-  Filter,
   Users,
-  RefreshCw,
-  ChevronDown,
   X,
-  Send,
-  Star,
-  Clock,
-  CheckSquare,
-  ArrowUpDown,
-  Tag,
-  Flame,
-  AlertTriangle,
-  CalendarPlus,
-  TrendingUp,
-  UserCheck,
   List,
   BarChart3,
   Sparkles,
-  Upload,
-  Link2,
-  UserPlus,
   Database,
   Lightbulb,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  ContactCard,
   ContactCardData,
   ContactForm,
   ContactFormData,
-  ContactDetail,
   ContactDetailData,
   ContactEvent,
   ContactNote,
@@ -46,10 +25,6 @@ import {
   NextActionQueue,
   AutopilotActions,
   PredictiveRevenue,
-  ContactHealthScore,
-  RelationshipTimeline,
-  ConversationContext,
-  AiCopilot,
   BroadcastDrawer,
 } from "@/components/contacts";
 import type { QuickActionType } from "@/components/contacts";
@@ -64,11 +39,15 @@ import type { AiInsight } from "@/components/contacts/ai-copilot";
 import { toast } from "sonner";
 import { KanbanSkeleton } from "@/components/ui/skeleton";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { ConnectionBanner } from "@/components/ui/connection-banner";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { DuplicateDetector } from "./duplicate-detector";
 import { ContactsDatabase } from "./contacts-database";
+import { PipelineToolbar } from "./pipeline-toolbar";
+import { PipelineContactList } from "./pipeline-contact-list";
+import { PipelineDetailPanel } from "./pipeline-detail-panel";
+import { BulkActionBar } from "./bulk-action-bar";
+import type { SortOption, SmartSegment, ListTab } from "./pipeline-toolbar";
 import {
   Contact,
   ContactDetail as ContactDetailAPI,
@@ -93,35 +72,15 @@ import {
   fetchConversationContext,
   generateAiInsight,
   logContactEvent,
-  CrmNextAction,
+  bulkUpdateContacts,
+  bulkDeleteContacts,
 } from "@/lib/client";
 import { ensureWorkspace, getStoredBusinessId } from "@/lib/workspace";
 
-const STATUSES = ["ALL", "LEAD", "PROSPECT", "CLIENT", "LOST"] as const;
 const PAGE_SIZE = 25;
 const PINNED_KEY = "kf_pinned_contacts";
 const RECENT_KEY = "kf_recent_contacts";
 const MAX_RECENT = 8;
-
-type SortOption = "name" | "newest" | "oldest" | "revenue" | "score";
-const SORT_OPTIONS: { value: SortOption; label: string }[] = [
-  { value: "name", label: "Name A-Z" },
-  { value: "newest", label: "Newest First" },
-  { value: "oldest", label: "Oldest First" },
-  { value: "revenue", label: "Highest Revenue" },
-  { value: "score", label: "Highest Score" },
-];
-
-type SmartSegment = "high-value" | "needs-followup" | "new-this-week" | "at-risk" | "stale";
-const SMART_SEGMENTS: { key: SmartSegment; label: string; icon: typeof Flame; color: string }[] = [
-  { key: "high-value", label: "High Value", icon: TrendingUp, color: "hsl(142 76% 36%)" },
-  { key: "needs-followup", label: "Needs Follow-up", icon: AlertTriangle, color: "hsl(var(--kf-accent1))" },
-  { key: "new-this-week", label: "New This Week", icon: CalendarPlus, color: "hsl(var(--kf-accent2))" },
-  { key: "at-risk", label: "At Risk", icon: Flame, color: "hsl(0 70% 55%)" },
-  { key: "stale", label: "No Activity 30d", icon: Clock, color: "hsl(var(--kf-muted-foreground))" },
-];
-
-type ContactWithTags = Omit<Contact, "tags"> & { tags?: string[]; source?: string | null; sourceDetail?: string | null; preferredChannel?: string | null; createdAt?: string | null };
 
 function getPinnedIds(): string[] {
   if (typeof window === "undefined") return [];
@@ -142,11 +101,12 @@ function addRecentId(id: string) {
 
 export default function ContactsPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
 
-  const [contacts, setContacts] = useState<ContactWithTags[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [segments, setSegments] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -155,7 +115,6 @@ export default function ContactsPage() {
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
-  const [showFilters, setShowFilters] = useState(false);
 
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   const [contactDetail, setContactDetail] = useState<ContactDetailAPI | null>(null);
@@ -182,19 +141,10 @@ export default function ContactsPage() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBroadcast, setShowBroadcast] = useState(false);
-  const [activeListTab, setActiveListTab] = useState<"all" | "pinned" | "recent">("all");
+  const [activeListTab, setActiveListTab] = useState<ListTab>("all");
   const [sortBy, setSortBy] = useState<SortOption>("newest");
-  const [showSort, setShowSort] = useState(false);
   const [activeSegment, setActiveSegment] = useState<SmartSegment | null>(null);
-  const [page, setPage] = useState(1);
-  const isMobile = typeof window !== "undefined" && window.innerWidth < 640;
-  const [pageSize, setPageSize] = useState(isMobile ? 10 : 20);
-  const [bulkStatus, setBulkStatus] = useState<string | null>(null);
-  const [bulkTagInput, setBulkTagInput] = useState("");
-  const [showBulkTag, setShowBulkTag] = useState(false);
   const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
-  const router = useRouter();
-  const [googleContactsImported, setGoogleContactsImported] = useState(false);
   const [activeListId, setActiveListId] = useState<string | null>(null);
   const [activeListContactIds, setActiveListContactIds] = useState<string[] | null>(null);
   const [crmViewTab, setCrmViewTab] = useState<"pipeline" | "insights" | "engage" | "database">("pipeline");
@@ -234,7 +184,6 @@ export default function ContactsPage() {
 
     if (googleSuccess === "true") {
       toast.success(`Google Contacts imported successfully${imported ? ` (${imported} contacts)` : ""}`);
-      setGoogleContactsImported(true);
       window.history.replaceState({}, "", window.location.pathname);
     } else if (googleError) {
       toast.error(`Google import failed: ${decodeURIComponent(googleError)}`);
@@ -242,15 +191,10 @@ export default function ContactsPage() {
     }
   }, [searchParams]);
 
-
   useEffect(() => {
     const timeout = setTimeout(() => setSearch(searchInput.trim()), 300);
     return () => clearTimeout(timeout);
   }, [searchInput]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [search, statusFilter, activeSegment, sortBy, activeListTab, pageSize]);
 
   const loadFlowData = useCallback(async () => {
     if (!businessId) return;
@@ -509,7 +453,6 @@ export default function ContactsPage() {
       await logContactEvent(selectedContactId, { type, description }, businessId);
       void loadDetail(selectedContactId);
     } catch {
-      // silent fail for event logging
     }
   };
 
@@ -613,34 +556,70 @@ export default function ContactsPage() {
 
   const handleBulkStatusChange = useCallback(async (newStatus: string) => {
     if (!businessId || selectedIds.size === 0) return;
-    const promises = Array.from(selectedIds).map((id) =>
-      updateContact({ businessId, contactId: id, status: newStatus })
-    );
-    await Promise.all(promises);
-    setContacts((prev) => prev.map((c) => selectedIds.has(c.id) ? { ...c, status: newStatus } : c));
-    setSelectedIds(new Set());
-    setSelectMode(false);
-    setBulkStatus(null);
+    try {
+      await bulkUpdateContacts({ businessId, contactIds: Array.from(selectedIds), status: newStatus });
+      setContacts((prev) => prev.map((c) => selectedIds.has(c.id) ? { ...c, status: newStatus } : c));
+      setSelectedIds(new Set());
+      setSelectMode(false);
+      toast.success(`Updated ${selectedIds.size} contact${selectedIds.size !== 1 ? "s" : ""}`);
+    } catch {
+      toast.error("Failed to update contacts");
+    }
   }, [businessId, selectedIds]);
 
   const handleBulkTag = useCallback(async (tag: string) => {
     if (!businessId || selectedIds.size === 0 || !tag.trim()) return;
-    const tagTrimmed = tag.trim();
-    const promises = Array.from(selectedIds).map((id) => {
-      const contact = contacts.find((c) => c.id === id);
-      const existingTags = contact?.tags ?? [];
-      if (existingTags.includes(tagTrimmed)) return Promise.resolve();
-      return updateContact({ businessId, contactId: id, tags: [...existingTags, tagTrimmed] });
+    try {
+      await bulkUpdateContacts({ businessId, contactIds: Array.from(selectedIds), addTags: [tag.trim()] });
+      setContacts((prev) => prev.map((c) => {
+        if (!selectedIds.has(c.id)) return c;
+        const tags = c.tags ?? [];
+        return tags.includes(tag.trim()) ? c : { ...c, tags: [...tags, tag.trim()] };
+      }));
+      toast.success(`Tagged ${selectedIds.size} contact${selectedIds.size !== 1 ? "s" : ""}`);
+    } catch {
+      toast.error("Failed to tag contacts");
+    }
+  }, [businessId, selectedIds]);
+
+  const handleBulkDelete = useCallback(async () => {
+    if (!businessId || selectedIds.size === 0) return;
+    setConfirmState({
+      open: true,
+      action: async () => {
+        try {
+          await bulkDeleteContacts({ businessId, contactIds: Array.from(selectedIds) });
+          setContacts((prev) => prev.filter((c) => !selectedIds.has(c.id)));
+          if (selectedContactId && selectedIds.has(selectedContactId)) {
+            setSelectedContactId(null);
+            setContactDetail(null);
+          }
+          setSelectedIds(new Set());
+          setSelectMode(false);
+          void loadFlowData();
+          toast.success(`Deleted ${selectedIds.size} contact${selectedIds.size !== 1 ? "s" : ""}`);
+        } catch {
+          toast.error("Failed to delete contacts");
+        }
+      },
     });
-    await Promise.all(promises);
-    setContacts((prev) => prev.map((c) => {
-      if (!selectedIds.has(c.id)) return c;
-      const tags = c.tags ?? [];
-      return tags.includes(tagTrimmed) ? c : { ...c, tags: [...tags, tagTrimmed] };
-    }));
-    setBulkTagInput("");
-    setShowBulkTag(false);
-  }, [businessId, selectedIds, contacts]);
+  }, [businessId, selectedIds, selectedContactId, loadFlowData]);
+
+  const handleToggleSelectMode = useCallback(() => {
+    setSelectMode((prev) => {
+      if (prev) {
+        setSelectedIds(new Set());
+      }
+      return !prev;
+    });
+  }, []);
+
+  const handleRefreshConversationContext = useCallback(async () => {
+    if (selectedContactId && businessId) {
+      const { data } = await fetchConversationContext(selectedContactId, businessId);
+      if (data) setConversationContext(data);
+    }
+  }, [selectedContactId, businessId]);
 
   const selectedContact = useMemo(() => {
     if (!contactDetail?.contact) return null;
@@ -659,7 +638,7 @@ export default function ContactsPage() {
 
   const pinnedContacts = useMemo(() => contacts.filter((c) => pinnedIds.includes(c.id)), [contacts, pinnedIds]);
   const recentContacts = useMemo(() => {
-    return recentIds.map((id) => contacts.find((c) => c.id === id)).filter(Boolean) as ContactWithTags[];
+    return recentIds.map((id) => contacts.find((c) => c.id === id)).filter(Boolean) as Contact[];
   }, [contacts, recentIds]);
 
   const segmentCounts = useMemo(() => {
@@ -668,9 +647,9 @@ export default function ContactsPage() {
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     const counts: Record<SmartSegment, number> = { "high-value": 0, "needs-followup": 0, "new-this-week": 0, "at-risk": 0, "stale": 0 };
     for (const c of contacts) {
-      const meta = (c as any).meta;
-      if (meta?.totalRevenue > 500 || meta?.invoiceCount > 3) counts["high-value"]++;
-      if (meta?.overdueTasks > 0 || meta?.unpaidInvoices > 0) counts["needs-followup"]++;
+      const meta = c.meta;
+      if (meta?.totalRevenue && meta.totalRevenue > 500 || meta?.invoiceCount && meta.invoiceCount > 3) counts["high-value"]++;
+      if (meta?.overdueTasks && meta.overdueTasks > 0 || meta?.unpaidInvoices && meta.unpaidInvoices > 0) counts["needs-followup"]++;
       if (c.createdAt && new Date(c.createdAt) > weekAgo) counts["new-this-week"]++;
       if (c.status === "CLIENT" && meta?.lastInteractionAt && new Date(meta.lastInteractionAt) < thirtyDaysAgo) counts["at-risk"]++;
       if (meta?.lastInteractionAt && new Date(meta.lastInteractionAt) < thirtyDaysAgo) counts["stale"]++;
@@ -679,7 +658,7 @@ export default function ContactsPage() {
   }, [contacts]);
 
   const displayContacts = useMemo(() => {
-    let list: ContactWithTags[];
+    let list: Contact[];
     if (activeListTab === "pinned") list = pinnedContacts;
     else if (activeListTab === "recent") list = recentContacts;
     else list = [...contacts];
@@ -694,10 +673,10 @@ export default function ContactsPage() {
       const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
       const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
       list = list.filter((c) => {
-        const meta = (c as any).meta;
+        const meta = c.meta;
         switch (activeSegment) {
-          case "high-value": return meta?.totalRevenue > 500 || meta?.invoiceCount > 3;
-          case "needs-followup": return meta?.overdueTasks > 0 || meta?.unpaidInvoices > 0;
+          case "high-value": return (meta?.totalRevenue && meta.totalRevenue > 500) || (meta?.invoiceCount && meta.invoiceCount > 3);
+          case "needs-followup": return (meta?.overdueTasks && meta.overdueTasks > 0) || (meta?.unpaidInvoices && meta.unpaidInvoices > 0);
           case "new-this-week": return c.createdAt && new Date(c.createdAt) > weekAgo;
           case "at-risk": return c.status === "CLIENT" && meta?.lastInteractionAt && new Date(meta.lastInteractionAt) < thirtyDaysAgo;
           case "stale": return meta?.lastInteractionAt && new Date(meta.lastInteractionAt) < thirtyDaysAgo;
@@ -707,8 +686,8 @@ export default function ContactsPage() {
     }
 
     list.sort((a, b) => {
-      const metaA = (a as any).meta;
-      const metaB = (b as any).meta;
+      const metaA = a.meta;
+      const metaB = b.meta;
       switch (sortBy) {
         case "name": {
           const nameA = `${a.firstName ?? ""} ${a.lastName ?? ""}`.trim().toLowerCase();
@@ -725,12 +704,6 @@ export default function ContactsPage() {
 
     return list;
   }, [activeListTab, contacts, pinnedContacts, recentContacts, activeSegment, sortBy, activeListContactIds]);
-
-  const totalPages = Math.max(1, Math.ceil(displayContacts.length / pageSize));
-  const paginatedContacts = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return displayContacts.slice(start, start + pageSize);
-  }, [displayContacts, page, pageSize]);
 
   const selectedContactsForBroadcast = useMemo(
     () => contacts.filter((c) => selectedIds.has(c.id)) as ContactCardData[],
@@ -819,118 +792,7 @@ export default function ContactsPage() {
             </AnimatePresence>
           </div>
         }
-        rightSlot={
-          <div className="flex items-center gap-2 flex-wrap">
-            {selectMode ? (
-              <>
-                <span className="text-sm text-muted-foreground">{selectedIds.size} selected</span>
-                <button onClick={handleSelectAll} className="kf-btn-secondary text-sm px-3 py-1.5">
-                  {selectedIds.size === contacts.length ? "Deselect All" : "Select All"}
-                </button>
-                <div className="relative">
-                  <button
-                    onClick={() => setBulkStatus(bulkStatus ? null : "open")}
-                    disabled={selectedIds.size === 0}
-                    className="kf-btn-secondary inline-flex items-center gap-1.5 text-sm disabled:opacity-50"
-                  >
-                    <UserCheck className="w-4 h-4" />
-                    Status
-                    <ChevronDown className="w-3 h-3" />
-                  </button>
-                  {bulkStatus === "open" && (
-                    <>
-                      <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" onClick={() => setBulkStatus(null)} />
-                      <div className="fixed left-2 right-2 top-20 sm:left-1/2 sm:right-auto sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 sm:w-44 max-h-[80vh] overflow-y-auto">
-                        {(["LEAD", "PROSPECT", "CLIENT", "LOST"] as const).map((s) => (
-                          <button
-                            key={s}
-                            onClick={() => handleBulkStatusChange(s)}
-                            className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors"
-                          >
-                            {s}
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
-                <div className="relative">
-                  <button
-                    onClick={() => setShowBulkTag(!showBulkTag)}
-                    disabled={selectedIds.size === 0}
-                    className="kf-btn-secondary inline-flex items-center gap-1.5 text-sm disabled:opacity-50"
-                  >
-                    <Tag className="w-4 h-4" />
-                    Tag
-                  </button>
-                  {showBulkTag && (
-                    <>
-                      <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" onClick={() => setShowBulkTag(false)} />
-                      <div className="fixed left-2 right-2 top-20 sm:left-1/2 sm:right-auto sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 z-50 kf-card border border-border shadow-2xl rounded-xl p-4 sm:w-64 max-h-[80vh] overflow-y-auto">
-                        <p className="text-xs font-semibold text-muted-foreground mb-2">Add Tag</p>
-                        <input
-                          type="text"
-                          placeholder="Enter tag name..."
-                          value={bulkTagInput}
-                          onChange={(e) => setBulkTagInput(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter") handleBulkTag(bulkTagInput); }}
-                          className="kf-input w-full text-sm mb-2"
-                          autoFocus
-                        />
-                        <button
-                          onClick={() => handleBulkTag(bulkTagInput)}
-                          disabled={!bulkTagInput.trim()}
-                          className="kf-btn-primary w-full text-sm disabled:opacity-50"
-                        >
-                          Apply Tag
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-                <button
-                  onClick={() => { setShowBroadcast(true); }}
-                  disabled={selectedIds.size === 0}
-                  className="kf-btn-primary inline-flex items-center gap-2 text-sm disabled:opacity-50"
-                >
-                  <Send className="w-4 h-4" />
-                  Broadcast
-                </button>
-                <button
-                  onClick={() => { setSelectMode(false); setSelectedIds(new Set()); setBulkStatus(null); setShowBulkTag(false); }}
-                  className="kf-btn-secondary text-sm px-3 py-1.5"
-                >
-                  Cancel
-                </button>
-              </>
-            ) : (
-              <></>
-            )}
-          </div>
-        }
       />
-
-      <button
-        onClick={() => setShowAddMenu(!showAddMenu)}
-        className="kf-btn-primary inline-flex items-center gap-2"
-      >
-        <Plus className="w-4 h-4" />
-        Add Contact
-      </button>
-
-      <AnimatePresence>
-        {showAddMenu && (
-          <ContactCapture
-            onManualAdd={() => setShowAddForm(true)}
-            onImportFile={handleImportFile}
-            onImportLink={handleImportLink}
-            onClose={() => setShowAddMenu(false)}
-            loading={isPending}
-            businessId={businessId ?? undefined}
-          />
-        )}
-      </AnimatePresence>
-
 
       <TabNav
         tabs={[
@@ -1010,39 +872,39 @@ export default function ContactsPage() {
           businessId={businessId}
           contacts={contacts.map((c) => ({
             id: c.id,
-            firstName: c.firstName,
-            lastName: c.lastName,
-            email: c.email,
-            phone: c.phone,
-            status: c.status,
-            source: (c as any).source ?? null,
-            tags: Array.isArray((c as any).tags) ? (c as any).tags : [],
-            companyName: (c as any).companyName ?? null,
-            jobTitle: (c as any).jobTitle ?? null,
-            city: (c as any).city ?? null,
-            country: (c as any).country ?? null,
-            preferredChannel: (c as any).preferredChannel ?? null,
-            createdAt: (c as any).createdAt ?? null,
-            addressLine1: (c as any).addressLine1 ?? null,
-            addressLine2: (c as any).addressLine2 ?? null,
-            whatsappNumber: (c as any).whatsappNumber ?? null,
-            department: (c as any).department ?? null,
-            industry: (c as any).industry ?? null,
-            lifecycleStage: (c as any).lifecycleStage ?? null,
-            sourceDetail: (c as any).sourceDetail ?? null,
-            notesInternal: (c as any).notesInternal ?? null,
-            updatedAt: (c as any).updatedAt ?? null,
-            secondaryEmail: (c as any).secondaryEmail ?? null,
-            secondaryPhone: (c as any).secondaryPhone ?? null,
-            displayName: (c as any).displayName ?? null,
-            segment: (c as any).segment ?? null,
-            language: (c as any).language ?? null,
-            timezone: (c as any).timezone ?? null,
-            state: (c as any).state ?? null,
-            postalCode: (c as any).postalCode ?? null,
-            marketingOptIn: (c as any).marketingOptIn ?? null,
-            doNotContact: (c as any).doNotContact ?? null,
-            custom: (c as any).custom ?? null,
+            firstName: c.firstName ?? null,
+            lastName: c.lastName ?? null,
+            email: c.email ?? null,
+            phone: c.phone ?? null,
+            status: c.status ?? null,
+            source: c.source ?? null,
+            tags: Array.isArray(c.tags) ? c.tags : [],
+            companyName: c.companyName ?? null,
+            jobTitle: c.jobTitle ?? null,
+            city: c.city ?? null,
+            country: c.country ?? null,
+            preferredChannel: c.preferredChannel ?? null,
+            createdAt: c.createdAt ?? null,
+            addressLine1: c.addressLine1 ?? null,
+            addressLine2: c.addressLine2 ?? null,
+            whatsappNumber: c.whatsappNumber ?? null,
+            department: c.department ?? null,
+            industry: c.industry ?? null,
+            lifecycleStage: c.lifecycleStage ?? null,
+            sourceDetail: c.sourceDetail ?? null,
+            notesInternal: c.notesInternal ?? null,
+            updatedAt: c.updatedAt ?? null,
+            secondaryEmail: c.secondaryEmail ?? null,
+            secondaryPhone: c.secondaryPhone ?? null,
+            displayName: c.displayName ?? null,
+            segment: c.segment ?? null,
+            language: c.language ?? null,
+            timezone: c.timezone ?? null,
+            state: c.state ?? null,
+            postalCode: c.postalCode ?? null,
+            marketingOptIn: c.marketingOptIn ?? null,
+            doNotContact: c.doNotContact ?? null,
+            custom: c.custom ?? null,
           }))}
           onRefresh={() => { void loadContacts(); }}
           activeListId={activeListId}
@@ -1072,6 +934,19 @@ export default function ContactsPage() {
       {crmViewTab === "pipeline" && (
       <>
       <AnimatePresence>
+        {showAddMenu && (
+          <ContactCapture
+            onManualAdd={() => setShowAddForm(true)}
+            onImportFile={handleImportFile}
+            onImportLink={handleImportLink}
+            onClose={() => setShowAddMenu(false)}
+            loading={isPending}
+            businessId={businessId ?? undefined}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {showAddForm && (
           <ContactForm
             onSubmit={handleSubmitContact}
@@ -1082,228 +957,74 @@ export default function ContactsPage() {
         )}
       </AnimatePresence>
 
+      {selectMode && (
+        <BulkActionBar
+          selectedCount={selectedIds.size}
+          totalCount={contacts.length}
+          onSelectAll={handleSelectAll}
+          onStatusChange={handleBulkStatusChange}
+          onAddTag={handleBulkTag}
+          onBulkDelete={handleBulkDelete}
+          onBroadcast={() => setShowBroadcast(true)}
+          onCancel={handleToggleSelectMode}
+        />
+      )}
 
-      <div className="kf-card p-3 space-y-3">
-        <div className="flex items-center gap-2">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Search contacts..."
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              aria-label="Search contacts"
-              className="kf-input w-full pl-9 pr-3 py-2 text-sm"
-            />
-          </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className={`p-2 rounded-lg transition-all ${showFilters ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground hover:bg-muted/50"}`}
-              aria-label="Filters"
-            >
-              <Filter className="w-4 h-4" />
-            </button>
-            <div className="relative">
-              <button
-                onClick={() => setShowSort(!showSort)}
-                className={`p-2 rounded-lg transition-all ${showSort ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground hover:bg-muted/50"}`}
-                aria-label="Sort"
-              >
-                <ArrowUpDown className="w-4 h-4" />
-              </button>
-              {showSort && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowSort(false)} />
-                  <div className="fixed left-2 right-2 top-20 sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-1 z-50 kf-card border border-border shadow-2xl rounded-xl py-1 sm:w-44 max-h-[80vh] overflow-y-auto">
-                    {SORT_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.value}
-                        onClick={() => { setSortBy(opt.value); setShowSort(false); }}
-                        className={`w-full text-left px-4 py-2 text-sm hover:bg-muted/50 transition-colors ${sortBy === opt.value ? "text-[hsl(var(--kf-accent1))] font-medium" : ""}`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-            <button
-              onClick={() => { void loadContacts(); void loadFlowData(); }}
-              disabled={loading}
-              className="p-2 rounded-lg text-muted-foreground hover:bg-muted/50 transition-all disabled:opacity-50"
-              aria-label="Refresh"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-            </button>
-          </div>
-        </div>
-
-        <AnimatePresence>
-          {showFilters && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              className="flex flex-wrap gap-1.5"
-            >
-              {STATUSES.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setStatusFilter(s)}
-                  className={`px-3 py-1.5 text-xs rounded-lg transition-all ${statusFilter === s ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] ring-1 ring-[hsl(var(--kf-accent1))]/30 font-medium" : "bg-muted/30 text-muted-foreground"}`}
-                >
-                  {s}
-                </button>
-              ))}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
-          {SMART_SEGMENTS.map(({ key, label, icon: SIcon, color }) => {
-            const count = segmentCounts[key];
-            const isActive = activeSegment === key;
-            return (
-              <button
-                key={key}
-                onClick={() => setActiveSegment(isActive ? null : key)}
-                className={`inline-flex items-center gap-1 px-2.5 py-1 text-[11px] rounded-full transition-all whitespace-nowrap flex-shrink-0 ${
-                  isActive
-                    ? "ring-1 ring-[hsl(var(--kf-accent1))]/40 bg-[hsl(var(--kf-accent1))]/10 font-medium"
-                    : "bg-muted/30 text-muted-foreground hover:bg-muted/50"
-                }`}
-                style={isActive ? { color } : undefined}
-              >
-                <SIcon className="w-3 h-3" style={{ color }} />
-                {label}
-                {count > 0 && (
-                  <span className="text-[9px] font-bold" style={{ color }}>{count}</span>
-                )}
-              </button>
-            );
-          })}
-          {activeSegment && (
-            <button
-              onClick={() => setActiveSegment(null)}
-              className="p-1 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/50 flex-shrink-0"
-              aria-label="Clear segment"
-            >
-              <X className="w-3 h-3" />
-            </button>
-          )}
-        </div>
-
-        <div className="flex gap-0.5 border-b border-border/50">
-          {[
-            { key: "all", label: "All", count: contacts.length, icon: Users },
-            { key: "pinned", label: "Pinned", count: pinnedContacts.length, icon: Star },
-            { key: "recent", label: "Recent", count: recentContacts.length, icon: Clock },
-          ].map(({ key, label, count, icon: Icon }) => (
-            <button
-              key={key}
-              onClick={() => setActiveListTab(key as typeof activeListTab)}
-              className={`flex items-center gap-1 px-3 py-1.5 text-xs transition-colors border-b-2 -mb-px ${
-                activeListTab === key
-                  ? "border-[hsl(var(--kf-accent1))] text-foreground font-medium"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Icon className="w-3 h-3" />
-              <span>{label}</span>
-              <span className="text-[10px] opacity-60">{count}</span>
-            </button>
-          ))}
-        </div>
-      </div>
+      <PipelineToolbar
+        searchInput={searchInput}
+        onSearchChange={setSearchInput}
+        statusFilter={statusFilter}
+        onStatusFilterChange={setStatusFilter}
+        sortBy={sortBy}
+        onSortChange={setSortBy}
+        activeSegment={activeSegment}
+        onSegmentChange={setActiveSegment}
+        segmentCounts={segmentCounts}
+        activeListTab={activeListTab}
+        onListTabChange={setActiveListTab}
+        allCount={contacts.length}
+        pinnedCount={pinnedContacts.length}
+        recentCount={recentContacts.length}
+        loading={loading}
+        selectMode={selectMode}
+        onToggleSelectMode={handleToggleSelectMode}
+        onRefresh={() => { void loadContacts(); void loadFlowData(); }}
+        onAddContact={() => setShowAddMenu(!showAddMenu)}
+      />
 
       <div className="grid gap-6 lg:grid-cols-[1fr,450px]">
-        <div className="space-y-3">
-          {loading && contacts.length === 0 ? (
-            <div className="kf-card p-8 text-center">
-              <RefreshCw className="w-8 h-8 animate-spin mx-auto text-muted-foreground mb-3" />
-              <p className="text-muted-foreground">Loading contacts...</p>
-            </div>
-          ) : displayContacts.length === 0 ? (
-            <div className="kf-card p-8 text-center">
-              <Users className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
-              <p className="text-lg font-medium mb-1">
-                {activeListTab === "pinned" ? "No pinned contacts" : activeListTab === "recent" ? "No recent contacts" : "No contacts yet"}
-              </p>
-              <p className="text-muted-foreground mb-4">
-                {activeListTab === "pinned"
-                  ? "Pin your most important contacts for quick access"
-                  : activeListTab === "recent"
-                  ? "Your recently viewed contacts will appear here"
-                  : "Add your first contact to get started"}
-              </p>
-              {activeListTab === "all" && (
-                <button
-                  onClick={() => setShowAddForm(true)}
-                  className="kf-btn-primary inline-flex items-center gap-2"
-                >
-                  <Plus className="w-4 h-4" />
-                  Add Contact
-                </button>
-              )}
-            </div>
-          ) : (
-            <>
-              {paginatedContacts.map((contact, index) => (
-                <ContactCard
-                  key={contact.id}
-                  contact={contact as ContactCardData}
-                  isSelected={selectedContactId === contact.id}
-                  selectable={selectMode}
-                  selected={selectedIds.has(contact.id)}
-                  onToggleSelect={handleToggleSelect}
-                  isPinned={pinnedIds.includes(contact.id)}
-                  onTogglePin={handleTogglePin}
-                  onClick={() => selectContact(contact.id)}
-                  onDelete={handleDeleteContact}
-                  onQuickAction={handleQuickAction}
-                  index={index}
-                />
-              ))}
-              {activeListTab === "all" && hasMore && (
-                <button
-                  onClick={() => loadContacts({ append: true })}
-                  disabled={loading}
-                  className="w-full kf-btn-secondary py-3"
-                >
-                  {loading ? "Loading..." : "Load More"}
-                </button>
-              )}
-              {displayContacts.length > 0 && (
-                <div className="flex items-center justify-between px-4 py-3 border-t border-border/30">
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <span>Rows per page:</span>
-                    <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }} className="bg-white/5 border border-border/40 rounded px-2 py-1 text-sm">
-                      <option value={10}>10</option>
-                      <option value={20}>20</option>
-                      <option value={50}>50</option>
-                    </select>
-                  </div>
-                  <div className="flex items-center gap-3 text-sm">
-                    <span className="text-muted-foreground">Page {page} of {totalPages}</span>
-                    <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="px-3 py-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed text-sm">Previous</button>
-                    <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)} className="px-3 py-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed text-sm">Next</button>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
+        <PipelineContactList
+          contacts={displayContacts as ContactCardData[]}
+          loading={loading}
+          hasMore={hasMore}
+          activeListTab={activeListTab}
+          selectedContactId={selectedContactId}
+          selectMode={selectMode}
+          selectedIds={selectedIds}
+          pinnedIds={pinnedIds}
+          onSelectContact={selectContact}
+          onToggleSelect={handleToggleSelect}
+          onTogglePin={handleTogglePin}
+          onDelete={handleDeleteContact}
+          onQuickAction={handleQuickAction}
+          onLoadMore={() => loadContacts({ append: true })}
+          onAddContact={() => setShowAddForm(true)}
+        />
 
-        <div className="hidden lg:block sticky top-4 h-fit space-y-4">
-          <ContactDetail
+        <div className="hidden lg:block sticky top-4 h-fit">
+          <PipelineDetailPanel
             contact={selectedContact}
             events={detailEvents}
             notes={detailNotes}
             tasks={detailTasks}
             loading={detailLoading}
             isPinned={selectedContactId ? pinnedIds.includes(selectedContactId) : false}
+            contactName={contactName}
+            healthMetrics={healthMetrics}
+            journeyMilestones={journeyMilestones}
+            conversationContext={conversationContext}
+            aiInsight={aiInsight}
+            aiInsightLoading={aiInsightLoading}
             onTogglePin={handleTogglePin}
             onAddNote={handleAddNote}
             onAddTask={handleAddTask}
@@ -1312,54 +1033,9 @@ export default function ContactsPage() {
             onEdit={() => handleEditContact()}
             onDelete={() => handleDeleteContact()}
             onLogEvent={handleLogEvent}
+            onGenerateAiInsight={handleGenerateAiInsight}
+            onRefreshConversationContext={handleRefreshConversationContext}
           />
-
-          {selectedContact && (
-            <>
-              <AiCopilot
-                contactName={contactName}
-                insight={aiInsight}
-                isLoading={aiInsightLoading}
-                onGenerateInsight={handleGenerateAiInsight}
-              />
-
-              {healthMetrics && (
-                <div className="kf-card p-5">
-                  <ContactHealthScore
-                    metrics={healthMetrics}
-                    tip={
-                      healthMetrics.relationship < 60
-                        ? "Schedule a personal check-in call to strengthen this relationship"
-                        : healthMetrics.engagement < 60
-                        ? "Send a personalized offer to re-engage this contact"
-                        : undefined
-                    }
-                  />
-                </div>
-              )}
-
-              {journeyMilestones.length > 0 && (
-                <div className="kf-card p-5">
-                  <RelationshipTimeline contactName={contactName} milestones={journeyMilestones} />
-                </div>
-              )}
-
-              {conversationContext && (
-                <div className="kf-card p-5">
-                  <ConversationContext
-                    data={conversationContext}
-                    contactName={contactName}
-                    onRefresh={async () => {
-                      if (selectedContactId && businessId) {
-                        const { data } = await fetchConversationContext(selectedContactId, businessId);
-                        if (data) setConversationContext(data);
-                      }
-                    }}
-                  />
-                </div>
-              )}
-            </>
-          )}
         </div>
       </div>
 
@@ -1381,16 +1057,21 @@ export default function ContactsPage() {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="w-12 h-1 bg-muted rounded-full mx-auto mt-3 mb-2" />
-              <div className="overflow-y-auto max-h-[calc(85vh-24px)] space-y-4 p-4">
-                <ContactDetail
+              <div className="overflow-y-auto max-h-[calc(85vh-24px)] p-4">
+                <PipelineDetailPanel
                   contact={selectedContact}
                   events={detailEvents}
                   notes={detailNotes}
                   tasks={detailTasks}
                   loading={detailLoading}
                   isPinned={selectedContactId ? pinnedIds.includes(selectedContactId) : false}
+                  contactName={contactName}
+                  healthMetrics={healthMetrics}
+                  journeyMilestones={journeyMilestones}
+                  conversationContext={conversationContext}
+                  aiInsight={aiInsight}
+                  aiInsightLoading={aiInsightLoading}
                   onTogglePin={handleTogglePin}
-                  onClose={() => setShowMobileDetail(false)}
                   onAddNote={handleAddNote}
                   onAddTask={handleAddTask}
                   onCompleteTask={handleCompleteTask}
@@ -1398,16 +1079,10 @@ export default function ContactsPage() {
                   onEdit={() => handleEditContact()}
                   onDelete={() => handleDeleteContact()}
                   onLogEvent={handleLogEvent}
+                  onGenerateAiInsight={handleGenerateAiInsight}
+                  onRefreshConversationContext={handleRefreshConversationContext}
+                  onClose={() => setShowMobileDetail(false)}
                 />
-
-                {selectedContact && (
-                  <AiCopilot
-                    contactName={contactName}
-                    insight={aiInsight}
-                    isLoading={aiInsightLoading}
-                    onGenerateInsight={handleGenerateAiInsight}
-                  />
-                )}
               </div>
             </motion.div>
           </motion.div>
@@ -1425,7 +1100,7 @@ export default function ContactsPage() {
       <ConfirmDialog
         open={confirmState.open}
         title="Delete Contact"
-        message="Are you sure you want to delete this contact?"
+        message="Are you sure you want to delete this contact? This cannot be undone."
         confirmLabel="Delete"
         variant="danger"
         onConfirm={() => { confirmState.action(); setConfirmState({open: false, action: () => {}}); }}
