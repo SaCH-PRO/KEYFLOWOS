@@ -196,50 +196,58 @@ export function ContactDetail({
       <motion.div
         initial={{ opacity: 0, x: 20 }}
         animate={{ opacity: 1, x: 0 }}
-        className="kf-card p-5 space-y-4 h-full overflow-y-auto"
+        className="kf-card p-5 space-y-4 h-full flex flex-col overflow-hidden"
       >
-        <ContactDetailHeader
-          contact={contact}
-          isPinned={isPinned}
-          onTogglePin={onTogglePin}
-          onClose={onClose}
-          onEdit={onEdit}
-          onDelete={onDelete ? handleDeleteClick : undefined}
-          onUpdateStatus={onUpdateStatus}
-          onQuickAction={onQuickAction}
-          onLogEvent={onLogEvent}
-          onAddTask={onAddTask}
-        />
+        <div className="shrink-0">
+          <ContactDetailHeader
+            contact={contact}
+            isPinned={isPinned}
+            onTogglePin={onTogglePin}
+            onClose={onClose}
+            onEdit={onEdit}
+            onDelete={onDelete ? handleDeleteClick : undefined}
+            onUpdateStatus={onUpdateStatus}
+            onQuickAction={onQuickAction}
+            onLogEvent={onLogEvent}
+            onAddTask={onAddTask}
+          />
+        </div>
 
-        <ContactDetailStats
-          contact={contact}
-          events={events}
-          onSetActiveTab={setActiveTab}
-          onQuickAction={onQuickAction}
-        />
+        <div className="shrink-0">
+          <ContactDetailStats
+            contact={contact}
+            events={events}
+            onSetActiveTab={setActiveTab}
+            onQuickAction={onQuickAction}
+          />
+        </div>
 
-        <ContactDetailInfo contact={contact} />
+        <div className="shrink-0">
+          <ContactDetailInfo contact={contact} />
+        </div>
 
-        <ContactDetailTabs
-          contact={contact}
-          events={events}
-          notes={notes}
-          tasks={tasks}
-          activeTab={activeTab}
-          onSetActiveTab={setActiveTab}
-          onAddNote={onAddNote}
-          onAddTask={onAddTask}
-          onCompleteTask={onCompleteTask}
-          onDeleteNote={onDeleteNote ? handleDeleteNote : undefined}
-          onDeleteTask={onDeleteTask ? handleDeleteTask : undefined}
-          healthMetrics={healthMetrics}
-          journeyMilestones={journeyMilestones}
-          conversationContext={conversationContext}
-          aiInsight={aiInsight}
-          aiInsightLoading={aiInsightLoading}
-          onGenerateAiInsight={onGenerateAiInsight}
-          onRefreshConversationContext={onRefreshConversationContext}
-        />
+        <div className="flex-1 min-h-0 flex flex-col">
+          <ContactDetailTabs
+            contact={contact}
+            events={events}
+            notes={notes}
+            tasks={tasks}
+            activeTab={activeTab}
+            onSetActiveTab={setActiveTab}
+            onAddNote={onAddNote}
+            onAddTask={onAddTask}
+            onCompleteTask={onCompleteTask}
+            onDeleteNote={onDeleteNote ? handleDeleteNote : undefined}
+            onDeleteTask={onDeleteTask ? handleDeleteTask : undefined}
+            healthMetrics={healthMetrics}
+            journeyMilestones={journeyMilestones}
+            conversationContext={conversationContext}
+            aiInsight={aiInsight}
+            aiInsightLoading={aiInsightLoading}
+            onGenerateAiInsight={onGenerateAiInsight}
+            onRefreshConversationContext={onRefreshConversationContext}
+          />
+        </div>
       </motion.div>
 
       <ConfirmDialog

@@ -188,6 +188,7 @@ export default function ContactsPage() {
     if (googleSuccess === "true") {
       toast.success(`Google Contacts imported successfully${imported ? ` (${imported} contacts)` : ""}`);
       window.history.replaceState({}, "", window.location.pathname);
+      loadContacts({});
     } else if (googleError) {
       toast.error(`Google import failed: ${decodeURIComponent(googleError)}`);
       window.history.replaceState({}, "", window.location.pathname);
@@ -1044,7 +1045,7 @@ export default function ContactsPage() {
           onAddContact={() => setShowAddForm(true)}
         />
 
-        <div className="hidden lg:block sticky top-4 h-fit">
+        <div className="hidden lg:block sticky top-4 max-h-[calc(100vh-2rem)]">
           <PipelineDetailPanel
             contact={selectedContact}
             events={detailEvents}

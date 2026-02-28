@@ -513,8 +513,8 @@ export function ContactDetailTabs({
   }, [tasks, taskFilter, taskSearch, taskSort]);
 
   return (
-    <>
-      <div className="flex border-b border-border overflow-x-auto" role="tablist">
+    <div className="flex flex-col h-full min-h-0">
+      <div className="flex border-b border-border overflow-x-auto shrink-0" role="tablist">
         {[
           { key: "notes", label: "Notes", icon: MessageSquare, count: notes.length },
           { key: "tasks", label: "Tasks", icon: ListTodo, count: tasks.filter((t) => t.status !== "DONE").length },
@@ -525,7 +525,7 @@ export function ContactDetailTabs({
             role="tab"
             aria-selected={activeTab === key}
             onClick={() => onSetActiveTab(key)}
-            className={`flex items-center gap-1.5 px-4 py-2 text-sm transition-colors border-b-2 -mb-px whitespace-nowrap ${
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap ${
               activeTab === key
                 ? "border-[hsl(var(--kf-accent1))] text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground"
@@ -540,7 +540,7 @@ export function ContactDetailTabs({
         ))}
       </div>
 
-      <div className="space-y-3">
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pt-3 pb-6">
         {activeTab === "notes" && (
           <>
             <div className="flex items-center gap-2">
@@ -1649,6 +1649,6 @@ export function ContactDetailTabs({
           </>
         )}
       </div>
-    </>
+    </div>
   );
 }
