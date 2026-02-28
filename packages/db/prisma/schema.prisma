@@ -242,11 +242,16 @@ model Contact {
     recurringInvoices RecurringInvoice[]
 
   createdAt DateTime  @default(now()) @map("created_at")
+  leadScore        Int?      @map("lead_score")
+  lastInteractionAt DateTime? @map("last_interaction_at")
+
   updatedAt DateTime  @updatedAt      @map("updated_at")
   deletedAt DateTime? @map("deleted_at") // Soft delete
 
   @@index([businessId])
   @@index([businessId, createdAt])
+  @@index([businessId, status])
+  @@index([businessId, leadScore])
   @@unique([businessId, emailNormalized])
   @@unique([businessId, phoneNormalized])
   @@map("contacts")
@@ -267,6 +272,7 @@ model ContactEvent {
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@index([businessId, contactId])
+  @@index([businessId, contactId, type])
   @@map("contact_events")
 }
 
@@ -305,6 +311,7 @@ model ContactTask {
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@index([businessId, contactId])
+  @@index([businessId, status, dueDate])
   @@map("contact_tasks")
 }
 

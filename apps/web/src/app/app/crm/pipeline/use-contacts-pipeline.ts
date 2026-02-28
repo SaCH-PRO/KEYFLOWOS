@@ -143,24 +143,33 @@ export function useContactsPipeline() {
     return () => clearTimeout(timeout);
   }, [searchInput]);
 
+  const [flowDataLoading, setFlowDataLoading] = useState(false);
+
   const loadFlowData = useCallback(async () => {
     if (!businessId) return;
-    const [flowRes, actionsRes, autopilotRes, revenueRes] = await Promise.all([
-      fetchFlowIntelligence(businessId),
-      fetchNextActions(businessId),
-      fetchAutopilotActionsForCrm(businessId),
-      fetchPredictiveRevenue(businessId),
-    ]);
-    if (flowRes.data) setFlowIntelligence(flowRes.data);
-    if (actionsRes.data) {
-      setNextActions(actionsRes.data.map((a) => ({
-        id: a.id, type: a.type, contactId: a.contactId, contactName: a.contactName,
-        description: a.description, aiDraft: a.aiDraft, estimatedTime: a.estimatedTime,
-        priority: a.priority, dueDate: a.dueDate, value: a.value,
-      })));
+    setFlowDataLoading(true);
+    try {
+      const [flowRes, actionsRes, autopilotRes, revenueRes] = await Promise.all([
+        fetchFlowIntelligence(businessId),
+        fetchNextActions(businessId),
+        fetchAutopilotActionsForCrm(businessId),
+        fetchPredictiveRevenue(businessId),
+      ]);
+      if (flowRes.data) setFlowIntelligence(flowRes.data);
+      if (actionsRes.data) {
+        setNextActions(actionsRes.data.map((a) => ({
+          id: a.id, type: a.type, contactId: a.contactId, contactName: a.contactName,
+          description: a.description, aiDraft: a.aiDraft, estimatedTime: a.estimatedTime,
+          priority: a.priority, dueDate: a.dueDate, value: a.value,
+        })));
+      }
+      if (autopilotRes.data) setAutopilotActions(autopilotRes.data);
+      if (revenueRes.data) setRevenueData(revenueRes.data);
+    } catch {
+      console.error("Failed to load flow data");
+    } finally {
+      setFlowDataLoading(false);
     }
-    if (autopilotRes.data) setAutopilotActions(autopilotRes.data);
-    if (revenueRes.data) setRevenueData(revenueRes.data);
   }, [businessId]);
 
   const loadContacts = useCallback(
@@ -399,7 +408,9 @@ export function useContactsPipeline() {
     try {
       await logContactEvent(selectedContactId, { type, description }, businessId);
       void loadDetail(selectedContactId);
-    } catch { /* silent */ }
+    } catch (err) {
+      console.error("Failed to log event:", err);
+    }
   };
 
   const handleEditContact = useCallback(() => {
@@ -479,6 +490,14 @@ export function useContactsPipeline() {
       case "book-appointment": router.push(`/app/bookings?contactId=${contactId}`); break;
       case "send-quote": router.push(`/app/commerce?tab=quotes&contactId=${contactId}`); break;
     }
+  }, [router]);
+
+  const handleViewExpiringQuotes = useCallback(() => {
+    router.push("/app/commerce?tab=quotes&filter=expiring");
+  }, [router]);
+
+  const handleViewOverdueInvoices = useCallback(() => {
+    router.push("/app/commerce?tab=invoices&filter=overdue");
   }, [router]);
 
   const handleBulkStatusChange = useCallback(async (newStatus: string) => {
@@ -671,7 +690,7 @@ export function useContactsPipeline() {
     activeListId, setActiveListId, activeListContactIds, setActiveListContactIds,
     listsCount, setListsCount,
     confirmState, setConfirmState,
-    flowIntelligence, nextActions, autopilotActions, autopilotPaused,
+    flowIntelligence, flowDataLoading, nextActions, autopilotActions, autopilotPaused,
     setAutopilotPaused, setAutopilotActions,
     revenueData, healthMetrics, journeyMilestones, conversationContext,
     aiInsight, aiInsightLoading,
@@ -684,6 +703,7 @@ export function useContactsPipeline() {
     handleEditContact, handleDeleteContact,
     handleImportFile, handleImportLink,
     handleCompleteNextAction, handleDoAction, handleQuickAction,
+    handleViewExpiringQuotes, handleViewOverdueInvoices,
     handleBulkStatusChange, handleBulkTag, handleBulkDelete,
     handleToggleSelectMode, handleTogglePin, handleToggleSelect, handleSelectAll,
     handleGenerateAiInsight, handleRefreshConversationContext,
