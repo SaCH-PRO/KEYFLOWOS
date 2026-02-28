@@ -758,11 +758,15 @@ export default function ContactsPage() {
           <div className="relative">
             <button
               onClick={() => setShowGuide(!showGuide)}
-              className={`p-1.5 rounded-lg transition-all ${showGuide ? "bg-amber-400/20 text-amber-400" : "hover:bg-muted/50 text-muted-foreground hover:text-amber-400"}`}
+              className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
+                showGuide
+                  ? "bg-amber-400 text-white shadow-md shadow-amber-400/40 scale-110"
+                  : "bg-amber-400/15 text-amber-400 hover:bg-amber-400/25 hover:shadow-sm hover:shadow-amber-400/20 hover:scale-105"
+              }`}
               aria-label="Getting started guide"
               title="Getting started guide"
             >
-              <Lightbulb className="w-4.5 h-4.5" />
+              <Lightbulb className="w-3.5 h-3.5" />
             </button>
             <AnimatePresence>
               {showGuide && (
