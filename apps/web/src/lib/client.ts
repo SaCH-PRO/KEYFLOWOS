@@ -481,6 +481,15 @@ export async function createContact(input: {
   state?: string;
   postalCode?: string;
   country?: string;
+  department?: string;
+  industry?: string;
+  secondaryEmail?: string;
+  secondaryPhone?: string;
+  whatsappNumber?: string;
+  language?: string;
+  timezone?: string;
+  marketingOptIn?: boolean;
+  doNotContact?: boolean;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   const body = {
@@ -505,6 +514,15 @@ export async function createContact(input: {
     state: input.state,
     postalCode: input.postalCode,
     country: input.country,
+    department: input.department,
+    industry: input.industry,
+    secondaryEmail: input.secondaryEmail,
+    secondaryPhone: input.secondaryPhone,
+    whatsappNumber: input.whatsappNumber,
+    language: input.language,
+    timezone: input.timezone,
+    marketingOptIn: input.marketingOptIn,
+    doNotContact: input.doNotContact,
   };
 
   const res = await apiPost<Contact>({
@@ -589,6 +607,17 @@ export async function updateContactPlaybook(params: {
   });
 }
 
+export async function logContactEvent(
+  contactId: string,
+  event: { type: string; description?: string; data?: Record<string, unknown> },
+  businessId: string = DEFAULT_BUSINESS_ID,
+) {
+  return apiPost<ContactEvent>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/events`,
+    body: event,
+  });
+}
+
 export async function addContactNote(contactId: string, body: string, businessId: string = DEFAULT_BUSINESS_ID) {
   return apiPost<ContactNote>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/notes`,
@@ -670,6 +699,30 @@ export async function fetchDueTasks(
     z.array(taskSchema),
     [],
   );
+}
+
+export async function bulkUpdateContacts(input: {
+  businessId?: string;
+  contactIds: string[];
+  status?: string;
+  addTags?: string[];
+}) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPatch<{ updated: number }>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/bulk`,
+    { contactIds: input.contactIds, status: input.status, addTags: input.addTags },
+  );
+}
+
+export async function bulkDeleteContacts(input: {
+  businessId?: string;
+  contactIds: string[];
+}) {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{ deleted: number }>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/bulk-delete`,
+    body: { contactIds: input.contactIds },
+  });
 }
 
 export async function fetchImportJobs(businessId: string = DEFAULT_BUSINESS_ID) {
@@ -788,6 +841,15 @@ export async function updateContact(input: {
   state?: string;
   postalCode?: string;
   country?: string;
+  department?: string;
+  industry?: string;
+  secondaryEmail?: string;
+  secondaryPhone?: string;
+  whatsappNumber?: string;
+  language?: string;
+  timezone?: string;
+  marketingOptIn?: boolean;
+  doNotContact?: boolean;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<Contact>({

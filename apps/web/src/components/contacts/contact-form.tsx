@@ -2,7 +2,10 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { X, User, Mail, Phone, Building2, Tag, Briefcase, MessageSquare, FileText, MapPin } from "lucide-react";
+import {
+  X, User, Mail, Phone, Building2, Tag, Briefcase, MessageSquare,
+  FileText, MapPin, ChevronDown, Globe, Shield, ToggleLeft
+} from "lucide-react";
 
 const STATUSES = ["LEAD", "PROSPECT", "CLIENT", "LOST"] as const;
 const CHANNELS = ["WhatsApp", "Email", "SMS", "Call", "Instagram DM"] as const;
@@ -30,48 +33,102 @@ export interface ContactFormData {
   addressLine1: string;
   city: string;
   country: string;
+  department: string;
+  industry: string;
+  segment: string;
+  secondaryEmail: string;
+  secondaryPhone: string;
+  whatsappNumber: string;
+  displayName: string;
+  language: string;
+  addressLine2: string;
+  state: string;
+  postalCode: string;
+  timezone: string;
+  marketingOptIn: boolean;
+  doNotContact: boolean;
+  notesInternal: string;
+}
+
+function SectionHeader({ label, icon: Icon, open, onToggle }: { label: string; icon: React.ElementType; open: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="w-full flex items-center gap-2 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
+    >
+      <Icon className="w-3.5 h-3.5" />
+      {label}
+      <ChevronDown className={`w-3.5 h-3.5 ml-auto transition-transform ${open ? "rotate-180" : ""}`} />
+    </button>
+  );
 }
 
 export function ContactForm({ onSubmit, onCancel, loading, initialValues }: ContactFormProps) {
   const isEditing = !!initialValues;
-  const [form, setForm] = useState<ContactFormData>({
-    firstName: initialValues?.firstName || "",
-    lastName: initialValues?.lastName || "",
-    email: initialValues?.email || "",
-    phone: initialValues?.phone || "",
-    status: initialValues?.status || "LEAD",
-    source: initialValues?.source || "",
-    tags: initialValues?.tags || "",
-    companyName: initialValues?.companyName || "",
-    jobTitle: initialValues?.jobTitle || "",
-    preferredChannel: initialValues?.preferredChannel || "WhatsApp",
-    lifecycleStage: initialValues?.lifecycleStage || "",
+
+  const defaults: ContactFormData = {
+    firstName: "",
+    lastName: "",
+    email: "",
+    phone: "",
+    status: "LEAD",
+    source: "",
+    tags: "",
+    companyName: "",
+    jobTitle: "",
+    preferredChannel: "WhatsApp",
+    lifecycleStage: "",
     initialNote: "",
-    addressLine1: initialValues?.addressLine1 || "",
-    city: initialValues?.city || "",
-    country: initialValues?.country || "Trinidad",
+    addressLine1: "",
+    city: "",
+    country: "Trinidad",
+    department: "",
+    industry: "",
+    segment: "",
+    secondaryEmail: "",
+    secondaryPhone: "",
+    whatsappNumber: "",
+    displayName: "",
+    language: "",
+    addressLine2: "",
+    state: "",
+    postalCode: "",
+    timezone: "",
+    marketingOptIn: false,
+    doNotContact: false,
+    notesInternal: "",
+  };
+
+  const [form, setForm] = useState<ContactFormData>({
+    ...defaults,
+    ...Object.fromEntries(
+      Object.entries(initialValues || {}).filter(([, v]) => v !== undefined && v !== null)
+    ),
   });
+
+  const [sections, setSections] = useState({
+    basic: true,
+    professional: isEditing,
+    contactDetails: isEditing,
+    address: isEditing,
+    preferences: isEditing,
+    notes: true,
+  });
+
+  const toggle = (key: keyof typeof sections) =>
+    setSections((s) => ({ ...s, [key]: !s[key] }));
 
   const handleSubmit = async () => {
     await onSubmit(form);
-    setForm({
-      firstName: "",
-      lastName: "",
-      email: "",
-      phone: "",
-      status: "LEAD",
-      source: "",
-      tags: "",
-      companyName: "",
-      jobTitle: "",
-      preferredChannel: "WhatsApp",
-      lifecycleStage: "",
-      initialNote: "",
-      addressLine1: "",
-      city: "",
-      country: "Trinidad",
-    });
+    setForm({ ...defaults });
   };
+
+  const field = (key: keyof ContactFormData) => ({
+    value: form[key] as string,
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      setForm((p) => ({ ...p, [key]: e.target.value })),
+  });
 
   return (
     <motion.div
@@ -102,209 +159,291 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
         </button>
       </div>
 
-      <div className="p-5 space-y-4 max-h-[calc(100vh-10rem)] overflow-y-auto">
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground flex items-center gap-1">
-            <User className="w-3 h-3" /> First Name *
-          </label>
-          <input
-            type="text"
-            placeholder="John"
-            value={form.firstName}
-            onChange={(e) => setForm((p) => ({ ...p, firstName: e.target.value }))}
-            className="kf-input w-full"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground flex items-center gap-1">
-            <User className="w-3 h-3" /> Last Name
-          </label>
-          <input
-            type="text"
-            placeholder="Doe"
-            value={form.lastName}
-            onChange={(e) => setForm((p) => ({ ...p, lastName: e.target.value }))}
-            className="kf-input w-full"
-          />
-        </div>
-      </div>
+      <div className="p-5 space-y-3 max-h-[calc(100vh-10rem)] overflow-y-auto">
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground flex items-center gap-1">
-            <Mail className="w-3 h-3" /> Email
-          </label>
-          <input
-            type="email"
-            placeholder="john@example.com"
-            value={form.email}
-            onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
-            className="kf-input w-full"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground flex items-center gap-1">
-            <Phone className="w-3 h-3" /> Phone
-          </label>
-          <input
-            type="tel"
-            placeholder="+1 868 123 4567"
-            value={form.phone}
-            onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
-            className="kf-input w-full"
-          />
-        </div>
-      </div>
+        <SectionHeader label="Basic Info" icon={User} open={sections.basic} onToggle={() => toggle("basic")} />
+        {sections.basic && (
+          <div className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <User className="w-3 h-3" /> First Name *
+                </label>
+                <input type="text" placeholder="John" {...field("firstName")} className="kf-input w-full" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <User className="w-3 h-3" /> Last Name
+                </label>
+                <input type="text" placeholder="Doe" {...field("lastName")} className="kf-input w-full" />
+              </div>
+            </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground flex items-center gap-1">
-            <Building2 className="w-3 h-3" /> Company
-          </label>
-          <input
-            type="text"
-            placeholder="Acme Inc"
-            value={form.companyName}
-            onChange={(e) => setForm((p) => ({ ...p, companyName: e.target.value }))}
-            className="kf-input w-full"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground flex items-center gap-1">
-            <Briefcase className="w-3 h-3" /> Job Title
-          </label>
-          <input
-            type="text"
-            placeholder="Marketing Manager"
-            value={form.jobTitle}
-            onChange={(e) => setForm((p) => ({ ...p, jobTitle: e.target.value }))}
-            className="kf-input w-full"
-          />
-        </div>
-      </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Mail className="w-3 h-3" /> Email
+                </label>
+                <input type="email" placeholder="john@example.com" {...field("email")} className="kf-input w-full" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Phone className="w-3 h-3" /> Phone
+                </label>
+                <input type="tel" placeholder="+1 868 123 4567" {...field("phone")} className="kf-input w-full" />
+              </div>
+            </div>
 
-      <div className="space-y-1.5">
-        <label className="text-xs text-muted-foreground flex items-center gap-1">
-          <MapPin className="w-3 h-3" /> Address
-        </label>
-        <input
-          type="text"
-          placeholder="123 Main Street, Apt 4B"
-          value={form.addressLine1}
-          onChange={(e) => setForm((p) => ({ ...p, addressLine1: e.target.value }))}
-          className="kf-input w-full"
-        />
-      </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <MessageSquare className="w-3 h-3" /> Source
+                </label>
+                <input type="text" placeholder="Instagram, Website, Referral..." {...field("source")} className="kf-input w-full" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Tag className="w-3 h-3" /> Tags
+                </label>
+                <input type="text" placeholder="VIP, Wedding, Corporate..." {...field("tags")} className="kf-input w-full" />
+              </div>
+            </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground flex items-center gap-1">
-            <MapPin className="w-3 h-3" /> City
-          </label>
-          <input
-            type="text"
-            placeholder="Port of Spain"
-            value={form.city}
-            onChange={(e) => setForm((p) => ({ ...p, city: e.target.value }))}
-            className="kf-input w-full"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground flex items-center gap-1">
-            <MapPin className="w-3 h-3" /> Country
-          </label>
-          <input
-            type="text"
-            placeholder="Trinidad"
-            value={form.country}
-            onChange={(e) => setForm((p) => ({ ...p, country: e.target.value }))}
-            className="kf-input w-full"
-          />
-        </div>
-      </div>
+            <div className="space-y-2">
+              <label className="text-xs text-muted-foreground">Status</label>
+              <div className="flex flex-wrap gap-2">
+                {STATUSES.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setForm((p) => ({ ...p, status: s }))}
+                    className={`px-3 py-1.5 text-sm rounded-lg transition-all ${
+                      form.status === s ? "kf-btn-primary" : "kf-btn-secondary"
+                    }`}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground flex items-center gap-1">
-            <MessageSquare className="w-3 h-3" /> Source
-          </label>
-          <input
-            type="text"
-            placeholder="Instagram, Website, Referral..."
-            value={form.source}
-            onChange={(e) => setForm((p) => ({ ...p, source: e.target.value }))}
-            className="kf-input w-full"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground flex items-center gap-1">
-            <Tag className="w-3 h-3" /> Tags
-          </label>
-          <input
-            type="text"
-            placeholder="VIP, Wedding, Corporate..."
-            value={form.tags}
-            onChange={(e) => setForm((p) => ({ ...p, tags: e.target.value }))}
-            className="kf-input w-full"
-          />
-        </div>
-      </div>
+            <div className="space-y-2">
+              <label className="text-xs text-muted-foreground flex items-center gap-1">
+                <MessageSquare className="w-3 h-3" /> Preferred Channel
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {CHANNELS.map((ch) => (
+                  <button
+                    key={ch}
+                    type="button"
+                    onClick={() => setForm((p) => ({ ...p, preferredChannel: ch }))}
+                    className={`px-3 py-1.5 text-sm rounded-lg transition-all ${
+                      form.preferredChannel === ch
+                        ? "bg-[hsl(var(--kf-accent2))] text-white"
+                        : "kf-btn-secondary"
+                    }`}
+                  >
+                    {ch}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
-      <div className="space-y-2">
-        <label className="text-xs text-muted-foreground flex items-center gap-1">
-          <MessageSquare className="w-3 h-3" /> Preferred Channel
-        </label>
-        <div className="flex flex-wrap gap-2">
-          {CHANNELS.map((ch) => (
-            <button
-              key={ch}
-              type="button"
-              onClick={() => setForm((p) => ({ ...p, preferredChannel: ch }))}
-              className={`px-3 py-1.5 text-sm rounded-lg transition-all ${
-                form.preferredChannel === ch
-                  ? "bg-[hsl(var(--kf-accent2))] text-white"
-                  : "kf-btn-secondary"
-              }`}
-            >
-              {ch}
-            </button>
-          ))}
-        </div>
-      </div>
+        <SectionHeader label="Professional" icon={Briefcase} open={sections.professional} onToggle={() => toggle("professional")} />
+        {sections.professional && (
+          <div className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Building2 className="w-3 h-3" /> Company
+                </label>
+                <input type="text" placeholder="Acme Inc" {...field("companyName")} className="kf-input w-full" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Briefcase className="w-3 h-3" /> Job Title
+                </label>
+                <input type="text" placeholder="Marketing Manager" {...field("jobTitle")} className="kf-input w-full" />
+              </div>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Building2 className="w-3 h-3" /> Department
+                </label>
+                <input type="text" placeholder="Marketing" {...field("department")} className="kf-input w-full" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Building2 className="w-3 h-3" /> Industry
+                </label>
+                <input type="text" placeholder="Technology, Finance..." {...field("industry")} className="kf-input w-full" />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground flex items-center gap-1">
+                <Tag className="w-3 h-3" /> Segment
+              </label>
+              <input type="text" placeholder="Enterprise, SMB, Startup..." {...field("segment")} className="kf-input w-full" />
+            </div>
+          </div>
+        )}
 
-      <div className="space-y-2">
-        <label className="text-xs text-muted-foreground">Status</label>
-        <div className="flex flex-wrap gap-2">
-          {STATUSES.map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setForm((p) => ({ ...p, status: s }))}
-              className={`px-3 py-1.5 text-sm rounded-lg transition-all ${
-                form.status === s
-                  ? "kf-btn-primary"
-                  : "kf-btn-secondary"
-              }`}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      </div>
+        <SectionHeader label="Contact Details" icon={Phone} open={sections.contactDetails} onToggle={() => toggle("contactDetails")} />
+        {sections.contactDetails && (
+          <div className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Mail className="w-3 h-3" /> Secondary Email
+                </label>
+                <input type="email" placeholder="alt@example.com" {...field("secondaryEmail")} className="kf-input w-full" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Phone className="w-3 h-3" /> Secondary Phone
+                </label>
+                <input type="tel" placeholder="+1 868 765 4321" {...field("secondaryPhone")} className="kf-input w-full" />
+              </div>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <MessageSquare className="w-3 h-3" /> WhatsApp Number
+                </label>
+                <input type="tel" placeholder="+1 868 123 4567" {...field("whatsappNumber")} className="kf-input w-full" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <User className="w-3 h-3" /> Display Name
+                </label>
+                <input type="text" placeholder="Johnny D" {...field("displayName")} className="kf-input w-full" />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground flex items-center gap-1">
+                <Globe className="w-3 h-3" /> Language
+              </label>
+              <input type="text" placeholder="English, Spanish..." {...field("language")} className="kf-input w-full" />
+            </div>
+          </div>
+        )}
 
-      <div className="space-y-1.5">
-        <label className="text-xs text-muted-foreground flex items-center gap-1">
-          <FileText className="w-3 h-3" /> Initial Note
-        </label>
-        <textarea
-          placeholder="Add any notes about this contact (e.g., 'Met at trade show', 'Referred by Sarah')..."
-          value={form.initialNote}
-          onChange={(e) => setForm((p) => ({ ...p, initialNote: e.target.value }))}
-          className="kf-input w-full min-h-[80px] resize-none"
-          rows={3}
-        />
-      </div>
+        <SectionHeader label="Address" icon={MapPin} open={sections.address} onToggle={() => toggle("address")} />
+        {sections.address && (
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground flex items-center gap-1">
+                <MapPin className="w-3 h-3" /> Address Line 1
+              </label>
+              <input type="text" placeholder="123 Main Street" {...field("addressLine1")} className="kf-input w-full" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground flex items-center gap-1">
+                <MapPin className="w-3 h-3" /> Address Line 2
+              </label>
+              <input type="text" placeholder="Apt 4B" {...field("addressLine2")} className="kf-input w-full" />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <MapPin className="w-3 h-3" /> City
+                </label>
+                <input type="text" placeholder="Port of Spain" {...field("city")} className="kf-input w-full" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <MapPin className="w-3 h-3" /> State / Region
+                </label>
+                <input type="text" placeholder="Western" {...field("state")} className="kf-input w-full" />
+              </div>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <MapPin className="w-3 h-3" /> Postal Code
+                </label>
+                <input type="text" placeholder="00000" {...field("postalCode")} className="kf-input w-full" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <MapPin className="w-3 h-3" /> Country
+                </label>
+                <input type="text" placeholder="Trinidad" {...field("country")} className="kf-input w-full" />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground flex items-center gap-1">
+                <Globe className="w-3 h-3" /> Timezone
+              </label>
+              <input type="text" placeholder="America/Port_of_Spain" {...field("timezone")} className="kf-input w-full" />
+            </div>
+          </div>
+        )}
+
+        <SectionHeader label="Preferences" icon={Shield} open={sections.preferences} onToggle={() => toggle("preferences")} />
+        {sections.preferences && (
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground flex items-center gap-1">
+                <ToggleLeft className="w-3 h-3" /> Lifecycle Stage
+              </label>
+              <input type="text" placeholder="Onboarding, Active, Churned..." {...field("lifecycleStage")} className="kf-input w-full" />
+            </div>
+            <div className="flex items-center gap-6">
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.marketingOptIn}
+                  onChange={(e) => setForm((p) => ({ ...p, marketingOptIn: e.target.checked }))}
+                  className="w-4 h-4 rounded border-border accent-primary"
+                />
+                Marketing Opt-In
+              </label>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.doNotContact}
+                  onChange={(e) => setForm((p) => ({ ...p, doNotContact: e.target.checked }))}
+                  className="w-4 h-4 rounded border-border accent-destructive"
+                />
+                Do Not Contact
+              </label>
+            </div>
+          </div>
+        )}
+
+        <SectionHeader label="Notes" icon={FileText} open={sections.notes} onToggle={() => toggle("notes")} />
+        {sections.notes && (
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground flex items-center gap-1">
+                <FileText className="w-3 h-3" /> Initial Note
+              </label>
+              <textarea
+                placeholder="Add any notes about this contact (e.g., 'Met at trade show', 'Referred by Sarah')..."
+                value={form.initialNote}
+                onChange={(e) => setForm((p) => ({ ...p, initialNote: e.target.value }))}
+                className="kf-input w-full min-h-[80px] resize-none"
+                rows={3}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground flex items-center gap-1">
+                <FileText className="w-3 h-3" /> Internal Notes
+              </label>
+              <textarea
+                placeholder="Private notes visible only to your team..."
+                value={form.notesInternal}
+                onChange={(e) => setForm((p) => ({ ...p, notesInternal: e.target.value }))}
+                className="kf-input w-full min-h-[80px] resize-none"
+                rows={3}
+              />
+            </div>
+          </div>
+        )}
 
       </div>
 

@@ -92,6 +92,7 @@ import {
   fetchContactJourney,
   fetchConversationContext,
   generateAiInsight,
+  logContactEvent,
   CrmNextAction,
 } from "@/lib/client";
 import { ensureWorkspace, getStoredBusinessId } from "@/lib/workspace";
@@ -417,6 +418,14 @@ export default function ContactsPage() {
           lifecycleStage: formData.lifecycleStage || undefined, tags: tagsArray,
           addressLine1: formData.addressLine1 || undefined, city: formData.city || undefined,
           country: formData.country || undefined,
+          department: formData.department || undefined, industry: formData.industry || undefined,
+          segment: formData.segment || undefined, secondaryEmail: formData.secondaryEmail || undefined,
+          secondaryPhone: formData.secondaryPhone || undefined, whatsappNumber: formData.whatsappNumber || undefined,
+          displayName: formData.displayName || undefined, language: formData.language || undefined,
+          addressLine2: formData.addressLine2 || undefined, state: formData.state || undefined,
+          postalCode: formData.postalCode || undefined, timezone: formData.timezone || undefined,
+          marketingOptIn: formData.marketingOptIn, doNotContact: formData.doNotContact,
+          notesInternal: formData.notesInternal || undefined,
         });
         setShowAddForm(false);
         setEditingContact(null);
@@ -433,6 +442,14 @@ export default function ContactsPage() {
           lifecycleStage: formData.lifecycleStage || undefined, tags: tagsArray,
           addressLine1: formData.addressLine1 || undefined, city: formData.city || undefined,
           country: formData.country || undefined,
+          department: formData.department || undefined, industry: formData.industry || undefined,
+          segment: formData.segment || undefined, secondaryEmail: formData.secondaryEmail || undefined,
+          secondaryPhone: formData.secondaryPhone || undefined, whatsappNumber: formData.whatsappNumber || undefined,
+          displayName: formData.displayName || undefined, language: formData.language || undefined,
+          addressLine2: formData.addressLine2 || undefined, state: formData.state || undefined,
+          postalCode: formData.postalCode || undefined, timezone: formData.timezone || undefined,
+          marketingOptIn: formData.marketingOptIn, doNotContact: formData.doNotContact,
+          notesInternal: formData.notesInternal || undefined,
         });
         if (data) {
           if (formData.initialNote.trim()) {
@@ -485,22 +502,48 @@ export default function ContactsPage() {
     }
   };
 
+  const handleLogEvent = async (type: string, description?: string) => {
+    if (!selectedContactId || !businessId) return;
+    try {
+      await logContactEvent(selectedContactId, { type, description }, businessId);
+      void loadDetail(selectedContactId);
+    } catch {
+      // silent fail for event logging
+    }
+  };
+
   const handleEditContact = (contact?: ContactCardData) => {
     const c = contact || contactDetail?.contact;
     if (!c) return;
     setSelectedContactId(c.id);
-    const extendedContact = c as ContactCardData & { addressLine1?: string | null; city?: string | null; country?: string | null };
+    const ec = c as ContactCardData & Record<string, any>;
     setEditingContact({
       firstName: c.firstName || "", lastName: c.lastName || "",
       email: c.email || "", phone: c.phone || "",
       companyName: c.companyName || "", jobTitle: c.jobTitle || "",
-      status: c.status || "LEAD", source: "",
-      preferredChannel: "WhatsApp", lifecycleStage: "",
+      status: c.status || "LEAD", source: ec.source || "",
+      preferredChannel: ec.preferredChannel || "WhatsApp",
+      lifecycleStage: ec.lifecycleStage || "",
       tags: Array.isArray(c.tags) ? c.tags.join(", ") : "",
       initialNote: "",
-      addressLine1: extendedContact.addressLine1 || "",
-      city: extendedContact.city || "",
-      country: extendedContact.country || "Trinidad",
+      addressLine1: ec.addressLine1 || "",
+      city: ec.city || "",
+      country: ec.country || "Trinidad",
+      department: ec.department || "",
+      industry: ec.industry || "",
+      segment: ec.segment || "",
+      secondaryEmail: ec.secondaryEmail || "",
+      secondaryPhone: ec.secondaryPhone || "",
+      whatsappNumber: ec.whatsappNumber || "",
+      displayName: ec.displayName || "",
+      language: ec.language || "",
+      addressLine2: ec.addressLine2 || "",
+      state: ec.state || "",
+      postalCode: ec.postalCode || "",
+      timezone: ec.timezone || "",
+      marketingOptIn: ec.marketingOptIn ?? false,
+      doNotContact: ec.doNotContact ?? false,
+      notesInternal: ec.notesInternal || "",
     });
     setShowMobileDetail(false);
     setShowAddForm(true);
@@ -980,6 +1023,7 @@ export default function ContactsPage() {
             preferredChannel: (c as any).preferredChannel ?? null,
             createdAt: (c as any).createdAt ?? null,
             addressLine1: (c as any).addressLine1 ?? null,
+            addressLine2: (c as any).addressLine2 ?? null,
             whatsappNumber: (c as any).whatsappNumber ?? null,
             department: (c as any).department ?? null,
             industry: (c as any).industry ?? null,
@@ -987,6 +1031,17 @@ export default function ContactsPage() {
             sourceDetail: (c as any).sourceDetail ?? null,
             notesInternal: (c as any).notesInternal ?? null,
             updatedAt: (c as any).updatedAt ?? null,
+            secondaryEmail: (c as any).secondaryEmail ?? null,
+            secondaryPhone: (c as any).secondaryPhone ?? null,
+            displayName: (c as any).displayName ?? null,
+            segment: (c as any).segment ?? null,
+            language: (c as any).language ?? null,
+            timezone: (c as any).timezone ?? null,
+            state: (c as any).state ?? null,
+            postalCode: (c as any).postalCode ?? null,
+            marketingOptIn: (c as any).marketingOptIn ?? null,
+            doNotContact: (c as any).doNotContact ?? null,
+            custom: (c as any).custom ?? null,
           }))}
           onRefresh={() => { void loadContacts(); }}
           activeListId={activeListId}
@@ -1255,6 +1310,7 @@ export default function ContactsPage() {
             onUpdateStatus={handleUpdateStatus}
             onEdit={() => handleEditContact()}
             onDelete={() => handleDeleteContact()}
+            onLogEvent={handleLogEvent}
           />
 
           {selectedContact && (
@@ -1340,6 +1396,7 @@ export default function ContactsPage() {
                   onUpdateStatus={handleUpdateStatus}
                   onEdit={() => handleEditContact()}
                   onDelete={() => handleDeleteContact()}
+                  onLogEvent={handleLogEvent}
                 />
 
                 {selectedContact && (

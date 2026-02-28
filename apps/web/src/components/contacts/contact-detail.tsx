@@ -32,6 +32,15 @@ import {
   Star,
   Receipt,
   FileSignature,
+  Languages,
+  ShieldAlert,
+  ShieldCheck,
+  Megaphone,
+  Tag,
+  StickyNote,
+  AtSign,
+  PhoneCall,
+  Bell,
 } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 
@@ -43,14 +52,30 @@ export type ContactDetailData = {
   phone?: string | null;
   companyName?: string | null;
   jobTitle?: string | null;
+  department?: string | null;
+  industry?: string | null;
   status?: string | null;
   source?: string | null;
   sourceDetail?: string | null;
   preferredChannel?: string | null;
   tags?: string[];
+  displayName?: string | null;
+  secondaryEmail?: string | null;
+  secondaryPhone?: string | null;
+  whatsappNumber?: string | null;
+  language?: string | null;
   addressLine1?: string | null;
+  addressLine2?: string | null;
   city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
   country?: string | null;
+  timezone?: string | null;
+  segment?: string | null;
+  lifecycleStage?: string | null;
+  marketingOptIn?: boolean | null;
+  doNotContact?: boolean | null;
+  notesInternal?: string | null;
   createdAt?: string | null;
   meta?: {
     leadScore?: number | null;
@@ -102,6 +127,7 @@ interface ContactDetailProps {
   onEdit?: () => void;
   onDelete?: () => Promise<void>;
   onQuickAction?: (contactId: string, action: DetailQuickAction) => void;
+  onLogEvent?: (type: string, description?: string) => Promise<void>;
 }
 
 const STATUSES = ["LEAD", "PROSPECT", "CLIENT", "LOST"] as const;
@@ -143,7 +169,10 @@ const EVENT_LABELS: Record<string, string> = {
   "task.created": "Task created",
   "task.completed": "Task completed",
   "email.sent": "Email sent",
+  "whatsapp.sent": "WhatsApp message sent",
+  "message.copied": "Message copied",
   "form.submitted": "Form submitted",
+  "followup.scheduled": "Follow-up scheduled",
 };
 
 export function ContactDetail({
@@ -162,6 +191,7 @@ export function ContactDetail({
   onEdit,
   onDelete,
   onQuickAction,
+  onLogEvent,
 }: ContactDetailProps) {
   const [activeTab, setActiveTab] = useState<"timeline" | "notes" | "tasks" | "compose">("timeline");
   const [newNote, setNewNote] = useState("");
@@ -173,6 +203,8 @@ export function ContactDetail({
   const [deleting, setDeleting] = useState(false);
   const [composeMessage, setComposeMessage] = useState("");
   const [copied, setCopied] = useState(false);
+  const [showFollowUp, setShowFollowUp] = useState(false);
+  const [followUpLoading, setFollowUpLoading] = useState(false);
 
   const handleDelete = async () => {
     if (!onDelete) return;
@@ -230,22 +262,40 @@ export function ContactDetail({
     setComposeMessage(template.replace("{name}", contact.firstName || "there"));
   };
 
-  const handleCopyMessage = () => {
+  const handleCopyMessage = async () => {
     navigator.clipboard.writeText(composeMessage);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+    onLogEvent?.("message.copied", composeMessage.slice(0, 200));
+    setShowFollowUp(true);
   };
 
-  const handleSendWhatsApp = () => {
+  const handleSendWhatsApp = async () => {
     if (!waPhone) return;
     window.open(buildWhatsAppLink(waPhone, composeMessage), "_blank");
+    onLogEvent?.("whatsapp.sent", composeMessage.slice(0, 200));
+    setShowFollowUp(true);
   };
 
-  const handleSendEmail = () => {
+  const handleSendEmail = async () => {
     if (!contact.email) return;
     const subject = encodeURIComponent("Following up");
     const body = encodeURIComponent(composeMessage);
     window.open(`mailto:${contact.email}?subject=${subject}&body=${body}`, "_blank");
+    onLogEvent?.("email.sent", composeMessage.slice(0, 200));
+    setShowFollowUp(true);
+  };
+
+  const handleFollowUp = async (days: number) => {
+    if (!onAddTask) return;
+    setFollowUpLoading(true);
+    const due = new Date();
+    due.setDate(due.getDate() + days);
+    const label = days === 1 ? "tomorrow" : days === 3 ? "in 3 days" : "in 1 week";
+    await onAddTask(`Follow up with ${contact.firstName || "contact"} ${label}`, due.toISOString());
+    onLogEvent?.("followup.scheduled", `Follow-up in ${days} day(s)`);
+    setFollowUpLoading(false);
+    setShowFollowUp(false);
   };
 
   return (
@@ -495,14 +545,154 @@ export function ContactDetail({
         </div>
       )}
 
-      {(contact.addressLine1 || contact.city || contact.country) && (
-        <div className="flex items-start gap-2 p-3 rounded-xl bg-muted/50 text-sm">
-          <MapPin className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: statusColor }} />
-          <span>
-            {[contact.addressLine1, contact.city, contact.country].filter(Boolean).join(", ")}
-          </span>
+      {contact.notesInternal && (
+        <div className="p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30">
+          <div className="flex items-center gap-2 mb-1">
+            <StickyNote className="w-3.5 h-3.5 text-yellow-500" />
+            <span className="text-xs font-medium text-yellow-500 uppercase tracking-wider">Internal Notes</span>
+          </div>
+          <p className="text-sm whitespace-pre-wrap">{contact.notesInternal}</p>
         </div>
       )}
+
+      <div className="p-3 rounded-xl bg-muted/30 border border-border/50">
+        <div className="flex items-center gap-2 mb-2">
+          <Building2 className="w-3.5 h-3.5 text-muted-foreground" />
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Professional</span>
+        </div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+          <div>
+            <span className="text-xs text-muted-foreground">Company</span>
+            <p className="font-medium">{contact.companyName || "—"}</p>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Job Title</span>
+            <p className="font-medium">{contact.jobTitle || "—"}</p>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Department</span>
+            <p className="font-medium">{contact.department || "—"}</p>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Industry</span>
+            <p className="font-medium">{contact.industry || "—"}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-3 rounded-xl bg-muted/30 border border-border/50">
+        <div className="flex items-center gap-2 mb-2">
+          <PhoneCall className="w-3.5 h-3.5 text-muted-foreground" />
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Contact Methods</span>
+        </div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+          <div>
+            <span className="text-xs text-muted-foreground">Secondary Email</span>
+            <p className="font-medium">{contact.secondaryEmail || "—"}</p>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Secondary Phone</span>
+            <p className="font-medium">{contact.secondaryPhone || "—"}</p>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">WhatsApp</span>
+            <p className="font-medium">{contact.whatsappNumber || "—"}</p>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Preferred Channel</span>
+            <p className="font-medium">{contact.preferredChannel || "—"}</p>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Language</span>
+            <p className="font-medium">{contact.language || "—"}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-3 rounded-xl bg-muted/30 border border-border/50">
+        <div className="flex items-center gap-2 mb-2">
+          <MapPin className="w-3.5 h-3.5 text-muted-foreground" />
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Address</span>
+        </div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+          <div className="col-span-2">
+            <span className="text-xs text-muted-foreground">Address Line 1</span>
+            <p className="font-medium">{contact.addressLine1 || "—"}</p>
+          </div>
+          <div className="col-span-2">
+            <span className="text-xs text-muted-foreground">Address Line 2</span>
+            <p className="font-medium">{contact.addressLine2 || "—"}</p>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">City</span>
+            <p className="font-medium">{contact.city || "—"}</p>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">State</span>
+            <p className="font-medium">{contact.state || "—"}</p>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Postal Code</span>
+            <p className="font-medium">{contact.postalCode || "—"}</p>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Country</span>
+            <p className="font-medium">{contact.country || "—"}</p>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Timezone</span>
+            <p className="font-medium">{contact.timezone || "—"}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-3 rounded-xl bg-muted/30 border border-border/50">
+        <div className="flex items-center gap-2 mb-2">
+          <Tag className="w-3.5 h-3.5 text-muted-foreground" />
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Preferences</span>
+        </div>
+        <div className="flex flex-wrap gap-2 mb-2">
+          {contact.marketingOptIn === true && (
+            <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-500 border border-emerald-500/30">
+              <Megaphone className="w-3 h-3" />
+              Marketing Opt-In
+            </span>
+          )}
+          {contact.marketingOptIn === false && (
+            <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-muted text-muted-foreground border border-border/50">
+              <Megaphone className="w-3 h-3" />
+              Marketing Opt-Out
+            </span>
+          )}
+          {contact.marketingOptIn == null && (
+            <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-muted text-muted-foreground border border-border/50">
+              <Megaphone className="w-3 h-3" />
+              Marketing: —
+            </span>
+          )}
+          {contact.doNotContact ? (
+            <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-red-500/10 text-red-400 border border-red-500/30">
+              <ShieldAlert className="w-3 h-3" />
+              Do Not Contact
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-500 border border-emerald-500/30">
+              <ShieldCheck className="w-3 h-3" />
+              Contactable
+            </span>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+          <div>
+            <span className="text-xs text-muted-foreground">Lifecycle Stage</span>
+            <p className="font-medium">{contact.lifecycleStage || "—"}</p>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Segment</span>
+            <p className="font-medium">{contact.segment || "—"}</p>
+          </div>
+        </div>
+      </div>
 
       {contact.tags && contact.tags.length > 0 && (
         <div className="flex flex-wrap gap-1">
@@ -589,6 +779,36 @@ export function ContactDetail({
                 {copied ? "Copied!" : "Copy"}
               </button>
             </div>
+            {showFollowUp && onAddTask && (
+              <div className="p-3 rounded-xl bg-[hsl(var(--kf-accent1))]/10 border border-[hsl(var(--kf-accent1))]/30 space-y-2">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Bell className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+                  Remind me to follow up
+                </div>
+                <div className="flex gap-2">
+                  {[
+                    { label: "Tomorrow", days: 1 },
+                    { label: "In 3 days", days: 3 },
+                    { label: "In 1 week", days: 7 },
+                  ].map((opt) => (
+                    <button
+                      key={opt.days}
+                      onClick={() => handleFollowUp(opt.days)}
+                      disabled={followUpLoading}
+                      className="flex-1 px-3 py-1.5 text-xs rounded-lg bg-muted hover:bg-muted/80 transition-colors disabled:opacity-50"
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setShowFollowUp(false)}
+                    className="px-3 py-1.5 text-xs rounded-lg text-muted-foreground hover:bg-muted transition-colors"
+                  >
+                    Skip
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
