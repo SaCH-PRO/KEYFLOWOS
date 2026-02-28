@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { AlertTriangle, RefreshCw } from "lucide-react";
 import {
   ContactDetail,
   ContactDetailData,
@@ -19,6 +20,8 @@ export interface PipelineDetailPanelProps {
   notes: ContactNote[];
   tasks: ContactTask[];
   loading: boolean;
+  detailError?: string | null;
+  onRetryDetail?: () => void;
   isPinned: boolean;
   contactName: string;
   healthMetrics: HealthMetrics | null;
@@ -49,6 +52,8 @@ function PipelineDetailPanelInner({
   notes,
   tasks,
   loading,
+  detailError,
+  onRetryDetail,
   isPinned,
   contactName,
   healthMetrics,
@@ -72,6 +77,28 @@ function PipelineDetailPanelInner({
   onRefreshConversationContext,
   onClose,
 }: PipelineDetailPanelProps) {
+  if (detailError && !loading) {
+    return (
+      <div className="kf-card p-6 text-center space-y-3" role="alert">
+        <div className="flex justify-center">
+          <div className="p-2.5 rounded-full bg-red-500/10">
+            <AlertTriangle className="w-5 h-5 text-red-400" />
+          </div>
+        </div>
+        <p className="text-sm text-muted-foreground">{detailError}</p>
+        {onRetryDetail && (
+          <button
+            onClick={onRetryDetail}
+            className="kf-btn-secondary inline-flex items-center gap-1.5 text-sm"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Retry
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <ContactDetail

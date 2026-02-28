@@ -129,17 +129,21 @@ function PipelineToolbarInner({
             <button
               onClick={() => setShowSort(!showSort)}
               className={`p-2 rounded-lg transition-all ${showSort ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground hover:bg-muted/50"}`}
-              aria-label="Sort"
+              aria-label="Sort contacts"
+              aria-haspopup="listbox"
+              aria-expanded={showSort}
             >
               <ArrowUpDown className="w-4 h-4" />
             </button>
             {showSort && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setShowSort(false)} />
-                <div className="fixed left-2 right-2 top-20 sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-1 z-50 kf-card border border-border shadow-2xl rounded-xl py-1 sm:w-44 max-h-[80vh] overflow-y-auto">
+                <div role="listbox" aria-label="Sort options" className="fixed left-2 right-2 top-20 sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-1 z-50 kf-card border border-border shadow-2xl rounded-xl py-1 sm:w-44 max-h-[80vh] overflow-y-auto">
                   {SORT_OPTIONS.map((opt) => (
                     <button
                       key={opt.value}
+                      role="option"
+                      aria-selected={sortBy === opt.value}
                       onClick={() => { onSortChange(opt.value); setShowSort(false); }}
                       className={`w-full text-left px-4 py-2 text-sm hover:bg-muted/50 transition-colors ${sortBy === opt.value ? "text-[hsl(var(--kf-accent1))] font-medium" : ""}`}
                     >
@@ -190,6 +194,7 @@ function PipelineToolbarInner({
             <button
               key={key}
               onClick={() => onSegmentChange(isActive ? null : key)}
+              aria-pressed={isActive}
               className={`inline-flex items-center gap-1 px-2.5 py-1 text-[11px] rounded-full transition-all whitespace-nowrap flex-shrink-0 ${
                 isActive
                   ? "ring-1 ring-[hsl(var(--kf-accent1))]/40 bg-[hsl(var(--kf-accent1))]/10 font-medium"
@@ -216,7 +221,7 @@ function PipelineToolbarInner({
         )}
       </div>
 
-      <div className="flex gap-0.5 border-b border-border/50">
+      <div role="tablist" aria-label="Contact list views" className="flex gap-0.5 border-b border-border/50">
         {[
           { key: "all" as const, label: "All", count: allCount, icon: Users },
           { key: "pinned" as const, label: "Pinned", count: pinnedCount, icon: Star },
@@ -224,6 +229,8 @@ function PipelineToolbarInner({
         ].map(({ key, label, count, icon: Icon }) => (
           <button
             key={key}
+            role="tab"
+            aria-selected={activeListTab === key}
             onClick={() => onListTabChange(key)}
             className={`flex items-center gap-1 px-3 py-1.5 text-xs transition-colors border-b-2 -mb-px ${
               activeListTab === key

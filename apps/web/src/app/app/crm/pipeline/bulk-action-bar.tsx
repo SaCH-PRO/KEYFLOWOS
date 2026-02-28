@@ -42,6 +42,9 @@ function BulkActionBarInner({
           onClick={() => { setShowStatus(!showStatus); setShowTag(false); }}
           disabled={selectedCount === 0}
           className="kf-btn-secondary inline-flex items-center gap-1.5 text-sm disabled:opacity-50"
+          aria-label="Change status"
+          aria-haspopup="listbox"
+          aria-expanded={showStatus}
         >
           <UserCheck className="w-4 h-4" />
           Status
@@ -50,10 +53,11 @@ function BulkActionBarInner({
         {showStatus && (
           <>
             <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" onClick={() => setShowStatus(false)} />
-            <div className="fixed left-2 right-2 top-20 sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-1 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 sm:w-44 max-h-[80vh] overflow-y-auto">
+            <div role="listbox" aria-label="Contact status options" className="fixed left-2 right-2 top-20 sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-1 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 sm:w-44 max-h-[80vh] overflow-y-auto">
               {(["LEAD", "PROSPECT", "CLIENT", "LOST"] as const).map((s) => (
                 <button
                   key={s}
+                  role="option"
                   onClick={() => { onStatusChange(s); setShowStatus(false); }}
                   className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors"
                 >
@@ -70,6 +74,9 @@ function BulkActionBarInner({
           onClick={() => { setShowTag(!showTag); setShowStatus(false); }}
           disabled={selectedCount === 0}
           className="kf-btn-secondary inline-flex items-center gap-1.5 text-sm disabled:opacity-50"
+          aria-label="Add tag"
+          aria-haspopup="dialog"
+          aria-expanded={showTag}
         >
           <Tag className="w-4 h-4" />
           Tag
@@ -104,6 +111,7 @@ function BulkActionBarInner({
         onClick={onBulkDelete}
         disabled={selectedCount === 0}
         className="kf-btn-secondary inline-flex items-center gap-1.5 text-sm text-red-400 hover:text-red-300 disabled:opacity-50"
+        aria-label={`Delete ${selectedCount} selected contacts`}
       >
         <Trash2 className="w-4 h-4" />
         Delete
@@ -113,6 +121,7 @@ function BulkActionBarInner({
         onClick={onBroadcast}
         disabled={selectedCount === 0}
         className="kf-btn-primary inline-flex items-center gap-2 text-sm disabled:opacity-50"
+        aria-label={`Broadcast to ${selectedCount} selected contacts`}
       >
         <Send className="w-4 h-4" />
         Broadcast

@@ -28,8 +28,9 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - ContactDetail UX improvements include quick actions, smart empty states, recent activity display, compact mobile layout, and lead score explainers.
 - All three detail tabs (Notes, Tasks, Timeline) render simultaneously with CSS `hidden` toggle to preserve state across tab switches.
 - Responsive popup positioning for mobile and desktop views.
-- Pipeline performance: Memoized `detailPanelProps` via `useMemo`, memoized database contacts mapping, stable useEffect dependencies (no `state` object in deps), focus management (detail panel auto-focused on selection, list focus restored on close).
-- Inline error/retry UI for contacts loading failures (replaces toast-only errors).
+- Pipeline performance: Memoized `detailPanelProps` via `useMemo`, memoized database contacts mapping, stable useEffect dependencies (no `state` object in deps), focus management (detail panel auto-focused on selection, list focus restored on close). `PipelineTabContent` wrapped in `React.memo`. All inline callbacks in `page.tsx` and `pipeline-tab-content.tsx` extracted into `useCallback` for stable references. `selectContact` dependency array uses `detail.selectContact` instead of entire `detail` object. `setSelectedIds` uses ref-based closure to avoid stale state.
+- Inline error/retry UI for contacts loading failures and detail panel loading failures (replaces toast-only errors).
+- Comprehensive ARIA accessibility: sort dropdown (`role="listbox"`, `aria-expanded`, `aria-haspopup`), segment buttons (`aria-pressed`), list tabs (`role="tablist"`, `role="tab"`, `aria-selected`), bulk action bar (`aria-label` on all buttons, `role="listbox"` on status dropdown), guide popup (`role="dialog"`, `aria-modal`), mobile detail drawer (`role="dialog"`, `aria-modal`).
 
 **Technical Implementations & Features:**
 - **Business Autopilot System:** AI-powered operations with onboarding, business archetype inference, revenue model detection, task orchestration, and a Legal & Compliance Module.
@@ -64,7 +65,8 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Global HTTP Exception Filter:** Consistent error response format for all backend errors.
 - **CORS Configuration:** Environment-aware CORS settings.
 - **Mass Assignment Protection:** Explicit field mapping for sensitive updates to prevent security vulnerabilities.
-- **Accessibility (ARIA):** Dialog, Drawer, and Command palette components include ARIA attributes.
+- **Accessibility (ARIA):** Dialog, Drawer, Command palette, CRM toolbar, bulk action bar, and mobile drawer components include ARIA attributes.
+- **Bulk Operations Cap:** Server-side validation caps `contactIds` array to 100 items in bulk update/delete endpoints.
 - **Error Boundaries:** Root, app-level, and CRM pipeline-level error boundaries for graceful recovery.
 - **Pluggable Notes System:** Contact notes with 6 categories (General, Call, Meeting, Deal, Follow-up, Idea) stored via `source` field. Collapsed composer, per-note action row (Pin, Copy, WhatsApp, Email, Create Task, Delete), search + category filter chips, pinned notes, quick templates, Cmd/Ctrl+Enter shortcut.
 - **Pluggable Tasks System:** Contact tasks with 3 priority levels (HIGH/NORMAL/LOW), collapsed composer, priority picker, due date + reminder (remindAt) inputs, 5 quick templates, search + filter (All/Open/Done/Overdue), sort (Due/Priority/Newest), overdue/due-soon highlighting, per-task action row (Copy, WhatsApp, Email, Create Note, Delete), circular checkbox completion, relative dates. `onAddTask` accepts `(title, options?: { dueDate, priority, remindAt })`.

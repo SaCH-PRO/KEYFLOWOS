@@ -108,6 +108,9 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Body() body: { contactIds: string[]; status?: string; addTags?: string[] },
   ) {
+    if (!Array.isArray(body.contactIds) || body.contactIds.length > 100) {
+      throw new HttpException('contactIds must be an array of at most 100 items', 400);
+    }
     return this.crm.bulkUpdateContacts({ businessId, contactIds: body.contactIds, status: body.status, addTags: body.addTags });
   }
 
@@ -117,6 +120,9 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Body() body: { contactIds: string[] },
   ) {
+    if (!Array.isArray(body.contactIds) || body.contactIds.length > 100) {
+      throw new HttpException('contactIds must be an array of at most 100 items', 400);
+    }
     return this.crm.bulkDeleteContacts({ businessId, contactIds: body.contactIds });
   }
 

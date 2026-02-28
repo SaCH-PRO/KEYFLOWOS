@@ -2330,11 +2330,12 @@ export async function fetchConversationContext(contactId: string, businessId?: s
   );
 }
 
-export async function generateAiInsight(contactId: string, businessId?: string): Promise<ApiResult<AiInsight>> {
+export async function generateAiInsight(contactId: string, businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<AiInsight>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<AiInsight>({
     path: `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/ai-insight`,
     body: {},
+    init: opts?.signal ? { signal: opts.signal } : undefined,
   });
 }
 
