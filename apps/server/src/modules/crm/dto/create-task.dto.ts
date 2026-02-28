@@ -20,4 +20,8 @@ export class CreateTaskDto {
   @IsOptional()
   @IsISO8601()
   remindAt?: string;
+
+  @IsOptional()
+  @IsString()
+  source?: string;
 }

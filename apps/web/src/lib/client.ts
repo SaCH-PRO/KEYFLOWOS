@@ -90,6 +90,7 @@ const taskSchema = z.object({
   dueDate: z.string().nullable().optional(),
   remindAt: z.string().nullable().optional(),
   completedAt: z.string().nullable().optional(),
+  source: z.string().nullable().optional(),
   createdAt: z.string(),
   contact: contactSchema.optional(),
 });

@@ -62,7 +62,8 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Mass Assignment Protection:** Explicit field mapping for sensitive updates to prevent security vulnerabilities.
 - **Accessibility (ARIA):** Dialog, Drawer, and Command palette components include ARIA attributes.
 - **Error Boundaries:** Root and app-level error boundaries for graceful recovery.
-- **Pluggable Notes System:** Contact notes with categories, search, filter, pinning, and integration with other modules.
+- **Pluggable Notes System:** Contact notes with 6 categories (General, Call, Meeting, Deal, Follow-up, Idea) stored via `source` field. Collapsed composer, per-note action row (Pin, Copy, WhatsApp, Email, Create Task, Delete), search + category filter chips, pinned notes, quick templates, Cmd/Ctrl+Enter shortcut.
+- **Pluggable Tasks System:** Contact tasks with 3 priority levels (HIGH/NORMAL/LOW), collapsed composer, priority picker, due date + reminder (remindAt) inputs, 5 quick templates, search + filter (All/Open/Done/Overdue), sort (Due/Priority/Newest), overdue/due-soon highlighting, per-task action row (Copy, WhatsApp, Email, Create Note, Delete), circular checkbox completion, relative dates. `onAddTask` accepts `(title, options?: { dueDate, priority, remindAt })`.
 - **Core Modules:** Identity, CRM, Commerce, Marketplace, Bookings, Social, Projects & Playbooks, Flow (Activity & Search), Reports, Command, Expenses, Webhooks, AI, Email Marketing, Lead Forms, Templates, Education, Community.
 
 ## External Dependencies

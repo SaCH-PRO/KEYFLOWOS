@@ -32,7 +32,7 @@ export interface PipelineDetailPanelProps {
   aiInsightLoading: boolean;
   onTogglePin: (id: string) => void;
   onAddNote: (body: string, source?: string) => Promise<void>;
-  onAddTask: (title: string, dueDate?: string) => Promise<void>;
+  onAddTask: (title: string, options?: { dueDate?: string; priority?: string; remindAt?: string }) => Promise<void>;
   onCompleteTask: (taskId: string) => Promise<void>;
   onDeleteNote: (noteId: string) => Promise<void>;
   onDeleteTask: (taskId: string) => Promise<void>;
