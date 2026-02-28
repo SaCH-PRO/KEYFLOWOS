@@ -190,6 +190,7 @@ export default function ContactsPage() {
                 if (listId) setCrmViewTab("pipeline");
               }}
               onListsLoaded={(count) => setListsCount(count)}
+              onSelectContact={(id) => { selectContact(id); setCrmViewTab("pipeline"); }}
             />
           </motion.div>
         )}
