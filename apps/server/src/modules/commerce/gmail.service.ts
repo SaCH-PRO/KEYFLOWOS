@@ -26,7 +26,7 @@ export class GmailService {
   private readonly logger = new Logger(GmailService.name);
   private readonly clientId = process.env.GOOGLE_CLIENT_ID;
   private readonly clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  private readonly redirectUri = process.env.GMAIL_REDIRECT_URI || process.env.GOOGLE_REDIRECT_URI?.replace('/api/crm/google/callback', '/api/commerce/gmail/callback');
+  private readonly redirectUri = process.env.GMAIL_REDIRECT_URI || process.env.GOOGLE_REDIRECT_URI?.replace('/crm/google/callback', '/commerce/gmail/callback');
   private readonly stateSecret = process.env.GOOGLE_STATE_SECRET;
 
   constructor(
