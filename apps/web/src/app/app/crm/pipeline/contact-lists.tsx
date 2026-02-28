@@ -21,11 +21,16 @@ import {
   updateContactList,
   deleteContactList,
   addContactsToList,
-  removeContactFromList,
   fetchContactListContacts,
 } from "@/lib/client";
 import { ContactSelect } from "@/components/contacts";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+
+interface SmartListFilters {
+  status?: string[];
+  tags?: string[];
+  source?: string;
+}
 
 interface ContactListData {
   id: string;
@@ -33,9 +38,17 @@ interface ContactListData {
   description?: string | null;
   color?: string | null;
   type: string;
-  filters?: any;
+  filters?: SmartListFilters;
   contactIds: string[];
   createdAt: string;
+}
+
+interface ContactListPayload {
+  name: string;
+  description?: string;
+  color: string;
+  type: "MANUAL" | "SMART";
+  filters?: SmartListFilters;
 }
 
 interface ContactListsProps {
@@ -76,9 +89,10 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
     try {
       const { data } = await fetchContactLists(businessId);
       if (data) {
-        setLists(data as ContactListData[]);
-        onListsLoaded?.((data as ContactListData[]).length);
-        const smartLists = (data as ContactListData[]).filter((l) => l.type === "SMART");
+        const typed = data as ContactListData[];
+        setLists(typed);
+        onListsLoaded?.(typed.length);
+        const smartLists = typed.filter((l) => l.type === "SMART");
         if (smartLists.length > 0) {
           const counts: Record<string, number> = {};
           await Promise.all(smartLists.map(async (sl) => {
@@ -90,7 +104,9 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
           setSmartListCounts(counts);
         }
       }
-    } catch {}
+    } catch {
+      toast.error("Failed to load contact lists");
+    }
     setLoading(false);
   }, [businessId, onListsLoaded]);
 
@@ -98,7 +114,7 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
     loadLists();
   }, [loadLists]);
 
-  const resetForm = () => {
+  const resetForm = useCallback(() => {
     setFormName("");
     setFormDescription("");
     setFormColor(LIST_COLORS[0]);
@@ -106,9 +122,9 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
     setFormFilterStatus([]);
     setFormFilterTags("");
     setFormFilterSource("");
-  };
+  }, []);
 
-  const openEdit = (list: ContactListData) => {
+  const openEdit = useCallback((list: ContactListData) => {
     setEditList(list);
     setFormName(list.name);
     setFormDescription(list.description || "");
@@ -121,13 +137,13 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
     }
     setShowCreate(true);
     setMenuOpenId(null);
-  };
+  }, []);
 
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     if (!formName.trim()) { toast.error("Name is required"); return; }
     setSaving(true);
     try {
-      const payload: any = {
+      const payload: ContactListPayload = {
         name: formName.trim(),
         description: formDescription.trim() || undefined,
         color: formColor,
@@ -156,9 +172,9 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
       toast.error("Failed to save list");
     }
     setSaving(false);
-  };
+  }, [businessId, editList, formName, formDescription, formColor, formType, formFilterStatus, formFilterTags, formFilterSource, loadLists, resetForm]);
 
-  const handleDelete = async (listId: string) => {
+  const handleDelete = useCallback(async (listId: string) => {
     try {
       await deleteContactList(businessId, listId);
       toast.success("List deleted");
@@ -167,9 +183,9 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
     } catch {
       toast.error("Failed to delete list");
     }
-  };
+  }, [businessId, activeListId, onSelectList, loadLists]);
 
-  const handleAddContact = async (listId: string, contactId: string) => {
+  const handleAddContact = useCallback(async (listId: string, contactId: string) => {
     try {
       await addContactsToList(businessId, listId, [contactId]);
       toast.success("Contact added to list");
@@ -178,7 +194,46 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
     } catch {
       toast.error("Failed to add contact");
     }
-  };
+  }, [businessId, loadLists]);
+
+  const handleListClick = useCallback(async (list: ContactListData) => {
+    if (activeListId === list.id) {
+      onSelectList(null);
+      return;
+    }
+    if (list.type === "SMART") {
+      try {
+        const res = await fetchContactListContacts(businessId, list.id);
+        const ids = Array.isArray(res.data) ? (res.data as { id: string }[]).map((c) => c.id) : [];
+        onSelectList(list.id, ids);
+      } catch {
+        onSelectList(list.id, []);
+      }
+    } else {
+      onSelectList(list.id, list.contactIds);
+    }
+  }, [businessId, activeListId, onSelectList]);
+
+  const handleNewList = useCallback(() => {
+    resetForm();
+    setEditList(null);
+    setShowCreate(true);
+  }, [resetForm]);
+
+  const handleCancelForm = useCallback(() => {
+    setShowCreate(false);
+    setEditList(null);
+    resetForm();
+  }, [resetForm]);
+
+  const handleConfirmDelete = useCallback(() => {
+    if (confirmDelete.listId) handleDelete(confirmDelete.listId);
+    setConfirmDelete({ open: false, listId: null });
+  }, [confirmDelete.listId, handleDelete]);
+
+  const handleCancelDelete = useCallback(() => {
+    setConfirmDelete({ open: false, listId: null });
+  }, []);
 
   return (
     <div className="space-y-4">
@@ -188,7 +243,7 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
           Contact Lists
         </h3>
         <button
-          onClick={() => { resetForm(); setEditList(null); setShowCreate(true); }}
+          onClick={handleNewList}
           className="kf-btn-primary text-xs px-3 py-1.5 inline-flex items-center gap-1.5"
         >
           <Plus className="w-3 h-3" />
@@ -206,7 +261,7 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
           >
             <div className="flex items-center justify-between">
               <h4 className="text-sm font-medium">{editList ? "Edit List" : "New List"}</h4>
-              <button onClick={() => { setShowCreate(false); setEditList(null); resetForm(); }} className="p-1 rounded hover:bg-muted/50">
+              <button onClick={handleCancelForm} className="p-1 rounded hover:bg-muted/50" aria-label="Close form">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -218,6 +273,7 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
               onChange={(e) => setFormName(e.target.value)}
               className="kf-input w-full text-sm"
               autoFocus
+              aria-label="List name"
             />
             <input
               type="text"
@@ -225,9 +281,10 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
               value={formDescription}
               onChange={(e) => setFormDescription(e.target.value)}
               className="kf-input w-full text-sm"
+              aria-label="List description"
             />
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2" role="group" aria-label="List color">
               <span className="text-xs text-muted-foreground">Color:</span>
               {LIST_COLORS.map((c) => (
                 <button
@@ -235,14 +292,17 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
                   onClick={() => setFormColor(c)}
                   className={`w-5 h-5 rounded-full transition-all ${formColor === c ? "ring-2 ring-offset-2 ring-offset-background" : ""}`}
                   style={{ backgroundColor: c, ringColor: c }}
+                  aria-label={`Color ${c}`}
+                  aria-pressed={formColor === c}
                 />
               ))}
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex gap-2" role="group" aria-label="List type">
               <button
                 onClick={() => setFormType("MANUAL")}
                 className={`flex-1 text-xs py-2 rounded-lg border transition-all ${formType === "MANUAL" ? "border-[hsl(var(--kf-accent1))] bg-[hsl(var(--kf-accent1))]/10 text-foreground" : "border-border text-muted-foreground"}`}
+                aria-pressed={formType === "MANUAL"}
               >
                 <Users className="w-3.5 h-3.5 mx-auto mb-1" />
                 Manual
@@ -250,6 +310,7 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
               <button
                 onClick={() => setFormType("SMART")}
                 className={`flex-1 text-xs py-2 rounded-lg border transition-all ${formType === "SMART" ? "border-[hsl(var(--kf-accent2))] bg-[hsl(var(--kf-accent2))]/10 text-foreground" : "border-border text-muted-foreground"}`}
+                aria-pressed={formType === "SMART"}
               >
                 <Zap className="w-3.5 h-3.5 mx-auto mb-1" />
                 Smart
@@ -264,12 +325,13 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">Status</label>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap gap-1.5" role="group" aria-label="Status filters">
                     {STATUSES_OPTIONS.map((s) => (
                       <button
                         key={s}
                         onClick={() => setFormFilterStatus((prev) => prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s])}
                         className={`px-2 py-1 text-xs rounded-md border transition-all ${formFilterStatus.includes(s) ? "border-[hsl(var(--kf-accent1))] bg-[hsl(var(--kf-accent1))]/10" : "border-border"}`}
+                        aria-pressed={formFilterStatus.includes(s)}
                       >
                         {s}
                       </button>
@@ -282,6 +344,7 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
                   value={formFilterTags}
                   onChange={(e) => setFormFilterTags(e.target.value)}
                   className="kf-input w-full text-xs"
+                  aria-label="Filter by tags"
                 />
                 <input
                   type="text"
@@ -289,12 +352,13 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
                   value={formFilterSource}
                   onChange={(e) => setFormFilterSource(e.target.value)}
                   className="kf-input w-full text-xs"
+                  aria-label="Filter by source"
                 />
               </div>
             )}
 
             <div className="flex gap-2 justify-end">
-              <button onClick={() => { setShowCreate(false); setEditList(null); resetForm(); }} className="kf-btn-secondary text-xs">
+              <button onClick={handleCancelForm} className="kf-btn-secondary text-xs">
                 Cancel
               </button>
               <button onClick={handleSave} disabled={saving || !formName.trim()} className="kf-btn-primary text-xs disabled:opacity-50">
@@ -321,53 +385,54 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
           <p className="text-xs text-muted-foreground mt-1">Create lists to organize and segment your contacts</p>
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-2" role="list" aria-label="Contact lists">
           {lists.map((list) => (
             <div
               key={list.id}
-              className={`kf-card p-3 cursor-pointer transition-all hover:border-[hsl(var(--kf-accent1))]/30 ${activeListId === list.id ? "border-[hsl(var(--kf-accent1))] bg-[hsl(var(--kf-accent1))]/5" : ""}`}
+              className={`kf-card p-3 transition-all hover:border-[hsl(var(--kf-accent1))]/30 ${activeListId === list.id ? "border-[hsl(var(--kf-accent1))] bg-[hsl(var(--kf-accent1))]/5" : ""}`}
+              role="listitem"
             >
-              <div className="flex items-center gap-3" onClick={async () => {
-                if (activeListId === list.id) { onSelectList(null); return; }
-                if (list.type === "SMART") {
-                  try {
-                    const res = await fetchContactListContacts(businessId, list.id);
-                    const ids = Array.isArray(res.data) ? res.data.map((c: any) => c.id) : [];
-                    onSelectList(list.id, ids);
-                  } catch { onSelectList(list.id, []); }
-                } else {
-                  onSelectList(list.id, list.contactIds);
-                }
-              }}>
-                <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: list.color || "#888" }} />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium truncate">{list.name}</span>
-                    {list.type === "SMART" && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[hsl(var(--kf-accent2))]/10" style={{ color: "hsl(var(--kf-accent2))" }}>
-                        <Zap className="w-2.5 h-2.5 inline -mt-0.5" /> Smart
-                      </span>
-                    )}
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  className="flex items-center gap-3 flex-1 min-w-0 text-left cursor-pointer"
+                  onClick={() => handleListClick(list)}
+                  aria-expanded={activeListId === list.id}
+                >
+                  <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: list.color || "#888" }} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium truncate">{list.name}</span>
+                      {list.type === "SMART" && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[hsl(var(--kf-accent2))]/10" style={{ color: "hsl(var(--kf-accent2))" }}>
+                          <Zap className="w-2.5 h-2.5 inline -mt-0.5" /> Smart
+                        </span>
+                      )}
+                    </div>
+                    {list.description && <p className="text-xs text-muted-foreground truncate">{list.description}</p>}
                   </div>
-                  {list.description && <p className="text-xs text-muted-foreground truncate">{list.description}</p>}
-                </div>
-                <span className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Users className="w-3 h-3" />
-                  {list.type === "SMART" ? (smartListCounts[list.id] ?? "…") : list.contactIds.length}
-                </span>
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Users className="w-3 h-3" />
+                    {list.type === "SMART" ? (smartListCounts[list.id] ?? "…") : list.contactIds.length}
+                  </span>
+                </button>
                 <div className="relative">
                   <button
-                    onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === list.id ? null : list.id); }}
+                    onClick={(e) => { e.stopPropagation(); setMenuOpenId((prev) => prev === list.id ? null : list.id); }}
                     className="p-1 rounded hover:bg-muted/50"
+                    aria-label={`Actions for ${list.name}`}
+                    aria-haspopup="menu"
+                    aria-expanded={menuOpenId === list.id}
                   >
                     <MoreHorizontal className="w-4 h-4" />
                   </button>
                   {menuOpenId === list.id && (
-                    <div className="absolute top-full right-0 mt-1 z-50 kf-card-glass border border-border shadow-xl rounded-xl py-1 w-40">
+                    <div className="absolute top-full right-0 mt-1 z-50 kf-card-glass border border-border shadow-xl rounded-xl py-1 w-40" role="menu">
                       {list.type === "MANUAL" && (
                         <button
                           onClick={(e) => { e.stopPropagation(); setMenuOpenId(null); setAddContactToListId(list.id); }}
                           className="w-full text-left px-3 py-2 text-sm hover:bg-muted/50 flex items-center gap-2"
+                          role="menuitem"
                         >
                           <Plus className="w-3.5 h-3.5" /> Add Contact
                         </button>
@@ -375,12 +440,14 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
                       <button
                         onClick={(e) => { e.stopPropagation(); openEdit(list); }}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-muted/50 flex items-center gap-2"
+                        role="menuitem"
                       >
                         <Edit2 className="w-3.5 h-3.5" /> Edit
                       </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); setMenuOpenId(null); setConfirmDelete({ open: true, listId: list.id }); }}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-muted/50 flex items-center gap-2 text-red-400"
+                        role="menuitem"
                       >
                         <Trash2 className="w-3.5 h-3.5" /> Delete
                       </button>
@@ -414,8 +481,8 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
         message="Are you sure you want to delete this list? Contacts won't be affected."
         confirmLabel="Delete"
         variant="danger"
-        onConfirm={() => { if (confirmDelete.listId) handleDelete(confirmDelete.listId); setConfirmDelete({ open: false, listId: null }); }}
-        onCancel={() => setConfirmDelete({ open: false, listId: null })}
+        onConfirm={handleConfirmDelete}
+        onCancel={handleCancelDelete}
       />
     </div>
   );
