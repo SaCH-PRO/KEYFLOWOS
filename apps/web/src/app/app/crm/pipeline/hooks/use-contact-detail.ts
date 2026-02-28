@@ -28,14 +28,14 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
   const loadContactEnhancements = useCallback(
     async (contactId: string) => {
       if (!businessId) return;
-      const [healthRes, journeyRes, contextRes] = await Promise.all([
+      const results = await Promise.allSettled([
         fetchContactHealthMetrics(contactId, businessId),
         fetchContactJourney(contactId, businessId),
         fetchConversationContext(contactId, businessId),
       ]);
-      if (healthRes.data) setHealthMetrics(healthRes.data);
-      if (journeyRes.data) setJourneyMilestones(journeyRes.data);
-      if (contextRes.data) setConversationContext(contextRes.data);
+      if (results[0].status === "fulfilled" && results[0].value.data) setHealthMetrics(results[0].value.data);
+      if (results[1].status === "fulfilled" && results[1].value.data) setJourneyMilestones(results[1].value.data);
+      if (results[2].status === "fulfilled" && results[2].value.data) setConversationContext(results[2].value.data);
       setAiInsight(null);
     },
     [businessId],
@@ -45,12 +45,23 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
     async (contactId: string) => {
       if (!businessId) return;
       setDetailLoading(true);
-      const { data } = await fetchContactDetail(contactId, businessId);
-      setContactDetail(data ?? null);
-      setDetailLoading(false);
-      void loadContactEnhancements(contactId);
+      try {
+        const results = await Promise.allSettled([
+          fetchContactDetail(contactId, businessId),
+          fetchContactHealthMetrics(contactId, businessId),
+          fetchContactJourney(contactId, businessId),
+          fetchConversationContext(contactId, businessId),
+        ]);
+        if (results[0].status === "fulfilled") setContactDetail(results[0].value.data ?? null);
+        if (results[1].status === "fulfilled" && results[1].value.data) setHealthMetrics(results[1].value.data);
+        if (results[2].status === "fulfilled" && results[2].value.data) setJourneyMilestones(results[2].value.data);
+        if (results[3].status === "fulfilled" && results[3].value.data) setConversationContext(results[3].value.data);
+        setAiInsight(null);
+      } finally {
+        setDetailLoading(false);
+      }
     },
-    [businessId, loadContactEnhancements],
+    [businessId],
   );
 
   const selectContact = useCallback(
