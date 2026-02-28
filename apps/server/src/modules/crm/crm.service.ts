@@ -512,7 +512,9 @@ export class CrmService {
       source?: string | null;
       sourceDetail?: string | null;
       tags?: string[];
-    },
+      status?: string;
+      custom?: any;
+    } & Partial<ContactExtraAttributes>,
   ) {
     const normalizeString = (value?: string | null) => {
       const trimmed = value?.trim();
@@ -575,6 +577,7 @@ export class CrmService {
       }
     }
 
+    const { firstName: _fn, lastName: _ln, email: _em, phone: _ph, tags: _t, ...extraFields } = input;
     return this.createContact({
       businessId,
       firstName: input.firstName,
@@ -585,6 +588,7 @@ export class CrmService {
       source: input.source ?? undefined,
       sourceDetail: input.sourceDetail ?? undefined,
       tags,
+      ...extraFields,
     });
   }
 

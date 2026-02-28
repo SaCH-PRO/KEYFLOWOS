@@ -8,14 +8,32 @@ import { CrmService } from './crm.service';
 type FieldMapping = {
   firstName?: string;
   lastName?: string;
+  displayName?: string;
   email?: string;
+  secondaryEmail?: string;
   phone?: string;
+  secondaryPhone?: string;
+  whatsappNumber?: string;
   status?: string;
   tags?: string;
   addressLine1?: string;
+  addressLine2?: string;
   city?: string;
+  state?: string;
+  postalCode?: string;
   country?: string;
+  timezone?: string;
   companyName?: string;
+  jobTitle?: string;
+  department?: string;
+  industry?: string;
+  segment?: string;
+  preferredChannel?: string;
+  language?: string;
+  lifecycleStage?: string;
+  marketingOptIn?: string;
+  doNotContact?: string;
+  notesInternal?: string;
   custom?: string[];
 };
 
@@ -33,13 +51,33 @@ export class CrmImportService {
     lname: 'lastName',
     family_name: 'lastName',
     surname: 'lastName',
+    last_name: 'lastName',
+    displayname: 'displayName',
+    display_name: 'displayName',
+    full_name: 'displayName',
+    fullname: 'displayName',
     email: 'email',
     e_mail: 'email',
     mail: 'email',
+    email_address: 'email',
+    secondaryemail: 'secondaryEmail',
+    secondary_email: 'secondaryEmail',
+    email2: 'secondaryEmail',
+    alternate_email: 'secondaryEmail',
     phone: 'phone',
     mobile: 'phone',
     telephone: 'phone',
     tel: 'phone',
+    phone_number: 'phone',
+    secondaryphone: 'secondaryPhone',
+    secondary_phone: 'secondaryPhone',
+    phone2: 'secondaryPhone',
+    alternate_phone: 'secondaryPhone',
+    home_phone: 'secondaryPhone',
+    whatsappnumber: 'whatsappNumber',
+    whatsapp_number: 'whatsappNumber',
+    whatsapp: 'whatsappNumber',
+    wa_number: 'whatsappNumber',
     status: 'status',
     stage: 'status',
     pipeline_stage: 'status',
@@ -51,14 +89,62 @@ export class CrmImportService {
     addressline1: 'addressLine1',
     street: 'addressLine1',
     street_address: 'addressLine1',
+    address_1: 'addressLine1',
+    addressline2: 'addressLine2',
+    address_line_2: 'addressLine2',
+    address_2: 'addressLine2',
+    apt: 'addressLine2',
+    suite: 'addressLine2',
     city: 'city',
     town: 'city',
+    state: 'state',
+    province: 'state',
+    region: 'state',
+    postalcode: 'postalCode',
+    postal_code: 'postalCode',
+    zip: 'postalCode',
+    zip_code: 'postalCode',
+    zipcode: 'postalCode',
     country: 'country',
+    timezone: 'timezone',
+    time_zone: 'timezone',
+    tz: 'timezone',
     company: 'companyName',
     company_name: 'companyName',
     companyname: 'companyName',
     organization: 'companyName',
     org: 'companyName',
+    jobtitle: 'jobTitle',
+    job_title: 'jobTitle',
+    title: 'jobTitle',
+    position: 'jobTitle',
+    role: 'jobTitle',
+    department: 'department',
+    dept: 'department',
+    industry: 'industry',
+    sector: 'industry',
+    segment: 'segment',
+    preferredchannel: 'preferredChannel',
+    preferred_channel: 'preferredChannel',
+    contact_method: 'preferredChannel',
+    language: 'language',
+    lang: 'language',
+    locale: 'language',
+    lifecyclestage: 'lifecycleStage',
+    lifecycle_stage: 'lifecycleStage',
+    lifecycle: 'lifecycleStage',
+    marketingoptin: 'marketingOptIn',
+    marketing_opt_in: 'marketingOptIn',
+    marketing: 'marketingOptIn',
+    opted_in: 'marketingOptIn',
+    donotcontact: 'doNotContact',
+    do_not_contact: 'doNotContact',
+    dnc: 'doNotContact',
+    opt_out: 'doNotContact',
+    notesinternal: 'notesInternal',
+    notes_internal: 'notesInternal',
+    notes: 'notesInternal',
+    internal_notes: 'notesInternal',
   };
 
   constructor(
@@ -81,7 +167,14 @@ export class CrmImportService {
     if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping)) return null;
     const record = mapping as Record<string, unknown>;
     const normalized: FieldMapping = { custom: [] };
-    const keys: Array<keyof Omit<FieldMapping, 'custom'>> = ['firstName', 'lastName', 'email', 'phone', 'status', 'tags', 'addressLine1', 'city', 'country', 'companyName'];
+    const keys: Array<keyof Omit<FieldMapping, 'custom'>> = [
+      'firstName', 'lastName', 'displayName', 'email', 'secondaryEmail',
+      'phone', 'secondaryPhone', 'whatsappNumber', 'status', 'tags',
+      'addressLine1', 'addressLine2', 'city', 'state', 'postalCode',
+      'country', 'timezone', 'companyName', 'jobTitle', 'department',
+      'industry', 'segment', 'preferredChannel', 'language',
+      'lifecycleStage', 'marketingOptIn', 'doNotContact', 'notesInternal',
+    ];
     for (const key of keys) {
       if (typeof record[key] === 'string') {
         normalized[key] = record[key] as string;
@@ -385,45 +478,20 @@ export class CrmImportService {
 
   private inferFieldMapping(headers: string[]): FieldMapping {
     const mapping: FieldMapping = { custom: [] };
+    const knownFields: (keyof Omit<FieldMapping, 'custom'>)[] = [
+      'firstName', 'lastName', 'displayName', 'email', 'secondaryEmail',
+      'phone', 'secondaryPhone', 'whatsappNumber', 'status', 'tags',
+      'addressLine1', 'addressLine2', 'city', 'state', 'postalCode',
+      'country', 'timezone', 'companyName', 'jobTitle', 'department',
+      'industry', 'segment', 'preferredChannel', 'language',
+      'lifecycleStage', 'marketingOptIn', 'doNotContact', 'notesInternal',
+    ];
     for (const header of headers) {
       const normalized = header.toLowerCase().replace(/[^a-z0-9]/g, '_');
       const match = this.synonymMap[normalized];
-      if (match) {
-        switch (match) {
-          case 'tags':
-            mapping.tags = header;
-            break;
-          case 'firstName':
-            mapping.firstName = header;
-            break;
-          case 'lastName':
-            mapping.lastName = header;
-            break;
-          case 'email':
-            mapping.email = header;
-            break;
-          case 'phone':
-            mapping.phone = header;
-            break;
-          case 'status':
-            mapping.status = header;
-            break;
-          case 'addressLine1':
-            mapping.addressLine1 = header;
-            break;
-          case 'city':
-            mapping.city = header;
-            break;
-          case 'country':
-            mapping.country = header;
-            break;
-          case 'companyName':
-            mapping.companyName = header;
-            break;
-          default:
-            break;
-        }
-      } else {
+      if (match && knownFields.includes(match as any)) {
+        (mapping as any)[match] = header;
+      } else if (!match) {
         mapping.custom?.push(header);
       }
     }
@@ -432,32 +500,19 @@ export class CrmImportService {
 
   private buildContactInput(row: ParsedRow, mapping: FieldMapping) {
     const contact: Record<string, unknown> = {};
-    if (mapping.firstName && typeof row[mapping.firstName] === 'string' && row[mapping.firstName]) {
-      contact.firstName = row[mapping.firstName];
-    }
-    if (mapping.lastName && typeof row[mapping.lastName] === 'string' && row[mapping.lastName]) {
-      contact.lastName = row[mapping.lastName];
-    }
-    if (mapping.email && typeof row[mapping.email] === 'string' && row[mapping.email]) {
-      contact.email = row[mapping.email];
-    }
-    if (mapping.phone && typeof row[mapping.phone] === 'string' && row[mapping.phone]) {
-      contact.phone = row[mapping.phone];
-    }
-    if (mapping.status && typeof row[mapping.status] === 'string' && row[mapping.status]) {
-      contact.status = row[mapping.status];
-    }
-    if (mapping.addressLine1 && typeof row[mapping.addressLine1] === 'string' && row[mapping.addressLine1]) {
-      contact.addressLine1 = row[mapping.addressLine1];
-    }
-    if (mapping.city && typeof row[mapping.city] === 'string' && row[mapping.city]) {
-      contact.city = row[mapping.city];
-    }
-    if (mapping.country && typeof row[mapping.country] === 'string' && row[mapping.country]) {
-      contact.country = row[mapping.country];
-    }
-    if (mapping.companyName && typeof row[mapping.companyName] === 'string' && row[mapping.companyName]) {
-      contact.companyName = row[mapping.companyName];
+    const stringFields: (keyof Omit<FieldMapping, 'custom' | 'tags' | 'marketingOptIn' | 'doNotContact'>)[] = [
+      'firstName', 'lastName', 'displayName', 'email', 'secondaryEmail',
+      'phone', 'secondaryPhone', 'whatsappNumber', 'status',
+      'addressLine1', 'addressLine2', 'city', 'state', 'postalCode',
+      'country', 'timezone', 'companyName', 'jobTitle', 'department',
+      'industry', 'segment', 'preferredChannel', 'language',
+      'lifecycleStage', 'notesInternal',
+    ];
+    for (const field of stringFields) {
+      const header = mapping[field];
+      if (header && typeof row[header] === 'string' && row[header]) {
+        contact[field] = row[header];
+      }
     }
     const tagsValue = mapping.tags ? row[mapping.tags] : null;
     if (typeof tagsValue === 'string' && tagsValue) {
@@ -465,6 +520,21 @@ export class CrmImportService {
         .split(',')
         .map((value) => value.trim())
         .filter(Boolean);
+    }
+    const parseBool = (val: string | null | undefined): boolean | null => {
+      if (!val) return null;
+      const lower = val.toLowerCase().trim();
+      if (['yes', 'true', '1', 'y'].includes(lower)) return true;
+      if (['no', 'false', '0', 'n'].includes(lower)) return false;
+      return null;
+    };
+    if (mapping.marketingOptIn && row[mapping.marketingOptIn] !== undefined) {
+      const val = parseBool(row[mapping.marketingOptIn]);
+      if (val !== null) contact.marketingOptIn = val;
+    }
+    if (mapping.doNotContact && row[mapping.doNotContact] !== undefined) {
+      const val = parseBool(row[mapping.doNotContact]);
+      if (val !== null) contact.doNotContact = val;
     }
     if (mapping.custom?.length) {
       const custom: Record<string, string | null> = {};
