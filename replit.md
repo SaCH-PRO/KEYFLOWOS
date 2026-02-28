@@ -25,6 +25,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - Core accessibility features including ARIA labels and roles.
 - Component decomposition for modularity (e.g., Marketplace, Reports, Store, CRM Pipeline, ContactDetail).
 - CRM Pipeline architecture: `useContactsPipeline` hook → thin `page.tsx` → per-tab components → `contact-detail-tabs.tsx` slim orchestrator with `TabErrorBoundary` → `notes-tab-panel.tsx`, `tasks-tab-panel.tsx`, `timeline-tab-panel.tsx` → shared `tab-constants.ts`.
+- CRM Database architecture: `useDatabaseState` hook (state/handlers/refs) → thin `contacts-database.tsx` orchestrator → `DatabaseTable` (`React.memo`), `DatabaseBulkBar` (`React.memo`), `ContactLists`. Ref-based patterns (`selectedIdsRef`, `filteredContactsRef`, `cachedContactsRef`), `useMediaQuery` for SSR-safe responsive `pageSize`, `ConfirmDialog` for bulk delete (no native `confirm()`), typed `ContactListPayload` (no `as any`), proper `<button>` for list click handlers (no async `onClick` on `<div>`), ARIA: `role="grid"` table, `aria-sort` headers, `aria-selected` rows, `role="toolbar"` bulk bar, `role="list/listitem"` contact lists, `role="menu/menuitem"` list actions.
 - ContactDetail UX improvements include quick actions, smart empty states, recent activity display, compact mobile layout, and lead score explainers.
 - All three detail tabs (Notes, Tasks, Timeline) render simultaneously with CSS `hidden` toggle to preserve state across tab switches.
 - Responsive popup positioning for mobile and desktop views.
