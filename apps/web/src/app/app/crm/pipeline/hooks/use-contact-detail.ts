@@ -17,6 +17,7 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   const [contactDetail, setContactDetail] = useState<ContactDetailAPI | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
   const [showMobileDetail, setShowMobileDetail] = useState(false);
 
   const [healthMetrics, setHealthMetrics] = useState<HealthMetrics | null>(null);
@@ -26,15 +27,17 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
   const [aiInsightLoading, setAiInsightLoading] = useState(false);
 
   const detailAbortRef = useRef<AbortController | null>(null);
+  const aiAbortRef = useRef<AbortController | null>(null);
 
   const loadContactEnhancements = useCallback(
-    async (contactId: string) => {
+    async (contactId: string, signal?: AbortSignal) => {
       if (!businessId) return;
       const results = await Promise.allSettled([
-        fetchContactHealthMetrics(contactId, businessId),
-        fetchContactJourney(contactId, businessId),
-        fetchConversationContext(contactId, businessId),
+        fetchContactHealthMetrics(contactId, businessId, { signal }),
+        fetchContactJourney(contactId, businessId, { signal }),
+        fetchConversationContext(contactId, businessId, { signal }),
       ]);
+      if (signal?.aborted) return;
       if (results[0].status === "fulfilled" && results[0].value.data) setHealthMetrics(results[0].value.data);
       if (results[1].status === "fulfilled" && results[1].value.data) setJourneyMilestones(results[1].value.data);
       if (results[2].status === "fulfilled" && results[2].value.data) setConversationContext(results[2].value.data);
@@ -55,6 +58,7 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
       const { signal } = controller;
 
       setDetailLoading(true);
+      setDetailError(null);
       try {
         const results = await Promise.allSettled([
           fetchContactDetail(contactId, businessId, { signal }),
@@ -63,14 +67,27 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
           fetchConversationContext(contactId, businessId, { signal }),
         ]);
         if (signal.aborted) return;
-        if (results[0].status === "fulfilled") setContactDetail(results[0].value.data ?? null);
+
+        const allFailed = results.every((r) => r.status === "rejected");
+        if (allFailed) {
+          setDetailError("Failed to load contact details. Please try again.");
+          return;
+        }
+
+        if (results[0].status === "fulfilled") {
+          setContactDetail(results[0].value.data ?? null);
+        } else {
+          setDetailError("Failed to load contact details. Please try again.");
+        }
         if (results[1].status === "fulfilled" && results[1].value.data) setHealthMetrics(results[1].value.data);
         if (results[2].status === "fulfilled" && results[2].value.data) setJourneyMilestones(results[2].value.data);
         if (results[3].status === "fulfilled" && results[3].value.data) setConversationContext(results[3].value.data);
         setAiInsight(null);
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        throw err;
+        if (!signal.aborted) {
+          setDetailError("Failed to load contact details. Please try again.");
+        }
       } finally {
         if (!signal.aborted) {
           setDetailLoading(false);
@@ -92,16 +109,28 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
 
   const handleGenerateAiInsight = useCallback(async () => {
     if (!selectedContactId || !businessId) return;
+    if (aiAbortRef.current) aiAbortRef.current.abort();
+    const controller = new AbortController();
+    aiAbortRef.current = controller;
     setAiInsightLoading(true);
-    const { data } = await generateAiInsight(selectedContactId, businessId);
-    if (data) setAiInsight(data);
-    setAiInsightLoading(false);
+    try {
+      const { data } = await generateAiInsight(selectedContactId, businessId, { signal: controller.signal });
+      if (!controller.signal.aborted && data) setAiInsight(data);
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+    } finally {
+      if (!controller.signal.aborted) setAiInsightLoading(false);
+    }
   }, [selectedContactId, businessId]);
 
   const handleRefreshConversationContext = useCallback(async () => {
-    if (selectedContactId && businessId) {
-      const { data } = await fetchConversationContext(selectedContactId, businessId);
-      if (data) setConversationContext(data);
+    if (!selectedContactId || !businessId) return;
+    const currentSignal = detailAbortRef.current?.signal;
+    try {
+      const { data } = await fetchConversationContext(selectedContactId, businessId, { signal: currentSignal });
+      if (!currentSignal?.aborted && data) setConversationContext(data);
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
     }
   }, [selectedContactId, businessId]);
 
@@ -114,9 +143,8 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
 
   useEffect(() => {
     return () => {
-      if (detailAbortRef.current) {
-        detailAbortRef.current.abort();
-      }
+      if (detailAbortRef.current) detailAbortRef.current.abort();
+      if (aiAbortRef.current) aiAbortRef.current.abort();
     };
   }, []);
 
@@ -140,7 +168,7 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
   return {
     selectedContactId, setSelectedContactId,
     contactDetail, setContactDetail,
-    detailLoading,
+    detailLoading, detailError,
     showMobileDetail, setShowMobileDetail,
     healthMetrics, journeyMilestones, conversationContext,
     aiInsight, aiInsightLoading,

@@ -1,8 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useTransition } from "react";
-import { useSearchParams } from "next/navigation";
-import { toast } from "sonner";
 import type { Contact } from "@/lib/client";
 import type { SmartSegment, ListTab, SortOption } from "../pipeline-toolbar";
 import {
@@ -109,7 +107,6 @@ function filterReducer(state: FilterState, action: FilterAction): FilterState {
 }
 
 export function useContactsData() {
-  const searchParams = useSearchParams();
   const [filters, dispatch] = useReducer(filterReducer, initialFilterState);
 
   const [businessId, setBusinessId] = useState<string | null>(null);
@@ -142,13 +139,15 @@ export function useContactsData() {
   const setSelectMode = useCallback((v: boolean) => {
     dispatch({ type: "SET_SELECT_MODE", payload: v });
   }, []);
+  const selectedIdsRef = useRef(filters.selectedIds);
+  selectedIdsRef.current = filters.selectedIds;
   const setSelectedIds = useCallback((v: Set<string> | ((prev: Set<string>) => Set<string>)) => {
     if (typeof v === "function") {
-      dispatch({ type: "SET_SELECTED_IDS", payload: v(filters.selectedIds) });
+      dispatch({ type: "SET_SELECTED_IDS", payload: v(selectedIdsRef.current) });
     } else {
       dispatch({ type: "SET_SELECTED_IDS", payload: v });
     }
-  }, [filters.selectedIds]);
+  }, []);
 
   useEffect(() => {
     setPinnedIdsState(getPinnedIds());
@@ -166,20 +165,6 @@ export function useContactsData() {
     };
     void initWorkspace();
   }, []);
-
-  useEffect(() => {
-    const googleSuccess = searchParams.get("google_success");
-    const googleError = searchParams.get("google_error");
-    const imported = searchParams.get("imported");
-    if (googleSuccess === "true") {
-      toast.success(`Google Contacts imported successfully${imported ? ` (${imported} contacts)` : ""}`);
-      window.history.replaceState({}, "", window.location.pathname);
-      loadContacts({});
-    } else if (googleError) {
-      toast.error(`Google import failed: ${decodeURIComponent(googleError)}`);
-      window.history.replaceState({}, "", window.location.pathname);
-    }
-  }, [searchParams]);
 
   useEffect(() => {
     const timeout = setTimeout(() => setSearch(filters.searchInput.trim()), 300);

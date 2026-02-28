@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import { AnimatePresence, motion, type PanInfo } from "framer-motion";
 import { X, List } from "lucide-react";
 import {
@@ -51,6 +51,16 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const prevSelectedRef = useRef<string | null>(null);
 
+  const handleRefresh = useCallback(() => { void loadContacts(); void loadFlowData(); }, [loadContacts, loadFlowData]);
+  const handleAddContact = useCallback(() => setShowAddMenu(!showAddMenu), [setShowAddMenu, showAddMenu]);
+  const handleMergeComplete = useCallback(() => { void loadContacts(); }, [loadContacts]);
+  const handleLoadMore = useCallback(() => loadContacts({ append: true }), [loadContacts]);
+  const handleRetry = useCallback(() => { void loadContacts(); }, [loadContacts]);
+  const handleOpenAddForm = useCallback(() => setShowAddForm(true), [setShowAddForm]);
+  const handleOpenBroadcast = useCallback(() => setShowBroadcast(true), [setShowBroadcast]);
+  const handleScanSuccess = useCallback(() => { void loadContacts(); void loadFlowData(); }, [loadContacts, loadFlowData]);
+  const handleCancelForm = useCallback(() => { setShowAddForm(false); setEditingContact(null); }, [setShowAddForm, setEditingContact]);
+
   useEffect(() => {
     if (selectedContactId && selectedContactId !== prevSelectedRef.current) {
       if (window.innerWidth >= 1024 && detailPanelRef.current) {
@@ -71,7 +81,7 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
   return (
     <div className="space-y-6">
       {businessId && (
-        <DuplicateDetector businessId={businessId} onMergeComplete={() => { void loadContacts(); }} />
+        <DuplicateDetector businessId={businessId} onMergeComplete={handleMergeComplete} />
       )}
 
       {activeListId && (
@@ -91,12 +101,12 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
       <AnimatePresence>
         {showAddMenu && (
           <ContactCapture
-            onManualAdd={() => setShowAddForm(true)}
+            onManualAdd={handleOpenAddForm}
             onImportFile={handleImportFile}
             onImportLink={handleImportLink}
             onDeviceImport={handleDeviceImport}
             onClose={() => setShowAddMenu(false)}
-            onScanSuccess={() => { void loadContacts(); void loadFlowData(); }}
+            onScanSuccess={handleScanSuccess}
             loading={isPending}
             businessId={businessId ?? undefined}
           />
@@ -107,7 +117,7 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
         {showAddForm && (
           <ContactForm
             onSubmit={handleSubmitContact}
-            onCancel={() => { setShowAddForm(false); setEditingContact(null); }}
+            onCancel={handleCancelForm}
             loading={isPending}
             initialValues={editingContact || undefined}
           />
@@ -122,7 +132,7 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
           onStatusChange={handleBulkStatusChange}
           onAddTag={handleBulkTag}
           onBulkDelete={handleBulkDelete}
-          onBroadcast={() => setShowBroadcast(true)}
+          onBroadcast={handleOpenBroadcast}
           onCancel={handleToggleSelectMode}
         />
       )}
@@ -145,8 +155,8 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
         loading={loading}
         selectMode={selectMode}
         onToggleSelectMode={handleToggleSelectMode}
-        onRefresh={() => { void loadContacts(); void loadFlowData(); }}
-        onAddContact={() => setShowAddMenu(!showAddMenu)}
+        onRefresh={handleRefresh}
+        onAddContact={handleAddContact}
       />
 
       <div className="grid gap-6 lg:grid-cols-[1fr,450px]">
@@ -166,9 +176,9 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
             onTogglePin={handleTogglePin}
             onDelete={handleDeleteContact}
             onQuickAction={handleQuickAction}
-            onLoadMore={() => loadContacts({ append: true })}
-            onRetry={() => { void loadContacts(); }}
-            onAddContact={() => setShowAddForm(true)}
+            onLoadMore={handleLoadMore}
+            onRetry={handleRetry}
+            onAddContact={handleOpenAddForm}
           />
         </div>
 
@@ -187,6 +197,9 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
             onClick={handleDetailClose}
           >
             <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Contact details"
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
@@ -217,3 +230,5 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
     </div>
   );
 }
+
+export const MemoizedPipelineTabContent = React.memo(PipelineTabContent);

@@ -23,7 +23,7 @@ export function useContactsPipeline() {
     selectedContactId, setSelectedContactId,
     contactDetail, setContactDetail,
     showMobileDetail, setShowMobileDetail,
-    loadDetail,
+    loadDetail, detailError,
   } = detail;
 
   const flow = useFlowIntelligence(businessId);
@@ -42,7 +42,7 @@ export function useContactsPipeline() {
     (contactId: string) => {
       detail.selectContact(contactId, trackRecent);
     },
-    [detail, trackRecent],
+    [detail.selectContact, trackRecent],
   );
 
   const handleDoAction = useCallback((action: NextActionUI) => {
@@ -67,6 +67,10 @@ export function useContactsPipeline() {
     void actions.handleDeleteContact();
   }, [actions.handleDeleteContact]);
 
+  const handleRetryDetail = useCallback(() => {
+    if (selectedContactId) void loadDetail(selectedContactId);
+  }, [selectedContactId, loadDetail]);
+
   const isPinned = selectedContactId ? contactsData.pinnedIds.includes(selectedContactId) : false;
 
   const detailPanelProps: Omit<PipelineDetailPanelProps, "onClose"> = useMemo(() => ({
@@ -75,6 +79,8 @@ export function useContactsPipeline() {
     notes: detail.detailNotes,
     tasks: detail.detailTasks,
     loading: detail.detailLoading,
+    detailError: detailError,
+    onRetryDetail: handleRetryDetail,
     isPinned,
     contactName: detail.contactName,
     healthMetrics: detail.healthMetrics,
@@ -98,7 +104,7 @@ export function useContactsPipeline() {
     onRefreshConversationContext: detail.handleRefreshConversationContext,
   }), [
     detail.selectedContact, detail.detailEvents, detail.detailNotes, detail.detailTasks,
-    detail.detailLoading, isPinned, detail.contactName, detail.healthMetrics,
+    detail.detailLoading, detailError, handleRetryDetail, isPinned, detail.contactName, detail.healthMetrics,
     detail.journeyMilestones, detail.conversationContext, detail.aiInsight, detail.aiInsightLoading,
     contactsData.handleTogglePin, actions.handleAddNote, actions.handleAddTask,
     actions.handleCompleteTask, actions.handleDeleteNote, actions.handleDeleteTask,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "sonner";
@@ -18,7 +18,7 @@ import { TabNav } from "@/components/ui/tab-nav";
 import { ContactsDatabase } from "./contacts-database";
 import { InsightsTab } from "./insights-tab";
 import { EngageTab } from "./engage-tab";
-import { PipelineTabContent } from "./pipeline-tab-content";
+import { MemoizedPipelineTabContent as PipelineTabContent } from "./pipeline-tab-content";
 import { useContactsPipeline } from "./use-contacts-pipeline";
 
 export default function ContactsPage() {
@@ -68,6 +68,22 @@ export default function ContactsPage() {
       router.replace("/app/crm/pipeline");
     }
   }, [searchParams, router, loadContacts, loadFlowData]);
+
+  const handleCloseBroadcast = useCallback(() => setShowBroadcast(false), [setShowBroadcast]);
+  const handleDeselectAll = useCallback(() => { setSelectedIds(new Set()); setSelectMode(false); }, [setSelectedIds, setSelectMode]);
+  const handleConfirmAction = useCallback(() => { confirmState.action(); setConfirmState({ open: false, action: () => {} }); }, [confirmState, setConfirmState]);
+  const handleCancelConfirm = useCallback(() => setConfirmState({ open: false, action: () => {} }), [setConfirmState]);
+  const handleRefreshContacts = useCallback(() => { void loadContacts(); }, [loadContacts]);
+  const handleSelectList = useCallback((listId: string | null, contactIds?: string[] | null) => {
+    setActiveListId(listId);
+    setActiveListContactIds(contactIds || null);
+    if (listId) setCrmViewTab("pipeline");
+  }, [setActiveListId, setActiveListContactIds, setCrmViewTab]);
+  const handleSelectDbContact = useCallback((id: string) => { selectContact(id); setCrmViewTab("pipeline"); }, [selectContact, setCrmViewTab]);
+  const handleViewCold = useCallback(() => { setStatusFilter("LEAD"); setCrmViewTab("pipeline"); }, [setStatusFilter, setCrmViewTab]);
+  const handleViewReady = useCallback(() => { setStatusFilter("PROSPECT"); setCrmViewTab("pipeline"); }, [setStatusFilter, setCrmViewTab]);
+  const handleViewEngageContact = useCallback((id: string) => { selectContact(id); setCrmViewTab("pipeline"); }, [selectContact, setCrmViewTab]);
+  const handleToggleAutopilotPause = useCallback(() => setAutopilotPaused(!autopilotPaused), [autopilotPaused, setAutopilotPaused]);
 
   const databaseContacts = useMemo(() => contacts.map((c) => ({
     id: c.id,
@@ -132,6 +148,9 @@ export default function ContactsPage() {
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setShowGuide(false)} />
                   <motion.div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="Getting started guide"
                     initial={{ opacity: 0, y: -4 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -4 }}
@@ -213,15 +232,11 @@ export default function ContactsPage() {
             <ContactsDatabase
               businessId={businessId}
               contacts={databaseContacts}
-              onRefresh={() => { void loadContacts(); }}
+              onRefresh={handleRefreshContacts}
               activeListId={activeListId}
-              onSelectList={(listId, contactIds) => {
-                setActiveListId(listId);
-                setActiveListContactIds(contactIds || null);
-                if (listId) setCrmViewTab("pipeline");
-              }}
-              onListsLoaded={(count) => setListsCount(count)}
-              onSelectContact={(id) => { selectContact(id); setCrmViewTab("pipeline"); }}
+              onSelectList={handleSelectList}
+              onListsLoaded={setListsCount}
+              onSelectContact={handleSelectDbContact}
             />
           </motion.div>
         )}
@@ -239,8 +254,8 @@ export default function ContactsPage() {
               revenueData={revenueData}
               contacts={contacts}
               loading={flowDataLoading}
-              onViewCold={() => { setStatusFilter("LEAD"); setCrmViewTab("pipeline"); }}
-              onViewReady={() => { setStatusFilter("PROSPECT"); setCrmViewTab("pipeline"); }}
+              onViewCold={handleViewCold}
+              onViewReady={handleViewReady}
               onViewExpiringQuotes={handleViewExpiringQuotes}
               onViewOverdueInvoices={handleViewOverdueInvoices}
             />
@@ -261,9 +276,9 @@ export default function ContactsPage() {
               autopilotPaused={autopilotPaused}
               loading={flowDataLoading}
               onComplete={handleCompleteNextAction}
-              onViewContact={(id) => { selectContact(id); setCrmViewTab("pipeline"); }}
+              onViewContact={handleViewEngageContact}
               onDoAction={handleDoAction}
-              onTogglePause={() => setAutopilotPaused(!autopilotPaused)}
+              onTogglePause={handleToggleAutopilotPause}
               onApprove={handleApproveAutopilot}
               onDeny={handleDenyAutopilot}
             />
@@ -273,9 +288,9 @@ export default function ContactsPage() {
 
       <BroadcastDrawer
         isOpen={showBroadcast}
-        onClose={() => setShowBroadcast(false)}
+        onClose={handleCloseBroadcast}
         selectedContacts={selectedContactsForBroadcast}
-        onDeselectAll={() => { setSelectedIds(new Set()); setSelectMode(false); }}
+        onDeselectAll={handleDeselectAll}
       />
       <ConfirmDialog
         open={confirmState.open}
@@ -283,8 +298,8 @@ export default function ContactsPage() {
         message="Are you sure you want to delete this contact? This cannot be undone."
         confirmLabel="Delete"
         variant="danger"
-        onConfirm={() => { confirmState.action(); setConfirmState({ open: false, action: () => {} }); }}
-        onCancel={() => setConfirmState({ open: false, action: () => {} })}
+        onConfirm={handleConfirmAction}
+        onCancel={handleCancelConfirm}
       />
     </div>
   );
