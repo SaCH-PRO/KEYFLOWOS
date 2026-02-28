@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search,
@@ -13,13 +13,16 @@ import {
   X,
   Filter,
   HardDrive,
-  Cloud,
   List,
+  Loader2,
+  Columns3,
+  Check,
 } from "lucide-react";
 import type { LocalContact } from "@/lib/contacts-db";
 import type { ExportFormat } from "@/lib/contacts-export";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { useDatabaseState } from "./hooks/use-database-state";
+import { useDatabaseState, ALL_COLUMNS } from "./hooks/use-database-state";
+import type { ColumnKey } from "./hooks/use-database-state";
 import { DatabaseTable } from "./database-table";
 import { DatabaseBulkBar } from "./database-bulk-bar";
 import { ContactLists } from "./contact-lists";
@@ -56,7 +59,68 @@ export function ContactsDatabase({
 }: ContactsDatabaseProps) {
   const db = useDatabaseState({ businessId, contacts, onRefresh });
 
+  const exportDialogRef = useRef<HTMLDivElement>(null);
+  const exportTriggerRef = useRef<HTMLButtonElement>(null);
+  const columnPickerRef = useRef<HTMLDivElement>(null);
+
   const handleClearSearch = useCallback(() => db.setSearchInput(""), [db.setSearchInput]);
+
+  useEffect(() => {
+    if (!db.showExport) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        db.closeExport();
+        exportTriggerRef.current?.focus();
+        return;
+      }
+      if (e.key === "Tab" && exportDialogRef.current) {
+        const focusable = exportDialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [db.showExport, db.closeExport]);
+
+  useEffect(() => {
+    if (db.showExport && exportDialogRef.current) {
+      const firstBtn = exportDialogRef.current.querySelector<HTMLButtonElement>("button");
+      firstBtn?.focus();
+    }
+  }, [db.showExport]);
+
+  useEffect(() => {
+    if (!db.showColumnPicker) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (columnPickerRef.current && !columnPickerRef.current.contains(e.target as Node)) {
+        db.closeColumnPicker();
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") db.closeColumnPicker();
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [db.showColumnPicker, db.closeColumnPicker]);
 
   return (
     <div className="space-y-4">
@@ -90,11 +154,58 @@ export function ContactsDatabase({
               className="kf-btn-secondary inline-flex items-center gap-1.5 text-xs"
               aria-label="Sync contacts from cloud"
             >
-              <Cloud className={`w-3.5 h-3.5 ${db.syncing ? "animate-spin" : ""}`} />
-              Sync
+              {db.syncing ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <HardDrive className="w-3.5 h-3.5" />
+              )}
+              {db.syncing ? "Syncing…" : "Sync"}
             </button>
+            <div className="relative" ref={columnPickerRef}>
+              <button
+                onClick={db.toggleColumnPicker}
+                className={`kf-btn-secondary inline-flex items-center gap-1.5 text-xs ${db.showColumnPicker ? "ring-2 ring-[hsl(var(--kf-accent1))]" : ""}`}
+                aria-label="Toggle column visibility"
+                aria-haspopup="true"
+                aria-expanded={db.showColumnPicker}
+              >
+                <Columns3 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Columns</span>
+              </button>
+              {db.showColumnPicker && (
+                <div
+                  className="absolute top-full right-0 mt-2 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 w-52 max-h-[60vh] overflow-y-auto"
+                  role="group"
+                  aria-label="Toggle columns"
+                >
+                  <div className="px-3 py-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                    Show / Hide Columns
+                  </div>
+                  {ALL_COLUMNS.map((col) => {
+                    const isVisible = db.visibleColumns.has(col.key);
+                    return (
+                      <button
+                        key={col.key}
+                        onClick={() => db.toggleColumn(col.key as ColumnKey)}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-muted/50 transition-colors text-left"
+                        role="checkbox"
+                        aria-checked={isVisible}
+                      >
+                        <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${isVisible ? "bg-[hsl(var(--kf-accent1))] border-[hsl(var(--kf-accent1))]" : "border-border"}`}>
+                          {isVisible && <Check className="w-3 h-3 text-white" />}
+                        </div>
+                        <span className={isVisible ? "text-foreground" : "text-muted-foreground"}>
+                          {col.label}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
             <div className="relative">
               <button
+                ref={exportTriggerRef}
                 onClick={db.toggleExport}
                 className="kf-btn-primary inline-flex items-center gap-1.5 text-xs"
                 aria-haspopup="dialog"
@@ -112,19 +223,27 @@ export function ContactsDatabase({
                     aria-hidden="true"
                   />
                   <div
+                    ref={exportDialogRef}
                     className="fixed left-2 right-2 top-20 sm:left-1/2 sm:right-auto sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 sm:w-64 max-h-[80vh] overflow-y-auto"
                     role="dialog"
                     aria-modal="true"
                     aria-label="Export contacts"
                   >
+                    <div className="px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/30 mb-1">
+                      Export {db.filteredContacts.length} contacts
+                    </div>
                     {EXPORT_OPTIONS.map(({ format, label, desc, icon: Icon }) => (
                       <button
                         key={format}
                         onClick={() => db.handleExport(format)}
                         disabled={db.exporting}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-left disabled:opacity-50"
+                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-left disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[hsl(var(--kf-accent1))]"
                       >
-                        <Icon className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+                        {db.exporting ? (
+                          <Loader2 className="w-4 h-4 animate-spin text-[hsl(var(--kf-accent1))]" />
+                        ) : (
+                          <Icon className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+                        )}
                         <div>
                           <span className="font-medium">{label}</span>
                           <p className="text-[11px] text-muted-foreground">{desc}</p>
@@ -152,7 +271,7 @@ export function ContactsDatabase({
             {db.searchInput && (
               <button
                 onClick={handleClearSearch}
-                className="absolute right-3 top-1/2 -translate-y-1/2"
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted/50"
                 aria-label="Clear search"
               >
                 <X className="w-3.5 h-3.5 text-muted-foreground" />
@@ -167,6 +286,9 @@ export function ContactsDatabase({
           >
             <Filter className="w-3.5 h-3.5" />
             Filter
+            {db.statusFilter !== "ALL" && (
+              <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--kf-accent1))]" />
+            )}
           </button>
         </div>
 
@@ -180,18 +302,26 @@ export function ContactsDatabase({
               role="group"
               aria-label="Filter by status"
             >
-              {STATUS_FILTER_OPTIONS.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => db.setStatusFilter(s)}
-                  className={`px-3 py-1 text-xs rounded-lg transition-all ${
-                    db.statusFilter === s ? "kf-btn-primary" : "kf-btn-secondary"
-                  }`}
-                  aria-pressed={db.statusFilter === s}
-                >
-                  {s}
-                </button>
-              ))}
+              {STATUS_FILTER_OPTIONS.map((s) => {
+                const count = db.statusCounts[s] ?? 0;
+                return (
+                  <button
+                    key={s}
+                    onClick={() => db.setStatusFilter(s)}
+                    className={`px-3 py-1 text-xs rounded-lg transition-all inline-flex items-center gap-1.5 ${
+                      db.statusFilter === s ? "kf-btn-primary" : "kf-btn-secondary"
+                    }`}
+                    aria-pressed={db.statusFilter === s}
+                  >
+                    {s}
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                      db.statusFilter === s ? "bg-white/20" : "bg-muted/50"
+                    }`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
             </motion.div>
           )}
         </AnimatePresence>
@@ -211,6 +341,7 @@ export function ContactsDatabase({
           onSelectContact={onSelectContact}
           isSortable={db.isSortable}
           search={db.searchInput}
+          columns={db.visibleColumnDefs}
         />
 
         <div className="flex items-center justify-between mt-3 px-1">
@@ -235,7 +366,7 @@ export function ContactsDatabase({
             <button
               disabled={db.page <= 1}
               onClick={db.handlePrevPage}
-              className="px-3 py-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
+              className="px-3 py-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               aria-label="Previous page"
             >
               Previous
@@ -244,7 +375,7 @@ export function ContactsDatabase({
             <button
               disabled={db.page >= db.totalPages}
               onClick={db.handleNextPage}
-              className="px-3 py-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
+              className="px-3 py-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               aria-label="Next page"
             >
               Next
@@ -254,7 +385,7 @@ export function ContactsDatabase({
       </div>
 
       <DatabaseBulkBar
-        selectedCount={db.selectedIds.size}
+        selectedCount={db.effectiveSelectedCount}
         bulkActing={db.bulkActing}
         activeBulkAction={db.activeBulkAction}
         onSetBulkAction={db.setActiveBulkAction}
@@ -266,6 +397,9 @@ export function ContactsDatabase({
         onBulkDelete={db.handleBulkDelete}
         onClearSelection={db.clearSelection}
         availableLists={db.availableLists}
+        allPagesSelected={db.allPagesSelected}
+        totalFiltered={db.filteredContacts.length}
+        onSelectAllPages={db.handleSelectAllPages}
       />
 
       <div className="kf-card">
