@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useRef } from "react";
 import { AnimatePresence, motion, type PanInfo } from "framer-motion";
 import { X, List } from "lucide-react";
 import {
@@ -21,7 +21,7 @@ interface PipelineTabContentProps {
   state: PipelineState;
 }
 
-export function PipelineTabContent({ state }: PipelineTabContentProps) {
+function PipelineTabContentInner({ state }: PipelineTabContentProps) {
   const {
     businessId,
     displayContacts, loading, loadError, hasMore, activeListTab,
@@ -232,3 +232,5 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
     </div>
   );
 }
+
+export const PipelineTabContent = memo(PipelineTabContentInner);

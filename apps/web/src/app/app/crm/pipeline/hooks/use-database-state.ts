@@ -4,12 +4,20 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import type { LocalContact } from "@/lib/contacts-db";
 import { cacheContacts, getCachedContacts, getLastSyncTime, setLastSyncTime } from "@/lib/contacts-db";
 import { exportContacts, type ExportFormat } from "@/lib/contacts-export";
-import { bulkUpdateContacts, bulkDeleteContacts } from "@/lib/client";
+import { bulkUpdateContacts, bulkDeleteContacts, addContactsToList } from "@/lib/client";
 import { toast } from "sonner";
 
 export type SortField = "firstName" | "lastName" | "email" | "phone" | "status" | "companyName" | "city" | "country" | "source" | "createdAt";
 export type SortDir = "asc" | "desc";
-export type BulkAction = "status" | "tags" | null;
+export type BulkAction = "status" | "tags" | "addToList" | null;
+
+export interface ListSummary {
+  id: string;
+  name: string;
+  color?: string | null;
+  type: string;
+  contactCount: number;
+}
 
 const SORTABLE_FIELDS = new Set<string>([
   "firstName", "lastName", "email", "phone", "status",
@@ -75,6 +83,9 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
   const [bulkActing, setBulkActing] = useState(false);
   const [activeBulkAction, setActiveBulkAction] = useState<BulkAction>(null);
   const [bulkTagInput, setBulkTagInput] = useState("");
+
+  const [availableLists, setAvailableLists] = useState<ListSummary[]>([]);
+  const [listsRefreshToken, setListsRefreshToken] = useState(0);
 
   const [confirmState, setConfirmState] = useState<{
     open: boolean;
@@ -271,6 +282,25 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     }
   }, [businessId, onRefresh]);
 
+  const handleBulkAddToList = useCallback(async (listId: string) => {
+    setBulkActing(true);
+    try {
+      const ids = Array.from(selectedIdsRef.current);
+      const res = await addContactsToList(businessId, listId, ids);
+      if (res.error) throw new Error(res.error);
+      const listName = availableLists.find((l) => l.id === listId)?.name || "list";
+      toast.success(`Added ${ids.length} contacts to "${listName}"`);
+      setSelectedIds(new Set());
+      setActiveBulkAction(null);
+      setListsRefreshToken((t) => t + 1);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to add contacts to list";
+      toast.error(message);
+    } finally {
+      setBulkActing(false);
+    }
+  }, [businessId, availableLists]);
+
   const handleBulkDelete = useCallback(() => {
     const ids = Array.from(selectedIdsRef.current);
     setConfirmState({
@@ -318,6 +348,10 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
 
   const isSortable = useCallback((key: string) => SORTABLE_FIELDS.has(key), []);
 
+  const handleListsChanged = useCallback((lists: ListSummary[]) => {
+    setAvailableLists(lists);
+  }, []);
+
   return {
     isMobile,
     showLists,
@@ -349,6 +383,10 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     allPageSelected,
     somePageSelected,
 
+    availableLists,
+    listsRefreshToken,
+    handleListsChanged,
+
     confirmState,
     handleConfirmClose,
 
@@ -359,6 +397,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     toggleSelectAll,
     handleBulkStatusChange,
     handleBulkAddTags,
+    handleBulkAddToList,
     handleBulkDelete,
     clearSelection,
     toggleExport,
