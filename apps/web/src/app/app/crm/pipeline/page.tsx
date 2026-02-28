@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus,
@@ -206,6 +206,8 @@ export default function ContactsPage() {
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [showImportPanel, setShowImportPanel] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
+  const guideButtonRef = useRef<HTMLButtonElement>(null);
+  const [guideTop, setGuideTop] = useState(0);
 
   useEffect(() => {
     setPinnedIdsState(getPinnedIds());
@@ -757,7 +759,14 @@ export default function ContactsPage() {
         titleExtra={
           <div className="relative">
             <button
-              onClick={() => setShowGuide(!showGuide)}
+              ref={guideButtonRef}
+              onClick={() => {
+                if (!showGuide && guideButtonRef.current) {
+                  const rect = guideButtonRef.current.getBoundingClientRect();
+                  setGuideTop(rect.bottom + 8);
+                }
+                setShowGuide(!showGuide);
+              }}
               className={`p-1.5 rounded-lg transition-all ${showGuide ? "bg-amber-400/20 text-amber-400" : "hover:bg-muted/50 text-muted-foreground hover:text-amber-400"}`}
               aria-label="Getting started guide"
               title="Getting started guide"
@@ -773,7 +782,8 @@ export default function ContactsPage() {
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 6, scale: 0.95 }}
                     transition={{ duration: 0.15 }}
-                    className="fixed left-1/2 -translate-x-1/2 top-24 z-50 kf-card border border-border shadow-2xl rounded-2xl w-[90vw] max-w-[700px] p-5"
+                    style={{ top: guideTop }}
+                    className="fixed left-1/2 -translate-x-1/2 z-50 kf-card border border-border shadow-2xl rounded-2xl w-[90vw] max-w-[700px] p-5"
                   >
                     <div className="flex items-center gap-2 mb-3">
                       <div className="p-1.5 rounded-lg bg-amber-400/10">
