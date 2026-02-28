@@ -184,7 +184,7 @@ export function ContactCapture({ onManualAdd, onImportFile, onImportLink, onClos
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-4 pt-16 sm:pt-4 pointer-events-none">
+      <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-16 sm:pt-20 pointer-events-none">
         <motion.div
           initial={{ opacity: 0, scale: 0.95, y: 8 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
