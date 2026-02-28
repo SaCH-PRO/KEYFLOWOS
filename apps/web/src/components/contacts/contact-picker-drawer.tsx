@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, type PanInfo } from "framer-motion";
 import {
   X,
   Search,
@@ -146,9 +146,22 @@ export function ContactPickerDrawer({ isOpen, onClose }: ContactPickerDrawerProp
           animate={{ y: 0 }}
           exit={{ y: "100%" }}
           transition={{ type: "spring", damping: 25 }}
+          drag="y"
+          dragConstraints={{ top: 0, bottom: 0 }}
+          dragElastic={{ top: 0, bottom: 0.6 }}
+          onDragEnd={(_: any, info: PanInfo) => {
+            if (info.offset.y > 100 || info.velocity.y > 500) onClose();
+          }}
           onClick={(e) => e.stopPropagation()}
           className="w-full md:max-w-2xl md:mx-4 max-h-[90vh] flex flex-col rounded-t-2xl md:rounded-2xl kf-card border-t md:border border-border"
         >
+          <button
+            onClick={onClose}
+            className="w-full flex items-center justify-center py-2 cursor-pointer active:bg-muted/30 transition-colors md:hidden flex-shrink-0"
+            aria-label="Close drawer"
+          >
+            <div className="w-12 h-1 bg-muted-foreground/40 rounded-full" />
+          </button>
           <div className="flex items-center justify-between p-4 border-b border-border flex-shrink-0" style={{ background: "hsl(var(--kf-sidebar-bg))" }}>
             <div className="flex items-center gap-3">
               <div

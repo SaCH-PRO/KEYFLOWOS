@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { AnimatePresence, motion, type PanInfo } from "framer-motion";
 import {
   Users,
   X,
@@ -1089,10 +1089,24 @@ export default function ContactsPage() {
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
               transition={{ type: "spring", damping: 25 }}
+              drag="y"
+              dragConstraints={{ top: 0, bottom: 0 }}
+              dragElastic={{ top: 0, bottom: 0.6 }}
+              onDragEnd={(_: any, info: PanInfo) => {
+                if (info.offset.y > 100 || info.velocity.y > 500) {
+                  setShowMobileDetail(false);
+                }
+              }}
               className="absolute bottom-0 left-0 right-0 max-h-[85vh] bg-background rounded-t-3xl overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="w-12 h-1 bg-muted rounded-full mx-auto mt-3 mb-2" />
+              <button
+                onClick={() => setShowMobileDetail(false)}
+                className="w-full flex items-center justify-center py-3 cursor-pointer active:bg-muted/30 transition-colors"
+                aria-label="Close panel"
+              >
+                <div className="w-12 h-1 bg-muted-foreground/40 rounded-full" />
+              </button>
               <div className="overflow-y-auto max-h-[calc(85vh-24px)] p-4">
                 <PipelineDetailPanel
                   contact={selectedContact}
