@@ -413,9 +413,9 @@ export default function ContactsPage() {
     }
   };
 
-  const handleAddNote = async (body: string) => {
+  const handleAddNote = async (body: string, source?: string) => {
     if (!selectedContactId || !businessId) return;
-    await addContactNote(selectedContactId, body, businessId);
+    await addContactNote(selectedContactId, body, businessId, source);
     void loadDetail(selectedContactId);
   };
 

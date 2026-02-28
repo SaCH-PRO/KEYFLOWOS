@@ -138,7 +138,7 @@ export class CrmController {
       contactId,
       body: body.body,
       authorId: req?.user?.id,
-      source: 'crm',
+      source: body.source || 'crm',
     });
   }
 

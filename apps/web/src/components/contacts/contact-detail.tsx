@@ -85,7 +85,7 @@ interface ContactDetailProps {
   isPinned?: boolean;
   onTogglePin?: (id: string) => void;
   onClose?: () => void;
-  onAddNote?: (body: string) => Promise<void>;
+  onAddNote?: (body: string, source?: string) => Promise<void>;
   onAddTask?: (title: string, dueDate?: string) => Promise<void>;
   onCompleteTask?: (taskId: string) => Promise<void>;
   onDeleteNote?: (noteId: string) => Promise<void>;
