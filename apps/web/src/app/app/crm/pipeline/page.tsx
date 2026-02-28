@@ -41,7 +41,7 @@ import {
   ContactEvent,
   ContactNote,
   ContactTask,
-  ContactImport,
+  ContactCapture,
   FlowIntelligence,
   NextActionQueue,
   AutopilotActions,
@@ -94,7 +94,6 @@ import {
   fetchConversationContext,
   generateAiInsight,
   CrmNextAction,
-  getGoogleContactsAuthUrl,
   fetchContactLists,
 } from "@/lib/client";
 import { ensureWorkspace, getStoredBusinessId } from "@/lib/workspace";
@@ -196,13 +195,11 @@ export default function ContactsPage() {
   const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
   const router = useRouter();
   const [googleContactsImported, setGoogleContactsImported] = useState(false);
-  const [googleConnectLoading, setGoogleConnectLoading] = useState(false);
   const [activeListId, setActiveListId] = useState<string | null>(null);
   const [activeListContactIds, setActiveListContactIds] = useState<string[] | null>(null);
   const [crmViewTab, setCrmViewTab] = useState<"pipeline" | "lists" | "insights" | "engage" | "database">("pipeline");
   const [listsCount, setListsCount] = useState(0);
   const [showAddMenu, setShowAddMenu] = useState(false);
-  const [showImportPanel, setShowImportPanel] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
 
   useEffect(() => {
@@ -245,39 +242,6 @@ export default function ContactsPage() {
     }
   }, [searchParams]);
 
-  const handleGoogleConnect = useCallback(async () => {
-    if (!businessId) return;
-    setGoogleConnectLoading(true);
-    try {
-      const { data } = await getGoogleContactsAuthUrl(businessId);
-      if (data?.url) {
-        window.location.href = data.url;
-      } else {
-        toast.error("Could not get Google authorization URL");
-        setGoogleConnectLoading(false);
-      }
-    } catch {
-      toast.error("Failed to start Google connection");
-      setGoogleConnectLoading(false);
-    }
-  }, [businessId]);
-
-  const handleGoogleSync = useCallback(async () => {
-    if (!businessId) return;
-    setGoogleConnectLoading(true);
-    try {
-      const { data } = await getGoogleContactsAuthUrl(businessId);
-      if (data?.url) {
-        window.location.href = data.url;
-      } else {
-        toast.error("Could not start sync");
-        setGoogleConnectLoading(false);
-      }
-    } catch {
-      toast.error("Failed to start sync");
-      setGoogleConnectLoading(false);
-    }
-  }, [businessId]);
 
   useEffect(() => {
     const timeout = setTimeout(() => setSearch(searchInput.trim()), 300);
@@ -906,53 +870,13 @@ export default function ContactsPage() {
         }
       />
 
-      <div className="relative inline-block">
-        <button
-          onClick={() => setShowAddMenu(!showAddMenu)}
-          className="kf-btn-primary inline-flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" />
-          Add Contact
-          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showAddMenu ? "rotate-180" : ""}`} />
-        </button>
-        {showAddMenu && (
-          <>
-            <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" onClick={() => setShowAddMenu(false)} />
-            <div className="fixed left-2 right-2 top-20 sm:left-1/2 sm:right-auto sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 sm:w-64 max-h-[80vh] overflow-y-auto">
-              <button
-                onClick={() => { setShowAddMenu(false); setShowAddForm(true); }}
-                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-left"
-              >
-                <UserPlus className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
-                <div>
-                  <span className="font-medium">Manual</span>
-                  <p className="text-[11px] text-muted-foreground">Fill in contact details</p>
-                </div>
-              </button>
-              <button
-                onClick={() => { setShowAddMenu(false); setShowImportPanel(true); }}
-                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-left"
-              >
-                <Upload className="w-4 h-4 text-[hsl(var(--kf-accent2))]" />
-                <div>
-                  <span className="font-medium">Import</span>
-                  <p className="text-[11px] text-muted-foreground">CSV, Excel, or vCard file</p>
-                </div>
-              </button>
-              <button
-                onClick={() => { setShowAddMenu(false); handleGoogleConnect(); }}
-                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-left"
-              >
-                <Link2 className="w-4 h-4 text-blue-500" />
-                <div>
-                  <span className="font-medium">Connect</span>
-                  <p className="text-[11px] text-muted-foreground">Google Contacts sync</p>
-                </div>
-              </button>
-            </div>
-          </>
-        )}
-      </div>
+      <button
+        onClick={() => setShowAddMenu(!showAddMenu)}
+        className="kf-btn-primary inline-flex items-center gap-2"
+      >
+        <Plus className="w-4 h-4" />
+        Add Contact
+      </button>
 
 
       <TabNav
@@ -1100,14 +1024,18 @@ export default function ContactsPage() {
         )}
       </AnimatePresence>
 
-      {showImportPanel && (
-        <ContactImport
-          onImportFile={handleImportFile}
-          onImportLink={handleImportLink}
-          loading={isPending}
-          businessId={businessId ?? undefined}
-        />
-      )}
+      <AnimatePresence>
+        {showAddMenu && (
+          <ContactCapture
+            onManualAdd={() => setShowAddForm(true)}
+            onImportFile={handleImportFile}
+            onImportLink={handleImportLink}
+            onClose={() => setShowAddMenu(false)}
+            loading={isPending}
+            businessId={businessId ?? undefined}
+          />
+        )}
+      </AnimatePresence>
 
       <div className="kf-card p-3 space-y-3">
         <div className="flex items-center gap-2">

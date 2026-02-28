@@ -9,6 +9,7 @@ export {
   type DetailQuickAction,
 } from "./contact-detail";
 export { ContactImport } from "./contact-import";
+export { ContactCapture } from "./contact-capture";
 export { FlowIntelligence, type FlowIntelligenceData } from "./flow-intelligence";
 export { NextActionQueue, type NextAction } from "./next-action-queue";
 export { ContactHealthScore, type HealthMetrics } from "./contact-health-score";
