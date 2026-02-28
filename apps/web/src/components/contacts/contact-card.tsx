@@ -112,6 +112,9 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
 
   return (
     <motion.div
+      role="option"
+      aria-selected={isSelected || selected || false}
+      aria-label={fullName}
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index < 10 ? index * 0.03 : 0 }}

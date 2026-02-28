@@ -243,11 +243,11 @@ const fallbackInvoices: Invoice[] = [
   { id: "inv_2", invoiceNumber: "INV-002", status: "SENT", total: 600, currency: "TTD", contact: { firstName: "John", email: "john@example.com" } },
 ];
 
-async function apiGet<T>(path: string, schema: z.ZodSchema<T>, fallback?: T): Promise<ApiResult<T>> {
+async function apiGet<T>(path: string, schema: z.ZodSchema<T>, fallback?: T, opts?: { signal?: AbortSignal }): Promise<ApiResult<T>> {
   try {
     const sep = path.includes("?") ? "&" : "?";
     const url = `${API_BASE}${path}${sep}_t=${Date.now()}`;
-    const res = await fetch(url, { headers: getAuthHeaders(), cache: "no-store" });
+    const res = await fetch(url, { headers: getAuthHeaders(), cache: "no-store", signal: opts?.signal });
     const json = await res.json().catch(() => null);
     if (!res.ok || !json) {
       let message: string = res.statusText;
@@ -283,6 +283,7 @@ export async function fetchContacts(
     skip?: number;
     take?: number;
     includeStats?: boolean;
+    signal?: AbortSignal;
   },
 ) {
   const params = new URLSearchParams();
@@ -300,6 +301,7 @@ export async function fetchContacts(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts${params.toString() ? `?${params.toString()}` : ""}`,
     z.array(contactSchema),
     fallbackContacts,
+    { signal: opts?.signal },
   );
 }
 
@@ -389,11 +391,12 @@ const flowHighlightsSchema = z.object({
 
 export type FlowHighlights = z.infer<typeof flowHighlightsSchema>;
 
-export async function fetchContactDetail(contactId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchContactDetail(contactId: string, businessId: string = DEFAULT_BUSINESS_ID, opts?: { signal?: AbortSignal }) {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}`,
     contactDetailSchema,
     null,
+    { signal: opts?.signal },
   );
 }
 
@@ -683,7 +686,7 @@ export async function denyAutopilotAction(actionId: string, businessId: string =
   });
 }
 
-export async function fetchSegmentSummary(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchSegmentSummary(businessId: string = DEFAULT_BUSINESS_ID, opts?: { signal?: AbortSignal }) {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/segments`,
     z.object({
@@ -696,6 +699,7 @@ export async function fetchSegmentSummary(businessId: string = DEFAULT_BUSINESS_
       newThisWeek: z.number(),
     }),
     { lead: 0, prospect: 0, client: 0, lost: 0, unpaid: 0, stale: 0, newThisWeek: 0 },
+    { signal: opts?.signal },
   );
 }
 
@@ -2282,20 +2286,23 @@ export async function fetchAutopilotActionsForCrm(businessId?: string): Promise<
   );
 }
 
-export async function fetchContactHealthMetrics(contactId: string, businessId?: string): Promise<ApiResult<HealthMetrics>> {
+export async function fetchContactHealthMetrics(contactId: string, businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<HealthMetrics>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiGet(
     `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/health`,
     healthMetricsSchema,
+    undefined,
+    { signal: opts?.signal },
   );
 }
 
-export async function fetchContactJourney(contactId: string, businessId?: string): Promise<ApiResult<JourneyMilestone[]>> {
+export async function fetchContactJourney(contactId: string, businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<JourneyMilestone[]>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiGet(
     `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/journey`,
     z.array(journeyMilestoneSchema),
     [],
+    { signal: opts?.signal },
   );
 }
 
@@ -2307,11 +2314,13 @@ export async function fetchPredictiveRevenue(businessId?: string): Promise<ApiRe
   );
 }
 
-export async function fetchConversationContext(contactId: string, businessId?: string): Promise<ApiResult<ConversationContextData>> {
+export async function fetchConversationContext(contactId: string, businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<ConversationContextData>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiGet(
     `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/context`,
     conversationContextSchema,
+    undefined,
+    { signal: opts?.signal },
   );
 }
 
