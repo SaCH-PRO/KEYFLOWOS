@@ -106,20 +106,11 @@ export function ContactsDatabase({
 
   useEffect(() => {
     if (!db.showColumnPicker) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (columnPickerRef.current && !columnPickerRef.current.contains(e.target as Node)) {
-        db.closeColumnPicker();
-      }
-    };
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === "Escape") db.closeColumnPicker();
     };
-    document.addEventListener("mousedown", handleClickOutside);
     document.addEventListener("keydown", handleEscape);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("keydown", handleEscape);
-    };
+    return () => document.removeEventListener("keydown", handleEscape);
   }, [db.showColumnPicker, db.closeColumnPicker]);
 
   return (
@@ -173,11 +164,17 @@ export function ContactsDatabase({
                 <span className="hidden sm:inline">Columns</span>
               </button>
               {db.showColumnPicker && (
-                <div
-                  className="absolute top-full right-0 mt-2 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 w-52 max-h-[60vh] overflow-y-auto"
-                  role="group"
-                  aria-label="Toggle columns"
-                >
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={db.closeColumnPicker}
+                    aria-hidden="true"
+                  />
+                  <div
+                    className="fixed left-2 right-2 top-20 sm:absolute sm:left-auto sm:top-full sm:right-0 sm:mt-2 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 sm:w-52 max-h-[60vh] overflow-y-auto"
+                    role="group"
+                    aria-label="Toggle columns"
+                  >
                   <div className="px-3 py-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                     Show / Hide Columns
                   </div>
@@ -200,7 +197,8 @@ export function ContactsDatabase({
                       </button>
                     );
                   })}
-                </div>
+                  </div>
+                </>
               )}
             </div>
             <div className="relative">
