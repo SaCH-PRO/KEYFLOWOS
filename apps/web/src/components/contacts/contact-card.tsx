@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect, memo } from "react";
+import { useState, useRef, useEffect } from "react";
+import React from "react";
 import { motion } from "framer-motion";
 import { Mail, Phone, Building2, Tag, Trash2, MessageCircle, Star, Globe, FileText, CalendarCheck, UserPlus, Upload, Sparkles, MoreHorizontal, Receipt, Calendar, FileSignature } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
@@ -70,7 +71,7 @@ interface ContactCardProps {
   index?: number;
 }
 
-export const ContactCard = memo(function ContactCard({ contact, isSelected, selectable, selected, onToggleSelect, isPinned, onTogglePin, onClick, onDelete, onQuickAction, index = 0 }: ContactCardProps) {
+function ContactCardInner({ contact, isSelected, selectable, selected, onToggleSelect, isPinned, onTogglePin, onClick, onDelete, onQuickAction, index = 0 }: ContactCardProps) {
   const [showActions, setShowActions] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
   const fullName = `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "Unnamed";
@@ -316,4 +317,6 @@ export const ContactCard = memo(function ContactCard({ contact, isSelected, sele
       </div>
     </motion.div>
   );
-});
+}
+
+export const ContactCard = React.memo(ContactCardInner);
