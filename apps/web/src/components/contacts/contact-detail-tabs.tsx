@@ -2,29 +2,15 @@
 
 import { useState } from "react";
 import {
-  Mail,
   Plus,
   MessageSquare,
   ListTodo,
   History,
-  MessageCircle,
-  Send,
-  Copy,
-  Bell,
   Trash2,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
-import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 import type { ContactDetailData, ContactEvent, ContactNote, ContactTask } from "./contact-detail";
-
-const QUICK_TEMPLATES = [
-  { label: "Follow-up", message: "Hi {name}, just following up on our last conversation. How can I help?" },
-  { label: "Thank you", message: "Hi {name}, thank you for your business! We truly appreciate it." },
-  { label: "Appointment", message: "Hi {name}, this is a reminder about your upcoming appointment. See you soon!" },
-  { label: "Payment", message: "Hi {name}, just a friendly reminder about your outstanding balance. Let me know if you have any questions." },
-  { label: "Promo", message: "Hi {name}, we have a special offer just for you! Reply to learn more." },
-];
 
 const EVENT_LABELS: Record<string, string> = {
   "contact.created": "Contact created",
@@ -46,8 +32,6 @@ const EVENT_LABELS: Record<string, string> = {
   "followup.scheduled": "Follow-up scheduled",
 };
 
-const WHATSAPP_CHAR_LIMIT = 4096;
-
 interface ContactDetailTabsProps {
   contact: ContactDetailData;
   events: ContactEvent[];
@@ -60,7 +44,6 @@ interface ContactDetailTabsProps {
   onCompleteTask?: (taskId: string) => Promise<void>;
   onDeleteNote?: (noteId: string) => Promise<void>;
   onDeleteTask?: (taskId: string) => Promise<void>;
-  onLogEvent?: (type: string, description?: string) => Promise<void>;
 }
 
 export function ContactDetailTabs({
@@ -75,22 +58,15 @@ export function ContactDetailTabs({
   onCompleteTask,
   onDeleteNote,
   onDeleteTask,
-  onLogEvent,
 }: ContactDetailTabsProps) {
   const [newNote, setNewNote] = useState("");
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskDue, setNewTaskDue] = useState("");
   const [noteLoading, setNoteLoading] = useState(false);
   const [taskLoading, setTaskLoading] = useState(false);
-  const [composeMessage, setComposeMessage] = useState("");
-  const [copied, setCopied] = useState(false);
-  const [showFollowUp, setShowFollowUp] = useState(false);
-  const [followUpLoading, setFollowUpLoading] = useState(false);
   const [timelineLimit, setTimelineLimit] = useState(20);
   const [notesLimit, setNotesLimit] = useState(20);
   const [tasksLimit, setTasksLimit] = useState(20);
-
-  const waPhone = getContactPhone(contact);
 
   const handleAddNote = async () => {
     if (!newNote.trim() || !onAddNote) return;
@@ -109,56 +85,12 @@ export function ContactDetailTabs({
     setTaskLoading(false);
   };
 
-  const applyTemplate = (template: string) => {
-    setComposeMessage(template.replace("{name}", contact.firstName || "there"));
-  };
-
-  const handleCopyMessage = async () => {
-    navigator.clipboard.writeText(composeMessage);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-    onLogEvent?.("message.copied", composeMessage.slice(0, 200));
-    setShowFollowUp(true);
-  };
-
-  const handleSendWhatsApp = async () => {
-    if (!waPhone) return;
-    window.open(buildWhatsAppLink(waPhone, composeMessage), "_blank");
-    onLogEvent?.("whatsapp.sent", composeMessage.slice(0, 200));
-    setShowFollowUp(true);
-  };
-
-  const handleSendEmail = async () => {
-    if (!contact.email) return;
-    const subject = encodeURIComponent("Following up");
-    const body = encodeURIComponent(composeMessage);
-    window.open(`mailto:${contact.email}?subject=${subject}&body=${body}`, "_blank");
-    onLogEvent?.("email.sent", composeMessage.slice(0, 200));
-    setShowFollowUp(true);
-  };
-
-  const handleFollowUp = async (days: number) => {
-    if (!onAddTask) return;
-    setFollowUpLoading(true);
-    const due = new Date();
-    due.setDate(due.getDate() + days);
-    const label = days === 1 ? "tomorrow" : days === 3 ? "in 3 days" : "in 1 week";
-    await onAddTask(`Follow up with ${contact.firstName || "contact"} ${label}`, due.toISOString());
-    onLogEvent?.("followup.scheduled", `Follow-up in ${days} day(s)`);
-    setFollowUpLoading(false);
-    setShowFollowUp(false);
-  };
-
-  const charCount = composeMessage.length;
-  const charColor = charCount > WHATSAPP_CHAR_LIMIT ? "text-red-400" : charCount > WHATSAPP_CHAR_LIMIT * 0.8 ? "text-yellow-400" : "text-muted-foreground";
-
   return (
     <>
       <div className="flex border-b border-border overflow-x-auto" role="tablist">
         {[
           { key: "notes", label: "Notes", icon: MessageSquare, count: notes.length },
           { key: "tasks", label: "Tasks", icon: ListTodo, count: tasks.filter((t) => t.status !== "DONE").length },
-          { key: "compose", label: "Compose", icon: Send },
           { key: "timeline", label: "Timeline", icon: History },
         ].map(({ key, label, icon: Icon, count }) => (
           <button
@@ -182,95 +114,6 @@ export function ContactDetailTabs({
       </div>
 
       <div className="space-y-3">
-        {activeTab === "compose" && (
-          <div className="space-y-3">
-            <div className="flex flex-wrap gap-1.5">
-              {QUICK_TEMPLATES.map((t) => (
-                <button
-                  key={t.label}
-                  onClick={() => applyTemplate(t.message)}
-                  className="text-xs px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-            <div className="relative">
-              <textarea
-                placeholder={`Write a message to ${contact.firstName || "this contact"}...`}
-                value={composeMessage}
-                onChange={(e) => setComposeMessage(e.target.value)}
-                className="kf-input w-full min-h-[100px] resize-none"
-              />
-              {charCount > 0 && (
-                <span className={`absolute bottom-2 right-2 text-[10px] ${charColor}`}>
-                  {charCount.toLocaleString()}/{WHATSAPP_CHAR_LIMIT.toLocaleString()}
-                </span>
-              )}
-            </div>
-            <div className="flex gap-2">
-              {waPhone && (
-                <button
-                  onClick={handleSendWhatsApp}
-                  disabled={!composeMessage.trim()}
-                  className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm transition-colors disabled:opacity-50"
-                >
-                  <MessageCircle className="w-4 h-4" />
-                  Send via WhatsApp
-                </button>
-              )}
-              {contact.email && (
-                <button
-                  onClick={handleSendEmail}
-                  disabled={!composeMessage.trim()}
-                  className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm transition-colors disabled:opacity-50"
-                >
-                  <Mail className="w-4 h-4" />
-                  Send via Email
-                </button>
-              )}
-              <button
-                onClick={handleCopyMessage}
-                disabled={!composeMessage.trim()}
-                className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-muted hover:bg-muted/80 text-sm transition-colors disabled:opacity-50"
-              >
-                <Copy className="w-4 h-4" />
-                {copied ? "Copied!" : "Copy"}
-              </button>
-            </div>
-            {showFollowUp && onAddTask && (
-              <div className="p-3 rounded-xl bg-[hsl(var(--kf-accent1))]/10 border border-[hsl(var(--kf-accent1))]/30 space-y-2">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <Bell className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-                  Remind me to follow up
-                </div>
-                <div className="flex gap-2">
-                  {[
-                    { label: "Tomorrow", days: 1 },
-                    { label: "In 3 days", days: 3 },
-                    { label: "In 1 week", days: 7 },
-                  ].map((opt) => (
-                    <button
-                      key={opt.days}
-                      onClick={() => handleFollowUp(opt.days)}
-                      disabled={followUpLoading}
-                      className="flex-1 px-3 py-1.5 text-xs rounded-lg bg-muted hover:bg-muted/80 transition-colors disabled:opacity-50"
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                  <button
-                    onClick={() => setShowFollowUp(false)}
-                    className="px-3 py-1.5 text-xs rounded-lg text-muted-foreground hover:bg-muted transition-colors"
-                  >
-                    Skip
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
         {activeTab === "timeline" && (
           <>
             {events.length === 0 ? (
