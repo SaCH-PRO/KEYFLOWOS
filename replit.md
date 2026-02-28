@@ -27,7 +27,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - Client-side pagination with page size selector on lists (expenses, CRM contacts, marketplace).
 - Core accessibility: ARIA labels, roles (tablist/tab, navigation, main, dialog), aria-selected on tabs.
 - Component decomposition: Marketplace (9 files), Reports (8 files), Store (6 files) extracted from monolithic pages.
-- Popup positioning rule: All popups triggered by a button must be fully centered on screen (horizontally and vertically) and completely visible on any screen size. Use `fixed` positioning with `left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2`, `max-h-[85vh] overflow-y-auto` for scroll safety, and a backdrop overlay (`bg-black/30 backdrop-blur-sm`).
+- Popup positioning rule: Mobile-first responsive popups. On mobile (`<sm`): `fixed left-2 right-2 top-20` for full-width cards near top with vertical scroll. On desktop (`sm:`): `sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-2` dropping from button, or centered `sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2`. Always `max-h-[80vh] overflow-y-auto` and backdrop overlay `bg-black/30 backdrop-blur-sm`. Guide grids use `grid-cols-1 sm:grid-cols-2` for vertical stacking on mobile.
 
 **Technical Implementations & Features:**
 - **Business Autopilot System:** AI-powered operations with quick-start onboarding, business archetype inference, revenue model detection, task orchestration, and a Legal & Compliance Module.

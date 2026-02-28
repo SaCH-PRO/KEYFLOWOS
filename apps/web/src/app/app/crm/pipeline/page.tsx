@@ -776,7 +776,7 @@ export default function ContactsPage() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -4 }}
                     transition={{ duration: 0.12 }}
-                    className="absolute left-0 top-full mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl w-[90vw] max-w-[700px] max-h-[85vh] overflow-y-auto p-5"
+                    className="fixed left-2 right-2 top-20 sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl sm:w-[90vw] sm:max-w-[700px] max-h-[80vh] overflow-y-auto p-5"
                   >
                     <div className="flex items-center gap-2 mb-3">
                       <div className="p-1.5 rounded-lg bg-amber-400/10">
@@ -790,7 +790,7 @@ export default function ContactsPage() {
                         <X className="w-3.5 h-3.5 text-muted-foreground" />
                       </button>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {[
                         { step: "1", title: "Add Contacts", desc: "Create contacts manually, or they auto-appear from bookings, store orders, and lead forms." },
                         { step: "2", title: "Segment & Filter", desc: "Use smart segments (High Value, New This Week, At Risk) to focus on key contacts." },
@@ -837,7 +837,7 @@ export default function ContactsPage() {
                   {bulkStatus === "open" && (
                     <>
                       <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" onClick={() => setBulkStatus(null)} />
-                      <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 w-44 max-h-[85vh] overflow-y-auto">
+                      <div className="fixed left-2 right-2 top-20 sm:left-1/2 sm:right-auto sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 sm:w-44 max-h-[80vh] overflow-y-auto">
                         {(["LEAD", "PROSPECT", "CLIENT", "LOST"] as const).map((s) => (
                           <button
                             key={s}
@@ -863,7 +863,7 @@ export default function ContactsPage() {
                   {showBulkTag && (
                     <>
                       <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" onClick={() => setShowBulkTag(false)} />
-                      <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 kf-card border border-border shadow-2xl rounded-xl p-4 w-64 max-h-[85vh] overflow-y-auto">
+                      <div className="fixed left-2 right-2 top-20 sm:left-1/2 sm:right-auto sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 z-50 kf-card border border-border shadow-2xl rounded-xl p-4 sm:w-64 max-h-[80vh] overflow-y-auto">
                         <p className="text-xs font-semibold text-muted-foreground mb-2">Add Tag</p>
                         <input
                           type="text"
@@ -919,7 +919,7 @@ export default function ContactsPage() {
         {showAddMenu && (
           <>
             <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" onClick={() => setShowAddMenu(false)} />
-            <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 w-64 max-h-[85vh] overflow-y-auto">
+            <div className="fixed left-2 right-2 top-20 sm:left-1/2 sm:right-auto sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 sm:w-64 max-h-[80vh] overflow-y-auto">
               <button
                 onClick={() => { setShowAddMenu(false); setShowAddForm(true); }}
                 className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-left"
@@ -1151,7 +1151,7 @@ export default function ContactsPage() {
             {showSort && (
               <>
                 <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" onClick={() => setShowSort(false)} />
-                <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 w-48 max-h-[85vh] overflow-y-auto">
+                <div className="fixed left-2 right-2 top-20 sm:left-1/2 sm:right-auto sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 sm:w-48 max-h-[80vh] overflow-y-auto">
                   {SORT_OPTIONS.map((opt) => (
                     <button
                       key={opt.value}

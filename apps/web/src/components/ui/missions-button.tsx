@@ -261,7 +261,7 @@ export function MissionsButton() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.12 }}
-              className="absolute left-0 top-full mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl w-[360px] max-h-[80vh] overflow-y-auto"
+              className="fixed left-2 right-2 top-20 sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl sm:w-[360px] max-h-[80vh] overflow-y-auto"
               role="dialog"
               aria-modal="true"
               aria-label="Missions"
