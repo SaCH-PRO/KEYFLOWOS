@@ -145,6 +145,7 @@ export function useContactsPipeline() {
     handleDeleteContact: actions.handleDeleteContact,
     handleImportFile: actions.handleImportFile,
     handleImportLink: actions.handleImportLink,
+    handleDeviceImport: actions.handleDeviceImport,
     handleCompleteNextAction: flow.handleCompleteNextAction,
     handleDoAction,
     handleQuickAction: actions.handleQuickAction,

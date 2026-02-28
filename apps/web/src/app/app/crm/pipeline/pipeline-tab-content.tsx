@@ -39,7 +39,7 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
     setShowBroadcast,
     detailPanelProps,
     loadContacts, loadFlowData, selectContact,
-    handleSubmitContact, handleImportFile, handleImportLink,
+    handleSubmitContact, handleImportFile, handleImportLink, handleDeviceImport,
     handleToggleSelect, handleTogglePin,
     handleDeleteContact, handleQuickAction,
     handleSelectAll, handleBulkStatusChange, handleBulkTag, handleBulkDelete,
@@ -72,6 +72,7 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
             onManualAdd={() => setShowAddForm(true)}
             onImportFile={handleImportFile}
             onImportLink={handleImportLink}
+            onDeviceImport={handleDeviceImport}
             onClose={() => setShowAddMenu(false)}
             onScanSuccess={() => { void loadContacts(); void loadFlowData(); }}
             loading={isPending}

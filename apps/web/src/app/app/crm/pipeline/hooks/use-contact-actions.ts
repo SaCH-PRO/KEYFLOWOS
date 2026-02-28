@@ -250,6 +250,35 @@ export function useContactActions({
     }
   };
 
+  const handleDeviceImport = async (deviceContacts: { firstName?: string; lastName?: string; email?: string; phone?: string }[]) => {
+    if (!businessId || deviceContacts.length === 0) return;
+    let created = 0;
+    for (const dc of deviceContacts) {
+      try {
+        await createContact({
+          businessId,
+          firstName: dc.firstName,
+          lastName: dc.lastName,
+          email: dc.email,
+          phone: dc.phone,
+          source: "device_contacts",
+          status: "LEAD",
+        });
+        created++;
+      } catch {
+        // continue with remaining contacts
+      }
+    }
+    if (created > 0) {
+      void loadContacts();
+      void loadFlowData();
+    }
+    if (created < deviceContacts.length) {
+      const skipped = deviceContacts.length - created;
+      toast.info(`${skipped} contact${skipped !== 1 ? "s" : ""} skipped (duplicates or errors)`);
+    }
+  };
+
   const handleUpdateNote = useCallback(async (noteId: string, data: { body?: string; source?: string }) => {
     if (!businessId) return;
     try {
@@ -346,7 +375,7 @@ export function useContactActions({
     handleSubmitContact, handleAddNote, handleAddTask, handleCompleteTask,
     handleDeleteNote, handleDeleteTask, handleUpdateStatus, handleLogEvent,
     handleEditContact, handleDeleteContact,
-    handleImportFile, handleImportLink,
+    handleImportFile, handleImportLink, handleDeviceImport,
     handleUpdateNote, handleUpdateTask,
     handleQuickAction, handleViewExpiringQuotes, handleViewOverdueInvoices,
     handleBulkStatusChange, handleBulkTag, handleBulkDelete,
