@@ -803,6 +803,48 @@ export class CrmService {
     return this.prisma.client.contact.update({ where: { id: input.contactId }, data: { deletedAt: new Date() } });
   }
 
+  async bulkUpdateContacts(input: { businessId: string; contactIds: string[]; status?: string; addTags?: string[] }) {
+    if (!input.contactIds || input.contactIds.length === 0) {
+      throw new BadRequestException('contactIds is required');
+    }
+    const data: any = {};
+    if (input.status) data.status = input.status;
+    if (input.addTags && input.addTags.length > 0) {
+      const contacts = await this.prisma.client.contact.findMany({
+        where: { id: { in: input.contactIds }, businessId: input.businessId, deletedAt: null },
+        select: { id: true, tags: true },
+      });
+      const ops = contacts.map((c) => {
+        const merged = Array.from(new Set([...(c.tags ?? []), ...(input.addTags ?? [])]));
+        return this.prisma.client.contact.update({
+          where: { id: c.id },
+          data: { ...data, tags: merged },
+        });
+      });
+      const results = await this.prisma.client.$transaction(ops);
+      return { updated: results.length };
+    }
+    if (Object.keys(data).length === 0) {
+      throw new BadRequestException('No update fields provided');
+    }
+    const result = await this.prisma.client.contact.updateMany({
+      where: { id: { in: input.contactIds }, businessId: input.businessId, deletedAt: null },
+      data,
+    });
+    return { updated: result.count };
+  }
+
+  async bulkDeleteContacts(input: { businessId: string; contactIds: string[] }) {
+    if (!input.contactIds || input.contactIds.length === 0) {
+      throw new BadRequestException('contactIds is required');
+    }
+    const result = await this.prisma.client.contact.updateMany({
+      where: { id: { in: input.contactIds }, businessId: input.businessId, deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
+    return { deleted: result.count };
+  }
+
   async mergeContacts(input: { businessId: string; primaryId: string; duplicateId: string }) {
     if (input.primaryId === input.duplicateId) {
       throw new BadRequestException('Cannot merge a contact into itself');

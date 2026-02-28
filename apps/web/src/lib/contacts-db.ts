@@ -17,12 +17,24 @@ export interface LocalContact {
   createdAt?: string | null;
   updatedAt?: string | null;
   addressLine1?: string | null;
+  addressLine2?: string | null;
   whatsappNumber?: string | null;
   department?: string | null;
   industry?: string | null;
   lifecycleStage?: string | null;
   sourceDetail?: string | null;
   notesInternal?: string | null;
+  secondaryEmail?: string | null;
+  secondaryPhone?: string | null;
+  displayName?: string | null;
+  segment?: string | null;
+  language?: string | null;
+  timezone?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  marketingOptIn?: boolean | null;
+  doNotContact?: boolean | null;
+  custom?: Record<string, unknown> | null;
 }
 
 class ContactsDatabase extends Dexie {

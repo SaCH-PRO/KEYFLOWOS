@@ -3,21 +3,33 @@ import type { LocalContact } from "./contacts-db";
 const EXPORT_COLUMNS = [
   { key: "firstName", label: "First Name" },
   { key: "lastName", label: "Last Name" },
+  { key: "displayName", label: "Display Name" },
   { key: "email", label: "Email" },
+  { key: "secondaryEmail", label: "Secondary Email" },
   { key: "phone", label: "Phone" },
+  { key: "secondaryPhone", label: "Secondary Phone" },
+  { key: "whatsappNumber", label: "WhatsApp" },
   { key: "status", label: "Status" },
   { key: "companyName", label: "Company" },
   { key: "jobTitle", label: "Job Title" },
+  { key: "department", label: "Department" },
+  { key: "industry", label: "Industry" },
+  { key: "segment", label: "Segment" },
   { key: "source", label: "Source" },
   { key: "tags", label: "Tags" },
+  { key: "addressLine1", label: "Address Line 1" },
+  { key: "addressLine2", label: "Address Line 2" },
   { key: "city", label: "City" },
+  { key: "state", label: "State" },
+  { key: "postalCode", label: "Postal Code" },
   { key: "country", label: "Country" },
-  { key: "addressLine1", label: "Address" },
-  { key: "whatsappNumber", label: "WhatsApp" },
+  { key: "timezone", label: "Timezone" },
+  { key: "language", label: "Language" },
   { key: "preferredChannel", label: "Preferred Channel" },
-  { key: "industry", label: "Industry" },
-  { key: "department", label: "Department" },
   { key: "lifecycleStage", label: "Lifecycle Stage" },
+  { key: "marketingOptIn", label: "Marketing Opt-In" },
+  { key: "doNotContact", label: "Do Not Contact" },
+  { key: "notesInternal", label: "Internal Notes" },
   { key: "createdAt", label: "Created" },
 ] as const;
 
@@ -31,6 +43,8 @@ function contactToRow(c: LocalContact): Record<string, string> {
       row[col.label] = new Date(val).toLocaleDateString("en-TT", {
         year: "numeric", month: "short", day: "numeric",
       });
+    } else if (col.key === "marketingOptIn" || col.key === "doNotContact") {
+      row[col.label] = val === true ? "Yes" : val === false ? "No" : "";
     } else {
       row[col.label] = val ?? "";
     }
@@ -100,8 +114,10 @@ export async function exportToVCard(contacts: LocalContact[], filename = "contac
     if (c.whatsappNumber) lines.push(`TEL;TYPE=VOICE:${c.whatsappNumber}`);
     if (c.companyName) lines.push(`ORG:${c.companyName}`);
     if (c.jobTitle) lines.push(`TITLE:${c.jobTitle}`);
-    if (c.addressLine1 || c.city || c.country) {
-      lines.push(`ADR;TYPE=WORK:;;${c.addressLine1 || ""};${c.city || ""};;${c.country || ""}`);
+    if (c.secondaryEmail) lines.push(`EMAIL;TYPE=HOME:${c.secondaryEmail}`);
+    if (c.secondaryPhone) lines.push(`TEL;TYPE=HOME:${c.secondaryPhone}`);
+    if (c.addressLine1 || c.city || c.state || c.postalCode || c.country) {
+      lines.push(`ADR;TYPE=WORK:;;${c.addressLine1 || ""}${c.addressLine2 ? " " + c.addressLine2 : ""};${c.city || ""};${c.state || ""};${c.postalCode || ""};${c.country || ""}`);
     }
     lines.push("END:VCARD");
     return lines.join("\r\n");

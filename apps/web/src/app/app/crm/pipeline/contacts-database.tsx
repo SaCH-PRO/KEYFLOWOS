@@ -17,11 +17,16 @@ import {
   HardDrive,
   Cloud,
   List,
+  CheckSquare,
+  Trash2,
+  Tag,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { LocalContact } from "@/lib/contacts-db";
 import { cacheContacts, getCachedContacts, getLastSyncTime, setLastSyncTime } from "@/lib/contacts-db";
 import { exportContacts, type ExportFormat } from "@/lib/contacts-export";
+import { bulkUpdateContacts, bulkDeleteContacts } from "@/lib/client";
 import { ContactLists } from "./contact-lists";
 
 interface ContactsDatabaseProps {
@@ -58,6 +63,8 @@ const STATUS_COLORS: Record<string, string> = {
   LOST: "bg-red-500/20 text-red-400",
 };
 
+const STATUSES = ["LEAD", "PROSPECT", "CLIENT", "LOST"];
+
 const EXPORT_OPTIONS: { format: ExportFormat; label: string; desc: string; icon: typeof FileSpreadsheet }[] = [
   { format: "csv", label: "CSV", desc: "Comma-separated values", icon: FileText },
   { format: "xlsx", label: "Excel", desc: "Microsoft Excel workbook", icon: FileSpreadsheet },
@@ -82,6 +89,12 @@ export function ContactsDatabase({ businessId, contacts, onRefresh, activeListId
   const [cachedContacts, setCachedLocal] = useState<LocalContact[]>([]);
   const [usingCache, setUsingCache] = useState(false);
   const tableRef = useRef<HTMLDivElement>(null);
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkActing, setBulkActing] = useState(false);
+  const [showBulkStatus, setShowBulkStatus] = useState(false);
+  const [showBulkTags, setShowBulkTags] = useState(false);
+  const [bulkTagInput, setBulkTagInput] = useState("");
 
   const activeContacts = contacts.length > 0 ? contacts : cachedContacts;
 
@@ -198,6 +211,86 @@ export function ContactsDatabase({ businessId, contacts, onRefresh, activeListId
       });
     }
     return (contact as any)[key] ?? "";
+  };
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAll = useCallback(() => {
+    const pageIds = paginatedContacts.map((c) => c.id);
+    const allSelected = pageIds.every((id) => selectedIds.has(id));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        pageIds.forEach((id) => next.delete(id));
+      } else {
+        pageIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  }, [paginatedContacts, selectedIds]);
+
+  const allPageSelected = paginatedContacts.length > 0 && paginatedContacts.every((c) => selectedIds.has(c.id));
+  const somePageSelected = paginatedContacts.some((c) => selectedIds.has(c.id));
+
+  const handleBulkStatusChange = async (status: string) => {
+    setBulkActing(true);
+    try {
+      const ids = Array.from(selectedIds);
+      const res = await bulkUpdateContacts({ businessId, contactIds: ids, status });
+      if (res.error) throw new Error(res.error);
+      toast.success(`Updated ${ids.length} contacts to ${status}`);
+      setSelectedIds(new Set());
+      setShowBulkStatus(false);
+      onRefresh();
+    } catch (err: any) {
+      toast.error(err.message || "Bulk update failed");
+    } finally {
+      setBulkActing(false);
+    }
+  };
+
+  const handleBulkAddTags = async () => {
+    const tags = bulkTagInput.split(",").map((t) => t.trim()).filter(Boolean);
+    if (tags.length === 0) return;
+    setBulkActing(true);
+    try {
+      const ids = Array.from(selectedIds);
+      const res = await bulkUpdateContacts({ businessId, contactIds: ids, addTags: tags });
+      if (res.error) throw new Error(res.error);
+      toast.success(`Added tags to ${ids.length} contacts`);
+      setSelectedIds(new Set());
+      setShowBulkTags(false);
+      setBulkTagInput("");
+      onRefresh();
+    } catch (err: any) {
+      toast.error(err.message || "Bulk tag update failed");
+    } finally {
+      setBulkActing(false);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedIds);
+    if (!confirm(`Delete ${ids.length} contacts? This action cannot be undone.`)) return;
+    setBulkActing(true);
+    try {
+      const res = await bulkDeleteContacts({ businessId, contactIds: ids });
+      if (res.error) throw new Error(res.error);
+      toast.success(`Deleted ${ids.length} contacts`);
+      setSelectedIds(new Set());
+      onRefresh();
+    } catch (err: any) {
+      toast.error(err.message || "Bulk delete failed");
+    } finally {
+      setBulkActing(false);
+    }
   };
 
   return (
@@ -324,6 +417,16 @@ export function ContactsDatabase({ businessId, contacts, onRefresh, activeListId
           <table className="w-full text-sm" role="grid">
             <thead>
               <tr className="bg-muted/30 border-b border-border/40">
+                <th className="px-2 py-2.5 w-[40px]">
+                  <input
+                    type="checkbox"
+                    checked={allPageSelected}
+                    ref={(el) => { if (el) el.indeterminate = somePageSelected && !allPageSelected; }}
+                    onChange={toggleSelectAll}
+                    className="w-3.5 h-3.5 rounded border-border accent-[hsl(var(--kf-accent1))] cursor-pointer"
+                    aria-label="Select all contacts on this page"
+                  />
+                </th>
                 <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground w-[40px]">#</th>
                 {VISIBLE_COLUMNS.map((col) => {
                   const sortable = col.key !== "tags" && col.key !== "jobTitle";
@@ -353,7 +456,7 @@ export function ContactsDatabase({ businessId, contacts, onRefresh, activeListId
             <tbody>
               {paginatedContacts.length === 0 ? (
                 <tr>
-                  <td colSpan={VISIBLE_COLUMNS.length + 1} className="px-4 py-8 text-center text-muted-foreground text-sm">
+                  <td colSpan={VISIBLE_COLUMNS.length + 2} className="px-4 py-8 text-center text-muted-foreground text-sm">
                     {search ? "No contacts match your search" : "No contacts found"}
                   </td>
                 </tr>
@@ -361,8 +464,17 @@ export function ContactsDatabase({ businessId, contacts, onRefresh, activeListId
                 paginatedContacts.map((contact, idx) => (
                   <tr
                     key={contact.id}
-                    className="border-b border-border/20 hover:bg-muted/20 transition-colors"
+                    className={`border-b border-border/20 hover:bg-muted/20 transition-colors ${selectedIds.has(contact.id) ? "bg-[hsl(var(--kf-accent1))]/5" : ""}`}
                   >
+                    <td className="px-2 py-2">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(contact.id)}
+                        onChange={() => toggleSelect(contact.id)}
+                        className="w-3.5 h-3.5 rounded border-border accent-[hsl(var(--kf-accent1))] cursor-pointer"
+                        aria-label={`Select ${contact.firstName ?? ""} ${contact.lastName ?? ""}`}
+                      />
+                    </td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
                       {(page - 1) * pageSize + idx + 1}
                     </td>
@@ -441,6 +553,97 @@ export function ContactsDatabase({ businessId, contacts, onRefresh, activeListId
           </div>
         </div>
       </div>
+
+      <AnimatePresence>
+        {selectedIds.size > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 40 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 40 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 kf-card border border-border shadow-2xl rounded-xl px-4 py-3 flex items-center gap-3 flex-wrap"
+          >
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <CheckSquare className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+              <span>{selectedIds.size} selected</span>
+            </div>
+
+            <div className="h-5 w-px bg-border/50" />
+
+            <div className="relative">
+              <button
+                onClick={() => { setShowBulkStatus(!showBulkStatus); setShowBulkTags(false); }}
+                disabled={bulkActing}
+                className="kf-btn-secondary inline-flex items-center gap-1.5 text-xs"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Change Status
+                <ChevronDown className="w-3 h-3" />
+              </button>
+              {showBulkStatus && (
+                <div className="absolute bottom-full left-0 mb-2 kf-card border border-border shadow-xl rounded-lg py-1 w-36 z-50">
+                  {STATUSES.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => handleBulkStatusChange(s)}
+                      disabled={bulkActing}
+                      className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50 transition-colors disabled:opacity-50"
+                    >
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium ${STATUS_COLORS[s]}`}>{s}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="relative">
+              <button
+                onClick={() => { setShowBulkTags(!showBulkTags); setShowBulkStatus(false); }}
+                disabled={bulkActing}
+                className="kf-btn-secondary inline-flex items-center gap-1.5 text-xs"
+              >
+                <Tag className="w-3.5 h-3.5" />
+                Add Tags
+              </button>
+              {showBulkTags && (
+                <div className="absolute bottom-full left-0 mb-2 kf-card border border-border shadow-xl rounded-lg p-3 w-56 z-50">
+                  <input
+                    type="text"
+                    value={bulkTagInput}
+                    onChange={(e) => setBulkTagInput(e.target.value)}
+                    placeholder="tag1, tag2, ..."
+                    className="kf-input w-full text-xs mb-2"
+                    onKeyDown={(e) => { if (e.key === "Enter") handleBulkAddTags(); }}
+                  />
+                  <button
+                    onClick={handleBulkAddTags}
+                    disabled={bulkActing || !bulkTagInput.trim()}
+                    className="kf-btn-primary w-full text-xs disabled:opacity-50"
+                  >
+                    Apply Tags
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={handleBulkDelete}
+              disabled={bulkActing}
+              className="kf-btn-secondary inline-flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 hover:border-red-400/50"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Delete
+            </button>
+
+            <button
+              onClick={() => { setSelectedIds(new Set()); setShowBulkStatus(false); setShowBulkTags(false); }}
+              className="ml-1 p-1 hover:bg-muted/50 rounded"
+              aria-label="Clear selection"
+            >
+              <X className="w-4 h-4 text-muted-foreground" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="kf-card">
         <button

@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Inject, Param, Post, Put, Query, Redirect, Req, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Inject, Param, Patch, Post, Put, Query, Redirect, Req, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { CrmFlowService } from './crm-flow.service';
 import { CrmGoogleService } from './crm-google.service';
@@ -86,6 +86,24 @@ export class CrmController {
       contactId,
       ...body,
     });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/contacts/bulk')
+  bulkUpdateContacts(
+    @Param('businessId') businessId: string,
+    @Body() body: { contactIds: string[]; status?: string; addTags?: string[] },
+  ) {
+    return this.crm.bulkUpdateContacts({ businessId, contactIds: body.contactIds, status: body.status, addTags: body.addTags });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/contacts/bulk-delete')
+  bulkDeleteContacts(
+    @Param('businessId') businessId: string,
+    @Body() body: { contactIds: string[] },
+  ) {
+    return this.crm.bulkDeleteContacts({ businessId, contactIds: body.contactIds });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -278,6 +296,25 @@ export class CrmController {
   @Get('businesses/:businessId/duplicates')
   findDuplicates(@Param('businessId') businessId: string) {
     return this.crm.findDuplicates(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/contacts/:contactId/events')
+  createEvent(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Body() body: { type: string; description?: string; data?: any },
+    @Req() req: any,
+  ) {
+    return this.crm.logContactEvent({
+      businessId,
+      contactId,
+      type: body.type,
+      data: { description: body.description, ...(body.data ?? {}) },
+      actorType: 'USER',
+      actorId: req?.user?.id,
+      source: 'crm',
+    });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
