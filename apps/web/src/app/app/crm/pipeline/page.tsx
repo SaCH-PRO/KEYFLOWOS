@@ -32,11 +32,12 @@ export default function ContactsPage() {
     contacts, loadContacts,
     activeListId, setActiveListId, setActiveListContactIds,
     setListsCount,
-    flowIntelligence, revenueData,
+    flowIntelligence, flowDataLoading, revenueData,
     setStatusFilter,
     nextActions, autopilotActions, autopilotPaused,
     setAutopilotPaused, setAutopilotActions,
     handleCompleteNextAction, handleDoAction,
+    handleViewExpiringQuotes, handleViewOverdueInvoices,
     selectContact,
   } = state;
 
@@ -206,8 +207,11 @@ export default function ContactsPage() {
             <InsightsTab
               flowIntelligence={flowIntelligence}
               revenueData={revenueData}
+              loading={flowDataLoading}
               onViewCold={() => { setStatusFilter("LEAD"); setCrmViewTab("pipeline"); }}
               onViewReady={() => { setStatusFilter("PROSPECT"); setCrmViewTab("pipeline"); }}
+              onViewExpiringQuotes={handleViewExpiringQuotes}
+              onViewOverdueInvoices={handleViewOverdueInvoices}
             />
           </motion.div>
         )}
@@ -224,6 +228,7 @@ export default function ContactsPage() {
               nextActions={nextActions}
               autopilotActions={autopilotActions}
               autopilotPaused={autopilotPaused}
+              loading={flowDataLoading}
               onComplete={handleCompleteNextAction}
               onViewContact={(id) => { selectContact(id); setCrmViewTab("pipeline"); }}
               onDoAction={handleDoAction}

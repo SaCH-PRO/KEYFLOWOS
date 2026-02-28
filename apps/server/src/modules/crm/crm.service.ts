@@ -400,6 +400,7 @@ export class CrmService {
       if (booking.startTime > stats.lastInteractionAt) stats.lastInteractionAt = booking.startTime;
     });
 
+    const updates: { id: string; leadScore: number; lastInteractionAt: Date }[] = [];
     const withStats = contacts.map((contact) => {
       const stats = statsMap.get(contact.id);
       if (!stats) return contact;
@@ -411,11 +412,28 @@ export class CrmService {
         stats.overdueTasks * 5 +
         (contact.status === 'CLIENT' ? 5 : 0);
       stats.leadScore = leadScore;
+      if (
+        contact.leadScore !== leadScore ||
+        !contact.lastInteractionAt ||
+        contact.lastInteractionAt.getTime() !== stats.lastInteractionAt.getTime()
+      ) {
+        updates.push({ id: contact.id, leadScore, lastInteractionAt: stats.lastInteractionAt });
+      }
       return {
         ...contact,
         meta: stats,
       };
     });
+    if (updates.length > 0) {
+      void Promise.all(
+        updates.map((u) =>
+          this.prisma.client.contact.update({
+            where: { id: u.id },
+            data: { leadScore: u.leadScore, lastInteractionAt: u.lastInteractionAt },
+          }),
+        ),
+      ).catch(() => {});
+    }
     return withStats;
   }
 

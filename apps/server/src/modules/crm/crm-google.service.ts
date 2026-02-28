@@ -96,8 +96,8 @@ export class CrmGoogleService {
   ) {}
 
   getAuthUrl(businessId: string) {
-    if (!this.clientId) {
-      throw new BadRequestException('Google OAuth not configured');
+    if (!this.clientId || !this.clientSecret || !this.redirectUri) {
+      throw new BadRequestException('Google OAuth not configured: missing GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, or GOOGLE_REDIRECT_URI');
     }
     
     const state: OAuthState = {
@@ -114,7 +114,7 @@ export class CrmGoogleService {
     ];
     const params = new URLSearchParams({
       client_id: this.clientId,
-      redirect_uri: this.redirectUri ?? '',
+      redirect_uri: this.redirectUri,
       response_type: 'code',
       scope: scopes.join(' '),
       access_type: 'offline',

@@ -97,11 +97,12 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<ApiRespo
   }
 }
 
-export async function apiDelete<T>(path: string): Promise<ApiResponse<T>> {
+export async function apiDelete<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
   try {
     const res = await fetch(`${API_BASE}${path}`, {
       method: "DELETE",
       headers: buildHeaders(),
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
     const data: unknown = await res.json().catch(() => null);
     if (!res.ok) {

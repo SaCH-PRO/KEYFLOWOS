@@ -731,10 +731,10 @@ export async function bulkDeleteContacts(input: {
   contactIds: string[];
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
-  return apiPost<{ deleted: number }>({
-    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/bulk-delete`,
-    body: { contactIds: input.contactIds },
-  });
+  return apiDelete<{ deleted: number }>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/bulk`,
+    { contactIds: input.contactIds },
+  );
 }
 
 export async function fetchImportJobs(businessId: string = DEFAULT_BUSINESS_ID) {
@@ -871,17 +871,16 @@ export async function updateContact(input: {
   doNotContact?: boolean;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
-  return apiPost<Contact>({
-    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(input.contactId)}`,
-    body: input,
-  });
+  return apiPatch<Contact>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(input.contactId)}`,
+    input,
+  );
 }
 
 export async function deleteContact(contactId: string, businessId: string = DEFAULT_BUSINESS_ID) {
-  return apiPost<Contact>({
-    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/delete`,
-    body: {},
-  });
+  return apiDelete<Contact>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}`,
+  );
 }
 
 export async function createProduct(input: { 

@@ -75,7 +75,7 @@ export class CrmController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
-  @Post('businesses/:businessId/contacts/:contactId')
+  @Patch('businesses/:businessId/contacts/:contactId')
   updateContact(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
@@ -98,7 +98,7 @@ export class CrmController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
-  @Post('businesses/:businessId/contacts/bulk-delete')
+  @Delete('businesses/:businessId/contacts/bulk')
   bulkDeleteContacts(
     @Param('businessId') businessId: string,
     @Body() body: { contactIds: string[] },
@@ -107,7 +107,7 @@ export class CrmController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
-  @Post('businesses/:businessId/contacts/:contactId/delete')
+  @Delete('businesses/:businessId/contacts/:contactId')
   softDeleteContact(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
