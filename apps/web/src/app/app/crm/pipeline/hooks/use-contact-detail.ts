@@ -136,13 +136,13 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
     return { ...contactDetail.contact, tags: contactDetail.contact.tags ?? [] } as ContactDetailData;
   }, [contactDetail]);
 
-  const detailEvents: ContactEvent[] = contactDetail?.events ?? [];
-  const detailNotes: ContactNote[] = contactDetail?.notes ?? [];
-  const detailTasks: ContactTask[] = (contactDetail?.tasks ?? []).map((t) => ({
+  const detailEvents: ContactEvent[] = useMemo(() => contactDetail?.events ?? [], [contactDetail]);
+  const detailNotes: ContactNote[] = useMemo(() => contactDetail?.notes ?? [], [contactDetail]);
+  const detailTasks: ContactTask[] = useMemo(() => (contactDetail?.tasks ?? []).map((t) => ({
     id: t.id, title: t.title, status: t.status ?? null, priority: t.priority ?? null,
     dueDate: t.dueDate ?? null, remindAt: t.remindAt ?? null,
     completedAt: t.completedAt ?? null, source: t.source ?? null, createdAt: t.createdAt ?? null,
-  }));
+  })), [contactDetail]);
 
   const contactName = selectedContact
     ? `${selectedContact.firstName ?? ""} ${selectedContact.lastName ?? ""}`.trim() || "Contact"

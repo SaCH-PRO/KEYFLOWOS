@@ -59,7 +59,11 @@ export function useContactActions({
   const [showGuide, setShowGuide] = useState(false);
   const [confirmState, setConfirmState] = useState<{ open: boolean; action: () => void }>({ open: false, action: () => {} });
 
-  const handleSubmitContact = async (formData: ContactFormData) => {
+  const [editingContactId, setEditingContactId] = useState<string | null>(null);
+  const editingContactIdRef = useRef(editingContactId);
+  editingContactIdRef.current = editingContactId;
+
+  const handleSubmitContact = useCallback(async (formData: ContactFormData) => {
     if (!businessId) return;
     const tagsArray = formData.tags.split(",").map((t) => t.trim()).filter(Boolean);
     const shared = {
@@ -81,12 +85,14 @@ export function useContactActions({
       notesInternal: formData.notesInternal || undefined,
     };
     try {
-      if (editingContact && selectedContactId) {
-        await updateContact({ businessId, contactId: selectedContactId, ...shared });
+      const cid = editingContactIdRef.current;
+      if (cid) {
+        await updateContact({ businessId, contactId: cid, ...shared });
         setShowAddForm(false);
         setEditingContact(null);
+        setEditingContactId(null);
         void loadContacts();
-        void loadDetail(selectedContactId);
+        void loadDetail(cid);
         toast.success("Contact updated");
       } else {
         const { data } = await createContact({
@@ -104,7 +110,7 @@ export function useContactActions({
     } catch {
       toast.error("Failed to save contact");
     }
-  };
+  }, [businessId, loadContacts, loadDetail, loadFlowData]);
 
   const handleAddNote = useCallback(async (body: string, source?: string) => {
     const cid = selectedContactIdRef.current;
@@ -238,6 +244,7 @@ export function useContactActions({
   const handleEditContact = useCallback(() => {
     const c = contactDetailRef.current?.contact;
     if (!c) return;
+    setEditingContactId(c.id);
     setSelectedContactId(c.id);
     setEditingContact({
       firstName: c.firstName || "", lastName: c.lastName || "",
@@ -317,7 +324,7 @@ export function useContactActions({
     }, 5500);
   }, [businessId, loadFlowData, setContacts, setSelectedContactId, setContactDetail, setShowMobileDetail]);
 
-  const handleImportFile = async (type: "csv" | "xlsx" | "vcf" | "image", file: File) => {
+  const handleImportFile = useCallback(async (type: "csv" | "xlsx" | "vcf" | "image", file: File) => {
     if (!businessId) return;
     try {
       await importContactsFromFile({ businessId, type, file });
@@ -328,9 +335,9 @@ export function useContactActions({
       toast.error(msg);
       throw err;
     }
-  };
+  }, [businessId, loadContacts, loadFlowData]);
 
-  const handleImportLink = async (url: string) => {
+  const handleImportLink = useCallback(async (url: string) => {
     if (!businessId) return;
     try {
       await importContactsFromLink(url, businessId);
@@ -341,9 +348,9 @@ export function useContactActions({
       toast.error(msg);
       throw err;
     }
-  };
+  }, [businessId, loadContacts, loadFlowData]);
 
-  const handleDeviceImport = async (deviceContacts: { firstName?: string; lastName?: string; email?: string; phone?: string }[]) => {
+  const handleDeviceImport = useCallback(async (deviceContacts: { firstName?: string; lastName?: string; email?: string; phone?: string }[]) => {
     if (!businessId || deviceContacts.length === 0) return;
     let created = 0;
     for (const dc of deviceContacts) {
@@ -370,29 +377,31 @@ export function useContactActions({
       const skipped = deviceContacts.length - created;
       toast.info(`${skipped} contact${skipped !== 1 ? "s" : ""} skipped (duplicates or errors)`);
     }
-  };
+  }, [businessId, loadContacts, loadFlowData]);
 
   const handleUpdateNote = useCallback(async (noteId: string, data: { body?: string; source?: string }) => {
     if (!businessId) return;
     try {
       await updateContactNote(noteId, data, businessId);
-      if (selectedContactId) void loadDetail(selectedContactId);
+      const cid = selectedContactIdRef.current;
+      if (cid) void loadDetail(cid);
       toast.success("Note updated");
     } catch {
       toast.error("Failed to update note");
     }
-  }, [businessId, selectedContactId, loadDetail]);
+  }, [businessId, loadDetail]);
 
   const handleUpdateTask = useCallback(async (taskId: string, data: { title?: string; dueDate?: string; priority?: string; remindAt?: string }) => {
     if (!businessId) return;
     try {
       await updateContactTask(taskId, data, businessId);
-      if (selectedContactId) void loadDetail(selectedContactId);
+      const cid = selectedContactIdRef.current;
+      if (cid) void loadDetail(cid);
       toast.success("Task updated");
     } catch {
       toast.error("Failed to update task");
     }
-  }, [businessId, selectedContactId, loadDetail]);
+  }, [businessId, loadDetail]);
 
   const handleQuickAction = useCallback((contactId: string, action: QuickActionType) => {
     switch (action) {
@@ -459,7 +468,11 @@ export function useContactActions({
 
   return {
     showAddForm, setShowAddForm,
-    editingContact, setEditingContact,
+    editingContact,
+    setEditingContact: useCallback((v: ContactFormData | null) => {
+      setEditingContact(v);
+      if (!v) setEditingContactId(null);
+    }, []),
     showAddMenu, setShowAddMenu,
     showBroadcast, setShowBroadcast,
     showGuide, setShowGuide,

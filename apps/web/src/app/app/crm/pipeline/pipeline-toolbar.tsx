@@ -119,7 +119,7 @@ function PipelineToolbarInner({
             <CheckSquare className="w-4 h-4" />
           </button>
           <button
-            onClick={() => setShowFilters(!showFilters)}
+            onClick={() => { setShowFilters(!showFilters); setShowSort(false); }}
             className={`p-2 rounded-lg transition-all ${showFilters ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground hover:bg-muted/50"}`}
             aria-label="Filters"
           >
@@ -127,7 +127,7 @@ function PipelineToolbarInner({
           </button>
           <div className="relative">
             <button
-              onClick={() => setShowSort(!showSort)}
+              onClick={() => { setShowSort(!showSort); setShowFilters(false); }}
               className={`p-2 rounded-lg transition-all ${showSort ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground hover:bg-muted/50"}`}
               aria-label="Sort contacts"
               aria-haspopup="listbox"
