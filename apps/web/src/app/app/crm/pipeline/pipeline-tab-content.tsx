@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useEffect, useRef } from "react";
 import { AnimatePresence, motion, type PanInfo } from "framer-motion";
 import { X, List } from "lucide-react";
 import {
@@ -23,7 +24,7 @@ interface PipelineTabContentProps {
 export function PipelineTabContent({ state }: PipelineTabContentProps) {
   const {
     businessId,
-    displayContacts, loading, hasMore, activeListTab,
+    displayContacts, loading, loadError, hasMore, activeListTab,
     selectedContactId, selectMode, selectedIds, pinnedIds,
     showAddMenu, setShowAddMenu,
     showAddForm, setShowAddForm,
@@ -45,6 +46,27 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
     handleSelectAll, handleBulkStatusChange, handleBulkTag, handleBulkDelete,
     handleToggleSelectMode,
   } = state;
+
+  const detailPanelRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const prevSelectedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (selectedContactId && selectedContactId !== prevSelectedRef.current) {
+      if (window.innerWidth >= 1024 && detailPanelRef.current) {
+        detailPanelRef.current.focus({ preventScroll: true });
+      }
+    }
+    prevSelectedRef.current = selectedContactId;
+  }, [selectedContactId]);
+
+  const handleDetailClose = useCallback(() => {
+    setShowMobileDetail(false);
+    if (listRef.current) {
+      const focused = listRef.current.querySelector<HTMLElement>('[aria-selected="true"]');
+      (focused ?? listRef.current).focus({ preventScroll: true });
+    }
+  }, [setShowMobileDetail]);
 
   return (
     <div className="space-y-6">
@@ -128,25 +150,29 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
       />
 
       <div className="grid gap-6 lg:grid-cols-[1fr,450px]">
-        <PipelineContactList
-          contacts={displayContacts as ContactCardData[]}
-          loading={loading}
-          hasMore={hasMore}
-          activeListTab={activeListTab}
-          selectedContactId={selectedContactId}
-          selectMode={selectMode}
-          selectedIds={selectedIds}
-          pinnedIds={pinnedIds}
-          onSelectContact={selectContact}
-          onToggleSelect={handleToggleSelect}
-          onTogglePin={handleTogglePin}
-          onDelete={handleDeleteContact}
-          onQuickAction={handleQuickAction}
-          onLoadMore={() => loadContacts({ append: true })}
-          onAddContact={() => setShowAddForm(true)}
-        />
+        <div ref={listRef}>
+          <PipelineContactList
+            contacts={displayContacts as ContactCardData[]}
+            loading={loading}
+            loadError={loadError}
+            hasMore={hasMore}
+            activeListTab={activeListTab}
+            selectedContactId={selectedContactId}
+            selectMode={selectMode}
+            selectedIds={selectedIds}
+            pinnedIds={pinnedIds}
+            onSelectContact={selectContact}
+            onToggleSelect={handleToggleSelect}
+            onTogglePin={handleTogglePin}
+            onDelete={handleDeleteContact}
+            onQuickAction={handleQuickAction}
+            onLoadMore={() => loadContacts({ append: true })}
+            onRetry={() => { void loadContacts(); }}
+            onAddContact={() => setShowAddForm(true)}
+          />
+        </div>
 
-        <div className="hidden lg:block sticky top-4 max-h-[calc(100vh-2rem)]">
+        <div ref={detailPanelRef} className="hidden lg:block sticky top-4 max-h-[calc(100vh-2rem)]" tabIndex={-1}>
           <PipelineDetailPanel {...detailPanelProps} />
         </div>
       </div>
@@ -158,7 +184,7 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 bg-black/50 lg:hidden"
-            onClick={() => setShowMobileDetail(false)}
+            onClick={handleDetailClose}
           >
             <motion.div
               initial={{ y: "100%" }}
@@ -169,20 +195,20 @@ export function PipelineTabContent({ state }: PipelineTabContentProps) {
               dragConstraints={{ top: 0, bottom: 0 }}
               dragElastic={{ top: 0, bottom: 0.6 }}
               onDragEnd={(_: any, info: PanInfo) => {
-                if (info.offset.y > 100 || info.velocity.y > 500) setShowMobileDetail(false);
+                if (info.offset.y > 100 || info.velocity.y > 500) handleDetailClose();
               }}
               className="absolute bottom-0 left-0 right-0 max-h-[85vh] bg-background rounded-t-3xl overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
               <button
-                onClick={() => setShowMobileDetail(false)}
+                onClick={handleDetailClose}
                 className="w-full flex items-center justify-center py-3 cursor-pointer active:bg-muted/30 transition-colors"
                 aria-label="Close panel"
               >
                 <div className="w-12 h-1 bg-muted-foreground/40 rounded-full" />
               </button>
               <div className="overflow-y-auto max-h-[calc(85vh-24px)] p-4">
-                <PipelineDetailPanel {...detailPanelProps} onClose={() => setShowMobileDetail(false)} />
+                <PipelineDetailPanel {...detailPanelProps} onClose={handleDetailClose} />
               </div>
             </motion.div>
           </motion.div>

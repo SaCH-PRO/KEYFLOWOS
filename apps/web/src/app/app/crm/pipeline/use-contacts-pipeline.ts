@@ -63,13 +63,19 @@ export function useContactsPipeline() {
     }
   }, [businessId, loadFlowData]);
 
-  const detailPanelProps: Omit<PipelineDetailPanelProps, "onClose"> = {
+  const handleDeleteForPanel = useCallback(() => {
+    void actions.handleDeleteContact();
+  }, [actions.handleDeleteContact]);
+
+  const isPinned = selectedContactId ? contactsData.pinnedIds.includes(selectedContactId) : false;
+
+  const detailPanelProps: Omit<PipelineDetailPanelProps, "onClose"> = useMemo(() => ({
     contact: detail.selectedContact,
     events: detail.detailEvents,
     notes: detail.detailNotes,
     tasks: detail.detailTasks,
     loading: detail.detailLoading,
-    isPinned: selectedContactId ? contactsData.pinnedIds.includes(selectedContactId) : false,
+    isPinned,
     contactName: detail.contactName,
     healthMetrics: detail.healthMetrics,
     journeyMilestones: detail.journeyMilestones,
@@ -86,11 +92,20 @@ export function useContactsPipeline() {
     onUpdateTask: actions.handleUpdateTask,
     onUpdateStatus: actions.handleUpdateStatus,
     onEdit: actions.handleEditContact,
-    onDelete: () => void actions.handleDeleteContact(),
+    onDelete: handleDeleteForPanel,
     onLogEvent: actions.handleLogEvent,
     onGenerateAiInsight: detail.handleGenerateAiInsight,
     onRefreshConversationContext: detail.handleRefreshConversationContext,
-  };
+  }), [
+    detail.selectedContact, detail.detailEvents, detail.detailNotes, detail.detailTasks,
+    detail.detailLoading, isPinned, detail.contactName, detail.healthMetrics,
+    detail.journeyMilestones, detail.conversationContext, detail.aiInsight, detail.aiInsightLoading,
+    contactsData.handleTogglePin, actions.handleAddNote, actions.handleAddTask,
+    actions.handleCompleteTask, actions.handleDeleteNote, actions.handleDeleteTask,
+    actions.handleUpdateNote, actions.handleUpdateTask, actions.handleUpdateStatus,
+    actions.handleEditContact, handleDeleteForPanel, actions.handleLogEvent,
+    detail.handleGenerateAiInsight, detail.handleRefreshConversationContext,
+  ]);
 
   const selectedContactsForBroadcast = useMemo(
     () => contacts.filter((c) => selectedIds.has(c.id)) as ContactCardData[],
@@ -99,7 +114,7 @@ export function useContactsPipeline() {
 
   return {
     businessId, workspaceLoading: contactsData.workspaceLoading, workspaceError: contactsData.workspaceError,
-    contacts, loading, hasMore: contactsData.hasMore,
+    contacts, loading, loadError: contactsData.loadError, hasMore: contactsData.hasMore,
     searchInput: contactsData.searchInput, setSearchInput: contactsData.setSearchInput,
     statusFilter: contactsData.statusFilter, setStatusFilter: contactsData.setStatusFilter,
     sortBy: contactsData.sortBy, setSortBy: contactsData.setSortBy,

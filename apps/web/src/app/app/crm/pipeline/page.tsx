@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "sonner";
@@ -27,27 +27,6 @@ export default function ContactsPage() {
   const googleHandled = useRef(false);
   const state = useContactsPipeline();
 
-  useEffect(() => {
-    if (googleHandled.current) return;
-    const googleSuccess = searchParams.get("google_success");
-    const googleError = searchParams.get("google_error");
-    const imported = searchParams.get("imported");
-    if (googleSuccess) {
-      googleHandled.current = true;
-      toast.success(`Google Contacts imported successfully${imported ? ` (${imported} contacts)` : ""}`);
-      router.replace("/app/crm/pipeline");
-      state.loadContacts();
-      state.loadFlowData();
-    } else if (googleError) {
-      googleHandled.current = true;
-      const msg = googleError === "missing_params" ? "Missing OAuth parameters"
-        : googleError === "invalid_state" ? "Invalid OAuth state — please try again"
-        : decodeURIComponent(googleError);
-      toast.error(`Google import failed: ${msg}`);
-      router.replace("/app/crm/pipeline");
-    }
-  }, [searchParams, router, state]);
-
   const {
     workspaceLoading, workspaceError, businessId,
     crmViewTab, setCrmViewTab,
@@ -66,8 +45,54 @@ export default function ContactsPage() {
     handleCompleteNextAction, handleDoAction,
     handleViewExpiringQuotes, handleViewOverdueInvoices,
     handleApproveAutopilot, handleDenyAutopilot,
-    selectContact,
+    selectContact, loadFlowData,
   } = state;
+
+  useEffect(() => {
+    if (googleHandled.current) return;
+    const googleSuccess = searchParams.get("google_success");
+    const googleError = searchParams.get("google_error");
+    const imported = searchParams.get("imported");
+    if (googleSuccess) {
+      googleHandled.current = true;
+      toast.success(`Google Contacts imported successfully${imported ? ` (${imported} contacts)` : ""}`);
+      router.replace("/app/crm/pipeline");
+      loadContacts();
+      loadFlowData();
+    } else if (googleError) {
+      googleHandled.current = true;
+      const msg = googleError === "missing_params" ? "Missing OAuth parameters"
+        : googleError === "invalid_state" ? "Invalid OAuth state — please try again"
+        : decodeURIComponent(googleError);
+      toast.error(`Google import failed: ${msg}`);
+      router.replace("/app/crm/pipeline");
+    }
+  }, [searchParams, router, loadContacts, loadFlowData]);
+
+  const databaseContacts = useMemo(() => contacts.map((c) => ({
+    id: c.id,
+    firstName: c.firstName ?? null, lastName: c.lastName ?? null,
+    email: c.email ?? null, phone: c.phone ?? null,
+    status: c.status ?? "LEAD", source: c.source ?? null,
+    tags: Array.isArray(c.tags) ? c.tags : [],
+    companyName: c.companyName ?? null, jobTitle: c.jobTitle ?? null,
+    city: c.city ?? null, country: c.country ?? null,
+    preferredChannel: c.preferredChannel ?? null,
+    createdAt: c.createdAt ?? null,
+    addressLine1: c.addressLine1 ?? null, addressLine2: c.addressLine2 ?? null,
+    whatsappNumber: c.whatsappNumber ?? null,
+    department: c.department ?? null, industry: c.industry ?? null,
+    lifecycleStage: c.lifecycleStage ?? null,
+    sourceDetail: c.sourceDetail ?? null, notesInternal: c.notesInternal ?? null,
+    updatedAt: c.updatedAt ?? null,
+    secondaryEmail: c.secondaryEmail ?? null, secondaryPhone: c.secondaryPhone ?? null,
+    displayName: c.displayName ?? null, segment: c.segment ?? null,
+    language: c.language ?? null, timezone: c.timezone ?? null,
+    state: c.state ?? null, postalCode: c.postalCode ?? null,
+    marketingOptIn: c.marketingOptIn ?? null,
+    doNotContact: c.doNotContact ?? null,
+    custom: c.custom ?? null,
+  })), [contacts]);
 
   if (workspaceLoading) return <KanbanSkeleton />;
 
@@ -187,30 +212,7 @@ export default function ContactsPage() {
           >
             <ContactsDatabase
               businessId={businessId}
-              contacts={contacts.map((c) => ({
-                id: c.id,
-                firstName: c.firstName ?? null, lastName: c.lastName ?? null,
-                email: c.email ?? null, phone: c.phone ?? null,
-                status: c.status ?? "LEAD", source: c.source ?? null,
-                tags: Array.isArray(c.tags) ? c.tags : [],
-                companyName: c.companyName ?? null, jobTitle: c.jobTitle ?? null,
-                city: c.city ?? null, country: c.country ?? null,
-                preferredChannel: c.preferredChannel ?? null,
-                createdAt: c.createdAt ?? null,
-                addressLine1: c.addressLine1 ?? null, addressLine2: c.addressLine2 ?? null,
-                whatsappNumber: c.whatsappNumber ?? null,
-                department: c.department ?? null, industry: c.industry ?? null,
-                lifecycleStage: c.lifecycleStage ?? null,
-                sourceDetail: c.sourceDetail ?? null, notesInternal: c.notesInternal ?? null,
-                updatedAt: c.updatedAt ?? null,
-                secondaryEmail: c.secondaryEmail ?? null, secondaryPhone: c.secondaryPhone ?? null,
-                displayName: c.displayName ?? null, segment: c.segment ?? null,
-                language: c.language ?? null, timezone: c.timezone ?? null,
-                state: c.state ?? null, postalCode: c.postalCode ?? null,
-                marketingOptIn: c.marketingOptIn ?? null,
-                doNotContact: c.doNotContact ?? null,
-                custom: c.custom ?? null,
-              }))}
+              contacts={databaseContacts}
               onRefresh={() => { void loadContacts(); }}
               activeListId={activeListId}
               onSelectList={(listId, contactIds) => {
