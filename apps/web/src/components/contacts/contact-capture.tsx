@@ -184,12 +184,13 @@ export function ContactCapture({ onManualAdd, onImportFile, onImportLink, onClos
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 8 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: 8 }}
-        className="fixed left-2 right-2 top-16 z-50 kf-card border border-border shadow-2xl rounded-2xl max-h-[80vh] overflow-y-auto sm:left-1/2 sm:top-1/2 sm:right-auto sm:bottom-auto sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-[440px]"
-      >
+      <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-4 pt-16 sm:pt-4 pointer-events-none">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95, y: 8 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.95, y: 8 }}
+          className="w-full sm:w-[440px] kf-card border border-border shadow-2xl rounded-2xl max-h-[80vh] overflow-y-auto pointer-events-auto"
+        >
         <div className="flex items-center justify-between p-4 pb-2">
           <h2 className="font-semibold text-base">Add Contacts</h2>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted/50 text-muted-foreground" aria-label="Close">
@@ -523,6 +524,7 @@ export function ContactCapture({ onManualAdd, onImportFile, onImportLink, onClos
           ) : null}
         </AnimatePresence>
       </motion.div>
+      </div>
     </>
   );
 }
