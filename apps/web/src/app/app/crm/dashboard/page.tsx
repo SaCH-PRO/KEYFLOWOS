@@ -70,7 +70,7 @@ export default function CrmDashboardPage() {
     startTransition(() => {
       void fetchContacts(undefined, { includeStats: true, take: 10 })
         .then(({ data }) => {
-          const sorted = (data ?? []).sort(
+          const sorted = (data?.contacts ?? []).sort(
             (a, b) => (b.meta?.leadScore ?? 0) - (a.meta?.leadScore ?? 0),
           );
           setTopContacts(sorted.slice(0, 6));

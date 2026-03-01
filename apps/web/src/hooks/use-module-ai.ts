@@ -165,11 +165,17 @@ export function useModuleAi(config: ModuleAiConfig) {
         toolResult: result,
         toolLoading: false,
       }));
-    } catch (err) {
+    } catch (err: unknown) {
+      const error = err as Error & { status?: number; response?: { status?: number } };
+      const status = error.status || error.response?.status;
+      const isRateLimited = status === 429 || (error.message && error.message.includes("rate limit"));
+      const errorMessage = isRateLimited
+        ? "Rate limit reached — please wait a moment"
+        : error.message || "Tool execution failed";
       setState(prev => ({
         ...prev,
         toolLoading: false,
-        toolError: (err as Error).message || "Tool execution failed",
+        toolError: errorMessage,
       }));
     }
   }, []);

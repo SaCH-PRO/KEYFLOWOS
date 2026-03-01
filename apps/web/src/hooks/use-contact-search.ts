@@ -65,7 +65,7 @@ export function useContactSearch({
           take: 20,
         });
         if (mountedRef.current) {
-          setResults((res.data as Contact[]) ?? []);
+          setResults((res.data?.contacts as Contact[]) ?? []);
         }
       } catch {
         /* silent */

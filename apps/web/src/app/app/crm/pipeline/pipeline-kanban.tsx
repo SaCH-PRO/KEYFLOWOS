@@ -236,6 +236,9 @@ const KanbanColumn = memo(function KanbanColumnInner({
 
   return (
     <div
+      role="list"
+      aria-roledescription="column"
+      aria-label={`${config.label} — ${contacts.length} contact${contacts.length !== 1 ? "s" : ""}`}
       onDragOver={onDragOver}
       onDrop={(e) => onDrop(e, status)}
       className={`rounded-xl border bg-card flex flex-col min-h-[300px] transition-all ${
@@ -377,7 +380,15 @@ function PipelineKanbanInner({ state }: PipelineKanbanProps) {
 
   return (
     <div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <span className="sr-only">
+        Kanban board with {STATUSES.length} columns: {STATUSES.map(s => STATUS_CONFIG[s]?.label ?? s).join(", ")}. Drag and drop contacts between columns to change their status.
+      </span>
+      <div
+        role="region"
+        aria-roledescription="kanban board"
+        aria-label="Contact pipeline board"
+        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3"
+      >
         {STATUSES.map((status) => (
           <div key={status} data-status={status}>
             <KanbanColumn

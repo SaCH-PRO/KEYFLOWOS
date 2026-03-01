@@ -2,6 +2,8 @@ import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nest
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
+const MAX_RETRIES = 3;
+
 @Injectable()
 export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(CrmSequenceSchedulerService.name);
@@ -65,9 +67,105 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
 
     for (const enrollment of dueEnrollments) {
       try {
-        await this.processEnrollment(enrollment);
+        await this.processEnrollmentWithRetry(enrollment);
       } catch (err) {
         this.logger.error(`Failed to process enrollment ${enrollment.id}`, err);
+      }
+    }
+  }
+
+  private getRetryMeta(enrollment: any): { retries: number; lastError: string | null } {
+    const meta = enrollment.metadata ?? {};
+    return {
+      retries: typeof meta.retries === 'number' ? meta.retries : 0,
+      lastError: meta.lastError ?? null,
+    };
+  }
+
+  private async processEnrollmentWithRetry(enrollment: any) {
+    try {
+      await this.processEnrollment(enrollment);
+
+      const currentMeta = enrollment.metadata ?? {};
+      if (currentMeta.retries && currentMeta.retries > 0) {
+        await this.db.crmSequenceEnrollment.update({
+          where: { id: enrollment.id },
+          data: {
+            metadata: { ...currentMeta, retries: 0, lastError: null },
+          },
+        });
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      const { retries } = this.getRetryMeta(enrollment);
+      const newRetries = retries + 1;
+      const currentMeta = enrollment.metadata ?? {};
+
+      const contactName = [enrollment.contact?.firstName, enrollment.contact?.lastName]
+        .filter(Boolean)
+        .join(' ') || enrollment.contact?.email || 'Unknown';
+      const businessId = enrollment.sequence.businessId;
+      const steps = enrollment.sequence.steps as any[];
+      const currentStepIndex = enrollment.currentStep;
+      const step = steps[currentStepIndex];
+      const stepType = step?.type ?? 'unknown';
+
+      if (newRetries >= MAX_RETRIES) {
+        await this.db.crmSequenceEnrollment.update({
+          where: { id: enrollment.id },
+          data: {
+            status: 'failed',
+            nextStepAt: null,
+            metadata: { ...currentMeta, retries: newRetries, lastError: errorMessage },
+          },
+        });
+
+        await this.logEvent(businessId, enrollment.contactId, 'sequence_step_failed', {
+          sequenceId: enrollment.sequenceId,
+          sequenceName: enrollment.sequence.name,
+          stepIndex: currentStepIndex,
+          stepType,
+          error: errorMessage,
+          retryCount: newRetries,
+          permanent: true,
+        });
+
+        this.events.emit('sequence.step_failed', {
+          businessId,
+          contactId: enrollment.contactId,
+          contactName,
+          sequenceId: enrollment.sequenceId,
+          sequenceName: enrollment.sequence.name,
+          stepIndex: currentStepIndex,
+          stepType,
+          enrollmentId: enrollment.id,
+          error: errorMessage,
+          retryCount: newRetries,
+        });
+
+        this.logger.error(
+          `Enrollment ${enrollment.id} permanently failed after ${newRetries} retries: ${errorMessage}`,
+        );
+      } else {
+        await this.db.crmSequenceEnrollment.update({
+          where: { id: enrollment.id },
+          data: {
+            metadata: { ...currentMeta, retries: newRetries, lastError: errorMessage },
+          },
+        });
+
+        await this.logEvent(businessId, enrollment.contactId, 'sequence_step_retry', {
+          sequenceId: enrollment.sequenceId,
+          sequenceName: enrollment.sequence.name,
+          stepIndex: currentStepIndex,
+          stepType,
+          error: errorMessage,
+          retryCount: newRetries,
+        });
+
+        this.logger.warn(
+          `Enrollment ${enrollment.id} step failed (retry ${newRetries}/${MAX_RETRIES}): ${errorMessage}`,
+        );
       }
     }
   }
@@ -130,21 +228,17 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
     }
 
     if (step.type === 'call') {
-      try {
-        await this.db.contactTask.create({
-          data: {
-            businessId,
-            contactId: enrollment.contactId,
-            title: `Call: ${step.subject || enrollment.sequence.name} - Step ${currentStepIndex + 1}`,
-            description: step.body || `Sequence "${enrollment.sequence.name}" requires a call to ${contactName}`,
-            priority: 'high',
-            status: 'pending',
-            dueDate: new Date(),
-          },
-        });
-      } catch (err) {
-        this.logger.warn(`Failed to create call task for enrollment ${enrollment.id}`, err);
-      }
+      await this.db.contactTask.create({
+        data: {
+          businessId,
+          contactId: enrollment.contactId,
+          title: `Call: ${step.subject || enrollment.sequence.name} - Step ${currentStepIndex + 1}`,
+          description: step.body || `Sequence "${enrollment.sequence.name}" requires a call to ${contactName}`,
+          priority: 'high',
+          status: 'pending',
+          dueDate: new Date(),
+        },
+      });
 
       await this.logEvent(businessId, enrollment.contactId, 'sequence_step_due', {
         sequenceId: enrollment.sequenceId,

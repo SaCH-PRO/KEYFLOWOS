@@ -1,4 +1,4 @@
-import { Injectable, Logger, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, ForbiddenException, HttpException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { AI_CREDIT_COSTS, AI_OVERAGE_RATE_TTD, AI_OVERAGE_RATE_USD } from '../subscriptions/plans';
@@ -45,6 +45,10 @@ export class AiUsageService {
   private readonly openai: OpenAI;
   private readonly defaultModel = 'gpt-5.2';
 
+  private readonly RATE_LIMIT_PER_MINUTE = 30;
+  private readonly rateLimitMap = new Map<string, number[]>();
+  private rateLimitCleanupTimer: ReturnType<typeof setInterval>;
+
   private readonly TOKEN_COST_PER_1K: Record<string, { input: number; output: number }> = {
     'gpt-5.2': { input: 0.005, output: 0.015 },
     'gpt-5-mini': { input: 0.0004, output: 0.0016 },
@@ -59,11 +63,50 @@ export class AiUsageService {
       apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
       baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
     });
+
+    this.rateLimitCleanupTimer = setInterval(() => {
+      const cutoff = Date.now() - 60_000;
+      for (const [key, timestamps] of this.rateLimitMap.entries()) {
+        const filtered = timestamps.filter(t => t > cutoff);
+        if (filtered.length === 0) {
+          this.rateLimitMap.delete(key);
+        } else {
+          this.rateLimitMap.set(key, filtered);
+        }
+      }
+    }, 60_000);
+  }
+
+  onModuleDestroy() {
+    clearInterval(this.rateLimitCleanupTimer);
+  }
+
+  checkRateLimit(businessId: string): void {
+    const now = Date.now();
+    const cutoff = now - 60_000;
+    const timestamps = this.rateLimitMap.get(businessId) || [];
+    const recent = timestamps.filter(t => t > cutoff);
+
+    if (recent.length >= this.RATE_LIMIT_PER_MINUTE) {
+      throw new HttpException(
+        {
+          statusCode: 429,
+          message: 'AI rate limit exceeded. Please wait a moment before trying again.',
+          code: 'RATE_LIMIT_EXCEEDED',
+        },
+        429,
+      );
+    }
+
+    recent.push(now);
+    this.rateLimitMap.set(businessId, recent);
   }
 
   async callAi(options: AiCallOptions): Promise<AiCallResult> {
     const { businessId, feature, messages, maxTokens = 500, temperature = 0.7 } = options;
     const model = options.model || this.defaultModel;
+
+    this.checkRateLimit(businessId);
 
     const creditCost = AI_CREDIT_COSTS[feature] || 1;
 

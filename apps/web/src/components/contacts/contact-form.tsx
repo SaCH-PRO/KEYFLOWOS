@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { validateEmail, validatePhone } from "@/lib/validators";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 const STATUSES = ["LEAD", "PROSPECT", "CLIENT", "LOST"] as const;
 const CHANNELS = ["WhatsApp", "Email", "SMS", "Call", "Instagram DM"] as const;
@@ -206,10 +207,12 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
     setTouched({});
   };
 
+  const [showDiscardDialog, setShowDiscardDialog] = useState(false);
+
   const handleCancel = () => {
     if (isDirty) {
-      const confirmed = window.confirm("You have unsaved changes. Are you sure you want to close?");
-      if (!confirmed) return;
+      setShowDiscardDialog(true);
+      return;
     }
     onCancel();
   };
@@ -660,6 +663,19 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
         </button>
       </div>
       </motion.div>
+      <ConfirmDialog
+        open={showDiscardDialog}
+        title="Unsaved Changes"
+        message="You have unsaved changes. Discard?"
+        confirmLabel="Discard"
+        cancelLabel="Keep Editing"
+        variant="danger"
+        onConfirm={() => {
+          setShowDiscardDialog(false);
+          onCancel();
+        }}
+        onCancel={() => setShowDiscardDialog(false)}
+      />
     </motion.div>
   );
 }

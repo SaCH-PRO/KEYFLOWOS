@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus,
@@ -104,6 +104,8 @@ function PipelineToolbarInner({
 }: PipelineToolbarProps) {
   const [showFilters, setShowFilters] = useState(false);
   const [showSort, setShowSort] = useState(false);
+  const [focusedSortIndex, setFocusedSortIndex] = useState(-1);
+  const sortItemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const handleToggleFilters = useCallback(() => {
     setShowFilters((p) => !p);
@@ -111,9 +113,57 @@ function PipelineToolbarInner({
   }, []);
 
   const handleToggleSort = useCallback(() => {
-    setShowSort((p) => !p);
+    setShowSort((p) => {
+      if (!p) {
+        const currentIndex = SORT_OPTIONS.findIndex(o => o.value === sortBy);
+        setFocusedSortIndex(currentIndex >= 0 ? currentIndex : 0);
+        requestAnimationFrame(() => {
+          const idx = currentIndex >= 0 ? currentIndex : 0;
+          sortItemRefs.current[idx]?.focus();
+        });
+      } else {
+        setFocusedSortIndex(-1);
+      }
+      return !p;
+    });
     setShowFilters(false);
-  }, []);
+  }, [sortBy]);
+
+  const handleSortKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (!showSort) return;
+    switch (e.key) {
+      case "ArrowDown": {
+        e.preventDefault();
+        const next = (focusedSortIndex + 1) % SORT_OPTIONS.length;
+        setFocusedSortIndex(next);
+        sortItemRefs.current[next]?.focus();
+        break;
+      }
+      case "ArrowUp": {
+        e.preventDefault();
+        const prev = (focusedSortIndex - 1 + SORT_OPTIONS.length) % SORT_OPTIONS.length;
+        setFocusedSortIndex(prev);
+        sortItemRefs.current[prev]?.focus();
+        break;
+      }
+      case "Enter":
+      case " ": {
+        e.preventDefault();
+        if (focusedSortIndex >= 0 && focusedSortIndex < SORT_OPTIONS.length) {
+          onSortChange(SORT_OPTIONS[focusedSortIndex].value);
+          setShowSort(false);
+          setFocusedSortIndex(-1);
+        }
+        break;
+      }
+      case "Escape": {
+        e.preventDefault();
+        setShowSort(false);
+        setFocusedSortIndex(-1);
+        break;
+      }
+    }
+  }, [showSort, focusedSortIndex, onSortChange]);
 
   return (
     <div className="rounded-2xl border border-border/50 bg-card p-3 sm:p-4 space-y-3 overflow-hidden">
@@ -171,15 +221,18 @@ function PipelineToolbarInner({
             </button>
             {showSort && (
               <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowSort(false)} />
-                <div role="listbox" aria-label="Sort options" className="fixed left-2 right-2 top-20 sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-1 z-50 bg-popover/95 backdrop-blur-xl border border-border/50 shadow-xl rounded-xl py-1 sm:w-44 max-h-[80vh] overflow-y-auto">
-                  {SORT_OPTIONS.map((opt) => (
+                <div className="fixed inset-0 z-40" onClick={() => { setShowSort(false); setFocusedSortIndex(-1); }} />
+                <div role="listbox" aria-label="Sort options" onKeyDown={handleSortKeyDown} className="fixed left-2 right-2 top-20 sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-1 z-50 bg-popover/95 backdrop-blur-xl border border-border/50 shadow-xl rounded-xl py-1 sm:w-44 max-h-[80vh] overflow-y-auto">
+                  {SORT_OPTIONS.map((opt, idx) => (
                     <button
                       key={opt.value}
+                      ref={(el) => { sortItemRefs.current[idx] = el; }}
                       role="option"
                       aria-selected={sortBy === opt.value}
-                      onClick={() => { onSortChange(opt.value); setShowSort(false); }}
-                      className={`w-full text-left px-3 py-2.5 text-xs hover:bg-white/[0.05] transition-colors ${sortBy === opt.value ? "text-[hsl(var(--kf-accent1))] font-semibold" : "text-muted-foreground"}`}
+                      tabIndex={focusedSortIndex === idx ? 0 : -1}
+                      onClick={() => { onSortChange(opt.value); setShowSort(false); setFocusedSortIndex(-1); }}
+                      onFocus={() => setFocusedSortIndex(idx)}
+                      className={`w-full text-left px-3 py-2.5 text-xs hover:bg-white/[0.05] transition-colors ${sortBy === opt.value ? "text-[hsl(var(--kf-accent1))] font-semibold" : "text-muted-foreground"} ${focusedSortIndex === idx ? "bg-white/[0.05]" : ""}`}
                     >
                       {opt.label}
                     </button>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Sparkles, X, RefreshCw, Loader2, AlertTriangle,
@@ -124,10 +124,12 @@ function ToolCard({
   tool,
   onExecute,
   disabled,
+  showSelectionHint,
 }: {
   tool: AiTool;
   onExecute: () => void;
   disabled: boolean;
+  showSelectionHint?: boolean;
 }) {
   const Icon = getToolIcon(tool.icon);
   const catMeta = CATEGORY_META[tool.category];
@@ -163,6 +165,9 @@ function ToolCard({
           </div>
         </div>
       </div>
+      {showSelectionHint && (
+        <p className="text-[11px] text-amber-400/80 mt-1.5 ml-12">Select a contact to use this tool</p>
+      )}
     </button>
   );
 }
@@ -181,20 +186,61 @@ export function AiCommandHub({
   toolResultRenderer,
 }: AiCommandHubProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (ai.panelOpen) {
+      previousFocusRef.current = document.activeElement as HTMLElement | null;
+      requestAnimationFrame(() => {
+        if (panelRef.current) {
+          const focusable = panelRef.current.querySelectorAll<HTMLElement>(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+          );
+          if (focusable.length > 0) focusable[0].focus();
+        }
+      });
+    } else {
+      if (previousFocusRef.current && typeof previousFocusRef.current.focus === "function") {
+        previousFocusRef.current.focus();
+        previousFocusRef.current = null;
+      }
+    }
+  }, [ai.panelOpen]);
 
   useEffect(() => {
     if (!ai.panelOpen) return;
-    const handleEsc = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (ai.hubMode === "tool-result") {
           ai.clearToolResult();
         } else {
           ai.setOpen(false);
         }
+        return;
+      }
+      if (e.key === "Tab" && panelRef.current) {
+        const focusable = panelRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
       }
     };
-    document.addEventListener("keydown", handleEsc);
-    return () => document.removeEventListener("keydown", handleEsc);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [ai.panelOpen, ai.hubMode, ai.clearToolResult, ai.setOpen]);
 
   const handleToolExecute = useCallback((toolId: string) => {
@@ -328,14 +374,18 @@ export function AiCommandHub({
                       </span>
                     </div>
                     <div className="space-y-2">
-                      {categoryTools.map(tool => (
-                        <ToolCard
-                          key={tool.id}
-                          tool={tool}
-                          onExecute={() => handleToolExecute(tool.id)}
-                          disabled={tool.requiresSelection && !ai.availableTools.some(t => t.id === tool.id)}
-                        />
-                      ))}
+                      {categoryTools.map(tool => {
+                        const isDisabledBySelection = tool.requiresSelection && !ai.availableTools.some(t => t.id === tool.id);
+                        return (
+                          <ToolCard
+                            key={tool.id}
+                            tool={tool}
+                            onExecute={() => handleToolExecute(tool.id)}
+                            disabled={isDisabledBySelection}
+                            showSelectionHint={isDisabledBySelection}
+                          />
+                        );
+                      })}
                     </div>
                   </div>
                 );

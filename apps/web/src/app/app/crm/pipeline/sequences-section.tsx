@@ -824,7 +824,7 @@ function EnrollContactPicker({
     (async () => {
       setLoading(true);
       const res = await fetchContacts(businessId, { take: 100, search: debouncedSearch.trim() || undefined });
-      if (!cancelled && res.data) setContacts(res.data);
+      if (!cancelled && res.data?.contacts) setContacts(res.data.contacts);
       if (!cancelled) setLoading(false);
     })();
     return () => { cancelled = true; };
