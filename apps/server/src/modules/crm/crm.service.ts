@@ -30,6 +30,8 @@ type ContactWithStats = Contact & {
   meta?: ContactMeta;
 };
 
+type ContactSortBy = 'name' | 'newest' | 'oldest' | 'revenue' | 'score' | 'lastInteraction';
+
 type ContactListOptions = {
   businessId: string;
   status?: string;
@@ -50,6 +52,8 @@ type ContactListOptions = {
   skip?: number;
   take?: number;
   includeStats?: boolean;
+  sortBy?: ContactSortBy;
+  sortOrder?: 'asc' | 'desc';
 };
 
 type ContactExtraAttributes = {
@@ -283,9 +287,45 @@ export class CrmService {
 
     const skip = input.skip ?? 0;
     const take = Math.min(input.take ?? 50, 100);
+
+    const sortBy = input.sortBy;
+    const needsPostSort = sortBy === 'revenue' || sortBy === 'score';
+
+    let orderBy: any;
+    if (!sortBy || needsPostSort) {
+      orderBy = { createdAt: 'desc' };
+    } else if (sortBy === 'name') {
+      const dir = input.sortOrder ?? 'asc';
+      orderBy = [{ firstName: dir }, { lastName: dir }];
+    } else if (sortBy === 'newest') {
+      orderBy = { createdAt: input.sortOrder ?? 'desc' };
+    } else if (sortBy === 'oldest') {
+      orderBy = { createdAt: input.sortOrder ?? 'asc' };
+    } else if (sortBy === 'lastInteraction') {
+      orderBy = { updatedAt: input.sortOrder ?? 'desc' };
+    } else {
+      orderBy = { createdAt: 'desc' };
+    }
+
+    if (needsPostSort) {
+      const allContacts = await this.prisma.client.contact.findMany({
+        where,
+        orderBy,
+      });
+      if (allContacts.length === 0) return [];
+      const withStats = await this.attachContactStats(input.businessId, allContacts);
+      const dir = input.sortOrder ?? 'desc';
+      withStats.sort((a, b) => {
+        const aVal = sortBy === 'revenue' ? (a.meta?.totalRevenue ?? 0) : (a.meta?.leadScore ?? 0);
+        const bVal = sortBy === 'revenue' ? (b.meta?.totalRevenue ?? 0) : (b.meta?.leadScore ?? 0);
+        return dir === 'asc' ? aVal - bVal : bVal - aVal;
+      });
+      return withStats.slice(skip, skip + take);
+    }
+
     const contacts = await this.prisma.client.contact.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy,
       skip,
       take,
     });
@@ -293,6 +333,70 @@ export class CrmService {
       return contacts;
     }
     return this.attachContactStats(input.businessId, contacts);
+  }
+
+  async getContactStats(businessId: string) {
+    const totalCount = await this.prisma.client.contact.count({
+      where: { businessId, deletedAt: null },
+    });
+
+    const statusGroups = await this.prisma.client.contact.groupBy({
+      by: ['status'],
+      where: { businessId, deletedAt: null },
+      _count: { id: true },
+    });
+    const countByStatus: Record<string, number> = { LEAD: 0, PROSPECT: 0, CLIENT: 0, LOST: 0 };
+    for (const g of statusGroups) {
+      countByStatus[g.status] = g._count.id;
+    }
+
+    const sourceGroups = await this.prisma.client.contact.groupBy({
+      by: ['source'],
+      where: { businessId, deletedAt: null },
+      _count: { id: true },
+    });
+    const countBySource = sourceGroups.map((g) => ({
+      source: g.source ?? 'unknown',
+      count: g._count.id,
+    }));
+
+    const recentGrowth: { week: string; count: number }[] = [];
+    const now = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const weekStart = new Date(now);
+      weekStart.setDate(weekStart.getDate() - i * 7);
+      weekStart.setHours(0, 0, 0, 0);
+      const day = weekStart.getDay();
+      const diff = weekStart.getDate() - day + (day === 0 ? -6 : 1);
+      weekStart.setDate(diff);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 7);
+      const count = await this.prisma.client.contact.count({
+        where: {
+          businessId,
+          deletedAt: null,
+          createdAt: { gte: weekStart, lt: weekEnd },
+        },
+      });
+      recentGrowth.push({ week: weekStart.toISOString(), count });
+    }
+
+    const allContacts = await this.prisma.client.contact.findMany({
+      where: { businessId, deletedAt: null },
+      select: { tags: true },
+    });
+    const tagCounts = new Map<string, number>();
+    for (const c of allContacts) {
+      for (const tag of c.tags ?? []) {
+        tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
+      }
+    }
+    const topTags = Array.from(tagCounts.entries())
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    return { totalCount, countByStatus, countBySource, recentGrowth, topTags };
   }
 
   private async attachContactStats(businessId: string, contacts: Contact[]): Promise<ContactWithStats[]> {

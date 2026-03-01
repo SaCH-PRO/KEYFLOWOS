@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import React, { useState, useMemo } from "react";
+import { motion } from "framer-motion";
 import {
   Sparkles, Filter, ArrowUpDown, History, CheckCircle2,
   MessageSquare, FileText, Phone, Mail, DollarSign, Clock,
@@ -43,6 +44,11 @@ const SORT_OPTIONS: { value: SortOption; label: string }[] = [
 
 const PRIORITY_ORDER: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
 
+const stagger = {
+  container: { hidden: {}, visible: { transition: { staggerChildren: 0.06 } } },
+  item: { hidden: { opacity: 0, y: 12 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] as const } } },
+};
+
 interface EngageTabProps {
   nextActions: NextAction[];
   autopilotActions: AutopilotAction[];
@@ -56,7 +62,7 @@ interface EngageTabProps {
   onDeny: (id: string) => Promise<void>;
 }
 
-function EngageSkeleton() {
+const EngageSkeleton = React.memo(function EngageSkeleton() {
   return (
     <div className="space-y-4">
       <div className="flex gap-2">
@@ -66,7 +72,7 @@ function EngageSkeleton() {
       </div>
       <div className="grid gap-6 lg:grid-cols-2">
         {Array.from({ length: 2 }).map((_, i) => (
-          <div key={i} className="kf-card p-5 space-y-4">
+          <div key={i} className="rounded-2xl border border-border/50 bg-card p-5 space-y-4">
             <div className="flex items-center gap-2">
               <Skeleton className="h-5 w-5 rounded" />
               <Skeleton className="h-5 w-32" />
@@ -86,37 +92,39 @@ function EngageSkeleton() {
       </div>
     </div>
   );
-}
+});
 
-function ProgressIndicator({ actions, completedCount }: { actions: NextAction[]; completedCount: number }) {
+const ProgressIndicator = React.memo(function ProgressIndicator({ actions, completedCount }: { actions: NextAction[]; completedCount: number }) {
   const total = actions.length + completedCount;
   if (total === 0) return null;
   const pct = total > 0 ? Math.round((completedCount / total) * 100) : 0;
 
   return (
-    <div className="kf-card p-4">
+    <motion.div variants={stagger.item} className="rounded-2xl border border-border/50 bg-gradient-to-br from-card to-card/80 backdrop-blur-sm p-4">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <Zap className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
-          <span className="text-sm font-medium">Today's Progress</span>
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Today's Progress</span>
         </div>
         <span className="text-sm font-semibold text-[hsl(var(--kf-accent2))]">{pct}%</span>
       </div>
-      <div className="h-2 rounded-full bg-muted overflow-hidden">
-        <div
-          className="h-full rounded-full bg-gradient-to-r from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] transition-all duration-500"
-          style={{ width: `${pct}%` }}
+      <div className="h-2 rounded-full bg-white/[0.03] overflow-hidden">
+        <motion.div
+          initial={{ width: 0 }}
+          animate={{ width: `${pct}%` }}
+          transition={{ duration: 0.8, ease: [0.25, 0.46, 0.45, 0.94] }}
+          className="h-full rounded-full bg-gradient-to-r from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))]"
         />
       </div>
       <div className="flex justify-between mt-1.5 text-xs text-muted-foreground">
         <span>{completedCount} completed</span>
         <span>{actions.length} remaining</span>
       </div>
-    </div>
+    </motion.div>
   );
-}
+});
 
-function CompletionHistory({ actions }: { actions: AutopilotAction[] }) {
+const CompletionHistory = React.memo(function CompletionHistory({ actions }: { actions: AutopilotAction[] }) {
   const [showAll, setShowAll] = useState(false);
   const completed = actions.filter((a) => a.status === "completed");
   if (completed.length === 0) return null;
@@ -124,15 +132,15 @@ function CompletionHistory({ actions }: { actions: AutopilotAction[] }) {
   const visible = showAll ? completed : completed.slice(0, 5);
 
   return (
-    <div className="kf-card p-4">
+    <motion.div variants={stagger.item} className="rounded-2xl border border-border/50 bg-gradient-to-br from-card to-card/80 p-4">
       <div className="flex items-center gap-2 mb-3">
-        <History className="w-4 h-4 text-[hsl(var(--kf-accent2))]" />
-        <span className="text-sm font-medium">Completion History</span>
+        <History className="w-3.5 h-3.5 text-muted-foreground/60" />
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Completion History</span>
         <span className="ml-auto text-xs text-muted-foreground">{completed.length} actions</span>
       </div>
       <div className="space-y-1.5">
         {visible.map((action) => (
-          <div key={action.id} className="flex items-center gap-2 py-1.5 px-2 rounded-lg text-sm">
+          <div key={action.id} className="flex items-center gap-2 py-1.5 px-2 rounded-lg text-sm hover:bg-white/[0.02] transition-colors">
             <CheckCircle2 className="w-3.5 h-3.5 text-[hsl(var(--kf-accent2))] shrink-0" />
             <span className="flex-1 truncate text-muted-foreground">{action.description}</span>
             <span className="text-xs text-muted-foreground shrink-0">
@@ -151,9 +159,9 @@ function CompletionHistory({ actions }: { actions: AutopilotAction[] }) {
           {showAll ? "Show less" : `Show ${completed.length - 5} more`}
         </button>
       )}
-    </div>
+    </motion.div>
   );
-}
+});
 
 export function EngageTab({
   nextActions, autopilotActions, autopilotPaused, loading,
@@ -208,10 +216,18 @@ export function EngageTab({
   if (loading) return <EngageSkeleton />;
 
   return (
-    <div className="space-y-4">
+    <motion.div
+      variants={stagger.container}
+      initial="hidden"
+      animate="visible"
+      className="space-y-4"
+    >
       <ProgressIndicator actions={filteredActions} completedCount={completedCount} />
 
-      <div className="flex flex-wrap items-center gap-2">
+      <motion.div
+        variants={stagger.item}
+        className="flex flex-wrap items-center gap-2 rounded-2xl border border-border/50 bg-gradient-to-br from-card to-card/80 backdrop-blur-sm p-3"
+      >
         <div className="flex items-center gap-1 mr-1">
           <Filter className="w-3.5 h-3.5 text-muted-foreground" />
           {activeFilterCount > 0 && (
@@ -281,7 +297,7 @@ export function EngageTab({
           {showSortMenu && (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setShowSortMenu(false)} />
-              <div className="absolute right-0 top-full mt-1 z-50 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[140px]">
+              <div className="absolute right-0 top-full mt-1 z-50 bg-popover/95 backdrop-blur-xl border border-border/50 rounded-xl shadow-lg py-1 min-w-[140px]">
                 {SORT_OPTIONS.map((opt) => (
                   <button
                     key={opt.value}
@@ -297,9 +313,9 @@ export function EngageTab({
             </>
           )}
         </div>
-      </div>
+      </motion.div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <motion.div variants={stagger.item} className="grid gap-6 lg:grid-cols-2">
         <NextActionQueue
           actions={filteredActions}
           onComplete={handleComplete}
@@ -314,14 +330,16 @@ export function EngageTab({
           onDeny={onDeny}
           onViewContact={onViewContact}
         />
-      </div>
+      </motion.div>
 
       <CompletionHistory actions={autopilotActions} />
 
       {filteredActions.length === 0 && autopilotActions.length === 0 && (
-        <div className="kf-card p-8 text-center">
-          <Sparkles className="w-10 h-10 mx-auto text-muted-foreground mb-3" />
-          <p className="text-lg font-medium mb-1">
+        <motion.div variants={stagger.item} className="rounded-2xl border border-border/50 bg-gradient-to-br from-card to-card/80 p-8 text-center">
+          <div className="w-10 h-10 rounded-xl bg-white/[0.03] flex items-center justify-center mx-auto mb-3">
+            <Sparkles className="w-5 h-5 text-muted-foreground/40" />
+          </div>
+          <p className="text-lg font-medium mb-1 bg-gradient-to-r from-foreground to-foreground/60 bg-clip-text text-transparent">
             {activeFilterCount > 0 ? "No Matching Actions" : "All Caught Up"}
           </p>
           <p className="text-muted-foreground text-sm">
@@ -329,8 +347,8 @@ export function EngageTab({
               ? "Try adjusting your filters to see more actions."
               : "No pending actions right now. Keep building your pipeline and we'll surface smart next steps."}
           </p>
-        </div>
+        </motion.div>
       )}
-    </div>
+    </motion.div>
   );
 }

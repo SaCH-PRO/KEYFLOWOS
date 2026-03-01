@@ -7,7 +7,7 @@ import { exportContacts, type ExportFormat } from "@/lib/contacts-export";
 import { bulkUpdateContacts, bulkDeleteContacts, addContactsToList } from "@/lib/client";
 import { toast } from "sonner";
 
-export type SortField = "firstName" | "lastName" | "email" | "phone" | "status" | "companyName" | "city" | "country" | "source" | "createdAt";
+export type SortField = "firstName" | "lastName" | "email" | "phone" | "status" | "companyName" | "city" | "country" | "source" | "createdAt" | "lastActive";
 export type SortDir = "asc" | "desc";
 export type BulkAction = "status" | "tags" | "addToList" | null;
 
@@ -41,12 +41,13 @@ export const ALL_COLUMNS: ColumnDef[] = [
   { key: "source", label: "Source", width: "w-[100px]", mobileHidden: true },
   { key: "tags", label: "Tags", width: "w-[150px]", mobileHidden: true },
   { key: "createdAt", label: "Created", width: "w-[100px]", mobileHidden: true },
+  { key: "lastActive", label: "Last Active", width: "w-[120px]", mobileHidden: true },
 ];
 
 const DEFAULT_VISIBLE_KEYS: ColumnKey[] = [
   "firstName", "lastName", "email", "phone", "status",
   "companyName", "jobTitle", "city", "country", "source",
-  "tags", "createdAt",
+  "tags", "createdAt", "lastActive",
 ];
 
 const STORAGE_KEY = "kf_db_visible_cols";
@@ -71,7 +72,7 @@ function saveVisibleColumns(keys: Set<ColumnKey>) {
 
 const SORTABLE_FIELDS = new Set<string>([
   "firstName", "lastName", "email", "phone", "status",
-  "companyName", "city", "country", "source", "createdAt",
+  "companyName", "city", "country", "source", "createdAt", "lastActive",
 ]);
 
 function getContactField(contact: LocalContact, field: SortField): string | null | undefined {
@@ -86,6 +87,9 @@ function getContactField(contact: LocalContact, field: SortField): string | null
     case "country": return contact.country;
     case "source": return contact.source;
     case "createdAt": return contact.createdAt;
+    case "lastActive": {
+      return contact.updatedAt || contact.createdAt;
+    }
   }
 }
 
@@ -212,7 +216,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     list.sort((a, b) => {
       const rawA = getContactField(a, sortField) ?? "";
       const rawB = getContactField(b, sortField) ?? "";
-      if (sortField === "createdAt") {
+      if (sortField === "createdAt" || sortField === "lastActive") {
         const valA = rawA ? new Date(rawA).getTime() : 0;
         const valB = rawB ? new Date(rawB).getTime() : 0;
         return sortDir === "asc" ? valA - valB : valB - valA;

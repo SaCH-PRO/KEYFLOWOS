@@ -18,12 +18,40 @@ const STATUS_COLORS: Record<string, string> = {
   LOST: "bg-red-500/15 text-red-400 border-red-500/20",
 };
 
+function formatRelativeTime(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  if (isNaN(then)) return "";
+  const diffMs = now - then;
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(months / 12)}y ago`;
+}
+
+const STATUS_HOVER_BORDER: Record<string, string> = {
+  LEAD: "hover:border-l-amber-400",
+  PROSPECT: "hover:border-l-blue-400",
+  CLIENT: "hover:border-l-emerald-400",
+  LOST: "hover:border-l-red-400",
+};
+
 function getCellValue(contact: LocalContact, key: string): string {
   if (key === "tags") return Array.isArray(contact.tags) ? contact.tags.join(", ") : "";
   if (key === "createdAt" && contact.createdAt) {
     return new Date(contact.createdAt).toLocaleDateString("en-TT", {
       year: "numeric", month: "short", day: "numeric",
     });
+  }
+  if (key === "lastActive") {
+    const dateStr = contact.updatedAt || contact.createdAt;
+    return dateStr ? formatRelativeTime(dateStr) : "";
   }
   switch (key) {
     case "firstName": return contact.firstName ?? "";
@@ -251,7 +279,7 @@ function DatabaseTableInner({
               return (
                 <tr
                   key={contact.id}
-                  className={`border-b border-border/20 hover:bg-white/[0.02] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[hsl(var(--kf-accent1))]/40 focus-visible:ring-inset ${isSelected ? "bg-[hsl(var(--kf-accent1))]/[0.04]" : ""}`}
+                  className={`border-b border-border/20 border-l-2 border-l-transparent ${STATUS_HOVER_BORDER[contact.status ?? ""] ?? ""} hover:bg-white/[0.02] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[hsl(var(--kf-accent1))]/40 focus-visible:ring-inset ${isSelected ? "bg-[hsl(var(--kf-accent1))]/[0.04]" : ""}`}
                   onClick={() => onSelectContact?.(contact.id)}
                   onKeyDown={(e) => handleRowKeyDown(e, contact.id, idx)}
                   role="row"

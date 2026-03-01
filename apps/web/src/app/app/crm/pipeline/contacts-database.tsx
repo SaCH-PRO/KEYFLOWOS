@@ -130,7 +130,7 @@ export function ContactsDatabase({
             <div>
               <h3 className="text-sm font-semibold tracking-tight">Contact Database</h3>
               <p className="text-xs text-muted-foreground/70">
-                {db.filteredContacts.length} of {db.activeContacts.length} contacts
+                Showing {db.filteredContacts.length} of {db.activeContacts.length} contacts
                 {db.usingCache && (
                   <span className="ml-2 text-amber-400">(offline cache)</span>
                 )}

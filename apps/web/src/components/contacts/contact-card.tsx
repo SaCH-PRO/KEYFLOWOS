@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import React from "react";
 import { motion } from "framer-motion";
-import { Mail, Phone, Building2, Tag, Trash2, MessageCircle, Star, Globe, FileText, CalendarCheck, UserPlus, Upload, Sparkles, MoreHorizontal, Receipt, Calendar, FileSignature } from "lucide-react";
+import { Mail, Phone, Building2, Tag, Trash2, MessageCircle, Star, Globe, FileText, CalendarCheck, UserPlus, Upload, Sparkles, MoreHorizontal, Receipt, Calendar, FileSignature, TrendingUp, Clock } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 
 export type ContactCardData = {
@@ -29,6 +29,7 @@ export type ContactCardData = {
     totalRevenue?: number | null;
     invoiceCount?: number | null;
     bookingCount?: number | null;
+    lastInteractionAt?: string | null;
   } | null;
 };
 
@@ -45,6 +46,43 @@ const STATUS_BADGE_CLASSES: Record<string, string> = {
   CLIENT: "bg-emerald-500/15 text-emerald-400 border-emerald-500/25",
   LOST: "bg-red-500/10 text-red-400/80 border-red-500/20",
 };
+
+const STATUS_BORDER_CLASSES: Record<string, string> = {
+  LEAD: "border-l-amber-500/60",
+  PROSPECT: "border-l-blue-500/60",
+  CLIENT: "border-l-emerald-500/60",
+  LOST: "border-l-red-500/60",
+};
+
+const SCORE_STYLES: Record<string, { ring: string; text: string; label: string }> = {
+  hot: { ring: "ring-red-500/60 bg-red-500/15", text: "text-red-400", label: "Hot" },
+  warm: { ring: "ring-orange-500/60 bg-orange-500/15", text: "text-orange-400", label: "Warm" },
+  cool: { ring: "ring-teal-500/60 bg-teal-500/15", text: "text-teal-400", label: "Cool" },
+  cold: { ring: "ring-blue-500/60 bg-blue-500/15", text: "text-blue-400", label: "Cold" },
+};
+
+function getScoreStyle(score: number) {
+  if (score >= 75) return SCORE_STYLES.hot;
+  if (score >= 50) return SCORE_STYLES.warm;
+  if (score >= 25) return SCORE_STYLES.cool;
+  return SCORE_STYLES.cold;
+}
+
+function relativeTime(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diffMs = now - then;
+  if (diffMs < 0) return "just now";
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  return `${months}mo ago`;
+}
 
 const SOURCE_CONFIG: Record<string, { label: string; icon: typeof Globe; color: string }> = {
   booking: { label: "Booking", icon: CalendarCheck, color: "hsl(var(--kf-accent2))" },
@@ -85,8 +123,19 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
   const initials = `${contact.firstName?.[0] ?? ""}${contact.lastName?.[0] ?? ""}`.toUpperCase() || "?";
   const statusColor = STATUS_COLORS[contact.status ?? ""] ?? STATUS_COLORS.LEAD;
   const badgeClass = STATUS_BADGE_CLASSES[contact.status ?? ""] ?? "bg-muted/20 text-muted-foreground border-border/30";
+  const borderClass = STATUS_BORDER_CLASSES[contact.status ?? ""] ?? "border-l-border/30";
   const sourceInfo = getSourceInfo(contact.source);
   const SourceIcon = sourceInfo.icon;
+
+  const leadScore = contact.meta?.leadScore;
+  const hasLeadScore = leadScore != null && leadScore > 0;
+  const scoreStyle = hasLeadScore ? getScoreStyle(leadScore!) : null;
+
+  const totalRevenue = contact.meta?.totalRevenue;
+  const hasRevenue = totalRevenue != null && totalRevenue > 0;
+
+  const lastInteraction = contact.meta?.lastInteractionAt;
+  const hasLastInteraction = !!lastInteraction;
 
   useEffect(() => {
     if (!showActions) return;
@@ -122,7 +171,7 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index < 10 ? index * 0.03 : 0 }}
       onClick={onClick}
-      className={`rounded-2xl border bg-card p-4 cursor-pointer transition-all hover:bg-white/[0.02] group ${
+      className={`rounded-2xl border border-l-2 ${borderClass} bg-card p-4 cursor-pointer transition-all hover:bg-white/[0.02] group ${
         isSelected ? "border-[hsl(var(--kf-accent1))]/50 bg-[hsl(var(--kf-accent1))]/[0.04]" : "border-border/50"
       } ${selected ? "border-[hsl(var(--kf-accent2))]/50 bg-[hsl(var(--kf-accent2))]/[0.04]" : ""}`}
     >
@@ -139,11 +188,21 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
           </div>
         )}
 
-        <div
-          className="h-10 w-10 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-          style={{ background: statusColor }}
-        >
-          {initials}
+        <div className="relative flex-shrink-0">
+          <div
+            className="h-10 w-10 rounded-full flex items-center justify-center text-white text-xs font-bold"
+            style={{ background: statusColor }}
+          >
+            {initials}
+          </div>
+          {hasLeadScore && scoreStyle && (
+            <div
+              className={`absolute -top-1 -right-1 w-5 h-5 rounded-full ring-2 ${scoreStyle.ring} flex items-center justify-center`}
+              title={`Lead Score: ${leadScore} (${scoreStyle.label})`}
+            >
+              <span className={`text-[8px] font-bold ${scoreStyle.text}`}>{leadScore}</span>
+            </div>
+          )}
         </div>
 
         <div className="flex-1 min-w-0">
@@ -162,6 +221,12 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
               )}
             </div>
             <div className="flex items-center gap-1.5 flex-shrink-0">
+              {hasRevenue && (
+                <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <TrendingUp className="w-2.5 h-2.5 inline-block mr-0.5 -mt-px" />
+                  TTD {totalRevenue!.toLocaleString("en-TT")}
+                </span>
+              )}
               {onQuickAction && (
                 <div className="relative" ref={actionsRef}>
                   <button
@@ -205,16 +270,24 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
             </div>
           </div>
 
-          {(contact.companyName || contact.jobTitle) && (
-            <p className="text-xs text-muted-foreground/70 mt-0.5 truncate">
-              <Building2 className="w-3 h-3 inline-block mr-1 -mt-px" />
-              {contact.jobTitle && contact.companyName
-                ? `${contact.jobTitle} at ${contact.companyName}`
-                : contact.companyName || contact.jobTitle}
-            </p>
-          )}
+          <div className="flex items-center gap-2 mt-0.5">
+            {(contact.companyName || contact.jobTitle) && (
+              <p className="text-xs text-muted-foreground/70 truncate">
+                <Building2 className="w-3 h-3 inline-block mr-1 -mt-px" />
+                {contact.jobTitle && contact.companyName
+                  ? `${contact.jobTitle} at ${contact.companyName}`
+                  : contact.companyName || contact.jobTitle}
+              </p>
+            )}
+            {hasLastInteraction && (
+              <span className="text-[10px] text-muted-foreground/50 flex items-center gap-0.5 flex-shrink-0">
+                <Clock className="w-2.5 h-2.5" />
+                {relativeTime(lastInteraction!)}
+              </span>
+            )}
+          </div>
 
-          <div className="flex items-center gap-2 mt-2">
+          <div className="flex items-center gap-2 mt-1.5">
             <span
               className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md"
               style={{ background: `${sourceInfo.color}15`, color: sourceInfo.color }}
@@ -230,27 +303,27 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
             )}
           </div>
 
-          <div className="flex items-center gap-1 mt-2.5">
+          <div className="flex items-center gap-1 mt-2">
             {contact.email && (
               <a
                 href={`mailto:${contact.email}`}
                 onClick={(e) => e.stopPropagation()}
-                className="inline-flex items-center justify-center w-8 h-8 rounded-lg hover:bg-blue-500/10 transition-colors"
+                className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-blue-500/10 transition-colors"
                 title={`Email ${contact.email}`}
                 aria-label={`Email ${contact.email}`}
               >
-                <Mail className="w-4 h-4 text-blue-400" />
+                <Mail className="w-3.5 h-3.5 text-blue-400" />
               </a>
             )}
             {contact.phone && (
               <a
                 href={`tel:${contact.phone}`}
                 onClick={(e) => e.stopPropagation()}
-                className="inline-flex items-center justify-center w-8 h-8 rounded-lg hover:bg-violet-500/10 transition-colors"
+                className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-violet-500/10 transition-colors"
                 title={`Call ${contact.phone}`}
                 aria-label={`Call ${contact.phone}`}
               >
-                <Phone className="w-4 h-4 text-violet-400" />
+                <Phone className="w-3.5 h-3.5 text-violet-400" />
               </a>
             )}
             {(() => {
@@ -263,11 +336,11 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={(e) => e.stopPropagation()}
-                  className="inline-flex items-center justify-center w-8 h-8 rounded-lg hover:bg-emerald-500/10 transition-colors"
+                  className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-emerald-500/10 transition-colors"
                   title="WhatsApp"
                   aria-label="Message on WhatsApp"
                 >
-                  <MessageCircle className="w-4 h-4 text-emerald-500" />
+                  <MessageCircle className="w-3.5 h-3.5 text-emerald-500" />
                 </a>
               );
             })()}
@@ -279,48 +352,18 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
                 {contact.tags.slice(0, 2).map((tag) => (
                   <span
                     key={tag}
-                    className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-md bg-muted/50 text-muted-foreground"
+                    className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-white/[0.06] text-muted-foreground border border-border/30"
                   >
                     <Tag className="w-2.5 h-2.5" />
                     {tag}
                   </span>
                 ))}
                 {contact.tags.length > 2 && (
-                  <span className="text-[10px] text-muted-foreground/60">+{contact.tags.length - 2}</span>
+                  <span className="text-[10px] text-muted-foreground/50 font-medium">+{contact.tags.length - 2}</span>
                 )}
               </div>
             )}
           </div>
-
-          {contact.meta && (contact.meta.leadScore || contact.meta.outstandingBalance || contact.meta.totalRevenue || contact.meta.invoiceCount || contact.meta.bookingCount) && (
-            <div className="flex items-center gap-3 mt-2 text-[10px] flex-wrap">
-              {contact.meta.leadScore != null && contact.meta.leadScore > 0 && (
-                <span className="text-muted-foreground">
-                  Score: <span className="font-semibold text-foreground">{contact.meta.leadScore}</span>
-                </span>
-              )}
-              {contact.meta.totalRevenue != null && contact.meta.totalRevenue > 0 && (
-                <span className="text-emerald-400 font-medium">
-                  Revenue: TTD {contact.meta.totalRevenue.toLocaleString("en-TT")}
-                </span>
-              )}
-              {contact.meta.outstandingBalance != null && contact.meta.outstandingBalance > 0 && (
-                <span style={{ color: "hsl(var(--kf-accent1))" }} className="font-medium">
-                  Owed: TTD {contact.meta.outstandingBalance.toLocaleString("en-TT")}
-                </span>
-              )}
-              {contact.meta.invoiceCount != null && contact.meta.invoiceCount > 0 && (
-                <span className="text-muted-foreground">
-                  {contact.meta.invoiceCount} invoice{contact.meta.invoiceCount !== 1 ? "s" : ""}
-                </span>
-              )}
-              {contact.meta.bookingCount != null && contact.meta.bookingCount > 0 && (
-                <span className="text-muted-foreground">
-                  {contact.meta.bookingCount} booking{contact.meta.bookingCount !== 1 ? "s" : ""}
-                </span>
-              )}
-            </div>
-          )}
         </div>
       </div>
     </motion.div>
