@@ -694,25 +694,25 @@ export default function QuotesPanel({
 
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50 pointer-events-none" />
           <input
             type="text"
             placeholder="Search quotes..."
             value={quoteSearch}
             onChange={(e) => setQuoteSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-card border border-border/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50"
+            className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-white/[0.03] border border-border/40 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/30 focus:border-[hsl(var(--kf-accent1))]/50 transition-all"
           />
         </div>
         <div className="flex items-center gap-1">
-          <Filter className="w-4 h-4 text-muted-foreground" />
+          <Filter className="w-3.5 h-3.5 text-muted-foreground/50" />
           {QUOTE_STATUS_FILTERS.map((f) => (
             <button
               key={f.value}
               onClick={() => setQuoteStatusFilter(f.value)}
-              className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
+              className={`px-2.5 py-1.5 text-[11px] rounded-lg transition-colors ${
                 quoteStatusFilter === f.value
-                  ? "bg-primary/20 text-primary border border-primary/30"
-                  : "text-muted-foreground hover:bg-muted border border-transparent"
+                  ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] border border-[hsl(var(--kf-accent1))]/30"
+                  : "text-muted-foreground/70 hover:bg-white/[0.06] border border-transparent"
               }`}
             >
               {f.label}
@@ -738,28 +738,42 @@ export default function QuotesPanel({
       </div>
 
       {quotes.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          <FileText className="w-12 h-12 mx-auto mb-3 opacity-40" />
-          <p>No quotes yet. Create your first quote above.</p>
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <div className="w-14 h-14 rounded-xl bg-white/[0.03] border border-border/50 flex items-center justify-center mb-4">
+            <FileText className="w-7 h-7 text-muted-foreground/50" />
+          </div>
+          <h3 className="text-lg font-semibold mb-1">No quotes yet</h3>
+          <p className="text-sm text-muted-foreground max-w-sm mb-4">
+            Create your first quote to start sending proposals to clients.
+          </p>
+          <Button onClick={() => { resetQuoteForm(); setShowQuoteBuilder(true); }} className="gap-2">
+            <Plus className="w-4 h-4" />
+            Create Your First Quote
+          </Button>
         </div>
       ) : filteredQuotes.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          <Search className="w-12 h-12 mx-auto mb-3 opacity-40" />
-          <p>No quotes match your search or filter.</p>
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <div className="w-14 h-14 rounded-xl bg-white/[0.03] border border-border/50 flex items-center justify-center mb-4">
+            <Search className="w-7 h-7 text-muted-foreground/50" />
+          </div>
+          <h3 className="text-lg font-semibold mb-1">No matching quotes</h3>
+          <p className="text-sm text-muted-foreground max-w-sm">
+            No quotes match your filters. Try adjusting your search or status filter.
+          </p>
         </div>
       ) : (
         <>
           {/* Desktop table */}
-          <div className="hidden md:block rounded-2xl border border-border/60 overflow-hidden">
+          <div className="hidden md:block rounded-xl border border-border/50 overflow-hidden">
             <table className="w-full text-sm">
-              <thead className="bg-muted/30">
+              <thead className="bg-white/[0.02] border-b border-border/40">
                 <tr>
-                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Quote #</th>
-                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Contact</th>
-                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Status</th>
-                  <th className="text-right px-4 py-3 font-medium text-muted-foreground">Total</th>
-                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Date</th>
-                  <th className="text-right px-4 py-3 font-medium text-muted-foreground">Actions</th>
+                  <th className="text-left px-4 py-3 text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Quote #</th>
+                  <th className="text-left px-4 py-3 text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Contact</th>
+                  <th className="text-left px-4 py-3 text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Status</th>
+                  <th className="text-right px-4 py-3 text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Total</th>
+                  <th className="text-left px-4 py-3 text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Date</th>
+                  <th className="text-right px-4 py-3 text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -886,7 +900,7 @@ export default function QuotesPanel({
             {filteredQuotes.map((quote) => (
               <div
                 key={quote.id}
-                className="rounded-2xl border border-border/60 bg-card/80 backdrop-blur-sm p-4 space-y-3"
+                className="rounded-xl border border-border/50 bg-card p-3.5 space-y-3"
               >
                 <div className="flex items-center justify-between">
                   <span className="font-mono text-xs text-muted-foreground">{quote.quoteNumber}</span>

@@ -711,84 +711,78 @@ export default function InvoicesPanel({
 
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50 pointer-events-none" />
           <input
             type="text"
             placeholder="Search invoices..."
             value={invoiceSearch}
             onChange={(e) => setInvoiceSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-card border border-border/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50"
+            className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-white/[0.03] border border-border/40 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/30 focus:border-[hsl(var(--kf-accent1))]/50 transition-all"
           />
         </div>
         <div className="flex items-center gap-1">
-          <Filter className="w-4 h-4 text-muted-foreground" />
+          <Filter className="w-3.5 h-3.5 text-muted-foreground/50" />
           {INVOICE_STATUS_FILTERS.map((f) => (
             <button
               key={f.value}
               onClick={() => setInvoiceStatusFilter(f.value)}
-              className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
+              className={`px-2.5 py-1.5 text-[11px] rounded-lg transition-colors ${
                 invoiceStatusFilter === f.value
-                  ? "bg-primary/20 text-primary border border-primary/30"
-                  : "text-muted-foreground hover:bg-muted border border-transparent"
+                  ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] border border-[hsl(var(--kf-accent1))]/30"
+                  : "text-muted-foreground/70 hover:bg-white/[0.06] border border-transparent"
               }`}
             >
               {f.label}
             </button>
           ))}
         </div>
-        <span className="text-sm text-muted-foreground">
+        <span className="text-[11px] text-muted-foreground/50">
           {filteredInvoices.length} invoice{filteredInvoices.length !== 1 ? "s" : ""}
         </span>
       </div>
 
       {loading ? (
-        <div className="rounded-2xl border border-border/60 bg-card p-8">
-          <div className="space-y-3 animate-pulse">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-12 bg-muted/50 rounded-xl" />
-            ))}
-          </div>
+        <div className="space-y-3 animate-pulse">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-16 bg-muted/30 rounded-xl border border-border/50" />
+          ))}
         </div>
       ) : invoices.length === 0 ? (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.98 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="rounded-2xl border border-border/60 bg-card p-12 text-center"
-        >
-          <FileText className="w-12 h-12 text-muted-foreground/40 mx-auto mb-4" />
-          <h3 className="text-lg font-medium mb-2">No invoices yet</h3>
-          <p className="text-sm text-muted-foreground mb-4">
-            Create your first invoice to start billing
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <div className="w-14 h-14 rounded-xl bg-white/[0.03] border border-border/50 flex items-center justify-center mb-4">
+            <FileText className="w-7 h-7 text-muted-foreground/50" />
+          </div>
+          <h3 className="text-lg font-semibold mb-1">No invoices yet</h3>
+          <p className="text-sm text-muted-foreground max-w-sm mb-4">
+            Create your first invoice to start billing clients and tracking payments.
           </p>
           <Button onClick={() => setShowInvoiceBuilder(true)} className="gap-2">
             <Plus className="w-4 h-4" />
-            Create Invoice
+            Create Your First Invoice
           </Button>
-        </motion.div>
+        </div>
       ) : filteredInvoices.length === 0 ? (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.98 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="rounded-2xl border border-border/60 bg-card p-8 text-center"
-        >
-          <Search className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
-          <h3 className="text-base font-medium mb-1">No matching invoices</h3>
-          <p className="text-sm text-muted-foreground">
-            Try a different search term or filter
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <div className="w-14 h-14 rounded-xl bg-white/[0.03] border border-border/50 flex items-center justify-center mb-4">
+            <Search className="w-7 h-7 text-muted-foreground/50" />
+          </div>
+          <h3 className="text-lg font-semibold mb-1">No matching invoices</h3>
+          <p className="text-sm text-muted-foreground max-w-sm">
+            No invoices match your filters. Try adjusting your search or status filter.
           </p>
-        </motion.div>
+        </div>
       ) : (
         <>
-          <div className="hidden md:block rounded-2xl border border-border/60 overflow-hidden">
+          <div className="hidden md:block rounded-xl border border-border/50 overflow-hidden">
             <table className="w-full">
-              <thead className="bg-muted/30 border-b border-border/60">
+              <thead className="bg-white/[0.02] border-b border-border/40">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Invoice</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Contact</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Amount</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Due</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Status</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider">Actions</th>
+                  <th className="px-4 py-3 text-left text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Invoice</th>
+                  <th className="px-4 py-3 text-left text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Contact</th>
+                  <th className="px-4 py-3 text-left text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Amount</th>
+                  <th className="px-4 py-3 text-left text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Due</th>
+                  <th className="px-4 py-3 text-left text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Status</th>
+                  <th className="px-4 py-3 text-right text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/40">
@@ -905,7 +899,7 @@ export default function InvoicesPanel({
             {filteredInvoices.map((inv) => {
               const dueInfo = getDaysUntilDue(inv.dueDate);
               return (
-                <div key={inv.id} className="rounded-2xl border border-border/60 bg-card/80 backdrop-blur-sm p-4 space-y-3">
+                <div key={inv.id} className="rounded-xl border border-border/50 bg-card p-3.5 space-y-3">
                   <div className="flex items-center justify-between">
                     <button onClick={() => setSelectedInvoice(inv)} className="font-mono text-xs text-primary hover:underline">
                       {inv.invoiceNumber ?? inv.id.slice(0, 8)}

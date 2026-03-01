@@ -81,14 +81,14 @@ export default function CommerceDashboard({ invoices, quotes, products }: Commer
       value: formatTTD(stats.totalRevenue),
       icon: DollarSign,
       color: "#10b981",
-      bgColor: "#10b98118",
+      glow: "shadow-emerald-500/10",
     },
     {
       label: "Outstanding",
       value: formatTTD(stats.outstanding),
       icon: Clock,
       color: "#f59e0b",
-      bgColor: "#f59e0b18",
+      glow: "shadow-amber-500/10",
     },
     {
       label: "Overdue",
@@ -96,7 +96,7 @@ export default function CommerceDashboard({ invoices, quotes, products }: Commer
       subtitle: stats.overdueCount > 0 ? `${stats.overdueCount} invoice${stats.overdueCount !== 1 ? "s" : ""}` : "All clear",
       icon: AlertTriangle,
       color: stats.overdueCount > 0 ? "#ef4444" : "#6b7280",
-      bgColor: stats.overdueCount > 0 ? "#ef444418" : "#6b728018",
+      glow: stats.overdueCount > 0 ? "shadow-red-500/10" : "",
     },
     {
       label: "Paid This Month",
@@ -104,7 +104,7 @@ export default function CommerceDashboard({ invoices, quotes, products }: Commer
       subtitle: `${stats.paidThisMonthCount} invoice${stats.paidThisMonthCount !== 1 ? "s" : ""}`,
       icon: CheckCircle,
       color: "#14b8a6",
-      bgColor: "#14b8a618",
+      glow: "shadow-teal-500/10",
     },
   ];
 
@@ -127,19 +127,19 @@ export default function CommerceDashboard({ invoices, quotes, products }: Commer
           <motion.div
             key={card.label}
             variants={item}
-            className="rounded-xl border border-border/50 bg-card p-3.5 flex items-start gap-3 group hover:border-border/70 transition-colors"
+            className={`rounded-xl border border-border/50 bg-card p-3.5 flex items-start gap-3 group hover:border-border/70 transition-all hover:shadow-lg ${card.glow}`}
           >
             <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-              style={{ backgroundColor: card.bgColor }}
+              className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ring-1 ring-inset ring-white/10"
+              style={{ backgroundColor: `${card.color}15` }}
             >
-              <card.icon className="w-4 h-4" style={{ color: card.color }} />
+              <card.icon className="w-4.5 h-4.5" style={{ color: card.color }} />
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 mb-1">
                 {card.label}
               </p>
-              <p className="text-lg font-bold truncate leading-tight">{card.value}</p>
+              <p className="text-base sm:text-lg font-bold truncate leading-tight">{card.value}</p>
               {card.subtitle && (
                 <p className="text-[10px] text-muted-foreground/50 mt-0.5">{card.subtitle}</p>
               )}
