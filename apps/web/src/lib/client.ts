@@ -3679,4 +3679,23 @@ export async function aiPrepBrief(contactId: string, businessId?: string): Promi
   });
 }
 
+export type AiCommandResult = {
+  isAction: boolean;
+  action: string;
+  contactId: string | null;
+  contactName: string | null;
+  params: Record<string, unknown>;
+  confirmation: string;
+  confidence: number;
+  creditsUsed: number;
+};
+
+export async function aiInterpretCommand(command: string, businessId?: string): Promise<ApiResult<AiCommandResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AiCommandResult>({
+    path: `/crm/businesses/${encodeURIComponent(bid)}/ai-command`,
+    body: { command },
+  });
+}
+
 export { DEFAULT_BUSINESS_ID };
