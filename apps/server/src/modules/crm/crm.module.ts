@@ -6,6 +6,7 @@ import { CrmGoogleService } from './crm-google.service';
 import { CrmImportService } from './crm-import.service';
 import { CrmPlaybookService } from './crm-playbook.service';
 import { CrmSequenceService } from './crm-sequence.service';
+import { CrmSequenceSchedulerService } from './crm-sequence-scheduler.service';
 import { CrmVisionService } from './crm-vision.service';
 import { CrmService } from './crm.service';
 import { AiModule } from '../ai/ai.module';
@@ -15,7 +16,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 @Module({
   imports: [forwardRef(() => AutomationModule), SubscriptionsModule, AiModule],
   controllers: [CrmController],
-  providers: [CrmService, CrmImportService, CrmPlaybookService, CrmVisionService, CrmGoogleService, CrmFlowService, CrmAiService, CrmSequenceService],
-  exports: [CrmService, CrmImportService, CrmPlaybookService, CrmVisionService, CrmGoogleService, CrmFlowService, CrmAiService, CrmSequenceService],
+  providers: [CrmService, CrmImportService, CrmPlaybookService, CrmVisionService, CrmGoogleService, CrmFlowService, CrmAiService, CrmSequenceService, CrmSequenceSchedulerService],
+  exports: [CrmService, CrmImportService, CrmPlaybookService, CrmVisionService, CrmGoogleService, CrmFlowService, CrmAiService, CrmSequenceService, CrmSequenceSchedulerService],
 })
 export class CrmModule {}

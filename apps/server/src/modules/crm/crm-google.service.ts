@@ -1,5 +1,7 @@
 import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { createHmac, randomBytes } from 'crypto';
+import { ContactImportedPayload } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from './crm.service';
 
@@ -93,6 +95,7 @@ export class CrmGoogleService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CrmService) private readonly crm: CrmService,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
 
   getAuthUrl(businessId: string) {
@@ -248,6 +251,15 @@ export class CrmGoogleService {
         this.logger.warn(`Failed to import contact: ${(err as Error).message}`);
         skipped++;
       }
+    }
+
+    if (imported > 0) {
+      const payload: ContactImportedPayload = {
+        businessId,
+        source: 'google_contacts',
+        count: imported,
+      };
+      this.events.emit('contact.imported', payload);
     }
 
     return {

@@ -1,6 +1,17 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { BookingCreatedPayload, BookingConfirmedPayload, InvoicePaidPayload, InvoiceStatusPayload } from '../../core/event-bus/events.types';
+import {
+  BookingCreatedPayload,
+  BookingConfirmedPayload,
+  ContactCreatedPayload,
+  ContactDeletedPayload,
+  ContactImportedPayload,
+  ContactMergedPayload,
+  ContactUpdatedPayload,
+  InvoicePaidPayload,
+  InvoiceStatusPayload,
+  SequenceStepDuePayload,
+} from '../../core/event-bus/events.types';
 import { BookingsService } from '../bookings/bookings.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
@@ -115,7 +126,110 @@ export class FlowListener {
   }
 
   @OnEvent('contact.created')
-  handleContactCreated(payload: unknown) {
+  async handleContactCreated(payload: ContactCreatedPayload) {
     this.logger.debug(`Flow observed contact.created`, payload as any);
+
+    const contactName = this.formatContactName(payload.contact);
+
+    await this.createNotification({
+      businessId: payload.businessId,
+      type: 'contact.created',
+      title: 'New Contact',
+      body: `${contactName} has been added to your CRM.`,
+      data: { contactId: payload.contact.id },
+    }).catch((e) => this.logger.error('Failed to create notification', e));
+  }
+
+  @OnEvent('contact.updated')
+  async handleContactUpdated(payload: ContactUpdatedPayload) {
+    if (!payload.fromStatus || !payload.toStatus || payload.fromStatus === payload.toStatus) {
+      return;
+    }
+
+    this.logger.debug(`Flow observed contact.updated (status change)`, payload as any);
+
+    const contactName = this.formatContactName(payload.contact);
+
+    await this.createNotification({
+      businessId: payload.businessId,
+      type: 'contact.updated',
+      title: 'Contact Status Changed',
+      body: `Contact ${contactName} status changed to ${payload.toStatus}.`,
+      data: { contactId: payload.contact.id, fromStatus: payload.fromStatus, toStatus: payload.toStatus },
+    }).catch((e) => this.logger.error('Failed to create notification', e));
+  }
+
+  @OnEvent('contact.merged')
+  async handleContactMerged(payload: ContactMergedPayload) {
+    this.logger.debug(`Flow observed contact.merged`, payload as any);
+
+    const keptName = this.formatContactName(payload.contact);
+
+    await this.createNotification({
+      businessId: payload.businessId,
+      type: 'contact.merged',
+      title: 'Contacts Merged',
+      body: `Contacts merged: kept ${keptName}, removed duplicate.`,
+      data: { contactId: payload.contact.id, duplicateId: payload.duplicateId },
+    }).catch((e) => this.logger.error('Failed to create notification', e));
+  }
+
+  @OnEvent('contact.deleted')
+  async handleContactDeleted(payload: ContactDeletedPayload) {
+    this.logger.debug(`Flow observed contact.deleted`, payload as any);
+
+    const contactName = this.formatContactName(payload.contact);
+
+    await this.createNotification({
+      businessId: payload.businessId,
+      type: 'contact.deleted',
+      title: 'Contact Archived',
+      body: `Contact ${contactName} archived.`,
+      data: { contactId: payload.contact.id },
+    }).catch((e) => this.logger.error('Failed to create notification', e));
+  }
+
+  @OnEvent('contact.imported')
+  async handleContactImported(payload: ContactImportedPayload) {
+    this.logger.debug(`Flow observed contact.imported`, payload as any);
+
+    await this.createNotification({
+      businessId: payload.businessId,
+      type: 'contact.imported',
+      title: 'Contacts Imported',
+      body: `${payload.count} contacts imported from ${payload.source}.`,
+      data: { source: payload.source, count: payload.count },
+    }).catch((e) => this.logger.error('Failed to create notification', e));
+  }
+
+  @OnEvent('sequence.step_due')
+  async handleSequenceStepDue(payload: SequenceStepDuePayload) {
+    this.logger.debug(`Flow observed sequence.step_due`, payload as any);
+
+    await this.createNotification({
+      businessId: payload.businessId,
+      type: 'sequence.step_due',
+      title: 'Sequence Step Due',
+      body: `Sequence step due: ${payload.stepType} for ${payload.contactName}.`,
+      data: {
+        contactId: payload.contactId,
+        sequenceName: payload.sequenceName,
+        stepType: payload.stepType,
+        stepIndex: payload.stepIndex,
+      },
+    }).catch((e) => this.logger.error('Failed to create notification', e));
+  }
+
+  private formatContactName(contact: {
+    displayName?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    email?: string | null;
+  }) {
+    if (contact.displayName && contact.displayName.trim()) return contact.displayName.trim();
+    const full = `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim();
+    if (full) return full;
+    if (contact.email) return contact.email;
+    return 'Unknown';
   }
 }

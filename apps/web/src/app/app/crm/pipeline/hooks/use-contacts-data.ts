@@ -5,6 +5,7 @@ import type { Contact } from "@/lib/client";
 import type { SmartSegment, ListTab, SortOption } from "../pipeline-toolbar";
 import {
   fetchContacts,
+  fetchContactsPoll,
   fetchFavorites,
   toggleFavorite as toggleFavoriteApi,
 } from "@/lib/client";
@@ -258,6 +259,46 @@ export function useContactsData() {
     },
     [businessId, search, filters.statusFilter, filters.sortBy],
   );
+
+  const lastUpdatedAtRef = useRef<string | null>(null);
+  const lastTotalCountRef = useRef<number | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (!businessId) return;
+
+    const poll = async () => {
+      if (document.hidden) return;
+      try {
+        const { data } = await fetchContactsPoll(businessId);
+        if (!data) return;
+        if (lastUpdatedAtRef.current === null) {
+          lastUpdatedAtRef.current = data.lastUpdatedAt;
+          lastTotalCountRef.current = data.totalCount;
+          return;
+        }
+        if (data.lastUpdatedAt !== lastUpdatedAtRef.current || data.totalCount !== lastTotalCountRef.current) {
+          lastUpdatedAtRef.current = data.lastUpdatedAt;
+          lastTotalCountRef.current = data.totalCount;
+          void loadContacts();
+        }
+      } catch {
+      }
+    };
+
+    void poll();
+    pollIntervalRef.current = setInterval(poll, 30_000);
+
+    const onVisibility = () => {
+      if (!document.hidden) void poll();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [businessId, loadContacts]);
 
   const handleTogglePin = useCallback((id: string) => {
     setPinnedIdsState((prev) => {
