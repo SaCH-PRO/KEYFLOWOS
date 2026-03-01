@@ -17,11 +17,14 @@ import {
   CalendarPlus,
   TrendingUp,
   CheckSquare,
+  LayoutGrid,
+  List,
 } from "lucide-react";
 
 export type SortOption = "name" | "newest" | "oldest" | "revenue" | "score";
 export type SmartSegment = "high-value" | "needs-followup" | "new-this-week" | "at-risk" | "stale";
 export type ListTab = "all" | "pinned" | "recent";
+export type ViewMode = "list" | "kanban";
 
 const STATUSES = ["ALL", "LEAD", "PROSPECT", "CLIENT", "LOST"] as const;
 
@@ -69,6 +72,8 @@ export interface PipelineToolbarProps {
   onToggleSelectMode: () => void;
   onRefresh: () => void;
   onAddContact: () => void;
+  viewMode?: ViewMode;
+  onViewModeChange?: (mode: ViewMode) => void;
 }
 
 function PipelineToolbarInner({
@@ -91,6 +96,8 @@ function PipelineToolbarInner({
   onToggleSelectMode,
   onRefresh,
   onAddContact,
+  viewMode,
+  onViewModeChange,
 }: PipelineToolbarProps) {
   const [showFilters, setShowFilters] = useState(false);
   const [showSort, setShowSort] = useState(false);
@@ -189,6 +196,26 @@ function PipelineToolbarInner({
           >
             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
           </button>
+          {onViewModeChange && (
+            <div className="flex items-center gap-0.5 ml-1 border-l border-border/30 pl-1.5">
+              <button
+                onClick={() => onViewModeChange("list")}
+                className={`p-2 rounded-xl transition-all ${viewMode === "list" ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
+                aria-label="List view"
+                title="List view"
+              >
+                <List className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => onViewModeChange("kanban")}
+                className={`p-2 rounded-xl transition-all ${viewMode === "kanban" ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
+                aria-label="Kanban view"
+                title="Kanban view"
+              >
+                <LayoutGrid className="w-4 h-4" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

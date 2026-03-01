@@ -55,6 +55,72 @@ const DEFAULT_VISIBLE_KEYS: ColumnKey[] = [
   "tags", "createdAt", "lastActive",
 ];
 
+export interface SavedView {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  config: {
+    statusFilter: string;
+    search: string;
+    sortField: SortField;
+    sortDir: SortDir;
+    visibleColumns: ColumnKey[];
+    pageSize: number;
+  };
+}
+
+const VIEWS_STORAGE_KEY = "kf_db_saved_views";
+
+const DEFAULT_VIEWS: SavedView[] = [
+  {
+    id: "view_all_contacts",
+    name: "All Contacts",
+    isDefault: true,
+    config: { statusFilter: "ALL", search: "", sortField: "firstName", sortDir: "asc", visibleColumns: [...DEFAULT_VISIBLE_KEYS], pageSize: 25 },
+  },
+  {
+    id: "view_active_leads",
+    name: "Active Leads",
+    isDefault: true,
+    config: { statusFilter: "LEAD", search: "", sortField: "createdAt", sortDir: "desc", visibleColumns: [...DEFAULT_VISIBLE_KEYS], pageSize: 25 },
+  },
+  {
+    id: "view_top_clients",
+    name: "Top Clients",
+    isDefault: true,
+    config: { statusFilter: "CLIENT", search: "", sortField: "createdAt", sortDir: "desc", visibleColumns: [...DEFAULT_VISIBLE_KEYS], pageSize: 25 },
+  },
+  {
+    id: "view_needs_attention",
+    name: "Needs Attention",
+    isDefault: true,
+    config: { statusFilter: "LEAD", search: "", sortField: "createdAt", sortDir: "asc", visibleColumns: [...DEFAULT_VISIBLE_KEYS], pageSize: 25 },
+  },
+];
+
+function loadSavedViews(): SavedView[] {
+  if (typeof window === "undefined") return [...DEFAULT_VIEWS];
+  try {
+    const saved = localStorage.getItem(VIEWS_STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved) as SavedView[];
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const hasAllDefaults = DEFAULT_VIEWS.every((dv) => parsed.some((p) => p.id === dv.id));
+        if (hasAllDefaults) return parsed;
+        const custom = parsed.filter((p) => !p.isDefault);
+        return [...DEFAULT_VIEWS, ...custom];
+      }
+    }
+  } catch { /* ignore */ }
+  return [...DEFAULT_VIEWS];
+}
+
+function persistSavedViews(views: SavedView[]) {
+  try {
+    localStorage.setItem(VIEWS_STORAGE_KEY, JSON.stringify(views));
+  } catch { /* ignore */ }
+}
+
 const STORAGE_KEY = "kf_db_visible_cols";
 
 function loadVisibleColumns(): Set<ColumnKey> {
@@ -161,6 +227,10 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
 
   const [visibleColumns, setVisibleColumns] = useState<Set<ColumnKey>>(() => loadVisibleColumns());
   const [showColumnPicker, setShowColumnPicker] = useState(false);
+
+  const [savedViews, setSavedViews] = useState<SavedView[]>(() => loadSavedViews());
+  const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  const [showViewsPicker, setShowViewsPicker] = useState(false);
 
   const [confirmState, setConfirmState] = useState<{
     open: boolean;
@@ -485,6 +555,69 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
   const toggleColumnPicker = useCallback(() => setShowColumnPicker((p) => !p), []);
   const closeColumnPicker = useCallback(() => setShowColumnPicker(false), []);
 
+  const toggleViewsPicker = useCallback(() => setShowViewsPicker((p) => !p), []);
+  const closeViewsPicker = useCallback(() => setShowViewsPicker(false), []);
+
+  const applyView = useCallback((viewId: string) => {
+    const view = savedViews.find((v) => v.id === viewId);
+    if (!view) return;
+    setStatusFilter(view.config.statusFilter);
+    setSearchInput(view.config.search);
+    setSortField(view.config.sortField);
+    setSortDir(view.config.sortDir);
+    setPageSize(view.config.pageSize);
+    const newCols = new Set<ColumnKey>(view.config.visibleColumns);
+    setVisibleColumns(newCols);
+    saveVisibleColumns(newCols);
+    setActiveViewId(viewId);
+    setShowViewsPicker(false);
+    setPage(1);
+    toast.success(`View "${view.name}" applied`);
+  }, [savedViews]);
+
+  const saveCurrentView = useCallback((name: string) => {
+    if (!name.trim()) {
+      toast.error("Please enter a view name");
+      return;
+    }
+    const newView: SavedView = {
+      id: `view_custom_${Date.now()}`,
+      name: name.trim(),
+      isDefault: false,
+      config: {
+        statusFilter,
+        search: searchInput,
+        sortField,
+        sortDir,
+        visibleColumns: [...visibleColumns],
+        pageSize,
+      },
+    };
+    setSavedViews((prev) => {
+      const next = [...prev, newView];
+      persistSavedViews(next);
+      return next;
+    });
+    setActiveViewId(newView.id);
+    setShowViewsPicker(false);
+    toast.success(`View "${newView.name}" saved`);
+  }, [statusFilter, searchInput, sortField, sortDir, visibleColumns, pageSize]);
+
+  const deleteView = useCallback((viewId: string) => {
+    setSavedViews((prev) => {
+      const view = prev.find((v) => v.id === viewId);
+      if (view?.isDefault) {
+        toast.error("Cannot delete default views");
+        return prev;
+      }
+      const next = prev.filter((v) => v.id !== viewId);
+      persistSavedViews(next);
+      return next;
+    });
+    if (activeViewId === viewId) setActiveViewId(null);
+    toast.success("View deleted");
+  }, [activeViewId]);
+
   return {
     isMobile,
     showLists,
@@ -530,6 +663,15 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     toggleColumn,
     toggleColumnPicker,
     closeColumnPicker,
+
+    savedViews,
+    activeViewId,
+    showViewsPicker,
+    toggleViewsPicker,
+    closeViewsPicker,
+    applyView,
+    saveCurrentView,
+    deleteView,
 
     confirmState,
     handleConfirmClose,

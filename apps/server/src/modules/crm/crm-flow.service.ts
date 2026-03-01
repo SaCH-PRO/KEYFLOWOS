@@ -165,8 +165,11 @@ export class CrmFlowService {
   async getNextActions(businessId: string): Promise<NextAction[]> {
     const now = new Date();
     const actions: NextAction[] = [];
+    const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const twentyFourHoursFromNow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
-    const [overdueTasks, pendingQuotes, unpaidInvoices, recentLeads] = await Promise.all([
+    const [overdueTasks, pendingQuotes, unpaidInvoices, recentLeads, coldContacts, scheduledContacts, staleProspects] = await Promise.all([
       this.db.contactTask.findMany({
         where: {
           contact: { businessId, deletedAt: null },
@@ -205,6 +208,36 @@ export class CrmFlowService {
         },
         take: 5,
         orderBy: { createdAt: 'desc' },
+      }),
+      this.db.contact.findMany({
+        where: {
+          businessId,
+          deletedAt: null,
+          status: { in: ['LEAD', 'PROSPECT', 'CLIENT'] },
+          updatedAt: { lt: fourteenDaysAgo },
+        },
+        take: 5,
+        orderBy: { updatedAt: 'asc' },
+      }),
+      this.db.contactTask.findMany({
+        where: {
+          contact: { businessId, deletedAt: null },
+          status: { not: 'DONE' },
+          dueDate: { gte: now, lte: twentyFourHoursFromNow },
+        },
+        include: { contact: true },
+        take: 5,
+        orderBy: { dueDate: 'asc' },
+      }),
+      this.db.contact.findMany({
+        where: {
+          businessId,
+          deletedAt: null,
+          status: 'PROSPECT',
+          createdAt: { lt: thirtyDaysAgo },
+        },
+        take: 5,
+        orderBy: { createdAt: 'asc' },
       }),
     ]);
 
@@ -261,24 +294,109 @@ export class CrmFlowService {
       });
     }
 
+    for (const contact of coldContacts) {
+      const daysSinceUpdate = Math.floor((now.getTime() - new Date(contact.updatedAt).getTime()) / (24 * 60 * 60 * 1000));
+      if (!actions.some(a => a.contactId === contact.id)) {
+        actions.push({
+          id: `cold_${contact.id}`,
+          type: 'follow_up',
+          contactId: contact.id,
+          contactName: `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() || 'Unknown',
+          description: `No interaction in ${daysSinceUpdate} days — check in`,
+          aiDraft: `Hi ${contact.firstName || 'there'}! It's been a while since we last connected. I wanted to check in and see how things are going.`,
+          estimatedTime: 30,
+          priority: daysSinceUpdate > 30 ? 'high' : 'medium',
+        });
+      }
+    }
+
+    for (const task of scheduledContacts) {
+      if (!actions.some(a => a.contactId === task.contactId)) {
+        actions.push({
+          id: `scheduled_${task.id}`,
+          type: 'call',
+          contactId: task.contactId,
+          contactName: `${task.contact?.firstName ?? ''} ${task.contact?.lastName ?? ''}`.trim() || 'Unknown',
+          description: `Upcoming task within 24h: ${task.title}`,
+          estimatedTime: 30,
+          priority: 'high',
+          dueDate: task.dueDate?.toISOString(),
+        });
+      }
+    }
+
+    for (const contact of staleProspects) {
+      if (!actions.some(a => a.contactId === contact.id)) {
+        const daysInPipeline = Math.floor((now.getTime() - new Date(contact.createdAt).getTime()) / (24 * 60 * 60 * 1000));
+        actions.push({
+          id: `stale_${contact.id}`,
+          type: 'follow_up',
+          contactId: contact.id,
+          contactName: `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() || 'Unknown',
+          description: `Convert prospect — has been in pipeline ${daysInPipeline} days`,
+          aiDraft: `Hi ${contact.firstName || 'there'}! I wanted to follow up on our previous conversations. Is there anything I can do to help move things forward?`,
+          estimatedTime: 45,
+          priority: daysInPipeline > 60 ? 'high' : 'medium',
+        });
+      }
+    }
+
     return actions.sort((a, b) => {
       const priorityOrder = { urgent: 0, high: 1, medium: 2, low: 3 };
-      return priorityOrder[a.priority] - priorityOrder[b.priority];
-    }).slice(0, 10);
+      const pDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
+      if (pDiff !== 0) return pDiff;
+      if (a.dueDate && b.dueDate) return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+      if (a.dueDate) return -1;
+      if (b.dueDate) return 1;
+      return 0;
+    }).slice(0, 20);
   }
 
   async getAutopilotActions(businessId: string): Promise<AutopilotAction[]> {
     const now = new Date();
     const actions: AutopilotAction[] = [];
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-    const recentTasks = await this.db.contactTask.findMany({
-      where: {
-        contact: { businessId, deletedAt: null },
-        completedAt: { gte: new Date(now.getTime() - 24 * 60 * 60 * 1000) },
-      },
-      include: { contact: true },
-      take: 5,
-    });
+    const [recentTasks, pendingTasks, overdueInvoices, inactiveClients] = await Promise.all([
+      this.db.contactTask.findMany({
+        where: {
+          contact: { businessId, deletedAt: null },
+          completedAt: { gte: new Date(now.getTime() - 24 * 60 * 60 * 1000) },
+        },
+        include: { contact: true },
+        take: 5,
+      }),
+      this.db.contactTask.findMany({
+        where: {
+          contact: { businessId, deletedAt: null },
+          status: { not: 'DONE' },
+          dueDate: { gte: now, lt: new Date(now.getTime() + 24 * 60 * 60 * 1000) },
+        },
+        include: { contact: true },
+        take: 5,
+      }),
+      this.db.invoice.findMany({
+        where: {
+          businessId,
+          status: 'OVERDUE',
+          dueDate: { lt: sevenDaysAgo },
+        },
+        include: { contact: true },
+        take: 5,
+        orderBy: { dueDate: 'asc' },
+      }),
+      this.db.contact.findMany({
+        where: {
+          businessId,
+          deletedAt: null,
+          status: 'CLIENT',
+          updatedAt: { lt: thirtyDaysAgo },
+        },
+        take: 5,
+        orderBy: { updatedAt: 'asc' },
+      }),
+    ]);
 
     for (const task of recentTasks) {
       actions.push({
@@ -292,16 +410,6 @@ export class CrmFlowService {
       });
     }
 
-    const pendingTasks = await this.db.contactTask.findMany({
-      where: {
-        contact: { businessId, deletedAt: null },
-        status: { not: 'DONE' },
-        dueDate: { gte: now, lt: new Date(now.getTime() + 24 * 60 * 60 * 1000) },
-      },
-      include: { contact: true },
-      take: 5,
-    });
-
     for (const task of pendingTasks) {
       actions.push({
         id: `pending_${task.id}`,
@@ -314,7 +422,33 @@ export class CrmFlowService {
       });
     }
 
-    return actions;
+    for (const invoice of overdueInvoices) {
+      const daysPastDue = Math.floor((now.getTime() - new Date(invoice.dueDate!).getTime()) / (24 * 60 * 60 * 1000));
+      actions.push({
+        id: `overdue_inv_${invoice.id}`,
+        type: 'payment_reminder',
+        status: 'needs_approval',
+        contactId: invoice.contactId || '',
+        contactName: `${invoice.contact?.firstName ?? ''} ${invoice.contact?.lastName ?? ''}`.trim() || 'Unknown',
+        description: `Send payment reminder for ${invoice.invoiceNumber} — ${daysPastDue} days overdue`,
+        scheduledAt: now.toISOString(),
+      });
+    }
+
+    for (const contact of inactiveClients) {
+      const daysSinceActivity = Math.floor((now.getTime() - new Date(contact.updatedAt).getTime()) / (24 * 60 * 60 * 1000));
+      actions.push({
+        id: `checkin_${contact.id}`,
+        type: 'check_in',
+        status: 'needs_approval',
+        contactId: contact.id,
+        contactName: `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() || 'Unknown',
+        description: `Check in with client — no activity in ${daysSinceActivity} days`,
+        scheduledAt: now.toISOString(),
+      });
+    }
+
+    return actions.slice(0, 15);
   }
 
   async getPredictiveRevenue(businessId: string): Promise<RevenueData> {
@@ -608,6 +742,66 @@ export class CrmFlowService {
             data: { status: 'DONE', completedAt: new Date() },
           });
           return { success: true, message: 'Task completed' };
+        }
+        case 'cold': {
+          const contact = await this.db.contact.findFirst({
+            where: { id, businessId, deletedAt: null },
+          });
+          if (!contact) {
+            return { success: false, message: 'Contact not found or not authorized' };
+          }
+          await this.db.contactEvent.create({
+            data: {
+              businessId,
+              contactId: id,
+              type: 'FOLLOW_UP_COMPLETED',
+              data: { source: 'next_action', actionType: 'cold_follow_up' },
+              source: 'system',
+            },
+          });
+          await this.db.contact.update({ where: { id }, data: { updatedAt: new Date() } });
+          return { success: true, message: 'Follow-up marked complete' };
+        }
+        case 'scheduled': {
+          const scheduledTask = await this.db.contactTask.findFirst({
+            where: { id, contact: { businessId, deletedAt: null } },
+          });
+          if (!scheduledTask) {
+            return { success: false, message: 'Scheduled task not found or not authorized' };
+          }
+          await this.db.contactTask.update({
+            where: { id },
+            data: { status: 'DONE', completedAt: new Date() },
+          });
+          await this.db.contactEvent.create({
+            data: {
+              businessId,
+              contactId: scheduledTask.contactId,
+              type: 'SCHEDULED_INTERACTION_COMPLETED',
+              data: { source: 'next_action', taskId: id },
+              source: 'system',
+            },
+          });
+          return { success: true, message: 'Scheduled task completed' };
+        }
+        case 'stale': {
+          const contact = await this.db.contact.findFirst({
+            where: { id, businessId, deletedAt: null },
+          });
+          if (!contact) {
+            return { success: false, message: 'Contact not found or not authorized' };
+          }
+          await this.db.contactEvent.create({
+            data: {
+              businessId,
+              contactId: id,
+              type: 'FOLLOW_UP_COMPLETED',
+              data: { source: 'next_action', actionType: 'stale_prospect_follow_up' },
+              source: 'system',
+            },
+          });
+          await this.db.contact.update({ where: { id }, data: { updatedAt: new Date() } });
+          return { success: true, message: 'Prospect follow-up marked complete' };
         }
         default:
           return { success: false, message: `Unknown action type: ${type}` };

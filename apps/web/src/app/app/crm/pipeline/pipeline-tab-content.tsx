@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, type PanInfo } from "framer-motion";
 import { X, List } from "lucide-react";
 import {
@@ -12,13 +12,27 @@ import {
 import type { QuickActionType } from "@/components/contacts";
 import { BulkActionBar } from "./bulk-action-bar";
 import { PipelineToolbar } from "./pipeline-toolbar";
+import type { ViewMode } from "./pipeline-toolbar";
 import { PipelineContactList } from "./pipeline-contact-list";
 import { PipelineDetailPanel } from "./pipeline-detail-panel";
+import { PipelineKanban } from "./pipeline-kanban";
 import { DuplicateDetector } from "./duplicate-detector";
 import type { PipelineState } from "./use-contacts-pipeline";
 
 interface PipelineTabContentProps {
   state: PipelineState;
+}
+
+const PIPELINE_VIEW_KEY = "kf_pipeline_view";
+
+function getStoredViewMode(): ViewMode {
+  if (typeof window === "undefined") return "list";
+  try {
+    const stored = localStorage.getItem(PIPELINE_VIEW_KEY);
+    return stored === "kanban" ? "kanban" : "list";
+  } catch {
+    return "list";
+  }
 }
 
 function PipelineTabContentInner({ state }: PipelineTabContentProps) {
@@ -46,6 +60,12 @@ function PipelineTabContentInner({ state }: PipelineTabContentProps) {
     handleSelectAll, handleBulkStatusChange, handleBulkTag, handleBulkDelete,
     handleToggleSelectMode,
   } = state;
+
+  const [viewMode, setViewMode] = useState<ViewMode>(getStoredViewMode);
+  const handleViewModeChange = useCallback((mode: ViewMode) => {
+    setViewMode(mode);
+    try { localStorage.setItem(PIPELINE_VIEW_KEY, mode); } catch {}
+  }, []);
 
   const detailPanelRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -159,35 +179,41 @@ function PipelineTabContentInner({ state }: PipelineTabContentProps) {
         onToggleSelectMode={handleToggleSelectMode}
         onRefresh={handleRefresh}
         onAddContact={handleToggleAddMenu}
+        viewMode={viewMode}
+        onViewModeChange={handleViewModeChange}
       />
 
-      <div className="grid gap-6 lg:grid-cols-[1fr,450px]">
-        <div ref={listRef}>
-          <PipelineContactList
-            contacts={displayContacts as ContactCardData[]}
-            loading={loading}
-            loadError={loadError}
-            hasMore={hasMore}
-            activeListTab={activeListTab}
-            selectedContactId={selectedContactId}
-            selectMode={selectMode}
-            selectedIds={selectedIds}
-            pinnedIds={pinnedIds}
-            onSelectContact={selectContact}
-            onToggleSelect={handleToggleSelect}
-            onTogglePin={handleTogglePin}
-            onDelete={handleDeleteContact}
-            onQuickAction={handleQuickAction}
-            onLoadMore={handleLoadMore}
-            onRetry={handleRetry}
-            onAddContact={handleOpenAddForm}
-          />
-        </div>
+      {viewMode === "kanban" ? (
+        <PipelineKanban state={state} />
+      ) : (
+        <div className="grid gap-6 lg:grid-cols-[1fr,450px]">
+          <div ref={listRef}>
+            <PipelineContactList
+              contacts={displayContacts as ContactCardData[]}
+              loading={loading}
+              loadError={loadError}
+              hasMore={hasMore}
+              activeListTab={activeListTab}
+              selectedContactId={selectedContactId}
+              selectMode={selectMode}
+              selectedIds={selectedIds}
+              pinnedIds={pinnedIds}
+              onSelectContact={selectContact}
+              onToggleSelect={handleToggleSelect}
+              onTogglePin={handleTogglePin}
+              onDelete={handleDeleteContact}
+              onQuickAction={handleQuickAction}
+              onLoadMore={handleLoadMore}
+              onRetry={handleRetry}
+              onAddContact={handleOpenAddForm}
+            />
+          </div>
 
-        <div ref={detailPanelRef} className="hidden lg:block sticky top-4 max-h-[calc(100vh-2rem)]" tabIndex={-1}>
-          <PipelineDetailPanel {...detailPanelProps} />
+          <div ref={detailPanelRef} className="hidden lg:block sticky top-4 max-h-[calc(100vh-2rem)]" tabIndex={-1}>
+            <PipelineDetailPanel {...detailPanelProps} />
+          </div>
         </div>
-      </div>
+      )}
 
       <AnimatePresence>
         {showMobileDetail && (

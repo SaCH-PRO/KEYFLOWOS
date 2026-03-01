@@ -237,6 +237,7 @@ export default function ContactsPage() {
               autopilotActions={autopilotActions}
               autopilotPaused={autopilotPaused}
               loading={flowDataLoading}
+              businessId={businessId ?? undefined}
               onComplete={handleCompleteNextAction}
               onViewContact={handleViewEngageContact}
               onDoAction={handleDoAction}

@@ -1355,7 +1355,53 @@ export class CrmService {
 
   async approveAutopilotAction(input: { businessId: string; actionId: string }) {
     const parts = input.actionId.split('_');
-    const contactId = parts.slice(0, -2).join('_') || input.actionId;
+    const actionType = parts[0];
+    const id = parts.slice(1).join('_');
+    let contactId = id;
+
+    try {
+      if (actionType === 'overdue' && parts[1] === 'inv') {
+        const invoiceId = parts.slice(2).join('_');
+        const invoice = await this.prisma.client.invoice.findFirst({
+          where: { id: invoiceId, businessId: input.businessId },
+        });
+        contactId = invoice?.contactId || invoiceId;
+        if (contactId) {
+          await this.prisma.client.contactTask.create({
+            data: {
+              businessId: input.businessId,
+              contactId,
+              title: `Send payment reminder for invoice ${invoice?.invoiceNumber || invoiceId}`,
+              status: 'OPEN',
+              priority: 'HIGH',
+              dueDate: new Date(),
+              source: 'autopilot',
+            },
+          });
+        }
+      } else if (actionType === 'checkin') {
+        contactId = id;
+        const contact = await this.prisma.client.contact.findFirst({
+          where: { id: contactId, businessId: input.businessId, deletedAt: null },
+        });
+        if (contact) {
+          await this.prisma.client.contactTask.create({
+            data: {
+              businessId: input.businessId,
+              contactId,
+              title: `Check in with ${contact.firstName || 'client'} — scheduled by autopilot`,
+              status: 'OPEN',
+              priority: 'MEDIUM',
+              dueDate: new Date(Date.now() + 24 * 60 * 60 * 1000),
+              source: 'autopilot',
+            },
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Error creating task for autopilot approval:', err);
+    }
+
     await this.logEvent(input.businessId, contactId, 'autopilot.approved', {
       actionId: input.actionId,
     });
@@ -1364,7 +1410,18 @@ export class CrmService {
 
   async denyAutopilotAction(input: { businessId: string; actionId: string }) {
     const parts = input.actionId.split('_');
-    const contactId = parts.slice(0, -2).join('_') || input.actionId;
+    const actionType = parts[0];
+    const id = parts.slice(1).join('_');
+    let contactId = id;
+
+    if (actionType === 'overdue' && parts[1] === 'inv') {
+      const invoiceId = parts.slice(2).join('_');
+      const invoice = await this.prisma.client.invoice.findFirst({
+        where: { id: invoiceId, businessId: input.businessId },
+      });
+      contactId = invoice?.contactId || invoiceId;
+    }
+
     await this.logEvent(input.businessId, contactId, 'autopilot.denied', {
       actionId: input.actionId,
     });
