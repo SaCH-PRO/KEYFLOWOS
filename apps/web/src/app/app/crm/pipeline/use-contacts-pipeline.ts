@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import type { ContactCardData } from "@/components/contacts/contact-card";
 import type { NextAction as NextActionUI } from "@/components/contacts/next-action-queue";
 import type { PipelineDetailPanelProps } from "./pipeline-detail-panel";
@@ -10,6 +12,7 @@ import { useContactActions } from "./hooks/use-contact-actions";
 import { useFlowIntelligence } from "./hooks/use-flow-intelligence";
 
 export function useContactsPipeline() {
+  const router = useRouter();
   const contactsData = useContactsData();
   const {
     businessId, contacts, setContacts, loading,
@@ -46,8 +49,37 @@ export function useContactsPipeline() {
   );
 
   const handleDoAction = useCallback((action: NextActionUI) => {
-    selectContact(action.contactId);
-  }, [selectContact]);
+    switch (action.type) {
+      case "send_quote":
+        router.push(`/app/commerce?tab=quotes&contactId=${action.contactId}`);
+        toast.info(`Opening quote builder for ${action.contactName}`);
+        break;
+      case "payment_reminder":
+        router.push(`/app/commerce?tab=invoices&contactId=${action.contactId}`);
+        toast.info(`Opening invoices for ${action.contactName}`);
+        break;
+      case "email":
+      case "follow_up":
+        selectContact(action.contactId);
+        contactsData.setCrmViewTab("pipeline");
+        toast.info(`Opening ${action.contactName} — ${action.description}`);
+        break;
+      case "call":
+        selectContact(action.contactId);
+        contactsData.setCrmViewTab("pipeline");
+        toast.info(`Opening ${action.contactName} — ready to call`);
+        break;
+      case "task":
+        selectContact(action.contactId);
+        contactsData.setCrmViewTab("pipeline");
+        toast.info(`Opening ${action.contactName} — task details`);
+        break;
+      default:
+        selectContact(action.contactId);
+        contactsData.setCrmViewTab("pipeline");
+        break;
+    }
+  }, [selectContact, router, contactsData.setCrmViewTab]);
 
   useEffect(() => {
     if (businessId) {
