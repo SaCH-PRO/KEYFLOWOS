@@ -250,18 +250,28 @@ export function ContactDetailHeader({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {STATUSES.map((s) => (
-          <button
-            key={s}
-            onClick={() => onUpdateStatus?.(s)}
-            className={`px-3 py-1 text-xs rounded-lg transition-all ${
-              contact.status === s ? "kf-btn-primary" : "kf-btn-secondary"
-            }`}
-          >
-            {s}
-          </button>
-        ))}
+      <div className="grid grid-cols-4 gap-1.5">
+        {STATUSES.map((s) => {
+          const isActive = contact.status === s;
+          const color = STATUS_COLORS[s] ?? STATUS_COLORS.LEAD;
+          return (
+            <button
+              key={s}
+              onClick={() => onUpdateStatus?.(s)}
+              className={`relative flex items-center justify-center py-2 text-xs font-semibold rounded-xl transition-all ${
+                isActive
+                  ? "text-white shadow-sm"
+                  : "bg-white/[0.03] border border-border/50 text-muted-foreground hover:bg-white/[0.06] hover:border-border/70"
+              }`}
+              style={isActive ? { backgroundColor: color } : undefined}
+            >
+              {s.charAt(0) + s.slice(1).toLowerCase()}
+              {isActive && (
+                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-white/80 ring-2 ring-card" />
+              )}
+            </button>
+          );
+        })}
       </div>
 
       <div className="rounded-xl bg-muted/30 border border-border/50 overflow-hidden">
