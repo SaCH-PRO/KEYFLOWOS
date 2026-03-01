@@ -161,8 +161,8 @@ const FunnelChart = React.memo(function FunnelChart({ data }: { data: FlowIntell
 
   return (
     <div role="img" aria-label={`Pipeline funnel: ${data.leads} leads, ${data.prospects} prospects, ${data.clients} clients`}>
-      <ResponsiveContainer width="100%" height={140}>
-        <BarChart data={chartData} layout="vertical" barCategoryGap="20%" margin={{ top: 0, right: 8, bottom: 0, left: 0 }}>
+      <ResponsiveContainer width="100%" height={160}>
+        <BarChart data={chartData} layout="vertical" barCategoryGap="18%" margin={{ top: 0, right: 8, bottom: 0, left: 0 }}>
           <defs>
             <linearGradient id="funnelLeads" x1="0" y1="0" x2="1" y2="0">
               <stop offset="0%" stopColor={FUNNEL_COLORS.leads} stopOpacity={0.8} />
@@ -463,14 +463,14 @@ const RevenueBreakdown = React.memo(function RevenueBreakdown({ data }: { data: 
       </div>
 
       {pieData.length > 0 ? (
-        <ResponsiveContainer width="100%" height={180}>
+        <ResponsiveContainer width="100%" height={200}>
           <PieChart>
             <Pie
               data={pieData}
               cx="50%"
               cy="45%"
-              innerRadius={60}
-              outerRadius={80}
+              innerRadius={55}
+              outerRadius={78}
               dataKey="value"
               paddingAngle={2}
               animationDuration={800}
@@ -592,12 +592,12 @@ const DataCompleteness = React.memo(function DataCompleteness({ contacts }: { co
         <ShieldCheck className="w-3.5 h-3.5" />
         Data Quality
       </h3>
-      <div className="flex items-center gap-4">
-        <div className="relative w-[72px] h-[72px] shrink-0">
+      <div className="flex items-center gap-5">
+        <div className="relative w-[88px] h-[88px] shrink-0">
           <svg viewBox="0 0 80 80" className="w-full h-full -rotate-90">
-            <circle cx="40" cy="40" r="36" fill="none" strokeWidth="4" className="stroke-white/[0.04]" />
+            <circle cx="40" cy="40" r="36" fill="none" strokeWidth="5" className="stroke-white/[0.04]" />
             <motion.circle
-              cx="40" cy="40" r="36" fill="none" strokeWidth="4"
+              cx="40" cy="40" r="36" fill="none" strokeWidth="5"
               initial={{ strokeDasharray: `0 ${circumference}` }}
               animate={{ strokeDasharray: `${dashLength} ${circumference - dashLength}` }}
               transition={{ duration: 1, ease: [0.25, 0.46, 0.45, 0.94] }}
@@ -606,7 +606,8 @@ const DataCompleteness = React.memo(function DataCompleteness({ contacts }: { co
             />
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-lg font-bold" style={{ color }}>{stats.completenessAvg}%</span>
+            <span className="text-xl font-bold" style={{ color }}>{stats.completenessAvg}%</span>
+            <span className="text-[10px] text-muted-foreground/50">complete</span>
           </div>
         </div>
         <div className="flex-1 space-y-1.5">
@@ -682,7 +683,7 @@ const GrowthTrend = React.memo(function GrowthTrend({ contacts, period }: { cont
           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-[hsl(var(--kf-accent2))]/10 text-[hsl(var(--kf-accent2))]">+{totalNew}</span>
         )}
       </div>
-      <ResponsiveContainer width="100%" height={100}>
+      <ResponsiveContainer width="100%" height={130}>
         <BarChart data={buckets} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
           <defs>
             <linearGradient id="growthBarGrad" x1="0" y1="0" x2="0" y2="1">
@@ -739,14 +740,14 @@ const LeadScoreDistribution = React.memo(function LeadScoreDistribution({ contac
         <Target className="w-3.5 h-3.5" />
         Lead Scores
       </h3>
-      <ResponsiveContainer width="100%" height={140}>
+      <ResponsiveContainer width="100%" height={160}>
         <PieChart>
           <Pie
             data={buckets}
             cx="50%"
             cy="50%"
-            innerRadius={40}
-            outerRadius={60}
+            innerRadius={42}
+            outerRadius={62}
             dataKey="value"
             paddingAngle={2}
             animationDuration={800}
@@ -1033,38 +1034,48 @@ const EngagementHeatmap = React.memo(function EngagementHeatmap({ contacts }: { 
 
   const maxCount = Math.max(...heatmapData, 1);
   const totalInteractions = heatmapData.reduce((s, v) => s + v, 0);
-  if (totalInteractions === 0) return null;
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2.5">
       <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5">
         <Calendar className="w-3.5 h-3.5" />
         Engagement Heatmap
       </h3>
-      <div className="grid grid-cols-7 gap-1">
-        {DAYS_OF_WEEK.map((day, i) => {
-          const count = heatmapData[i];
-          const intensity = count / maxCount;
-          const bg = intensity === 0 ? "bg-white/[0.02]" : intensity < 0.25 ? "bg-emerald-500/10" : intensity < 0.5 ? "bg-emerald-500/25" : intensity < 0.75 ? "bg-emerald-500/40" : "bg-emerald-500/65";
-          return (
-            <div key={day} className="flex flex-col items-center gap-0.5">
-              <div className={`w-full aspect-square rounded-md ${bg} flex items-center justify-center hover:scale-105 transition-transform cursor-default`} title={`${day}: ${count}`}>
-                <span className="text-[10px] font-mono font-bold text-foreground/50">{count}</span>
-              </div>
-              <span className="text-[10px] text-muted-foreground/50">{day}</span>
-            </div>
-          );
-        })}
-      </div>
-      <div className="flex items-center justify-between text-[10px] text-muted-foreground/50">
-        <span>Less</span>
-        <div className="flex gap-0.5">
-          {["bg-white/[0.02]", "bg-emerald-500/10", "bg-emerald-500/25", "bg-emerald-500/40", "bg-emerald-500/65"].map((bg, i) => (
-            <div key={i} className={`w-3.5 h-3.5 rounded-sm ${bg}`} />
-          ))}
+      {totalInteractions === 0 ? (
+        <div className="flex flex-col items-center justify-center py-6 text-center">
+          <div className="w-9 h-9 rounded-xl bg-white/[0.03] border border-border/30 flex items-center justify-center mb-2">
+            <Calendar className="w-4 h-4 text-muted-foreground/50" />
+          </div>
+          <p className="text-[10px] text-muted-foreground/50">Engagement data appears with interactions</p>
         </div>
-        <span>More</span>
-      </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-7 gap-1.5">
+            {DAYS_OF_WEEK.map((day, i) => {
+              const count = heatmapData[i];
+              const intensity = count / maxCount;
+              const bg = intensity === 0 ? "bg-white/[0.02]" : intensity < 0.25 ? "bg-emerald-500/10" : intensity < 0.5 ? "bg-emerald-500/25" : intensity < 0.75 ? "bg-emerald-500/40" : "bg-emerald-500/65";
+              return (
+                <div key={day} className="flex flex-col items-center gap-1">
+                  <div className={`w-full aspect-square rounded-lg ${bg} flex items-center justify-center hover:scale-105 transition-transform cursor-default`} title={`${day}: ${count}`}>
+                    <span className="text-[11px] font-mono font-bold text-foreground/60">{count}</span>
+                  </div>
+                  <span className="text-[10px] text-muted-foreground/50">{day}</span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex items-center justify-between text-[10px] text-muted-foreground/50 pt-1">
+            <span>Less</span>
+            <div className="flex gap-0.5">
+              {["bg-white/[0.02]", "bg-emerald-500/10", "bg-emerald-500/25", "bg-emerald-500/40", "bg-emerald-500/65"].map((bg, i) => (
+                <div key={i} className={`w-4 h-4 rounded-sm ${bg}`} />
+              ))}
+            </div>
+            <span>More</span>
+          </div>
+        </>
+      )}
     </div>
   );
 });
@@ -1204,6 +1215,23 @@ const TagPerformance = React.memo(function TagPerformance({ contacts, onNavigate
   );
 });
 
+function InsightEmptyState({ icon: Icon, message, label }: { icon: React.ElementType; message: string; label?: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-6 text-center">
+      {label && (
+        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5 mb-3 self-start">
+          <Icon className="w-3.5 h-3.5" />
+          {label}
+        </h3>
+      )}
+      <div className="w-9 h-9 rounded-xl bg-white/[0.03] border border-border/30 flex items-center justify-center mb-2">
+        <Icon className="w-4 h-4 text-muted-foreground/50" />
+      </div>
+      <p className="text-[10px] text-muted-foreground/50 max-w-[180px] leading-relaxed">{message}</p>
+    </div>
+  );
+}
+
 function InsightsTabInner({
   flowIntelligence, revenueData, contacts, loading,
   businessId, onViewCold, onViewReady, onViewExpiringQuotes, onViewOverdueInvoices,
@@ -1286,6 +1314,13 @@ function InsightsTabInner({
     );
   }
 
+  const hasRevenueClients = periodContacts.some((c) => c.meta?.totalRevenue && c.meta.totalRevenue > 0);
+  const hasInteractions = periodContacts.some((c) => c.meta && (c.meta as Record<string, unknown>).lastInteractionAt);
+  const hasClients = periodContacts.some((c) => c.status === "CLIENT");
+  const hasTags = periodContacts.some((c) => Array.isArray(c.tags) && c.tags.length > 0);
+  const hasLeadScores = periodContacts.some((c) => (c as Record<string, unknown>).leadScore != null);
+  const hasMeta = periodContacts.some((c) => (c as Record<string, unknown>).meta);
+
   return (
     <motion.div
       initial="hidden"
@@ -1295,7 +1330,7 @@ function InsightsTabInner({
     >
       <motion.div variants={stagger.item} className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
-          <div className="w-1 h-4 rounded-full bg-gradient-to-b from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))]" />
+          <div className="w-1 h-5 rounded-full bg-gradient-to-b from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))]" />
           <h2 className="text-sm font-semibold tracking-tight">Insights</h2>
           <span className="text-[10px] text-muted-foreground/50 font-medium">{contacts.length} contacts</span>
         </div>
@@ -1303,29 +1338,29 @@ function InsightsTabInner({
           <button
             onClick={handleRefresh}
             disabled={refreshing}
-            className="flex items-center gap-1 px-2 py-1.5 text-[10px] font-medium rounded-md border border-border/40 bg-white/[0.02] hover:bg-white/[0.04] transition-colors disabled:opacity-50"
+            className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-lg border border-border/50 bg-white/[0.03] hover:bg-white/[0.06] transition-colors disabled:opacity-50"
             aria-label="Refresh insights"
           >
-            <RefreshCw className={`w-3 h-3 text-muted-foreground/50 ${refreshing ? "animate-spin" : ""}`} />
+            <RefreshCw className={`w-3.5 h-3.5 text-muted-foreground/50 ${refreshing ? "animate-spin" : ""}`} />
             <span className="hidden sm:inline">Refresh</span>
           </button>
 
           <div className="relative">
             <button
               onClick={toggleExportMenu}
-              className="flex items-center gap-1 px-2 py-1.5 text-[10px] font-medium rounded-md border border-border/40 bg-white/[0.02] hover:bg-white/[0.04] transition-colors"
+              className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-lg border border-border/50 bg-white/[0.03] hover:bg-white/[0.06] transition-colors"
               aria-haspopup="listbox"
               aria-expanded={showExportMenu}
               aria-label="Export report"
             >
-              <Download className="w-3 h-3 text-muted-foreground/50" />
+              <Download className="w-3.5 h-3.5 text-muted-foreground/50" />
               <span className="hidden sm:inline">Export</span>
               <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground/50 transition-transform ${showExportMenu ? "rotate-180" : ""}`} />
             </button>
             {showExportMenu && (
               <>
                 <div className="fixed inset-0 z-10" onClick={closeExportMenu} />
-                <div className="absolute right-0 top-full mt-1 z-20 bg-popover/95 backdrop-blur-xl border border-border/50 rounded-lg shadow-xl py-0.5 min-w-[130px]">
+                <div className="absolute right-0 top-full mt-1 z-20 bg-popover/95 backdrop-blur-xl border border-border/50 rounded-xl shadow-xl py-1 min-w-[140px]">
                   {([
                     { format: "pdf" as const, label: "Export as PDF" },
                     { format: "csv" as const, label: "Export as CSV" },
@@ -1333,7 +1368,7 @@ function InsightsTabInner({
                     <button
                       key={opt.format}
                       onClick={() => handleExport(opt.format)}
-                      className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-white/[0.04] transition-colors text-muted-foreground hover:text-foreground"
+                      className="w-full text-left px-3 py-2 text-[11px] hover:bg-white/[0.05] transition-colors text-muted-foreground hover:text-foreground"
                     >
                       {opt.label}
                     </button>
@@ -1346,25 +1381,26 @@ function InsightsTabInner({
           <div className="relative">
             <button
               onClick={togglePeriodMenu}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-md border border-border/40 bg-white/[0.02] hover:bg-white/[0.04] transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-medium rounded-lg border border-border/50 bg-white/[0.03] hover:bg-white/[0.06] transition-colors"
               aria-haspopup="listbox"
               aria-expanded={showPeriodMenu}
               aria-label={`Time period: ${PERIOD_LABELS[period]}`}
             >
+              <Calendar className="w-3.5 h-3.5 text-muted-foreground/50" />
               {PERIOD_LABELS[period]}
               <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground/50 transition-transform ${showPeriodMenu ? "rotate-180" : ""}`} />
             </button>
             {showPeriodMenu && (
               <>
                 <div className="fixed inset-0 z-10" onClick={closePeriodMenu} />
-                <div className="absolute right-0 top-full mt-1 z-20 bg-popover/95 backdrop-blur-xl border border-border/50 rounded-lg shadow-xl py-0.5 min-w-[170px]" role="listbox" aria-label="Select time period">
+                <div className="absolute right-0 top-full mt-1 z-20 bg-popover/95 backdrop-blur-xl border border-border/50 rounded-xl shadow-xl py-1 min-w-[170px]" role="listbox" aria-label="Select time period">
                   {(Object.keys(PERIOD_LABELS) as Period[]).map((p) => (
                     <button
                       key={p}
                       role="option"
                       aria-selected={p === period}
                       onClick={() => handleSelectPeriod(p)}
-                      className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-white/[0.04] transition-colors ${
+                      className={`w-full text-left px-3 py-2 text-[11px] hover:bg-white/[0.05] transition-colors ${
                         p === period ? "font-semibold text-[hsl(var(--kf-accent1))]" : "text-muted-foreground"
                       }`}
                     >
@@ -1372,16 +1408,16 @@ function InsightsTabInner({
                     </button>
                   ))}
                   {period === "custom" && (
-                    <div className="px-3 py-1.5 space-y-1.5 border-t border-border/20 mt-0.5 pt-1.5">
+                    <div className="px-3 py-2 space-y-1.5 border-t border-border/20 mt-0.5 pt-2">
                       <div className="flex items-center gap-1.5">
                         <label className="text-[10px] text-muted-foreground/50 w-8">From</label>
                         <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)}
-                          className="flex-1 text-[10px] bg-white/[0.03] border border-border/30 rounded px-1.5 py-1 text-foreground" />
+                          className="flex-1 text-[10px] bg-white/[0.03] border border-border/30 rounded-md px-2 py-1 text-foreground" />
                       </div>
                       <div className="flex items-center gap-1.5">
                         <label className="text-[10px] text-muted-foreground/50 w-8">To</label>
                         <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)}
-                          className="flex-1 text-[10px] bg-white/[0.03] border border-border/30 rounded px-1.5 py-1 text-foreground" />
+                          className="flex-1 text-[10px] bg-white/[0.03] border border-border/30 rounded-md px-2 py-1 text-foreground" />
                       </div>
                     </div>
                   )}
@@ -1394,18 +1430,18 @@ function InsightsTabInner({
 
       <HeroStats flowIntelligence={flowIntelligence} revenueData={revenueData} contacts={periodContacts} onNavigatePipeline={onNavigatePipeline} />
 
-      <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-5 gap-2.5">
+      <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
         {flowIntelligence && (
-          <div className="lg:col-span-3 rounded-xl border border-border/50 bg-card p-3.5">
-            <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5 mb-2.5">
+          <div className="lg:col-span-7 rounded-xl border border-border/50 bg-card p-4">
+            <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5 mb-3">
               <Zap className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
               Pipeline Funnel
             </h3>
             <FunnelChart data={flowIntelligence} />
           </div>
         )}
-        <div className={`${flowIntelligence ? "lg:col-span-2" : "lg:col-span-5"} rounded-xl border border-border/50 bg-card p-3.5`}>
-          <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5 mb-2.5">
+        <div className={`${flowIntelligence ? "lg:col-span-5" : "lg:col-span-12"} rounded-xl border border-border/50 bg-card p-4`}>
+          <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5 mb-3">
             <AlertTriangle className="w-3.5 h-3.5 text-amber-400/60" />
             Action Items
           </h3>
@@ -1422,79 +1458,70 @@ function InsightsTabInner({
         </div>
       </motion.div>
 
-      <motion.div variants={stagger.item} className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+      <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
         {revenueData && (
-          <div className="rounded-xl border border-border/50 bg-card p-3.5">
+          <div className="lg:col-span-5 rounded-xl border border-border/50 bg-card p-4">
             <RevenueBreakdown data={revenueData} />
           </div>
         )}
-        <div className={`rounded-xl border border-border/50 bg-card p-3.5 ${!revenueData ? "sm:col-span-2" : ""}`}>
+        <div className={`rounded-xl border border-border/50 bg-card p-4 ${revenueData ? "lg:col-span-7" : "lg:col-span-12"}`}>
           <GrowthTrend contacts={contacts} period={period} />
         </div>
       </motion.div>
 
-      <motion.div variants={stagger.item} className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-        <div className="rounded-xl border border-border/50 bg-card p-3.5">
-          <RevenueByClient contacts={periodContacts} onNavigatePipeline={onNavigatePipeline} />
-          {!periodContacts.some((c) => c.meta?.totalRevenue && c.meta.totalRevenue > 0) && (
-            <div className="flex flex-col items-center py-4 text-center">
-              <DollarSign className="w-4 h-4 text-muted-foreground/50 mb-1" />
-              <p className="text-[10px] text-muted-foreground/50">Revenue data appears with invoices</p>
-            </div>
-          )}
-        </div>
-        <div className="rounded-xl border border-border/50 bg-card p-3.5">
-          <EngagementHeatmap contacts={periodContacts} />
-          {!periodContacts.some((c) => c.meta && (c.meta as Record<string, unknown>).lastInteractionAt) && periodContacts.length === 0 && (
-            <div className="flex flex-col items-center py-4 text-center">
-              <Calendar className="w-4 h-4 text-muted-foreground/50 mb-1" />
-              <p className="text-[10px] text-muted-foreground/50">Engagement data appears with interactions</p>
-            </div>
-          )}
-        </div>
-      </motion.div>
-
-      <motion.div variants={stagger.item} className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-        <div className="rounded-xl border border-border/50 bg-card p-3.5">
-          <ConversionTimeline contacts={periodContacts} />
-          {!periodContacts.some((c) => c.status === "CLIENT") && (
-            <div className="flex flex-col items-center py-4 text-center">
-              <Clock className="w-4 h-4 text-muted-foreground/50 mb-1" />
-              <p className="text-[10px] text-muted-foreground/50">Conversion data appears with stage changes</p>
-            </div>
-          )}
-        </div>
-        <div className="rounded-xl border border-border/50 bg-card p-3.5">
-          <TagPerformance contacts={periodContacts} onNavigatePipeline={onNavigatePipeline} />
-          {!periodContacts.some((c) => Array.isArray(c.tags) && c.tags.length > 0) && (
-            <div className="flex flex-col items-center py-4 text-center">
-              <Tag className="w-4 h-4 text-muted-foreground/50 mb-1" />
-              <p className="text-[10px] text-muted-foreground/50">Tag analytics appear with tagged contacts</p>
-            </div>
-          )}
-        </div>
-      </motion.div>
-
-      <motion.div variants={stagger.item} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-        <div className="rounded-xl border border-border/50 bg-card p-3.5">
+      <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
+        <div className="lg:col-span-5 rounded-xl border border-border/50 bg-card p-4">
           <DataCompleteness contacts={periodContacts} />
         </div>
-        <div className="rounded-xl border border-border/50 bg-card p-3.5 space-y-4">
+        <div className="lg:col-span-4 rounded-xl border border-border/50 bg-card p-4">
           <LeadScoreDistribution contacts={periodContacts} />
-          <TaskHealth contacts={periodContacts} />
-          {periodContacts.length > 0 && !(periodContacts.some(c => (c as Record<string, unknown>).leadScore != null)) && !(periodContacts.some(c => (c as Record<string, unknown>).meta)) && (
-            <div className="flex flex-col items-center py-3 text-center">
-              <div className="w-7 h-7 rounded-md bg-white/[0.03] flex items-center justify-center mb-1">
-                <Target className="w-3.5 h-3.5 text-muted-foreground/50" />
-              </div>
-              <p className="text-[10px] text-muted-foreground/50">Scores appear as activity grows</p>
-            </div>
+          {!hasLeadScores && (
+            <InsightEmptyState icon={Target} message="Scores appear as contacts engage" />
           )}
         </div>
-        <div className="sm:col-span-2 lg:col-span-1 rounded-xl border border-border/50 bg-card p-3.5 space-y-4">
+        <div className="lg:col-span-3 rounded-xl border border-border/50 bg-card p-4">
+          <TaskHealth contacts={periodContacts} />
+          {!hasMeta && (
+            <InsightEmptyState icon={ListChecks} message="Health data appears with tasks" />
+          )}
+        </div>
+      </motion.div>
+
+      <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
+        <div className="lg:col-span-6 rounded-xl border border-border/50 bg-card p-4">
+          {hasRevenueClients ? (
+            <RevenueByClient contacts={periodContacts} onNavigatePipeline={onNavigatePipeline} />
+          ) : (
+            <InsightEmptyState icon={DollarSign} message="Revenue data appears with invoices" label="Revenue by Client" />
+          )}
+        </div>
+        <div className="lg:col-span-6 rounded-xl border border-border/50 bg-card p-4">
+          <EngagementHeatmap contacts={periodContacts} />
+        </div>
+      </motion.div>
+
+      <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
+        <div className="lg:col-span-4 rounded-xl border border-border/50 bg-card p-4">
+          {hasClients ? (
+            <ConversionTimeline contacts={periodContacts} />
+          ) : (
+            <InsightEmptyState icon={Clock} message="Conversion data appears with stage changes" label="Conversion Timeline" />
+          )}
+        </div>
+        <div className="lg:col-span-4 rounded-xl border border-border/50 bg-card p-4">
+          {hasTags ? (
+            <TagPerformance contacts={periodContacts} onNavigatePipeline={onNavigatePipeline} />
+          ) : (
+            <InsightEmptyState icon={Tag} message="Tag analytics appear with tagged contacts" label="Tag Performance" />
+          )}
+        </div>
+        <div className="lg:col-span-4 rounded-xl border border-border/50 bg-card p-4 space-y-5">
           <SourceConversion contacts={periodContacts} />
           <TopSources contacts={periodContacts} />
           <ChannelPreference contacts={periodContacts} />
+          {!periodContacts.some((c) => c.source) && (
+            <InsightEmptyState icon={Filter} message="Source data appears with attributed contacts" />
+          )}
         </div>
       </motion.div>
 

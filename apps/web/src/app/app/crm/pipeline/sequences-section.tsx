@@ -138,9 +138,12 @@ export const SequencesSection = React.memo(function SequencesSection({ businessI
         transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
         className="rounded-2xl border border-border/50 bg-card overflow-hidden"
       >
-        <button
+        <div
+          role="button"
+          tabIndex={0}
           onClick={() => setExpanded(!expanded)}
-          className="w-full flex items-center gap-3 p-4 hover:bg-white/[0.02] transition-colors"
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(!expanded); } }}
+          className="w-full flex items-center gap-3 p-4 hover:bg-white/[0.02] transition-colors cursor-pointer"
         >
           <div className="p-2 rounded-xl bg-gradient-to-br from-purple-500/15 to-purple-500/5">
             <GitBranch className="w-4 h-4 text-purple-400" />
@@ -159,7 +162,7 @@ export const SequencesSection = React.memo(function SequencesSection({ businessI
             New Sequence
           </button>
           {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground/50" /> : <ChevronDown className="w-4 h-4 text-muted-foreground/50" />}
-        </button>
+        </div>
 
         <AnimatePresence>
           {expanded && (
