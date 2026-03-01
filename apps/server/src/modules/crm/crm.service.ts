@@ -1359,6 +1359,14 @@ export class CrmService {
     const id = parts.slice(1).join('_');
     let contactId = id;
 
+    const ACTION_TASK_MAP: Record<string, { titleFn: (name: string) => string; priority: string }> = {
+      checkin: { titleFn: (n) => `Check in with ${n} — scheduled by autopilot`, priority: 'MEDIUM' },
+      nudge: { titleFn: (n) => `Send nurture email to ${n} — cold lead re-engagement`, priority: 'MEDIUM' },
+      autowelcome: { titleFn: (n) => `Send welcome message to ${n}`, priority: 'HIGH' },
+      stalenudge: { titleFn: (n) => `Send incentive offer to ${n} — stale prospect`, priority: 'MEDIUM' },
+      postbooking: { titleFn: (n) => `Send post-session follow-up`, priority: 'MEDIUM' },
+    };
+
     try {
       if (actionType === 'overdue' && parts[1] === 'inv') {
         const invoiceId = parts.slice(2).join('_');
@@ -1379,23 +1387,46 @@ export class CrmService {
             },
           });
         }
-      } else if (actionType === 'checkin') {
-        contactId = id;
-        const contact = await this.prisma.client.contact.findFirst({
-          where: { id: contactId, businessId: input.businessId, deletedAt: null },
-        });
-        if (contact) {
-          await this.prisma.client.contactTask.create({
-            data: {
-              businessId: input.businessId,
-              contactId,
-              title: `Check in with ${contact.firstName || 'client'} — scheduled by autopilot`,
-              status: 'OPEN',
-              priority: 'MEDIUM',
-              dueDate: new Date(Date.now() + 24 * 60 * 60 * 1000),
-              source: 'autopilot',
-            },
+      } else if (ACTION_TASK_MAP[actionType]) {
+        const mapping = ACTION_TASK_MAP[actionType];
+        if (actionType === 'postbooking') {
+          const booking = await this.prisma.client.booking.findFirst({
+            where: { id, contact: { businessId: input.businessId, deletedAt: null } },
+            select: { contactId: true, contact: { select: { firstName: true } } },
           });
+          if (booking?.contactId) {
+            contactId = booking.contactId;
+            const name = booking.contact?.firstName || 'client';
+            await this.prisma.client.contactTask.create({
+              data: {
+                businessId: input.businessId,
+                contactId,
+                title: mapping.titleFn(name),
+                status: 'OPEN',
+                priority: mapping.priority,
+                dueDate: new Date(Date.now() + 24 * 60 * 60 * 1000),
+                source: 'autopilot',
+              },
+            });
+          }
+        } else {
+          contactId = id;
+          const contact = await this.prisma.client.contact.findFirst({
+            where: { id: contactId, businessId: input.businessId, deletedAt: null },
+          });
+          if (contact) {
+            await this.prisma.client.contactTask.create({
+              data: {
+                businessId: input.businessId,
+                contactId,
+                title: mapping.titleFn(contact.firstName || 'contact'),
+                status: 'OPEN',
+                priority: mapping.priority,
+                dueDate: new Date(Date.now() + 24 * 60 * 60 * 1000),
+                source: 'autopilot',
+              },
+            });
+          }
         }
       }
     } catch (err) {
@@ -1420,6 +1451,12 @@ export class CrmService {
         where: { id: invoiceId, businessId: input.businessId },
       });
       contactId = invoice?.contactId || invoiceId;
+    } else if (actionType === 'postbooking') {
+      const booking = await this.prisma.client.booking.findFirst({
+        where: { id, contact: { businessId: input.businessId, deletedAt: null } },
+        select: { contactId: true },
+      });
+      contactId = booking?.contactId || id;
     }
 
     await this.logEvent(input.businessId, contactId, 'autopilot.denied', {
