@@ -237,6 +237,7 @@ const HeroStats = React.memo(function HeroStats({
   const stats = [
     {
       label: "Total Contacts",
+      mobileLabel: "Contacts",
       value: contacts.length.toString(),
       sub: `${flowIntelligence?.leads ?? 0} leads, ${flowIntelligence?.clients ?? 0} clients`,
       icon: Users,
@@ -248,6 +249,7 @@ const HeroStats = React.memo(function HeroStats({
     },
     {
       label: "Conversion Rate",
+      mobileLabel: "Convert",
       value: `${overallConversion}%`,
       sub: `${flowIntelligence?.leads ?? 0} → ${flowIntelligence?.clients ?? 0}`,
       icon: TrendingUp,
@@ -259,6 +261,7 @@ const HeroStats = React.memo(function HeroStats({
     },
     {
       label: "Pipeline Value",
+      mobileLabel: "Pipeline",
       value: formatTTD(totalRevenue),
       sub: revenueData ? `${formatTTD(revenueData.fromActivePipeline)} active` : "No data",
       icon: DollarSign,
@@ -270,6 +273,7 @@ const HeroStats = React.memo(function HeroStats({
     },
     {
       label: "New This Week",
+      mobileLabel: "New",
       value: newThisWeek.toString(),
       sub: `${convThisWeek} conversion${convThisWeek !== 1 ? "s" : ""}, ${flowIntelligence?.lost ?? 0} lost`,
       icon: Activity,
@@ -286,7 +290,7 @@ const HeroStats = React.memo(function HeroStats({
       variants={stagger.container}
       initial="hidden"
       animate="visible"
-      className="grid grid-cols-2 lg:grid-cols-4 gap-2.5"
+      className="grid grid-cols-4 gap-1.5 sm:gap-2.5"
       role="group"
       aria-label="Key metrics"
     >
@@ -297,30 +301,31 @@ const HeroStats = React.memo(function HeroStats({
             key={s.label}
             variants={stagger.item}
             onClick={s.onClick}
-            className="relative overflow-hidden rounded-xl border border-border/50 bg-card p-3 group hover:border-border/80 transition-all duration-200 text-left cursor-pointer"
+            className="relative overflow-hidden rounded-xl border border-border/50 bg-card p-2 sm:p-3 group hover:border-border/80 transition-all duration-200 text-left cursor-pointer"
           >
             <div
               className="absolute top-0 right-0 w-20 h-20 rounded-full opacity-[0.04] -translate-y-1/2 translate-x-1/2 blur-xl"
               style={{ background: `hsl(var(${s.accentVar}))` }}
               aria-hidden="true"
             />
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="flex items-center gap-1.5">
-                <Icon className="w-3.5 h-3.5 text-muted-foreground/50" />
-                <span className="text-[10px] text-muted-foreground/60 font-semibold uppercase tracking-wider">{s.label}</span>
-              </div>
+            <div className="flex items-center gap-1 mb-1 sm:mb-1.5">
+              <Icon className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-muted-foreground/50 shrink-0" />
+              <span className="text-[10px] text-muted-foreground/60 font-semibold uppercase tracking-wider truncate leading-tight sm:hidden">{s.mobileLabel}</span>
+              <span className="text-[10px] text-muted-foreground/60 font-semibold uppercase tracking-wider truncate leading-tight hidden sm:inline">{s.label}</span>
+            </div>
+            <div className="hidden sm:flex items-center justify-end mb-1">
               <div className="opacity-50 group-hover:opacity-100 transition-opacity">
                 <Sparkline data={sparkData} color={s.sparkColor} />
               </div>
             </div>
-            <div className="text-xl font-bold tracking-tight" style={{ color: `hsl(var(${s.accentVar}))` }}>
+            <div className="text-sm sm:text-xl font-bold tracking-tight leading-tight" style={{ color: `hsl(var(${s.accentVar}))` }}>
               {s.value}
             </div>
-            <div className="flex items-center gap-1.5 mt-0.5">
+            <div className="hidden sm:flex items-center gap-1.5 mt-0.5">
               <span className="text-[10px] text-muted-foreground/50">{s.sub}</span>
             </div>
             {s.trend && s.trendLabel && (
-              <div className={`flex items-center gap-0.5 mt-1 text-[10px] font-semibold ${s.trend === "up" ? "text-emerald-400" : "text-red-400"}`}>
+              <div className={`items-center gap-0.5 mt-1 text-[10px] font-semibold hidden sm:flex ${s.trend === "up" ? "text-emerald-400" : "text-red-400"}`}>
                 {s.trend === "up" ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
                 {s.trendLabel}
               </div>
