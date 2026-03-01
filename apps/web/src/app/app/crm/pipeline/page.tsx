@@ -17,6 +17,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { AiSearchBar, type CrmCommand } from "@/components/contacts/ai-search-bar";
 import { AiChurnDetectionPanel } from "@/components/contacts/ai-churn-detection";
+import { ModuleAiAssistant, AiAssistantTrigger } from "@/components/ai/module-ai-assistant";
 import type { SmartSegment } from "./pipeline-toolbar";
 import { ContactsDatabase } from "./contacts-database";
 import { InsightsTab } from "./insights-tab";
@@ -24,12 +25,14 @@ import { EngageTab } from "./engage-tab";
 import { PipelineTabContent } from "./pipeline-tab-content";
 import { GettingStartedGuide } from "./getting-started-guide";
 import { useContactsPipeline } from "./use-contacts-pipeline";
+import { useCrmAiAssistant } from "./hooks/use-crm-ai-assistant";
 
 export default function ContactsPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const googleHandled = useRef(false);
   const state = useContactsPipeline();
+  const crmAi = useCrmAiAssistant();
 
   const {
     workspaceLoading, workspaceError, businessId,
@@ -51,6 +54,30 @@ export default function ContactsPage() {
     handleApproveAutopilot, handleDenyAutopilot,
     selectContact, loadFlowData,
   } = state;
+
+  useEffect(() => {
+    if (businessId) {
+      crmAi.updateCrmContext({
+        businessId,
+        activeView: crmViewTab,
+        contactCount: contacts.length,
+        selectedContactId: state.selectedContact?.id,
+      });
+    }
+  }, [businessId, crmViewTab, contacts.length, state.selectedContact?.id, crmAi.updateCrmContext]);
+
+  const handleAiAssistantAction = useCallback((actionKey: string) => {
+    const { type, contactId } = crmAi.parseActionKey(actionKey);
+    if (contactId) {
+      selectContact(contactId);
+      setCrmViewTab("pipeline");
+    }
+    if (type === "follow_up" || type === "check_in" || type === "re_engage") {
+      toast.success("Opening contact for follow-up...");
+    } else if (type === "send_quote") {
+      toast.success("Opening contact to create a quote...");
+    }
+  }, [crmAi.parseActionKey, selectContact, setCrmViewTab]);
 
   useEffect(() => {
     if (googleHandled.current) return;
@@ -268,10 +295,25 @@ export default function ContactsPage() {
         }
       />
 
-      <AiSearchBar
-        onSelectContact={(id) => { selectContact(id); setCrmViewTab("pipeline"); }}
-        onExecuteCommand={handleAiCommand}
-      />
+      <div className="flex items-start gap-3">
+        <div className="flex-1">
+          <AiSearchBar
+            onSelectContact={(id) => { selectContact(id); setCrmViewTab("pipeline"); }}
+            onExecuteCommand={handleAiCommand}
+          />
+        </div>
+        <AiAssistantTrigger ai={crmAi} moduleName="CRM" />
+      </div>
+
+      <AnimatePresence>
+        {crmAi.panelOpen && (
+          <ModuleAiAssistant
+            ai={crmAi}
+            moduleName="CRM"
+            onAction={handleAiAssistantAction}
+          />
+        )}
+      </AnimatePresence>
 
       <TabNav
         tabs={[
