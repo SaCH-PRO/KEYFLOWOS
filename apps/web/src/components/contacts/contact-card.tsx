@@ -39,6 +39,13 @@ const STATUS_COLORS: Record<string, string> = {
   LOST: "hsl(var(--kf-muted-foreground))",
 };
 
+const STATUS_BADGE_CLASSES: Record<string, string> = {
+  LEAD: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+  PROSPECT: "bg-blue-500/10 text-blue-400 border-blue-500/20",
+  CLIENT: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+  LOST: "bg-red-500/10 text-red-400/70 border-red-500/15",
+};
+
 const SOURCE_CONFIG: Record<string, { label: string; icon: typeof Globe; color: string }> = {
   booking: { label: "Booking", icon: CalendarCheck, color: "hsl(var(--kf-accent2))" },
   store: { label: "Store", icon: Globe, color: "hsl(280 70% 60%)" },
@@ -77,6 +84,7 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
   const fullName = `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "Unnamed";
   const initials = `${contact.firstName?.[0] ?? ""}${contact.lastName?.[0] ?? ""}`.toUpperCase() || "?";
   const statusColor = STATUS_COLORS[contact.status ?? ""] ?? STATUS_COLORS.LEAD;
+  const badgeClass = STATUS_BADGE_CLASSES[contact.status ?? ""] ?? "bg-muted/30 text-muted-foreground border-border/30";
   const sourceInfo = getSourceInfo(contact.source);
   const SourceIcon = sourceInfo.icon;
 
@@ -119,9 +127,9 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index < 10 ? index * 0.03 : 0 }}
       onClick={onClick}
-      className={`kf-card p-4 cursor-pointer transition-all hover:scale-[1.01] group ${
-        isSelected ? "ring-2 ring-[hsl(var(--kf-accent1))]" : ""
-      } ${selected ? "ring-2 ring-[hsl(var(--kf-accent2))]" : ""}`}
+      className={`rounded-2xl border bg-card p-4 cursor-pointer transition-all hover:bg-white/[0.01] group ${
+        isSelected ? "border-[hsl(var(--kf-accent1))]/40 bg-[hsl(var(--kf-accent1))]/[0.03]" : "border-border/50"
+      } ${selected ? "border-[hsl(var(--kf-accent2))]/40 bg-[hsl(var(--kf-accent2))]/[0.03]" : ""}`}
     >
       <div className="flex items-start gap-3">
         {selectable && (
@@ -131,14 +139,14 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
               checked={selected}
               onChange={() => onToggleSelect?.(contact.id)}
               onClick={(e) => e.stopPropagation()}
-              className="w-4 h-4 rounded border-border accent-[hsl(var(--kf-accent1))] cursor-pointer"
+              className="w-3.5 h-3.5 rounded border-border accent-[hsl(var(--kf-accent1))] cursor-pointer"
             />
           </div>
         )}
 
         <div
-          className="h-10 w-10 rounded-full flex items-center justify-center text-white text-sm font-semibold flex-shrink-0 relative"
-          style={{ background: statusColor }}
+          className="h-10 w-10 rounded-xl flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+          style={{ background: `linear-gradient(135deg, ${statusColor}, ${statusColor}cc)` }}
         >
           {initials}
         </div>
@@ -146,39 +154,42 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
-              <h3 className="font-medium truncate">{fullName}</h3>
+              <h3 className="text-[13px] font-semibold truncate">{fullName}</h3>
               {onTogglePin && (
                 <button
                   onClick={handlePin}
-                  className={`p-0.5 rounded transition-colors flex-shrink-0 ${isPinned ? "text-yellow-400" : "text-muted-foreground md:opacity-0 md:group-hover:opacity-100"}`}
+                  className={`p-0.5 rounded transition-colors flex-shrink-0 ${isPinned ? "text-yellow-400" : "text-muted-foreground/30 md:opacity-0 md:group-hover:opacity-100"}`}
                   title={isPinned ? "Unpin" : "Pin contact"}
+                  aria-label={isPinned ? "Unpin contact" : "Pin contact"}
                 >
-                  <Star className={`w-3.5 h-3.5 ${isPinned ? "fill-current" : ""}`} />
+                  <Star className={`w-3 h-3 ${isPinned ? "fill-current" : ""}`} />
                 </button>
               )}
             </div>
-            <div className="flex items-center gap-1.5 flex-shrink-0">
+            <div className="flex items-center gap-1 flex-shrink-0">
               {onQuickAction && (
                 <div className="relative" ref={actionsRef}>
                   <button
                     onClick={(e) => { e.stopPropagation(); setShowActions(!showActions); }}
-                    className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors md:opacity-0 md:group-hover:opacity-100 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center"
+                    className="p-1 rounded-lg hover:bg-white/[0.04] text-muted-foreground/40 hover:text-muted-foreground transition-colors md:opacity-0 md:group-hover:opacity-100 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center"
                     title="Quick actions"
+                    aria-haspopup="menu"
+                    aria-expanded={showActions}
                   >
                     <MoreHorizontal className="w-3.5 h-3.5" />
                   </button>
                   {showActions && (
-                    <div className="absolute right-0 top-8 z-50 w-48 kf-card border border-border shadow-xl rounded-xl py-1 animate-in fade-in zoom-in-95">
-                      <button onClick={(e) => handleQuickAction(e, "create-invoice")} className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/50 transition-colors">
-                        <Receipt className="w-4 h-4 text-emerald-400" />
+                    <div role="menu" className="absolute right-0 top-8 z-50 w-48 bg-popover/95 backdrop-blur-xl border border-border/50 shadow-xl rounded-xl py-1 animate-in fade-in zoom-in-95">
+                      <button role="menuitem" onClick={(e) => handleQuickAction(e, "create-invoice")} className="w-full flex items-center gap-2 px-3 py-2 text-[11px] hover:bg-white/[0.05] transition-colors">
+                        <Receipt className="w-3.5 h-3.5 text-emerald-400/70" />
                         Create Invoice
                       </button>
-                      <button onClick={(e) => handleQuickAction(e, "book-appointment")} className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/50 transition-colors">
-                        <Calendar className="w-4 h-4 text-blue-400" />
+                      <button role="menuitem" onClick={(e) => handleQuickAction(e, "book-appointment")} className="w-full flex items-center gap-2 px-3 py-2 text-[11px] hover:bg-white/[0.05] transition-colors">
+                        <Calendar className="w-3.5 h-3.5 text-blue-400/70" />
                         Book Appointment
                       </button>
-                      <button onClick={(e) => handleQuickAction(e, "send-quote")} className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/50 transition-colors">
-                        <FileSignature className="w-4 h-4 text-violet-400" />
+                      <button role="menuitem" onClick={(e) => handleQuickAction(e, "send-quote")} className="w-full flex items-center gap-2 px-3 py-2 text-[11px] hover:bg-white/[0.05] transition-colors">
+                        <FileSignature className="w-3.5 h-3.5 text-violet-400/70" />
                         Send Quote
                       </button>
                     </div>
@@ -187,23 +198,21 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
               )}
               <button
                 onClick={handleDelete}
-                className="p-1.5 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors md:opacity-0 md:group-hover:opacity-100 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center"
+                className="p-1 rounded-lg hover:bg-red-500/10 text-muted-foreground/30 hover:text-red-400 transition-colors md:opacity-0 md:group-hover:opacity-100 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center"
                 title="Delete contact"
+                aria-label="Delete contact"
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
-              <span
-                className="text-[10px] font-medium px-2 py-0.5 rounded-full"
-                style={{ background: `${statusColor}20`, color: statusColor }}
-              >
+              <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-md border ${badgeClass}`}>
                 {contact.status ?? "LEAD"}
               </span>
             </div>
           </div>
           
           {(contact.companyName || contact.jobTitle) && (
-            <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
-              <Building2 className="w-3 h-3" />
+            <div className="flex items-center gap-1 text-[11px] text-muted-foreground/60 mt-0.5">
+              <Building2 className="w-2.5 h-2.5" />
               <span className="truncate">
                 {contact.jobTitle && contact.companyName
                   ? `${contact.jobTitle} at ${contact.companyName}`
@@ -212,41 +221,43 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
             </div>
           )}
 
-          <div className="flex items-center gap-2 mt-1.5">
+          <div className="flex items-center gap-1.5 mt-1.5">
             <span
-              className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md"
-              style={{ background: `${sourceInfo.color}15`, color: sourceInfo.color }}
+              className="inline-flex items-center gap-1 text-[9px] font-medium px-1.5 py-0.5 rounded-md border border-transparent"
+              style={{ background: `${sourceInfo.color}10`, color: sourceInfo.color, borderColor: `${sourceInfo.color}15` }}
               title={`Source: ${sourceInfo.label}${contact.sourceDetail ? ` (${contact.sourceDetail})` : ""}`}
             >
               <SourceIcon className="w-2.5 h-2.5" />
               {sourceInfo.label}
             </span>
             {contact.preferredChannel && (
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-[9px] text-muted-foreground/40">
                 via {contact.preferredChannel}
               </span>
             )}
           </div>
 
-          <div className="flex items-center gap-1 mt-2">
+          <div className="flex items-center gap-0.5 mt-2">
             {contact.email && (
               <a
                 href={`mailto:${contact.email}`}
                 onClick={(e) => e.stopPropagation()}
-                className="inline-flex items-center justify-center w-8 h-8 rounded-lg hover:bg-blue-500/10 transition-colors"
+                className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-blue-500/10 transition-colors"
                 title={`Email ${contact.email}`}
+                aria-label={`Email ${contact.email}`}
               >
-                <Mail className="w-4 h-4 text-blue-400" />
+                <Mail className="w-3.5 h-3.5 text-blue-400/60" />
               </a>
             )}
             {contact.phone && (
               <a
                 href={`tel:${contact.phone}`}
                 onClick={(e) => e.stopPropagation()}
-                className="inline-flex items-center justify-center w-8 h-8 rounded-lg hover:bg-violet-500/10 transition-colors"
+                className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-violet-500/10 transition-colors"
                 title={`Call ${contact.phone}`}
+                aria-label={`Call ${contact.phone}`}
               >
-                <Phone className="w-4 h-4 text-violet-400" />
+                <Phone className="w-3.5 h-3.5 text-violet-400/60" />
               </a>
             )}
             {(() => {
@@ -259,10 +270,11 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={(e) => e.stopPropagation()}
-                  className="inline-flex items-center justify-center w-8 h-8 rounded-lg hover:bg-emerald-500/10 transition-colors"
+                  className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-emerald-500/10 transition-colors"
                   title="WhatsApp"
+                  aria-label="Message on WhatsApp"
                 >
-                  <MessageCircle className="w-4 h-4 text-emerald-500" />
+                  <MessageCircle className="w-3.5 h-3.5 text-emerald-500/60" />
                 </a>
               );
             })()}
@@ -274,44 +286,44 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
                 {contact.tags.slice(0, 2).map((tag) => (
                   <span
                     key={tag}
-                    className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground"
+                    className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-md bg-white/[0.04] text-muted-foreground/50 border border-border/30"
                   >
-                    <Tag className="w-2.5 h-2.5" />
+                    <Tag className="w-2 h-2" />
                     {tag}
                   </span>
                 ))}
                 {contact.tags.length > 2 && (
-                  <span className="text-[10px] text-muted-foreground">+{contact.tags.length - 2}</span>
+                  <span className="text-[9px] text-muted-foreground/30">+{contact.tags.length - 2}</span>
                 )}
               </div>
             )}
           </div>
 
           {contact.meta && (contact.meta.leadScore || contact.meta.outstandingBalance || contact.meta.totalRevenue || contact.meta.invoiceCount || contact.meta.bookingCount) && (
-            <div className="flex items-center gap-3 mt-1.5 text-[10px] flex-wrap">
+            <div className="flex items-center gap-2.5 mt-1.5 text-[9px] flex-wrap">
               {contact.meta.leadScore != null && contact.meta.leadScore > 0 && (
-                <span className="text-muted-foreground">
-                  Score: <span className="font-medium text-foreground">{contact.meta.leadScore}</span>
+                <span className="text-muted-foreground/50">
+                  Score <span className="font-semibold text-foreground/70">{contact.meta.leadScore}</span>
                 </span>
               )}
               {contact.meta.totalRevenue != null && contact.meta.totalRevenue > 0 && (
-                <span className="text-emerald-400">
-                  Revenue: TTD {contact.meta.totalRevenue.toLocaleString()}
+                <span className="text-emerald-400/70 font-medium">
+                  TTD {contact.meta.totalRevenue.toLocaleString("en-TT")}
                 </span>
               )}
               {contact.meta.outstandingBalance != null && contact.meta.outstandingBalance > 0 && (
-                <span style={{ color: "hsl(var(--kf-accent1))" }}>
-                  Owed: TTD {contact.meta.outstandingBalance.toLocaleString()}
+                <span className="text-[hsl(var(--kf-accent1))]/70 font-medium">
+                  Owed TTD {contact.meta.outstandingBalance.toLocaleString("en-TT")}
                 </span>
               )}
               {contact.meta.invoiceCount != null && contact.meta.invoiceCount > 0 && (
-                <span className="text-muted-foreground">
-                  {contact.meta.invoiceCount} invoice{contact.meta.invoiceCount !== 1 ? "s" : ""}
+                <span className="text-muted-foreground/40">
+                  {contact.meta.invoiceCount} inv
                 </span>
               )}
               {contact.meta.bookingCount != null && contact.meta.bookingCount > 0 && (
-                <span className="text-muted-foreground">
-                  {contact.meta.bookingCount} booking{contact.meta.bookingCount !== 1 ? "s" : ""}
+                <span className="text-muted-foreground/40">
+                  {contact.meta.bookingCount} book
                 </span>
               )}
             </div>
