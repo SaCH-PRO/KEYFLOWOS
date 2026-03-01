@@ -680,7 +680,7 @@ const TaskHealth = React.memo(function TaskHealth({ contacts }: { contacts: Cont
             <div key={it.label} className="text-center p-2.5 rounded-xl bg-white/[0.02] border border-border/30">
               <Icon className={`w-3.5 h-3.5 mx-auto mb-1 ${it.bad ? "text-red-400/70" : "text-emerald-400/70"}`} />
               <div className={`text-sm font-bold ${it.bad ? "text-red-400" : "text-emerald-400"}`}>{it.value}</div>
-              <div className="text-[9px] text-muted-foreground/50 mt-0.5">{it.label}</div>
+              <div className="text-[10px] text-muted-foreground/60 mt-0.5">{it.label}</div>
             </div>
           );
         })}

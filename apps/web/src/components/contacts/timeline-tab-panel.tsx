@@ -136,14 +136,14 @@ export function TimelineTabPanel({
                   const barColor = value >= 70 ? "hsl(142 76% 36%)" : value >= 40 ? "hsl(var(--kf-accent2))" : "hsl(var(--kf-accent1))";
                   return (
                     <div key={key} className="space-y-0.5">
-                      <div className="flex items-center gap-1 text-[9px] text-muted-foreground">
-                        <Icon className="w-2.5 h-2.5" />
+                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                        <Icon className="w-3 h-3" />
                         {label}
                       </div>
                       <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                         <div className="h-full rounded-full transition-all" style={{ width: `${value}%`, background: barColor }} />
                       </div>
-                      <div className="text-[9px] font-medium" style={{ color: barColor }}>{value}%</div>
+                      <div className="text-[10px] font-medium" style={{ color: barColor }}>{value}%</div>
                     </div>
                   );
                 })}
@@ -388,7 +388,7 @@ export function TimelineTabPanel({
                     <p className="text-sm">{aiInsight.summary}</p>
                   </div>
                   {aiInsight.confidence > 0 && (
-                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${
                       aiInsight.confidence >= 80 ? "bg-emerald-500/10 text-emerald-400" : aiInsight.confidence >= 50 ? "bg-amber-500/10 text-amber-400" : "bg-red-500/10 text-red-400"
                     }`}>{aiInsight.confidence}%</span>
                   )}

@@ -131,7 +131,7 @@ function DatabaseBulkBarInner({
               <CheckSquare className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
               <span>{selectedCount} selected</span>
               {allPagesSelected && (
-                <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))]">
+                <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))]">
                   all pages
                 </span>
               )}
@@ -241,7 +241,7 @@ function DatabaseBulkBarInner({
                   aria-label="Select a list"
                 >
                   {manualLists.length === 0 ? (
-                    <div className="px-3 py-2 text-[11px] text-muted-foreground/50">
+                    <div className="px-3 py-2 text-xs text-muted-foreground/60">
                       No manual lists yet. Create one first.
                     </div>
                   ) : (
@@ -258,7 +258,7 @@ function DatabaseBulkBarInner({
                           style={{ backgroundColor: list.color || "#888" }}
                         />
                         <span className="truncate flex-1">{list.name}</span>
-                        <span className="text-[9px] text-muted-foreground/40 font-mono">{list.contactCount}</span>
+                        <span className="text-[10px] text-muted-foreground/50 font-mono">{list.contactCount}</span>
                       </button>
                     ))
                   )}
