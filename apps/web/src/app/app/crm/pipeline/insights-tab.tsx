@@ -1,11 +1,13 @@
 "use client";
 
 import React, { useMemo, useState, useCallback } from "react";
+import { motion } from "framer-motion";
 import {
   BarChart3, TrendingUp, Users, ArrowRight, DollarSign,
   Clock, Zap, AlertTriangle, Filter, ChevronDown,
   CheckCircle2, ListChecks, Target, ShieldCheck,
-  ArrowUpRight, ArrowDownRight, Activity,
+  ArrowUpRight, ArrowDownRight, Activity, MessageCircle,
+  Mail, Phone, Globe,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { FlowIntelligenceData } from "@/components/contacts/flow-intelligence";
@@ -41,29 +43,34 @@ function formatTTD(value: number): string {
   return `TTD ${value.toLocaleString("en-TT", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
+const stagger = {
+  container: { hidden: {}, visible: { transition: { staggerChildren: 0.06 } } },
+  item: { hidden: { opacity: 0, y: 12 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] } } },
+};
+
 function InsightsSkeleton() {
   return (
     <div className="space-y-5" role="status" aria-label="Loading insights">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="kf-stat-card p-4">
+          <div key={i} className="rounded-2xl border border-border/50 bg-card p-5">
             <Skeleton className="h-3 w-16 mb-3" />
-            <Skeleton className="h-8 w-20 mb-1" />
+            <Skeleton className="h-8 w-20 mb-2" />
             <Skeleton className="h-3 w-24" />
           </div>
         ))}
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
-        <div className="lg:col-span-3 kf-card p-5 space-y-4">
+        <div className="lg:col-span-3 rounded-2xl border border-border/50 bg-card p-5 space-y-4">
           <Skeleton className="h-5 w-28" />
           {Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className="space-y-2">
               <Skeleton className="h-4 w-20" />
-              <Skeleton className="h-6 w-full rounded-lg" />
+              <Skeleton className="h-7 w-full rounded-lg" />
             </div>
           ))}
         </div>
-        <div className="lg:col-span-2 kf-card p-5 space-y-3">
+        <div className="lg:col-span-2 rounded-2xl border border-border/50 bg-card p-5 space-y-3">
           <Skeleton className="h-5 w-24" />
           {Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-14 w-full rounded-xl" />
@@ -71,11 +78,50 @@ function InsightsSkeleton() {
         </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="kf-card p-5"><Skeleton className="h-32 w-full" /></div>
-        <div className="kf-card p-5"><Skeleton className="h-32 w-full" /></div>
+        <div className="rounded-2xl border border-border/50 bg-card p-5"><Skeleton className="h-36 w-full" /></div>
+        <div className="rounded-2xl border border-border/50 bg-card p-5"><Skeleton className="h-36 w-full" /></div>
       </div>
     </div>
   );
+}
+
+function Sparkline({ data, color, width = 48, height = 20 }: { data: number[]; color: string; width?: number; height?: number }) {
+  if (data.length < 2) return null;
+  const max = Math.max(...data, 1);
+  const min = Math.min(...data, 0);
+  const range = max - min || 1;
+  const step = width / (data.length - 1);
+
+  const points = data.map((v, i) => `${i * step},${height - ((v - min) / range) * height}`).join(" ");
+  const areaPath = `M0,${height} L${points.split(" ").map((p, i) => (i === 0 ? p.split(",").join(",") : p)).join(" L")} L${width},${height} Z`;
+
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="overflow-visible" aria-hidden="true">
+      <defs>
+        <linearGradient id={`spark-${color.replace(/[^a-z0-9]/gi, "")}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.3" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={areaPath} fill={`url(#spark-${color.replace(/[^a-z0-9]/gi, "")})`} />
+      <polyline points={points} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={width} cy={height - ((data[data.length - 1] - min) / range) * height} r="2" fill={color} />
+    </svg>
+  );
+}
+
+function buildWeeklyBuckets(contacts: Contact[], weeks: number): number[] {
+  const now = Date.now();
+  const buckets: number[] = [];
+  for (let i = weeks - 1; i >= 0; i--) {
+    const start = now - (i + 1) * 7 * 86_400_000;
+    const end = now - i * 7 * 86_400_000;
+    buckets.push(contacts.filter((c) => {
+      const d = c.createdAt ? new Date(c.createdAt).getTime() : 0;
+      return d >= start && d < end;
+    }).length);
+  }
+  return buckets;
 }
 
 const FUNNEL_STAGES = [
@@ -97,26 +143,28 @@ const FunnelChart = React.memo(function FunnelChart({ data }: { data: FlowIntell
   const conversionRates = [leadToProspect, prospectToClient];
 
   return (
-    <div className="space-y-2.5" role="img" aria-label={`Pipeline funnel: ${data.leads} leads, ${data.prospects} prospects, ${data.clients} clients`}>
+    <div className="space-y-3" role="img" aria-label={`Pipeline funnel: ${data.leads} leads, ${data.prospects} prospects, ${data.clients} clients`}>
       {stages.map((stage, i) => {
         const widthPct = Math.max((stage.count / maxCount) * 100, 12);
         return (
           <div key={stage.key}>
-            <div className="flex items-center justify-between text-xs mb-1">
+            <div className="flex items-center justify-between text-xs mb-1.5">
               <span className="font-medium text-foreground/80">{stage.label}</span>
-              <span className="font-mono font-semibold" style={{ color: stage.color }}>{stage.count}</span>
+              <span className="font-mono font-bold text-sm" style={{ color: stage.color }}>{stage.count}</span>
             </div>
-            <div className="h-7 bg-white/[0.03] rounded-lg overflow-hidden relative group">
-              <div
-                className={`h-full rounded-lg bg-gradient-to-r ${stage.gradient} transition-all duration-700 ease-out`}
-                style={{ width: `${widthPct}%` }}
+            <div className="h-8 bg-white/[0.03] rounded-lg overflow-hidden relative group">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${widthPct}%` }}
+                transition={{ duration: 0.8, delay: i * 0.15, ease: [0.25, 0.46, 0.45, 0.94] }}
+                className={`h-full rounded-lg bg-gradient-to-r ${stage.gradient}`}
               />
-              <div className="absolute inset-0 bg-white/0 group-hover:bg-white/[0.03] transition-colors rounded-lg" />
+              <div className="absolute inset-0 bg-white/0 group-hover:bg-white/[0.04] transition-colors rounded-lg" />
             </div>
             {i < stages.length - 1 && (
-              <div className="flex items-center gap-1 mt-1 ml-2">
-                <ArrowRight className="w-2.5 h-2.5 text-muted-foreground/60" />
-                <span className="text-[10px] text-muted-foreground/70 font-medium">
+              <div className="flex items-center gap-1.5 mt-1.5 ml-3">
+                <ArrowRight className="w-3 h-3 text-muted-foreground/50" />
+                <span className="text-[11px] text-muted-foreground/70 font-medium">
                   {conversionRates[i]}% convert
                 </span>
               </div>
@@ -129,9 +177,7 @@ const FunnelChart = React.memo(function FunnelChart({ data }: { data: FlowIntell
 });
 
 const HeroStats = React.memo(function HeroStats({
-  flowIntelligence,
-  revenueData,
-  contacts,
+  flowIntelligence, revenueData, contacts,
 }: {
   flowIntelligence: FlowIntelligenceData | null;
   revenueData: RevenueData | null;
@@ -146,6 +192,8 @@ const HeroStats = React.memo(function HeroStats({
   const newThisWeek = flowIntelligence?.newThisWeek ?? 0;
   const convThisWeek = flowIntelligence?.conversionsThisWeek ?? 0;
 
+  const sparkData = useMemo(() => buildWeeklyBuckets(contacts, 6), [contacts]);
+
   const stats = [
     {
       label: "Total Contacts",
@@ -153,6 +201,7 @@ const HeroStats = React.memo(function HeroStats({
       sub: `${flowIntelligence?.leads ?? 0} leads, ${flowIntelligence?.clients ?? 0} clients`,
       icon: Users,
       accentVar: "--kf-accent2",
+      sparkColor: "hsl(var(--kf-accent2))",
       trend: newThisWeek > 0 ? "up" as const : null,
       trendLabel: newThisWeek > 0 ? `+${newThisWeek} this week` : undefined,
     },
@@ -162,6 +211,7 @@ const HeroStats = React.memo(function HeroStats({
       sub: `${flowIntelligence?.leads ?? 0} → ${flowIntelligence?.clients ?? 0}`,
       icon: TrendingUp,
       accentVar: "--kf-accent1",
+      sparkColor: "hsl(var(--kf-accent1))",
       trend: convThisWeek > 0 ? "up" as const : null,
       trendLabel: convThisWeek > 0 ? `${convThisWeek} this week` : undefined,
     },
@@ -171,6 +221,7 @@ const HeroStats = React.memo(function HeroStats({
       sub: revenueData ? `${formatTTD(revenueData.fromActivePipeline)} active` : "No data",
       icon: DollarSign,
       accentVar: "--kf-accent1",
+      sparkColor: "hsl(142 76% 36%)",
       trend: null,
       trendLabel: undefined,
     },
@@ -180,26 +231,41 @@ const HeroStats = React.memo(function HeroStats({
       sub: `${convThisWeek} conversion${convThisWeek !== 1 ? "s" : ""}, ${flowIntelligence?.lost ?? 0} lost`,
       icon: Activity,
       accentVar: "--kf-accent2",
+      sparkColor: "hsl(var(--kf-accent2))",
       trend: flowIntelligence && flowIntelligence.lost > 0 ? "down" as const : null,
       trendLabel: flowIntelligence && flowIntelligence.lost > 0 ? `${flowIntelligence.lost} lost` : undefined,
     },
   ];
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" role="group" aria-label="Key metrics">
+    <motion.div
+      variants={stagger.container}
+      initial="hidden"
+      animate="visible"
+      className="grid grid-cols-2 lg:grid-cols-4 gap-3"
+      role="group"
+      aria-label="Key metrics"
+    >
       {stats.map((s) => {
         const Icon = s.icon;
         return (
-          <div
+          <motion.div
             key={s.label}
-            className="relative overflow-hidden rounded-2xl border border-border/50 bg-gradient-to-br from-card to-card/80 p-4 group hover:border-border transition-all duration-300"
+            variants={stagger.item}
+            className="relative overflow-hidden rounded-2xl border border-border/50 bg-gradient-to-br from-card to-card/80 p-4 group hover:border-border/80 transition-all duration-300"
           >
-            <div className="absolute top-0 right-0 w-20 h-20 rounded-full opacity-[0.04] -translate-y-1/2 translate-x-1/2"
+            <div
+              className="absolute top-0 right-0 w-24 h-24 rounded-full opacity-[0.05] -translate-y-1/2 translate-x-1/2 blur-xl"
               style={{ background: `hsl(var(${s.accentVar}))` }}
             />
-            <div className="flex items-center gap-1.5 mb-2">
-              <Icon className="w-3.5 h-3.5 text-muted-foreground/70" />
-              <span className="text-[11px] text-muted-foreground/80 font-medium uppercase tracking-wider">{s.label}</span>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <Icon className="w-3.5 h-3.5 text-muted-foreground/60" />
+                <span className="text-[10px] text-muted-foreground/70 font-semibold uppercase tracking-wider">{s.label}</span>
+              </div>
+              <div className="opacity-60 group-hover:opacity-100 transition-opacity">
+                <Sparkline data={sparkData} color={s.sparkColor} />
+              </div>
             </div>
             <div className="text-2xl font-bold tracking-tight" style={{ color: `hsl(var(${s.accentVar}))` }}>
               {s.value}
@@ -208,25 +274,20 @@ const HeroStats = React.memo(function HeroStats({
               <span className="text-[11px] text-muted-foreground/60">{s.sub}</span>
             </div>
             {s.trend && s.trendLabel && (
-              <div className={`flex items-center gap-0.5 mt-1.5 text-[10px] font-medium ${s.trend === "up" ? "text-emerald-400" : "text-red-400"}`}>
+              <div className={`flex items-center gap-0.5 mt-1.5 text-[10px] font-semibold ${s.trend === "up" ? "text-emerald-400" : "text-red-400"}`}>
                 {s.trend === "up" ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
                 {s.trendLabel}
               </div>
             )}
-          </div>
+          </motion.div>
         );
       })}
-    </div>
+    </motion.div>
   );
 });
 
 const AlertCards = React.memo(function AlertCards({
-  data,
-  revenueData,
-  onViewCold,
-  onViewReady,
-  onViewExpiringQuotes,
-  onViewOverdueInvoices,
+  data, revenueData, onViewCold, onViewReady, onViewExpiringQuotes, onViewOverdueInvoices,
 }: {
   data: FlowIntelligenceData;
   revenueData: RevenueData | null;
@@ -279,17 +340,27 @@ const AlertCards = React.memo(function AlertCards({
 
   if (alerts.length === 0) {
     return (
-      <div className="flex items-center gap-2 px-3 py-4 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04]">
-        <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
-        <span className="text-xs text-emerald-400/80 font-medium">All clear — no action items right now</span>
+      <div className="flex items-center gap-3 px-4 py-5 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04]">
+        <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+        </div>
+        <div>
+          <span className="text-xs text-emerald-400 font-semibold">All clear</span>
+          <p className="text-[10px] text-emerald-400/50 mt-0.5">No action items right now</p>
+        </div>
       </div>
     );
   }
 
   const variantStyles = {
-    success: "border-emerald-500/25 bg-emerald-500/[0.06] hover:bg-emerald-500/[0.1] text-emerald-400",
-    danger: "border-red-500/25 bg-red-500/[0.06] hover:bg-red-500/[0.1] text-red-400",
-    warning: "border-amber-500/25 bg-amber-500/[0.06] hover:bg-amber-500/[0.1] text-amber-400",
+    success: "border-emerald-500/25 bg-emerald-500/[0.04] hover:bg-emerald-500/[0.08]",
+    danger: "border-red-500/25 bg-red-500/[0.04] hover:bg-red-500/[0.08]",
+    warning: "border-amber-500/25 bg-amber-500/[0.04] hover:bg-amber-500/[0.08]",
+  };
+  const iconStyles = {
+    success: "bg-emerald-500/15 text-emerald-400",
+    danger: "bg-red-500/15 text-red-400",
+    warning: "bg-amber-500/15 text-amber-400",
   };
 
   return (
@@ -300,15 +371,17 @@ const AlertCards = React.memo(function AlertCards({
           <button
             key={a.key}
             onClick={a.onClick}
-            className={`flex items-center gap-3 w-full p-3 rounded-xl border transition-all duration-200 text-left group ${variantStyles[a.variant]}`}
+            className={`flex items-center gap-3 w-full p-3.5 rounded-xl border transition-all duration-200 text-left group ${variantStyles[a.variant]}`}
             aria-label={`${a.label} — ${a.sub}`}
           >
-            <Icon className="w-4 h-4 flex-shrink-0" />
-            <div className="flex-1 min-w-0">
-              <div className="text-xs font-semibold">{a.label}</div>
-              <div className="text-[10px] text-muted-foreground/60">{a.sub}</div>
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${iconStyles[a.variant]}`}>
+              <Icon className="w-4 h-4" />
             </div>
-            <ArrowRight className="w-3 h-3 opacity-0 group-hover:opacity-60 -translate-x-1 group-hover:translate-x-0 transition-all" />
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-semibold text-foreground">{a.label}</div>
+              <div className="text-[10px] text-muted-foreground/60 mt-0.5">{a.sub}</div>
+            </div>
+            <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/30 group-hover:text-muted-foreground/60 -translate-x-1 group-hover:translate-x-0 transition-all" />
           </button>
         );
       })}
@@ -319,50 +392,52 @@ const AlertCards = React.memo(function AlertCards({
 const RevenueBreakdown = React.memo(function RevenueBreakdown({ data }: { data: RevenueData }) {
   const total = data.fromActivePipeline + data.fromRecurringClients + data.fromColdLeads;
   const sources = [
-    { label: "Active Pipeline", value: data.fromActivePipeline, gradient: "from-orange-500 to-orange-400" },
-    { label: "Recurring", value: data.fromRecurringClients, gradient: "from-emerald-500 to-emerald-400" },
-    { label: "Cold (if won)", value: data.fromColdLeads, gradient: "from-slate-500 to-slate-400" },
+    { label: "Active Pipeline", value: data.fromActivePipeline, gradient: "from-orange-500 to-orange-400", color: "hsl(var(--kf-accent1))" },
+    { label: "Recurring", value: data.fromRecurringClients, gradient: "from-emerald-500 to-emerald-400", color: "hsl(142 76% 36%)" },
+    { label: "Cold (if won)", value: data.fromColdLeads, gradient: "from-slate-500 to-slate-400", color: "hsl(215 20% 55%)" },
   ];
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 flex items-center gap-2">
+        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 flex items-center gap-2">
           <TrendingUp className="w-3.5 h-3.5" />
           Revenue Forecast
         </h3>
-        <span className="text-sm font-bold" style={{ color: "hsl(var(--kf-accent1))" }}>
+        <span className="text-lg font-bold" style={{ color: "hsl(var(--kf-accent1))" }}>
           {formatTTD(total)}
         </span>
       </div>
 
-      <div className="h-2.5 bg-white/[0.03] rounded-full overflow-hidden flex" role="img" aria-label={`Revenue: ${formatTTD(total)}`}>
+      <div className="h-3 bg-white/[0.03] rounded-full overflow-hidden flex" role="img" aria-label={`Revenue: ${formatTTD(total)}`}>
         {sources.map((s) => {
           const pct = total > 0 ? (s.value / total) * 100 : 0;
           if (pct === 0) return null;
           return (
-            <div
+            <motion.div
               key={s.label}
-              className={`h-full first:rounded-l-full last:rounded-r-full bg-gradient-to-r ${s.gradient} transition-all duration-700`}
-              style={{ width: `${pct}%` }}
+              initial={{ width: 0 }}
+              animate={{ width: `${pct}%` }}
+              transition={{ duration: 0.8, ease: [0.25, 0.46, 0.45, 0.94] }}
+              className={`h-full first:rounded-l-full last:rounded-r-full bg-gradient-to-r ${s.gradient}`}
               title={`${s.label}: ${formatTTD(s.value)}`}
             />
           );
         })}
       </div>
 
-      <div className="space-y-1.5">
+      <div className="space-y-2.5">
         {sources.map((s) => {
           const pct = total > 0 ? Math.round((s.value / total) * 100) : 0;
           return (
-            <div key={s.label} className="flex items-center justify-between text-[11px]">
-              <div className="flex items-center gap-2">
-                <div className={`w-1.5 h-1.5 rounded-full bg-gradient-to-r ${s.gradient}`} />
+            <div key={s.label} className="flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2.5">
+                <div className={`w-2 h-2 rounded-full bg-gradient-to-r ${s.gradient}`} />
                 <span className="text-muted-foreground/70">{s.label}</span>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="font-medium">{formatTTD(s.value)}</span>
-                <span className="text-muted-foreground/40 w-8 text-right">{pct}%</span>
+              <div className="flex items-center gap-3">
+                <span className="font-semibold">{formatTTD(s.value)}</span>
+                <span className="text-muted-foreground/40 w-8 text-right font-mono text-[10px]">{pct}%</span>
               </div>
             </div>
           );
@@ -370,15 +445,15 @@ const RevenueBreakdown = React.memo(function RevenueBreakdown({ data }: { data: 
       </div>
 
       {(data.expiringQuotes.count > 0 || data.overdueInvoices.count > 0) && (
-        <div className="flex gap-2 pt-2 border-t border-border/30">
+        <div className="flex gap-2 pt-3 border-t border-border/30">
           {data.expiringQuotes.count > 0 && (
-            <div className="flex items-center gap-1.5 text-[10px] text-amber-400/70 px-2 py-1 rounded-md bg-amber-500/[0.06]">
+            <div className="flex items-center gap-1.5 text-[10px] text-amber-400 px-2.5 py-1.5 rounded-lg bg-amber-500/[0.06] border border-amber-500/15">
               <Clock className="w-3 h-3" />
               {data.expiringQuotes.count} expiring
             </div>
           )}
           {data.overdueInvoices.count > 0 && (
-            <div className="flex items-center gap-1.5 text-[10px] text-red-400/70 px-2 py-1 rounded-md bg-red-500/[0.06]">
+            <div className="flex items-center gap-1.5 text-[10px] text-red-400 px-2.5 py-1.5 rounded-lg bg-red-500/[0.06] border border-red-500/15">
               <DollarSign className="w-3 h-3" />
               {data.overdueInvoices.count} overdue
             </div>
@@ -405,11 +480,11 @@ const COMPLETENESS_FIELDS: { key: keyof Contact; weight: number }[] = [
 
 function computeHealthStats(contacts: Contact[]) {
   if (contacts.length === 0) {
-    return { completenessAvg: 0, withEmail: 0, withPhone: 0, withCompany: 0, withTags: 0, total: 0 };
+    return { completenessAvg: 0, withEmail: 0, withPhone: 0, withCompany: 0, withTags: 0, withCity: 0, total: 0 };
   }
 
   let totalScore = 0;
-  let withEmail = 0, withPhone = 0, withCompany = 0, withTags = 0;
+  let withEmail = 0, withPhone = 0, withCompany = 0, withTags = 0, withCity = 0;
 
   for (const c of contacts) {
     let score = 0;
@@ -426,9 +501,10 @@ function computeHealthStats(contacts: Contact[]) {
     if (c.phone) withPhone++;
     if (c.companyName) withCompany++;
     if (Array.isArray(c.tags) && c.tags.length > 0) withTags++;
+    if (c.city) withCity++;
   }
 
-  return { completenessAvg: Math.round(totalScore / contacts.length), withEmail, withPhone, withCompany, withTags, total: contacts.length };
+  return { completenessAvg: Math.round(totalScore / contacts.length), withEmail, withPhone, withCompany, withTags, withCity, total: contacts.length };
 }
 
 function getCompletenessColor(pct: number): string {
@@ -443,16 +519,22 @@ const DataCompleteness = React.memo(function DataCompleteness({ contacts }: { co
 
   if (stats.total === 0) {
     return (
-      <div className="text-center py-6 text-muted-foreground/50 text-xs">Add contacts to track data quality</div>
+      <div className="flex flex-col items-center justify-center py-8 text-center">
+        <div className="w-10 h-10 rounded-xl bg-white/[0.03] flex items-center justify-center mb-2">
+          <ShieldCheck className="w-5 h-5 text-muted-foreground/40" />
+        </div>
+        <p className="text-xs text-muted-foreground/60">Add contacts to track data quality</p>
+      </div>
     );
   }
 
   const color = getCompletenessColor(stats.completenessAvg);
   const fields = [
-    { label: "Email", count: stats.withEmail },
-    { label: "Phone", count: stats.withPhone },
-    { label: "Company", count: stats.withCompany },
-    { label: "Tags", count: stats.withTags },
+    { label: "Email", count: stats.withEmail, icon: Mail },
+    { label: "Phone", count: stats.withPhone, icon: Phone },
+    { label: "Company", count: stats.withCompany, icon: Globe },
+    { label: "Tags", count: stats.withTags, icon: Filter },
+    { label: "Location", count: stats.withCity, icon: Target },
   ];
 
   const circumference = 2 * Math.PI * 42;
@@ -460,32 +542,43 @@ const DataCompleteness = React.memo(function DataCompleteness({ contacts }: { co
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-4">
-        <div className="relative w-20 h-20 flex-shrink-0">
+      <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 flex items-center gap-2">
+        <ShieldCheck className="w-3.5 h-3.5" />
+        Data Quality
+      </h3>
+      <div className="flex items-center gap-5">
+        <div className="relative w-[88px] h-[88px] flex-shrink-0">
           <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
-            <circle cx="50" cy="50" r="42" fill="none" strokeWidth="6" className="stroke-white/[0.04]" />
-            <circle
-              cx="50" cy="50" r="42" fill="none" strokeWidth="6"
-              strokeDasharray={`${dashLength} ${circumference - dashLength}`}
+            <circle cx="50" cy="50" r="42" fill="none" strokeWidth="5" className="stroke-white/[0.04]" />
+            <motion.circle
+              cx="50" cy="50" r="42" fill="none" strokeWidth="5"
+              initial={{ strokeDasharray: `0 ${circumference}` }}
+              animate={{ strokeDasharray: `${dashLength} ${circumference - dashLength}` }}
+              transition={{ duration: 1.2, ease: [0.25, 0.46, 0.45, 0.94] }}
               strokeLinecap="round"
               style={{ stroke: color }}
-              className="transition-all duration-1000 ease-out"
             />
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-base font-bold" style={{ color }}>{stats.completenessAvg}%</span>
+            <span className="text-xl font-bold" style={{ color }}>{stats.completenessAvg}%</span>
+            <span className="text-[10px] text-muted-foreground/50">complete</span>
           </div>
         </div>
-        <div className="flex-1 space-y-1.5">
+        <div className="flex-1 space-y-2">
           {fields.map((f) => {
             const pct = Math.round((f.count / stats.total) * 100);
+            const FieldIcon = f.icon;
             return (
               <div key={f.label} className="flex items-center gap-2">
-                <span className="text-[10px] text-muted-foreground/60 w-12">{f.label}</span>
-                <div className="flex-1 h-1 bg-white/[0.03] rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all duration-500"
-                    style={{ width: `${pct}%`, background: getCompletenessColor(pct) }}
+                <FieldIcon className="w-3 h-3 text-muted-foreground/40 flex-shrink-0" />
+                <span className="text-[10px] text-muted-foreground/60 w-14">{f.label}</span>
+                <div className="flex-1 h-1.5 bg-white/[0.03] rounded-full overflow-hidden">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ width: `${pct}%` }}
+                    transition={{ duration: 0.8, ease: [0.25, 0.46, 0.45, 0.94] }}
+                    className="h-full rounded-full"
+                    style={{ background: getCompletenessColor(pct) }}
                   />
                 </div>
                 <span className="text-[10px] font-mono text-muted-foreground/50 w-8 text-right">{pct}%</span>
@@ -536,36 +629,38 @@ const GrowthTrend = React.memo(function GrowthTrend({ contacts, period }: { cont
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 flex items-center gap-2">
+        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 flex items-center gap-2">
           <BarChart3 className="w-3.5 h-3.5" />
           Contact Growth
         </h3>
         {totalNew > 0 && (
-          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[hsl(var(--kf-accent2))]/10 text-[hsl(var(--kf-accent2))]">
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[hsl(var(--kf-accent2))]/10 text-[hsl(var(--kf-accent2))]">
             +{totalNew}
           </span>
         )}
       </div>
-      <div className="flex items-end gap-[3px] h-20" role="img" aria-label={`Growth: ${totalNew} new contacts`}>
+      <div className="flex items-end gap-1 h-28" role="img" aria-label={`Growth: ${totalNew} new contacts`}>
         {buckets.map((b, i) => {
-          const heightPct = Math.max((b.count / maxCount) * 100, 3);
+          const heightPct = Math.max((b.count / maxCount) * 100, 4);
           const isZero = b.count === 0;
           return (
-            <div key={i} className="flex-1 flex flex-col items-center gap-0.5 group">
+            <div key={i} className="flex-1 flex flex-col items-center gap-1 group cursor-default">
               {!isZero && (
-                <span className="text-[8px] font-mono font-medium text-muted-foreground/50" aria-label={`${b.count} contacts`}>{b.count}</span>
+                <span className="text-[10px] font-mono font-semibold text-muted-foreground/60 opacity-0 group-hover:opacity-100 transition-opacity" aria-label={`${b.count} contacts`}>{b.count}</span>
               )}
-              <div
-                className="w-full rounded-sm transition-all duration-500 group-hover:opacity-100"
+              <motion.div
+                initial={{ height: 0 }}
+                animate={{ height: `${heightPct}%` }}
+                transition={{ duration: 0.6, delay: i * 0.08, ease: [0.25, 0.46, 0.45, 0.94] }}
+                className="w-full rounded-md transition-all group-hover:brightness-125"
                 style={{
-                  height: `${heightPct}%`,
                   background: isZero
-                    ? "hsl(var(--muted) / 0.3)"
-                    : `linear-gradient(to top, hsl(var(--kf-accent2) / 0.4), hsl(var(--kf-accent2) / 0.8))`,
-                  opacity: isZero ? 0.3 : 0.7,
+                    ? "hsl(var(--muted) / 0.2)"
+                    : `linear-gradient(to top, hsl(var(--kf-accent2) / 0.35), hsl(var(--kf-accent2) / 0.85))`,
+                  opacity: isZero ? 0.4 : 1,
                 }}
               />
-              <span className="text-[8px] text-muted-foreground/40 truncate w-full text-center">{b.label}</span>
+              <span className="text-[10px] text-muted-foreground/50 truncate w-full text-center">{b.label}</span>
             </div>
           );
         })}
@@ -600,19 +695,21 @@ const LeadScoreDistribution = React.memo(function LeadScoreDistribution({ contac
 
   return (
     <div className="space-y-3">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 flex items-center gap-2">
+      <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 flex items-center gap-2">
         <Target className="w-3.5 h-3.5" />
         Lead Scores
       </h3>
-      <div className="h-2 bg-white/[0.03] rounded-full overflow-hidden flex">
+      <div className="h-2.5 bg-white/[0.03] rounded-full overflow-hidden flex">
         {buckets.map((b) => {
           const pct = total > 0 ? (b.count / total) * 100 : 0;
           if (pct === 0) return null;
           return (
-            <div
+            <motion.div
               key={b.label}
-              className={`h-full first:rounded-l-full last:rounded-r-full bg-gradient-to-r ${b.gradient} transition-all duration-500`}
-              style={{ width: `${pct}%` }}
+              initial={{ width: 0 }}
+              animate={{ width: `${pct}%` }}
+              transition={{ duration: 0.8 }}
+              className={`h-full first:rounded-l-full last:rounded-r-full bg-gradient-to-r ${b.gradient}`}
               title={`${b.label}: ${b.count} (${Math.round(pct)}%)`}
             />
           );
@@ -624,10 +721,10 @@ const LeadScoreDistribution = React.memo(function LeadScoreDistribution({ contac
           const pct = Math.round((b.count / total) * 100);
           return (
             <div key={b.label} className="flex items-center gap-1.5 text-[10px]">
-              <div className="w-1.5 h-1.5 rounded-full" style={{ background: b.color }} />
-              <span className="text-muted-foreground/60">{b.label}</span>
-              <span className="font-mono font-medium text-muted-foreground/80">{b.count}</span>
-              <span className="text-muted-foreground/30">({pct}%)</span>
+              <div className="w-2 h-2 rounded-full" style={{ background: b.color }} />
+              <span className="text-muted-foreground/70">{b.label}</span>
+              <span className="font-mono font-semibold text-muted-foreground/80">{b.count}</span>
+              <span className="text-muted-foreground/40">({pct}%)</span>
             </div>
           );
         })}
@@ -669,7 +766,7 @@ const TaskHealth = React.memo(function TaskHealth({ contacts }: { contacts: Cont
 
   return (
     <div className="space-y-3">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 flex items-center gap-2">
+      <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 flex items-center gap-2">
         <ListChecks className="w-3.5 h-3.5" />
         Health
       </h3>
@@ -677,10 +774,117 @@ const TaskHealth = React.memo(function TaskHealth({ contacts }: { contacts: Cont
         {items.map((it) => {
           const Icon = it.icon;
           return (
-            <div key={it.label} className="text-center p-2.5 rounded-xl bg-white/[0.02] border border-border/30">
-              <Icon className={`w-3.5 h-3.5 mx-auto mb-1 ${it.bad ? "text-red-400/70" : "text-emerald-400/70"}`} />
+            <div key={it.label} className="text-center p-3 rounded-xl bg-white/[0.02] border border-border/30 hover:border-border/50 transition-colors">
+              <div className={`w-7 h-7 rounded-lg mx-auto mb-1.5 flex items-center justify-center ${it.bad ? "bg-red-500/10" : "bg-emerald-500/10"}`}>
+                <Icon className={`w-3.5 h-3.5 ${it.bad ? "text-red-400" : "text-emerald-400"}`} />
+              </div>
               <div className={`text-sm font-bold ${it.bad ? "text-red-400" : "text-emerald-400"}`}>{it.value}</div>
               <div className="text-[10px] text-muted-foreground/60 mt-0.5">{it.label}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+});
+
+const SourceConversion = React.memo(function SourceConversion({ contacts }: { contacts: Contact[] }) {
+  const data = useMemo(() => {
+    const map: Record<string, { total: number; clients: number }> = {};
+    for (const c of contacts) {
+      const src = c.source || "unknown";
+      if (!map[src]) map[src] = { total: 0, clients: 0 };
+      map[src].total++;
+      if (c.status === "CLIENT") map[src].clients++;
+    }
+    return Object.entries(map)
+      .filter(([, v]) => v.total >= 2)
+      .map(([source, v]) => ({
+        source,
+        total: v.total,
+        clients: v.clients,
+        rate: v.total > 0 ? Math.round((v.clients / v.total) * 100) : 0,
+      }))
+      .sort((a, b) => b.rate - a.rate)
+      .slice(0, 5);
+  }, [contacts]);
+
+  if (data.length === 0) return null;
+
+  return (
+    <div className="space-y-3">
+      <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 flex items-center gap-2">
+        <TrendingUp className="w-3.5 h-3.5" />
+        Source Effectiveness
+      </h3>
+      <div className="space-y-2.5">
+        {data.map((d) => (
+          <div key={d.source} className="group">
+            <div className="flex items-center justify-between text-xs mb-1">
+              <span className="capitalize text-muted-foreground/70 font-medium">{d.source.replace(/_/g, " ")}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-muted-foreground/50">{d.clients}/{d.total}</span>
+                <span className={`font-mono font-bold text-[11px] ${d.rate >= 50 ? "text-emerald-400" : d.rate >= 25 ? "text-amber-400" : "text-muted-foreground/60"}`}>
+                  {d.rate}%
+                </span>
+              </div>
+            </div>
+            <div className="h-1.5 bg-white/[0.03] rounded-full overflow-hidden">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${d.rate}%` }}
+                transition={{ duration: 0.6 }}
+                className={`h-full rounded-full ${d.rate >= 50 ? "bg-gradient-to-r from-emerald-500/60 to-emerald-400" : d.rate >= 25 ? "bg-gradient-to-r from-amber-500/60 to-amber-400" : "bg-gradient-to-r from-muted to-muted-foreground/30"}`}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+});
+
+const ChannelPreference = React.memo(function ChannelPreference({ contacts }: { contacts: Contact[] }) {
+  const channels = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const c of contacts) {
+      const ch = c.preferredChannel || "none";
+      map[ch] = (map[ch] || 0) + 1;
+    }
+    const total = contacts.length || 1;
+    return Object.entries(map)
+      .filter(([key]) => key !== "none")
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([channel, count]) => ({ channel, count, pct: Math.round((count / total) * 100) }));
+  }, [contacts]);
+
+  if (channels.length === 0) return null;
+
+  const channelConfig: Record<string, { icon: React.ElementType; color: string }> = {
+    email: { icon: Mail, color: "hsl(220 70% 55%)" },
+    whatsapp: { icon: MessageCircle, color: "hsl(142 70% 45%)" },
+    phone: { icon: Phone, color: "hsl(280 60% 55%)" },
+    sms: { icon: MessageCircle, color: "hsl(200 70% 50%)" },
+  };
+
+  return (
+    <div className="space-y-3">
+      <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 flex items-center gap-2">
+        <MessageCircle className="w-3.5 h-3.5" />
+        Channels
+      </h3>
+      <div className="space-y-2">
+        {channels.map((ch) => {
+          const cfg = channelConfig[ch.channel.toLowerCase()] || { icon: Globe, color: "hsl(var(--kf-muted-foreground))" };
+          const ChIcon = cfg.icon;
+          return (
+            <div key={ch.channel} className="flex items-center gap-2.5">
+              <div className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0" style={{ background: `${cfg.color}15` }}>
+                <ChIcon className="w-3 h-3" style={{ color: cfg.color }} />
+              </div>
+              <span className="text-[11px] capitalize text-muted-foreground/70 flex-1">{ch.channel}</span>
+              <span className="text-[10px] font-mono font-semibold text-muted-foreground/80">{ch.pct}%</span>
             </div>
           );
         })}
@@ -704,65 +908,25 @@ const TopSources = React.memo(function TopSources({ contacts }: { contacts: Cont
 
   return (
     <div className="space-y-3">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 flex items-center gap-2">
+      <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 flex items-center gap-2">
         <Filter className="w-3.5 h-3.5" />
         Sources
       </h3>
-      <div className="space-y-2">
+      <div className="space-y-2.5">
         {sources.map(([source, count]) => {
           const pct = (count / maxCount) * 100;
           return (
             <div key={source} className="group">
-              <div className="flex items-center justify-between text-[11px] mb-0.5">
+              <div className="flex items-center justify-between text-xs mb-1">
                 <span className="capitalize text-muted-foreground/70">{source.replace(/_/g, " ")}</span>
-                <span className="font-mono font-medium text-muted-foreground/80">{count}</span>
+                <span className="font-mono font-semibold text-muted-foreground/80">{count}</span>
               </div>
-              <div className="h-1 bg-white/[0.03] rounded-full overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-[hsl(var(--kf-accent2))]/60 to-[hsl(var(--kf-accent2))]/90 transition-all duration-500"
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-});
-
-const TopSegments = React.memo(function TopSegments({ contacts }: { contacts: Contact[] }) {
-  const segments = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (const c of contacts) {
-      const seg = c.segment || c.lifecycleStage || "unassigned";
-      map[seg] = (map[seg] || 0) + 1;
-    }
-    return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 4);
-  }, [contacts]);
-
-  const maxCount = segments.length > 0 ? segments[0][1] : 1;
-  if (segments.length === 0) return null;
-
-  return (
-    <div className="space-y-3">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 flex items-center gap-2">
-        <Users className="w-3.5 h-3.5" />
-        Segments
-      </h3>
-      <div className="space-y-2">
-        {segments.map(([segment, count]) => {
-          const pct = (count / maxCount) * 100;
-          return (
-            <div key={segment} className="group">
-              <div className="flex items-center justify-between text-[11px] mb-0.5">
-                <span className="capitalize text-muted-foreground/70">{segment.replace(/_/g, " ")}</span>
-                <span className="font-mono font-medium text-muted-foreground/80">{count}</span>
-              </div>
-              <div className="h-1 bg-white/[0.03] rounded-full overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-[hsl(var(--kf-accent1))]/60 to-[hsl(var(--kf-accent1))]/90 transition-all duration-500"
-                  style={{ width: `${pct}%` }}
+              <div className="h-1.5 bg-white/[0.03] rounded-full overflow-hidden">
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${pct}%` }}
+                  transition={{ duration: 0.6 }}
+                  className="h-full rounded-full bg-gradient-to-r from-[hsl(var(--kf-accent2))]/50 to-[hsl(var(--kf-accent2))]"
                 />
               </div>
             </div>
@@ -802,29 +966,35 @@ function InsightsTabInner({
 
   if (!flowIntelligence && !revenueData && contacts.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
-        <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[hsl(var(--kf-accent1))]/10 to-[hsl(var(--kf-accent2))]/10 flex items-center justify-center mb-4">
-          <BarChart3 className="w-6 h-6 text-muted-foreground/50" />
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[hsl(var(--kf-accent1))]/10 to-[hsl(var(--kf-accent2))]/10 flex items-center justify-center mb-5 border border-border/30">
+          <BarChart3 className="w-7 h-7 text-muted-foreground/40" />
         </div>
-        <p className="text-sm font-medium text-foreground/70 mb-1">No Insights Yet</p>
-        <p className="text-xs text-muted-foreground/50 max-w-[240px]">
-          Add contacts and activities to unlock pipeline analytics.
+        <p className="text-base font-semibold text-foreground/70 mb-1.5">No Insights Yet</p>
+        <p className="text-xs text-muted-foreground/50 max-w-[260px] leading-relaxed">
+          Add contacts and activities to unlock pipeline analytics and revenue forecasting.
         </p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-1 h-4 rounded-full bg-gradient-to-b from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))]" />
+    <motion.div
+      initial="hidden"
+      animate="visible"
+      variants={stagger.container}
+      className="space-y-4"
+    >
+      <motion.div variants={stagger.item} className="flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="w-1 h-5 rounded-full bg-gradient-to-b from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))]" />
           <h2 className="text-sm font-semibold tracking-tight">Insights</h2>
+          <span className="text-[10px] text-muted-foreground/40 font-medium">{contacts.length} contacts</span>
         </div>
         <div className="relative">
           <button
             onClick={togglePeriodMenu}
-            className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium rounded-lg border border-border/50 bg-white/[0.02] hover:bg-white/[0.05] transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-border/50 bg-white/[0.02] hover:bg-white/[0.05] transition-colors"
             aria-haspopup="listbox"
             aria-expanded={showPeriodMenu}
             aria-label={`Time period: ${PERIOD_LABELS[period]}`}
@@ -836,7 +1006,7 @@ function InsightsTabInner({
             <>
               <div className="fixed inset-0 z-10" onClick={closePeriodMenu} />
               <div
-                className="absolute right-0 top-full mt-1 z-20 bg-popover/95 backdrop-blur-xl border border-border/50 rounded-lg shadow-xl py-1 min-w-[120px]"
+                className="absolute right-0 top-full mt-1 z-20 bg-popover/95 backdrop-blur-xl border border-border/50 rounded-xl shadow-xl py-1 min-w-[130px]"
                 role="listbox"
                 aria-label="Select time period"
               >
@@ -846,7 +1016,7 @@ function InsightsTabInner({
                     role="option"
                     aria-selected={p === period}
                     onClick={() => handleSelectPeriod(p)}
-                    className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-white/[0.05] transition-colors ${
+                    className={`w-full text-left px-3.5 py-2 text-xs hover:bg-white/[0.05] transition-colors ${
                       p === period ? "font-semibold text-[hsl(var(--kf-accent1))]" : "text-muted-foreground"
                     }`}
                   >
@@ -857,14 +1027,14 @@ function InsightsTabInner({
             </>
           )}
         </div>
-      </div>
+      </motion.div>
 
       <HeroStats flowIntelligence={flowIntelligence} revenueData={revenueData} contacts={contacts} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
+      <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-5 gap-3">
         {flowIntelligence && (
           <div className="lg:col-span-3 rounded-2xl border border-border/50 bg-card p-5 space-y-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 flex items-center gap-2">
+            <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 flex items-center gap-2">
               <Zap className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
               Pipeline Funnel
             </h3>
@@ -873,7 +1043,7 @@ function InsightsTabInner({
         )}
 
         <div className={`${flowIntelligence ? "lg:col-span-2" : "lg:col-span-5"} rounded-2xl border border-border/50 bg-card p-5 space-y-4`}>
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 flex items-center gap-2">
+          <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 flex items-center gap-2">
             <AlertTriangle className="w-3.5 h-3.5 text-amber-400/70" />
             Action Items
           </h3>
@@ -887,15 +1057,17 @@ function InsightsTabInner({
               onViewOverdueInvoices={onViewOverdueInvoices}
             />
           ) : (
-            <div className="flex items-center gap-2 px-3 py-4 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04]">
-              <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+            <div className="flex items-center gap-3 px-4 py-5 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04]">
+              <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+              </div>
               <span className="text-xs text-emerald-400/80 font-medium">All clear</span>
             </div>
           )}
         </div>
-      </div>
+      </motion.div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <motion.div variants={stagger.item} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {revenueData && (
           <div className="rounded-2xl border border-border/50 bg-card p-5">
             <RevenueBreakdown data={revenueData} />
@@ -904,25 +1076,33 @@ function InsightsTabInner({
         <div className={`rounded-2xl border border-border/50 bg-card p-5 ${!revenueData ? "sm:col-span-2" : ""}`}>
           <GrowthTrend contacts={contacts} period={period} />
         </div>
-      </div>
+      </motion.div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <motion.div variants={stagger.item} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <div className="rounded-2xl border border-border/50 bg-card p-5">
           <DataCompleteness contacts={contacts} />
         </div>
-        <div className="rounded-2xl border border-border/50 bg-card p-5 space-y-5">
+
+        <div className="rounded-2xl border border-border/50 bg-card p-5 space-y-6">
           <LeadScoreDistribution contacts={contacts} />
           <TaskHealth contacts={contacts} />
           {contacts.length > 0 && !(contacts.some(c => (c as Record<string, unknown>).leadScore != null)) && !(contacts.some(c => (c as Record<string, unknown>).meta)) && (
-            <div className="text-center py-4 text-muted-foreground/50 text-xs">Scores and health metrics appear as activity grows</div>
+            <div className="flex flex-col items-center py-4 text-center">
+              <div className="w-8 h-8 rounded-lg bg-white/[0.03] flex items-center justify-center mb-2">
+                <Target className="w-4 h-4 text-muted-foreground/30" />
+              </div>
+              <p className="text-xs text-muted-foreground/50">Scores appear as activity grows</p>
+            </div>
           )}
         </div>
+
         <div className="sm:col-span-2 lg:col-span-1 rounded-2xl border border-border/50 bg-card p-5 space-y-6">
+          <SourceConversion contacts={contacts} />
           <TopSources contacts={periodContacts} />
-          <TopSegments contacts={periodContacts} />
+          <ChannelPreference contacts={contacts} />
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
