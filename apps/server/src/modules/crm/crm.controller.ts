@@ -671,6 +671,13 @@ export class CrmController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(120, 60_000)
+  @Get('businesses/:businessId/financial-growth')
+  getFinancialGrowth(@Param('businessId') businessId: string) {
+    return this.revenue.getFinancialGrowth(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/health-metrics')
   getContactHealthMetrics(
     @Param('businessId') businessId: string,
