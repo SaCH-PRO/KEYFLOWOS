@@ -14,6 +14,7 @@ import {
   getCategoryConfig,
   type NoteCategory,
 } from "./tab-constants";
+import { AiNoteAnalyzeButton } from "./ai-note-intelligence";
 
 interface NotesTabPanelProps {
   contact: ContactDetailData;
@@ -377,6 +378,12 @@ export function NotesTabPanel({ contact, notes, onAddNote, onAddTask, onDeleteNo
                           {taskCreatedId === note.id ? <Check className="w-3.5 h-3.5 text-violet-400" /> : <ListPlus className="w-3.5 h-3.5 text-violet-400" />}
                         </button>
                       )}
+                      <AiNoteAnalyzeButton
+                        contactId={contact.id}
+                        noteBody={note.body}
+                        noteId={note.id}
+                        onCreateTask={onAddTask}
+                      />
                       <div className="flex-1" />
                       {onDeleteNote && (
                         <button onClick={async () => { try { await onDeleteNote(note.id); } catch { toast.error("Failed to delete note"); } }} className="p-1.5 rounded-md hover:bg-red-500/20 transition-colors" title="Delete note">

@@ -719,6 +719,66 @@ export class CrmController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/contacts/:contactId/ai-summary')
+  aiContactSummary(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+  ) {
+    checkAiRateLimit(businessId);
+    return this.crmAi.summarizeContact(businessId, contactId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/contacts/:contactId/ai-score')
+  aiLeadScore(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+  ) {
+    checkAiRateLimit(businessId);
+    return this.crmAi.scoreContactWithAi(businessId, contactId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/contacts/:contactId/ai-note-analysis')
+  aiNoteAnalysis(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Body() body: { noteBody: string; noteId?: string },
+  ) {
+    if (!body.noteBody || typeof body.noteBody !== 'string') {
+      throw new BadRequestException('noteBody is required');
+    }
+    if (body.noteBody.length > 5000) {
+      throw new BadRequestException('Note too long (max 5000 chars)');
+    }
+    checkAiRateLimit(businessId);
+    return this.crmAi.analyzeNote(businessId, contactId, body.noteBody, body.noteId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai-churn-risk')
+  aiChurnDetection(@Param('businessId') businessId: string) {
+    checkAiRateLimit(businessId);
+    return this.crmAi.detectChurnRisk(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai-search')
+  aiNaturalLanguageSearch(
+    @Param('businessId') businessId: string,
+    @Body() body: { query: string },
+  ) {
+    if (!body.query || typeof body.query !== 'string') {
+      throw new BadRequestException('query is required');
+    }
+    if (body.query.length > 500) {
+      throw new BadRequestException('Query too long (max 500 chars)');
+    }
+    checkAiRateLimit(businessId);
+    return this.crmAi.naturalLanguageSearch(businessId, body.query);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/sequences')
   listSequences(@Param('businessId') businessId: string) {
     return this.sequences.listSequences(businessId);
