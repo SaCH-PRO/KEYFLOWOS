@@ -54,11 +54,11 @@ const STATUS_BORDER_CLASSES: Record<string, string> = {
   LOST: "border-l-red-500/60",
 };
 
-const SCORE_STYLES: Record<string, { ring: string; text: string; label: string }> = {
-  hot: { ring: "ring-red-500/60 bg-red-500/15", text: "text-red-400", label: "Hot" },
-  warm: { ring: "ring-orange-500/60 bg-orange-500/15", text: "text-orange-400", label: "Warm" },
-  cool: { ring: "ring-teal-500/60 bg-teal-500/15", text: "text-teal-400", label: "Cool" },
-  cold: { ring: "ring-blue-500/60 bg-blue-500/15", text: "text-blue-400", label: "Cold" },
+const SCORE_STYLES: Record<string, { bg: string; text: string; label: string }> = {
+  hot: { bg: "bg-red-500/15 border border-red-500/25", text: "text-red-400", label: "Hot" },
+  warm: { bg: "bg-orange-500/15 border border-orange-500/25", text: "text-orange-400", label: "Warm" },
+  cool: { bg: "bg-teal-500/15 border border-teal-500/25", text: "text-teal-400", label: "Cool" },
+  cold: { bg: "bg-blue-500/15 border border-blue-500/25", text: "text-blue-400", label: "Cold" },
 };
 
 function getScoreStyle(score: number) {
@@ -188,27 +188,27 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
           </div>
         )}
 
-        <div className="relative flex-shrink-0">
+        <div className="flex-shrink-0">
           <div
             className="h-10 w-10 rounded-full flex items-center justify-center text-white text-xs font-bold"
             style={{ background: statusColor }}
           >
             {initials}
           </div>
-          {hasLeadScore && scoreStyle && (
-            <div
-              className={`absolute -top-1 -right-1 w-5 h-5 rounded-full ring-2 ${scoreStyle.ring} flex items-center justify-center`}
-              title={`Lead Score: ${leadScore} (${scoreStyle.label})`}
-            >
-              <span className={`text-[8px] font-bold ${scoreStyle.text}`}>{leadScore}</span>
-            </div>
-          )}
         </div>
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
               <h3 className="text-sm font-semibold truncate">{fullName}</h3>
+              {hasLeadScore && scoreStyle && (
+                <span
+                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${scoreStyle.bg} ${scoreStyle.text} flex-shrink-0`}
+                  title={`Lead Score: ${leadScore} (${scoreStyle.label})`}
+                >
+                  {leadScore}
+                </span>
+              )}
               {onTogglePin && (
                 <button
                   onClick={handlePin}
