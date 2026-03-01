@@ -74,9 +74,11 @@ export interface PipelineContactListProps {
   selectMode: boolean;
   selectedIds: Set<string>;
   pinnedIds: string[];
+  favoriteIds?: Set<string>;
   onSelectContact: (id: string) => void;
   onToggleSelect: (id: string) => void;
   onTogglePin: (id: string) => void;
+  onToggleFavorite?: (id: string) => void;
   onDelete: (contact?: ContactCardData) => void;
   onQuickAction: (contactId: string, action: QuickActionType) => void;
   onLoadMore: () => void;
@@ -94,9 +96,11 @@ function PipelineContactListInner({
   selectMode,
   selectedIds,
   pinnedIds,
+  favoriteIds,
   onSelectContact,
   onToggleSelect,
   onTogglePin,
+  onToggleFavorite,
   onDelete,
   onQuickAction,
   onLoadMore,
@@ -263,6 +267,8 @@ function PipelineContactListInner({
         onToggleSelect={onToggleSelect}
         isPinned={pinnedIds.includes(contact.id)}
         onTogglePin={onTogglePin}
+        isFavorite={favoriteIds?.has(contact.id)}
+        onToggleFavorite={onToggleFavorite}
         onClick={() => onSelectContact(contact.id)}
         onDelete={onDelete}
         onQuickAction={onQuickAction}

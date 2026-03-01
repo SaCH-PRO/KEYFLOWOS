@@ -1003,13 +1003,58 @@ export class CrmService {
     return { deleted: result.count };
   }
 
-  async mergeContacts(input: { businessId: string; primaryId: string; duplicateId: string }) {
+  async mergeContacts(input: { businessId: string; primaryId: string; duplicateId: string; fieldOverrides?: Record<string, unknown> }) {
     if (input.primaryId === input.duplicateId) {
       throw new BadRequestException('Cannot merge a contact into itself');
     }
 
-    await this.assertContact(input.businessId, input.primaryId);
-    await this.assertContact(input.businessId, input.duplicateId);
+    const primary = await this.assertContact(input.businessId, input.primaryId);
+    const duplicate = await this.assertContact(input.businessId, input.duplicateId);
+
+    const mergedTags = Array.from(new Set([...(primary.tags ?? []), ...(duplicate.tags ?? [])]));
+
+    const mergedLeadScore = Math.max(primary.leadScore ?? 0, duplicate.leadScore ?? 0);
+
+    const fillableFields: Array<keyof typeof primary> = [
+      'firstName', 'lastName', 'email', 'emailNormalized', 'phone', 'phoneNormalized',
+      'displayName', 'secondaryEmail', 'secondaryPhone', 'whatsappNumber',
+      'preferredChannel', 'addressLine1', 'addressLine2', 'city', 'state',
+      'postalCode', 'country', 'timezone', 'companyName', 'jobTitle',
+      'department', 'industry', 'sourceDetail', 'segment', 'language', 'notesInternal',
+    ];
+
+    const contactUpdate: Record<string, unknown> = {
+      tags: mergedTags,
+      leadScore: mergedLeadScore,
+    };
+
+    for (const field of fillableFields) {
+      const primaryVal = primary[field];
+      const duplicateVal = duplicate[field];
+      if ((primaryVal === null || primaryVal === undefined || primaryVal === '') && duplicateVal) {
+        contactUpdate[field] = duplicateVal;
+      }
+    }
+
+    if (primary.email && !primary.emailNormalized && duplicate.emailNormalized) {
+      contactUpdate.emailNormalized = duplicate.emailNormalized;
+    }
+    if (primary.phone && !primary.phoneNormalized && duplicate.phoneNormalized) {
+      contactUpdate.phoneNormalized = duplicate.phoneNormalized;
+    }
+
+    const primaryCustom = (typeof primary.custom === 'object' && primary.custom) ? primary.custom as Record<string, unknown> : {};
+    const duplicateCustom = (typeof duplicate.custom === 'object' && duplicate.custom) ? duplicate.custom as Record<string, unknown> : {};
+    const mergedCustom = { ...duplicateCustom, ...primaryCustom };
+    contactUpdate.custom = mergedCustom;
+
+    if (input.fieldOverrides) {
+      for (const [key, value] of Object.entries(input.fieldOverrides)) {
+        if (fillableFields.includes(key as any) || key === 'tags' || key === 'status') {
+          contactUpdate[key] = value;
+        }
+      }
+    }
 
     await this.prisma.client.$transaction([
       this.prisma.client.contactEvent.updateMany({
@@ -1022,6 +1067,10 @@ export class CrmService {
       }),
       this.prisma.client.contactTask.updateMany({
         where: { businessId: input.businessId, contactId: input.duplicateId },
+        data: { contactId: input.primaryId },
+      }),
+      this.prisma.client.crmSequenceEnrollment.updateMany({
+        where: { contactId: input.duplicateId },
         data: { contactId: input.primaryId },
       }),
       this.prisma.client.quote.updateMany({
@@ -1037,6 +1086,10 @@ export class CrmService {
         data: { contactId: input.primaryId },
       }),
       this.prisma.client.contact.update({
+        where: { id: input.primaryId },
+        data: contactUpdate as any,
+      }),
+      this.prisma.client.contact.update({
         where: { id: input.duplicateId },
         data: { deletedAt: new Date() },
       }),
@@ -1045,7 +1098,7 @@ export class CrmService {
       input.businessId,
       input.primaryId,
       'contact.merged',
-      { duplicateId: input.duplicateId },
+      { duplicateId: input.duplicateId, mergedFields: Object.keys(contactUpdate) },
       { actorType: 'SYSTEM', source: 'crm' },
     );
     const merged = await this.prisma.client.contact.findUnique({ where: { id: input.primaryId } });
@@ -1486,6 +1539,55 @@ export class CrmService {
   }
 
   // Expose for other modules to log events without cycle
+  async logCommunication(input: {
+    businessId: string;
+    contactId: string;
+    channelType: string;
+    outcome: string;
+    duration?: number | null;
+    notes?: string | null;
+    actorId?: string | null;
+  }) {
+    const validChannels = ['call', 'email', 'whatsapp', 'meeting', 'sms'];
+    const validOutcomes = ['answered', 'voicemail', 'no-answer', 'sent', 'received', 'completed', 'cancelled'];
+    const channelType = validChannels.includes(input.channelType) ? input.channelType : 'call';
+    const outcome = validOutcomes.includes(input.outcome) ? input.outcome : 'answered';
+
+    await this.assertContact(input.businessId, input.contactId);
+
+    const eventData: Record<string, unknown> = {
+      channelType,
+      outcome,
+    };
+    if (input.duration != null) eventData.duration = input.duration;
+    if (input.notes) eventData.notes = input.notes;
+
+    const event = await this.logEvent(
+      input.businessId,
+      input.contactId,
+      `communication.${channelType}`,
+      eventData,
+      { actorType: 'USER', actorId: input.actorId ?? undefined, source: 'crm' },
+    );
+
+    let note = null;
+    if (input.notes && input.notes.trim()) {
+      const durationStr = input.duration ? ` (${input.duration} min)` : '';
+      const noteBody = `[${channelType.toUpperCase()} - ${outcome}]${durationStr}\n${input.notes.trim()}`;
+      note = await this.prisma.client.contactNote.create({
+        data: {
+          businessId: input.businessId,
+          contactId: input.contactId,
+          body: noteBody,
+          authorId: input.actorId ?? null,
+          source: 'communication-log',
+        },
+      });
+    }
+
+    return { event, note };
+  }
+
   async logContactEvent(input: {
     businessId: string;
     contactId: string;
@@ -2042,6 +2144,29 @@ export class CrmService {
     return this.prisma.client.contactList.update({
       where: { id: input.listId },
       data: { contactIds: filtered },
+    });
+  }
+
+  async toggleFavorite(businessId: string, contactId: string) {
+    const contact = await this.assertContact(businessId, contactId);
+    const custom = (contact.custom as Record<string, unknown>) ?? {};
+    const isFavorite = !custom.isFavorite;
+    const updatedCustom = { ...custom, isFavorite };
+    const updated = await this.prisma.client.contact.update({
+      where: { id: contactId },
+      data: { custom: updatedCustom },
+    });
+    return { isFavorite, contact: updated };
+  }
+
+  async getFavorites(businessId: string) {
+    const allContacts = await this.prisma.client.contact.findMany({
+      where: { businessId, deletedAt: null },
+      orderBy: { updatedAt: 'desc' },
+    });
+    return allContacts.filter((c) => {
+      const custom = c.custom as Record<string, unknown> | null;
+      return custom?.isFavorite === true;
     });
   }
 

@@ -9,6 +9,7 @@ import {
   Clock,
   X,
   GripVertical,
+  Heart,
 } from "lucide-react";
 import type { Contact } from "@/lib/client";
 import { updateContact } from "@/lib/client";
@@ -90,12 +91,16 @@ interface KanbanCardProps {
   contact: Contact;
   onDragStart: (e: React.DragEvent, contactId: string) => void;
   onClick: (contactId: string) => void;
+  isFavorite?: boolean;
+  onToggleFavorite?: (id: string) => void;
 }
 
 const KanbanCard = memo(function KanbanCardInner({
   contact,
   onDragStart,
   onClick,
+  isFavorite,
+  onToggleFavorite,
 }: KanbanCardProps) {
   const fullName =
     `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "Unnamed";
@@ -132,6 +137,15 @@ const KanbanCard = memo(function KanbanCardInner({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
             <h4 className="text-xs font-semibold truncate">{fullName}</h4>
+            {onToggleFavorite && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onToggleFavorite(contact.id); }}
+                className={`p-0.5 rounded transition-colors flex-shrink-0 ${isFavorite ? "text-rose-400" : "text-muted-foreground/50 opacity-0 group-hover:opacity-100"}`}
+                title={isFavorite ? "Remove from favorites" : "Add to favorites"}
+              >
+                <Heart className={`w-3 h-3 ${isFavorite ? "fill-current" : ""}`} />
+              </button>
+            )}
             {hasLeadScore && scoreStyle && (
               <span
                 className={`text-[10px] font-bold px-1 py-px rounded ${scoreStyle.bg} ${scoreStyle.text} flex-shrink-0`}
@@ -198,6 +212,8 @@ interface KanbanColumnProps {
   onDrop: (e: React.DragEvent, status: string) => void;
   onCardClick: (contactId: string) => void;
   dragOverStatus: string | null;
+  favoriteIds?: Set<string>;
+  onToggleFavorite?: (id: string) => void;
 }
 
 const KanbanColumn = memo(function KanbanColumnInner({
@@ -208,6 +224,8 @@ const KanbanColumn = memo(function KanbanColumnInner({
   onDrop,
   onCardClick,
   dragOverStatus,
+  favoriteIds,
+  onToggleFavorite,
 }: KanbanColumnProps) {
   const config = STATUS_CONFIG[status] ?? STATUS_CONFIG.LEAD;
   const totalValue = contacts.reduce(
@@ -258,6 +276,8 @@ const KanbanColumn = memo(function KanbanColumnInner({
             contact={contact}
             onDragStart={onDragStart}
             onClick={onCardClick}
+            isFavorite={favoriteIds?.has(contact.id)}
+            onToggleFavorite={onToggleFavorite}
           />
         ))}
       </div>
@@ -368,6 +388,8 @@ function PipelineKanbanInner({ state }: PipelineKanbanProps) {
               onDrop={handleDrop}
               onCardClick={handleCardClick}
               dragOverStatus={dragOverStatus}
+              favoriteIds={state.favoriteIds}
+              onToggleFavorite={state.handleToggleFavorite}
             />
           </div>
         ))}

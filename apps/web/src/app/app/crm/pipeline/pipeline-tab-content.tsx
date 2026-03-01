@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, type PanInfo } from "framer-motion";
-import { X, List } from "lucide-react";
+import { X, List, Heart } from "lucide-react";
 import {
   ContactCapture,
   ContactForm,
@@ -51,6 +51,7 @@ function PipelineTabContentInner({ state }: PipelineTabContentProps) {
     sortBy, setSortBy,
     activeSegment, setActiveSegment,
     segmentCounts, pinnedContacts, recentContacts, contacts,
+    favoriteIds, favoriteContacts, handleToggleFavorite,
     setShowBroadcast,
     detailPanelProps,
     loadContacts, loadFlowData, selectContact,
@@ -104,6 +105,60 @@ function PipelineTabContentInner({ state }: PipelineTabContentProps) {
     <div className="space-y-6">
       {businessId && (
         <DuplicateDetector businessId={businessId} onMergeComplete={handleMergeComplete} />
+      )}
+
+      {favoriteContacts.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 px-1">
+            <Heart className="w-4 h-4 text-rose-400 fill-rose-400" />
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Favorites</span>
+            <span className="text-[10px] text-muted-foreground/60 ml-auto">{favoriteContacts.length}</span>
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
+            {favoriteContacts.map((c) => {
+              const name = `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || "Unnamed";
+              const initials = `${c.firstName?.[0] ?? ""}${c.lastName?.[0] ?? ""}`.toUpperCase() || "?";
+              const statusColor: Record<string, string> = {
+                LEAD: "hsl(var(--kf-accent1))",
+                PROSPECT: "hsl(var(--kf-accent2))",
+                CLIENT: "hsl(142 76% 36%)",
+                LOST: "hsl(var(--kf-muted-foreground))",
+              };
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => selectContact(c.id)}
+                  className={`flex-shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl border transition-all hover:bg-white/[0.03] cursor-pointer ${
+                    selectedContactId === c.id
+                      ? "border-[hsl(var(--kf-accent1))]/50 bg-[hsl(var(--kf-accent1))]/[0.06]"
+                      : "border-border/40 bg-card"
+                  }`}
+                >
+                  <div
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
+                    style={{ background: statusColor[c.status ?? ""] ?? statusColor.LEAD }}
+                  >
+                    {initials}
+                  </div>
+                  <div className="text-left min-w-0">
+                    <p className="text-xs font-semibold truncate max-w-[100px]">{name}</p>
+                    {c.companyName && (
+                      <p className="text-[10px] text-muted-foreground/60 truncate max-w-[100px]">{c.companyName}</p>
+                    )}
+                  </div>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleToggleFavorite(c.id); }}
+                    className="ml-1 text-rose-400 hover:text-rose-300 flex-shrink-0"
+                    title="Remove from favorites"
+                    aria-label="Remove from favorites"
+                  >
+                    <Heart className="w-3 h-3 fill-current" />
+                  </button>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       )}
 
       {activeListId && (
@@ -198,9 +253,11 @@ function PipelineTabContentInner({ state }: PipelineTabContentProps) {
               selectMode={selectMode}
               selectedIds={selectedIds}
               pinnedIds={pinnedIds}
+              favoriteIds={favoriteIds}
               onSelectContact={selectContact}
               onToggleSelect={handleToggleSelect}
               onTogglePin={handleTogglePin}
+              onToggleFavorite={handleToggleFavorite}
               onDelete={handleDeleteContact}
               onQuickAction={handleQuickAction}
               onLoadMore={handleLoadMore}

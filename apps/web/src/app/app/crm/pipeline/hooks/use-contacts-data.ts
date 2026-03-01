@@ -5,6 +5,8 @@ import type { Contact } from "@/lib/client";
 import type { SmartSegment, ListTab, SortOption } from "../pipeline-toolbar";
 import {
   fetchContacts,
+  fetchFavorites,
+  toggleFavorite as toggleFavoriteApi,
 } from "@/lib/client";
 import { ensureWorkspace, getStoredBusinessId } from "@/lib/workspace";
 
@@ -125,6 +127,7 @@ export function useContactsData() {
 
   const [pinnedIds, setPinnedIdsState] = useState<string[]>([]);
   const [recentIds, setRecentIds] = useState<string[]>([]);
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
 
   const setSearchInput = useCallback((v: string) => dispatch({ type: "SET_SEARCH_INPUT", payload: v }), []);
   const setStatusFilter = useCallback((v: string) => dispatch({ type: "SET_STATUS_FILTER", payload: v }), []);
@@ -152,6 +155,28 @@ export function useContactsData() {
     setPinnedIdsState(getPinnedIds());
     setRecentIds(getRecentIds());
   }, []);
+
+  const loadFavorites = useCallback(async () => {
+    if (!businessId) return;
+    const { data } = await fetchFavorites(businessId);
+    if (data) {
+      setFavoriteIds(new Set(data.map((c) => c.id)));
+    }
+  }, [businessId]);
+
+  useEffect(() => {
+    if (businessId) void loadFavorites();
+  }, [businessId, loadFavorites]);
+
+  const handleToggleFavorite = useCallback(async (id: string) => {
+    if (!businessId) return;
+    setFavoriteIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+    await toggleFavoriteApi(id, businessId);
+  }, [businessId]);
 
   useEffect(() => {
     const initWorkspace = async () => {
@@ -266,6 +291,7 @@ export function useContactsData() {
   }, []);
 
   const pinnedContacts = useMemo(() => contacts.filter((c) => pinnedIds.includes(c.id)), [contacts, pinnedIds]);
+  const favoriteContacts = useMemo(() => contacts.filter((c) => favoriteIds.has(c.id)), [contacts, favoriteIds]);
   const recentContacts = useMemo(() => {
     return recentIds.map((id) => contacts.find((c) => c.id === id)).filter(Boolean) as Contact[];
   }, [contacts, recentIds]);
@@ -356,6 +382,7 @@ export function useContactsData() {
     crmViewTab: filters.crmViewTab, setCrmViewTab,
     isPending, startTransition,
     pinnedIds, pinnedContacts, recentContacts,
+    favoriteIds, favoriteContacts, handleToggleFavorite,
     displayContacts, segmentCounts,
     loadContacts, handleTogglePin, handleToggleSelect, handleSelectAll, handleToggleSelectMode,
     trackRecent,

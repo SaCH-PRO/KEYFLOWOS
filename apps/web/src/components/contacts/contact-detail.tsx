@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, ClipboardList } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ContactDetailHeader } from "./contact-detail-header";
 import { ContactDetailStats } from "./contact-detail-stats";
@@ -10,6 +10,9 @@ import { ContactDetailInfo } from "./contact-detail-info";
 import { ContactDetailTabs } from "./contact-detail-tabs";
 import { AiContactSummaryPanel } from "./ai-contact-summary";
 import { AiLeadScorePanel } from "./ai-lead-score";
+import { AiPrepBriefPanel } from "./ai-prep-brief";
+import { AiTagSuggestionsPanel } from "./ai-tag-suggestions";
+import { CommunicationLogger } from "./communication-logger";
 
 export type ContactDetailData = {
   id: string;
@@ -105,6 +108,7 @@ interface ContactDetailProps {
   onDelete?: () => void;
   onQuickAction?: (contactId: string, action: DetailQuickAction) => void;
   onLogEvent?: (type: string, description?: string) => Promise<void>;
+  onLogCommunication?: (data: { channelType: string; outcome: string; duration?: number; notes?: string }) => Promise<void>;
   healthMetrics?: { engagement: number; payment: number; responsiveness: number; relationship: number } | null;
   journeyMilestones?: Array<{ id: string; type: string; title: string; description?: string; date: string; value?: number; isNext?: boolean }>;
   conversationContext?: { lastDiscussed?: string; concerns?: string[]; preferences?: string[]; suggestedOpening?: string; sentiment?: string; engagementLevel?: string } | null;
@@ -137,6 +141,7 @@ export function ContactDetail({
   onDelete,
   onQuickAction,
   onLogEvent,
+  onLogCommunication,
   healthMetrics,
   journeyMilestones,
   conversationContext,
@@ -147,11 +152,12 @@ export function ContactDetail({
   relatedContacts,
   onSelectRelatedContact,
 }: ContactDetailProps) {
-  const [activeTab, setActiveTab] = useState<string>("notes");
+  const [activeTab, setActiveTab] = useState<string>("activity");
   const [confirmState, setConfirmState] = useState<{ open: boolean; action: () => void }>({
     open: false,
     action: () => {},
   });
+  const [commLoggerOpen, setCommLoggerOpen] = useState(false);
 
   if (loading) {
     return (
@@ -261,6 +267,18 @@ export function ContactDetail({
           />
         </div>
 
+        {onLogCommunication && (
+          <div className="shrink-0">
+            <button
+              onClick={() => setCommLoggerOpen(true)}
+              className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-[hsl(var(--kf-accent2))]/10 hover:bg-[hsl(var(--kf-accent2))]/20 text-[hsl(var(--kf-accent2))] text-xs font-medium transition-colors border border-[hsl(var(--kf-accent2))]/20"
+            >
+              <ClipboardList className="w-3.5 h-3.5" />
+              Log Interaction
+            </button>
+          </div>
+        )}
+
         <div className="shrink-0">
           <ContactDetailStats
             contact={contact}
@@ -271,8 +289,10 @@ export function ContactDetail({
         </div>
 
         <div className="shrink-0 space-y-2">
+          <AiPrepBriefPanel contactId={contact.id} />
           <AiContactSummaryPanel contactId={contact.id} />
           <AiLeadScorePanel contactId={contact.id} currentScore={contact.meta?.leadScore} />
+          <AiTagSuggestionsPanel contactId={contact.id} currentTags={contact.tags} />
         </div>
 
         <div className="shrink-0">
@@ -304,6 +324,15 @@ export function ContactDetail({
           />
         </div>
       </motion.div>
+
+      {onLogCommunication && (
+        <CommunicationLogger
+          open={commLoggerOpen}
+          contactName={`${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || undefined}
+          onClose={() => setCommLoggerOpen(false)}
+          onSubmit={onLogCommunication}
+        />
+      )}
 
       <ConfirmDialog
         open={confirmState.open}
