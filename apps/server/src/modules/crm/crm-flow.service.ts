@@ -261,8 +261,8 @@ export class CrmFlowService {
         select: {
           id: true, firstName: true, lastName: true, status: true,
           createdAt: true, updatedAt: true, leadScore: true,
-          lastInteractionAt: true, nextScheduledInteraction: true,
-          totalRevenue: true, tags: true, lifecycleStage: true, email: true, phone: true,
+          lastInteractionAt: true,
+          tags: true, lifecycleStage: true, email: true, phone: true,
         },
         orderBy: { updatedAt: 'asc' },
         take: 200,
@@ -468,26 +468,6 @@ export class CrmFlowService {
       const name = this.contactName(contact);
       const hasInvoice = invoiceContactIds.has(contact.id);
 
-      if (contact.nextScheduledInteraction) {
-        const schedDate = new Date(contact.nextScheduledInteraction);
-        const hoursUntil = (schedDate.getTime() - now.getTime()) / (60 * 60 * 1000);
-        if (hoursUntil > -24 && hoursUntil <= 24) {
-          push({
-            id: `nextsched_${contact.id}`,
-            type: 'call',
-            contactId: contact.id,
-            contactName: name,
-            description: hoursUntil < 0
-              ? `Scheduled interaction overdue — was ${Math.abs(Math.round(hoursUntil))}h ago`
-              : `Scheduled interaction in ${Math.round(hoursUntil)}h`,
-            estimatedTime: 30,
-            priority: hoursUntil < 0 ? 'urgent' : 'high',
-            dueDate: schedDate.toISOString(),
-          });
-          continue;
-        }
-      }
-
       if (contact.status === 'LEAD') {
         if (daysSinceCreated <= 1 && !hasRecentEvent) {
           push({
@@ -544,7 +524,6 @@ export class CrmFlowService {
             description: `Hot lead (score ${contact.leadScore}) — schedule discovery call`,
             estimatedTime: 30,
             priority: 'high',
-            value: this.toNum(contact.totalRevenue),
           });
         }
       }
@@ -590,20 +569,18 @@ export class CrmFlowService {
             aiDraft: `Hi ${firstName}! Hope everything's going well. Just wanted to touch base and see if there's anything else I can help with.`,
             estimatedTime: 15,
             priority: daysSinceTouch > 60 ? 'high' : 'medium',
-            value: this.toNum(contact.totalRevenue),
           });
         }
 
-        if (daysSinceTouch > 60 && this.toNum(contact.totalRevenue) > 0) {
+        if (daysSinceTouch > 60 && hasInvoice) {
           push({
             id: `upsell_${contact.id}`,
             type: 'call',
             contactId: contact.id,
             contactName: name,
-            description: `High-value client dormant ${daysSinceTouch}d — explore upsell`,
+            description: `Client with invoice history dormant ${daysSinceTouch}d — explore upsell`,
             estimatedTime: 30,
             priority: 'medium',
-            value: this.toNum(contact.totalRevenue),
           });
         }
       }

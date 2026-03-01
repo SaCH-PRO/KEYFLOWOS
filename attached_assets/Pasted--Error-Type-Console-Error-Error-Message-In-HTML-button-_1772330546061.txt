@@ -1,0 +1,57 @@
+## Error Type
+Console Error
+
+## Error Message
+In HTML, <button> cannot be a descendant of <button>.
+This will cause a hydration error.
+
+  ...
+    <div className="space-y-6" aria-label="CRM Pipeline">
+      <PageHeader>
+      <TabNav>
+      <AnimatePresence mode="wait">
+        <PresenceChild isPresent={true} initial={undefined} custom={undefined} presenceAffectsLayout={true} mode="wait" ...>
+          <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} exit={{opacity:0}} transition={{duration:0.15}}>
+            <div style={{opacity:0, ...}} ref={function useMotionRef.useCallback}>
+              <EngageTab nextActions={[...]} autopilotActions={[...]} autopilotPaused={false} loading={false} ...>
+                <motion.div variants={{hidden:{}, ...}} initial="hidden" animate="visible" className="space-y-4">
+                  <div className="space-y-4" style={{}} ref={function useMotionRef.useCallback}>
+                    <HeroStats>
+                    <div>
+                    <FilterToolbar>
+                    <motion.div>
+                    <SequencesSection businessId="cml78w33i0...">
+                      <motion.div initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} transition={{duration:0.4, ...}} ...>
+                        <div className="rounded-2x..." style={{opacity:0, ...}} ref={function useMotionRef.useCallback}>
+>                         <button
+>                           onClick={function onClick}
+>                           className="w-full flex items-center gap-3 p-4 hover:bg-white/[0.02] transition-colors"
+>                         >
+                            <div>
+                            <div>
+>                           <button
+>                             onClick={function onClick}
+>                             className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-semibold rounded-lg ..."
+>                           >
+                            ...
+                          ...
+                    ...
+      ...
+
+
+
+    at button (<anonymous>:null:null)
+    at SequencesSection (src/app/app/crm/pipeline/sequences-section.tsx:154:11)
+    at EngageTab (src/app/app/crm/pipeline/engage-tab.tsx:601:9)
+    at ContactsPage (src/app/app/crm/pipeline/page.tsx:235:13)
+
+## Code Frame
+  152 |             </p>
+  153 |           </div>
+> 154 |           <button
+      |           ^
+  155 |             onClick={(e) => { e.stopPropagation(); setShowBuilder(true); }}
+  156 |             className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-semibold rounded-lg bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] border border-[hsl(var(--kf-accent1))]/20 hover:bg-[hsl(var(--kf-accent1))]/20 transition-colors"
+  157 |           >
+
+Next.js version: 16.1.6 (Turbopack)

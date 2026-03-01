@@ -15,39 +15,29 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 **UI/UX Decisions:**
 - Custom design system with a warm Caribbean-inspired color palette, Glassmorphism elements, and a dark theme.
 - PWA capabilities, mobile-optimized navigation, and a redesigned, icon-first, collapsible sidebar.
-- Premium design token system with elevation shadows, glass surfaces, and micro-transitions.
-- Context-aware notifications, flow-themed animations, and a glassmorphism toast notification system.
+- Premium design token system with elevation shadows, glass surfaces, micro-transitions, and context-aware notifications.
 - Custom Glassmorphism ConfirmDialog for all confirmations and skeleton loading states.
-- Graceful error handling with Next.js error boundaries.
-- Search debouncing and client-side pagination with accessibility features (ARIA labels, roles).
-- Component decomposition for modularity, especially in CRM Pipeline and Database features.
-- **Unified CRM Design Language (Pipeline, Database, Insights, Engage):** All four CRM tabs share standardized design tokens: `rounded-2xl border-border/50 bg-card` cards, `bg-white/[0.03] border-border/40 rounded-xl` glass search inputs, `bg-popover/95 backdrop-blur-xl` dropdowns, `text-[10px] uppercase tracking-wider` section headers, gradient accent buttons (`bg-gradient-to-r from-accent/15 to-accent/5`), `bg-white/[0.08] border-border/50` active states, `border-border/40 rounded-xl` bordered status badges, gradient accent indicators (`w-1 h-5 rounded-full bg-gradient-to-b`), and consistent empty states with icon containers (`w-10 h-10 rounded-xl bg-white/[0.03]`). Safe array sort (always spread before sort to prevent memoized mutation).
-- **Pipeline Kanban Board View:** Toggle between List and Kanban views via toolbar icons (List/LayoutGrid). Kanban displays contacts in 4 status columns (LEAD/PROSPECT/CLIENT/LOST) with color-coded headers (amber/blue/emerald/red). HTML5 drag-and-drop to move contacts between columns, updating status via API. Each column shows count and pipeline value. Contact cards display name, company, lead score, tags, revenue, last interaction. Clicking a card opens a detail drawer. View preference persists to localStorage (`kf_pipeline_view`).
-- Enhanced database table features include column visibility toggle, responsive column auto-hiding, search text highlighting, multi-word search, keyboard-navigable rows, select-all-across-pages functionality, "Last Active" column with relative time, status-colored hover borders, glassmorphism bulk action bar, and **Saved Views** (localStorage-persisted named filter/sort/column configs with 4 default views: All Contacts, Active Leads, Top Clients, Needs Attention; custom views can be saved/deleted via glassmorphism dropdown).
-- Contact cards enriched with lead score badges (color-coded by temperature), revenue indicator, relative "last active" time, status-colored left accent border, and pill-styled tags with overflow count.
-- Server-side sorting support: `sortBy` (name/newest/oldest/revenue/score/lastInteraction) and `sortOrder` (asc/desc) query params on contacts list endpoint. Revenue/score sorts fetch all contacts for global ordering then paginate.
-- Contact stats aggregate endpoint: `GET contact-stats` returns totalCount, countByStatus, countBySource, recentGrowth (6 weeks), and topTags.
-- Contact Lists are enhanced with bulk "Add to List" actions, expandable member panels, and per-member removal.
-- ContactDetail UX improvements include quick actions, smart empty states, recent activity, and lead score explainers.
-- All detail tabs (Notes, Tasks, Timeline) render simultaneously using CSS `hidden` for state preservation.
-- Performance optimizations include extensive use of `useMemo` and `useCallback` for memoization and stable references, along with ref-based callback stabilization.
-- Inline error/retry UI for loading failures and comprehensive ARIA accessibility across components.
-- A "Getting Started Guide" component provides step-by-step onboarding with progress tracking and localStorage persistence.
+- Unified CRM Design Language across Pipeline, Database, Insights, and Engage tabs, featuring standardized cards, glass search inputs, popover dropdowns, and gradient accents.
+- Pipeline Kanban Board View with HTML5 drag-and-drop for status updates, persistent view preferences, and detailed contact cards.
+- Enhanced database tables with column visibility, responsive auto-hiding, multi-word search, keyboard navigation, and localStorage-persisted "Saved Views".
+- Contact cards with lead score badges, revenue indicators, and status-colored borders.
+- Extensive use of `useMemo` and `useCallback` for performance optimization.
+- Graceful error handling with Next.js error boundaries and comprehensive ARIA accessibility.
 
 **Technical Implementations & Features:**
 - **Business Autopilot System:** AI-powered operations with onboarding, archetype inference, revenue model detection, task orchestration, and a Legal & Compliance Module.
 - **Command Center:** Unified page with AI command bar, voice input, AI chat, dashboard metrics, daily briefing, cash flow forecast, and prioritized tasks.
 - **Online Store & Public Booking Page:** Modular storefront and a 4-step public booking flow.
-- **Notification System:** Real-time notifications for key business events.
+**Notification System:** Real-time notifications for key business events.
 - **Gamification System:** Global tiered missions system with XP rewards.
 - **Personalized Auth & Onboarding:** Redesigned Glassmorphism sign-up/sign-in, Google OAuth, and an onboarding wizard.
-- **Quote-to-Invoice Workflow:** Comprehensive quote management with tax and discount systems, and a professional invoice template.
+- **Quote-to-Invoice Workflow:** Comprehensive quote management with tax and discount systems.
 - **Multi-Gateway Payment System:** Integration with WiPay (Caribbean) and PayPal (international).
 - **Subscription & Billing System:** 3-tier plans with free trial and module limits.
 - **Multi-Tenant System:** Data isolation using `businessId` with `BusinessGuard` protection.
 - **Commerce Module Overhaul (v2):** Re-architected into 8 focused modules with KPI dashboard and glassmorphism product cards, including recurring invoices.
 - **Unified Contact Capture:** Single modal with multiple capture modes: Manual, Scan (AI Vision OCR), File Upload, Google Sync, URL Import.
-- **Contacts Module (Pluggable):** Modular CRM with reusable components, Contact Lists/Groups, Duplicate Detection, Pipeline, Database, Insights, Engage tabs, CRM Momentum gamification, and AI copilot. Features bulk edit, inline note/task editing, Google OAuth callback handling, enriched Insights and Engage tabs, import field mapping, virtual scrolling, client-side validation, and timezone-aware dates.
+- **Contacts Module (Pluggable):** Modular CRM with reusable components, Contact Lists/Groups, Duplicate Detection, Pipeline, Database, Insights, Engage tabs, CRM Momentum gamification, and AI copilot. Features bulk edit, inline note/task editing, import field mapping, and virtual scrolling.
 - **Settings Feature:** Modular business settings including branding, social links, and a connections hub.
 - **Contextual Connection System:** Reusable `ConnectionBanner` and `useConnections` hook for relevant connection prompts.
 - **Expense Tracking (v2):** Comprehensive expense management with categories, vendors, budgets, alerts, and recurring expense support.
@@ -58,23 +48,18 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **MasterClass (Education):** Micro-course catalog with progress tracking.
 - **Community Hub:** Peer discussion forum and cohort-based founder circles.
 - **Projects & Playbooks (Merged):** Unified page with Kanban board for tasks and event-driven automations.
-- **Global Commerce / Marketplace:** International selling pipeline with tabs for Dashboard, Catalog, Orders, Shipments, Customs, Warehousing, Pre-Orders, and Purchase Orders, supporting multi-currency and customs clearance.
+- **Global Commerce / Marketplace:** International selling pipeline with multi-currency and customs clearance support.
 - **AI Usage Billing:** Centralized AI metering with token/cost logging and a tiered credit system.
 - **Server-Side Pagination:** Standardized pagination for commerce and marketplace list endpoints.
 - **Global HTTP Exception Filter:** Consistent error response format for backend errors.
-- **CORS Configuration:** Environment-aware CORS settings.
-- **Mass Assignment Protection:** Explicit field mapping for sensitive updates.
-- **Accessibility (ARIA):** Extensive ARIA attributes across dialogs, drawers, and interactive components.
-- **Bulk Operations Cap:** Server-side validation limits `contactIds` array to 100 items.
-- **Error Boundaries:** Root, app-level, and CRM pipeline-level error boundaries.
-- **Pluggable Notes System:** Contact notes with 6 categories, composer, per-note actions, search, category filters, pinned notes, quick templates, and keyboard shortcuts.
-- **Pluggable Tasks System:** Contact tasks with 3 priority levels, composer, priority picker, due date/reminder inputs, quick templates, search/filter/sort options, overdue/due-soon highlighting, per-task actions, and circular checkbox completion.
-- **CRM Insights Tab (Production-Grade, Bento Layout + Recharts):** Premium `insights-tab.tsx` using Bento Grid layout (Apple/Vercel-inspired) with framer-motion stagger animations and **Recharts** for interactive charts. **Row 1:** HeroStats — 4 stat cards with inline SVG sparklines (6-week trend), gradient accent glows, trend indicators. **Row 2:** Pipeline Funnel (Recharts horizontal BarChart with gradient fills and tooltips) + Action Items. **Row 3:** Revenue Forecast (Recharts PieChart donut with TTD-formatted legend) + Contact Growth (Recharts BarChart with interactive tooltips). **Row 4:** Data Quality (animated SVG ring), Lead Scores (Recharts PieChart with hot/warm/cool/cold segments), Source Effectiveness, Channel Preference. **Enhanced features:** Date range picker, Export Report (PDF/CSV), Revenue by Client, Engagement Heatmap, Conversion Timeline, Tag Performance, clickable metric cards. All Recharts use dark theme: `hsl(var(--popover))` tooltips, transparent backgrounds, `animationDuration={800}`.
-- **CRM AI Command Center:** AI Analyst section in Insights tab (`ai-command-center.tsx`) with chat interface for asking questions about contacts/pipeline. Pre-built quick prompts (Pipeline Health, Needs Attention, Revenue Tips, At-Risk Clients, Follow-up Tasks). Displays structured AI response with Analysis summary, Suggested Actions (priority-coded), Auto-Generated Tasks (with "Execute All" button to bulk-create as real ContactTasks), and AI Guidelines (saveable to business metaData). Backend: `crm-ai.service.ts` with `POST ai-analyze` (builds full CRM context from contacts, revenue, tasks, invoices), `POST ai-analyze/execute` (bulk creates tasks, max 100), `GET/POST ai-guidelines` (persisted in business.metaData.aiGuidelines). Uses OpenAI via `AiUsageService.callAi()` with `crm_analysis` feature (3 credits). Guidelines Panel with inline editing and persistence.
-- **CRM Engage Tab (Production-Grade + Sequences):** Premium `engage-tab.tsx` with Bento-inspired layout, framer-motion stagger animations, and **Multi-Step Engagement Sequences**. **Journey-Aware Action Engine:** `crm-flow.service.ts` analyzes the full contact lifecycle to inject contextual actions. **Next Actions (manual):** Overdue/upcoming tasks, upcoming bookings, unpaid/overdue invoices, expiring quotes, quote follow-ups (3d+), accepted-quote-to-invoice conversion, journey-stage actions (new lead first contact, 1-3d intro email, 7-14d value content, 14d+ re-engage, hot lead discovery call, prospect no-quote proposal, stale prospect nudge, dormant client check-in, high-value upsell, lost win-back, scheduled interaction reminders, post-payment thank-you). Deduplication via seen-set. Sorted by priority then dueDate, capped at 20. **Autopilot Actions (automated/approval):** Completed tasks (last 24h), scheduled tasks (next 48h), overdue invoices (7d+ needs_approval), inactive clients (30d+ check-in), cold leads (14d+ nurture email), completed bookings (post-session follow-up), new leads with zero events (welcome message), stale prospects (30d+ incentive offer). Approving creates real ContactTask with appropriate priority. Capped at 15. **completeNextAction** handles all action ID prefixes (task, scheduled, pending, cold, stale, leadnurture, warmup, newlead, hotlead, sendquote, clientcheckin, upsell, winback, nextsched, quote, expiring, invoice, convert, booking, thankyou) — logs ACTION_COMPLETED event and updates lastInteractionAt. **Sequences System:** `CrmSequence` and `CrmSequenceEnrollment` Prisma models; full CRUD + enrollment endpoints; visual sequence builder with step types (Email/WhatsApp/Call/Wait), delay configuration, reorder, and 3 pre-built templates (New Lead Onboarding, Re-engagement, Post-Sale Follow-up); enrollment progress tracking per contact; collapsible section in Engage tab (`sequences-section.tsx`). **Row 1-5 layout preserved** with HeroStats, ProgressRing, FilterToolbar, NextActionQueue, AutopilotActions, CompletionTimeline, ActionBreakdown.
-- **Contact Form Enhancements:** Social links (LinkedIn, Instagram, Twitter URLs), referredBy free text, nextScheduledInteraction date picker, Custom Fields section (arbitrary key-value pairs stored in `custom` JSON column).
-- **Contact Detail Enrichment:** Data completeness percentage, lifecycle stage badge, days-since-last-interaction, Related Contacts (same company, max 10).
-- **Core Modules:** Identity, CRM, Commerce, Marketplace, Bookings, Social, Projects & Playbooks, Flow (Activity & Search), Reports, Command, Expenses, Webhooks, AI, Email Marketing, Lead Forms, Templates, Education, Community.
+- **Pluggable Notes System:** Contact notes with categories, composer, actions, search, filters, pinned notes, and quick templates.
+- **Pluggable Tasks System:** Contact tasks with priority levels, composer, due date/reminder inputs, quick templates, search/filter/sort options, and per-task actions.
+- **CRM Insights Tab:** Production-grade `insights-tab.tsx` using 12-column Bento Grid layout with Framer Motion animations and **Recharts** for interactive data visualization (HeroStats, Pipeline Funnel, Revenue Forecast, Contact Growth, Data Quality, Lead Scores, Health Stats, Revenue by Client, Engagement Heatmap, Conversion Timeline, Tag Performance, Sources/Channels). Includes a date range picker and export functionality.
+- **CRM AI Command Center:** AI Analyst section within the Insights tab for querying contacts/pipeline, with pre-built quick prompts, structured AI responses, suggested actions, and auto-generated tasks.
+- **CRM Engage Tab:** Production-grade `engage-tab.tsx` with Bento-inspired layout, Framer Motion animations, and **Multi-Step Engagement Sequences**. Features a **Journey-Aware Action Engine** (`crm-flow.service.ts`) for contextual actions, including manual next actions and autopilot actions requiring approval. Includes a comprehensive Sequences System with full CRUD, enrollment, a visual builder, and pre-built templates.
+- **Contact Form Enhancements:** Social links, referredBy field, nextScheduledInteraction date picker, and Custom Fields (JSON column).
+- **Contact Detail Enrichment:** Data completeness percentage, lifecycle stage badge, days-since-last-interaction, and Related Contacts.
+- **Core Modules:** Identity, CRM, Commerce, Marketplace, Bookings, Social, Projects & Playbooks, Flow, Reports, Command, Expenses, Webhooks, AI, Email Marketing, Lead Forms, Templates, Education, Community.
 
 ## External Dependencies
 - **Database:** PostgreSQL
@@ -82,6 +67,6 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **AI:** OpenAI via Replit AI Integrations
 - **Google Services:** Google Calendar Integration, Google Sign-In, Gmail Integration, Google Contacts OAuth Sync
 - **Payment Gateways:** WiPay, PayPal
-- **Charts:** Recharts (interactive charting library for Insights)
+- **Charts:** Recharts
 - **Package Manager:** pnpm
 - **Storage:** App Storage
