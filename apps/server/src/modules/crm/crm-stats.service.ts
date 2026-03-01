@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { Contact, Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmTimelineService } from './crm-timeline.service';
@@ -102,8 +102,8 @@ export class CrmStatsService {
   private cache: Map<string, { data: any; expires: number }> = new Map();
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly timeline: CrmTimelineService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
   ) {}
 
   private getCached<T>(key: string): T | null {

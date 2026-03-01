@@ -10,7 +10,7 @@ KEYFLOWOS is an AI-powered operating system designed to automate operations for 
 - Pre-opinionated flows (Playbooks)
 
 ## System Architecture
-The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a NestJS backend API (`apps/server`), with PostgreSQL managed by Prisma.
+The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a NestJS backend API (`apps/server`), with PostgreSQL managed by Prisma. Backend uses SWC for transpilation (`ts-node` with `swc: true`), which does NOT emit decorator metadata — all NestJS constructor injection **must** use explicit `@Inject(Token)` decorators.
 
 **UI/UX Decisions:**
 - Custom design system with a warm Caribbean-inspired color palette, Glassmorphism elements, and a dark theme.
