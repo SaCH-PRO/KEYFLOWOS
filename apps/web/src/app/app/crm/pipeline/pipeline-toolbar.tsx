@@ -117,7 +117,7 @@ function PipelineToolbarInner({
 
   return (
     <div className="rounded-2xl border border-border/50 bg-card p-3 sm:p-4 space-y-3 overflow-hidden">
-      <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+      <div className="flex items-center gap-2 min-w-0">
         <div className="relative flex-1 min-w-0">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50" />
           <input
@@ -138,47 +138,34 @@ function PipelineToolbarInner({
             </button>
           )}
         </div>
-        <div className="flex items-center gap-0.5 flex-shrink-0">
-          <button
-            onClick={onAddContact}
-            className="p-2 rounded-xl bg-gradient-to-br from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all"
-            aria-label="Add contact"
-            title="Add contact"
-          >
-            <Plus className="w-4 h-4" />
-          </button>
-          {onImport && (
-            <button
-              onClick={onImport}
-              className="p-2 rounded-xl text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground transition-all"
-              aria-label="Import contacts"
-              title="Import contacts"
-            >
-              <Upload className="w-4 h-4" />
-            </button>
-          )}
-          <button
-            onClick={onToggleSelectMode}
-            className={`p-2 rounded-xl transition-all ${selectMode ? "bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
-            aria-label={selectMode ? "Exit select mode" : "Select contacts"}
-            title={selectMode ? "Exit select mode" : "Select contacts"}
-          >
-            <CheckSquare className="w-4 h-4" />
-          </button>
+        <button
+          onClick={onAddContact}
+          className="p-2 rounded-xl bg-gradient-to-br from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all flex-shrink-0"
+          aria-label="Add contact"
+          title="Add contact"
+        >
+          <Plus className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
           <button
             onClick={handleToggleFilters}
-            className={`p-2 rounded-xl transition-all ${showFilters ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
+            className={`p-2 rounded-xl transition-all flex-shrink-0 ${showFilters ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
             aria-label="Filters"
+            title="Filters"
           >
             <Filter className="w-4 h-4" />
           </button>
           <div className="relative">
             <button
               onClick={handleToggleSort}
-              className={`p-2 rounded-xl transition-all ${showSort ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
+              className={`p-2 rounded-xl transition-all flex-shrink-0 ${showSort ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
               aria-label="Sort contacts"
               aria-haspopup="listbox"
               aria-expanded={showSort}
+              title="Sort"
             >
               <ArrowUpDown className="w-4 h-4" />
             </button>
@@ -202,34 +189,53 @@ function PipelineToolbarInner({
             )}
           </div>
           <button
+            onClick={onToggleSelectMode}
+            className={`p-2 rounded-xl transition-all flex-shrink-0 ${selectMode ? "bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
+            aria-label={selectMode ? "Exit select mode" : "Select contacts"}
+            title={selectMode ? "Exit select mode" : "Select contacts"}
+          >
+            <CheckSquare className="w-4 h-4" />
+          </button>
+          {onImport && (
+            <button
+              onClick={onImport}
+              className="p-2 rounded-xl text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground transition-all flex-shrink-0"
+              aria-label="Import contacts"
+              title="Import contacts"
+            >
+              <Upload className="w-4 h-4" />
+            </button>
+          )}
+          <button
             onClick={onRefresh}
             disabled={loading}
-            className="p-2 rounded-xl text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground transition-all disabled:opacity-40"
+            className="p-2 rounded-xl text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground transition-all disabled:opacity-40 flex-shrink-0"
             aria-label="Refresh"
+            title="Refresh"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
           </button>
-          {onViewModeChange && (
-            <div className="flex items-center gap-0.5 ml-1 border-l border-border/30 pl-1.5">
-              <button
-                onClick={() => onViewModeChange("list")}
-                className={`p-2 rounded-xl transition-all ${viewMode === "list" ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
-                aria-label="List view"
-                title="List view"
-              >
-                <List className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => onViewModeChange("kanban")}
-                className={`p-2 rounded-xl transition-all ${viewMode === "kanban" ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
-                aria-label="Kanban view"
-                title="Kanban view"
-              >
-                <LayoutGrid className="w-4 h-4" />
-              </button>
-            </div>
-          )}
         </div>
+        {onViewModeChange && (
+          <div className="flex items-center gap-0.5 border-l border-border/30 pl-2 flex-shrink-0">
+            <button
+              onClick={() => onViewModeChange("list")}
+              className={`p-2 rounded-xl transition-all ${viewMode === "list" ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
+              aria-label="List view"
+              title="List view"
+            >
+              <List className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => onViewModeChange("kanban")}
+              className={`p-2 rounded-xl transition-all ${viewMode === "kanban" ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
+              aria-label="Kanban view"
+              title="Kanban view"
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
 
       <AnimatePresence>
