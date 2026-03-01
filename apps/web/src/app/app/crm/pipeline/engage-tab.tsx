@@ -167,26 +167,26 @@ const HeroStats = React.memo(function HeroStats({
   }, [nextActions, autopilotActions, completedCount]);
 
   return (
-    <motion.div variants={stagger.item} className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+    <motion.div variants={stagger.item} className="grid grid-cols-4 gap-1.5 sm:gap-2.5">
       {stats.map((stat) => {
         const Icon = stat.icon;
         return (
           <div
             key={stat.label}
-            className="relative rounded-2xl border border-border/50 bg-card p-4 overflow-hidden"
+            className="relative rounded-xl border border-border/50 bg-card p-2 sm:p-3 overflow-hidden"
           >
-            <div className={`absolute -top-6 -right-6 w-16 h-16 rounded-full bg-gradient-to-br ${stat.accent} blur-xl opacity-60`} aria-hidden="true" />
+            <div className={`absolute -top-6 -right-6 w-14 h-14 rounded-full bg-gradient-to-br ${stat.accent} blur-xl opacity-60`} aria-hidden="true" />
             <div className="relative">
-              <div className="flex items-center gap-2 mb-2">
-                <div className={`p-1.5 rounded-lg bg-gradient-to-br ${stat.accent}`}>
-                  <Icon className={`w-3.5 h-3.5 ${stat.iconColor}`} />
+              <div className="flex items-center gap-1 sm:gap-1.5 mb-1 sm:mb-1.5">
+                <div className={`p-1 sm:p-1.5 rounded-lg bg-gradient-to-br ${stat.accent}`}>
+                  <Icon className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${stat.iconColor}`} />
                 </div>
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">{stat.label}</span>
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 truncate">{stat.label}</span>
               </div>
-              <p className={`text-2xl font-bold tracking-tight ${stat.highlight ? "text-[hsl(var(--kf-accent1))]" : ""}`}>
+              <p className={`text-sm sm:text-xl font-bold tracking-tight leading-tight ${stat.highlight ? "text-[hsl(var(--kf-accent1))]" : ""}`}>
                 {stat.value}
               </p>
-              <p className="text-[10px] text-muted-foreground/60 mt-0.5">{stat.sub}</p>
+              <p className="text-[10px] text-muted-foreground/60 mt-0.5 hidden sm:block">{stat.sub}</p>
             </div>
           </div>
         );
@@ -195,38 +195,42 @@ const HeroStats = React.memo(function HeroStats({
   );
 });
 
-const ProgressRing = React.memo(function ProgressRing({
+const ProgressCard = React.memo(function ProgressCard({
   nextActions, completedCount,
 }: {
   nextActions: NextAction[];
   completedCount: number;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const total = nextActions.length + completedCount;
   if (total === 0) return null;
 
   const pct = Math.round((completedCount / total) * 100);
-  const radius = 28;
+  const radius = 22;
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - (pct / 100) * circumference;
-
-  const urgentPct = total > 0
-    ? Math.round((nextActions.filter((a) => a.priority === "urgent").length / total) * 100)
-    : 0;
+  const urgentCount = nextActions.filter((a) => a.priority === "urgent" || a.priority === "high").length;
+  const estTime = nextActions.reduce((s, a) => s + a.estimatedTime, 0);
 
   return (
     <motion.div
       variants={stagger.item}
-      className="rounded-2xl border border-border/50 bg-card p-4"
+      className="rounded-xl border border-border/50 bg-card overflow-hidden"
     >
-      <div className="flex items-center gap-4">
+      <button
+        onClick={() => setExpanded((p) => !p)}
+        className="w-full flex items-center gap-3 p-3 hover:bg-white/[0.02] transition-colors"
+        aria-expanded={expanded}
+        aria-label="Toggle today's progress details"
+      >
         <div className="relative shrink-0">
-          <svg width="68" height="68" viewBox="0 0 68 68" className="-rotate-90" aria-hidden="true">
-            <circle cx="34" cy="34" r={radius} fill="none" stroke="hsl(var(--kf-border))" strokeWidth="4" opacity="0.3" />
+          <svg width="52" height="52" viewBox="0 0 52 52" className="-rotate-90" aria-hidden="true">
+            <circle cx="26" cy="26" r={radius} fill="none" stroke="hsl(var(--kf-border))" strokeWidth="3.5" opacity="0.2" />
             <motion.circle
-              cx="34" cy="34" r={radius}
+              cx="26" cy="26" r={radius}
               fill="none"
-              stroke="url(#progressGradient)"
-              strokeWidth="4"
+              stroke="url(#engageProgressGrad)"
+              strokeWidth="3.5"
               strokeLinecap="round"
               strokeDasharray={circumference}
               initial={{ strokeDashoffset: circumference }}
@@ -234,28 +238,54 @@ const ProgressRing = React.memo(function ProgressRing({
               transition={{ duration: 1, ease: [0.25, 0.46, 0.45, 0.94] }}
             />
             <defs>
-              <linearGradient id="progressGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+              <linearGradient id="engageProgressGrad" x1="0%" y1="0%" x2="100%" y2="0%">
                 <stop offset="0%" stopColor="hsl(var(--kf-accent1))" />
                 <stop offset="100%" stopColor="hsl(var(--kf-accent2))" />
               </linearGradient>
             </defs>
           </svg>
           <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-sm font-bold">{pct}%</span>
+            <span className="text-[11px] font-bold">{pct}%</span>
           </div>
         </div>
 
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <Activity className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
+        <div className="flex-1 min-w-0 text-left">
+          <div className="flex items-center gap-1.5">
+            <Activity className="w-3 h-3 text-[hsl(var(--kf-accent1))]" />
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">Today's Progress</span>
           </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-lg font-bold">{completedCount}</span>
-            <span className="text-xs text-muted-foreground/60">of {total} actions</span>
+          <div className="flex items-baseline gap-1.5 mt-0.5">
+            <span className="text-base font-bold">{completedCount}<span className="text-muted-foreground/50 font-normal text-xs">/{total}</span></span>
+            <span className="text-[10px] text-muted-foreground/50">done</span>
           </div>
+        </div>
 
-          <div className="flex gap-3 mt-2">
+        <div className="flex items-center gap-2 shrink-0">
+          {estTime > 0 && (
+            <div className="flex items-center gap-1 px-2 py-1 rounded-md bg-[hsl(var(--kf-accent2))]/10 text-[10px] font-medium text-[hsl(var(--kf-accent2))]">
+              <Timer className="w-3 h-3" />
+              {estTime}m
+            </div>
+          )}
+          {urgentCount > 0 && (
+            <div className="flex items-center gap-1 px-2 py-1 rounded-md bg-red-500/10 text-[10px] font-medium text-red-400">
+              <Zap className="w-3 h-3" />
+              {urgentCount}
+            </div>
+          )}
+          <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground/50 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`} />
+        </div>
+      </button>
+
+      {expanded && (
+        <motion.div
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: "auto", opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          className="border-t border-border/30 px-3 pb-3 pt-2"
+        >
+          <div className="flex items-center gap-4 flex-wrap">
             <div className="flex items-center gap-1.5">
               <div className="w-2 h-2 rounded-full bg-[hsl(var(--kf-accent2))]" />
               <span className="text-[10px] text-muted-foreground/60">Done {completedCount}</span>
@@ -264,15 +294,31 @@ const ProgressRing = React.memo(function ProgressRing({
               <div className="w-2 h-2 rounded-full bg-[hsl(var(--kf-accent1))]" />
               <span className="text-[10px] text-muted-foreground/60">Remaining {nextActions.length}</span>
             </div>
-            {urgentPct > 0 && (
+            {urgentCount > 0 && (
               <div className="flex items-center gap-1.5">
                 <div className="w-2 h-2 rounded-full bg-red-500" />
-                <span className="text-[10px] text-muted-foreground/60">Urgent {urgentPct}%</span>
+                <span className="text-[10px] text-muted-foreground/60">{urgentCount} urgent</span>
+              </div>
+            )}
+            {estTime > 0 && (
+              <div className="flex items-center gap-1.5">
+                <Timer className="w-3 h-3 text-muted-foreground/50" />
+                <span className="text-[10px] text-muted-foreground/60">~{estTime} min remaining</span>
               </div>
             )}
           </div>
-        </div>
-      </div>
+
+          <div className="mt-2 h-1.5 rounded-full bg-white/[0.04] overflow-hidden">
+            <motion.div
+              className="h-full rounded-full"
+              style={{ background: "linear-gradient(90deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
+              initial={{ width: 0 }}
+              animate={{ width: `${pct}%` }}
+              transition={{ duration: 0.8, ease: "easeOut" }}
+            />
+          </div>
+        </motion.div>
+      )}
     </motion.div>
   );
 });
@@ -550,24 +596,7 @@ export function EngageTab({
         completedCount={completedCount}
       />
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
-        <ProgressRing nextActions={filteredActions} completedCount={completedCount} />
-        <motion.div
-          variants={stagger.item}
-          className="rounded-2xl border border-border/50 bg-card p-4 flex items-center gap-3 lg:min-w-[200px]"
-        >
-          <div className="p-2 rounded-xl bg-gradient-to-br from-[hsl(var(--kf-accent2))]/15 to-[hsl(var(--kf-accent2))]/5">
-            <Timer className="w-4 h-4 text-[hsl(var(--kf-accent2))]" />
-          </div>
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">Est. Time</p>
-            <p className="text-lg font-bold">
-              {filteredActions.reduce((s, a) => s + a.estimatedTime, 0)}
-              <span className="text-xs text-muted-foreground/60 font-normal ml-1">min</span>
-            </p>
-          </div>
-        </motion.div>
-      </div>
+      <ProgressCard nextActions={filteredActions} completedCount={completedCount} />
 
       <FilterToolbar
         typeFilter={typeFilter}
