@@ -157,11 +157,11 @@ Respond in valid JSON with this exact structure:
   async getGuidelines(businessId: string): Promise<{ guidelines: string[]; generatedAt: string | null }> {
     const business = await this.db.business.findUnique({
       where: { id: businessId },
-      select: { settings: true },
+      select: { metaData: true },
     });
 
-    const settings = (business?.settings as Record<string, unknown>) ?? {};
-    const aiGuidelines = settings.aiGuidelines as { guidelines: string[]; generatedAt: string } | undefined;
+    const meta = (business?.metaData as Record<string, unknown>) ?? {};
+    const aiGuidelines = meta.aiGuidelines as { guidelines: string[]; generatedAt: string } | undefined;
 
     return {
       guidelines: aiGuidelines?.guidelines ?? [],
@@ -172,15 +172,15 @@ Respond in valid JSON with this exact structure:
   async saveGuidelines(businessId: string, guidelines: string[]): Promise<void> {
     const business = await this.db.business.findUnique({
       where: { id: businessId },
-      select: { settings: true },
+      select: { metaData: true },
     });
 
-    const existing = (business?.settings as Record<string, unknown>) ?? {};
+    const existing = (business?.metaData as Record<string, unknown>) ?? {};
 
     await this.db.business.update({
       where: { id: businessId },
       data: {
-        settings: {
+        metaData: {
           ...existing,
           aiGuidelines: {
             guidelines,
