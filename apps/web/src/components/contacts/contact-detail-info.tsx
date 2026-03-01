@@ -11,6 +11,13 @@ import {
   ShieldAlert,
   ShieldCheck,
   ChevronRight,
+  Link2,
+  Linkedin,
+  Instagram,
+  Twitter,
+  Users,
+  ExternalLink,
+  Layers,
 } from "lucide-react";
 import type { ContactDetailData } from "./contact-detail";
 
@@ -56,15 +63,38 @@ function InfoField({ label, value }: { label: string; value?: string | null }) {
   );
 }
 
+export type RelatedContact = {
+  id: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  email?: string | null;
+  status?: string | null;
+  jobTitle?: string | null;
+};
+
 interface ContactDetailInfoProps {
   contact: ContactDetailData;
+  relatedContacts?: RelatedContact[];
+  onSelectRelatedContact?: (contactId: string) => void;
 }
 
-export function ContactDetailInfo({ contact }: ContactDetailInfoProps) {
+export function ContactDetailInfo({ contact, relatedContacts, onSelectRelatedContact }: ContactDetailInfoProps) {
   const hasProfessional = !!(contact.companyName || contact.jobTitle || contact.department || contact.industry);
   const hasContactMethods = !!(contact.secondaryEmail || contact.secondaryPhone || contact.whatsappNumber || contact.preferredChannel || contact.language);
   const hasAddress = !!(contact.addressLine1 || contact.addressLine2 || contact.city || contact.state || contact.postalCode || contact.country || contact.timezone);
   const hasPreferences = contact.marketingOptIn != null || contact.doNotContact != null || contact.lifecycleStage || contact.segment;
+
+  const customObj = (contact as any)?.custom;
+  const customData = customObj && typeof customObj === "object" && !Array.isArray(customObj) ? customObj as Record<string, unknown> : null;
+  const reservedKeys = new Set(["linkedinUrl", "instagramUrl", "twitterUrl", "referredBy", "nextScheduledInteraction"]);
+  const linkedinUrl = customData?.linkedinUrl ? String(customData.linkedinUrl) : null;
+  const instagramUrl = customData?.instagramUrl ? String(customData.instagramUrl) : null;
+  const twitterUrl = customData?.twitterUrl ? String(customData.twitterUrl) : null;
+  const referredBy = customData?.referredBy ? String(customData.referredBy) : null;
+  const nextScheduledInteraction = customData?.nextScheduledInteraction ? String(customData.nextScheduledInteraction) : null;
+  const hasSocial = !!(linkedinUrl || instagramUrl || twitterUrl || referredBy || nextScheduledInteraction);
+  const arbitraryCustomFields = customData ? Object.entries(customData).filter(([k]) => !reservedKeys.has(k)) : [];
+  const hasCustomFields = arbitraryCustomFields.length > 0;
 
   return (
     <>
@@ -84,6 +114,37 @@ export function ContactDetailInfo({ contact }: ContactDetailInfoProps) {
           <InfoField label="Job Title" value={contact.jobTitle} />
           <InfoField label="Department" value={contact.department} />
           <InfoField label="Industry" value={contact.industry} />
+        </div>
+      </CollapsibleSection>
+
+      <CollapsibleSection icon={Link2} title="Social & Referral" hasData={hasSocial}>
+        <div className="space-y-2 text-sm">
+          {linkedinUrl && (
+            <a href={linkedinUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-blue-400 hover:underline">
+              <Linkedin className="w-3.5 h-3.5" /> LinkedIn <ExternalLink className="w-3 h-3 opacity-50" />
+            </a>
+          )}
+          {instagramUrl && (
+            <a href={instagramUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-pink-400 hover:underline">
+              <Instagram className="w-3.5 h-3.5" /> Instagram <ExternalLink className="w-3 h-3 opacity-50" />
+            </a>
+          )}
+          {twitterUrl && (
+            <a href={twitterUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sky-400 hover:underline">
+              <Twitter className="w-3.5 h-3.5" /> Twitter <ExternalLink className="w-3 h-3 opacity-50" />
+            </a>
+          )}
+          {referredBy && (
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+              <InfoField label="Referred By" value={referredBy} />
+            </div>
+          )}
+          {nextScheduledInteraction && (
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+              <InfoField label="Next Scheduled Interaction" value={new Date(nextScheduledInteraction).toLocaleString()} />
+            </div>
+          )}
+          {!hasSocial && <p className="text-xs text-muted-foreground">No social links or referral info</p>}
         </div>
       </CollapsibleSection>
 
@@ -150,6 +211,52 @@ export function ContactDetailInfo({ contact }: ContactDetailInfoProps) {
           <InfoField label="Segment" value={contact.segment} />
         </div>
       </CollapsibleSection>
+
+      {hasCustomFields && (
+        <CollapsibleSection icon={Layers} title="Custom Fields" hasData>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+            {arbitraryCustomFields.map(([key, value]) => (
+              <InfoField key={key} label={key} value={value != null ? String(value) : null} />
+            ))}
+          </div>
+        </CollapsibleSection>
+      )}
+
+      {relatedContacts && relatedContacts.length > 0 && (
+        <CollapsibleSection icon={Users} title={`Related Contacts (${relatedContacts.length})`} hasData defaultOpen>
+          <div className="space-y-2">
+            {relatedContacts.map((rc) => {
+              const name = `${rc.firstName ?? ""} ${rc.lastName ?? ""}`.trim() || rc.email || "Unnamed";
+              const statusColor: Record<string, string> = {
+                LEAD: "bg-amber-500/15 text-amber-400",
+                PROSPECT: "bg-blue-500/15 text-blue-400",
+                CLIENT: "bg-emerald-500/15 text-emerald-400",
+                LOST: "bg-red-500/15 text-red-400",
+              };
+              return (
+                <button
+                  key={rc.id}
+                  onClick={() => onSelectRelatedContact?.(rc.id)}
+                  className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-muted/30 transition-colors text-left"
+                >
+                  <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center text-[10px] font-semibold text-muted-foreground shrink-0">
+                    {(rc.firstName?.[0] ?? "").toUpperCase()}{(rc.lastName?.[0] ?? "").toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{name}</p>
+                    {rc.jobTitle && <p className="text-[10px] text-muted-foreground truncate">{rc.jobTitle}</p>}
+                  </div>
+                  {rc.status && (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-semibold ${statusColor[rc.status] ?? "bg-muted text-muted-foreground"}`}>
+                      {rc.status}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </CollapsibleSection>
+      )}
 
       {contact.tags && contact.tags.length > 0 && (
         <div className="flex flex-wrap gap-1">

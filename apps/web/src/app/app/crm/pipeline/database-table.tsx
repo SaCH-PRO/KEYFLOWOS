@@ -42,6 +42,22 @@ const STATUS_HOVER_BORDER: Record<string, string> = {
   LOST: "hover:border-l-red-400",
 };
 
+function getCustomFieldValue(contact: LocalContact, key: string): string {
+  const custom = contact.custom;
+  if (!custom || typeof custom !== "object") return "";
+  const val = (custom as Record<string, unknown>)[key];
+  return val ? String(val) : "";
+}
+
+function getCustomFieldsSummary(contact: LocalContact): string {
+  const custom = contact.custom;
+  if (!custom || typeof custom !== "object") return "";
+  const reserved = new Set(["linkedinUrl", "instagramUrl", "twitterUrl", "referredBy", "nextScheduledInteraction"]);
+  const entries = Object.entries(custom as Record<string, unknown>).filter(([k]) => !reserved.has(k));
+  if (entries.length === 0) return "";
+  return entries.slice(0, 3).map(([k, v]) => `${k}: ${v}`).join(", ") + (entries.length > 3 ? ` +${entries.length - 3}` : "");
+}
+
 function getCellValue(contact: LocalContact, key: string): string {
   if (key === "tags") return Array.isArray(contact.tags) ? contact.tags.join(", ") : "";
   if (key === "createdAt" && contact.createdAt) {
@@ -53,6 +69,11 @@ function getCellValue(contact: LocalContact, key: string): string {
     const dateStr = contact.updatedAt || contact.createdAt;
     return dateStr ? formatRelativeTime(dateStr) : "";
   }
+  if (key === "referredBy") return getCustomFieldValue(contact, "referredBy");
+  if (key === "linkedinUrl") return getCustomFieldValue(contact, "linkedinUrl");
+  if (key === "instagramUrl") return getCustomFieldValue(contact, "instagramUrl");
+  if (key === "twitterUrl") return getCustomFieldValue(contact, "twitterUrl");
+  if (key === "customFields") return getCustomFieldsSummary(contact);
   switch (key) {
     case "firstName": return contact.firstName ?? "";
     case "lastName": return contact.lastName ?? "";

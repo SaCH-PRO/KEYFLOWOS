@@ -191,3 +191,134 @@ export async function exportContacts(
       return exportToPDF(contacts, filename || `contacts_${ts}.pdf`);
   }
 }
+
+export type InsightsExportFormat = "pdf" | "csv";
+
+interface InsightsMetrics {
+  totalContacts: number;
+  leads: number;
+  prospects: number;
+  clients: number;
+  conversionRate: string;
+  pipelineValue: number;
+  newThisWeek: number;
+  period: string;
+  contacts: { firstName?: string | null; lastName?: string | null; email?: string | null; status?: string; meta?: { totalRevenue?: number } }[];
+}
+
+function formatTTDExport(value: number): string {
+  return `TTD ${value.toLocaleString("en-TT", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
+export async function exportInsightsReport(metrics: InsightsMetrics, format: InsightsExportFormat) {
+  const ts = new Date().toISOString().slice(0, 10);
+
+  if (format === "csv") {
+    const rows: string[][] = [];
+    rows.push(["CRM Insights Report"]);
+    rows.push([`Period: ${metrics.period}`]);
+    rows.push([`Exported: ${new Date().toLocaleDateString("en-TT", { year: "numeric", month: "long", day: "numeric" })}`]);
+    rows.push([]);
+    rows.push(["Metric", "Value"]);
+    rows.push(["Total Contacts", metrics.totalContacts.toString()]);
+    rows.push(["Leads", metrics.leads.toString()]);
+    rows.push(["Prospects", metrics.prospects.toString()]);
+    rows.push(["Clients", metrics.clients.toString()]);
+    rows.push(["Conversion Rate", metrics.conversionRate]);
+    rows.push(["Pipeline Value", formatTTDExport(metrics.pipelineValue)]);
+    rows.push(["New This Week", metrics.newThisWeek.toString()]);
+    rows.push([]);
+
+    const topRevenue = metrics.contacts
+      .filter((c) => c.meta?.totalRevenue && c.meta.totalRevenue > 0)
+      .sort((a, b) => (b.meta?.totalRevenue ?? 0) - (a.meta?.totalRevenue ?? 0))
+      .slice(0, 10);
+
+    if (topRevenue.length > 0) {
+      rows.push(["Top Revenue Clients"]);
+      rows.push(["Name", "Revenue"]);
+      for (const c of topRevenue) {
+        const name = [c.firstName, c.lastName].filter(Boolean).join(" ") || c.email || "Unknown";
+        rows.push([name, formatTTDExport(c.meta?.totalRevenue ?? 0)]);
+      }
+    }
+
+    const escape = (s: string) => {
+      if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+        return `"${s.replace(/"/g, '""')}"`;
+      }
+      return s;
+    };
+
+    const csv = rows.map((r) => r.map(escape).join(",")).join("\n");
+    downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8;" }), `insights_report_${ts}.csv`);
+    return;
+  }
+
+  const { default: jsPDF } = await import("jspdf");
+  await import("jspdf-autotable");
+
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+  doc.setFontSize(18);
+  doc.setTextColor(40);
+  doc.text("CRM Insights Report", 14, 20);
+
+  doc.setFontSize(9);
+  doc.setTextColor(120);
+  doc.text(
+    `Period: ${metrics.period} · Exported ${new Date().toLocaleDateString("en-TT", { year: "numeric", month: "long", day: "numeric" })}`,
+    14,
+    28,
+  );
+
+  const summaryData = [
+    ["Total Contacts", metrics.totalContacts.toString()],
+    ["Leads", metrics.leads.toString()],
+    ["Prospects", metrics.prospects.toString()],
+    ["Clients", metrics.clients.toString()],
+    ["Conversion Rate", metrics.conversionRate],
+    ["Pipeline Value", formatTTDExport(metrics.pipelineValue)],
+    ["New This Week", metrics.newThisWeek.toString()],
+  ];
+
+  (doc as any).autoTable({
+    head: [["Metric", "Value"]],
+    body: summaryData,
+    startY: 34,
+    styles: { fontSize: 9, cellPadding: 3 },
+    headStyles: { fillColor: [249, 115, 22], textColor: 255, fontStyle: "bold" },
+    alternateRowStyles: { fillColor: [250, 250, 250] },
+    margin: { left: 14, right: 14 },
+  });
+
+  const topRevenue = metrics.contacts
+    .filter((c) => c.meta?.totalRevenue && c.meta.totalRevenue > 0)
+    .sort((a, b) => (b.meta?.totalRevenue ?? 0) - (a.meta?.totalRevenue ?? 0))
+    .slice(0, 10);
+
+  if (topRevenue.length > 0) {
+    const finalY = (doc as any).lastAutoTable?.finalY ?? 80;
+    doc.setFontSize(12);
+    doc.setTextColor(40);
+    doc.text("Top Revenue Clients", 14, finalY + 10);
+
+    const revenueRows = topRevenue.map((c, i) => [
+      (i + 1).toString(),
+      [c.firstName, c.lastName].filter(Boolean).join(" ") || c.email || "Unknown",
+      formatTTDExport(c.meta?.totalRevenue ?? 0),
+    ]);
+
+    (doc as any).autoTable({
+      head: [["#", "Client", "Revenue"]],
+      body: revenueRows,
+      startY: finalY + 14,
+      styles: { fontSize: 9, cellPadding: 3 },
+      headStyles: { fillColor: [16, 185, 129], textColor: 255, fontStyle: "bold" },
+      alternateRowStyles: { fillColor: [250, 250, 250] },
+      margin: { left: 14, right: 14 },
+    });
+  }
+
+  doc.save(`insights_report_${ts}.pdf`);
+}

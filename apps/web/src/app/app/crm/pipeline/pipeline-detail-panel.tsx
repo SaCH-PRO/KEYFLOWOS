@@ -44,6 +44,8 @@ export interface PipelineDetailPanelProps {
   onGenerateAiInsight: () => Promise<void>;
   onRefreshConversationContext: () => Promise<void>;
   onClose?: () => void;
+  relatedContacts?: Array<{ id: string; firstName?: string | null; lastName?: string | null; email?: string | null; status?: string | null; jobTitle?: string | null }>;
+  onSelectRelatedContact?: (contactId: string) => void;
 }
 
 function PipelineDetailPanelInner({
@@ -76,6 +78,8 @@ function PipelineDetailPanelInner({
   onGenerateAiInsight,
   onRefreshConversationContext,
   onClose,
+  relatedContacts,
+  onSelectRelatedContact,
 }: PipelineDetailPanelProps) {
   if (detailError && !loading) {
     return (
@@ -128,6 +132,8 @@ function PipelineDetailPanelInner({
         aiInsightLoading={aiInsightLoading}
         onGenerateAiInsight={onGenerateAiInsight}
         onRefreshConversationContext={onRefreshConversationContext}
+        relatedContacts={relatedContacts}
+        onSelectRelatedContact={onSelectRelatedContact}
       />
     </div>
   );

@@ -87,6 +87,12 @@ export default function ContactsPage() {
   const handleSelectDbContact = useCallback((id: string) => { selectContact(id); setCrmViewTab("pipeline"); }, [selectContact, setCrmViewTab]);
   const handleViewCold = useCallback(() => { setStatusFilter("LEAD"); setCrmViewTab("pipeline"); }, [setStatusFilter, setCrmViewTab]);
   const handleViewReady = useCallback(() => { setStatusFilter("PROSPECT"); setCrmViewTab("pipeline"); }, [setStatusFilter, setCrmViewTab]);
+  const handleInsightsRefresh = useCallback(() => { void loadContacts(); void loadFlowData(); }, [loadContacts, loadFlowData]);
+  const handleNavigatePipeline = useCallback((filter?: { status?: string; segment?: string }) => {
+    if (filter?.status) setStatusFilter(filter.status);
+    if (filter?.segment) state.setActiveSegment(filter.segment as any);
+    setCrmViewTab("pipeline");
+  }, [setStatusFilter, setCrmViewTab, state.setActiveSegment]);
   const handleViewEngageContact = useCallback((id: string) => { selectContact(id); setCrmViewTab("pipeline"); }, [selectContact, setCrmViewTab]);
   const handleToggleAutopilotPause = useCallback(() => setAutopilotPaused((prev: boolean) => !prev), [setAutopilotPaused]);
   const handleToggleGuide = useCallback(() => setShowGuide((prev: boolean) => !prev), [setShowGuide]);
@@ -207,10 +213,13 @@ export default function ContactsPage() {
               revenueData={revenueData}
               contacts={contacts}
               loading={flowDataLoading}
+              businessId={businessId}
               onViewCold={handleViewCold}
               onViewReady={handleViewReady}
               onViewExpiringQuotes={handleViewExpiringQuotes}
               onViewOverdueInvoices={handleViewOverdueInvoices}
+              onRefresh={handleInsightsRefresh}
+              onNavigatePipeline={handleNavigatePipeline}
             />
           </motion.div>
         )}

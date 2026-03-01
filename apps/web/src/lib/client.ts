@@ -3207,4 +3207,70 @@ export async function removeContactFromList(
   );
 }
 
+export type AiSuggestedAction = {
+  type: string;
+  contactId?: string;
+  contactName?: string;
+  title: string;
+  description: string;
+  priority: "urgent" | "high" | "medium" | "low";
+};
+
+export type AiAutomatedTask = {
+  contactId: string;
+  contactName?: string;
+  title: string;
+  dueDate: string;
+  priority: "HIGH" | "NORMAL" | "LOW";
+};
+
+export type AiAnalysisResult = {
+  analysis: string;
+  suggestedActions: AiSuggestedAction[];
+  guidelines: string[];
+  automatedTasks: AiAutomatedTask[];
+};
+
+export async function aiAnalyzeContacts(
+  businessId: string,
+  prompt: string,
+  contactIds?: string[],
+): Promise<ApiResult<AiAnalysisResult>> {
+  return apiPost<AiAnalysisResult>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/ai-analyze`,
+    body: { prompt, contactIds },
+  });
+}
+
+export async function aiExecuteTasks(
+  businessId: string,
+  tasks: AiAutomatedTask[],
+): Promise<ApiResult<{ created: number; failed: number }>> {
+  return apiPost<{ created: number; failed: number }>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/ai-analyze/execute`,
+    body: { tasks },
+  });
+}
+
+export async function fetchAiGuidelines(
+  businessId: string,
+): Promise<ApiResult<{ guidelines: string[]; generatedAt: string | null }>> {
+  const fallback = { guidelines: [] as string[], generatedAt: null as string | null };
+  return apiGetSimple(
+    `/crm/businesses/${encodeURIComponent(businessId)}/ai-guidelines`,
+    z.object({ guidelines: z.array(z.string()), generatedAt: z.string().nullable() }),
+    fallback,
+  );
+}
+
+export async function saveAiGuidelines(
+  businessId: string,
+  guidelines: string[],
+): Promise<ApiResult<void>> {
+  return apiPost<void>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/ai-guidelines`,
+    body: { guidelines },
+  });
+}
+
 export { DEFAULT_BUSINESS_ID };

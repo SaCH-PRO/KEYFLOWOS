@@ -73,6 +73,16 @@ export function useContactsPipeline() {
 
   const isPinned = selectedContactId ? contactsData.pinnedIds.includes(selectedContactId) : false;
 
+  const relatedContacts = useMemo(() => {
+    const selected = detail.selectedContact;
+    if (!selected?.companyName) return [];
+    const company = selected.companyName.toLowerCase();
+    return contacts
+      .filter((c) => c.id !== selected.id && c.companyName && c.companyName.toLowerCase() === company)
+      .slice(0, 10)
+      .map((c) => ({ id: c.id, firstName: c.firstName, lastName: c.lastName, email: c.email, status: c.status, jobTitle: c.jobTitle }));
+  }, [detail.selectedContact, contacts]);
+
   const detailPanelProps: Omit<PipelineDetailPanelProps, "onClose"> = useMemo(() => ({
     contact: detail.selectedContact,
     events: detail.detailEvents,
@@ -102,11 +112,13 @@ export function useContactsPipeline() {
     onLogEvent: actions.handleLogEvent,
     onGenerateAiInsight: detail.handleGenerateAiInsight,
     onRefreshConversationContext: detail.handleRefreshConversationContext,
+    relatedContacts,
+    onSelectRelatedContact: selectContact,
   }), [
     detail.selectedContact, detail.detailEvents, detail.detailNotes, detail.detailTasks,
     detail.detailLoading, detailError, handleRetryDetail, isPinned, detail.contactName, detail.healthMetrics,
     detail.journeyMilestones, detail.conversationContext, detail.aiInsight, detail.aiInsightLoading,
-    contactsData.handleTogglePin, actions.handleAddNote, actions.handleAddTask,
+    contactsData.handleTogglePin, actions.handleAddNote, actions.handleAddTask, relatedContacts, selectContact,
     actions.handleCompleteTask, actions.handleDeleteNote, actions.handleDeleteTask,
     actions.handleUpdateNote, actions.handleUpdateTask, actions.handleUpdateStatus,
     actions.handleEditContact, handleDeleteForPanel, actions.handleLogEvent,

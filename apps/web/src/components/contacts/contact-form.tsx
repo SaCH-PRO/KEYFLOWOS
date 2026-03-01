@@ -4,7 +4,8 @@ import { useState, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   X, User, Mail, Phone, Building2, Tag, Briefcase, MessageSquare,
-  FileText, MapPin, ChevronDown, Globe, Shield, ToggleLeft
+  FileText, MapPin, ChevronDown, Globe, Shield, ToggleLeft,
+  Linkedin, Instagram, Twitter, Link2, CalendarClock, Plus, Trash2
 } from "lucide-react";
 import { validateEmail, validatePhone } from "@/lib/validators";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
@@ -17,6 +18,11 @@ interface ContactFormProps {
   onCancel: () => void;
   loading?: boolean;
   initialValues?: Partial<ContactFormData>;
+}
+
+export interface CustomFieldEntry {
+  key: string;
+  value: string;
 }
 
 export interface ContactFormData {
@@ -50,6 +56,12 @@ export interface ContactFormData {
   marketingOptIn: boolean;
   doNotContact: boolean;
   notesInternal: string;
+  linkedinUrl: string;
+  instagramUrl: string;
+  twitterUrl: string;
+  referredBy: string;
+  nextScheduledInteraction: string;
+  customFields: CustomFieldEntry[];
 }
 
 type ValidationErrors = Partial<Record<keyof ContactFormData, string>>;
@@ -107,6 +119,12 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
     marketingOptIn: false,
     doNotContact: false,
     notesInternal: "",
+    linkedinUrl: "",
+    instagramUrl: "",
+    twitterUrl: "",
+    referredBy: "",
+    nextScheduledInteraction: "",
+    customFields: [],
   };
 
   const initial = useMemo(() => ({
@@ -132,8 +150,10 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
     basic: true,
     professional: isEditing,
     contactDetails: isEditing,
+    socialLinks: isEditing,
     address: isEditing,
     preferences: isEditing,
+    customFieldsSection: isEditing,
     notes: true,
   });
 
@@ -416,6 +436,38 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
           </div>
         )}
 
+        <SectionHeader label="Social Links" icon={Link2} open={sections.socialLinks} onToggle={() => toggle("socialLinks")} />
+        {sections.socialLinks && (
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground flex items-center gap-1">
+                <Linkedin className="w-3 h-3" /> LinkedIn URL
+              </label>
+              <input type="url" placeholder="https://linkedin.com/in/username" {...field("linkedinUrl")} className="kf-input w-full" />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Instagram className="w-3 h-3" /> Instagram URL
+                </label>
+                <input type="url" placeholder="https://instagram.com/username" {...field("instagramUrl")} className="kf-input w-full" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Twitter className="w-3 h-3" /> Twitter URL
+                </label>
+                <input type="url" placeholder="https://twitter.com/username" {...field("twitterUrl")} className="kf-input w-full" />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground flex items-center gap-1">
+                <User className="w-3 h-3" /> Referred By
+              </label>
+              <input type="text" placeholder="Name or source of referral" {...field("referredBy")} className="kf-input w-full" />
+            </div>
+          </div>
+        )}
+
         <SectionHeader label="Address" icon={MapPin} open={sections.address} onToggle={() => toggle("address")} />
         {sections.address && (
           <div className="space-y-4">
@@ -471,11 +523,24 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
         <SectionHeader label="Preferences" icon={Shield} open={sections.preferences} onToggle={() => toggle("preferences")} />
         {sections.preferences && (
           <div className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground flex items-center gap-1">
-                <ToggleLeft className="w-3 h-3" /> Lifecycle Stage
-              </label>
-              <input type="text" placeholder="Onboarding, Active, Churned..." {...field("lifecycleStage")} className="kf-input w-full" />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <ToggleLeft className="w-3 h-3" /> Lifecycle Stage
+                </label>
+                <input type="text" placeholder="Onboarding, Active, Churned..." {...field("lifecycleStage")} className="kf-input w-full" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <CalendarClock className="w-3 h-3" /> Next Scheduled Interaction
+                </label>
+                <input
+                  type="datetime-local"
+                  value={form.nextScheduledInteraction}
+                  onChange={(e) => setForm((p) => ({ ...p, nextScheduledInteraction: e.target.value }))}
+                  className="kf-input w-full"
+                />
+              </div>
             </div>
             <div className="flex items-center gap-6">
               <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -497,6 +562,56 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
                 Do Not Contact
               </label>
             </div>
+          </div>
+        )}
+
+        <SectionHeader label="Custom Fields" icon={Tag} open={sections.customFieldsSection} onToggle={() => toggle("customFieldsSection")} />
+        {sections.customFieldsSection && (
+          <div className="space-y-3">
+            {form.customFields.map((cf, idx) => (
+              <div key={idx} className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Field name"
+                  value={cf.key}
+                  onChange={(e) => {
+                    const updated = [...form.customFields];
+                    updated[idx] = { ...updated[idx], key: e.target.value };
+                    setForm((p) => ({ ...p, customFields: updated }));
+                  }}
+                  className="kf-input w-1/3"
+                />
+                <input
+                  type="text"
+                  placeholder="Value"
+                  value={cf.value}
+                  onChange={(e) => {
+                    const updated = [...form.customFields];
+                    updated[idx] = { ...updated[idx], value: e.target.value };
+                    setForm((p) => ({ ...p, customFields: updated }));
+                  }}
+                  className="kf-input flex-1"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const updated = form.customFields.filter((_, i) => i !== idx);
+                    setForm((p) => ({ ...p, customFields: updated }));
+                  }}
+                  className="p-1.5 hover:bg-red-500/20 rounded-lg transition-colors text-red-400"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => setForm((p) => ({ ...p, customFields: [...p.customFields, { key: "", value: "" }] }))}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1.5 rounded-lg hover:bg-muted"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add Custom Field
+            </button>
           </div>
         )}
 

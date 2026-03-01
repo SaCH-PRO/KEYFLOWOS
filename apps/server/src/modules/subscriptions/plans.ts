@@ -44,6 +44,7 @@ export const AI_CREDIT_COSTS: Record<string, number> = {
   seo_analysis: 1,
   email_draft: 1,
   social_caption: 1,
+  crm_analysis: 3,
 };
 
 export const AI_OVERAGE_RATE_TTD = 2.50;
