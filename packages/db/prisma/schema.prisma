@@ -242,6 +242,7 @@ model Contact {
     playbooks     ContactPlaybook[]
     recurringInvoices RecurringInvoice[]
     sequenceEnrollments CrmSequenceEnrollment[]
+  listMembers         ContactListMember[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   leadScore        Int?      @map("lead_score")
@@ -278,6 +279,7 @@ model ContactEvent {
 
   @@index([businessId, contactId])
   @@index([businessId, contactId, type])
+  @@index([businessId, type, createdAt])
   @@map("contact_events")
 }
 
@@ -294,6 +296,7 @@ model ContactNote {
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@index([businessId, contactId])
+  @@index([businessId, createdAt])
   @@map("contact_notes")
 }
 
@@ -317,6 +320,7 @@ model ContactTask {
 
   @@index([businessId, contactId])
   @@index([businessId, status, dueDate])
+  @@index([businessId, assigneeId, status])
   @@map("contact_tasks")
 }
 
@@ -402,11 +406,25 @@ model ContactList {
   type        String   @default("MANUAL")
   filters     Json?
   contactIds  String[] @map("contact_ids")
+  members     ContactListMember[]
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   @@index([businessId])
   @@map("contact_lists")
+}
+
+model ContactListMember {
+  id        String      @id @default(cuid())
+  listId    String      @map("list_id")
+  list      ContactList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  contactId String      @map("contact_id")
+  contact   Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  addedAt   DateTime    @default(now()) @map("added_at")
+
+  @@unique([listId, contactId])
+  @@index([contactId])
+  @@map("contact_list_members")
 }
 
 // ---
@@ -1670,5 +1688,6 @@ model CrmSequenceEnrollment {
 
   @@index([sequenceId])
   @@index([contactId])
+  @@index([status, nextStepAt])
   @@map("crm_sequence_enrollments")
 }

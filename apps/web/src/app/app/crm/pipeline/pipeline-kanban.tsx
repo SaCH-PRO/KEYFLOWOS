@@ -17,75 +17,12 @@ import { toast } from "sonner";
 import { PipelineDetailPanel } from "./pipeline-detail-panel";
 import type { PipelineState } from "./use-contacts-pipeline";
 import { CONTACT_STATUSES } from "@/lib/crm-constants";
+import { relativeTime, getScoreStyle, STATUS_CONFIG, STATUS_COLORS } from "@/lib/crm-utils";
 
 const STATUSES = CONTACT_STATUSES;
 
-const STATUS_CONFIG: Record<
-  string,
-  { label: string; gradient: string; text: string; bg: string; border: string }
-> = {
-  LEAD: {
-    label: "Lead",
-    gradient: "from-amber-500/20 to-amber-600/10",
-    text: "text-amber-400",
-    bg: "bg-amber-500/10",
-    border: "border-amber-500/30",
-  },
-  PROSPECT: {
-    label: "Prospect",
-    gradient: "from-blue-500/20 to-blue-600/10",
-    text: "text-blue-400",
-    bg: "bg-blue-500/10",
-    border: "border-blue-500/30",
-  },
-  CLIENT: {
-    label: "Client",
-    gradient: "from-emerald-500/20 to-emerald-600/10",
-    text: "text-emerald-400",
-    bg: "bg-emerald-500/10",
-    border: "border-emerald-500/30",
-  },
-  LOST: {
-    label: "Lost",
-    gradient: "from-red-500/20 to-red-600/10",
-    text: "text-red-400",
-    bg: "bg-red-500/10",
-    border: "border-red-500/30",
-  },
-};
-
-function relativeTime(dateStr: string): string {
-  const now = Date.now();
-  const then = new Date(dateStr).getTime();
-  const diffMs = now - then;
-  if (diffMs < 0) return "just now";
-  const mins = Math.floor(diffMs / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  const months = Math.floor(days / 30);
-  return `${months}mo ago`;
-}
-
 function formatCurrency(value: number): string {
   return `TTD ${value.toLocaleString("en-TT")}`;
-}
-
-const SCORE_STYLES: Record<string, { bg: string; text: string }> = {
-  hot: { bg: "bg-red-500/15 border border-red-500/25", text: "text-red-400" },
-  warm: { bg: "bg-orange-500/15 border border-orange-500/25", text: "text-orange-400" },
-  cool: { bg: "bg-teal-500/15 border border-teal-500/25", text: "text-teal-400" },
-  cold: { bg: "bg-blue-500/15 border border-blue-500/25", text: "text-blue-400" },
-};
-
-function getScoreStyle(score: number) {
-  if (score >= 75) return SCORE_STYLES.hot;
-  if (score >= 50) return SCORE_STYLES.warm;
-  if (score >= 25) return SCORE_STYLES.cool;
-  return SCORE_STYLES.cold;
 }
 
 interface KanbanCardProps {
@@ -114,14 +51,7 @@ const KanbanCard = memo(function KanbanCardInner({
   const scoreStyle = hasLeadScore ? getScoreStyle(leadScore!) : null;
   const totalRevenue = contact.meta?.totalRevenue;
   const lastInteraction = contact.meta?.lastInteractionAt;
-  const statusColor =
-    contact.status === "LEAD"
-      ? "hsl(var(--kf-accent1))"
-      : contact.status === "PROSPECT"
-        ? "hsl(var(--kf-accent2))"
-        : contact.status === "CLIENT"
-          ? "hsl(142 76% 36%)"
-          : "hsl(var(--kf-muted-foreground))";
+  const statusColor = STATUS_COLORS[contact.status ?? "LEAD"] ?? STATUS_COLORS.LEAD;
 
   const statusLabel = STATUS_CONFIG[contact.status ?? "LEAD"]?.label ?? contact.status ?? "Lead";
   const cardAriaLabel = `${fullName} - ${statusLabel}${hasLeadScore ? ` - Lead Score: ${leadScore}` : ""}`;

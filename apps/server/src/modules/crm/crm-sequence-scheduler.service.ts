@@ -234,8 +234,8 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
           contactId: enrollment.contactId,
           title: `Call: ${step.subject || enrollment.sequence.name} - Step ${currentStepIndex + 1}`,
           description: step.body || `Sequence "${enrollment.sequence.name}" requires a call to ${contactName}`,
-          priority: 'high',
-          status: 'pending',
+          priority: 'HIGH',
+          status: 'OPEN',
           dueDate: new Date(),
         },
       });

@@ -1,8 +1,8 @@
-import { Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import type { Contact, Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmTimelineService } from './crm-timeline.service';
-import type { CrmService } from './crm.service';
+import { contactWhereBase, contactWhereWithId } from './crm.helpers';
 
 export type ContactMeta = {
   outstandingBalance: number;
@@ -97,45 +97,14 @@ type FlowHighlightsPayload = {
   aiNextActions: AiStub[];
 };
 
-type ContactListOptions = {
-  businessId: string;
-  status?: string;
-  search?: string;
-  hasUnpaidInvoices?: boolean;
-  hasUpcomingBookings?: boolean;
-  staleDays?: number;
-  newThisWeek?: boolean;
-  tags?: string[];
-  ownerId?: string;
-  lifecycleStage?: string;
-  companyName?: string;
-  industry?: string;
-  city?: string;
-  country?: string;
-  segment?: string;
-  doNotContact?: boolean;
-  skip?: number;
-  take?: number;
-  cursor?: string;
-  includeStats?: boolean;
-  sortBy?: string;
-  sortOrder?: 'asc' | 'desc';
-};
-
 @Injectable()
 export class CrmStatsService {
-  private crmService!: CrmService;
   private cache: Map<string, { data: any; expires: number }> = new Map();
 
   constructor(
     private readonly prisma: PrismaService,
-    @Inject(forwardRef(() => require('./crm.service').CrmService)) private readonly crmRef: any,
     private readonly timeline: CrmTimelineService,
   ) {}
-
-  onModuleInit() {
-    this.crmService = this.crmRef;
-  }
 
   private getCached<T>(key: string): T | null {
     const entry = this.cache.get(key);
@@ -176,7 +145,7 @@ export class CrmStatsService {
 
   private async assertContact(businessId: string, contactId: string) {
     const contact = await this.prisma.client.contact.findFirst({
-      where: { id: contactId, businessId, deletedAt: null },
+      where: contactWhereWithId(businessId, contactId),
     });
     if (!contact) {
       throw new NotFoundException('Contact not found');
@@ -190,12 +159,12 @@ export class CrmStatsService {
     if (cached) return cached;
 
     const totalCount = await this.prisma.client.contact.count({
-      where: { businessId, deletedAt: null },
+      where: contactWhereBase(businessId),
     });
 
     const statusGroups = await this.prisma.client.contact.groupBy({
       by: ['status'],
-      where: { businessId, deletedAt: null },
+      where: contactWhereBase(businessId),
       _count: { id: true },
     });
     const countByStatus: Record<string, number> = { LEAD: 0, PROSPECT: 0, CLIENT: 0, LOST: 0 };
@@ -205,7 +174,7 @@ export class CrmStatsService {
 
     const sourceGroups = await this.prisma.client.contact.groupBy({
       by: ['source'],
-      where: { businessId, deletedAt: null },
+      where: contactWhereBase(businessId),
       _count: { id: true },
     });
     const countBySource = sourceGroups.map((g) => ({
@@ -226,8 +195,7 @@ export class CrmStatsService {
       weekEnd.setDate(weekEnd.getDate() + 7);
       const count = await this.prisma.client.contact.count({
         where: {
-          businessId,
-          deletedAt: null,
+          ...contactWhereBase(businessId),
           createdAt: { gte: weekStart, lt: weekEnd },
         },
       });
@@ -235,7 +203,7 @@ export class CrmStatsService {
     }
 
     const allContacts = await this.prisma.client.contact.findMany({
-      where: { businessId, deletedAt: null },
+      where: contactWhereBase(businessId),
       select: { tags: true },
     });
     const tagCounts = new Map<string, number>();
@@ -398,7 +366,7 @@ export class CrmStatsService {
 
   async findDuplicates(businessId: string) {
     const contacts = await this.prisma.client.contact.findMany({
-      where: { businessId, deletedAt: null },
+      where: contactWhereBase(businessId),
       orderBy: { createdAt: 'desc' },
     });
 
@@ -589,7 +557,7 @@ export class CrmStatsService {
     const cached = this.getCached(cacheKey);
     if (cached) return cached;
 
-    const base = { businessId: input.businessId, deletedAt: null };
+    const base = contactWhereBase(input.businessId);
     const now = new Date();
     const start = new Date(now);
     start.setHours(0, 0, 0, 0);
@@ -626,8 +594,14 @@ export class CrmStatsService {
     const cached = this.getCached<FlowHighlightsPayload>(cacheKey);
     if (cached) return cached;
 
-    const result = await this.crmService.listContacts({ businessId: input.businessId, includeStats: true, take: 200 });
-    const contacts = result.contacts;
+    const rawContacts = await this.prisma.client.contact.findMany({
+      where: contactWhereBase(input.businessId),
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+    const contacts = rawContacts.length > 0
+      ? await this.attachContactStats(input.businessId, rawContacts)
+      : [];
     const [segments, serviceAffinity, timeline] = await Promise.all([
       this.buildSegmentInsights(input.businessId),
       this.buildServiceAffinity(input.businessId),
@@ -662,11 +636,11 @@ export class CrmStatsService {
   async getContactsPollState(businessId: string) {
     const [result, totalCount] = await Promise.all([
       this.prisma.client.contact.aggregate({
-        where: { businessId, deletedAt: null },
+        where: contactWhereBase(businessId),
         _max: { updatedAt: true },
       }),
       this.prisma.client.contact.count({
-        where: { businessId, deletedAt: null },
+        where: contactWhereBase(businessId),
       }),
     ]);
     return {
@@ -689,7 +663,7 @@ export class CrmStatsService {
 
   async getFavorites(businessId: string) {
     const allContacts = await this.prisma.client.contact.findMany({
-      where: { businessId, deletedAt: null },
+      where: contactWhereBase(businessId),
       orderBy: { updatedAt: 'desc' },
     });
     return allContacts.filter((c) => {
@@ -739,7 +713,6 @@ export class CrmStatsService {
       key: string;
       label: string;
       description: string;
-      params?: Partial<ContactListOptions>;
       take?: number;
       countWhere: Prisma.ContactWhereInput;
     }> = [
@@ -747,18 +720,15 @@ export class CrmStatsService {
         key: 'new-this-week',
         label: 'New this week',
         description: 'Fresh leads created since the start of the week',
-        params: { newThisWeek: true },
         take: 6,
-        countWhere: { businessId, deletedAt: null, createdAt: { gte: startOfWeek } },
+        countWhere: { ...contactWhereBase(businessId), createdAt: { gte: startOfWeek } },
       },
       {
         key: 'cold-with-unpaid',
         label: 'Cold leads with unpaid invoices',
         description: 'No recent activity plus outstanding invoices',
-        params: { hasUnpaidInvoices: true, staleDays: 21 },
         countWhere: {
-          businessId,
-          deletedAt: null,
+          ...contactWhereBase(businessId),
           invoices: {
             some: {
               status: { in: ['SENT', 'OVERDUE'] as string[] },
@@ -772,29 +742,30 @@ export class CrmStatsService {
         key: 'top-clients',
         label: 'Top clients',
         description: 'Clients who book and pay frequently',
-        params: { status: 'CLIENT' },
-        countWhere: { businessId, deletedAt: null, status: 'CLIENT' },
+        countWhere: { ...contactWhereBase(businessId), status: 'CLIENT' },
       },
     ];
 
     const insights: SegmentInsight[] = [];
     for (const def of definitions) {
-      const options = {
-        businessId,
-        ...def.params,
-        includeStats: def.params?.includeStats ?? true,
-        take: def.take ?? 6,
-      };
-      const [listResult, count] = await Promise.all([
-        this.crmService.listContacts(options as any),
+      const take = def.take ?? 6;
+      const [rawContacts, count] = await Promise.all([
+        this.prisma.client.contact.findMany({
+          where: def.countWhere,
+          orderBy: { createdAt: 'desc' },
+          take,
+        }),
         this.prisma.client.contact.count({ where: def.countWhere }),
       ]);
+      const contactsWithStats = rawContacts.length > 0
+        ? await this.attachContactStats(businessId, rawContacts)
+        : [];
       insights.push({
         key: def.key,
         label: def.label,
         description: def.description,
         count,
-        contacts: listResult.contacts.slice(0, 6),
+        contacts: contactsWithStats.slice(0, 6),
       });
     }
     return insights;

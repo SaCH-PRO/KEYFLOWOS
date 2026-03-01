@@ -1,18 +1,14 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpException, HttpStatus, Inject, Param, Patch, Post, Put, Query, Redirect, Req, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpException, HttpStatus, Inject, Param, Patch, Post, Put, Query, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { CrmActionsService } from './crm-actions.service';
-import { CrmAiService } from './crm-ai.service';
 import { CrmFlowService } from './crm-flow.service';
-import { CrmGoogleService } from './crm-google.service';
 import { CrmImportService } from './crm-import.service';
 import { CrmJourneyService } from './crm-journey.service';
-import { CrmListsService } from './crm-lists.service';
 import { CrmPlaybookService } from './crm-playbook.service';
 import { CrmRevenueService } from './crm-revenue.service';
 import { CrmStatsService } from './crm-stats.service';
 import { CrmTimelineService } from './crm-timeline.service';
 import { CrmVisionService } from './crm-vision.service';
-import { CrmSequenceService } from './crm-sequence.service';
 import { CrmService } from './crm.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -23,7 +19,7 @@ import { UpdateContactDto } from './dto/update-contact.dto';
 import { CrmRateLimitGuard, CrmRateLimit } from './guards/rate-limit.guard';
 import { FeatureFlagGuard, RequireFeature } from './guards/feature-flag.guard';
 import { memoryStorage } from 'multer';
-import type { Express, Response } from 'express';
+import type { Express } from 'express';
 
 const AI_RATE_LIMIT = 10;
 const AI_RATE_WINDOW_MS = 60_000;
@@ -45,18 +41,14 @@ export class CrmController {
   constructor(
     @Inject(CrmService) private readonly crm: CrmService,
     @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
-    @Inject(CrmListsService) private readonly lists: CrmListsService,
     @Inject(CrmStatsService) private readonly crmStats: CrmStatsService,
     @Inject(CrmImportService) private readonly crmImport: CrmImportService,
     @Inject(CrmPlaybookService) private readonly playbook: CrmPlaybookService,
     @Inject(CrmVisionService) private readonly vision: CrmVisionService,
-    @Inject(CrmGoogleService) private readonly google: CrmGoogleService,
     @Inject(CrmFlowService) private readonly flow: CrmFlowService,
     @Inject(CrmActionsService) private readonly actions: CrmActionsService,
     @Inject(CrmRevenueService) private readonly revenue: CrmRevenueService,
     @Inject(CrmJourneyService) private readonly journey: CrmJourneyService,
-    @Inject(CrmAiService) private readonly crmAi: CrmAiService,
-    @Inject(CrmSequenceService) private readonly sequences: CrmSequenceService,
   ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -583,64 +575,6 @@ export class CrmController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(120, 60_000)
-  @Get('businesses/:businessId/google/auth-url')
-  getGoogleAuthUrl(@Param('businessId') businessId: string) {
-    const url = this.google.getAuthUrl(businessId);
-    return { url };
-  }
-
-  @Get('google/callback')
-  async handleGoogleCallback(
-    @Query('code') code: string,
-    @Query('state') state: string,
-    @Res() res: Response,
-  ) {
-    const frontendUrl = process.env.REPLIT_DEV_DOMAIN 
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}` 
-      : 'http://localhost:5000';
-
-    if (!code || !state) {
-      return res.redirect(`${frontendUrl}/app/crm/pipeline?google_error=missing_params`);
-    }
-
-    const verifiedState = this.google.verifyState(state);
-    if (!verifiedState) {
-      return res.redirect(`${frontendUrl}/app/crm/pipeline?google_error=invalid_state`);
-    }
-
-    try {
-      const tokens = await this.google.exchangeCodeForTokens(code);
-      const result = await this.google.importGoogleContacts({
-        businessId: verifiedState.businessId,
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
-      });
-
-      return res.redirect(`${frontendUrl}/app/crm/pipeline?google_success=true&imported=${result.imported}`);
-    } catch (err) {
-      return res.redirect(`${frontendUrl}/app/crm/pipeline?google_error=${encodeURIComponent((err as Error).message)}`);
-    }
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard)
-  @CrmRateLimit(5, 60_000)
-  @Post('businesses/:businessId/google/import')
-  async importFromGoogle(
-    @Param('businessId') businessId: string,
-    @Body() body: { accessToken: string; refreshToken?: string },
-  ) {
-    if (!body.accessToken) {
-      throw new BadRequestException('accessToken is required');
-    }
-    return this.google.importGoogleContacts({
-      businessId,
-      accessToken: body.accessToken,
-      refreshToken: body.refreshToken,
-    });
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard)
-  @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/lists')
   listContactLists(@Param('businessId') businessId: string) {
     return this.crm.listContactLists(businessId);
@@ -778,268 +712,6 @@ export class CrmController {
     return this.journey.getConversationContext(businessId, contactId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('ai_tools')
-  @CrmRateLimit(10, 60_000)
-  @Get('businesses/:businessId/contacts/:contactId/ai-insight')
-  getAiInsight(
-    @Param('businessId') businessId: string,
-    @Param('contactId') contactId: string,
-  ) {
-    checkAiRateLimit(businessId);
-    return this.journey.generateAiInsight(businessId, contactId);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('ai_tools')
-  @CrmRateLimit(10, 60_000)
-  @Post('businesses/:businessId/contacts/:contactId/ai-tags')
-  aiSuggestTags(
-    @Param('businessId') businessId: string,
-    @Param('contactId') contactId: string,
-  ) {
-    checkAiRateLimit(businessId);
-    return this.crmAi.suggestTags(businessId, contactId);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('ai_tools')
-  @CrmRateLimit(10, 60_000)
-  @Post('businesses/:businessId/contacts/:contactId/ai-prep-brief')
-  aiPrepBrief(
-    @Param('businessId') businessId: string,
-    @Param('contactId') contactId: string,
-  ) {
-    checkAiRateLimit(businessId);
-    return this.crmAi.generatePrepBrief(businessId, contactId);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('ai_tools')
-  @CrmRateLimit(10, 60_000)
-  @Post('businesses/:businessId/ai-command')
-  aiCommand(
-    @Param('businessId') businessId: string,
-    @Body() body: { command: string },
-  ) {
-    if (!body.command || typeof body.command !== 'string') {
-      throw new BadRequestException('command is required');
-    }
-    if (body.command.length > 500) {
-      throw new BadRequestException('command must be 500 characters or less');
-    }
-    checkAiRateLimit(businessId);
-    return this.crmAi.interpretCommand(businessId, body.command);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('ai_tools')
-  @CrmRateLimit(10, 60_000)
-  @Post('businesses/:businessId/ai-analyze')
-  aiAnalyze(
-    @Param('businessId') businessId: string,
-    @Body() body: { prompt: string; contactIds?: string[] },
-  ) {
-    if (!body.prompt || typeof body.prompt !== 'string') {
-      throw new BadRequestException('prompt is required');
-    }
-    if (body.prompt.length > 2000) {
-      throw new BadRequestException('prompt must be 2000 characters or less');
-    }
-    if (Array.isArray(body.contactIds) && body.contactIds.length > 100) {
-      throw new BadRequestException('Maximum 100 contactIds per request');
-    }
-    checkAiRateLimit(businessId);
-    return this.crmAi.analyzeContacts(businessId, body.prompt, body.contactIds);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('ai_tools')
-  @CrmRateLimit(10, 60_000)
-  @Post('businesses/:businessId/ai-analyze/execute')
-  async aiExecuteTasks(
-    @Param('businessId') businessId: string,
-    @Req() req: any,
-    @Body() body: { tasks: Array<{ contactId: string; contactName?: string; title: string; dueDate: string; priority: 'HIGH' | 'NORMAL' | 'LOW' }> },
-  ) {
-    if (!Array.isArray(body.tasks) || body.tasks.length === 0) {
-      throw new BadRequestException('tasks array is required');
-    }
-    if (body.tasks.length > 100) {
-      throw new BadRequestException('Maximum 100 tasks per request');
-    }
-    const userId = req.user?.id ?? req.user?.sub ?? 'system';
-    return this.crmAi.executeTasks(businessId, userId, body.tasks);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('ai_tools')
-  @CrmRateLimit(120, 60_000)
-  @Get('businesses/:businessId/ai-guidelines')
-  getAiGuidelines(@Param('businessId') businessId: string) {
-    return this.crmAi.getGuidelines(businessId);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('ai_tools')
-  @CrmRateLimit(30, 60_000)
-  @Post('businesses/:businessId/ai-guidelines')
-  saveAiGuidelines(
-    @Param('businessId') businessId: string,
-    @Body() body: { guidelines: string[] },
-  ) {
-    if (!Array.isArray(body.guidelines)) {
-      throw new BadRequestException('guidelines array is required');
-    }
-    return this.crmAi.saveGuidelines(businessId, body.guidelines);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('ai_tools')
-  @CrmRateLimit(10, 60_000)
-  @Post('businesses/:businessId/contacts/:contactId/ai-summary')
-  aiContactSummary(
-    @Param('businessId') businessId: string,
-    @Param('contactId') contactId: string,
-  ) {
-    checkAiRateLimit(businessId);
-    return this.crmAi.summarizeContact(businessId, contactId);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('ai_tools')
-  @CrmRateLimit(10, 60_000)
-  @Post('businesses/:businessId/contacts/:contactId/ai-score')
-  aiLeadScore(
-    @Param('businessId') businessId: string,
-    @Param('contactId') contactId: string,
-  ) {
-    checkAiRateLimit(businessId);
-    return this.crmAi.scoreContactWithAi(businessId, contactId);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('ai_tools')
-  @CrmRateLimit(10, 60_000)
-  @Post('businesses/:businessId/contacts/:contactId/ai-note-analysis')
-  aiNoteAnalysis(
-    @Param('businessId') businessId: string,
-    @Param('contactId') contactId: string,
-    @Body() body: { noteBody: string; noteId?: string },
-  ) {
-    if (!body.noteBody || typeof body.noteBody !== 'string') {
-      throw new BadRequestException('noteBody is required');
-    }
-    if (body.noteBody.length > 5000) {
-      throw new BadRequestException('Note too long (max 5000 chars)');
-    }
-    checkAiRateLimit(businessId);
-    return this.crmAi.analyzeNote(businessId, contactId, body.noteBody, body.noteId);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('ai_tools')
-  @CrmRateLimit(10, 60_000)
-  @Get('businesses/:businessId/ai-churn-risk')
-  aiChurnDetection(@Param('businessId') businessId: string) {
-    checkAiRateLimit(businessId);
-    return this.crmAi.detectChurnRisk(businessId);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('ai_tools')
-  @CrmRateLimit(10, 60_000)
-  @Post('businesses/:businessId/ai-search')
-  aiNaturalLanguageSearch(
-    @Param('businessId') businessId: string,
-    @Body() body: { query: string },
-  ) {
-    if (!body.query || typeof body.query !== 'string') {
-      throw new BadRequestException('query is required');
-    }
-    if (body.query.length > 500) {
-      throw new BadRequestException('Query too long (max 500 chars)');
-    }
-    checkAiRateLimit(businessId);
-    return this.crmAi.naturalLanguageSearch(businessId, body.query);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
-  @CrmRateLimit(120, 60_000)
-  @Get('businesses/:businessId/sequences')
-  listSequences(@Param('businessId') businessId: string) {
-    return this.sequences.listSequences(businessId);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
-  @CrmRateLimit(30, 60_000)
-  @Post('businesses/:businessId/sequences')
-  createSequence(
-    @Param('businessId') businessId: string,
-    @Body() body: { name: string; description?: string; steps: unknown },
-  ) {
-    return this.sequences.createSequence(businessId, body);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
-  @CrmRateLimit(120, 60_000)
-  @Get('businesses/:businessId/sequences/:id')
-  getSequence(
-    @Param('businessId') businessId: string,
-    @Param('id') id: string,
-  ) {
-    return this.sequences.getSequence(businessId, id);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
-  @CrmRateLimit(30, 60_000)
-  @Patch('businesses/:businessId/sequences/:id')
-  updateSequence(
-    @Param('businessId') businessId: string,
-    @Param('id') id: string,
-    @Body() body: { name?: string; description?: string; steps?: unknown; status?: string },
-  ) {
-    return this.sequences.updateSequence(businessId, id, body);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
-  @CrmRateLimit(30, 60_000)
-  @Delete('businesses/:businessId/sequences/:id')
-  deleteSequence(
-    @Param('businessId') businessId: string,
-    @Param('id') id: string,
-  ) {
-    return this.sequences.deleteSequence(businessId, id);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
-  @CrmRateLimit(30, 60_000)
-  @Post('businesses/:businessId/sequences/:id/duplicate')
-  duplicateSequence(
-    @Param('businessId') businessId: string,
-    @Param('id') id: string,
-  ) {
-    return this.sequences.duplicateSequence(businessId, id);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
-  @CrmRateLimit(10, 60_000)
-  @Post('businesses/:businessId/sequences/:id/enroll')
-  enrollContacts(
-    @Param('businessId') businessId: string,
-    @Param('id') id: string,
-    @Body() body: { contactIds: string[] },
-  ) {
-    return this.sequences.enrollContacts(businessId, id, body.contactIds);
-  }
-
   @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/favorite')
@@ -1048,27 +720,5 @@ export class CrmController {
     @Param('contactId') contactId: string,
   ) {
     return this.crm.toggleFavorite(businessId, contactId);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
-  @CrmRateLimit(30, 60_000)
-  @Post('businesses/:businessId/sequences/:id/enrollments/:enrollmentId/advance')
-  advanceEnrollment(
-    @Param('businessId') businessId: string,
-    @Param('enrollmentId') enrollmentId: string,
-  ) {
-    return this.sequences.advanceEnrollment(businessId, enrollmentId);
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
-  @CrmRateLimit(30, 60_000)
-  @Post('businesses/:businessId/sequences/:id/enrollments/:enrollmentId/unenroll')
-  unenrollContact(
-    @Param('businessId') businessId: string,
-    @Param('enrollmentId') enrollmentId: string,
-  ) {
-    return this.sequences.unenrollContact(businessId, enrollmentId);
   }
 }

@@ -1,6 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
+import { contactWhereBase, contactWhereWithId } from './crm.helpers';
 import { buildContactSummaryPrompt } from './prompts/contact-summary.prompt';
 import { buildLeadScoringPrompt } from './prompts/lead-scoring.prompt';
 import { buildChurnDetectionPrompt } from './prompts/churn-detection.prompt';
@@ -155,7 +156,7 @@ Respond in valid JSON with this exact structure:
     for (const task of tasks) {
       try {
         const contactExists = await this.db.contact.findFirst({
-          where: { id: task.contactId, businessId, deletedAt: null },
+          where: contactWhereWithId(businessId, task.contactId),
           select: { id: true },
         });
 
@@ -224,7 +225,7 @@ Respond in valid JSON with this exact structure:
   }
 
   private async buildCrmContext(businessId: string, contactIds?: string[]): Promise<string> {
-    const where: Record<string, unknown> = { businessId, deletedAt: null };
+    const where: Record<string, unknown> = { ...contactWhereBase(businessId) };
     if (contactIds?.length) {
       where.id = { in: contactIds };
     }
@@ -253,11 +254,11 @@ Respond in valid JSON with this exact structure:
       }),
       this.db.contact.groupBy({
         by: ['status'],
-        where: { businessId, deletedAt: null },
+        where: contactWhereBase(businessId),
         _count: true,
       }),
       this.db.contactEvent.findMany({
-        where: { contact: { businessId, deletedAt: null } },
+        where: { contact: contactWhereBase(businessId) },
         take: 50,
         orderBy: { createdAt: 'desc' },
         select: {
@@ -267,7 +268,7 @@ Respond in valid JSON with this exact structure:
         },
       }),
       this.db.contactTask.findMany({
-        where: { businessId, deletedAt: null, status: 'OPEN' },
+        where: { ...contactWhereBase(businessId), status: 'OPEN' },
         take: 50,
         orderBy: { dueDate: 'asc' },
         select: {
@@ -334,7 +335,7 @@ ${tasks.slice(0, 20).map(t => `- "${t.title}" for ${t.contact.firstName ?? ''} $
   async summarizeContact(businessId: string, contactId: string) {
     const start = Date.now();
     const contact = await this.db.contact.findFirst({
-      where: { id: contactId, businessId, deletedAt: null },
+      where: contactWhereWithId(businessId, contactId),
       select: {
         id: true, firstName: true, lastName: true, email: true, phone: true,
         status: true, source: true, tags: true, companyName: true, jobTitle: true,
@@ -446,7 +447,7 @@ ${tasks.filter(t => t.status === 'OPEN').map(t => `- ${t.title} (${t.priority ??
   async scoreContactWithAi(businessId: string, contactId: string) {
     const start = Date.now();
     const contact = await this.db.contact.findFirst({
-      where: { id: contactId, businessId, deletedAt: null },
+      where: contactWhereWithId(businessId, contactId),
       select: {
         id: true, firstName: true, lastName: true, email: true, phone: true,
         status: true, tags: true, companyName: true, leadScore: true,
@@ -554,7 +555,7 @@ ${notes.slice(0, 8).map(n => `- ${n.body.substring(0, 150)}`).join('\n') || 'No 
   async analyzeNote(businessId: string, contactId: string, noteBody: string, noteId?: string) {
     const sanitizedNoteBody = this.sanitizeAiInput(noteBody, 5000);
     const contact = await this.db.contact.findFirst({
-      where: { id: contactId, businessId, deletedAt: null },
+      where: contactWhereWithId(businessId, contactId),
       select: {
         id: true, firstName: true, lastName: true, status: true,
         companyName: true, tags: true, leadScore: true,
@@ -627,7 +628,7 @@ Respond in valid JSON:
   async detectChurnRisk(businessId: string) {
     const now = new Date();
     const contacts = await this.db.contact.findMany({
-      where: { businessId, deletedAt: null, status: { in: ['CLIENT', 'PROSPECT'] } },
+      where: { ...contactWhereBase(businessId), status: { in: ['CLIENT', 'PROSPECT'] } },
       take: 100,
       orderBy: { lastInteractionAt: 'asc' },
       select: {
@@ -711,7 +712,7 @@ Respond in valid JSON:
   async naturalLanguageSearch(businessId: string, query: string) {
     const sanitizedQuery = this.sanitizeAiInput(query, 500);
     const contactFields = await this.db.contact.findMany({
-      where: { businessId, deletedAt: null },
+      where: contactWhereBase(businessId),
       take: 5,
       select: {
         status: true, tags: true, source: true, city: true,
@@ -814,7 +815,7 @@ Respond in valid JSON:
 
   async suggestTags(businessId: string, contactId: string) {
     const contact = await this.db.contact.findFirst({
-      where: { id: contactId, businessId, deletedAt: null },
+      where: contactWhereWithId(businessId, contactId),
       select: {
         id: true, firstName: true, lastName: true, email: true, phone: true,
         status: true, source: true, tags: true, companyName: true, jobTitle: true,
@@ -852,7 +853,7 @@ Respond in valid JSON:
     ]);
 
     const allTags = await this.db.contact.findMany({
-      where: { businessId, deletedAt: null },
+      where: contactWhereBase(businessId),
       select: { tags: true },
     });
     const tagFreq = new Map<string, number>();
@@ -950,7 +951,7 @@ Respond in valid JSON:
 
   async generatePrepBrief(businessId: string, contactId: string) {
     const contact = await this.db.contact.findFirst({
-      where: { id: contactId, businessId, deletedAt: null },
+      where: contactWhereWithId(businessId, contactId),
       select: {
         id: true, firstName: true, lastName: true, email: true, phone: true,
         status: true, source: true, tags: true, companyName: true, jobTitle: true,
@@ -1101,7 +1102,7 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
   async interpretCommand(businessId: string, command: string) {
     const sanitizedCommand = this.sanitizeAiInput(command, 500);
     const contacts = await this.db.contact.findMany({
-      where: { businessId, deletedAt: null },
+      where: contactWhereBase(businessId),
       take: 200,
       orderBy: { updatedAt: 'desc' },
       select: {

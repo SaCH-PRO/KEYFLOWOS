@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { contactWhereWithId } from './crm.helpers';
 
 type HealthMetrics = {
   engagement: number;
@@ -58,7 +59,7 @@ export class CrmJourneyService {
 
     const [contact, recentEvents, paidInvoices, totalInvoices, recentNotes] = await Promise.all([
       this.db.contact.findFirst({
-        where: { id: contactId, businessId, deletedAt: null },
+        where: contactWhereWithId(businessId, contactId),
       }),
       this.db.contactEvent.count({
         where: { contactId, createdAt: { gte: thirtyDaysAgo } },
@@ -92,7 +93,7 @@ export class CrmJourneyService {
   async getContactJourney(businessId: string, contactId: string): Promise<JourneyMilestone[]> {
     const [contact, events, invoices, quotes, bookings] = await Promise.all([
       this.db.contact.findFirst({
-        where: { id: contactId, businessId, deletedAt: null },
+        where: contactWhereWithId(businessId, contactId),
         select: { createdAt: true, firstName: true },
       }),
       this.db.contactEvent.findMany({
@@ -172,7 +173,7 @@ export class CrmJourneyService {
   async getConversationContext(businessId: string, contactId: string): Promise<ConversationContext> {
     const [contact, recentNotes, recentEvents] = await Promise.all([
       this.db.contact.findFirst({
-        where: { id: contactId, businessId, deletedAt: null },
+        where: contactWhereWithId(businessId, contactId),
       }),
       this.db.contactNote.findMany({
         where: { contactId },
@@ -220,7 +221,7 @@ export class CrmJourneyService {
   async generateAiInsight(businessId: string, contactId: string): Promise<AiInsight> {
     const [contact, events, notes, invoices, tasks] = await Promise.all([
       this.db.contact.findFirst({
-        where: { id: contactId, businessId, deletedAt: null },
+        where: contactWhereWithId(businessId, contactId),
       }),
       this.db.contactEvent.count({ where: { contactId } }),
       this.db.contactNote.count({ where: { contactId } }),
