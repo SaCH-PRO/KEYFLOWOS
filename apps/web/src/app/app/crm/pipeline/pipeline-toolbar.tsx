@@ -113,9 +113,9 @@ function PipelineToolbarInner({
   }, []);
 
   return (
-    <div className="rounded-2xl border border-border/50 bg-card p-4 space-y-3">
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1">
+    <div className="rounded-2xl border border-border/50 bg-card p-3 sm:p-4 space-y-3 overflow-hidden">
+      <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+        <div className="relative flex-1 min-w-0">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50" />
           <input
             type="text"
@@ -135,7 +135,7 @@ function PipelineToolbarInner({
             </button>
           )}
         </div>
-        <div className="flex items-center gap-0.5">
+        <div className="flex items-center gap-0.5 flex-shrink-0">
           <button
             onClick={onAddContact}
             className="p-2 rounded-xl bg-gradient-to-br from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all"

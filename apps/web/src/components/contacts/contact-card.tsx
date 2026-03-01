@@ -171,13 +171,13 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index < 10 ? index * 0.03 : 0 }}
       onClick={onClick}
-      className={`rounded-2xl border border-l-2 ${borderClass} bg-card p-4 cursor-pointer transition-all hover:bg-white/[0.02] group ${
+      className={`rounded-2xl border border-l-2 ${borderClass} bg-card p-3 sm:p-4 cursor-pointer transition-all hover:bg-white/[0.02] group overflow-hidden ${
         isSelected ? "border-[hsl(var(--kf-accent1))]/50 bg-[hsl(var(--kf-accent1))]/[0.04]" : "border-border/50"
       } ${selected ? "border-[hsl(var(--kf-accent2))]/50 bg-[hsl(var(--kf-accent2))]/[0.04]" : ""}`}
     >
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-2.5 sm:gap-3 min-w-0">
         {selectable && (
-          <div className="flex items-center pt-1.5">
+          <div className="flex items-center pt-1.5 flex-shrink-0">
             <input
               type="checkbox"
               checked={selected}
@@ -190,89 +190,49 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
 
         <div className="flex-shrink-0">
           <div
-            className="h-10 w-10 rounded-full flex items-center justify-center text-white text-xs font-bold"
+            className="h-9 w-9 sm:h-10 sm:w-10 rounded-full flex items-center justify-center text-white text-xs font-bold"
             style={{ background: statusColor }}
           >
             {initials}
           </div>
         </div>
 
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <h3 className="text-sm font-semibold truncate">{fullName}</h3>
-              {hasLeadScore && scoreStyle && (
-                <span
-                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${scoreStyle.bg} ${scoreStyle.text} flex-shrink-0`}
-                  title={`Lead Score: ${leadScore} (${scoreStyle.label})`}
-                >
-                  {leadScore}
-                </span>
-              )}
-              {onTogglePin && (
-                <button
-                  onClick={handlePin}
-                  className={`p-0.5 rounded transition-colors flex-shrink-0 ${isPinned ? "text-yellow-400" : "text-muted-foreground/50 md:opacity-0 md:group-hover:opacity-100"}`}
-                  title={isPinned ? "Unpin" : "Pin contact"}
-                  aria-label={isPinned ? "Unpin contact" : "Pin contact"}
-                >
-                  <Star className={`w-3.5 h-3.5 ${isPinned ? "fill-current" : ""}`} />
-                </button>
-              )}
-            </div>
-            <div className="flex items-center gap-1.5 flex-shrink-0">
-              {hasRevenue && (
-                <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  <TrendingUp className="w-2.5 h-2.5 inline-block mr-0.5 -mt-px" />
-                  TTD {totalRevenue!.toLocaleString("en-TT")}
-                </span>
-              )}
-              {onQuickAction && (
-                <div className="relative" ref={actionsRef}>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setShowActions(!showActions); }}
-                    className="p-1.5 rounded-lg hover:bg-white/[0.06] text-muted-foreground/50 hover:text-muted-foreground transition-colors md:opacity-0 md:group-hover:opacity-100 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center"
-                    title="Quick actions"
-                    aria-haspopup="menu"
-                    aria-expanded={showActions}
-                  >
-                    <MoreHorizontal className="w-4 h-4" />
-                  </button>
-                  {showActions && (
-                    <div role="menu" className="absolute right-0 top-9 z-50 w-48 bg-popover/95 backdrop-blur-xl border border-border/50 shadow-xl rounded-xl py-1 animate-in fade-in zoom-in-95">
-                      <button role="menuitem" onClick={(e) => handleQuickAction(e, "create-invoice")} className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs hover:bg-white/[0.05] transition-colors">
-                        <Receipt className="w-4 h-4 text-emerald-400" />
-                        Create Invoice
-                      </button>
-                      <button role="menuitem" onClick={(e) => handleQuickAction(e, "book-appointment")} className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs hover:bg-white/[0.05] transition-colors">
-                        <Calendar className="w-4 h-4 text-blue-400" />
-                        Book Appointment
-                      </button>
-                      <button role="menuitem" onClick={(e) => handleQuickAction(e, "send-quote")} className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs hover:bg-white/[0.05] transition-colors">
-                        <FileSignature className="w-4 h-4 text-violet-400" />
-                        Send Quote
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-              <button
-                onClick={handleDelete}
-                className="p-1.5 rounded-lg hover:bg-red-500/10 text-muted-foreground/40 hover:text-red-400 transition-colors md:opacity-0 md:group-hover:opacity-100 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center"
-                title="Delete contact"
-                aria-label="Delete contact"
+        <div className="flex-1 min-w-0 overflow-hidden">
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+            <h3 className="text-sm font-semibold truncate min-w-0 flex-shrink">{fullName}</h3>
+            {hasLeadScore && scoreStyle && (
+              <span
+                className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${scoreStyle.bg} ${scoreStyle.text} flex-shrink-0`}
+                title={`Lead Score: ${leadScore} (${scoreStyle.label})`}
               >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border ${badgeClass}`}>
-                {contact.status ?? "LEAD"}
+                {leadScore}
               </span>
-            </div>
+            )}
+            {onTogglePin && (
+              <button
+                onClick={handlePin}
+                className={`p-0.5 rounded transition-colors flex-shrink-0 ${isPinned ? "text-yellow-400" : "text-muted-foreground/50 md:opacity-0 md:group-hover:opacity-100"}`}
+                title={isPinned ? "Unpin" : "Pin contact"}
+                aria-label={isPinned ? "Unpin contact" : "Pin contact"}
+              >
+                <Star className={`w-3.5 h-3.5 ${isPinned ? "fill-current" : ""}`} />
+              </button>
+            )}
+            <div className="flex-1" />
+            <span className={`text-[10px] font-semibold px-1.5 sm:px-2 py-0.5 rounded-md border flex-shrink-0 ${badgeClass}`}>
+              {contact.status ?? "LEAD"}
+            </span>
           </div>
 
-          <div className="flex items-center gap-2 mt-0.5">
+          <div className="flex items-center gap-1.5 mt-1 flex-wrap min-w-0">
+            {hasRevenue && (
+              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex-shrink-0">
+                <TrendingUp className="w-3 h-3 inline-block mr-0.5 -mt-px" />
+                TTD {totalRevenue!.toLocaleString("en-TT")}
+              </span>
+            )}
             {(contact.companyName || contact.jobTitle) && (
-              <p className="text-xs text-muted-foreground/70 truncate">
+              <p className="text-xs text-muted-foreground/70 truncate min-w-0">
                 <Building2 className="w-3 h-3 inline-block mr-1 -mt-px" />
                 {contact.jobTitle && contact.companyName
                   ? `${contact.jobTitle} at ${contact.companyName}`
@@ -281,15 +241,15 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
             )}
             {hasLastInteraction && (
               <span className="text-[10px] text-muted-foreground/50 flex items-center gap-0.5 flex-shrink-0">
-                <Clock className="w-2.5 h-2.5" />
+                <Clock className="w-3 h-3" />
                 {relativeTime(lastInteraction!)}
               </span>
             )}
           </div>
 
-          <div className="flex items-center gap-2 mt-1.5">
+          <div className="flex items-center gap-1.5 mt-1.5 min-w-0">
             <span
-              className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md"
+              className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md flex-shrink-0"
               style={{ background: `${sourceInfo.color}15`, color: sourceInfo.color }}
               title={`Source: ${sourceInfo.label}${contact.sourceDetail ? ` (${contact.sourceDetail})` : ""}`}
             >
@@ -303,12 +263,12 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
             )}
           </div>
 
-          <div className="flex items-center gap-1 mt-2">
+          <div className="flex items-center gap-1 mt-2 min-w-0 flex-wrap">
             {contact.email && (
               <a
                 href={`mailto:${contact.email}`}
                 onClick={(e) => e.stopPropagation()}
-                className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-blue-500/10 transition-colors"
+                className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-blue-500/10 transition-colors flex-shrink-0"
                 title={`Email ${contact.email}`}
                 aria-label={`Email ${contact.email}`}
               >
@@ -319,7 +279,7 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
               <a
                 href={`tel:${contact.phone}`}
                 onClick={(e) => e.stopPropagation()}
-                className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-violet-500/10 transition-colors"
+                className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-violet-500/10 transition-colors flex-shrink-0"
                 title={`Call ${contact.phone}`}
                 aria-label={`Call ${contact.phone}`}
               >
@@ -336,7 +296,7 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={(e) => e.stopPropagation()}
-                  className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-emerald-500/10 transition-colors"
+                  className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-emerald-500/10 transition-colors flex-shrink-0"
                   title="WhatsApp"
                   aria-label="Message on WhatsApp"
                 >
@@ -345,16 +305,54 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
               );
             })()}
 
+            {onQuickAction && (
+              <div className="relative flex-shrink-0" ref={actionsRef}>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowActions(!showActions); }}
+                  className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-white/[0.06] text-muted-foreground/50 hover:text-muted-foreground transition-colors md:opacity-0 md:group-hover:opacity-100"
+                  title="Quick actions"
+                  aria-haspopup="menu"
+                  aria-expanded={showActions}
+                >
+                  <MoreHorizontal className="w-3.5 h-3.5" />
+                </button>
+                {showActions && (
+                  <div role="menu" className="absolute right-0 bottom-full mb-1 sm:bottom-auto sm:top-9 sm:mb-0 z-50 w-48 bg-popover/95 backdrop-blur-xl border border-border/50 shadow-xl rounded-xl py-1 animate-in fade-in zoom-in-95">
+                    <button role="menuitem" onClick={(e) => handleQuickAction(e, "create-invoice")} className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs hover:bg-white/[0.05] transition-colors">
+                      <Receipt className="w-4 h-4 text-emerald-400" />
+                      Create Invoice
+                    </button>
+                    <button role="menuitem" onClick={(e) => handleQuickAction(e, "book-appointment")} className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs hover:bg-white/[0.05] transition-colors">
+                      <Calendar className="w-4 h-4 text-blue-400" />
+                      Book Appointment
+                    </button>
+                    <button role="menuitem" onClick={(e) => handleQuickAction(e, "send-quote")} className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs hover:bg-white/[0.05] transition-colors">
+                      <FileSignature className="w-4 h-4 text-violet-400" />
+                      Send Quote
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            <button
+              onClick={handleDelete}
+              className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-red-500/10 text-muted-foreground/40 hover:text-red-400 transition-colors md:opacity-0 md:group-hover:opacity-100 flex-shrink-0"
+              title="Delete contact"
+              aria-label="Delete contact"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+
             <div className="flex-1" />
 
             {contact.tags && contact.tags.length > 0 && (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 flex-shrink-0">
                 {contact.tags.slice(0, 2).map((tag) => (
                   <span
                     key={tag}
-                    className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-white/[0.06] text-muted-foreground border border-border/30"
+                    className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-white/[0.06] text-muted-foreground border border-border/30 max-w-[80px] truncate"
                   >
-                    <Tag className="w-2.5 h-2.5" />
+                    <Tag className="w-3 h-3 flex-shrink-0" />
                     {tag}
                   </span>
                 ))}
