@@ -33,6 +33,8 @@ type AutopilotAction = {
   status: 'completed' | 'pending' | 'needs_approval';
   contactName: string;
   contactId: string;
+  contactPhone?: string;
+  contactEmail?: string;
   description: string;
   scheduledAt?: string;
   completedAt?: string;
@@ -753,6 +755,8 @@ export class CrmFlowService {
         status: 'needs_approval',
         contactId: invoice.contactId || '',
         contactName: this.contactName(invoice.contact || {}),
+        contactPhone: (invoice.contact as any)?.phone || undefined,
+        contactEmail: (invoice.contact as any)?.email || undefined,
         description: `Auto-send payment reminder for ${invoice.invoiceNumber} — ${daysPastDue}d overdue`,
         scheduledAt: now.toISOString(),
       });
@@ -766,6 +770,8 @@ export class CrmFlowService {
         status: 'needs_approval',
         contactId: contact.id,
         contactName: this.contactName(contact),
+        contactPhone: contact.phone || undefined,
+        contactEmail: contact.email || undefined,
         description: `Auto check-in with client — ${daysSince}d since last activity`,
         scheduledAt: now.toISOString(),
       });
@@ -779,6 +785,8 @@ export class CrmFlowService {
         status: 'needs_approval',
         contactId: contact.id,
         contactName: this.contactName(contact),
+        contactPhone: contact.phone || undefined,
+        contactEmail: contact.email || undefined,
         description: `Auto-send nurture email — lead cold for ${daysSince}d`,
         scheduledAt: now.toISOString(),
       });
@@ -792,6 +800,8 @@ export class CrmFlowService {
         status: 'needs_approval',
         contactId: booking.contactId,
         contactName: this.contactName(booking.contact),
+        contactPhone: (booking.contact as any)?.phone || undefined,
+        contactEmail: (booking.contact as any)?.email || undefined,
         description: `Send post-session follow-up after booking`,
         scheduledAt: now.toISOString(),
       });
@@ -806,6 +816,8 @@ export class CrmFlowService {
           status: 'needs_approval',
           contactId: lead.id,
           contactName: this.contactName(lead),
+          contactPhone: lead.phone || undefined,
+          contactEmail: lead.email || undefined,
           description: `Auto-send welcome message to new lead`,
           scheduledAt: now.toISOString(),
         });
@@ -820,6 +832,8 @@ export class CrmFlowService {
         status: 'needs_approval',
         contactId: contact.id,
         contactName: this.contactName(contact),
+        contactPhone: contact.phone || undefined,
+        contactEmail: contact.email || undefined,
         description: `Prospect stalled ${daysSince}d — auto-send incentive offer`,
         scheduledAt: now.toISOString(),
       });

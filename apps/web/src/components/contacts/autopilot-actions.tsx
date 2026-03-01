@@ -1,12 +1,15 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Bot, CheckCircle2, Clock, Eye, Pause, Play,
   Settings, MessageSquare, Gift, DollarSign, Bell,
-  Sparkles, ArrowRight, X,
+  Sparkles, X, Copy, Send, Mail, Phone,
+  Loader2, ChevronDown, ChevronUp,
 } from "lucide-react";
+import { generateAutopilotDraft, executeAutopilotAction } from "@/lib/client";
+import type { AutopilotDraft } from "@/lib/client";
 
 export interface AutopilotAction {
   id: string;
@@ -14,6 +17,8 @@ export interface AutopilotAction {
   status: "completed" | "pending" | "needs_approval";
   contactName: string;
   contactId: string;
+  contactPhone?: string;
+  contactEmail?: string;
   description: string;
   scheduledAt?: string;
   completedAt?: string;
@@ -22,6 +27,7 @@ export interface AutopilotAction {
 interface AutopilotActionsProps {
   actions: AutopilotAction[];
   isPaused?: boolean;
+  businessId?: string;
   onTogglePause?: () => void;
   onApprove?: (actionId: string) => Promise<void>;
   onDeny?: (actionId: string) => Promise<void>;
@@ -45,22 +51,181 @@ const ACTION_LABELS: Record<AutopilotAction["type"], string> = {
   offer: "Offer",
 };
 
+const TONE_COLORS: Record<string, string> = {
+  warm: "bg-orange-500/15 text-orange-400 border-orange-500/20",
+  professional: "bg-blue-500/15 text-blue-400 border-blue-500/20",
+  friendly: "bg-green-500/15 text-green-400 border-green-500/20",
+  urgent: "bg-red-500/15 text-red-400 border-red-500/20",
+  celebratory: "bg-purple-500/15 text-purple-400 border-purple-500/20",
+};
+
 const stagger = {
   container: { hidden: {}, visible: { transition: { staggerChildren: 0.04 } } },
   item: { hidden: { opacity: 0, x: -8 }, visible: { opacity: 1, x: 0, transition: { duration: 0.35, ease: [0.25, 0.46, 0.45, 0.94] } } },
 };
 
+function DraftPreview({ draft, onSendWhatsApp, onSendEmail, onMarkDone, onCopy, sending }: {
+  draft: AutopilotDraft;
+  onSendWhatsApp: () => void;
+  onSendEmail: () => void;
+  onMarkDone: () => void;
+  onCopy: () => void;
+  sending: boolean;
+}) {
+  const toneClass = TONE_COLORS[draft.tone] || TONE_COLORS.warm;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: "auto" }}
+      exit={{ opacity: 0, height: 0 }}
+      transition={{ duration: 0.3 }}
+      className="overflow-hidden"
+    >
+      <div className="mt-2.5 p-3 rounded-lg border border-[hsl(var(--kf-accent2))]/20 bg-[hsl(var(--kf-accent2))]/[0.03]">
+        <div className="flex items-center gap-2 mb-2">
+          <Sparkles className="w-3.5 h-3.5 text-[hsl(var(--kf-accent2))]" />
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--kf-accent2))]/80">AI Draft</span>
+          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md border ${toneClass}`}>
+            {draft.tone}
+          </span>
+          <span className="text-[10px] text-muted-foreground/50 ml-auto flex items-center gap-1">
+            {draft.suggestedChannel === "whatsapp" ? <Phone className="w-3 h-3" /> : <Mail className="w-3 h-3" />}
+            {draft.suggestedChannel === "whatsapp" ? "WhatsApp" : "Email"}
+          </span>
+        </div>
+
+        {draft.subject && (
+          <p className="text-xs font-medium text-foreground/80 mb-1">
+            {draft.subject}
+          </p>
+        )}
+        <p className="text-xs text-muted-foreground/80 leading-relaxed whitespace-pre-wrap">
+          {draft.message}
+        </p>
+
+        <div className="flex items-center gap-1.5 mt-3">
+          <button
+            onClick={onSendWhatsApp}
+            disabled={sending}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-semibold rounded-lg bg-green-500/15 text-green-400 hover:bg-green-500/25 border border-green-500/20 transition-all disabled:opacity-50"
+          >
+            {sending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Phone className="w-3 h-3" />}
+            Open WhatsApp
+          </button>
+          <button
+            onClick={onSendEmail}
+            disabled={sending}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-semibold rounded-lg bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 border border-blue-500/20 transition-all disabled:opacity-50"
+          >
+            {sending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Mail className="w-3 h-3" />}
+            Open Email
+          </button>
+          <button
+            onClick={onCopy}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-semibold rounded-lg hover:bg-white/[0.06] text-muted-foreground/60 transition-all"
+          >
+            <Copy className="w-3 h-3" />
+            Copy
+          </button>
+          <button
+            onClick={onMarkDone}
+            disabled={sending}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-semibold rounded-lg bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))] hover:bg-[hsl(var(--kf-accent2))]/25 border border-[hsl(var(--kf-accent2))]/20 transition-all disabled:opacity-50 ml-auto"
+          >
+            <CheckCircle2 className="w-3 h-3" />
+            Mark Done
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 const ApprovalCard = React.memo(function ApprovalCard({
-  action, approving, onApprove, onDeny, onViewContact,
+  action, approving, drafts, draftLoading, businessId,
+  onApprove, onDeny, onViewContact, onGenerateDraft, onExecute,
 }: {
   action: AutopilotAction;
   approving: string | null;
+  drafts: Record<string, AutopilotDraft>;
+  draftLoading: Record<string, boolean>;
+  businessId?: string;
   onApprove: (id: string) => void;
   onDeny: (id: string) => void;
   onViewContact: (id: string) => void;
+  onGenerateDraft: (action: AutopilotAction) => void;
+  onExecute: (action: AutopilotAction, channel: string, message: string) => void;
 }) {
   const Icon = ACTION_ICONS[action.type];
   const isApproving = approving === action.id;
+  const draft = drafts[action.id];
+  const isLoadingDraft = draftLoading[action.id];
+  const [expanded, setExpanded] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const handleGenerateDraft = useCallback(() => {
+    setExpanded(true);
+    if (!draft) {
+      onGenerateDraft(action);
+    }
+  }, [action, draft, onGenerateDraft]);
+
+  const handleSendWhatsApp = useCallback(async () => {
+    if (!draft) return;
+    setSending(true);
+    const phone = (action.contactPhone || "").replace(/[^0-9+]/g, "");
+    const text = encodeURIComponent(draft.message);
+    window.open(`https://wa.me/${phone}?text=${text}`, "_blank");
+    onExecute(action, "whatsapp", draft.message);
+    setSending(false);
+    setDone(true);
+  }, [action, draft, onExecute]);
+
+  const handleSendEmail = useCallback(async () => {
+    if (!draft) return;
+    setSending(true);
+    const email = action.contactEmail || "";
+    const subject = encodeURIComponent(draft.subject);
+    const body = encodeURIComponent(draft.message);
+    window.open(`mailto:${email}?subject=${subject}&body=${body}`, "_blank");
+    onExecute(action, "email", draft.message);
+    setSending(false);
+    setDone(true);
+  }, [action, draft, onExecute]);
+
+  const handleMarkDone = useCallback(async () => {
+    if (!draft) return;
+    setSending(true);
+    onExecute(action, "manual", draft.message);
+    setSending(false);
+    setDone(true);
+  }, [action, draft, onExecute]);
+
+  const handleCopy = useCallback(() => {
+    if (!draft) return;
+    navigator.clipboard.writeText(draft.message);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [draft]);
+
+  if (done) {
+    return (
+      <motion.div
+        initial={{ opacity: 1 }}
+        animate={{ opacity: 0, height: 0, marginBottom: 0 }}
+        transition={{ delay: 0.5, duration: 0.3 }}
+        className="rounded-xl border border-[hsl(var(--kf-accent2))]/30 bg-[hsl(var(--kf-accent2))]/[0.06] p-3"
+      >
+        <div className="flex items-center gap-2 text-[hsl(var(--kf-accent2))]">
+          <CheckCircle2 className="w-4 h-4" />
+          <span className="text-sm font-medium">Done — {action.contactName}</span>
+        </div>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div
@@ -88,16 +253,32 @@ const ApprovalCard = React.memo(function ApprovalCard({
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <button
+            onClick={handleGenerateDraft}
+            disabled={isLoadingDraft}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-[hsl(var(--kf-accent2))]/10 text-[hsl(var(--kf-accent2))] hover:bg-[hsl(var(--kf-accent2))]/20 border border-[hsl(var(--kf-accent2))]/20 transition-all disabled:opacity-50"
+          >
+            {isLoadingDraft ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : (
+              <>
+                <Sparkles className="w-3 h-3" />
+                <span className="hidden sm:inline">{draft ? "View" : "AI Draft"}</span>
+                <span className="sm:hidden">{draft ? "" : "AI"}</span>
+              </>
+            )}
+            {expanded ? <ChevronUp className="w-3 h-3 ml-0.5" /> : <ChevronDown className="w-3 h-3 ml-0.5" />}
+          </button>
+          <button
             onClick={() => onApprove(action.id)}
             disabled={isApproving}
             className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-gradient-to-r from-[hsl(var(--kf-accent2))] to-[hsl(var(--kf-accent2))]/80 text-white hover:opacity-90 transition-opacity disabled:opacity-50 shadow-sm"
           >
             {isApproving ? (
-              <span className="animate-pulse">...</span>
+              <Loader2 className="w-3 h-3 animate-spin" />
             ) : (
               <>
                 <CheckCircle2 className="w-3 h-3" />
-                Approve
+                <span className="hidden sm:inline">Approve</span>
               </>
             )}
           </button>
@@ -110,14 +291,50 @@ const ApprovalCard = React.memo(function ApprovalCard({
           </button>
         </div>
       </div>
+
+      <AnimatePresence>
+        {expanded && isLoadingDraft && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="mt-2.5 p-3 rounded-lg border border-border/30 bg-white/[0.02] space-y-2">
+              <div className="flex items-center gap-2">
+                <Loader2 className="w-3.5 h-3.5 text-[hsl(var(--kf-accent2))] animate-spin" />
+                <span className="text-xs text-muted-foreground/60">Generating AI draft...</span>
+              </div>
+              <div className="space-y-1.5">
+                <div className="h-3 w-2/3 rounded bg-white/[0.04] animate-pulse" />
+                <div className="h-3 w-full rounded bg-white/[0.04] animate-pulse" />
+                <div className="h-3 w-4/5 rounded bg-white/[0.04] animate-pulse" />
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {expanded && draft && !isLoadingDraft && (
+          <DraftPreview
+            draft={draft}
+            onSendWhatsApp={handleSendWhatsApp}
+            onSendEmail={handleSendEmail}
+            onMarkDone={handleMarkDone}
+            onCopy={handleCopy}
+            sending={sending}
+          />
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 });
 
 export const AutopilotActions = React.memo(function AutopilotActions({
-  actions, isPaused = false, onTogglePause, onApprove, onDeny, onViewContact, onOpenSettings,
+  actions, isPaused = false, businessId, onTogglePause, onApprove, onDeny, onViewContact, onOpenSettings,
 }: AutopilotActionsProps) {
   const [approving, setApproving] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, AutopilotDraft>>({});
+  const [draftLoading, setDraftLoading] = useState<Record<string, boolean>>({});
 
   const { completedToday, pending, needsApproval } = useMemo(() => ({
     completedToday: actions.filter((a) => a.status === "completed"),
@@ -125,20 +342,55 @@ export const AutopilotActions = React.memo(function AutopilotActions({
     needsApproval: actions.filter((a) => a.status === "needs_approval"),
   }), [actions]);
 
-  const handleApprove = async (actionId: string) => {
+  const handleApprove = useCallback(async (actionId: string) => {
     if (!onApprove) return;
     setApproving(actionId);
     await onApprove(actionId);
     setApproving(null);
-  };
+  }, [onApprove]);
 
-  const handleDeny = (actionId: string) => {
+  const handleDeny = useCallback((actionId: string) => {
     onDeny?.(actionId);
-  };
+  }, [onDeny]);
 
-  const handleViewContact = (contactId: string) => {
+  const handleViewContact = useCallback((contactId: string) => {
     onViewContact?.(contactId);
-  };
+  }, [onViewContact]);
+
+  const handleGenerateDraft = useCallback(async (action: AutopilotAction) => {
+    setDraftLoading((prev) => ({ ...prev, [action.id]: true }));
+    try {
+      const result = await generateAutopilotDraft(
+        action.id,
+        {
+          type: action.type,
+          contactId: action.contactId,
+          contactName: action.contactName,
+          description: action.description,
+        },
+        businessId,
+      );
+      if (result.data) {
+        setDrafts((prev) => ({ ...prev, [action.id]: result.data! }));
+      }
+    } catch (err) {
+      console.error("Failed to generate draft:", err);
+    } finally {
+      setDraftLoading((prev) => ({ ...prev, [action.id]: false }));
+    }
+  }, [businessId]);
+
+  const handleExecute = useCallback(async (action: AutopilotAction, channel: string, message: string) => {
+    try {
+      await executeAutopilotAction(
+        action.id,
+        { contactId: action.contactId, channel, message },
+        businessId,
+      );
+    } catch (err) {
+      console.error("Failed to execute action:", err);
+    }
+  }, [businessId]);
 
   return (
     <motion.div
@@ -169,6 +421,12 @@ export const AutopilotActions = React.memo(function AutopilotActions({
                   <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/20">
                     <Eye className="w-3 h-3" />
                     {needsApproval.length}
+                  </span>
+                )}
+                {Object.keys(drafts).length > 0 && (
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold rounded-md bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))] border border-[hsl(var(--kf-accent2))]/20">
+                    <Sparkles className="w-3 h-3" />
+                    {Object.keys(drafts).length}
                   </span>
                 )}
               </div>
@@ -217,9 +475,14 @@ export const AutopilotActions = React.memo(function AutopilotActions({
                   key={action.id}
                   action={action}
                   approving={approving}
+                  drafts={drafts}
+                  draftLoading={draftLoading}
+                  businessId={businessId}
                   onApprove={handleApprove}
                   onDeny={handleDeny}
                   onViewContact={handleViewContact}
+                  onGenerateDraft={handleGenerateDraft}
+                  onExecute={handleExecute}
                 />
               ))}
             </motion.div>
