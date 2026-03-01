@@ -129,6 +129,7 @@ const HeroStats = React.memo(function HeroStats({
     return [
       {
         label: "Pending",
+        mobileLabel: "Todo",
         value: nextActions.length,
         sub: urgentCount > 0 ? `${urgentCount} high priority` : "No urgent",
         icon: Target,
@@ -138,6 +139,7 @@ const HeroStats = React.memo(function HeroStats({
       },
       {
         label: "Completed",
+        mobileLabel: "Done",
         value: completedCount,
         sub: `${completionRate}% today`,
         icon: CheckCircle2,
@@ -147,6 +149,7 @@ const HeroStats = React.memo(function HeroStats({
       },
       {
         label: "Pipeline Value",
+        mobileLabel: "Value",
         value: totalValue > 0 ? `TTD ${(totalValue / 1000).toFixed(totalValue >= 1000 ? 1 : 0)}k` : "—",
         sub: totalValue > 0 ? `across ${nextActions.filter((a) => a.value).length} deals` : "No values set",
         icon: TrendingUp,
@@ -156,6 +159,7 @@ const HeroStats = React.memo(function HeroStats({
       },
       {
         label: "Autopilot",
+        mobileLabel: "Auto",
         value: autopilotDone,
         sub: `${autopilotActions.filter((a) => a.status === "pending").length} scheduled`,
         icon: Bot,
@@ -181,7 +185,8 @@ const HeroStats = React.memo(function HeroStats({
                 <div className={`p-1 sm:p-1.5 rounded-lg bg-gradient-to-br ${stat.accent}`}>
                   <Icon className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${stat.iconColor}`} />
                 </div>
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 truncate">{stat.label}</span>
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 sm:hidden">{stat.mobileLabel}</span>
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 hidden sm:inline">{stat.label}</span>
               </div>
               <p className={`text-sm sm:text-xl font-bold tracking-tight leading-tight ${stat.highlight ? "text-[hsl(var(--kf-accent1))]" : ""}`}>
                 {stat.value}

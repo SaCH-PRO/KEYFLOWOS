@@ -150,7 +150,7 @@ export default function CommerceDashboard({ invoices, quotes, products }: Commer
               >
                 <card.icon className="w-3 h-3 sm:w-4 sm:h-4" style={{ color: card.color }} />
               </div>
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 truncate">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
                 <span className="hidden sm:inline">{card.label}</span>
                 <span className="sm:hidden">{card.mobileLabel}</span>
               </span>
