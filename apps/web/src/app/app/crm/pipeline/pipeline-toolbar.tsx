@@ -172,7 +172,7 @@ function PipelineToolbarInner({
                       role="option"
                       aria-selected={sortBy === opt.value}
                       onClick={() => { onSortChange(opt.value); setShowSort(false); }}
-                      className={`w-full text-left px-3 py-2 text-[11px] hover:bg-white/[0.05] transition-colors ${sortBy === opt.value ? "text-[hsl(var(--kf-accent1))] font-semibold" : "text-muted-foreground"}`}
+                      className={`w-full text-left px-3 py-2.5 text-xs hover:bg-white/[0.05] transition-colors ${sortBy === opt.value ? "text-[hsl(var(--kf-accent1))] font-semibold" : "text-muted-foreground"}`}
                     >
                       {opt.label}
                     </button>
@@ -207,7 +207,7 @@ function PipelineToolbarInner({
                 className={`px-3 py-1.5 text-[11px] rounded-lg transition-all font-medium ${
                   statusFilter === s
                     ? "bg-white/[0.08] border border-border/60 " + (STATUS_COLORS[s] || "")
-                    : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"
+                    : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.05] hover:text-muted-foreground"
                 }`}
               >
                 {s}
@@ -217,7 +217,7 @@ function PipelineToolbarInner({
         )}
       </AnimatePresence>
 
-      <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide pb-0.5">
+      <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
         {SMART_SEGMENTS.map(({ key, label, icon: SIcon, color }) => {
           const count = segmentCounts[key];
           const isActive = activeSegment === key;
@@ -226,17 +226,17 @@ function PipelineToolbarInner({
               key={key}
               onClick={() => onSegmentChange(isActive ? null : key)}
               aria-pressed={isActive}
-              className={`inline-flex items-center gap-1 px-2.5 py-1 text-[10px] rounded-lg transition-all whitespace-nowrap flex-shrink-0 font-medium ${
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] rounded-lg transition-all whitespace-nowrap flex-shrink-0 font-medium ${
                 isActive
                   ? "bg-white/[0.08] border border-border/50"
-                  : "bg-white/[0.02] border border-transparent text-muted-foreground/50 hover:bg-white/[0.04] hover:text-muted-foreground"
+                  : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.05] hover:text-muted-foreground"
               }`}
               style={isActive ? { color } : undefined}
             >
-              <SIcon className="w-3 h-3" style={{ color }} />
+              <SIcon className="w-3.5 h-3.5" style={{ color }} />
               {label}
               {count > 0 && (
-                <span className="text-[9px] font-bold ml-0.5 opacity-70" style={{ color }}>{count}</span>
+                <span className="text-[10px] font-bold ml-0.5 opacity-80" style={{ color }}>{count}</span>
               )}
             </button>
           );
@@ -244,15 +244,15 @@ function PipelineToolbarInner({
         {activeSegment && (
           <button
             onClick={() => onSegmentChange(null)}
-            className="p-1 rounded-md text-muted-foreground/40 hover:text-muted-foreground hover:bg-white/[0.04] flex-shrink-0 transition-all"
+            className="p-1.5 rounded-md text-muted-foreground/50 hover:text-muted-foreground hover:bg-white/[0.05] flex-shrink-0 transition-all"
             aria-label="Clear segment"
           >
-            <X className="w-3 h-3" />
+            <X className="w-3.5 h-3.5" />
           </button>
         )}
       </div>
 
-      <div role="tablist" aria-label="Contact list views" className="flex gap-0.5 border-t border-border/30 pt-2">
+      <div role="tablist" aria-label="Contact list views" className="flex gap-1 border-t border-border/30 pt-2.5">
         {[
           { key: "all" as const, label: "All", count: allCount, icon: Users },
           { key: "pinned" as const, label: "Pinned", count: pinnedCount, icon: Star },
@@ -263,15 +263,15 @@ function PipelineToolbarInner({
             role="tab"
             aria-selected={activeListTab === key}
             onClick={() => onListTabChange(key)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] rounded-lg transition-all font-medium ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-all font-medium ${
               activeListTab === key
                 ? "bg-white/[0.08] text-foreground"
-                : "text-muted-foreground/50 hover:text-muted-foreground hover:bg-white/[0.03]"
+                : "text-muted-foreground/60 hover:text-muted-foreground hover:bg-white/[0.04]"
             }`}
           >
-            <Icon className="w-3 h-3" />
+            <Icon className="w-3.5 h-3.5" />
             <span>{label}</span>
-            <span className={`text-[9px] font-mono ${activeListTab === key ? "opacity-70" : "opacity-40"}`}>{count}</span>
+            <span className={`text-[10px] font-mono ${activeListTab === key ? "text-muted-foreground" : "text-muted-foreground/50"}`}>{count}</span>
           </button>
         ))}
       </div>

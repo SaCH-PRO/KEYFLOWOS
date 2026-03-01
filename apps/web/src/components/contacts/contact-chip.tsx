@@ -46,7 +46,7 @@ export function ContactChip({
 
   const avatarSize = size === "sm" ? "w-6 h-6" : "w-8 h-8";
   const textSize = size === "sm" ? "text-xs" : "text-sm";
-  const initialsSize = size === "sm" ? "text-[9px]" : "text-[11px]";
+  const initialsSize = size === "sm" ? "text-[10px]" : "text-[11px]";
 
   const Wrapper = onClick ? "button" : "div";
 

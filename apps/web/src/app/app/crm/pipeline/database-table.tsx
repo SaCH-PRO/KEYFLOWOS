@@ -119,12 +119,12 @@ function TagsCell({ value, search }: { value: string; search: string }) {
   return (
     <div className="flex flex-wrap gap-1">
       {visible.map((tag) => (
-        <span key={tag} className="px-1.5 py-0.5 text-[10px] rounded-md bg-white/[0.04] text-muted-foreground/70 border border-border/30">
+        <span key={tag} className="px-1.5 py-0.5 text-[10px] rounded-md bg-muted/50 text-muted-foreground border border-border/30">
           <HighlightedText text={tag} search={search} />
         </span>
       ))}
       {overflow > 0 && (
-        <span className="text-[10px] text-muted-foreground/40" title={tags.slice(3).join(", ")}>
+        <span className="text-[10px] text-muted-foreground/60" title={tags.slice(3).join(", ")}>
           +{overflow}
         </span>
       )}
@@ -228,18 +228,18 @@ function DatabaseTableInner({
                   {search ? (
                     <>
                       <div className="w-10 h-10 rounded-xl bg-white/[0.03] flex items-center justify-center mb-1">
-                        <SearchX className="w-5 h-5 text-muted-foreground/30" />
+                        <SearchX className="w-5 h-5 text-muted-foreground/40" />
                       </div>
-                      <p className="text-xs font-medium text-muted-foreground/60">No contacts match &ldquo;{search}&rdquo;</p>
-                      <p className="text-[11px] text-muted-foreground/40">Try adjusting your search or filters</p>
+                      <p className="text-xs font-medium text-muted-foreground/70">No contacts match &ldquo;{search}&rdquo;</p>
+                      <p className="text-xs text-muted-foreground/50">Try adjusting your search or filters</p>
                     </>
                   ) : (
                     <>
                       <div className="w-10 h-10 rounded-xl bg-white/[0.03] flex items-center justify-center mb-1">
-                        <UserX className="w-5 h-5 text-muted-foreground/30" />
+                        <UserX className="w-5 h-5 text-muted-foreground/40" />
                       </div>
-                      <p className="text-xs font-medium text-muted-foreground/60">No contacts found</p>
-                      <p className="text-[11px] text-muted-foreground/40">Sync or add contacts to get started</p>
+                      <p className="text-xs font-medium text-muted-foreground/70">No contacts found</p>
+                      <p className="text-xs text-muted-foreground/50">Sync or add contacts to get started</p>
                     </>
                   )}
                 </div>
@@ -267,7 +267,7 @@ function DatabaseTableInner({
                       aria-label={`Select ${contact.firstName ?? ""} ${contact.lastName ?? ""}`}
                     />
                   </td>
-                  <td className="px-3 py-2.5 text-[10px] text-muted-foreground/40 font-mono">
+                  <td className="px-3 py-2.5 text-[10px] text-muted-foreground/60 font-mono">
                     {(page - 1) * pageSize + idx + 1}
                   </td>
                   {columns.map((col) => {
@@ -281,7 +281,7 @@ function DatabaseTableInner({
                               {val}
                             </span>
                           ) : (
-                            <span className="text-muted-foreground/30">—</span>
+                            <span className="text-muted-foreground/40">—</span>
                           )}
                         </td>
                       );
@@ -297,7 +297,7 @@ function DatabaseTableInner({
 
                     return (
                       <td key={col.key} className={`px-3 py-2.5 text-[13px] truncate max-w-[200px] ${col.width}`}>
-                        {val ? <HighlightedText text={val} search={search} /> : <span className="text-muted-foreground/30">—</span>}
+                        {val ? <HighlightedText text={val} search={search} /> : <span className="text-muted-foreground/40">—</span>}
                       </td>
                     );
                   })}

@@ -651,7 +651,7 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
                                   )}
                                 </div>
                                 {member.status && (
-                                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium mr-2 ${
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium mr-2 ${
                                     member.status === "CLIENT" ? "bg-green-500/20 text-green-400" :
                                     member.status === "LEAD" ? "bg-amber-500/20 text-amber-400" :
                                     member.status === "PROSPECT" ? "bg-blue-500/20 text-blue-400" :

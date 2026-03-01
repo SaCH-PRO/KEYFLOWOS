@@ -129,14 +129,14 @@ export function ContactsDatabase({
             <div className="w-1 h-5 rounded-full bg-gradient-to-b from-[hsl(var(--kf-accent2))] to-[hsl(var(--kf-accent2))]/40" />
             <div>
               <h3 className="text-sm font-semibold tracking-tight">Contact Database</h3>
-              <p className="text-[11px] text-muted-foreground/60">
+              <p className="text-xs text-muted-foreground/70">
                 {db.filteredContacts.length} of {db.activeContacts.length} contacts
                 {db.usingCache && (
-                  <span className="ml-2 text-amber-400/70">(offline cache)</span>
+                  <span className="ml-2 text-amber-400">(offline cache)</span>
                 )}
                 {db.lastSync && (
-                  <span className="ml-2 inline-flex items-center gap-1 text-muted-foreground/40">
-                    <HardDrive className="w-2.5 h-2.5" />
+                  <span className="ml-2 inline-flex items-center gap-1 text-muted-foreground/50">
+                    <HardDrive className="w-3 h-3" />
                     Synced {new Date(db.lastSync).toLocaleTimeString("en-TT", { hour: "2-digit", minute: "2-digit" })}
                   </span>
                 )}
@@ -235,7 +235,7 @@ export function ContactsDatabase({
                     aria-modal="true"
                     aria-label="Export contacts"
                   >
-                    <div className="px-4 py-2 text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider border-b border-border/30 mb-1">
+                    <div className="px-4 py-2 text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider border-b border-border/30 mb-1">
                       Export {db.filteredContacts.length} contacts
                     </div>
                     {EXPORT_OPTIONS.map(({ format, label, desc, icon: Icon }) => (
@@ -252,7 +252,7 @@ export function ContactsDatabase({
                         )}
                         <div>
                           <span className="font-semibold">{label}</span>
-                          <p className="text-[10px] text-muted-foreground/40">{desc}</p>
+                          <p className="text-[10px] text-muted-foreground/50">{desc}</p>
                         </div>
                       </button>
                     ))}
@@ -321,13 +321,13 @@ export function ContactsDatabase({
                     className={`px-3 py-1.5 text-[11px] rounded-lg transition-all inline-flex items-center gap-1.5 font-medium ${
                       db.statusFilter === s
                         ? "bg-white/[0.08] border border-border/60 " + (STATUS_COLORS[s] || "")
-                        : "bg-white/[0.02] border border-transparent text-muted-foreground/50 hover:bg-white/[0.04]"
+                        : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.05]"
                     }`}
                     aria-pressed={db.statusFilter === s}
                   >
                     {s}
-                    <span className={`text-[9px] font-mono px-1 py-0.5 rounded ${
-                      db.statusFilter === s ? "bg-white/10" : "bg-white/[0.03] text-muted-foreground/40"
+                    <span className={`text-[10px] font-mono px-1 py-0.5 rounded ${
+                      db.statusFilter === s ? "bg-white/10" : "bg-white/[0.04] text-muted-foreground/50"
                     }`}>
                       {count}
                     </span>
@@ -357,37 +357,37 @@ export function ContactsDatabase({
         />
 
         <div className="flex items-center justify-between mt-4 px-1">
-          <div className="flex items-center gap-2 text-[11px] text-muted-foreground/50">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground/60">
             <label htmlFor="db-page-size" className="sr-only">Rows per page</label>
             <span className="font-medium">Rows</span>
             <select
               id="db-page-size"
               value={db.pageSize}
               onChange={(e) => db.handlePageSizeChange(Number(e.target.value))}
-              className="bg-white/[0.03] border border-border/40 rounded-lg px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40"
+              className="bg-white/[0.03] border border-border/40 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40"
             >
               {PAGE_SIZE_OPTIONS.map((size) => (
                 <option key={size} value={size}>{size}</option>
               ))}
             </select>
-            <span className="hidden sm:inline text-muted-foreground/40">
+            <span className="hidden sm:inline text-muted-foreground/50">
               Showing {Math.min((db.page - 1) * db.pageSize + 1, db.filteredContacts.length)}-{Math.min(db.page * db.pageSize, db.filteredContacts.length)} of {db.filteredContacts.length}
             </span>
           </div>
-          <nav className="flex items-center gap-1.5 text-[11px]" aria-label="Table pagination">
+          <nav className="flex items-center gap-1.5 text-xs" aria-label="Table pagination">
             <button
               disabled={db.page <= 1}
               onClick={db.handlePrevPage}
-              className="px-2.5 py-1 rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] disabled:opacity-25 disabled:cursor-not-allowed transition-all font-medium text-muted-foreground/60"
+              className="px-2.5 py-1.5 rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] disabled:opacity-25 disabled:cursor-not-allowed transition-all font-medium text-muted-foreground/60"
               aria-label="Previous page"
             >
               Previous
             </button>
-            <span className="text-muted-foreground/40 font-mono px-2" aria-live="polite">{db.page}/{db.totalPages}</span>
+            <span className="text-muted-foreground/50 font-mono px-2" aria-live="polite">{db.page}/{db.totalPages}</span>
             <button
               disabled={db.page >= db.totalPages}
               onClick={db.handleNextPage}
-              className="px-2.5 py-1 rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] disabled:opacity-25 disabled:cursor-not-allowed transition-all font-medium text-muted-foreground/60"
+              className="px-2.5 py-1.5 rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] disabled:opacity-25 disabled:cursor-not-allowed transition-all font-medium text-muted-foreground/60"
               aria-label="Next page"
             >
               Next
@@ -424,7 +424,7 @@ export function ContactsDatabase({
             <div className="w-1 h-5 rounded-full bg-gradient-to-b from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent1))]/40" />
             <div className="text-left">
               <h3 className="text-sm font-semibold tracking-tight">Contact Lists</h3>
-              <p className="text-[11px] text-muted-foreground/50">Organize contacts into manual or smart lists</p>
+              <p className="text-xs text-muted-foreground/60">Organize contacts into manual or smart lists</p>
             </div>
           </div>
           <ChevronDown className={`w-4 h-4 text-muted-foreground/40 transition-transform duration-200 ${db.showLists ? "rotate-180" : ""}`} />

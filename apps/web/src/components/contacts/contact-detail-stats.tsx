@@ -104,7 +104,7 @@ function LeadScoreGauge({ score }: { score: number }) {
             style={{ width: `${clampedScore}%`, backgroundColor: color }}
           />
         </div>
-        <span className="text-[9px] font-medium" style={{ color }}>{label}</span>
+        <span className="text-[10px] font-medium" style={{ color }}>{label}</span>
       </div>
     </div>
   );
