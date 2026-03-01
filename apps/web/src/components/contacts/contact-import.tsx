@@ -18,7 +18,7 @@ import {
   ArrowRight,
   Table,
 } from "lucide-react";
-import { getGoogleContactsAuthUrl } from "@/lib/client";
+import { getGoogleContactsAuthUrl, checkImportDuplicates } from "@/lib/client";
 import { toast } from "sonner";
 
 type ImportMethod = "file" | "url" | "google";
@@ -258,6 +258,19 @@ export function ContactImport({ onImportFile, onImportLink, loading, businessId 
   const [sizeError, setSizeError] = useState<string | null>(null);
   const [mappingState, setMappingState] = useState<MappingState | null>(null);
   const [parsingFile, setParsingFile] = useState(false);
+  const [duplicateResult, setDuplicateResult] = useState<{
+    total: number;
+    newCount: number;
+    duplicateCount: number;
+    duplicates: Array<{
+      importIndex: number;
+      importContact: { email?: string; phone?: string; firstName?: string; lastName?: string };
+      existingContact: { id: string; firstName: string | null; lastName: string | null; email: string | null; phone: string | null };
+      matchField: 'email' | 'phone';
+    }>;
+  } | null>(null);
+  const [checkingDuplicates, setCheckingDuplicates] = useState(false);
+  const [skipDuplicates, setSkipDuplicates] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleGoogleConnect = async () => {
@@ -340,6 +353,43 @@ export function ContactImport({ onImportFile, onImportLink, loading, businessId 
     }
   }, [file]);
 
+  const handleCheckDuplicates = useCallback(async () => {
+    if (!file || !mappingState || !businessId) return;
+    setCheckingDuplicates(true);
+    try {
+      const text = await file.text();
+      const lines = text.split(/\r?\n/).filter((l) => l.trim());
+      const allRows = lines.slice(1).map(parseCSVLine);
+      const contacts = allRows.slice(0, 100).map((row) => {
+        const contact: Record<string, string> = {};
+        mappingState.headers.forEach((header, idx) => {
+          const field = mappingState.mapping[header];
+          if (field && row[idx]) {
+            contact[field] = row[idx];
+          }
+        });
+        return {
+          email: contact.email,
+          phone: contact.phone,
+          firstName: contact.firstName,
+          lastName: contact.lastName,
+        };
+      });
+      const result = await checkImportDuplicates(businessId, contacts);
+      if (result.data) {
+        setDuplicateResult(result.data);
+      } else {
+        setDuplicateResult(null);
+        toast.info("Could not check duplicates. You can proceed with import.");
+      }
+    } catch {
+      toast.error("Failed to check duplicates");
+      setDuplicateResult(null);
+    } finally {
+      setCheckingDuplicates(false);
+    }
+  }, [file, mappingState, businessId]);
+
   const handleFileImport = async () => {
     if (!file) return;
     try {
@@ -347,6 +397,8 @@ export function ContactImport({ onImportFile, onImportLink, loading, businessId 
       toast.success("Contacts imported successfully");
       setFile(null);
       setMappingState(null);
+      setDuplicateResult(null);
+      setSkipDuplicates(false);
       setUploadSuccess(true);
       setTimeout(() => setUploadSuccess(false), 3000);
     } catch (err) {
@@ -722,20 +774,115 @@ export function ContactImport({ onImportFile, onImportLink, loading, businessId 
                         </div>
                       )}
 
-                      <button
-                        onClick={handleFileImport}
-                        disabled={!file || loading || mappedCount === 0}
-                        className="kf-btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                      >
-                        {loading ? (
-                          "Importing..."
-                        ) : (
-                          <>
-                            <Upload className="w-4 h-4" />
-                            Import {mappedCount} Mapped Fields
-                          </>
-                        )}
-                      </button>
+                      {!duplicateResult && (
+                        <button
+                          onClick={handleCheckDuplicates}
+                          disabled={!file || checkingDuplicates || mappedCount === 0 || !businessId}
+                          className="kf-btn-secondary w-full disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        >
+                          {checkingDuplicates ? (
+                            "Checking duplicates..."
+                          ) : (
+                            <>
+                              <AlertCircle className="w-4 h-4" />
+                              Check Duplicates
+                            </>
+                          )}
+                        </button>
+                      )}
+
+                      {duplicateResult && (
+                        <div className="space-y-3">
+                          <div className="p-3 rounded-lg border border-border bg-muted/30">
+                            <div className="flex items-center gap-3 text-sm">
+                              <div className="flex items-center gap-1.5">
+                                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                                <span className="font-medium">{duplicateResult.newCount} new</span>
+                              </div>
+                              {duplicateResult.duplicateCount > 0 && (
+                                <div className="flex items-center gap-1.5">
+                                  <AlertCircle className="w-4 h-4 text-amber-500" />
+                                  <span className="font-medium text-amber-600 dark:text-amber-400">{duplicateResult.duplicateCount} potential duplicate{duplicateResult.duplicateCount !== 1 ? "s" : ""}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {duplicateResult.duplicateCount > 0 && duplicateResult.duplicates.length > 0 && (
+                            <div className="max-h-32 overflow-y-auto space-y-1.5">
+                              {duplicateResult.duplicates.slice(0, 10).map((dup, idx) => (
+                                <div key={idx} className="flex items-center gap-2 text-xs p-2 rounded-md bg-amber-500/5 border border-amber-500/15">
+                                  <AlertCircle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+                                  <span className="truncate">
+                                    {dup.importContact.firstName || dup.importContact.email || dup.importContact.phone || "Row " + (dup.importIndex + 1)}
+                                    {" matches "}
+                                    {dup.existingContact.firstName ? `${dup.existingContact.firstName} ${dup.existingContact.lastName || ""}`.trim() : dup.existingContact.email || dup.existingContact.phone}
+                                    {" (by " + dup.matchField + ")"}
+                                  </span>
+                                </div>
+                              ))}
+                              {duplicateResult.duplicates.length > 10 && (
+                                <p className="text-xs text-muted-foreground text-center">
+                                  +{duplicateResult.duplicates.length - 10} more duplicates
+                                </p>
+                              )}
+                            </div>
+                          )}
+
+                          <div className="flex gap-2">
+                            <button
+                              onClick={handleFileImport}
+                              disabled={!file || loading}
+                              className="kf-btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                            >
+                              {loading ? "Importing..." : (
+                                <>
+                                  <Upload className="w-4 h-4" />
+                                  Import All
+                                </>
+                              )}
+                            </button>
+                            {duplicateResult.duplicateCount > 0 && (
+                              <button
+                                onClick={() => {
+                                  setSkipDuplicates(true);
+                                  handleFileImport();
+                                }}
+                                disabled={!file || loading}
+                                className="kf-btn-secondary flex-1 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                              >
+                                {loading ? "Importing..." : "Skip Duplicates"}
+                              </button>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => {
+                              setDuplicateResult(null);
+                              setMappingState(null);
+                            }}
+                            className="w-full text-sm text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
+
+                      {!duplicateResult && (
+                        <button
+                          onClick={handleFileImport}
+                          disabled={!file || loading || mappedCount === 0}
+                          className="kf-btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        >
+                          {loading ? (
+                            "Importing..."
+                          ) : (
+                            <>
+                              <Upload className="w-4 h-4" />
+                              Import {mappedCount} Mapped Fields
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>

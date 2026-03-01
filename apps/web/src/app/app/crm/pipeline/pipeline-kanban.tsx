@@ -16,8 +16,9 @@ import { updateContact } from "@/lib/client";
 import { toast } from "sonner";
 import { PipelineDetailPanel } from "./pipeline-detail-panel";
 import type { PipelineState } from "./use-contacts-pipeline";
+import { CONTACT_STATUSES } from "@/lib/crm-constants";
 
-const STATUSES = ["LEAD", "PROSPECT", "CLIENT", "LOST"] as const;
+const STATUSES = CONTACT_STATUSES;
 
 const STATUS_CONFIG: Record<
   string,
@@ -91,6 +92,7 @@ interface KanbanCardProps {
   contact: Contact;
   onDragStart: (e: React.DragEvent, contactId: string) => void;
   onClick: (contactId: string) => void;
+  onKeyboardMove?: (contactId: string, direction: "left" | "right") => void;
   isFavorite?: boolean;
   onToggleFavorite?: (id: string) => void;
 }
@@ -99,6 +101,7 @@ const KanbanCard = memo(function KanbanCardInner({
   contact,
   onDragStart,
   onClick,
+  onKeyboardMove,
   isFavorite,
   onToggleFavorite,
 }: KanbanCardProps) {
@@ -120,12 +123,26 @@ const KanbanCard = memo(function KanbanCardInner({
           ? "hsl(142 76% 36%)"
           : "hsl(var(--kf-muted-foreground))";
 
+  const statusLabel = STATUS_CONFIG[contact.status ?? "LEAD"]?.label ?? contact.status ?? "Lead";
+  const cardAriaLabel = `${fullName} - ${statusLabel}${hasLeadScore ? ` - Lead Score: ${leadScore}` : ""}`;
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+      e.preventDefault();
+      onKeyboardMove?.(contact.id, e.key === "ArrowLeft" ? "left" : "right");
+    }
+  }, [contact.id, onKeyboardMove]);
+
   return (
     <div
+      role="article"
+      aria-label={cardAriaLabel}
+      tabIndex={0}
       draggable
       onDragStart={(e) => onDragStart(e, contact.id)}
       onClick={() => onClick(contact.id)}
-      className="rounded-xl border border-border/50 bg-card p-3 cursor-grab active:cursor-grabbing hover:bg-white/[0.03] transition-all group"
+      onKeyDown={handleKeyDown}
+      className="rounded-xl border border-border/50 bg-card p-3 cursor-grab active:cursor-grabbing hover:bg-white/[0.03] transition-all group focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/50"
     >
       <div className="flex items-start gap-2.5">
         <div
@@ -211,6 +228,7 @@ interface KanbanColumnProps {
   onDragOver: (e: React.DragEvent) => void;
   onDrop: (e: React.DragEvent, status: string) => void;
   onCardClick: (contactId: string) => void;
+  onKeyboardMove?: (contactId: string, direction: "left" | "right") => void;
   dragOverStatus: string | null;
   favoriteIds?: Set<string>;
   onToggleFavorite?: (id: string) => void;
@@ -223,6 +241,7 @@ const KanbanColumn = memo(function KanbanColumnInner({
   onDragOver,
   onDrop,
   onCardClick,
+  onKeyboardMove,
   dragOverStatus,
   favoriteIds,
   onToggleFavorite,
@@ -279,6 +298,7 @@ const KanbanColumn = memo(function KanbanColumnInner({
             contact={contact}
             onDragStart={onDragStart}
             onClick={onCardClick}
+            onKeyboardMove={onKeyboardMove}
             isFavorite={favoriteIds?.has(contact.id)}
             onToggleFavorite={onToggleFavorite}
           />
@@ -354,16 +374,76 @@ function PipelineKanbanInner({ state }: PipelineKanbanProps) {
       const contact = contacts.find((c) => c.id === contactId);
       if (!contact || contact.status === newStatus) return;
 
+      const previousStatus = contact.status;
+      const contactName = `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "Unnamed";
+      const newLabel = STATUS_CONFIG[newStatus]?.label ?? newStatus;
+
       try {
         await updateContact({ businessId, contactId, status: newStatus });
         void state.loadContacts();
         void state.loadFlowData();
+        toast(`${contactName} moved to ${newLabel}`, {
+          action: {
+            label: "Undo",
+            onClick: async () => {
+              try {
+                await updateContact({ businessId, contactId, status: previousStatus });
+                void state.loadContacts();
+                void state.loadFlowData();
+                toast.success("Status change undone");
+              } catch {
+                toast.error("Failed to undo status change");
+              }
+            },
+          },
+        });
       } catch {
         toast.error("Failed to update contact status");
       }
       setDraggedContactId(null);
     },
     [draggedContactId, businessId, contacts, state]
+  );
+
+  const handleKeyboardMove = useCallback(
+    async (contactId: string, direction: "left" | "right") => {
+      if (!businessId) return;
+      const contact = contacts.find((c) => c.id === contactId);
+      if (!contact) return;
+
+      const currentIndex = STATUSES.indexOf((contact.status ?? "LEAD") as typeof STATUSES[number]);
+      if (currentIndex === -1) return;
+
+      const newIndex = direction === "left" ? currentIndex - 1 : currentIndex + 1;
+      if (newIndex < 0 || newIndex >= STATUSES.length) return;
+
+      const newStatus = STATUSES[newIndex];
+      const previousStatus = contact.status ?? "LEAD";
+      const newLabel = STATUS_CONFIG[newStatus]?.label ?? newStatus;
+
+      try {
+        await updateContact({ businessId, contactId, status: newStatus });
+        void state.loadContacts();
+        void state.loadFlowData();
+        toast.success(`Contact moved to ${newLabel}`, {
+          action: {
+            label: "Undo",
+            onClick: async () => {
+              try {
+                await updateContact({ businessId, contactId, status: previousStatus });
+                void state.loadContacts();
+                void state.loadFlowData();
+              } catch {
+                toast.error("Failed to undo status change");
+              }
+            },
+          },
+        });
+      } catch {
+        toast.error("Failed to update contact status");
+      }
+    },
+    [businessId, contacts, state]
   );
 
   const handleCardClick = useCallback(
@@ -398,6 +478,7 @@ function PipelineKanbanInner({ state }: PipelineKanbanProps) {
               onDragOver={handleDragOver}
               onDrop={handleDrop}
               onCardClick={handleCardClick}
+              onKeyboardMove={handleKeyboardMove}
               dragOverStatus={dragOverStatus}
               favoriteIds={state.favoriteIds}
               onToggleFavorite={state.handleToggleFavorite}

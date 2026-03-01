@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { UserCheck, Tag, Send, X, ChevronDown, Trash2 } from "lucide-react";
+import { Button } from "@keyflow/ui";
 
 export interface BulkActionBarProps {
   selectedCount: number;
@@ -27,8 +28,11 @@ function BulkActionBarInner({
   const [showStatus, setShowStatus] = useState(false);
   const [showTag, setShowTag] = useState(false);
   const [tagInput, setTagInput] = useState("");
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
   return (
+    <>
     <div className="kf-card border border-[hsl(var(--kf-accent2))]/30 bg-[hsl(var(--kf-accent2))]/5 p-3 rounded-xl flex items-center gap-2 flex-wrap">
       <span className="text-sm font-medium">{selectedCount} selected</span>
       <button onClick={onSelectAll} className="kf-btn-secondary text-sm px-3 py-1.5">
@@ -108,7 +112,7 @@ function BulkActionBarInner({
       </div>
 
       <button
-        onClick={onBulkDelete}
+        onClick={() => setShowDeleteConfirm(true)}
         disabled={selectedCount === 0}
         className="kf-btn-secondary inline-flex items-center gap-1.5 text-sm text-red-400 hover:text-red-300 disabled:opacity-50"
         aria-label={`Delete ${selectedCount} selected contacts`}
@@ -135,6 +139,42 @@ function BulkActionBarInner({
         <X className="w-4 h-4" />
       </button>
     </div>
+
+    {showDeleteConfirm && (
+      <div className="fixed inset-0 z-[60] flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="bulk-delete-title" aria-describedby="bulk-delete-desc">
+        <div
+          className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+          onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmText(""); }}
+        />
+        <div className="relative z-10 w-full max-w-md mx-4 rounded-xl border border-border/60 bg-slate-900/95 backdrop-blur-xl p-6 shadow-2xl">
+          <h3 className="text-lg font-semibold mb-2" id="bulk-delete-title">Delete {selectedCount} contact{selectedCount !== 1 ? "s" : ""}?</h3>
+          <p className="text-sm text-muted-foreground mb-4" id="bulk-delete-desc">
+            This action cannot be undone. Type <span className="font-mono font-bold text-red-400">DELETE</span> to confirm.
+          </p>
+          <input
+            type="text"
+            value={deleteConfirmText}
+            onChange={(e) => setDeleteConfirmText(e.target.value)}
+            placeholder='Type "DELETE" to confirm'
+            className="w-full px-3 py-2 text-sm bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500/40 placeholder:text-muted-foreground/40 mb-4"
+            autoFocus
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="subtle" onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmText(""); }}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => { onBulkDelete(); setShowDeleteConfirm(false); setDeleteConfirmText(""); }}
+              disabled={deleteConfirmText !== "DELETE"}
+              className="bg-red-600 hover:bg-red-700 text-white disabled:opacity-40"
+            >
+              Delete {selectedCount} Contact{selectedCount !== 1 ? "s" : ""}
+            </Button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 

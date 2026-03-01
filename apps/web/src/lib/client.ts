@@ -850,6 +850,26 @@ export async function bulkDeleteContacts(input: {
   );
 }
 
+export async function checkImportDuplicates(
+  businessId: string = DEFAULT_BUSINESS_ID,
+  contacts: Array<{ email?: string; phone?: string; firstName?: string; lastName?: string }>,
+) {
+  return apiPost<{
+    total: number;
+    newCount: number;
+    duplicateCount: number;
+    duplicates: Array<{
+      importIndex: number;
+      importContact: { email?: string; phone?: string; firstName?: string; lastName?: string };
+      existingContact: { id: string; firstName: string | null; lastName: string | null; email: string | null; phone: string | null };
+      matchField: 'email' | 'phone';
+    }>;
+  }>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/check-duplicates`,
+    body: { contacts },
+  });
+}
+
 export async function fetchImportJobs(businessId: string = DEFAULT_BUSINESS_ID) {
   return apiGet(`/crm/businesses/${encodeURIComponent(businessId)}/imports`, z.array(contactImportSchema), []);
 }

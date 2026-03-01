@@ -1,20 +1,28 @@
-import { IsBoolean, IsEmail, IsIn, IsOptional, IsString } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import { sanitize } from '../../../core/utils/sanitize';
 
 export class UpdateContactDto {
   @IsString()
   @IsOptional()
+  @MaxLength(100)
+  @Transform(({ value }) => sanitize(value))
   firstName?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
+  @Transform(({ value }) => sanitize(value))
   lastName?: string;
 
   @IsEmail()
   @IsOptional()
+  @MaxLength(254)
   email?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(30)
   phone?: string;
 
   @IsString()
@@ -24,6 +32,7 @@ export class UpdateContactDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   source?: string;
 
   @IsOptional()
@@ -34,66 +43,91 @@ export class UpdateContactDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
+  @Transform(({ value }) => sanitize(value))
   displayName?: string;
 
   @IsEmail()
   @IsOptional()
+  @MaxLength(254)
   secondaryEmail?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(30)
   secondaryPhone?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(30)
   whatsappNumber?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   preferredChannel?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
+  @Transform(({ value }) => sanitize(value))
   addressLine1?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
+  @Transform(({ value }) => sanitize(value))
   addressLine2?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
+  @Transform(({ value }) => sanitize(value))
   city?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
+  @Transform(({ value }) => sanitize(value))
   state?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   postalCode?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
+  @Transform(({ value }) => sanitize(value))
   country?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   timezone?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
+  @Transform(({ value }) => sanitize(value))
   companyName?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
+  @Transform(({ value }) => sanitize(value))
   jobTitle?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
+  @Transform(({ value }) => sanitize(value))
   department?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   industry?: string;
 
   @IsString()
@@ -102,18 +136,22 @@ export class UpdateContactDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   lifecycleStage?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   sourceDetail?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   segment?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   language?: string;
 
   @IsBoolean()
@@ -126,5 +164,7 @@ export class UpdateContactDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(10000)
+  @Transform(({ value }) => sanitize(value))
   notesInternal?: string;
 }

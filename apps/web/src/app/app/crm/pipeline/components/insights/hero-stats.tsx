@@ -109,9 +109,12 @@ export const HeroStats = React.memo(function HeroStats({
       initial="hidden"
       animate="visible"
       className="grid grid-cols-4 gap-1.5 sm:gap-2.5"
-      role="group"
-      aria-label="Key metrics"
+      role="img"
+      aria-label={`Key metrics: ${contacts.length} total contacts, ${overallConversion}% conversion rate, ${formatTTD(totalRevenue)} pipeline value, ${newThisWeek} new this week`}
     >
+      <span className="sr-only">
+        {contacts.length} total contacts with {flowIntelligence?.leads ?? 0} leads and {flowIntelligence?.clients ?? 0} clients. Conversion rate is {overallConversion}%. Pipeline value is {formatTTD(totalRevenue)}. {newThisWeek} new contacts this week with {convThisWeek} conversions.
+      </span>
       {stats.map((s) => {
         const Icon = s.icon;
         return (

@@ -23,6 +23,9 @@ export const FunnelChart = React.memo(function FunnelChart({ data }: { data: Flo
 
   return (
     <div className="space-y-2" role="img" aria-label={`Pipeline funnel: ${data.leads} leads, ${data.prospects} prospects, ${data.clients} clients`}>
+      <span className="sr-only">
+        Pipeline funnel showing {data.leads} leads converting at {leadToProspect}% to {data.prospects} prospects, then at {prospectToClient}% to {data.clients} clients.
+      </span>
       {stages.map((s, i) => (
         <div key={s.label}>
           <div className="flex items-center justify-between mb-1">
