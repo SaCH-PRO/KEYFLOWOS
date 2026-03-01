@@ -7,7 +7,7 @@ import { exportContacts, type ExportFormat } from "@/lib/contacts-export";
 import { bulkUpdateContacts, bulkDeleteContacts, addContactsToList } from "@/lib/client";
 import { toast } from "sonner";
 
-export type SortField = "firstName" | "lastName" | "email" | "phone" | "status" | "companyName" | "city" | "country" | "source" | "createdAt" | "lastActive";
+export type SortField = "firstName" | "lastName" | "email" | "phone" | "status" | "companyName" | "city" | "country" | "source" | "createdAt" | "lastActive" | "referredBy" | "linkedinUrl" | "instagramUrl" | "twitterUrl";
 export type SortDir = "asc" | "desc";
 export type BulkAction = "status" | "tags" | "addToList" | null;
 
@@ -19,7 +19,7 @@ export interface ListSummary {
   contactCount: number;
 }
 
-export type ColumnKey = SortField | "tags" | "jobTitle";
+export type ColumnKey = SortField | "tags" | "jobTitle" | "referredBy" | "linkedinUrl" | "instagramUrl" | "twitterUrl" | "customFields";
 
 export interface ColumnDef {
   key: ColumnKey;
@@ -42,6 +42,11 @@ export const ALL_COLUMNS: ColumnDef[] = [
   { key: "tags", label: "Tags", width: "w-[150px]", mobileHidden: true },
   { key: "createdAt", label: "Created", width: "w-[100px]", mobileHidden: true },
   { key: "lastActive", label: "Last Active", width: "w-[120px]", mobileHidden: true },
+  { key: "referredBy", label: "Referred By", width: "w-[130px]", mobileHidden: true },
+  { key: "linkedinUrl", label: "LinkedIn", width: "w-[130px]", mobileHidden: true },
+  { key: "instagramUrl", label: "Instagram", width: "w-[130px]", mobileHidden: true },
+  { key: "twitterUrl", label: "Twitter", width: "w-[130px]", mobileHidden: true },
+  { key: "customFields", label: "Custom", width: "w-[150px]", mobileHidden: true },
 ];
 
 const DEFAULT_VISIBLE_KEYS: ColumnKey[] = [
@@ -73,7 +78,15 @@ function saveVisibleColumns(keys: Set<ColumnKey>) {
 const SORTABLE_FIELDS = new Set<string>([
   "firstName", "lastName", "email", "phone", "status",
   "companyName", "city", "country", "source", "createdAt", "lastActive",
+  "referredBy", "linkedinUrl", "instagramUrl", "twitterUrl",
 ]);
+
+function getCustomField(contact: LocalContact, key: string): string | null {
+  const custom = contact.custom;
+  if (!custom || typeof custom !== "object") return null;
+  const val = (custom as Record<string, unknown>)[key];
+  return val ? String(val) : null;
+}
 
 function getContactField(contact: LocalContact, field: SortField): string | null | undefined {
   switch (field) {
@@ -90,6 +103,10 @@ function getContactField(contact: LocalContact, field: SortField): string | null
     case "lastActive": {
       return contact.updatedAt || contact.createdAt;
     }
+    case "referredBy": return getCustomField(contact, "referredBy");
+    case "linkedinUrl": return getCustomField(contact, "linkedinUrl");
+    case "instagramUrl": return getCustomField(contact, "instagramUrl");
+    case "twitterUrl": return getCustomField(contact, "twitterUrl");
   }
 }
 

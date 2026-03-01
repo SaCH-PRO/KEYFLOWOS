@@ -41,6 +41,7 @@ export type ContactDetailData = {
   marketingOptIn?: boolean | null;
   doNotContact?: boolean | null;
   notesInternal?: string | null;
+  custom?: Record<string, unknown> | null;
   createdAt?: string | null;
   meta?: {
     leadScore?: number | null;
@@ -109,6 +110,8 @@ interface ContactDetailProps {
   aiInsightLoading?: boolean;
   onGenerateAiInsight?: () => Promise<void>;
   onRefreshConversationContext?: () => Promise<void>;
+  relatedContacts?: Array<{ id: string; firstName?: string | null; lastName?: string | null; email?: string | null; status?: string | null; jobTitle?: string | null }>;
+  onSelectRelatedContact?: (contactId: string) => void;
 }
 
 export function ContactDetail({
@@ -139,6 +142,8 @@ export function ContactDetail({
   aiInsightLoading,
   onGenerateAiInsight,
   onRefreshConversationContext,
+  relatedContacts,
+  onSelectRelatedContact,
 }: ContactDetailProps) {
   const [activeTab, setActiveTab] = useState<string>("notes");
   const [confirmState, setConfirmState] = useState<{ open: boolean; action: () => void }>({
@@ -264,7 +269,7 @@ export function ContactDetail({
         </div>
 
         <div className="shrink-0">
-          <ContactDetailInfo contact={contact} />
+          <ContactDetailInfo contact={contact} relatedContacts={relatedContacts} onSelectRelatedContact={onSelectRelatedContact} />
         </div>
 
         <div className="flex-1 min-h-0 flex flex-col">

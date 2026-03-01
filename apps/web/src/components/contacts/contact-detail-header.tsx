@@ -178,11 +178,37 @@ export function ContactDetailHeader({
                 </a>
               )}
             </div>
-            <div className="flex items-center gap-2 mt-1">
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
               <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground">
                 <SourceIcon className="w-2.5 h-2.5" />
                 {sourceInfo.label}
               </span>
+              {contact.lifecycleStage && (
+                <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))] border border-[hsl(var(--kf-accent2))]/30">
+                  {contact.lifecycleStage}
+                </span>
+              )}
+              {(() => {
+                const fields = [contact.firstName, contact.lastName, contact.email, contact.phone, contact.companyName, contact.jobTitle, contact.department, contact.industry, contact.addressLine1, contact.city, contact.country, contact.lifecycleStage, contact.segment];
+                const filled = fields.filter(Boolean).length;
+                const pct = Math.round((filled / fields.length) * 100);
+                const pctColor = pct >= 75 ? "text-emerald-400" : pct >= 50 ? "text-amber-400" : "text-red-400";
+                return (
+                  <span className={`text-[10px] font-medium ${pctColor}`} title="Data completeness">
+                    {pct}% complete
+                  </span>
+                );
+              })()}
+              {contact.meta?.lastInteractionAt && (() => {
+                const days = Math.floor((Date.now() - new Date(contact.meta.lastInteractionAt).getTime()) / 86400000);
+                const label = days === 0 ? "Today" : days === 1 ? "1 day ago" : `${days}d ago`;
+                const color = days > 30 ? "text-red-400" : days > 14 ? "text-amber-400" : "text-muted-foreground";
+                return (
+                  <span className={`text-[10px] ${color}`} title="Last interaction">
+                    Last active: {label}
+                  </span>
+                );
+              })()}
               {contact.createdAt && (
                 <span className="text-[10px] text-muted-foreground">
                   Added {new Date(contact.createdAt).toLocaleDateString()}

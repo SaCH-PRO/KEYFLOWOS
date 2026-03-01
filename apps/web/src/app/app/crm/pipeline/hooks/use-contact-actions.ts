@@ -66,6 +66,19 @@ export function useContactActions({
   const handleSubmitContact = useCallback(async (formData: ContactFormData) => {
     if (!businessId) return;
     const tagsArray = formData.tags.split(",").map((t) => t.trim()).filter(Boolean);
+    const customData: Record<string, unknown> = {};
+    if (formData.linkedinUrl) customData.linkedinUrl = formData.linkedinUrl;
+    if (formData.instagramUrl) customData.instagramUrl = formData.instagramUrl;
+    if (formData.twitterUrl) customData.twitterUrl = formData.twitterUrl;
+    if (formData.referredBy) customData.referredBy = formData.referredBy;
+    if (formData.nextScheduledInteraction) customData.nextScheduledInteraction = formData.nextScheduledInteraction;
+    if (formData.customFields && formData.customFields.length > 0) {
+      for (const cf of formData.customFields) {
+        if (cf.key.trim() && cf.value.trim()) {
+          customData[cf.key.trim()] = cf.value.trim();
+        }
+      }
+    }
     const shared = {
       firstName: formData.firstName, lastName: formData.lastName,
       email: formData.email || undefined, phone: formData.phone || undefined,
@@ -83,6 +96,7 @@ export function useContactActions({
       postalCode: formData.postalCode || undefined, timezone: formData.timezone || undefined,
       marketingOptIn: formData.marketingOptIn, doNotContact: formData.doNotContact,
       notesInternal: formData.notesInternal || undefined,
+      custom: Object.keys(customData).length > 0 ? customData : undefined,
     };
     try {
       const cid = editingContactIdRef.current;
@@ -246,6 +260,11 @@ export function useContactActions({
     if (!c) return;
     setEditingContactId(c.id);
     setSelectedContactId(c.id);
+    const customObj = (c.custom && typeof c.custom === "object" && !Array.isArray(c.custom)) ? c.custom as Record<string, unknown> : {};
+    const reservedKeys = new Set(["linkedinUrl", "instagramUrl", "twitterUrl", "referredBy", "nextScheduledInteraction"]);
+    const customFields = Object.entries(customObj)
+      .filter(([k]) => !reservedKeys.has(k))
+      .map(([key, value]) => ({ key, value: String(value ?? "") }));
     setEditingContact({
       firstName: c.firstName || "", lastName: c.lastName || "",
       email: c.email || "", phone: c.phone || "",
@@ -266,6 +285,12 @@ export function useContactActions({
       marketingOptIn: c.marketingOptIn ?? false,
       doNotContact: c.doNotContact ?? false,
       notesInternal: c.notesInternal || "",
+      linkedinUrl: String(customObj.linkedinUrl ?? ""),
+      instagramUrl: String(customObj.instagramUrl ?? ""),
+      twitterUrl: String(customObj.twitterUrl ?? ""),
+      referredBy: String(customObj.referredBy ?? ""),
+      nextScheduledInteraction: String(customObj.nextScheduledInteraction ?? ""),
+      customFields,
     });
     setShowMobileDetail(false);
     setShowAddForm(true);

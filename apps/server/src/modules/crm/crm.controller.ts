@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, Get, HttpException, HttpStatus, Inject, Param, Patch, Post, Put, Query, Redirect, Req, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { CrmAiService } from './crm-ai.service';
 import { CrmFlowService } from './crm-flow.service';
 import { CrmGoogleService } from './crm-google.service';
 import { CrmImportService } from './crm-import.service';
@@ -38,6 +39,7 @@ export class CrmController {
     @Inject(CrmVisionService) private readonly vision: CrmVisionService,
     @Inject(CrmGoogleService) private readonly google: CrmGoogleService,
     @Inject(CrmFlowService) private readonly flow: CrmFlowService,
+    @Inject(CrmAiService) private readonly crmAi: CrmAiService,
   ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -658,5 +660,59 @@ export class CrmController {
   ) {
     checkAiRateLimit(businessId);
     return this.flow.generateAiInsight(businessId, contactId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai-analyze')
+  aiAnalyze(
+    @Param('businessId') businessId: string,
+    @Body() body: { prompt: string; contactIds?: string[] },
+  ) {
+    if (!body.prompt || typeof body.prompt !== 'string') {
+      throw new BadRequestException('prompt is required');
+    }
+    if (body.prompt.length > 2000) {
+      throw new BadRequestException('prompt must be 2000 characters or less');
+    }
+    if (Array.isArray(body.contactIds) && body.contactIds.length > 100) {
+      throw new BadRequestException('Maximum 100 contactIds per request');
+    }
+    checkAiRateLimit(businessId);
+    return this.crmAi.analyzeContacts(businessId, body.prompt, body.contactIds);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai-analyze/execute')
+  async aiExecuteTasks(
+    @Param('businessId') businessId: string,
+    @Req() req: any,
+    @Body() body: { tasks: Array<{ contactId: string; contactName?: string; title: string; dueDate: string; priority: 'HIGH' | 'NORMAL' | 'LOW' }> },
+  ) {
+    if (!Array.isArray(body.tasks) || body.tasks.length === 0) {
+      throw new BadRequestException('tasks array is required');
+    }
+    if (body.tasks.length > 100) {
+      throw new BadRequestException('Maximum 100 tasks per request');
+    }
+    const userId = req.user?.id ?? req.user?.sub ?? 'system';
+    return this.crmAi.executeTasks(businessId, userId, body.tasks);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai-guidelines')
+  getAiGuidelines(@Param('businessId') businessId: string) {
+    return this.crmAi.getGuidelines(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai-guidelines')
+  saveAiGuidelines(
+    @Param('businessId') businessId: string,
+    @Body() body: { guidelines: string[] },
+  ) {
+    if (!Array.isArray(body.guidelines)) {
+      throw new BadRequestException('guidelines array is required');
+    }
+    return this.crmAi.saveGuidelines(businessId, body.guidelines);
   }
 }
