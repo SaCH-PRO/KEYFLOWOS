@@ -54,7 +54,11 @@ export class CrmController {
     @Query('skip') skip?: string,
     @Query('take') take?: string,
     @Query('includeStats') includeStats?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: string,
   ) {
+    const validSortBy = ['name', 'newest', 'oldest', 'revenue', 'score', 'lastInteraction'];
+    const validSortOrder = ['asc', 'desc'];
     return this.crm.listContacts({
       businessId,
       status,
@@ -67,6 +71,8 @@ export class CrmController {
       skip: skip ? Number(skip) : undefined,
       take: take ? Number(take) : undefined,
       includeStats: includeStats === 'true',
+      sortBy: sortBy && validSortBy.includes(sortBy) ? sortBy as any : undefined,
+      sortOrder: sortOrder && validSortOrder.includes(sortOrder) ? sortOrder as 'asc' | 'desc' : undefined,
     });
   }
 
@@ -160,6 +166,12 @@ export class CrmController {
       authorId: req?.user?.id,
       source: body.source || 'crm',
     });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/contact-stats')
+  getContactStats(@Param('businessId') businessId: string) {
+    return this.crm.getContactStats(businessId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

@@ -184,6 +184,11 @@ export function useContactsData() {
       contactsAbortRef.current = controller;
       const { signal } = controller;
 
+      const sortOpts = {
+        sortBy: filters.sortBy !== "newest" ? filters.sortBy : undefined,
+        sortOrder: (filters.sortBy === "name" || filters.sortBy === "oldest") ? "asc" as const : "desc" as const,
+      };
+
       setLoading(true);
       setLoadError(null);
       try {
@@ -193,6 +198,7 @@ export function useContactsData() {
             search: search || undefined,
             status: filters.statusFilter !== "ALL" ? filters.statusFilter : undefined,
             includeStats: true,
+            ...sortOpts,
             signal,
           });
           if (signal.aborted) return;
@@ -206,6 +212,7 @@ export function useContactsData() {
               search: search || undefined,
               status: filters.statusFilter !== "ALL" ? filters.statusFilter : undefined,
               includeStats: true,
+              ...sortOpts,
               signal,
             });
           if (signal.aborted) return;
@@ -224,7 +231,7 @@ export function useContactsData() {
         }
       }
     },
-    [businessId, search, filters.statusFilter],
+    [businessId, search, filters.statusFilter, filters.sortBy],
   );
 
   const handleTogglePin = useCallback((id: string) => {

@@ -283,6 +283,8 @@ export async function fetchContacts(
     skip?: number;
     take?: number;
     includeStats?: boolean;
+    sortBy?: string;
+    sortOrder?: "asc" | "desc";
     signal?: AbortSignal;
   },
 ) {
@@ -297,6 +299,8 @@ export async function fetchContacts(
   if (opts?.skip !== undefined) params.set("skip", String(opts.skip));
   if (opts?.take !== undefined) params.set("take", String(opts.take));
   if (opts?.includeStats) params.set("includeStats", "true");
+  if (opts?.sortBy) params.set("sortBy", opts.sortBy);
+  if (opts?.sortOrder) params.set("sortOrder", opts.sortOrder);
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts${params.toString() ? `?${params.toString()}` : ""}`,
     z.array(contactSchema),
@@ -684,6 +688,24 @@ export async function denyAutopilotAction(actionId: string, businessId: string =
     path: `/crm/businesses/${encodeURIComponent(businessId)}/autopilot-actions/${encodeURIComponent(actionId)}/deny`,
     body: {},
   });
+}
+
+const contactStatsSchema = z.object({
+  totalCount: z.number(),
+  countByStatus: z.record(z.string(), z.number()),
+  countBySource: z.array(z.object({ source: z.string(), count: z.number() })),
+  recentGrowth: z.array(z.object({ week: z.string(), count: z.number() })),
+  topTags: z.array(z.object({ tag: z.string(), count: z.number() })),
+});
+export type ContactStats = z.infer<typeof contactStatsSchema>;
+
+export async function fetchContactStats(businessId: string = DEFAULT_BUSINESS_ID, opts?: { signal?: AbortSignal }) {
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contact-stats`,
+    contactStatsSchema,
+    { totalCount: 0, countByStatus: {}, countBySource: [], recentGrowth: [], topTags: [] },
+    { signal: opts?.signal },
+  );
 }
 
 export async function fetchSegmentSummary(businessId: string = DEFAULT_BUSINESS_ID, opts?: { signal?: AbortSignal }) {

@@ -110,7 +110,7 @@ function DatabaseBulkBarInner({
           initial={{ opacity: 0, y: 40 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 40 }}
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 rounded-2xl border border-border/50 bg-card/95 backdrop-blur-xl shadow-xl px-4 py-3 flex flex-col items-center gap-2 max-w-[95vw]"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 rounded-2xl border border-border/50 bg-popover/95 backdrop-blur-xl shadow-2xl px-4 py-3 flex flex-col items-center gap-2 max-w-[95vw]"
           role="toolbar"
           aria-label={`Bulk actions for ${selectedCount} selected contacts`}
         >
@@ -143,7 +143,7 @@ function DatabaseBulkBarInner({
               <button
                 onClick={toggleStatusAction}
                 disabled={bulkActing}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] transition-all disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-border/50 bg-white/[0.04] backdrop-blur-sm hover:bg-white/[0.08] transition-all disabled:opacity-40"
                 aria-label="Change status of selected contacts"
                 aria-haspopup="listbox"
                 aria-expanded={activeBulkAction === "status"}
@@ -181,7 +181,7 @@ function DatabaseBulkBarInner({
               <button
                 onClick={toggleTagsAction}
                 disabled={bulkActing}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] transition-all disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-border/50 bg-white/[0.04] backdrop-blur-sm hover:bg-white/[0.08] transition-all disabled:opacity-40"
                 aria-label="Add tags to selected contacts"
                 aria-haspopup="true"
                 aria-expanded={activeBulkAction === "tags"}
@@ -221,7 +221,7 @@ function DatabaseBulkBarInner({
               <button
                 onClick={toggleAddToListAction}
                 disabled={bulkActing}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] transition-all disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-border/50 bg-white/[0.04] backdrop-blur-sm hover:bg-white/[0.08] transition-all disabled:opacity-40"
                 aria-label="Add selected contacts to a list"
                 aria-haspopup="listbox"
                 aria-expanded={activeBulkAction === "addToList"}
@@ -269,7 +269,7 @@ function DatabaseBulkBarInner({
             <button
               onClick={onBulkDelete}
               disabled={bulkActing}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-red-500/20 bg-red-500/[0.06] text-red-400/80 hover:bg-red-500/10 hover:text-red-400 transition-all disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-red-500/30 bg-red-500/[0.08] backdrop-blur-sm text-red-400/80 hover:bg-red-500/15 hover:text-red-400 transition-all disabled:opacity-40"
               aria-label={`Delete ${selectedCount} selected contacts`}
             >
               <Trash2 className="w-3 h-3" />
