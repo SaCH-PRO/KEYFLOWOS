@@ -10,6 +10,10 @@ import {
   Mail, Phone, Globe, Download, RefreshCw, Hash,
   Calendar, Tag,
 } from "lucide-react";
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, Legend,
+} from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { FlowIntelligenceData } from "@/components/contacts/flow-intelligence";
 import type { RevenueData } from "@/components/contacts/predictive-revenue";
@@ -127,52 +131,86 @@ function buildWeeklyBuckets(contacts: Contact[], weeks: number): number[] {
   return buckets;
 }
 
-const FUNNEL_STAGES = [
-  { key: "leads", label: "Leads", gradient: "from-orange-500/80 to-orange-400/60" },
-  { key: "prospects", label: "Prospects", gradient: "from-teal-500/80 to-teal-400/60" },
-  { key: "clients", label: "Clients", gradient: "from-emerald-500/80 to-emerald-400/60" },
-] as const;
+const RECHARTS_TOOLTIP_STYLE = {
+  contentStyle: {
+    background: 'hsl(var(--popover))',
+    border: '1px solid hsl(var(--border)/0.5)',
+    borderRadius: '0.75rem',
+    color: 'hsl(var(--foreground))',
+    fontSize: '11px',
+    padding: '6px 10px',
+  },
+  cursor: { fill: 'hsl(var(--border)/0.1)' },
+};
+
+const FUNNEL_COLORS = {
+  leads: '#f97316',
+  prospects: '#14b8a6',
+  clients: '#10b981',
+};
 
 const FunnelChart = React.memo(function FunnelChart({ data }: { data: FlowIntelligenceData }) {
-  const maxCount = Math.max(data.leads, data.prospects, data.clients, 1);
-  const stages = [
-    { ...FUNNEL_STAGES[0], count: data.leads, color: "hsl(var(--kf-accent1))" },
-    { ...FUNNEL_STAGES[1], count: data.prospects, color: "hsl(var(--kf-accent2))" },
-    { ...FUNNEL_STAGES[2], count: data.clients, color: "hsl(142 76% 36%)" },
-  ];
-
   const leadToProspect = data.leads > 0 ? ((data.prospects / data.leads) * 100).toFixed(0) : "0";
   const prospectToClient = data.prospects > 0 ? ((data.clients / data.prospects) * 100).toFixed(0) : "0";
-  const conversionRates = [leadToProspect, prospectToClient];
+
+  const chartData = [
+    { name: 'Leads', count: data.leads, fill: FUNNEL_COLORS.leads, conversion: `${leadToProspect}% → Prospect` },
+    { name: 'Prospects', count: data.prospects, fill: FUNNEL_COLORS.prospects, conversion: `${prospectToClient}% → Client` },
+    { name: 'Clients', count: data.clients, fill: FUNNEL_COLORS.clients, conversion: '' },
+  ];
 
   return (
-    <div className="space-y-2" role="img" aria-label={`Pipeline funnel: ${data.leads} leads, ${data.prospects} prospects, ${data.clients} clients`}>
-      {stages.map((stage, i) => {
-        const widthPct = Math.max((stage.count / maxCount) * 100, 12);
-        return (
-          <div key={stage.key}>
-            <div className="flex items-center justify-between text-xs mb-1">
-              <span className="font-medium text-foreground/80">{stage.label}</span>
-              <span className="font-mono font-bold text-sm" style={{ color: stage.color }}>{stage.count}</span>
-            </div>
-            <div className="h-6 bg-white/[0.03] rounded-md overflow-hidden relative group">
-              <motion.div
-                initial={{ width: 0 }}
-                animate={{ width: `${widthPct}%` }}
-                transition={{ duration: 0.8, delay: i * 0.12, ease: [0.25, 0.46, 0.45, 0.94] }}
-                className={`h-full rounded-md bg-gradient-to-r ${stage.gradient}`}
-              />
-              <div className="absolute inset-0 bg-white/0 group-hover:bg-white/[0.04] transition-colors rounded-md" />
-            </div>
-            {i < stages.length - 1 && (
-              <div className="flex items-center gap-1 mt-1 ml-2">
-                <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/50" />
-                <span className="text-[10px] text-muted-foreground/60 font-medium">{conversionRates[i]}% convert</span>
-              </div>
-            )}
-          </div>
-        );
-      })}
+    <div role="img" aria-label={`Pipeline funnel: ${data.leads} leads, ${data.prospects} prospects, ${data.clients} clients`}>
+      <ResponsiveContainer width="100%" height={140}>
+        <BarChart data={chartData} layout="vertical" barCategoryGap="20%" margin={{ top: 0, right: 8, bottom: 0, left: 0 }}>
+          <defs>
+            <linearGradient id="funnelLeads" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor={FUNNEL_COLORS.leads} stopOpacity={0.8} />
+              <stop offset="100%" stopColor={FUNNEL_COLORS.leads} stopOpacity={0.5} />
+            </linearGradient>
+            <linearGradient id="funnelProspects" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor={FUNNEL_COLORS.prospects} stopOpacity={0.8} />
+              <stop offset="100%" stopColor={FUNNEL_COLORS.prospects} stopOpacity={0.5} />
+            </linearGradient>
+            <linearGradient id="funnelClients" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor={FUNNEL_COLORS.clients} stopOpacity={0.8} />
+              <stop offset="100%" stopColor={FUNNEL_COLORS.clients} stopOpacity={0.5} />
+            </linearGradient>
+          </defs>
+          <XAxis type="number" hide />
+          <YAxis
+            type="category"
+            dataKey="name"
+            axisLine={false}
+            tickLine={false}
+            tick={{ fill: 'hsl(var(--muted-foreground))', opacity: 0.6, fontSize: 11 }}
+            width={70}
+          />
+          <Tooltip
+            contentStyle={RECHARTS_TOOLTIP_STYLE.contentStyle}
+            cursor={RECHARTS_TOOLTIP_STYLE.cursor}
+            formatter={((value: number | undefined, _name: string | undefined, props: { payload: { name: string; conversion: string } }) => {
+              const conv = props.payload.conversion;
+              return [`${value ?? 0} contacts${conv ? ` · ${conv}` : ''}`, props.payload.name];
+            }) as never}
+          />
+          <Bar dataKey="count" radius={[0, 6, 6, 0]} animationDuration={800}>
+            {chartData.map((entry, index) => (
+              <Cell key={`cell-${index}`} fill={`url(#funnel${entry.name})`} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+      <div className="flex items-center gap-3 mt-1 px-1">
+        <div className="flex items-center gap-1 text-[10px] text-muted-foreground/60">
+          <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/50" />
+          <span className="font-medium">{leadToProspect}% lead→prospect</span>
+        </div>
+        <div className="flex items-center gap-1 text-[10px] text-muted-foreground/60">
+          <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/50" />
+          <span className="font-medium">{prospectToClient}% prospect→client</span>
+        </div>
+      </div>
     </div>
   );
 });
@@ -374,13 +412,45 @@ const AlertCards = React.memo(function AlertCards({
   );
 });
 
+const REVENUE_COLORS = ['#f97316', '#10b981', '#64748b'];
+
 const RevenueBreakdown = React.memo(function RevenueBreakdown({ data }: { data: RevenueData }) {
   const total = data.fromActivePipeline + data.fromRecurringClients + data.fromColdLeads;
-  const sources = [
-    { label: "Active Pipeline", value: data.fromActivePipeline, gradient: "from-orange-500 to-orange-400", color: "hsl(var(--kf-accent1))" },
-    { label: "Recurring", value: data.fromRecurringClients, gradient: "from-emerald-500 to-emerald-400", color: "hsl(142 76% 36%)" },
-    { label: "Cold (if won)", value: data.fromColdLeads, gradient: "from-slate-500 to-slate-400", color: "hsl(215 20% 55%)" },
-  ];
+  const pieData = [
+    { name: "Active Pipeline", value: data.fromActivePipeline },
+    { name: "Recurring", value: data.fromRecurringClients },
+    { name: "Cold (if won)", value: data.fromColdLeads },
+  ].filter((d) => d.value > 0);
+
+  const renderLegend = useCallback((props: { payload?: Array<{ value: string; color: string }> }) => {
+    const { payload } = props;
+    if (!payload) return null;
+    const sources = [
+      { label: "Active Pipeline", value: data.fromActivePipeline },
+      { label: "Recurring", value: data.fromRecurringClients },
+      { label: "Cold (if won)", value: data.fromColdLeads },
+    ];
+    return (
+      <div className="space-y-1.5 mt-1">
+        {payload.map((entry, index) => {
+          const src = sources.find((s) => s.label === entry.value);
+          const pct = total > 0 && src ? Math.round((src.value / total) * 100) : 0;
+          return (
+            <div key={entry.value} className="flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full" style={{ background: entry.color }} />
+                <span className="text-muted-foreground/60 text-[11px]">{entry.value}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-[11px]">{src ? formatTTD(src.value) : ''}</span>
+                <span className="text-muted-foreground/50 w-7 text-right font-mono text-[10px]">{pct}%</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }, [data, total]);
 
   return (
     <div className="space-y-2.5">
@@ -392,40 +462,33 @@ const RevenueBreakdown = React.memo(function RevenueBreakdown({ data }: { data: 
         <span className="text-base font-bold" style={{ color: "hsl(var(--kf-accent1))" }}>{formatTTD(total)}</span>
       </div>
 
-      <div className="h-2.5 bg-white/[0.03] rounded-full overflow-hidden flex" role="img" aria-label={`Revenue: ${formatTTD(total)}`}>
-        {sources.map((s) => {
-          const pct = total > 0 ? (s.value / total) * 100 : 0;
-          if (pct === 0) return null;
-          return (
-            <motion.div
-              key={s.label}
-              initial={{ width: 0 }}
-              animate={{ width: `${pct}%` }}
-              transition={{ duration: 0.8, ease: [0.25, 0.46, 0.45, 0.94] }}
-              className={`h-full first:rounded-l-full last:rounded-r-full bg-gradient-to-r ${s.gradient}`}
-              title={`${s.label}: ${formatTTD(s.value)}`}
+      {pieData.length > 0 ? (
+        <ResponsiveContainer width="100%" height={180}>
+          <PieChart>
+            <Pie
+              data={pieData}
+              cx="50%"
+              cy="45%"
+              innerRadius={60}
+              outerRadius={80}
+              dataKey="value"
+              paddingAngle={2}
+              animationDuration={800}
+            >
+              {pieData.map((_entry, index) => (
+                <Cell key={`cell-${index}`} fill={REVENUE_COLORS[index % REVENUE_COLORS.length]} strokeWidth={0} />
+              ))}
+            </Pie>
+            <Tooltip
+              contentStyle={RECHARTS_TOOLTIP_STYLE.contentStyle}
+              formatter={((value: number | undefined, name: string | undefined) => [formatTTD(value ?? 0), name ?? '']) as never}
             />
-          );
-        })}
-      </div>
-
-      <div className="space-y-1.5">
-        {sources.map((s) => {
-          const pct = total > 0 ? Math.round((s.value / total) * 100) : 0;
-          return (
-            <div key={s.label} className="flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
-                <div className={`w-1.5 h-1.5 rounded-full bg-gradient-to-r ${s.gradient}`} />
-                <span className="text-muted-foreground/60 text-[11px]">{s.label}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-[11px]">{formatTTD(s.value)}</span>
-                <span className="text-muted-foreground/50 w-7 text-right font-mono text-[10px]">{pct}%</span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+            <Legend content={renderLegend as never} />
+          </PieChart>
+        </ResponsiveContainer>
+      ) : (
+        <div className="flex items-center justify-center h-[180px] text-[10px] text-muted-foreground/50">No revenue data</div>
+      )}
 
       {(data.expiringQuotes.count > 0 || data.overdueInvoices.count > 0) && (
         <div className="flex gap-1.5 pt-2 border-t border-border/20">
@@ -606,7 +669,6 @@ const GrowthTrend = React.memo(function GrowthTrend({ contacts, period }: { cont
     return result;
   }, [contacts, period]);
 
-  const maxCount = Math.max(...buckets.map((b) => b.count), 1);
   const totalNew = buckets.reduce((s, b) => s + b.count, 0);
 
   return (
@@ -620,35 +682,34 @@ const GrowthTrend = React.memo(function GrowthTrend({ contacts, period }: { cont
           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-[hsl(var(--kf-accent2))]/10 text-[hsl(var(--kf-accent2))]">+{totalNew}</span>
         )}
       </div>
-      <div className="flex items-end gap-0.5 h-20" role="img" aria-label={`Growth: ${totalNew} new contacts`}>
-        {buckets.map((b, i) => {
-          const heightPct = Math.max((b.count / maxCount) * 100, 4);
-          const isZero = b.count === 0;
-          return (
-            <div key={i} className="flex-1 flex flex-col items-center gap-0.5 group cursor-default">
-              {!isZero && (
-                <span className="text-[10px] font-mono font-semibold text-muted-foreground/50 opacity-0 group-hover:opacity-100 transition-opacity">{b.count}</span>
-              )}
-              <motion.div
-                initial={{ height: 0 }}
-                animate={{ height: `${heightPct}%` }}
-                transition={{ duration: 0.5, delay: i * 0.06, ease: [0.25, 0.46, 0.45, 0.94] }}
-                className="w-full rounded-sm transition-all group-hover:brightness-125"
-                style={{
-                  background: isZero
-                    ? "hsl(var(--muted) / 0.2)"
-                    : `linear-gradient(to top, hsl(var(--kf-accent2) / 0.3), hsl(var(--kf-accent2) / 0.8))`,
-                  opacity: isZero ? 0.4 : 1,
-                }}
-              />
-              <span className="text-[10px] text-muted-foreground/50 truncate w-full text-center">{b.label}</span>
-            </div>
-          );
-        })}
-      </div>
+      <ResponsiveContainer width="100%" height={100}>
+        <BarChart data={buckets} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
+          <defs>
+            <linearGradient id="growthBarGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#14b8a6" stopOpacity={0.8} />
+              <stop offset="100%" stopColor="#14b8a6" stopOpacity={0.3} />
+            </linearGradient>
+          </defs>
+          <XAxis
+            dataKey="label"
+            axisLine={false}
+            tickLine={false}
+            tick={{ fill: 'hsl(var(--muted-foreground))', opacity: 0.6, fontSize: 10 }}
+          />
+          <YAxis hide />
+          <Tooltip
+            contentStyle={RECHARTS_TOOLTIP_STYLE.contentStyle}
+            cursor={RECHARTS_TOOLTIP_STYLE.cursor}
+            formatter={((value: number | undefined) => [`${value ?? 0} contacts`, 'New']) as never}
+          />
+          <Bar dataKey="count" fill="url(#growthBarGrad)" radius={[4, 4, 0, 0]} animationDuration={800} />
+        </BarChart>
+      </ResponsiveContainer>
     </div>
   );
 });
+
+const LEAD_SCORE_COLORS = { Hot: '#ef4444', Warm: '#f97316', Cool: '#14b8a6', Cold: '#6482a6' };
 
 const LeadScoreDistribution = React.memo(function LeadScoreDistribution({ contacts }: { contacts: Contact[] }) {
   const buckets = useMemo(() => {
@@ -662,14 +723,14 @@ const LeadScoreDistribution = React.memo(function LeadScoreDistribution({ contac
       else cold++;
     }
     return [
-      { label: "Hot", count: hot, color: "hsl(0 84% 60%)", gradient: "from-red-500 to-red-400" },
-      { label: "Warm", count: warm, color: "hsl(var(--kf-accent1))", gradient: "from-orange-500 to-orange-400" },
-      { label: "Cool", count: cool, color: "hsl(var(--kf-accent2))", gradient: "from-teal-500 to-teal-400" },
-      { label: "Cold", count: cold, color: "hsl(210 40% 50%)", gradient: "from-blue-500 to-blue-400" },
-    ];
+      { name: "Hot", value: hot, color: LEAD_SCORE_COLORS.Hot },
+      { name: "Warm", value: warm, color: LEAD_SCORE_COLORS.Warm },
+      { name: "Cool", value: cool, color: LEAD_SCORE_COLORS.Cool },
+      { name: "Cold", value: cold, color: LEAD_SCORE_COLORS.Cold },
+    ].filter((b) => b.value > 0);
   }, [contacts]);
 
-  const total = buckets.reduce((s, b) => s + b.count, 0);
+  const total = buckets.reduce((s, b) => s + b.value, 0);
   if (total === 0) return null;
 
   return (
@@ -678,27 +739,36 @@ const LeadScoreDistribution = React.memo(function LeadScoreDistribution({ contac
         <Target className="w-3.5 h-3.5" />
         Lead Scores
       </h3>
-      <div className="h-2 bg-white/[0.03] rounded-full overflow-hidden flex">
-        {buckets.map((b) => {
-          const pct = total > 0 ? (b.count / total) * 100 : 0;
-          if (pct === 0) return null;
-          return (
-            <motion.div key={b.label} initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ duration: 0.6 }}
-              className={`h-full first:rounded-l-full last:rounded-r-full bg-gradient-to-r ${b.gradient}`} title={`${b.label}: ${b.count}`} />
-          );
-        })}
-      </div>
-      <div className="flex items-center gap-2.5 flex-wrap">
-        {buckets.map((b) => {
-          if (b.count === 0) return null;
-          return (
-            <div key={b.label} className="flex items-center gap-1 text-[10px]">
-              <div className="w-1.5 h-1.5 rounded-full" style={{ background: b.color }} />
-              <span className="text-muted-foreground/60">{b.label}</span>
-              <span className="font-mono font-semibold text-muted-foreground/70">{b.count}</span>
-            </div>
-          );
-        })}
+      <ResponsiveContainer width="100%" height={140}>
+        <PieChart>
+          <Pie
+            data={buckets}
+            cx="50%"
+            cy="50%"
+            innerRadius={40}
+            outerRadius={60}
+            dataKey="value"
+            paddingAngle={2}
+            animationDuration={800}
+          >
+            {buckets.map((entry, index) => (
+              <Cell key={`cell-${index}`} fill={entry.color} strokeWidth={0} />
+            ))}
+          </Pie>
+          <Tooltip
+            contentStyle={RECHARTS_TOOLTIP_STYLE.contentStyle}
+            formatter={((value: number | undefined, name: string | undefined) => [`${value ?? 0} contacts (${total > 0 ? Math.round(((value ?? 0) / total) * 100) : 0}%)`, name ?? '']) as never}
+          />
+        </PieChart>
+      </ResponsiveContainer>
+      <div className="flex items-center gap-2.5 flex-wrap justify-center">
+        {buckets.map((b) => (
+          <div key={b.name} className="flex items-center gap-1 text-[10px]">
+            <div className="w-1.5 h-1.5 rounded-full" style={{ background: b.color }} />
+            <span className="text-muted-foreground/60">{b.name}</span>
+            <span className="font-mono font-semibold text-muted-foreground/70">{b.value}</span>
+          </div>
+        ))}
       </div>
     </div>
   );

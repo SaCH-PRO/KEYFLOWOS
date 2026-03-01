@@ -11,6 +11,7 @@ import {
 import { NextActionQueue } from "@/components/contacts";
 import { AutopilotActions } from "@/components/contacts";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SequencesSection } from "./sequences-section";
 import type { NextAction } from "@/components/contacts/next-action-queue";
 import type { AutopilotAction } from "@/components/contacts/autopilot-actions";
 
@@ -55,6 +56,7 @@ interface EngageTabProps {
   autopilotActions: AutopilotAction[];
   autopilotPaused: boolean;
   loading?: boolean;
+  businessId?: string;
   onComplete: (id: string) => Promise<void>;
   onViewContact: (id: string) => void;
   onDoAction: (action: NextAction) => void;
@@ -480,6 +482,7 @@ const ActionBreakdown = React.memo(function ActionBreakdown({ actions }: { actio
 
 export function EngageTab({
   nextActions, autopilotActions, autopilotPaused, loading,
+  businessId,
   onComplete, onViewContact, onDoAction,
   onTogglePause, onApprove, onDeny,
 }: EngageTabProps) {
@@ -593,6 +596,10 @@ export function EngageTab({
           onViewContact={onViewContact}
         />
       </motion.div>
+
+      {businessId && (
+        <SequencesSection businessId={businessId} />
+      )}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <CompletionTimeline actions={autopilotActions} />

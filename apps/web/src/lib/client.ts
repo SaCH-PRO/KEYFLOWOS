@@ -3273,4 +3273,118 @@ export async function saveAiGuidelines(
   });
 }
 
+export type CrmSequenceStep = {
+  stepNumber: number;
+  type: 'email' | 'whatsapp' | 'call' | 'wait';
+  delayDays: number;
+  subject?: string;
+  template?: string;
+  notes?: string;
+};
+
+export type CrmSequence = {
+  id: string;
+  businessId: string;
+  name: string;
+  description: string | null;
+  steps: CrmSequenceStep[];
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  enrollmentCount?: number;
+};
+
+export type CrmSequenceEnrollment = {
+  id: string;
+  contactId: string;
+  contactName: string;
+  contactEmail: string | null;
+  contactStatus: string;
+  currentStep: number;
+  status: string;
+  nextStepAt: string | null;
+  startedAt: string;
+  completedAt: string | null;
+};
+
+export type CrmSequenceDetail = CrmSequence & {
+  enrollments: CrmSequenceEnrollment[];
+};
+
+export async function fetchSequences(businessId: string = DEFAULT_BUSINESS_ID): Promise<ApiResult<CrmSequence[]>> {
+  return apiGetSimple<CrmSequence[]>(`/crm/businesses/${encodeURIComponent(businessId)}/sequences`);
+}
+
+export async function createSequence(
+  businessId: string = DEFAULT_BUSINESS_ID,
+  data: { name: string; description?: string; steps: CrmSequenceStep[] },
+): Promise<ApiResult<CrmSequence>> {
+  return apiPost<CrmSequence>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/sequences`,
+    body: data,
+  });
+}
+
+export async function fetchSequenceDetail(
+  businessId: string,
+  sequenceId: string,
+): Promise<ApiResult<CrmSequenceDetail>> {
+  return apiGetSimple<CrmSequenceDetail>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/sequences/${encodeURIComponent(sequenceId)}`,
+  );
+}
+
+export async function updateSequence(
+  businessId: string,
+  sequenceId: string,
+  data: { name?: string; description?: string; steps?: CrmSequenceStep[]; status?: string },
+): Promise<ApiResult<CrmSequence>> {
+  return apiPatch<CrmSequence>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/sequences/${encodeURIComponent(sequenceId)}`,
+    data,
+  );
+}
+
+export async function deleteSequence(
+  businessId: string,
+  sequenceId: string,
+): Promise<ApiResult<{ success: boolean }>> {
+  return apiDelete<{ success: boolean }>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/sequences/${encodeURIComponent(sequenceId)}`,
+  );
+}
+
+export async function enrollContactsInSequence(
+  businessId: string,
+  sequenceId: string,
+  contactIds: string[],
+): Promise<ApiResult<{ enrolled: number; skipped: number }>> {
+  return apiPost<{ enrolled: number; skipped: number }>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/sequences/${encodeURIComponent(sequenceId)}/enroll`,
+    body: { contactIds },
+  });
+}
+
+export async function advanceSequenceEnrollment(
+  businessId: string,
+  sequenceId: string,
+  enrollmentId: string,
+): Promise<ApiResult<{ status: string; currentStep: number; nextStepAt?: string }>> {
+  return apiPost<{ status: string; currentStep: number; nextStepAt?: string }>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/sequences/${encodeURIComponent(sequenceId)}/enrollments/${encodeURIComponent(enrollmentId)}/advance`,
+    body: {},
+  });
+}
+
+export async function unenrollFromSequence(
+  businessId: string,
+  sequenceId: string,
+  enrollmentId: string,
+): Promise<ApiResult<{ success: boolean }>> {
+  return apiPost<{ success: boolean }>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/sequences/${encodeURIComponent(sequenceId)}/enrollments/${encodeURIComponent(enrollmentId)}/unenroll`,
+    body: {},
+  });
+}
+
 export { DEFAULT_BUSINESS_ID };

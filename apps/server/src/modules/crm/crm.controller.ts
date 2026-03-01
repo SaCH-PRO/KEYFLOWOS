@@ -6,6 +6,7 @@ import { CrmGoogleService } from './crm-google.service';
 import { CrmImportService } from './crm-import.service';
 import { CrmPlaybookService } from './crm-playbook.service';
 import { CrmVisionService } from './crm-vision.service';
+import { CrmSequenceService } from './crm-sequence.service';
 import { CrmService } from './crm.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -40,6 +41,7 @@ export class CrmController {
     @Inject(CrmGoogleService) private readonly google: CrmGoogleService,
     @Inject(CrmFlowService) private readonly flow: CrmFlowService,
     @Inject(CrmAiService) private readonly crmAi: CrmAiService,
+    @Inject(CrmSequenceService) private readonly sequences: CrmSequenceService,
   ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -714,5 +716,76 @@ export class CrmController {
       throw new BadRequestException('guidelines array is required');
     }
     return this.crmAi.saveGuidelines(businessId, body.guidelines);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/sequences')
+  listSequences(@Param('businessId') businessId: string) {
+    return this.sequences.listSequences(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/sequences')
+  createSequence(
+    @Param('businessId') businessId: string,
+    @Body() body: { name: string; description?: string; steps: unknown },
+  ) {
+    return this.sequences.createSequence(businessId, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/sequences/:id')
+  getSequence(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+  ) {
+    return this.sequences.getSequence(businessId, id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/sequences/:id')
+  updateSequence(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: { name?: string; description?: string; steps?: unknown; status?: string },
+  ) {
+    return this.sequences.updateSequence(businessId, id, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/sequences/:id')
+  deleteSequence(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+  ) {
+    return this.sequences.deleteSequence(businessId, id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/sequences/:id/enroll')
+  enrollContacts(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: { contactIds: string[] },
+  ) {
+    return this.sequences.enrollContacts(businessId, id, body.contactIds);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/sequences/:id/enrollments/:enrollmentId/advance')
+  advanceEnrollment(
+    @Param('businessId') businessId: string,
+    @Param('enrollmentId') enrollmentId: string,
+  ) {
+    return this.sequences.advanceEnrollment(businessId, enrollmentId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/sequences/:id/enrollments/:enrollmentId/unenroll')
+  unenrollContact(
+    @Param('businessId') businessId: string,
+    @Param('enrollmentId') enrollmentId: string,
+  ) {
+    return this.sequences.unenrollContact(businessId, enrollmentId);
   }
 }

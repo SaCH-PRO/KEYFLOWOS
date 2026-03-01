@@ -130,6 +130,7 @@ model Business {
   preOrders        PreOrder[]
   purchaseOrders   PurchaseOrder[]
   marketplaceOrders MarketplaceOrder[]
+  crmSequences      CrmSequence[]
 
   // Gmail Integration for sending quotes/invoices
   gmailEmail        String?   @map("gmail_email")
@@ -240,6 +241,7 @@ model Contact {
     media         ContactMedia[]
     playbooks     ContactPlaybook[]
     recurringInvoices RecurringInvoice[]
+    sequenceEnrollments CrmSequenceEnrollment[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   leadScore        Int?      @map("lead_score")
@@ -1636,4 +1638,37 @@ model PurchaseOrder {
 
   @@index([businessId])
   @@map("purchase_orders")
+}
+
+model CrmSequence {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  steps       Json
+  status      String   @default("active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  enrollments CrmSequenceEnrollment[]
+
+  @@index([businessId])
+  @@map("crm_sequences")
+}
+
+model CrmSequenceEnrollment {
+  id          String      @id @default(cuid())
+  sequenceId  String      @map("sequence_id")
+  sequence    CrmSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  contactId   String      @map("contact_id")
+  contact     Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  currentStep Int         @default(0) @map("current_step")
+  status      String      @default("active")
+  nextStepAt  DateTime?   @map("next_step_at")
+  startedAt   DateTime    @default(now()) @map("started_at")
+  completedAt DateTime?   @map("completed_at")
+
+  @@index([sequenceId])
+  @@index([contactId])
+  @@map("crm_sequence_enrollments")
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search,
@@ -17,6 +17,9 @@ import {
   Loader2,
   Columns3,
   Check,
+  Eye,
+  Trash2,
+  Plus,
 } from "lucide-react";
 import type { LocalContact } from "@/lib/contacts-db";
 import type { ExportFormat } from "@/lib/contacts-export";
@@ -70,6 +73,9 @@ export function ContactsDatabase({
   const exportDialogRef = useRef<HTMLDivElement>(null);
   const exportTriggerRef = useRef<HTMLButtonElement>(null);
   const columnPickerRef = useRef<HTMLDivElement>(null);
+  const viewsPickerRef = useRef<HTMLDivElement>(null);
+  const [savingViewName, setSavingViewName] = useState("");
+  const [showSaveInput, setShowSaveInput] = useState(false);
 
   const handleClearSearch = useCallback(() => db.setSearchInput(""), [db.setSearchInput]);
 
@@ -121,6 +127,19 @@ export function ContactsDatabase({
     return () => document.removeEventListener("keydown", handleEscape);
   }, [db.showColumnPicker, db.closeColumnPicker]);
 
+  useEffect(() => {
+    if (!db.showViewsPicker) return;
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        db.closeViewsPicker();
+        setShowSaveInput(false);
+        setSavingViewName("");
+      }
+    };
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [db.showViewsPicker, db.closeViewsPicker]);
+
   return (
     <div className="space-y-3">
       <div className="rounded-2xl border border-border/50 bg-card p-5">
@@ -158,6 +177,116 @@ export function ContactsDatabase({
               )}
               {db.syncing ? "Syncing…" : "Sync"}
             </button>
+            <div className="relative" ref={viewsPickerRef}>
+              <button
+                onClick={db.toggleViewsPicker}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] transition-all ${db.showViewsPicker ? "ring-1 ring-[hsl(var(--kf-accent1))]/40" : ""}`}
+                aria-label="Saved views"
+                aria-haspopup="true"
+                aria-expanded={db.showViewsPicker}
+              >
+                <Eye className="w-3.5 h-3.5 text-muted-foreground/60" />
+                <span className="hidden sm:inline">Views</span>
+                <ChevronDown className={`w-3 h-3 transition-transform ${db.showViewsPicker ? "rotate-180" : ""}`} />
+              </button>
+              {db.showViewsPicker && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => { db.closeViewsPicker(); setShowSaveInput(false); setSavingViewName(""); }}
+                    aria-hidden="true"
+                  />
+                  <div
+                    className="fixed left-2 right-2 top-20 sm:absolute sm:left-auto sm:top-full sm:right-0 sm:mt-2 z-50 bg-popover/95 backdrop-blur-xl border border-border/50 shadow-xl rounded-xl py-2 sm:w-72 max-h-[60vh] overflow-y-auto"
+                    role="group"
+                    aria-label="Saved views"
+                  >
+                    <div className="px-3 py-1.5 text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">
+                      Saved Views
+                    </div>
+                    {db.savedViews.map((view) => (
+                      <div
+                        key={view.id}
+                        className={`flex items-center gap-2 px-3 py-2 text-[11px] hover:bg-white/[0.04] transition-colors cursor-pointer rounded-md mx-1 ${
+                          db.activeViewId === view.id ? "bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))]" : "text-foreground"
+                        }`}
+                      >
+                        <button
+                          onClick={() => db.applyView(view.id)}
+                          className="flex-1 text-left flex items-center gap-2 min-w-0"
+                        >
+                          <Eye className="w-3.5 h-3.5 shrink-0 opacity-60" />
+                          <span className="truncate font-medium">{view.name}</span>
+                          {view.isDefault && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-muted-foreground/50 shrink-0">
+                              Default
+                            </span>
+                          )}
+                        </button>
+                        {!view.isDefault && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); db.deleteView(view.id); }}
+                            className="p-1 rounded hover:bg-red-500/20 text-muted-foreground/50 hover:text-red-400 transition-colors shrink-0"
+                            aria-label={`Delete view ${view.name}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <div className="border-t border-border/30 mt-1 pt-1 mx-1">
+                      {showSaveInput ? (
+                        <div className="flex items-center gap-1.5 px-3 py-2">
+                          <input
+                            type="text"
+                            value={savingViewName}
+                            onChange={(e) => setSavingViewName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && savingViewName.trim()) {
+                                db.saveCurrentView(savingViewName);
+                                setSavingViewName("");
+                                setShowSaveInput(false);
+                              }
+                            }}
+                            placeholder="View name..."
+                            className="flex-1 px-2 py-1.5 text-[11px] bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 placeholder:text-muted-foreground/40"
+                            autoFocus
+                          />
+                          <button
+                            onClick={() => {
+                              if (savingViewName.trim()) {
+                                db.saveCurrentView(savingViewName);
+                                setSavingViewName("");
+                                setShowSaveInput(false);
+                              }
+                            }}
+                            className="p-1.5 rounded-lg bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/25 transition-colors"
+                            aria-label="Save view"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => { setShowSaveInput(false); setSavingViewName(""); }}
+                            className="p-1.5 rounded-lg hover:bg-white/[0.05] text-muted-foreground/50 transition-colors"
+                            aria-label="Cancel"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setShowSaveInput(true)}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-[11px] font-medium text-[hsl(var(--kf-accent1))] hover:bg-white/[0.04] transition-colors rounded-md"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          Save Current View
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
             <div className="relative" ref={columnPickerRef}>
               <button
                 onClick={db.toggleColumnPicker}
