@@ -211,7 +211,7 @@ const HeroStats = React.memo(function HeroStats({
   const stats = [
     {
       label: "Total Contacts",
-      mobileLabel: "Contacts",
+      mobileLabel: "Total",
       value: contacts.length.toString(),
       sub: `${flowIntelligence?.leads ?? 0} leads, ${flowIntelligence?.clients ?? 0} clients`,
       icon: Users,
@@ -284,8 +284,8 @@ const HeroStats = React.memo(function HeroStats({
             />
             <div className="flex items-center gap-1 mb-1 sm:mb-1.5">
               <Icon className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-muted-foreground/50 shrink-0" />
-              <span className="text-[10px] text-muted-foreground/60 font-semibold uppercase tracking-wider truncate leading-tight sm:hidden">{s.mobileLabel}</span>
-              <span className="text-[10px] text-muted-foreground/60 font-semibold uppercase tracking-wider truncate leading-tight hidden sm:inline">{s.label}</span>
+              <span className="text-[10px] text-muted-foreground/60 font-semibold uppercase tracking-wider leading-tight sm:hidden">{s.mobileLabel}</span>
+              <span className="text-[10px] text-muted-foreground/60 font-semibold uppercase tracking-wider leading-tight hidden sm:inline">{s.label}</span>
             </div>
             <div className="hidden sm:flex items-center justify-end mb-1">
               <div className="opacity-50 group-hover:opacity-100 transition-opacity">
