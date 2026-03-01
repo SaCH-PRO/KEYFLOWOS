@@ -1,6 +1,11 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
+import { buildContactSummaryPrompt } from './prompts/contact-summary.prompt';
+import { buildLeadScoringPrompt } from './prompts/lead-scoring.prompt';
+import { buildChurnDetectionPrompt } from './prompts/churn-detection.prompt';
+import { buildNlSearchPrompt } from './prompts/nl-search.prompt';
+import { buildCommandInterpreterPrompt } from './prompts/command-interpreter.prompt';
 
 type SuggestedAction = {
   type: 'follow_up' | 'call' | 'email' | 'send_quote' | 'payment_reminder' | 'check_in' | 'upsell' | 're_engage';
@@ -39,11 +44,35 @@ export class CrmAiService {
     return this.prisma.client;
   }
 
+  sanitizeAiInput(input: string, maxLen = 500): string {
+    let sanitized = input;
+    const injectionPatterns = [
+      /<\|system\|>/gi,
+      /<\|user\|>/gi,
+      /<\|assistant\|>/gi,
+      /\[INST\]/gi,
+      /\[\/INST\]/gi,
+      /<<SYS>>/gi,
+      /<<\/SYS>>/gi,
+      /<\/s>/gi,
+      /^Human:/gim,
+      /^Assistant:/gim,
+      /^System:/gim,
+    ];
+    for (const pattern of injectionPatterns) {
+      sanitized = sanitized.replace(pattern, '');
+    }
+    sanitized = sanitized.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+    return sanitized.slice(0, maxLen);
+  }
+
   async analyzeContacts(
     businessId: string,
     prompt: string,
     contactIds?: string[],
   ): Promise<AiAnalysisResult> {
+    const start = Date.now();
+    const sanitizedPrompt = this.sanitizeAiInput(prompt, 2000);
     const context = await this.buildCrmContext(businessId, contactIds);
 
     const systemPrompt = `You are an expert CRM analyst and business advisor for a Caribbean service business (Trinidad & Tobago, TTD currency).
@@ -93,13 +122,16 @@ Respond in valid JSON with this exact structure:
         feature: 'crm_analysis',
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: prompt },
+          { role: 'user', content: sanitizedPrompt },
         ],
         maxTokens: 2000,
         temperature: 0.4,
       });
 
       const parsed = this.parseJsonResponse(result.content);
+      const duration = Date.now() - start;
+      this.logger.log(`[CRM] analyzeContacts businessId=${businessId} duration=${duration}ms`);
+      if (duration > 1000) this.logger.warn(`[CRM] analyzeContacts slow businessId=${businessId} duration=${duration}ms`);
       return parsed;
     } catch (error) {
       this.logger.error('AI analysis failed', error);
@@ -300,6 +332,7 @@ ${tasks.slice(0, 20).map(t => `- "${t.title}" for ${t.contact.firstName ?? ''} $
   }
 
   async summarizeContact(businessId: string, contactId: string) {
+    const start = Date.now();
     const contact = await this.db.contact.findFirst({
       where: { id: contactId, businessId, deletedAt: null },
       select: {
@@ -378,20 +411,7 @@ ${events.slice(0, 15).map(e => `- ${e.type} at ${e.createdAt.toISOString().split
 OPEN TASKS:
 ${tasks.filter(t => t.status === 'OPEN').map(t => `- ${t.title} (${t.priority ?? 'NORMAL'}, due: ${t.dueDate?.toISOString().split('T')[0] ?? 'no date'})`).join('\n') || 'None'}`;
 
-    const systemPrompt = `You are a CRM intelligence assistant for a Caribbean service business (Trinidad & Tobago, TTD currency).
-Generate a concise, actionable briefing about this contact. Be specific — reference actual data points.
-
-${contextBlock}
-
-Respond in valid JSON:
-{
-  "summary": "2-3 sentence overview of who this person is, their relationship with the business, and current status",
-  "sentiment": "positive|neutral|negative|at_risk",
-  "keyInsights": ["insight1", "insight2", "insight3"],
-  "recommendedAction": "The single most important next step",
-  "relationshipHealth": "strong|good|neutral|weak|critical",
-  "revenueImpact": "high|medium|low"
-}`;
+    const systemPrompt = buildContactSummaryPrompt(contextBlock);
 
     try {
       const result = await this.aiUsage.callAi({
@@ -405,6 +425,9 @@ Respond in valid JSON:
         temperature: 0.3,
       });
       const parsed = this.parseJson(result.content);
+      const duration = Date.now() - start;
+      this.logger.log(`[CRM] summarizeContact businessId=${businessId} contactId=${contactId} duration=${duration}ms`);
+      if (duration > 1000) this.logger.warn(`[CRM] summarizeContact slow businessId=${businessId} duration=${duration}ms`);
       return {
         summary: parsed.summary ?? '',
         sentiment: parsed.sentiment ?? 'neutral',
@@ -421,6 +444,7 @@ Respond in valid JSON:
   }
 
   async scoreContactWithAi(businessId: string, contactId: string) {
+    const start = Date.now();
     const contact = await this.db.contact.findFirst({
       where: { id: contactId, businessId, deletedAt: null },
       select: {
@@ -489,31 +513,7 @@ Open: ${tasks.filter(t => t.status === 'OPEN').length} | Overdue: ${tasks.filter
 NOTES (sentiment context):
 ${notes.slice(0, 8).map(n => `- ${n.body.substring(0, 150)}`).join('\n') || 'No notes'}`;
 
-    const systemPrompt = `You are a lead scoring AI for a Caribbean service business (TTD currency).
-Analyze this contact and provide an intelligent lead score (0-100) with detailed reasoning.
-
-${contextBlock}
-
-Scoring guidelines:
-- 80-100: Hot — active engagement, revenue history, positive sentiment
-- 60-79: Warm — regular interaction, some revenue, good potential
-- 40-59: Neutral — moderate engagement, no red flags
-- 20-39: Cool — declining engagement, no recent revenue
-- 0-19: Cold — no engagement, negative signals
-
-Respond in valid JSON:
-{
-  "score": 75,
-  "label": "Hot|Warm|Neutral|Cool|Cold",
-  "reasoning": "2-3 sentence explanation referencing actual data points",
-  "factors": [
-    {"name": "Engagement Frequency", "impact": "positive|neutral|negative", "detail": "brief explanation"},
-    {"name": "Revenue History", "impact": "positive|neutral|negative", "detail": "brief explanation"},
-    {"name": "Note Sentiment", "impact": "positive|neutral|negative", "detail": "brief explanation"},
-    {"name": "Responsiveness", "impact": "positive|neutral|negative", "detail": "brief explanation"}
-  ],
-  "recommendation": "One specific action to improve or maintain this score"
-}`;
+    const systemPrompt = buildLeadScoringPrompt(contextBlock);
 
     try {
       const result = await this.aiUsage.callAi({
@@ -534,6 +534,9 @@ Respond in valid JSON:
         data: { leadScore: score },
       }).catch(() => {});
 
+      const duration = Date.now() - start;
+      this.logger.log(`[CRM] scoreContactWithAi businessId=${businessId} contactId=${contactId} duration=${duration}ms`);
+      if (duration > 1000) this.logger.warn(`[CRM] scoreContactWithAi slow businessId=${businessId} duration=${duration}ms`);
       return {
         score,
         label: parsed.label ?? (score >= 80 ? 'Hot' : score >= 60 ? 'Warm' : score >= 40 ? 'Neutral' : score >= 20 ? 'Cool' : 'Cold'),
@@ -549,6 +552,7 @@ Respond in valid JSON:
   }
 
   async analyzeNote(businessId: string, contactId: string, noteBody: string, noteId?: string) {
+    const sanitizedNoteBody = this.sanitizeAiInput(noteBody, 5000);
     const contact = await this.db.contact.findFirst({
       where: { id: contactId, businessId, deletedAt: null },
       select: {
@@ -577,7 +581,7 @@ PREVIOUS NOTES (for context):
 ${recentNotes.slice(0, 3).map(n => `- ${n.body.substring(0, 200)}`).join('\n') || 'No previous notes'}
 
 NEW NOTE TO ANALYZE:
-"${noteBody}"
+"${sanitizedNoteBody}"
 
 Respond in valid JSON:
 {
@@ -598,7 +602,7 @@ Respond in valid JSON:
         feature: 'note_intelligence',
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Analyze this note: "${noteBody}"` },
+          { role: 'user', content: `Analyze this note: "${sanitizedNoteBody}"` },
         ],
         maxTokens: 500,
         temperature: 0.3,
@@ -679,29 +683,7 @@ Respond in valid JSON:
       return `- ${name} (ID:${c.id}) | Status: ${c.status} | Revenue: TTD ${totalRevenue.toFixed(0)} | Last active: ${daysSinceLastInteraction}d ago | Recent events: ${recentEvents} | Overdue invoices: ${overdueInvoices} | Overdue tasks: ${overdueTasks} | Score: ${c.leadScore ?? 'N/A'} | Latest note: "${cNotes[0]?.body?.substring(0, 100) ?? 'none'}"`;
     }).join('\n');
 
-    const systemPrompt = `You are a churn prediction AI for a Caribbean service business (Trinidad & Tobago, TTD currency).
-Analyze these contacts and identify who is at risk of churning (leaving or going inactive).
-
-CONTACTS:
-${contactProfiles}
-
-Respond in valid JSON:
-{
-  "atRisk": [
-    {
-      "contactId": "contact ID",
-      "contactName": "name",
-      "churnProbability": 0.85,
-      "riskLevel": "critical|high|medium",
-      "reasons": ["reason1", "reason2"],
-      "recommendedAction": "What to do to retain this client",
-      "estimatedRevenueLoss": 0
-    }
-  ],
-  "summary": "Overview of churn risk across the business"
-}
-
-Only include contacts with meaningful churn risk (probability > 0.4). Sort by churnProbability descending.`;
+    const systemPrompt = buildChurnDetectionPrompt(contactProfiles);
 
     try {
       const result = await this.aiUsage.callAi({
@@ -727,6 +709,7 @@ Only include contacts with meaningful churn risk (probability > 0.4). Sort by ch
   }
 
   async naturalLanguageSearch(businessId: string, query: string) {
+    const sanitizedQuery = this.sanitizeAiInput(query, 500);
     const contactFields = await this.db.contact.findMany({
       where: { businessId, deletedAt: null },
       take: 5,
@@ -742,42 +725,13 @@ Only include contacts with meaningful churn risk (probability > 0.4). Sort by ch
     const knownCities = [...new Set(contactFields.map(c => c.city).filter(Boolean))];
     const knownIndustries = [...new Set(contactFields.map(c => c.industry).filter(Boolean))];
 
-    const systemPrompt = `You are a CRM search translator for a Caribbean service business (TTD currency, Trinidad & Tobago).
-Convert a natural language query into structured CRM filter parameters.
-
-Available filter fields:
-- status: contact status (known values: ${knownStatuses.join(', ') || 'LEAD, PROSPECT, CLIENT, LOST'})
-- search: text search across name, email, phone, company
-- tags: array of tags to filter by (known: ${knownTags.slice(0, 20).join(', ') || 'none yet'})
-- hasUnpaidInvoices: boolean
-- staleDays: number (contacts inactive for N+ days)
-- newThisWeek: boolean
-- city: city name (known: ${knownCities.join(', ') || 'any'})
-- industry: industry (known: ${knownIndustries.join(', ') || 'any'})
-- source: lead source (known: ${knownSources.join(', ') || 'any'})
-- sortBy: name|newest|oldest|revenue|score|lastInteraction
-- sortOrder: asc|desc
-
-Respond in valid JSON:
-{
-  "filters": {
-    "status": "CLIENT",
-    "search": "",
-    "tags": [],
-    "hasUnpaidInvoices": false,
-    "staleDays": null,
-    "newThisWeek": false,
-    "city": null,
-    "industry": null,
-    "source": null,
-    "sortBy": "name",
-    "sortOrder": "asc"
-  },
-  "interpretation": "What you understood the user wants",
-  "confidence": 0.9
-}
-
-Only include filters that are relevant to the query. Set irrelevant filters to null or false.`;
+    const systemPrompt = buildNlSearchPrompt({
+      knownStatuses,
+      knownTags,
+      knownSources,
+      knownCities,
+      knownIndustries,
+    });
 
     try {
       const result = await this.aiUsage.callAi({
@@ -785,7 +739,7 @@ Only include filters that are relevant to the query. Set irrelevant filters to n
         feature: 'nl_search',
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: query },
+          { role: 'user', content: sanitizedQuery },
         ],
         maxTokens: 400,
         temperature: 0.2,
@@ -1145,6 +1099,7 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
   }
 
   async interpretCommand(businessId: string, command: string) {
+    const sanitizedCommand = this.sanitizeAiInput(command, 500);
     const contacts = await this.db.contact.findMany({
       where: { businessId, deletedAt: null },
       take: 200,
@@ -1160,54 +1115,14 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
       return `${name} (${c.id}) [${c.status}]${c.companyName ? ` @ ${c.companyName}` : ''}`;
     }).join('\n');
 
-    const systemPrompt = `You are KeyFlow CRM's AI command interpreter. Parse the user's natural language command into a structured action intent.
-
-Available actions:
-- add_contact: Open the add contact form. Extract any provided details (firstName, lastName, email, phone, companyName, status).
-- edit_contact: Open edit form for a specific contact. Requires matching a contact from the list.
-- delete_contact: Delete a specific contact. Requires matching a contact.
-- view_contact: Open/select a specific contact to view details. Requires matching a contact.
-- change_status: Change a contact's status. Requires contact match and new status (LEAD, PROSPECT, CLIENT, LOST).
-- add_note: Add a note to a contact. Requires contact match and note body.
-- add_task: Add a task for a contact. Requires contact match and task title.
-- log_communication: Log an interaction. Requires contact match and channel (call, email, whatsapp, meeting, sms).
-- switch_tab: Navigate to a CRM tab (pipeline, database, insights, engage).
-- filter_status: Filter the pipeline by status (LEAD, PROSPECT, CLIENT, LOST, all).
-- open_broadcast: Open the broadcast/bulk messaging tool.
-- import_contacts: Open the contact import modal.
-- search_contacts: Search for contacts (delegate to search, not an action).
-- show_favorites: Show favorite contacts.
-- toggle_favorite: Star/unstar a contact.
-- bulk_tag: Add tags to selected contacts. Requires tag names.
-- generate_ai_summary: Generate AI summary for a contact.
-- generate_ai_score: Generate AI lead score for a contact.
-- generate_prep_brief: Generate AI prep brief for a contact.
-- suggest_tags: Get AI tag suggestions for a contact.
-
-Current contacts:
-${contactSummary}
-
-Respond with JSON:
-{
-  "isAction": true/false,
-  "action": "action_name",
-  "contactId": "id if applicable",
-  "contactName": "matched name for confirmation",
-  "params": { action-specific parameters },
-  "confirmation": "Human-readable description of what will happen",
-  "confidence": 0.0-1.0
-}
-
-If the input is a question/search query rather than an action command, set isAction to false.
-If you cannot determine which contact the user means, set action to "ambiguous_contact" with params.candidates as an array of {id, name} matches.
-Always try to match contacts by partial name, email, or company.`;
+    const systemPrompt = buildCommandInterpreterPrompt(contactSummary);
 
     const result = await this.aiUsage.callAi({
       businessId,
       feature: 'crm_command',
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: command },
+        { role: 'user', content: sanitizedCommand },
       ],
       maxTokens: 500,
       temperature: 0.1,

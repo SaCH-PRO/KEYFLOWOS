@@ -125,6 +125,7 @@ type ContactListOptions = {
 @Injectable()
 export class CrmStatsService {
   private crmService!: CrmService;
+  private cache: Map<string, { data: any; expires: number }> = new Map();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -134,6 +135,28 @@ export class CrmStatsService {
 
   onModuleInit() {
     this.crmService = this.crmRef;
+  }
+
+  private getCached<T>(key: string): T | null {
+    const entry = this.cache.get(key);
+    if (!entry) return null;
+    if (Date.now() > entry.expires) {
+      this.cache.delete(key);
+      return null;
+    }
+    return entry.data as T;
+  }
+
+  private setCache(key: string, data: any, ttlMs = 60000): void {
+    this.cache.set(key, { data, expires: Date.now() + ttlMs });
+  }
+
+  invalidateCache(businessId: string): void {
+    for (const key of this.cache.keys()) {
+      if (key.startsWith(`${businessId}:`)) {
+        this.cache.delete(key);
+      }
+    }
   }
 
   private formatContactName(contact: {
@@ -162,6 +185,10 @@ export class CrmStatsService {
   }
 
   async getContactStats(businessId: string) {
+    const cacheKey = `${businessId}:getContactStats`;
+    const cached = this.getCached(cacheKey);
+    if (cached) return cached;
+
     const totalCount = await this.prisma.client.contact.count({
       where: { businessId, deletedAt: null },
     });
@@ -222,7 +249,9 @@ export class CrmStatsService {
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
 
-    return { totalCount, countByStatus, countBySource, recentGrowth, topTags };
+    const result = { totalCount, countByStatus, countBySource, recentGrowth, topTags };
+    this.setCache(cacheKey, result);
+    return result;
   }
 
   async attachContactStats(businessId: string, contacts: Contact[]): Promise<ContactWithStats[]> {
@@ -556,6 +585,10 @@ export class CrmStatsService {
   }
 
   async segmentSummary(input: { businessId: string }) {
+    const cacheKey = `${input.businessId}:segmentSummary`;
+    const cached = this.getCached(cacheKey);
+    if (cached) return cached;
+
     const base = { businessId: input.businessId, deletedAt: null };
     const now = new Date();
     const start = new Date(now);
@@ -583,10 +616,16 @@ export class CrmStatsService {
       }),
       this.prisma.client.contact.count({ where: { ...base, createdAt: { gte: start } } }),
     ]);
-    return { lead, prospect, client, lost, unpaid, stale, newThisWeek };
+    const segResult = { lead, prospect, client, lost, unpaid, stale, newThisWeek };
+    this.setCache(cacheKey, segResult);
+    return segResult;
   }
 
   async flowHighlights(input: { businessId: string }): Promise<FlowHighlightsPayload> {
+    const cacheKey = `${input.businessId}:flowHighlights`;
+    const cached = this.getCached<FlowHighlightsPayload>(cacheKey);
+    if (cached) return cached;
+
     const result = await this.crmService.listContacts({ businessId: input.businessId, includeStats: true, take: 200 });
     const contacts = result.contacts;
     const [segments, serviceAffinity, timeline] = await Promise.all([
@@ -594,7 +633,7 @@ export class CrmStatsService {
       this.buildServiceAffinity(input.businessId),
       this.timeline.buildTimeline(input.businessId),
     ]);
-    return {
+    const flowResult = {
       highlights: {
         highPotential: this.buildHighlightCards(contacts, 4, (meta) => meta.leadScore),
         overdueReminders: this.buildHighlightCards(
@@ -616,6 +655,8 @@ export class CrmStatsService {
         },
       ],
     };
+    this.setCache(cacheKey, flowResult);
+    return flowResult;
   }
 
   async getContactsPollState(businessId: string) {

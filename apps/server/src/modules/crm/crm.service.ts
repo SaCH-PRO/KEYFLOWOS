@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, forwardRef } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Contact, Prisma } from '@prisma/client';
 import {
@@ -8,6 +8,8 @@ import {
   ContactUpdatedPayload,
 } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { sanitize } from '../../core/utils/sanitize';
+import { BULK_LIMIT, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from './crm.constants';
 import { AutomationService } from '../automation/automation.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CrmTimelineService } from './crm-timeline.service';
@@ -71,6 +73,8 @@ type ContactExtraAttributes = {
 
 @Injectable()
 export class CrmService {
+  private readonly logger = new Logger(CrmService.name);
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
@@ -201,7 +205,7 @@ export class CrmService {
     if (input.segment) where.segment = input.segment;
     if (typeof input.doNotContact === 'boolean') where.doNotContact = input.doNotContact;
 
-    const take = Math.min(input.take ?? 50, 100);
+    const take = Math.min(input.take ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
 
     const sortBy = input.sortBy;
     const needsPostSort = sortBy === 'revenue' || sortBy === 'score';
@@ -292,12 +296,13 @@ export class CrmService {
     tags?: string[];
     custom?: any;
   } & ContactExtraAttributes) {
+    const start = Date.now();
     const normalizeString = (value?: string | null) => {
       const trimmed = value?.trim();
       return trimmed ? trimmed : null;
     };
-    const firstName = normalizeString(input.firstName);
-    const lastName = normalizeString(input.lastName);
+    const firstName = sanitize(normalizeString(input.firstName));
+    const lastName = sanitize(normalizeString(input.lastName));
     const email = normalizeString(input.email);
     const phone = normalizeString(input.phone);
     const emailNormalized = this.normalizeEmail(email);
@@ -330,7 +335,7 @@ export class CrmService {
         postalCode: normalizeString(input.postalCode),
         country: normalizeString(input.country),
         timezone: normalizeString(input.timezone),
-        companyName: normalizeString(input.companyName),
+        companyName: sanitize(normalizeString(input.companyName)),
         jobTitle: normalizeString(input.jobTitle),
         department: normalizeString(input.department),
         industry: normalizeString(input.industry),
@@ -340,7 +345,7 @@ export class CrmService {
         language: normalizeString(input.language),
         marketingOptIn: input.marketingOptIn ?? null,
         doNotContact: input.doNotContact ?? null,
-        notesInternal: input.notesInternal ?? null,
+        notesInternal: sanitize(input.notesInternal ?? null),
       },
       select: { id: true },
     });
@@ -359,6 +364,10 @@ export class CrmService {
       };
       this.events.emit('contact.created', payload);
     }
+    this.stats.invalidateCache(input.businessId);
+    const duration = Date.now() - start;
+    this.logger.log(`[CRM] createContact businessId=${input.businessId} duration=${duration}ms`);
+    if (duration > 1000) this.logger.warn(`[CRM] createContact slow businessId=${input.businessId} duration=${duration}ms`);
     return contact;
   }
 
@@ -498,6 +507,7 @@ export class CrmService {
     tags?: string[];
     custom?: any;
   } & ContactExtraAttributes) {
+    const start = Date.now();
     const existing = await this.assertContact(input.businessId, input.contactId);
     const trimOptional = (value?: string | null) => {
       if (value === undefined) return undefined;
@@ -510,9 +520,14 @@ export class CrmService {
     const phoneNormalized = phone !== undefined ? this.normalizePhone(phone) : undefined;
     const tags = input.tags !== undefined ? this.normalizeTags(input.tags) : undefined;
 
+    const sanitizeOptional = (value?: string | null) => {
+      if (value === undefined) return undefined;
+      return sanitize(value);
+    };
+
     const data: Prisma.ContactUpdateInput = {
-      firstName: trimOptional(input.firstName),
-      lastName: trimOptional(input.lastName),
+      firstName: sanitizeOptional(trimOptional(input.firstName)),
+      lastName: sanitizeOptional(trimOptional(input.lastName)),
       email,
       emailNormalized,
       phone,
@@ -534,7 +549,7 @@ export class CrmService {
       postalCode: trimOptional(input.postalCode),
       country: trimOptional(input.country),
       timezone: trimOptional(input.timezone),
-      companyName: trimOptional(input.companyName),
+      companyName: sanitizeOptional(trimOptional(input.companyName)),
       jobTitle: trimOptional(input.jobTitle),
       department: trimOptional(input.department),
       industry: trimOptional(input.industry),
@@ -544,7 +559,7 @@ export class CrmService {
       language: trimOptional(input.language),
       marketingOptIn: input.marketingOptIn ?? undefined,
       doNotContact: input.doNotContact ?? undefined,
-      notesInternal: input.notesInternal ?? undefined,
+      notesInternal: input.notesInternal !== undefined ? sanitize(input.notesInternal ?? null) ?? undefined : undefined,
     };
 
     const updated = await this.prisma.client.contact.update({
@@ -592,6 +607,10 @@ export class CrmService {
         to: input.status,
       });
     }
+    this.stats.invalidateCache(input.businessId);
+    const duration = Date.now() - start;
+    this.logger.log(`[CRM] updateContact businessId=${input.businessId} contactId=${input.contactId} duration=${duration}ms`);
+    if (duration > 1000) this.logger.warn(`[CRM] updateContact slow businessId=${input.businessId} duration=${duration}ms`);
     return updated;
   }
 
@@ -610,6 +629,7 @@ export class CrmService {
       businessId: input.businessId,
     };
     this.events.emit('contact.deleted', deletedPayload);
+    this.stats.invalidateCache(input.businessId);
     return deleted;
   }
 
@@ -639,6 +659,7 @@ export class CrmService {
         }),
       );
       await Promise.allSettled(eventOps);
+      this.stats.invalidateCache(input.businessId);
       return { updated: results.length };
     }
     if (Object.keys(data).length === 0) {
@@ -652,6 +673,7 @@ export class CrmService {
       this.timeline.logEvent(input.businessId, cid, 'bulk.updated', { status: input.status }),
     );
     await Promise.allSettled(eventOps);
+    this.stats.invalidateCache(input.businessId);
     return { updated: result.count };
   }
 
@@ -667,6 +689,7 @@ export class CrmService {
       where: { id: { in: input.contactIds }, businessId: input.businessId, deletedAt: null },
       data: { deletedAt: new Date() },
     });
+    this.stats.invalidateCache(input.businessId);
     return { deleted: result.count };
   }
 
@@ -927,5 +950,75 @@ export class CrmService {
 
   removeContactFromList(input: { businessId: string; listId: string; contactId: string }) {
     return this.lists.removeContactFromList(input);
+  }
+
+  async checkDuplicates(businessId: string, contacts: Array<{ email?: string | null; phone?: string | null; firstName?: string | null; lastName?: string | null }>) {
+    const limited = contacts.slice(0, 100);
+    const emails = limited
+      .map((c) => this.normalizeEmail(c.email))
+      .filter((e): e is string => !!e);
+    const phones = limited
+      .map((c) => this.normalizePhone(c.phone))
+      .filter((p): p is string => !!p);
+
+    const existingByEmail = emails.length > 0
+      ? await this.prisma.client.contact.findMany({
+          where: { businessId, emailNormalized: { in: emails }, deletedAt: null },
+          select: { id: true, firstName: true, lastName: true, email: true, emailNormalized: true, phone: true, phoneNormalized: true },
+        })
+      : [];
+
+    const existingByPhone = phones.length > 0
+      ? await this.prisma.client.contact.findMany({
+          where: { businessId, phoneNormalized: { in: phones }, deletedAt: null },
+          select: { id: true, firstName: true, lastName: true, email: true, emailNormalized: true, phone: true, phoneNormalized: true },
+        })
+      : [];
+
+    const existingMap = new Map<string, typeof existingByEmail[0]>();
+    for (const c of [...existingByEmail, ...existingByPhone]) {
+      existingMap.set(c.id, c);
+    }
+
+    const duplicates: Array<{
+      importIndex: number;
+      importContact: typeof limited[0];
+      existingContact: typeof existingByEmail[0];
+      matchField: 'email' | 'phone';
+    }> = [];
+
+    const newContacts: number[] = [];
+
+    for (let i = 0; i < limited.length; i++) {
+      const c = limited[i];
+      const normalizedEmail = this.normalizeEmail(c.email);
+      const normalizedPhone = this.normalizePhone(c.phone);
+      let matched = false;
+
+      if (normalizedEmail) {
+        const match = existingByEmail.find((e) => e.emailNormalized === normalizedEmail);
+        if (match) {
+          duplicates.push({ importIndex: i, importContact: c, existingContact: match, matchField: 'email' });
+          matched = true;
+        }
+      }
+      if (!matched && normalizedPhone) {
+        const match = existingByPhone.find((e) => e.phoneNormalized === normalizedPhone);
+        if (match) {
+          duplicates.push({ importIndex: i, importContact: c, existingContact: match, matchField: 'phone' });
+          matched = true;
+        }
+      }
+      if (!matched) {
+        newContacts.push(i);
+      }
+    }
+
+    return {
+      total: limited.length,
+      newCount: newContacts.length,
+      duplicateCount: duplicates.length,
+      duplicates: duplicates.slice(0, 50),
+    };
   }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   CheckSquare,
@@ -12,6 +12,7 @@ import {
   List,
   Loader2,
 } from "lucide-react";
+import { Button } from "@keyflow/ui";
 import type { BulkAction, ListSummary } from "./hooks/use-database-state";
 
 const STATUSES = ["LEAD", "PROSPECT", "CLIENT", "LOST"];
@@ -59,6 +60,8 @@ function DatabaseBulkBarInner({
   onSelectAllPages,
 }: DatabaseBulkBarProps) {
   const barRef = useRef<HTMLDivElement>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
   useEffect(() => {
     if (!activeBulkAction) return;
@@ -103,6 +106,7 @@ function DatabaseBulkBarInner({
   const showSelectAllBanner = !allPagesSelected && totalFiltered && totalFiltered > selectedCount;
 
   return (
+    <>
     <AnimatePresence>
       {selectedCount > 0 && (
         <motion.div
@@ -267,7 +271,7 @@ function DatabaseBulkBarInner({
             </div>
 
             <button
-              onClick={onBulkDelete}
+              onClick={() => setShowDeleteConfirm(true)}
               disabled={bulkActing}
               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-red-500/30 bg-red-500/[0.08] backdrop-blur-sm text-red-400/80 hover:bg-red-500/15 hover:text-red-400 transition-all disabled:opacity-40"
               aria-label={`Delete ${selectedCount} selected contacts`}
@@ -287,6 +291,42 @@ function DatabaseBulkBarInner({
         </motion.div>
       )}
     </AnimatePresence>
+
+    {showDeleteConfirm && (
+      <div className="fixed inset-0 z-[60] flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="db-bulk-delete-title" aria-describedby="db-bulk-delete-desc">
+        <div
+          className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+          onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmText(""); }}
+        />
+        <div className="relative z-10 w-full max-w-md mx-4 rounded-xl border border-border/60 bg-slate-900/95 backdrop-blur-xl p-6 shadow-2xl">
+          <h3 className="text-lg font-semibold mb-2" id="db-bulk-delete-title">Delete {selectedCount} contact{selectedCount !== 1 ? "s" : ""}?</h3>
+          <p className="text-sm text-muted-foreground mb-4" id="db-bulk-delete-desc">
+            This action cannot be undone. Type <span className="font-mono font-bold text-red-400">DELETE</span> to confirm.
+          </p>
+          <input
+            type="text"
+            value={deleteConfirmText}
+            onChange={(e) => setDeleteConfirmText(e.target.value)}
+            placeholder='Type "DELETE" to confirm'
+            className="w-full px-3 py-2 text-sm bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500/40 placeholder:text-muted-foreground/40 mb-4"
+            autoFocus
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="subtle" onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmText(""); }}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => { onBulkDelete(); setShowDeleteConfirm(false); setDeleteConfirmText(""); }}
+              disabled={deleteConfirmText !== "DELETE"}
+              className="bg-red-600 hover:bg-red-700 text-white disabled:opacity-40"
+            >
+              Delete {selectedCount} Contact{selectedCount !== 1 ? "s" : ""}
+            </Button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 

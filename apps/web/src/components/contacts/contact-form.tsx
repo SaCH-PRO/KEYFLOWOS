@@ -10,8 +10,9 @@ import {
 import { validateEmail, validatePhone } from "@/lib/validators";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { CONTACT_STATUSES } from "@/lib/crm-constants";
 
-const STATUSES = ["LEAD", "PROSPECT", "CLIENT", "LOST"] as const;
+const STATUSES = CONTACT_STATUSES;
 const CHANNELS = ["WhatsApp", "Email", "SMS", "Call", "Instagram DM"] as const;
 
 interface ContactFormProps {

@@ -25,7 +25,12 @@ export const RevenueBreakdown = React.memo(function RevenueBreakdown({ data }: {
   ];
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2" role="img" aria-label={`Revenue forecast: ${formatTTD(total)} total. ${formatTTD(data.fromActivePipeline)} from active pipeline, ${formatTTD(data.fromRecurringClients)} from recurring clients, ${formatTTD(data.fromColdLeads)} from cold leads`}>
+      <span className="sr-only">
+        Revenue forecast totals {formatTTD(total)}, with {formatTTD(data.fromActivePipeline)} from active pipeline, {formatTTD(data.fromRecurringClients)} from recurring clients, and {formatTTD(data.fromColdLeads)} from cold leads.
+        {data.expiringQuotes.count > 0 ? ` ${data.expiringQuotes.count} expiring quotes.` : ""}
+        {data.overdueInvoices.count > 0 ? ` ${data.overdueInvoices.count} overdue invoices.` : ""}
+      </span>
       <div className="flex items-center justify-between">
         <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5">
           <TrendingUp className="w-3.5 h-3.5" />
