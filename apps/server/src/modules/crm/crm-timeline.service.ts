@@ -58,8 +58,10 @@ export class CrmTimelineService {
     type: string,
     data: any,
     meta?: { actorType?: string; actorId?: string; source?: string },
+    tx?: { contactEvent: { create: (args: any) => any } },
   ) {
-    return this.prisma.client.contactEvent.create({
+    const client = tx ?? this.prisma.client;
+    return client.contactEvent.create({
       data: {
         businessId,
         contactId,

@@ -1,5 +1,8 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { CrmController } from './crm.controller';
+import { CrmAiController } from './crm-ai.controller';
+import { CrmGoogleController } from './crm-google.controller';
+import { CrmSequenceController } from './crm-sequence.controller';
 import { CrmActionsService } from './crm-actions.service';
 import { CrmAiService } from './crm-ai.service';
 import { CrmFlowService } from './crm-flow.service';
@@ -22,7 +25,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 
 @Module({
   imports: [forwardRef(() => AutomationModule), SubscriptionsModule, AiModule],
-  controllers: [CrmController],
+  controllers: [CrmController, CrmAiController, CrmGoogleController, CrmSequenceController],
   providers: [CrmService, CrmTimelineService, CrmListsService, CrmStatsService, CrmImportService, CrmPlaybookService, CrmVisionService, CrmGoogleService, CrmFlowService, CrmActionsService, CrmRevenueService, CrmJourneyService, CrmAiService, CrmSequenceService, CrmSequenceSchedulerService, FeatureFlagGuard],
   exports: [CrmService, CrmTimelineService, CrmListsService, CrmStatsService, CrmImportService, CrmPlaybookService, CrmVisionService, CrmGoogleService, CrmFlowService, CrmActionsService, CrmRevenueService, CrmJourneyService, CrmAiService, CrmSequenceService, CrmSequenceSchedulerService],
 })

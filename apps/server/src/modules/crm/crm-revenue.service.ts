@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { contactWhereBase } from './crm.helpers';
 
 type RevenueData = {
   fromActivePipeline: number;
@@ -52,8 +53,7 @@ export class CrmRevenueService {
       }),
       this.db.contact.findMany({
         where: {
-          businessId,
-          deletedAt: null,
+          ...contactWhereBase(businessId),
           status: 'CLIENT',
         },
         select: { id: true },

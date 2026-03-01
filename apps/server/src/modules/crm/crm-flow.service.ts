@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { contactWhereBase } from './crm.helpers';
 
 type FlowIntelligenceData = {
   totalContacts: number;
@@ -32,38 +33,36 @@ export class CrmFlowService {
 
     const [allContacts, statusCounts, newThisWeek, newLastWeek, conversions, coldContacts, readyContacts] = await Promise.all([
       this.db.contact.count({
-        where: { businessId, deletedAt: null },
+        where: contactWhereBase(businessId),
       }),
       this.db.contact.groupBy({
         by: ['status'],
-        where: { businessId, deletedAt: null },
+        where: contactWhereBase(businessId),
         _count: true,
       }),
       this.db.contact.count({
-        where: { businessId, deletedAt: null, createdAt: { gte: weekAgo } },
+        where: { ...contactWhereBase(businessId), createdAt: { gte: weekAgo } },
       }),
       this.db.contact.count({
-        where: { businessId, deletedAt: null, createdAt: { gte: twoWeeksAgo, lt: weekAgo } },
+        where: { ...contactWhereBase(businessId), createdAt: { gte: twoWeeksAgo, lt: weekAgo } },
       }),
       this.db.contactEvent.count({
         where: {
-          contact: { businessId, deletedAt: null },
+          contact: contactWhereBase(businessId),
           type: 'STATUS_CHANGED',
           createdAt: { gte: weekAgo },
         },
       }),
       this.db.contact.count({
         where: {
-          businessId,
-          deletedAt: null,
+          ...contactWhereBase(businessId),
           status: { in: ['LEAD', 'PROSPECT'] },
           updatedAt: { lt: thirtyDaysAgo },
         },
       }),
       this.db.contact.count({
         where: {
-          businessId,
-          deletedAt: null,
+          ...contactWhereBase(businessId),
           status: 'LEAD',
           updatedAt: { gte: weekAgo },
         },

@@ -3,6 +3,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, type PanInfo } from "framer-motion";
 import { X, List, Heart } from "lucide-react";
+import { STATUS_COLORS } from "@/lib/crm-utils";
 import {
   ContactCapture,
   ContactForm,
@@ -121,12 +122,6 @@ function PipelineTabContentInner({ state }: PipelineTabContentProps) {
             {favoriteContacts.map((c) => {
               const name = `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || "Unnamed";
               const initials = `${c.firstName?.[0] ?? ""}${c.lastName?.[0] ?? ""}`.toUpperCase() || "?";
-              const statusColor: Record<string, string> = {
-                LEAD: "hsl(var(--kf-accent1))",
-                PROSPECT: "hsl(var(--kf-accent2))",
-                CLIENT: "hsl(142 76% 36%)",
-                LOST: "hsl(var(--kf-muted-foreground))",
-              };
               return (
                 <button
                   key={c.id}
@@ -139,7 +134,7 @@ function PipelineTabContentInner({ state }: PipelineTabContentProps) {
                 >
                   <div
                     className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
-                    style={{ background: statusColor[c.status ?? ""] ?? statusColor.LEAD }}
+                    style={{ background: STATUS_COLORS[c.status ?? ""] ?? STATUS_COLORS.LEAD }}
                   >
                     {initials}
                   </div>

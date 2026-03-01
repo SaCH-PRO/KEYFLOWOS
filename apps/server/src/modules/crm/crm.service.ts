@@ -16,6 +16,8 @@ import { CrmTimelineService } from './crm-timeline.service';
 import { CrmStatsService } from './crm-stats.service';
 import { CrmListsService } from './crm-lists.service';
 import type { ContactMeta, ContactWithStats } from './crm-stats.service';
+import { contactWhereBase, contactWhereWithId } from './crm.helpers';
+import { normalizeEmail, normalizePhone, findExistingByEmailOrPhone, findExistingBulk } from './crm-duplicate.util';
 
 type ContactSortBy = 'name' | 'newest' | 'oldest' | 'revenue' | 'score' | 'lastInteraction';
 
@@ -81,17 +83,9 @@ export class CrmService {
     @Inject(forwardRef(() => AutomationService)) private readonly automation: AutomationService,
     @Inject(SubscriptionsService) private readonly subscriptions: SubscriptionsService,
     @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
-    @Inject(forwardRef(() => CrmStatsService)) private readonly stats: CrmStatsService,
+    @Inject(CrmStatsService) private readonly stats: CrmStatsService,
     @Inject(CrmListsService) private readonly lists: CrmListsService,
   ) {}
-
-  private normalizeEmail(email?: string | null) {
-    return email ? email.trim().toLowerCase() : null;
-  }
-
-  private normalizePhone(phone?: string | null) {
-    return phone ? phone.replace(/[^0-9+]/g, '') : null;
-  }
 
   private normalizeTags(tags?: string[] | null) {
     if (!tags) return [];
@@ -121,7 +115,7 @@ export class CrmService {
 
   private async assertContact(businessId: string, contactId: string) {
     const contact = await this.prisma.client.contact.findFirst({
-      where: { id: contactId, businessId, deletedAt: null },
+      where: contactWhereWithId(businessId, contactId),
     });
     if (!contact) {
       throw new NotFoundException('Contact not found');
@@ -130,12 +124,12 @@ export class CrmService {
   }
 
   async listContacts(input: ContactListOptions) {
-    const where: any = { businessId: input.businessId, deletedAt: null };
+    const where: any = { ...contactWhereBase(input.businessId) };
     if (input.status) where.status = input.status;
     const searchValue = input.search?.trim();
     if (searchValue) {
-      const normalizedEmail = this.normalizeEmail(searchValue);
-      const normalizedPhone = this.normalizePhone(searchValue);
+      const normalizedEmail = normalizeEmail(searchValue);
+      const normalizedPhone = normalizePhone(searchValue);
       const orConditions: Prisma.ContactWhereInput[] = [
         { firstName: { contains: searchValue, mode: 'insensitive' } },
         { lastName: { contains: searchValue, mode: 'insensitive' } },
@@ -208,11 +202,13 @@ export class CrmService {
     const take = Math.min(input.take ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
 
     const sortBy = input.sortBy;
-    const needsPostSort = sortBy === 'revenue' || sortBy === 'score';
+    const needsPostSort = sortBy === 'revenue';
 
     let orderBy: any;
     if (!sortBy || needsPostSort) {
       orderBy = { createdAt: 'desc' };
+    } else if (sortBy === 'score') {
+      orderBy = { leadScore: input.sortOrder ?? 'desc' };
     } else if (sortBy === 'name') {
       const dir = input.sortOrder ?? 'asc';
       orderBy = [{ firstName: dir }, { lastName: dir }];
@@ -231,13 +227,14 @@ export class CrmService {
       const allContacts = await this.prisma.client.contact.findMany({
         where,
         orderBy,
+        take: 500,
       });
       if (allContacts.length === 0) return { contacts: [], nextCursor: null, hasMore: false };
       const withStats = await this.stats.attachContactStats(input.businessId, allContacts);
       const dir = input.sortOrder ?? 'desc';
       withStats.sort((a, b) => {
-        const aVal = sortBy === 'revenue' ? (a.meta?.totalRevenue ?? 0) : (a.meta?.leadScore ?? 0);
-        const bVal = sortBy === 'revenue' ? (b.meta?.totalRevenue ?? 0) : (b.meta?.leadScore ?? 0);
+        const aVal = a.meta?.totalRevenue ?? 0;
+        const bVal = b.meta?.totalRevenue ?? 0;
         return dir === 'asc' ? aVal - bVal : bVal - aVal;
       });
       const sliced = withStats.slice(skip, skip + take);
@@ -305,58 +302,60 @@ export class CrmService {
     const lastName = sanitize(normalizeString(input.lastName));
     const email = normalizeString(input.email);
     const phone = normalizeString(input.phone);
-    const emailNormalized = this.normalizeEmail(email);
-    const phoneNormalized = this.normalizePhone(phone);
+    const emailNormalized = normalizeEmail(email);
+    const phoneNormalized = normalizePhone(phone);
     const tags = this.normalizeTags(input.tags);
 
-    const created = await this.prisma.client.contact.create({
-      data: {
-        businessId: input.businessId,
+    const contact = await this.prisma.client.$transaction(async (tx) => {
+      const created = await tx.contact.create({
+        data: {
+          businessId: input.businessId,
+          firstName,
+          lastName,
+          email,
+          emailNormalized,
+          phone,
+          phoneNormalized,
+          status: input.status ?? 'LEAD',
+          source: input.source ?? 'manual',
+          tags,
+          custom: input.custom ?? {},
+          sourceDetail: normalizeString(input.sourceDetail),
+          displayName: normalizeString(input.displayName),
+          secondaryEmail: normalizeString(input.secondaryEmail),
+          secondaryPhone: normalizeString(input.secondaryPhone),
+          whatsappNumber: normalizeString(input.whatsappNumber),
+          preferredChannel: normalizeString(input.preferredChannel),
+          addressLine1: normalizeString(input.addressLine1),
+          addressLine2: normalizeString(input.addressLine2),
+          city: normalizeString(input.city),
+          state: normalizeString(input.state),
+          postalCode: normalizeString(input.postalCode),
+          country: normalizeString(input.country),
+          timezone: normalizeString(input.timezone),
+          companyName: sanitize(normalizeString(input.companyName)),
+          jobTitle: normalizeString(input.jobTitle),
+          department: normalizeString(input.department),
+          industry: normalizeString(input.industry),
+          ownerId: input.ownerId ?? null,
+          lifecycleStage: normalizeString(input.lifecycleStage),
+          segment: normalizeString(input.segment),
+          language: normalizeString(input.language),
+          marketingOptIn: input.marketingOptIn ?? null,
+          doNotContact: input.doNotContact ?? null,
+          notesInternal: sanitize(input.notesInternal ?? null),
+        },
+      });
+
+      await this.timeline.logEvent(input.businessId, created.id, 'contact.created', {
         firstName,
         lastName,
         email,
-        emailNormalized,
-        phone,
-        phoneNormalized,
-        status: input.status ?? 'LEAD',
         source: input.source ?? 'manual',
-        tags,
-        custom: input.custom ?? {},
-        sourceDetail: normalizeString(input.sourceDetail),
-        displayName: normalizeString(input.displayName),
-        secondaryEmail: normalizeString(input.secondaryEmail),
-        secondaryPhone: normalizeString(input.secondaryPhone),
-        whatsappNumber: normalizeString(input.whatsappNumber),
-        preferredChannel: normalizeString(input.preferredChannel),
-        addressLine1: normalizeString(input.addressLine1),
-        addressLine2: normalizeString(input.addressLine2),
-        city: normalizeString(input.city),
-        state: normalizeString(input.state),
-        postalCode: normalizeString(input.postalCode),
-        country: normalizeString(input.country),
-        timezone: normalizeString(input.timezone),
-        companyName: sanitize(normalizeString(input.companyName)),
-        jobTitle: normalizeString(input.jobTitle),
-        department: normalizeString(input.department),
-        industry: normalizeString(input.industry),
-        ownerId: input.ownerId ?? null,
-        lifecycleStage: normalizeString(input.lifecycleStage),
-        segment: normalizeString(input.segment),
-        language: normalizeString(input.language),
-        marketingOptIn: input.marketingOptIn ?? null,
-        doNotContact: input.doNotContact ?? null,
-        notesInternal: sanitize(input.notesInternal ?? null),
-      },
-      select: { id: true },
-    });
+      }, undefined, tx);
 
-    await this.timeline.logEvent(input.businessId, created.id, 'contact.created', {
-      firstName,
-      lastName,
-      email,
-      source: input.source ?? 'manual',
+      return created;
     });
-    const contact = await this.prisma.client.contact.findUnique({ where: { id: created.id } });
     if (contact) {
       const payload: ContactCreatedPayload = {
         contact,
@@ -392,13 +391,13 @@ export class CrmService {
     };
     const email = normalizeString(input.email);
     const phone = normalizeString(input.phone);
-    const emailNormalized = this.normalizeEmail(email);
-    const phoneNormalized = this.normalizePhone(phone);
+    const emailNormalized = normalizeEmail(email);
+    const phoneNormalized = normalizePhone(phone);
     const tags = this.normalizeTags(input.tags);
 
     if (email) {
       const existing = await this.prisma.client.contact.findFirst({
-        where: { businessId, emailNormalized, deletedAt: null },
+        where: { ...contactWhereBase(businessId), emailNormalized },
       });
       if (existing) {
         return this.mergeContactDetails(existing, businessId, {
@@ -414,7 +413,7 @@ export class CrmService {
     }
     if (phoneNormalized) {
       const existingByPhone = await this.prisma.client.contact.findFirst({
-        where: { businessId, phoneNormalized, deletedAt: null },
+        where: { ...contactWhereBase(businessId), phoneNormalized },
       });
       if (existingByPhone) {
         return this.mergeContactDetails(existingByPhone, businessId, {
@@ -432,8 +431,7 @@ export class CrmService {
     if (!email && !phoneNormalized && input.firstName && input.lastName && input.sourceDetail) {
       const recentMatch = await this.prisma.client.contact.findFirst({
         where: {
-          businessId,
-          deletedAt: null,
+          ...contactWhereBase(businessId),
           firstName: input.firstName,
           lastName: input.lastName,
           source: input.source ?? 'manual',
@@ -508,7 +506,6 @@ export class CrmService {
     custom?: any;
   } & ContactExtraAttributes) {
     const start = Date.now();
-    const existing = await this.assertContact(input.businessId, input.contactId);
     const trimOptional = (value?: string | null) => {
       if (value === undefined) return undefined;
       const trimmed = value?.trim();
@@ -516,8 +513,8 @@ export class CrmService {
     };
     const email = trimOptional(input.email);
     const phone = trimOptional(input.phone);
-    const emailNormalized = email !== undefined ? this.normalizeEmail(email) : undefined;
-    const phoneNormalized = phone !== undefined ? this.normalizePhone(phone) : undefined;
+    const emailNormalized = email !== undefined ? normalizeEmail(email) : undefined;
+    const phoneNormalized = phone !== undefined ? normalizePhone(phone) : undefined;
     const tags = input.tags !== undefined ? this.normalizeTags(input.tags) : undefined;
 
     const sanitizeOptional = (value?: string | null) => {
@@ -562,33 +559,46 @@ export class CrmService {
       notesInternal: input.notesInternal !== undefined ? sanitize(input.notesInternal ?? null) ?? undefined : undefined,
     };
 
-    const updated = await this.prisma.client.contact.update({
-      where: { id: input.contactId },
-      data,
+    const { existing, updated } = await this.prisma.client.$transaction(async (tx) => {
+      const existingContact = await tx.contact.findFirst({
+        where: contactWhereWithId(input.businessId, input.contactId),
+      });
+      if (!existingContact) {
+        throw new NotFoundException('Contact not found');
+      }
+
+      const updatedContact = await tx.contact.update({
+        where: { id: input.contactId },
+        data,
+      });
+
+      const updatedFields = Object.keys(data).filter(
+        (key) => data[key as keyof Prisma.ContactUpdateInput] !== undefined,
+      );
+      if (updatedFields.length > 0) {
+        await this.timeline.logEvent(
+          input.businessId,
+          input.contactId,
+          'contact.updated',
+          { updatedFields },
+          { actorType: 'USER', source: 'crm' },
+          tx,
+        );
+      }
+
+      if (input.status && existingContact.status !== input.status) {
+        await this.timeline.logEvent(
+          input.businessId,
+          input.contactId,
+          'status.changed',
+          { from: existingContact.status, to: input.status },
+          { actorType: 'USER', source: 'crm' },
+          tx,
+        );
+      }
+
+      return { existing: existingContact, updated: updatedContact };
     });
-
-    const updatedFields = Object.keys(data).filter(
-      (key) => data[key as keyof Prisma.ContactUpdateInput] !== undefined,
-    );
-    if (updatedFields.length > 0) {
-      await this.timeline.logEvent(
-        input.businessId,
-        input.contactId,
-        'contact.updated',
-        { updatedFields },
-        { actorType: 'USER', source: 'crm' },
-      );
-    }
-
-    if (input.status && existing?.status !== input.status) {
-      await this.timeline.logEvent(
-        input.businessId,
-        input.contactId,
-        'status.changed',
-        { from: existing?.status, to: input.status },
-        { actorType: 'USER', source: 'crm' },
-      );
-    }
 
     const payload: ContactUpdatedPayload = {
       contact: updated,
@@ -641,7 +651,7 @@ export class CrmService {
     if (input.status) data.status = input.status;
     if (input.addTags && input.addTags.length > 0) {
       const contacts = await this.prisma.client.contact.findMany({
-        where: { id: { in: input.contactIds }, businessId: input.businessId, deletedAt: null },
+        where: { id: { in: input.contactIds }, ...contactWhereBase(input.businessId) },
         select: { id: true, tags: true },
       });
       const ops = contacts.map((c) => {
@@ -666,7 +676,7 @@ export class CrmService {
       throw new BadRequestException('No update fields provided');
     }
     const result = await this.prisma.client.contact.updateMany({
-      where: { id: { in: input.contactIds }, businessId: input.businessId, deletedAt: null },
+      where: { id: { in: input.contactIds }, ...contactWhereBase(input.businessId) },
       data,
     });
     const eventOps = input.contactIds.map((cid) =>
@@ -686,7 +696,7 @@ export class CrmService {
     );
     await Promise.allSettled(eventOps);
     const result = await this.prisma.client.contact.updateMany({
-      where: { id: { in: input.contactIds }, businessId: input.businessId, deletedAt: null },
+      where: { id: { in: input.contactIds }, ...contactWhereBase(input.businessId) },
       data: { deletedAt: new Date() },
     });
     this.stats.invalidateCache(input.businessId);
@@ -745,52 +755,53 @@ export class CrmService {
       }
     }
 
-    await this.prisma.client.$transaction([
-      this.prisma.client.contactEvent.updateMany({
+    const merged = await this.prisma.client.$transaction(async (tx) => {
+      await tx.contactEvent.updateMany({
         where: { businessId: input.businessId, contactId: input.duplicateId },
         data: { contactId: input.primaryId },
-      }),
-      this.prisma.client.contactNote.updateMany({
+      });
+      await tx.contactNote.updateMany({
         where: { businessId: input.businessId, contactId: input.duplicateId },
         data: { contactId: input.primaryId },
-      }),
-      this.prisma.client.contactTask.updateMany({
+      });
+      await tx.contactTask.updateMany({
         where: { businessId: input.businessId, contactId: input.duplicateId },
         data: { contactId: input.primaryId },
-      }),
-      this.prisma.client.crmSequenceEnrollment.updateMany({
+      });
+      await tx.crmSequenceEnrollment.updateMany({
         where: { contactId: input.duplicateId },
         data: { contactId: input.primaryId },
-      }),
-      this.prisma.client.quote.updateMany({
+      });
+      await tx.quote.updateMany({
         where: { businessId: input.businessId, contactId: input.duplicateId },
         data: { contactId: input.primaryId },
-      }),
-      this.prisma.client.invoice.updateMany({
+      });
+      await tx.invoice.updateMany({
         where: { businessId: input.businessId, contactId: input.duplicateId },
         data: { contactId: input.primaryId },
-      }),
-      this.prisma.client.booking.updateMany({
+      });
+      await tx.booking.updateMany({
         where: { businessId: input.businessId, contactId: input.duplicateId },
         data: { contactId: input.primaryId },
-      }),
-      this.prisma.client.contact.update({
+      });
+      const mergedContact = await tx.contact.update({
         where: { id: input.primaryId },
         data: contactUpdate as any,
-      }),
-      this.prisma.client.contact.update({
+      });
+      await tx.contact.update({
         where: { id: input.duplicateId },
         data: { deletedAt: new Date() },
-      }),
-    ]);
-    await this.timeline.logEvent(
-      input.businessId,
-      input.primaryId,
-      'contact.merged',
-      { duplicateId: input.duplicateId, mergedFields: Object.keys(contactUpdate) },
-      { actorType: 'SYSTEM', source: 'crm' },
-    );
-    const merged = await this.prisma.client.contact.findUnique({ where: { id: input.primaryId } });
+      });
+      await this.timeline.logEvent(
+        input.businessId,
+        input.primaryId,
+        'contact.merged',
+        { duplicateId: input.duplicateId, mergedFields: Object.keys(contactUpdate) },
+        { actorType: 'SYSTEM', source: 'crm' },
+        tx,
+      );
+      return mergedContact;
+    });
     if (merged) {
       const payload: ContactMergedPayload = {
         contact: merged,
@@ -955,30 +966,13 @@ export class CrmService {
   async checkDuplicates(businessId: string, contacts: Array<{ email?: string | null; phone?: string | null; firstName?: string | null; lastName?: string | null }>) {
     const limited = contacts.slice(0, 100);
     const emails = limited
-      .map((c) => this.normalizeEmail(c.email))
+      .map((c) => normalizeEmail(c.email))
       .filter((e): e is string => !!e);
     const phones = limited
-      .map((c) => this.normalizePhone(c.phone))
+      .map((c) => normalizePhone(c.phone))
       .filter((p): p is string => !!p);
 
-    const existingByEmail = emails.length > 0
-      ? await this.prisma.client.contact.findMany({
-          where: { businessId, emailNormalized: { in: emails }, deletedAt: null },
-          select: { id: true, firstName: true, lastName: true, email: true, emailNormalized: true, phone: true, phoneNormalized: true },
-        })
-      : [];
-
-    const existingByPhone = phones.length > 0
-      ? await this.prisma.client.contact.findMany({
-          where: { businessId, phoneNormalized: { in: phones }, deletedAt: null },
-          select: { id: true, firstName: true, lastName: true, email: true, emailNormalized: true, phone: true, phoneNormalized: true },
-        })
-      : [];
-
-    const existingMap = new Map<string, typeof existingByEmail[0]>();
-    for (const c of [...existingByEmail, ...existingByPhone]) {
-      existingMap.set(c.id, c);
-    }
+    const { existingByEmail, existingByPhone } = await findExistingBulk(this.prisma, businessId, emails, phones);
 
     const duplicates: Array<{
       importIndex: number;
@@ -991,19 +985,19 @@ export class CrmService {
 
     for (let i = 0; i < limited.length; i++) {
       const c = limited[i];
-      const normalizedEmail = this.normalizeEmail(c.email);
-      const normalizedPhone = this.normalizePhone(c.phone);
+      const normalizedEmailVal = normalizeEmail(c.email);
+      const normalizedPhoneVal = normalizePhone(c.phone);
       let matched = false;
 
-      if (normalizedEmail) {
-        const match = existingByEmail.find((e) => e.emailNormalized === normalizedEmail);
+      if (normalizedEmailVal) {
+        const match = existingByEmail.find((e) => e.emailNormalized === normalizedEmailVal);
         if (match) {
           duplicates.push({ importIndex: i, importContact: c, existingContact: match, matchField: 'email' });
           matched = true;
         }
       }
-      if (!matched && normalizedPhone) {
-        const match = existingByPhone.find((e) => e.phoneNormalized === normalizedPhone);
+      if (!matched && normalizedPhoneVal) {
+        const match = existingByPhone.find((e) => e.phoneNormalized === normalizedPhoneVal);
         if (match) {
           duplicates.push({ importIndex: i, importContact: c, existingContact: match, matchField: 'phone' });
           matched = true;

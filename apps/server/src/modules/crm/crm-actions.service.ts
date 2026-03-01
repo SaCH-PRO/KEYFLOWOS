@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { contactWhereBase } from './crm.helpers';
 
 type NextAction = {
   id: string;
@@ -84,7 +85,7 @@ export class CrmActionsService {
     ] = await Promise.all([
       this.db.contactTask.findMany({
         where: {
-          contact: { businessId, deletedAt: null },
+          contact: contactWhereBase(businessId),
           status: { not: 'DONE' },
           dueDate: { lt: now },
         },
@@ -94,7 +95,7 @@ export class CrmActionsService {
       }),
       this.db.contactTask.findMany({
         where: {
-          contact: { businessId, deletedAt: null },
+          contact: contactWhereBase(businessId),
           status: { not: 'DONE' },
           dueDate: { gte: now, lte: fortyEightHoursFromNow },
         },
@@ -132,7 +133,7 @@ export class CrmActionsService {
         orderBy: { dueDate: 'asc' },
       }),
       this.db.contact.findMany({
-        where: { businessId, deletedAt: null },
+        where: contactWhereBase(businessId),
         select: {
           id: true, firstName: true, lastName: true, status: true,
           createdAt: true, updatedAt: true, leadScore: true,
@@ -144,7 +145,7 @@ export class CrmActionsService {
       }),
       this.db.contactEvent.findMany({
         where: {
-          contact: { businessId, deletedAt: null },
+          contact: contactWhereBase(businessId),
           createdAt: { gte: thirtyDaysAgo },
         },
         select: { contactId: true, type: true, createdAt: true },
@@ -152,7 +153,7 @@ export class CrmActionsService {
       }),
       this.db.booking.findMany({
         where: {
-          contact: { businessId, deletedAt: null },
+          contact: contactWhereBase(businessId),
           startTime: { gte: now, lte: fortyEightHoursFromNow },
           status: { in: ['PENDING', 'CONFIRMED'] },
         },
@@ -550,7 +551,7 @@ export class CrmActionsService {
     ] = await Promise.all([
       this.db.contactTask.findMany({
         where: {
-          contact: { businessId, deletedAt: null },
+          contact: contactWhereBase(businessId),
           completedAt: { gte: oneDayAgo },
         },
         include: { contact: true },
@@ -559,7 +560,7 @@ export class CrmActionsService {
       }),
       this.db.contactTask.findMany({
         where: {
-          contact: { businessId, deletedAt: null },
+          contact: contactWhereBase(businessId),
           status: { not: 'DONE' },
           dueDate: { gte: now, lt: fortyEightHoursFromNow },
         },
@@ -579,8 +580,7 @@ export class CrmActionsService {
       }),
       this.db.contact.findMany({
         where: {
-          businessId,
-          deletedAt: null,
+          ...contactWhereBase(businessId),
           status: 'CLIENT',
           updatedAt: { lt: thirtyDaysAgo },
         },
@@ -589,8 +589,7 @@ export class CrmActionsService {
       }),
       this.db.contact.findMany({
         where: {
-          businessId,
-          deletedAt: null,
+          ...contactWhereBase(businessId),
           status: 'LEAD',
           updatedAt: { lt: fourteenDaysAgo },
         },
@@ -599,7 +598,7 @@ export class CrmActionsService {
       }),
       this.db.booking.findMany({
         where: {
-          contact: { businessId, deletedAt: null },
+          contact: contactWhereBase(businessId),
           status: 'COMPLETED',
           endTime: { gte: oneDayAgo, lte: now },
         },
@@ -609,8 +608,7 @@ export class CrmActionsService {
       }),
       this.db.contact.findMany({
         where: {
-          businessId,
-          deletedAt: null,
+          ...contactWhereBase(businessId),
           status: 'LEAD',
           createdAt: { gte: new Date(now.getTime() - 2 * DAY) },
         },
@@ -619,8 +617,7 @@ export class CrmActionsService {
       }),
       this.db.contact.findMany({
         where: {
-          businessId,
-          deletedAt: null,
+          ...contactWhereBase(businessId),
           status: 'PROSPECT',
           updatedAt: { lt: thirtyDaysAgo },
         },
@@ -804,7 +801,7 @@ export class CrmActionsService {
       const taskTypes = ['task', 'scheduled', 'pending'];
       if (taskTypes.includes(type)) {
         const task = await this.db.contactTask.findFirst({
-          where: { id, contact: { businessId, deletedAt: null } },
+          where: { id, contact: contactWhereBase(businessId) },
         });
         if (!task) return { success: false, message: 'Task not found' };
         await this.db.contactTask.update({
@@ -830,7 +827,7 @@ export class CrmActionsService {
       ];
       if (contactActionTypes.includes(type)) {
         const contact = await this.db.contact.findFirst({
-          where: { id, businessId, deletedAt: null },
+          where: { ...contactWhereBase(businessId), id },
         });
         if (!contact) return { success: false, message: 'Contact not found' };
         await this.db.contactEvent.create({
@@ -901,7 +898,7 @@ export class CrmActionsService {
 
       if (type === 'booking') {
         const booking = await this.db.booking.findFirst({
-          where: { id, contact: { businessId, deletedAt: null } },
+          where: { id, contact: contactWhereBase(businessId) },
           select: { contactId: true },
         });
         if (!booking) return { success: false, message: 'Booking not found' };
