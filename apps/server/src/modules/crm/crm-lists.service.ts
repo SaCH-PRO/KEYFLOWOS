@@ -34,7 +34,6 @@ export class CrmListsService {
         color: input.color ?? null,
         type: input.type ?? 'MANUAL',
         filters: input.filters ?? null,
-        contactIds: input.contactIds ?? [],
       },
     });
 
@@ -74,7 +73,6 @@ export class CrmListsService {
     if (input.filters !== undefined) data.filters = input.filters;
 
     if (input.contactIds !== undefined) {
-      data.contactIds = input.contactIds;
       await this.prisma.client.contactListMember.deleteMany({
         where: { listId: input.listId },
       });
@@ -133,39 +131,13 @@ export class CrmListsService {
 
     const members = await this.prisma.client.contactListMember.findMany({
       where: { listId: input.listId },
-      include: {
-        contact: true,
-      },
+      include: { contact: true },
       orderBy: { addedAt: 'desc' },
     });
 
-    if (members.length > 0) {
-      return members
-        .filter((m) => m.contact.deletedAt === null && m.contact.businessId === input.businessId)
-        .map((m) => m.contact);
-    }
-
-    if (list.contactIds && list.contactIds.length > 0) {
-      const contacts = await this.prisma.client.contact.findMany({
-        where: {
-          id: { in: list.contactIds },
-          businessId: input.businessId,
-          deletedAt: null,
-        },
-        orderBy: { createdAt: 'desc' },
-      });
-
-      if (contacts.length > 0) {
-        await this.prisma.client.contactListMember.createMany({
-          data: contacts.map((c) => ({ listId: list.id, contactId: c.id })),
-          skipDuplicates: true,
-        }).catch(() => {});
-      }
-
-      return contacts;
-    }
-
-    return [];
+    return members
+      .filter((m) => m.contact.deletedAt === null && m.contact.businessId === input.businessId)
+      .map((m) => m.contact);
   }
 
   async addContactsToList(input: { businessId: string; listId: string; contactIds: string[] }) {
@@ -183,10 +155,9 @@ export class CrmListsService {
       skipDuplicates: true,
     });
 
-    const updatedIds = Array.from(new Set([...list.contactIds, ...input.contactIds]));
-    return this.prisma.client.contactList.update({
+    return this.prisma.client.contactList.findUnique({
       where: { id: input.listId },
-      data: { contactIds: updatedIds },
+      include: { _count: { select: { members: true } } },
     });
   }
 
@@ -201,10 +172,9 @@ export class CrmListsService {
       where: { listId: input.listId, contactId: input.contactId },
     });
 
-    const filtered = list.contactIds.filter((id) => id !== input.contactId);
-    return this.prisma.client.contactList.update({
+    return this.prisma.client.contactList.findUnique({
       where: { id: input.listId },
-      data: { contactIds: filtered },
+      include: { _count: { select: { members: true } } },
     });
   }
 }

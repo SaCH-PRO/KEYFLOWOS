@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { Contact, Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmTimelineService } from './crm-timeline.service';
@@ -99,6 +99,7 @@ type FlowHighlightsPayload = {
 
 @Injectable()
 export class CrmStatsService {
+  private readonly logger = new Logger(CrmStatsService.name);
   private cache: Map<string, { data: any; expires: number }> = new Map();
 
   constructor(
@@ -359,7 +360,9 @@ export class CrmStatsService {
             data: { leadScore: u.leadScore, lastInteractionAt: u.lastInteractionAt },
           }),
         ),
-      ).catch(() => {});
+      ).catch((err) => {
+        this.logger.warn('Background lead score update failed', (err as Error).message);
+      });
     }
     return withStats;
   }
@@ -368,6 +371,20 @@ export class CrmStatsService {
     const contacts = await this.prisma.client.contact.findMany({
       where: contactWhereBase(businessId),
       orderBy: { createdAt: 'desc' },
+      take: 5000,
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        emailNormalized: true,
+        phone: true,
+        phoneNormalized: true,
+        status: true,
+        companyName: true,
+        source: true,
+        createdAt: true,
+      },
     });
 
     type DuplicateGroup = {

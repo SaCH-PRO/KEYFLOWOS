@@ -118,7 +118,8 @@ export default function ContactsPage() {
       googleHandled.current = true;
       const msg = googleError === "missing_params" ? "Missing OAuth parameters"
         : googleError === "invalid_state" ? "Invalid OAuth state — please try again"
-        : decodeURIComponent(googleError);
+        : googleError === "import_failed" ? "Google import failed — please try again"
+        : "Something went wrong with Google import";
       toast.error(`Google import failed: ${msg}`);
       router.replace("/app/crm/pipeline");
     }

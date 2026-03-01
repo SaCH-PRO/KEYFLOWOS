@@ -17,13 +17,9 @@ import { toast } from "sonner";
 import { PipelineDetailPanel } from "./pipeline-detail-panel";
 import type { PipelineState } from "./use-contacts-pipeline";
 import { CONTACT_STATUSES } from "@/lib/crm-constants";
-import { relativeTime, getScoreStyle, STATUS_CONFIG, STATUS_COLORS } from "@/lib/crm-utils";
+import { relativeTime, getScoreStyle, formatTTD, STATUS_CONFIG, STATUS_COLORS } from "@/lib/crm-utils";
 
 const STATUSES = CONTACT_STATUSES;
-
-function formatCurrency(value: number): string {
-  return `TTD ${value.toLocaleString("en-TT")}`;
-}
 
 interface KanbanCardProps {
   contact: Contact;
@@ -115,7 +111,7 @@ const KanbanCard = memo(function KanbanCardInner({
             {totalRevenue != null && totalRevenue > 0 && (
               <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-0.5">
                 <TrendingUp className="w-3 h-3" />
-                {formatCurrency(totalRevenue)}
+                {formatTTD(totalRevenue)}
               </span>
             )}
             {lastInteraction && (
@@ -210,7 +206,7 @@ const KanbanColumn = memo(function KanbanColumnInner({
           </div>
           {totalValue > 0 && (
             <span className="text-[10px] font-medium text-muted-foreground/60">
-              {formatCurrency(totalValue)}
+              {formatTTD(totalValue)}
             </span>
           )}
         </div>
@@ -308,9 +304,10 @@ function PipelineKanbanInner({ state }: PipelineKanbanProps) {
       const contactName = `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "Unnamed";
       const newLabel = STATUS_CONFIG[newStatus]?.label ?? newStatus;
 
+      state.setContacts((prev: Contact[]) => prev.map((c) => c.id === contactId ? { ...c, status: newStatus } : c));
+
       try {
         await updateContact({ businessId, contactId, status: newStatus });
-        void state.loadContacts();
         void state.loadFlowData();
         toast(`${contactName} moved to ${newLabel}`, {
           action: {
@@ -328,6 +325,7 @@ function PipelineKanbanInner({ state }: PipelineKanbanProps) {
           },
         });
       } catch {
+        state.setContacts((prev: Contact[]) => prev.map((c) => c.id === contactId ? { ...c, status: previousStatus } : c));
         toast.error("Failed to update contact status");
       }
       setDraggedContactId(null);
@@ -351,17 +349,18 @@ function PipelineKanbanInner({ state }: PipelineKanbanProps) {
       const previousStatus = contact.status ?? "LEAD";
       const newLabel = STATUS_CONFIG[newStatus]?.label ?? newStatus;
 
+      state.setContacts((prev: Contact[]) => prev.map((c) => c.id === contactId ? { ...c, status: newStatus } : c));
+
       try {
         await updateContact({ businessId, contactId, status: newStatus });
-        void state.loadContacts();
         void state.loadFlowData();
         toast.success(`Contact moved to ${newLabel}`, {
           action: {
             label: "Undo",
             onClick: async () => {
               try {
+                state.setContacts((prev: Contact[]) => prev.map((c) => c.id === contactId ? { ...c, status: previousStatus } : c));
                 await updateContact({ businessId, contactId, status: previousStatus });
-                void state.loadContacts();
                 void state.loadFlowData();
               } catch {
                 toast.error("Failed to undo status change");
@@ -370,6 +369,7 @@ function PipelineKanbanInner({ state }: PipelineKanbanProps) {
           },
         });
       } catch {
+        state.setContacts((prev: Contact[]) => prev.map((c) => c.id === contactId ? { ...c, status: previousStatus } : c));
         toast.error("Failed to update contact status");
       }
     },

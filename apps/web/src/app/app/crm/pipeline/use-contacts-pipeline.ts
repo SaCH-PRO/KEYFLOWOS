@@ -165,7 +165,7 @@ export function useContactsPipeline() {
 
   return {
     businessId, workspaceLoading: contactsData.workspaceLoading, workspaceError: contactsData.workspaceError,
-    contacts, loading, loadError: contactsData.loadError, hasMore: contactsData.hasMore,
+    contacts, setContacts, loading, loadError: contactsData.loadError, hasMore: contactsData.hasMore,
     searchInput: contactsData.searchInput, setSearchInput: contactsData.setSearchInput,
     statusFilter: contactsData.statusFilter, setStatusFilter: contactsData.setStatusFilter,
     sortBy: contactsData.sortBy, setSortBy: contactsData.setSortBy,

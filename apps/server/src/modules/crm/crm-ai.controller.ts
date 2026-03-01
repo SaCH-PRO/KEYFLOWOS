@@ -1,24 +1,11 @@
-import { BadRequestException, Body, Controller, Get, HttpException, HttpStatus, Inject, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { CrmAiService } from './crm-ai.service';
 import { CrmJourneyService } from './crm-journey.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CrmRateLimitGuard, CrmRateLimit } from './guards/rate-limit.guard';
 import { FeatureFlagGuard, RequireFeature } from './guards/feature-flag.guard';
-
-const AI_RATE_LIMIT = 10;
-const AI_RATE_WINDOW_MS = 60_000;
-const aiRateMap = new Map<string, number[]>();
-
-function checkAiRateLimit(businessId: string) {
-  const now = Date.now();
-  const timestamps = (aiRateMap.get(businessId) ?? []).filter((t) => now - t < AI_RATE_WINDOW_MS);
-  if (timestamps.length >= AI_RATE_LIMIT) {
-    throw new HttpException('AI rate limit exceeded. Please wait a moment before trying again.', HttpStatus.TOO_MANY_REQUESTS);
-  }
-  timestamps.push(now);
-  aiRateMap.set(businessId, timestamps);
-}
+import { checkAiRateLimit } from './ai-rate-limit.util';
 
 @Controller('crm')
 @UseGuards(CrmRateLimitGuard)
