@@ -15,8 +15,8 @@ import {
   Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchDuplicateContacts, mergeContacts } from "@/lib/client";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { fetchDuplicateContacts, mergeContacts, type Contact } from "@/lib/client";
+import { MergeContactsModal } from "@/components/contacts/merge-contacts-modal";
 
 interface DuplicateContact {
   id: string;
@@ -24,8 +24,31 @@ interface DuplicateContact {
   lastName?: string | null;
   email?: string | null;
   phone?: string | null;
+  displayName?: string | null;
+  secondaryEmail?: string | null;
+  secondaryPhone?: string | null;
+  whatsappNumber?: string | null;
+  preferredChannel?: string | null;
+  companyName?: string | null;
+  jobTitle?: string | null;
+  department?: string | null;
+  industry?: string | null;
+  addressLine1?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+  timezone?: string | null;
+  segment?: string | null;
+  lifecycleStage?: string | null;
+  language?: string | null;
+  notesInternal?: string | null;
+  sourceDetail?: string | null;
   status?: string;
-  createdAt?: string;
+  source?: string | null;
+  tags?: string[];
+  createdAt?: string | null;
+  custom?: Record<string, unknown> | null;
 }
 
 interface DuplicateGroup {
@@ -57,8 +80,8 @@ export function DuplicateDetector({ businessId, onMergeComplete }: DuplicateDete
   const [expanded, setExpanded] = useState(false);
   const [expandedGroupIdx, setExpandedGroupIdx] = useState<number | null>(null);
   const [merging, setMerging] = useState(false);
-  const [confirmMerge, setConfirmMerge] = useState<{ open: boolean; primaryId: string; duplicateId: string; primaryName: string; dupName: string }>({
-    open: false, primaryId: "", duplicateId: "", primaryName: "", dupName: "",
+  const [mergeModal, setMergeModal] = useState<{ open: boolean; left: DuplicateContact | null; right: DuplicateContact | null }>({
+    open: false, left: null, right: null,
   });
 
   const loadDuplicates = useCallback(async () => {
@@ -74,11 +97,12 @@ export function DuplicateDetector({ businessId, onMergeComplete }: DuplicateDete
     loadDuplicates();
   }, [loadDuplicates]);
 
-  const handleMerge = async (primaryId: string, duplicateId: string) => {
+  const handleMerge = async (keepId: string, mergeId: string, fieldOverrides: Record<string, unknown>) => {
     setMerging(true);
     try {
-      await mergeContacts({ businessId, contactId: primaryId, duplicateId });
+      await mergeContacts({ businessId, contactId: keepId, duplicateId: mergeId, fieldOverrides });
       toast.success("Contacts merged successfully");
+      setMergeModal({ open: false, left: null, right: null });
       await loadDuplicates();
       onMergeComplete();
     } catch {
@@ -174,12 +198,10 @@ export function DuplicateDetector({ businessId, onMergeComplete }: DuplicateDete
                                 </span>
                                 {cIdx > 0 && (
                                   <button
-                                    onClick={() => setConfirmMerge({
+                                    onClick={() => setMergeModal({
                                       open: true,
-                                      primaryId: group.contacts[0].id,
-                                      duplicateId: contact.id,
-                                      primaryName: formatName(group.contacts[0]),
-                                      dupName: formatName(contact),
+                                      left: group.contacts[0],
+                                      right: contact,
                                     })}
                                     disabled={merging}
                                     className="text-xs px-2 py-1 rounded-lg bg-[hsl(var(--kf-accent2))]/10 hover:bg-[hsl(var(--kf-accent2))]/20 transition-colors flex items-center gap-1 disabled:opacity-50"
@@ -192,7 +214,7 @@ export function DuplicateDetector({ businessId, onMergeComplete }: DuplicateDete
                               </div>
                             ))}
                             <div className="text-[10px] text-muted-foreground/60 text-center pt-1">
-                              First contact is kept as primary during merge
+                              Click Merge to review fields side-by-side before merging
                             </div>
                           </div>
                         </motion.div>
@@ -206,15 +228,15 @@ export function DuplicateDetector({ businessId, onMergeComplete }: DuplicateDete
         )}
       </AnimatePresence>
 
-      <ConfirmDialog
-        open={confirmMerge.open}
-        title="Merge Contacts"
-        message={`Merge "${confirmMerge.dupName}" into "${confirmMerge.primaryName}"? All notes, tasks, invoices, and bookings will be transferred to the primary contact. This cannot be undone.`}
-        confirmLabel={merging ? "Merging..." : "Merge"}
-        variant="danger"
-        onConfirm={() => { handleMerge(confirmMerge.primaryId, confirmMerge.duplicateId); setConfirmMerge((s) => ({ ...s, open: false })); }}
-        onCancel={() => setConfirmMerge((s) => ({ ...s, open: false }))}
-      />
+      {mergeModal.open && mergeModal.left && mergeModal.right && (
+        <MergeContactsModal
+          open={mergeModal.open}
+          left={mergeModal.left}
+          right={mergeModal.right}
+          onClose={() => setMergeModal({ open: false, left: null, right: null })}
+          onMerge={handleMerge}
+        />
+      )}
     </div>
   );
 }

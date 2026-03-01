@@ -1,13 +1,14 @@
 "use client";
 
 import React, { Suspense, useRef } from "react";
-import { MessageSquare, ListTodo, History, AlertCircle, Loader2 } from "lucide-react";
+import { MessageSquare, ListTodo, History, AlertCircle, Loader2, Activity } from "lucide-react";
 import type { ContactDetailData, ContactEvent, ContactNote, ContactTask } from "./contact-detail";
 import type { HealthMetricsData, JourneyMilestoneData, ConversationContextData, AiInsightData } from "./tab-constants";
 
 const NotesTabPanel = React.lazy(() => import("./notes-tab-panel").then(m => ({ default: m.NotesTabPanel })));
 const TasksTabPanel = React.lazy(() => import("./tasks-tab-panel").then(m => ({ default: m.TasksTabPanel })));
 const TimelineTabPanel = React.lazy(() => import("./timeline-tab-panel").then(m => ({ default: m.TimelineTabPanel })));
+const ActivityTimeline = React.lazy(() => import("./activity-timeline").then(m => ({ default: m.ActivityTimeline })));
 
 class TabErrorBoundary extends React.Component<
   { children: React.ReactNode; resetKey: string },
@@ -68,7 +69,7 @@ export function ContactDetailTabs({
   conversationContext, aiInsight, aiInsightLoading,
   onGenerateAiInsight, onRefreshConversationContext,
 }: ContactDetailTabsProps) {
-  const activatedTabs = useRef(new Set<string>(["notes"]));
+  const activatedTabs = useRef(new Set<string>(["activity"]));
   if (!activatedTabs.current.has(activeTab)) {
     activatedTabs.current.add(activeTab);
   }
@@ -77,6 +78,7 @@ export function ContactDetailTabs({
     <div className="flex flex-col h-full min-h-0">
       <div className="flex border-b border-border overflow-x-auto shrink-0" role="tablist">
         {[
+          { key: "activity", label: "Activity", icon: Activity, count: events.length + notes.length + tasks.length },
           { key: "notes", label: "Notes", icon: MessageSquare, count: notes.length },
           { key: "tasks", label: "Tasks", icon: ListTodo, count: tasks.filter((t) => t.status !== "DONE").length },
           { key: "timeline", label: "Timeline", icon: History },
@@ -103,6 +105,13 @@ export function ContactDetailTabs({
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         <Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>}>
+          {activatedTabs.current.has("activity") && (
+            <div className={`space-y-3 pt-3 pb-6 ${activeTab === "activity" ? "" : "hidden"}`}>
+              <TabErrorBoundary resetKey="activity">
+                <ActivityTimeline contact={contact} events={events} notes={notes} tasks={tasks} />
+              </TabErrorBoundary>
+            </div>
+          )}
           {activatedTabs.current.has("notes") && (
             <div className={`space-y-3 pt-3 pb-6 ${activeTab === "notes" ? "" : "hidden"}`}>
               <TabErrorBoundary resetKey="notes">

@@ -7,6 +7,7 @@ import {
   ArrowUpDown,
   UserX,
   SearchX,
+  Heart,
 } from "lucide-react";
 import type { LocalContact } from "@/lib/contacts-db";
 import type { SortField, SortDir, ColumnDef } from "./hooks/use-database-state";
@@ -157,6 +158,8 @@ interface DatabaseTableProps {
   isSortable: (key: string) => boolean;
   search: string;
   columns: ColumnDef[];
+  favoriteIds?: Set<string>;
+  onToggleFavorite?: (id: string) => void;
 }
 
 function TagsCell({ value, search }: { value: string; search: string }) {
@@ -197,6 +200,8 @@ function DatabaseTableInner({
   isSortable,
   search,
   columns,
+  favoriteIds,
+  onToggleFavorite,
 }: DatabaseTableProps) {
   const tbodyRef = useRef<HTMLTableSectionElement>(null);
 
@@ -238,6 +243,11 @@ function DatabaseTableInner({
               />
             </th>
             <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider w-[40px]">#</th>
+            {onToggleFavorite && (
+              <th className="px-1 py-2.5 w-[32px]">
+                <Heart className="w-3 h-3 text-muted-foreground/40" />
+              </th>
+            )}
             {columns.map((col) => {
               const sortable = isSortable(col.key);
               const isActive = sortField === col.key;
@@ -272,7 +282,7 @@ function DatabaseTableInner({
         <tbody ref={tbodyRef}>
           {contacts.length === 0 ? (
             <tr>
-              <td colSpan={columns.length + 2} className="px-4 py-16 text-center">
+              <td colSpan={columns.length + (onToggleFavorite ? 3 : 2)} className="px-4 py-16 text-center">
                 <div className="flex flex-col items-center gap-2">
                   {search ? (
                     <>
@@ -319,6 +329,18 @@ function DatabaseTableInner({
                   <td className="px-3 py-2.5 text-[10px] text-muted-foreground/60 font-mono">
                     {(page - 1) * pageSize + idx + 1}
                   </td>
+                  {onToggleFavorite && (
+                    <td className="px-1 py-2.5 w-[32px]" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => onToggleFavorite(contact.id)}
+                        className={`p-0.5 rounded transition-colors ${favoriteIds?.has(contact.id) ? "text-rose-400" : "text-muted-foreground/30 hover:text-rose-300"}`}
+                        title={favoriteIds?.has(contact.id) ? "Remove from favorites" : "Add to favorites"}
+                        aria-label={favoriteIds?.has(contact.id) ? "Remove from favorites" : "Add to favorites"}
+                      >
+                        <Heart className={`w-3.5 h-3.5 ${favoriteIds?.has(contact.id) ? "fill-current" : ""}`} />
+                      </button>
+                    </td>
+                  )}
                   {columns.map((col) => {
                     const val = getCellValue(contact, col.key);
 

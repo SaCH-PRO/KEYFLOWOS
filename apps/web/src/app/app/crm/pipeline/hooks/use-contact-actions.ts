@@ -11,7 +11,7 @@ import {
   addContactNote, addContactTask, completeContactTask, reopenContactTask,
   createContact, deleteContact, updateContact,
   importContactsFromFile, importContactsFromLink,
-  logContactEvent, bulkUpdateContacts, bulkDeleteContacts,
+  logContactEvent, logCommunication, bulkUpdateContacts, bulkDeleteContacts,
   deleteContactNote, deleteContactTask,
   updateContactNote, updateContactTask,
 } from "@/lib/client";
@@ -252,6 +252,19 @@ export function useContactActions({
       void loadDetail(cid);
     } catch (err) {
       console.error("Failed to log event:", err);
+    }
+  }, [businessId, loadDetail]);
+
+  const handleLogCommunication = useCallback(async (data: { channelType: string; outcome: string; duration?: number; notes?: string }) => {
+    const cid = selectedContactIdRef.current;
+    if (!cid || !businessId) return;
+    try {
+      await logCommunication(cid, data, businessId);
+      void loadDetail(cid);
+      toast.success("Interaction logged");
+    } catch (err) {
+      console.error("Failed to log communication:", err);
+      toast.error("Failed to log interaction");
     }
   }, [businessId, loadDetail]);
 
@@ -503,7 +516,7 @@ export function useContactActions({
     showGuide, setShowGuide,
     confirmState, setConfirmState,
     handleSubmitContact, handleAddNote, handleAddTask, handleCompleteTask,
-    handleDeleteNote, handleDeleteTask, handleUpdateStatus, handleLogEvent,
+    handleDeleteNote, handleDeleteTask, handleUpdateStatus, handleLogEvent, handleLogCommunication,
     handleEditContact, handleDeleteContact,
     handleImportFile, handleImportLink, handleDeviceImport,
     handleUpdateNote, handleUpdateTask,

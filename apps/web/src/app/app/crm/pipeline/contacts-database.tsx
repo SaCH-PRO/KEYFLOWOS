@@ -38,6 +38,8 @@ interface ContactsDatabaseProps {
   onSelectList: (listId: string | null, contactIds?: string[]) => void;
   onListsLoaded?: (count: number) => void;
   onSelectContact?: (contactId: string) => void;
+  favoriteIds?: Set<string>;
+  onToggleFavorite?: (id: string) => void;
 }
 
 const STATUS_FILTER_OPTIONS = ["ALL", "LEAD", "PROSPECT", "CLIENT", "LOST"];
@@ -67,6 +69,8 @@ export function ContactsDatabase({
   onSelectList,
   onListsLoaded,
   onSelectContact,
+  favoriteIds,
+  onToggleFavorite,
 }: ContactsDatabaseProps) {
   const db = useDatabaseState({ businessId, contacts, onRefresh });
 
@@ -483,6 +487,8 @@ export function ContactsDatabase({
           isSortable={db.isSortable}
           search={db.searchInput}
           columns={db.visibleColumnDefs}
+          favoriteIds={favoriteIds}
+          onToggleFavorite={onToggleFavorite}
         />
 
         <div className="flex items-center justify-between mt-4 px-1">

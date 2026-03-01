@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import React from "react";
 import { motion } from "framer-motion";
-import { Mail, Phone, Building2, Tag, Trash2, MessageCircle, Star, Globe, FileText, CalendarCheck, UserPlus, Upload, Sparkles, MoreHorizontal, Receipt, Calendar, FileSignature, TrendingUp, Clock } from "lucide-react";
+import { Mail, Phone, Building2, Tag, Trash2, MessageCircle, Star, Heart, Globe, FileText, CalendarCheck, UserPlus, Upload, Sparkles, MoreHorizontal, Receipt, Calendar, FileSignature, TrendingUp, Clock } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 
 export type ContactCardData = {
@@ -110,13 +110,15 @@ interface ContactCardProps {
   onToggleSelect?: (id: string) => void;
   isPinned?: boolean;
   onTogglePin?: (id: string) => void;
+  isFavorite?: boolean;
+  onToggleFavorite?: (id: string) => void;
   onClick?: () => void;
   onDelete?: (contact: ContactCardData) => void;
   onQuickAction?: (contactId: string, action: QuickActionType) => void;
   index?: number;
 }
 
-function ContactCardInner({ contact, isSelected, selectable, selected, onToggleSelect, isPinned, onTogglePin, onClick, onDelete, onQuickAction, index = 0 }: ContactCardProps) {
+function ContactCardInner({ contact, isSelected, selectable, selected, onToggleSelect, isPinned, onTogglePin, isFavorite, onToggleFavorite, onClick, onDelete, onQuickAction, index = 0 }: ContactCardProps) {
   const [showActions, setShowActions] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
   const fullName = `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "Unnamed";
@@ -154,6 +156,11 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
   const handlePin = (e: React.MouseEvent) => {
     e.stopPropagation();
     onTogglePin?.(contact.id);
+  };
+
+  const handleFavorite = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onToggleFavorite?.(contact.id);
   };
 
   const handleQuickAction = (e: React.MouseEvent, action: QuickActionType) => {
@@ -207,6 +214,16 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
               >
                 {leadScore}
               </span>
+            )}
+            {onToggleFavorite && (
+              <button
+                onClick={handleFavorite}
+                className={`p-0.5 rounded transition-colors flex-shrink-0 ${isFavorite ? "text-rose-400" : "text-muted-foreground/50 md:opacity-0 md:group-hover:opacity-100"}`}
+                title={isFavorite ? "Remove from favorites" : "Add to favorites"}
+                aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+              >
+                <Heart className={`w-3.5 h-3.5 ${isFavorite ? "fill-current" : ""}`} />
+              </button>
             )}
             {onTogglePin && (
               <button

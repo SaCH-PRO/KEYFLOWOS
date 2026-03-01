@@ -50,6 +50,8 @@ export const AI_CREDIT_COSTS: Record<string, number> = {
   note_intelligence: 1,
   churn_detection: 2,
   nl_search: 1,
+  ai_tags: 1,
+  ai_prep_brief: 2,
 };
 
 export const AI_OVERAGE_RATE_TTD = 2.50;

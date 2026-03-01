@@ -629,6 +629,22 @@ export async function logContactEvent(
   });
 }
 
+export async function logCommunication(
+  contactId: string,
+  input: {
+    channelType: string;
+    outcome: string;
+    duration?: number;
+    notes?: string;
+  },
+  businessId: string = DEFAULT_BUSINESS_ID,
+) {
+  return apiPost<{ event: ContactEvent; note: ContactNote | null }>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/log-communication`,
+    body: input,
+  });
+}
+
 export async function addContactNote(contactId: string, body: string, businessId: string = DEFAULT_BUSINESS_ID, source?: string) {
   return apiPost<ContactNote>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/notes`,
@@ -674,6 +690,21 @@ export async function updateContactTask(taskId: string, data: { title?: string; 
 
 export async function deleteContactTask(taskId: string, businessId: string = DEFAULT_BUSINESS_ID) {
   return apiDelete(`/crm/businesses/${encodeURIComponent(businessId)}/tasks/${encodeURIComponent(taskId)}`);
+}
+
+export async function toggleFavorite(contactId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiPost<{ isFavorite: boolean; contact: Contact }>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/favorite`,
+    body: {},
+  });
+}
+
+export async function fetchFavorites(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/favorites`,
+    z.array(contactSchema),
+    [],
+  );
 }
 
 export async function approveAutopilotAction(actionId: string, businessId: string = DEFAULT_BUSINESS_ID) {
@@ -882,11 +913,11 @@ export async function reopenContactTask(taskId: string, businessId: string = DEF
   });
 }
 
-export async function mergeContacts(input: { businessId?: string; contactId: string; duplicateId: string }) {
+export async function mergeContacts(input: { businessId?: string; contactId: string; duplicateId: string; fieldOverrides?: Record<string, unknown> }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<Contact>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(input.contactId)}/merge/${encodeURIComponent(input.duplicateId)}`,
-    body: {},
+    body: { fieldOverrides: input.fieldOverrides },
   });
 }
 
@@ -3567,6 +3598,26 @@ export async function aiLeadScore(contactId: string, businessId?: string): Promi
   });
 }
 
+export type AiTagSuggestion = {
+  tag: string;
+  confidence: number;
+  reasoning: string;
+};
+
+export type AiTagSuggestionsResult = {
+  suggestedTags: AiTagSuggestion[];
+  currentTags: string[];
+  creditsUsed: number;
+};
+
+export async function aiSuggestTags(contactId: string, businessId?: string): Promise<ApiResult<AiTagSuggestionsResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AiTagSuggestionsResult>({
+    path: `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/ai-tags`,
+    body: {},
+  });
+}
+
 export async function aiNoteAnalysis(contactId: string, noteBody: string, noteId?: string, businessId?: string): Promise<ApiResult<AiNoteAnalysis>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<AiNoteAnalysis>({
@@ -3588,6 +3639,43 @@ export async function aiNaturalLanguageSearch(query: string, businessId?: string
   return apiPost<AiSearchResult>({
     path: `/crm/businesses/${encodeURIComponent(bid)}/ai-search`,
     body: { query },
+  });
+}
+
+export type AiPrepBrief = {
+  keyInfo: {
+    summary: string;
+    relationshipHealth: string;
+    sentiment: string;
+    lastContactSummary: string;
+  };
+  openItems: Array<{
+    type: string;
+    title: string;
+    urgency: string;
+    detail: string;
+  }>;
+  suggestedTopics: Array<{
+    topic: string;
+    reason: string;
+    approach: string;
+  }>;
+  relationshipSignals: {
+    positive: string[];
+    concerns: string[];
+    opportunities: string[];
+  };
+  icebreakers: string[];
+  thingsToAvoid: string[];
+  talkingPoints: string[];
+  creditsUsed: number;
+};
+
+export async function aiPrepBrief(contactId: string, businessId?: string): Promise<ApiResult<AiPrepBrief>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AiPrepBrief>({
+    path: `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/ai-prep-brief`,
+    body: {},
   });
 }
 

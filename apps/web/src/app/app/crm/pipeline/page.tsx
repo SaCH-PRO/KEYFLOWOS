@@ -203,6 +203,8 @@ export default function ContactsPage() {
               onSelectList={handleSelectList}
               onListsLoaded={setListsCount}
               onSelectContact={handleSelectDbContact}
+              favoriteIds={state.favoriteIds}
+              onToggleFavorite={state.handleToggleFavorite}
             />
           </motion.div>
         )}

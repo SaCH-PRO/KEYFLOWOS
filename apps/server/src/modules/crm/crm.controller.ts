@@ -90,6 +90,12 @@ export class CrmController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/contacts/favorites')
+  getFavorites(@Param('businessId') businessId: string) {
+    return this.crm.getFavorites(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/contacts/:contactId')
   getContactDetail(
     @Param('businessId') businessId: string,
@@ -151,8 +157,9 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Param('duplicateId') duplicateId: string,
+    @Body() body?: { fieldOverrides?: Record<string, unknown> },
   ) {
-    return this.crm.mergeContacts({ businessId, primaryId: contactId, duplicateId });
+    return this.crm.mergeContacts({ businessId, primaryId: contactId, duplicateId, fieldOverrides: body?.fieldOverrides });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -405,6 +412,28 @@ export class CrmController {
   @Get('businesses/:businessId/duplicates')
   findDuplicates(@Param('businessId') businessId: string) {
     return this.crm.findDuplicates(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/contacts/:contactId/log-communication')
+  logCommunication(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Body() body: { channelType: string; outcome: string; duration?: number; notes?: string },
+    @Req() req: any,
+  ) {
+    if (!body.channelType || !body.outcome) {
+      throw new BadRequestException('channelType and outcome are required');
+    }
+    return this.crm.logCommunication({
+      businessId,
+      contactId,
+      channelType: body.channelType,
+      outcome: body.outcome,
+      duration: body.duration,
+      notes: body.notes,
+      actorId: req?.user?.id,
+    });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -665,6 +694,26 @@ export class CrmController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/contacts/:contactId/ai-tags')
+  aiSuggestTags(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+  ) {
+    checkAiRateLimit(businessId);
+    return this.crmAi.suggestTags(businessId, contactId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/contacts/:contactId/ai-prep-brief')
+  aiPrepBrief(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+  ) {
+    checkAiRateLimit(businessId);
+    return this.crmAi.generatePrepBrief(businessId, contactId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/ai-analyze')
   aiAnalyze(
     @Param('businessId') businessId: string,
@@ -838,6 +887,15 @@ export class CrmController {
     @Body() body: { contactIds: string[] },
   ) {
     return this.sequences.enrollContacts(businessId, id, body.contactIds);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/contacts/:contactId/favorite')
+  toggleFavorite(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+  ) {
+    return this.crm.toggleFavorite(businessId, contactId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

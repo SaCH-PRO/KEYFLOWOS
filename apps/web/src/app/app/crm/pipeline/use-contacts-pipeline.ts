@@ -142,6 +142,7 @@ export function useContactsPipeline() {
     onEdit: actions.handleEditContact,
     onDelete: handleDeleteForPanel,
     onLogEvent: actions.handleLogEvent,
+    onLogCommunication: actions.handleLogCommunication,
     onGenerateAiInsight: detail.handleGenerateAiInsight,
     onRefreshConversationContext: detail.handleRefreshConversationContext,
     relatedContacts,
@@ -153,7 +154,7 @@ export function useContactsPipeline() {
     contactsData.handleTogglePin, actions.handleAddNote, actions.handleAddTask, relatedContacts, selectContact,
     actions.handleCompleteTask, actions.handleDeleteNote, actions.handleDeleteTask,
     actions.handleUpdateNote, actions.handleUpdateTask, actions.handleUpdateStatus,
-    actions.handleEditContact, handleDeleteForPanel, actions.handleLogEvent,
+    actions.handleEditContact, handleDeleteForPanel, actions.handleLogEvent, actions.handleLogCommunication,
     detail.handleGenerateAiInsight, detail.handleRefreshConversationContext,
   ]);
 
@@ -198,6 +199,8 @@ export function useContactsPipeline() {
     aiInsight: detail.aiInsight, aiInsightLoading: detail.aiInsightLoading,
     pinnedIds: contactsData.pinnedIds, pinnedContacts: contactsData.pinnedContacts,
     recentContacts: contactsData.recentContacts,
+    favoriteIds: contactsData.favoriteIds, favoriteContacts: contactsData.favoriteContacts,
+    handleToggleFavorite: contactsData.handleToggleFavorite,
     displayContacts: contactsData.displayContacts,
     segmentCounts: contactsData.segmentCounts,
     selectedContactsForBroadcast,
