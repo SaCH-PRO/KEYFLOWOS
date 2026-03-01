@@ -232,6 +232,7 @@ export function AiSearchBar({ onSelectContact, onApplyFilters, onExecuteCommand 
         )}
         <input
           ref={inputRef}
+          data-ai-search
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}

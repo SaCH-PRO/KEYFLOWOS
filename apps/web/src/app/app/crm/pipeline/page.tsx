@@ -26,6 +26,8 @@ import { PipelineTabContent } from "./pipeline-tab-content";
 import { GettingStartedGuide } from "./getting-started-guide";
 import { useContactsPipeline } from "./use-contacts-pipeline";
 import { useCrmAiAssistant } from "./hooks/use-crm-ai-assistant";
+import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
+import { useModuleEmit } from "@/hooks/use-module-events";
 
 export default function ContactsPage() {
   const searchParams = useSearchParams();
@@ -33,6 +35,7 @@ export default function ContactsPage() {
   const googleHandled = useRef(false);
   const state = useContactsPipeline();
   const crmAi = useCrmAiAssistant();
+  const emitEvent = useModuleEmit();
 
   const {
     workspaceLoading, workspaceError, businessId,
@@ -78,6 +81,26 @@ export default function ContactsPage() {
       toast.success("Opening contact to create a quote...");
     }
   }, [crmAi.parseActionKey, selectContact, setCrmViewTab]);
+
+  const crmShortcuts = useMemo<ShortcutGroup[]>(() => [
+    {
+      groupName: "CRM Navigation",
+      shortcuts: [
+        { key: "n", description: "New contact", action: () => state.setShowAddMenu(true) },
+        { key: "f", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('[data-ai-search]'); el?.focus(); } },
+        { key: "1", description: "Pipeline tab", action: () => setCrmViewTab("pipeline") },
+        { key: "2", description: "Database tab", action: () => setCrmViewTab("database") },
+        { key: "3", description: "Insights tab", action: () => setCrmViewTab("insights") },
+        { key: "4", description: "Engage tab", action: () => setCrmViewTab("engage") },
+        { key: "r", description: "Refresh contacts", action: () => { void loadContacts(); void loadFlowData(); } },
+        { key: "b", description: "Open broadcast", action: () => state.setShowBroadcast(true) },
+        { key: "g", description: "Toggle guide", action: () => setShowGuide((p: boolean) => !p) },
+        { key: "Escape", description: "Close panels", action: () => { if (crmAi.panelOpen) crmAi.setOpen(false); } },
+      ],
+    },
+  ], [setCrmViewTab, loadContacts, loadFlowData, state.setShowAddMenu, state.setShowBroadcast, setShowGuide, crmAi.panelOpen, crmAi.setOpen]);
+
+  useKeyboardShortcuts(crmShortcuts, !workspaceLoading);
 
   useEffect(() => {
     if (googleHandled.current) return;
@@ -128,7 +151,10 @@ export default function ContactsPage() {
   const handleGuideAddContact = useCallback(() => state.setShowAddMenu(true), [state.setShowAddMenu]);
   const handleGuideSegment = useCallback((segment: string) => { state.setActiveSegment(segment as SmartSegment); setCrmViewTab("pipeline"); }, [state.setActiveSegment, setCrmViewTab]);
   const handleGuideSelectMode = useCallback(() => { state.handleToggleSelectMode(); setCrmViewTab("pipeline"); }, [state.handleToggleSelectMode, setCrmViewTab]);
-  const handleTabChange = useCallback((t: string) => setCrmViewTab(t as "pipeline" | "insights" | "engage" | "database"), [setCrmViewTab]);
+  const handleTabChange = useCallback((t: string) => {
+    setCrmViewTab(t as "pipeline" | "insights" | "engage" | "database");
+    emitEvent("module:tab_changed", "crm", { tab: t });
+  }, [setCrmViewTab, emitEvent]);
 
   const handleAiCommand = useCallback((cmd: CrmCommand) => {
     switch (cmd.type) {
