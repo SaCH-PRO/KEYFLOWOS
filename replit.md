@@ -35,7 +35,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Multi-Gateway Payment System:** Integration with WiPay (Caribbean) and PayPal (international).
 - **Subscription & Billing System:** 3-tier plans with free trial and module limits.
 - **Multi-Tenant System:** Data isolation using `businessId` with `BusinessGuard` protection.
-- **Commerce Module Overhaul (v2):** Re-architected into 8 focused modules with KPI dashboard and glassmorphism product cards, including recurring invoices.
+- **Commerce Module Overhaul (v3):** Re-architected with `useCommerce()` hook (mirrors CRM pattern), thin page.tsx orchestration shell (~200 lines), shared `TabNav`, extracted `ProductFormModal`, `ConnectionStatus`, and `CommerceGuide` (15 steps across 4 collapsible sections with localStorage persistence). KPI dashboard with `formatTTD()`, glassmorphism product cards, and recurring invoices.
 - **Unified Contact Capture:** Single modal with multiple capture modes: Manual, Scan (AI Vision OCR), File Upload, Google Sync, URL Import.
 - **Contacts Module (Pluggable):** Modular CRM with reusable components, Contact Lists/Groups, Duplicate Detection, Pipeline, Database, Insights, Engage tabs, CRM Momentum gamification, and AI copilot. Features bulk edit, inline note/task editing, import field mapping, and virtual scrolling.
 - **Settings Feature:** Modular business settings including branding, social links, and a connections hub.
