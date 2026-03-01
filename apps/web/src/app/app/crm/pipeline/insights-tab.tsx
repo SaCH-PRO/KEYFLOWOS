@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend,
+  PieChart, Pie, Cell,
 } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { FlowIntelligenceData } from "@/components/contacts/flow-intelligence";
@@ -152,65 +152,39 @@ const FUNNEL_COLORS = {
 const FunnelChart = React.memo(function FunnelChart({ data }: { data: FlowIntelligenceData }) {
   const leadToProspect = data.leads > 0 ? ((data.prospects / data.leads) * 100).toFixed(0) : "0";
   const prospectToClient = data.prospects > 0 ? ((data.clients / data.prospects) * 100).toFixed(0) : "0";
+  const maxCount = Math.max(data.leads, data.prospects, data.clients, 1);
 
-  const chartData = [
-    { name: 'Leads', count: data.leads, fill: FUNNEL_COLORS.leads, conversion: `${leadToProspect}% → Prospect` },
-    { name: 'Prospects', count: data.prospects, fill: FUNNEL_COLORS.prospects, conversion: `${prospectToClient}% → Client` },
-    { name: 'Clients', count: data.clients, fill: FUNNEL_COLORS.clients, conversion: '' },
+  const stages = [
+    { label: 'Leads', count: data.leads, color: FUNNEL_COLORS.leads, conv: `${leadToProspect}%` },
+    { label: 'Prospects', count: data.prospects, color: FUNNEL_COLORS.prospects, conv: `${prospectToClient}%` },
+    { label: 'Clients', count: data.clients, color: FUNNEL_COLORS.clients, conv: null },
   ];
 
   return (
-    <div role="img" aria-label={`Pipeline funnel: ${data.leads} leads, ${data.prospects} prospects, ${data.clients} clients`}>
-      <ResponsiveContainer width="100%" height={160}>
-        <BarChart data={chartData} layout="vertical" barCategoryGap="18%" margin={{ top: 0, right: 8, bottom: 0, left: 0 }}>
-          <defs>
-            <linearGradient id="funnelLeads" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor={FUNNEL_COLORS.leads} stopOpacity={0.8} />
-              <stop offset="100%" stopColor={FUNNEL_COLORS.leads} stopOpacity={0.5} />
-            </linearGradient>
-            <linearGradient id="funnelProspects" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor={FUNNEL_COLORS.prospects} stopOpacity={0.8} />
-              <stop offset="100%" stopColor={FUNNEL_COLORS.prospects} stopOpacity={0.5} />
-            </linearGradient>
-            <linearGradient id="funnelClients" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor={FUNNEL_COLORS.clients} stopOpacity={0.8} />
-              <stop offset="100%" stopColor={FUNNEL_COLORS.clients} stopOpacity={0.5} />
-            </linearGradient>
-          </defs>
-          <XAxis type="number" hide />
-          <YAxis
-            type="category"
-            dataKey="name"
-            axisLine={false}
-            tickLine={false}
-            tick={{ fill: 'hsl(var(--muted-foreground))', opacity: 0.6, fontSize: 11 }}
-            width={70}
-          />
-          <Tooltip
-            contentStyle={RECHARTS_TOOLTIP_STYLE.contentStyle}
-            cursor={RECHARTS_TOOLTIP_STYLE.cursor}
-            formatter={((value: number | undefined, _name: string | undefined, props: { payload: { name: string; conversion: string } }) => {
-              const conv = props.payload.conversion;
-              return [`${value ?? 0} contacts${conv ? ` · ${conv}` : ''}`, props.payload.name];
-            }) as never}
-          />
-          <Bar dataKey="count" radius={[0, 6, 6, 0]} animationDuration={800}>
-            {chartData.map((entry, index) => (
-              <Cell key={`cell-${index}`} fill={`url(#funnel${entry.name})`} />
-            ))}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-      <div className="flex items-center gap-3 mt-1 px-1">
-        <div className="flex items-center gap-1 text-[10px] text-muted-foreground/60">
-          <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/50" />
-          <span className="font-medium">{leadToProspect}% lead→prospect</span>
+    <div className="space-y-2" role="img" aria-label={`Pipeline funnel: ${data.leads} leads, ${data.prospects} prospects, ${data.clients} clients`}>
+      {stages.map((s, i) => (
+        <div key={s.label}>
+          <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center gap-1.5">
+              <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: s.color }} />
+              <span className="text-[11px] text-muted-foreground/70 font-medium">{s.label}</span>
+            </div>
+            <span className="text-[11px] font-bold tabular-nums" style={{ color: s.color }}>{s.count}</span>
+          </div>
+          <div className="h-2 rounded-full bg-white/[0.04] overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all duration-700"
+              style={{ width: `${Math.max((s.count / maxCount) * 100, 2)}%`, background: `linear-gradient(90deg, ${s.color}cc, ${s.color}80)` }}
+            />
+          </div>
+          {s.conv && i < stages.length - 1 && (
+            <div className="flex items-center gap-0.5 mt-0.5 ml-3">
+              <ArrowRight className="w-2.5 h-2.5 text-muted-foreground/40" />
+              <span className="text-[10px] text-muted-foreground/50 font-medium">{s.conv}</span>
+            </div>
+          )}
         </div>
-        <div className="flex items-center gap-1 text-[10px] text-muted-foreground/60">
-          <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/50" />
-          <span className="font-medium">{prospectToClient}% prospect→client</span>
-        </div>
-      </div>
+      ))}
     </div>
   );
 });
@@ -427,72 +401,69 @@ const RevenueBreakdown = React.memo(function RevenueBreakdown({ data }: { data: 
     { name: "Cold (if won)", value: data.fromColdLeads },
   ].filter((d) => d.value > 0);
 
-  const renderLegend = useCallback((props: { payload?: Array<{ value: string; color: string }> }) => {
-    const { payload } = props;
-    if (!payload) return null;
-    const sources = [
-      { label: "Active Pipeline", value: data.fromActivePipeline },
-      { label: "Recurring", value: data.fromRecurringClients },
-      { label: "Cold (if won)", value: data.fromColdLeads },
-    ];
-    return (
-      <div className="space-y-1.5 mt-1">
-        {payload.map((entry, index) => {
-          const src = sources.find((s) => s.label === entry.value);
-          const pct = total > 0 && src ? Math.round((src.value / total) * 100) : 0;
-          return (
-            <div key={entry.value} className="flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full" style={{ background: entry.color }} />
-                <span className="text-muted-foreground/60 text-[11px]">{entry.value}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-[11px]">{src ? formatTTD(src.value) : ''}</span>
-                <span className="text-muted-foreground/50 w-7 text-right font-mono text-[10px]">{pct}%</span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    );
-  }, [data, total]);
+  const sources = [
+    { label: "Active", value: data.fromActivePipeline, color: REVENUE_COLORS[0] },
+    { label: "Recurring", value: data.fromRecurringClients, color: REVENUE_COLORS[1] },
+    { label: "Cold", value: data.fromColdLeads, color: REVENUE_COLORS[2] },
+  ];
 
   return (
-    <div className="space-y-2.5">
+    <div className="space-y-2">
       <div className="flex items-center justify-between">
         <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5">
           <TrendingUp className="w-3.5 h-3.5" />
           Revenue Forecast
         </h3>
-        <span className="text-base font-bold" style={{ color: "hsl(var(--kf-accent1))" }}>{formatTTD(total)}</span>
+        <span className="text-sm font-bold" style={{ color: "hsl(var(--kf-accent1))" }}>{formatTTD(total)}</span>
       </div>
 
       {pieData.length > 0 ? (
-        <ResponsiveContainer width="100%" height={200}>
-          <PieChart>
-            <Pie
-              data={pieData}
-              cx="50%"
-              cy="45%"
-              innerRadius={55}
-              outerRadius={78}
-              dataKey="value"
-              paddingAngle={2}
-              animationDuration={800}
-            >
-              {pieData.map((_entry, index) => (
-                <Cell key={`cell-${index}`} fill={REVENUE_COLORS[index % REVENUE_COLORS.length]} strokeWidth={0} />
-              ))}
-            </Pie>
-            <Tooltip
-              contentStyle={RECHARTS_TOOLTIP_STYLE.contentStyle}
-              formatter={((value: number | undefined, name: string | undefined) => [formatTTD(value ?? 0), name ?? '']) as never}
-            />
-            <Legend content={renderLegend as never} />
-          </PieChart>
-        </ResponsiveContainer>
+        <div className="flex items-center gap-3">
+          <div className="shrink-0">
+            <ResponsiveContainer width={100} height={100}>
+              <PieChart>
+                <Pie
+                  data={pieData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={30}
+                  outerRadius={46}
+                  dataKey="value"
+                  paddingAngle={2}
+                  animationDuration={800}
+                  strokeWidth={0}
+                >
+                  {pieData.map((_entry, index) => (
+                    <Cell key={`cell-${index}`} fill={REVENUE_COLORS[index % REVENUE_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  contentStyle={RECHARTS_TOOLTIP_STYLE.contentStyle}
+                  formatter={((value: number | undefined, name: string | undefined) => [formatTTD(value ?? 0), name ?? '']) as never}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="flex-1 min-w-0 space-y-1.5">
+            {sources.filter((s) => s.value > 0).map((s) => {
+              const pct = total > 0 ? Math.round((s.value / total) * 100) : 0;
+              return (
+                <div key={s.label} className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: s.color }} />
+                    <span className="text-[11px] text-muted-foreground/60 truncate">{s.label}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-[11px] font-semibold">{formatTTD(s.value)}</span>
+                    <span className="text-[10px] text-muted-foreground/50 font-mono w-6 text-right">{pct}%</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       ) : (
-        <div className="flex items-center justify-center h-[180px] text-[10px] text-muted-foreground/50">No revenue data</div>
+        <div className="flex items-center justify-center h-16 text-[10px] text-muted-foreground/50">No revenue data</div>
       )}
 
       {(data.expiringQuotes.count > 0 || data.overdueInvoices.count > 0) && (
@@ -1437,8 +1408,8 @@ function InsightsTabInner({
 
       <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
         {flowIntelligence && (
-          <div className="lg:col-span-7 rounded-xl border border-border/50 bg-card p-4">
-            <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5 mb-3">
+          <div className="lg:col-span-7 rounded-xl border border-border/50 bg-card p-3.5">
+            <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5 mb-2.5">
               <Zap className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
               Pipeline Funnel
             </h3>
@@ -1465,7 +1436,7 @@ function InsightsTabInner({
 
       <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
         {revenueData && (
-          <div className="lg:col-span-5 rounded-xl border border-border/50 bg-card p-4">
+          <div className="lg:col-span-5 rounded-xl border border-border/50 bg-card p-3.5">
             <RevenueBreakdown data={revenueData} />
           </div>
         )}
