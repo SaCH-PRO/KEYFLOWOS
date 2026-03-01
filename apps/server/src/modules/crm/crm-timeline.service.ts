@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
@@ -17,8 +17,8 @@ type TimelineEntry = {
 @Injectable()
 export class CrmTimelineService {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly events: EventEmitter2,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
 
   private formatContactName(contact: {

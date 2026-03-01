@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, HttpException, HttpStatus, Injectable, SetMetadata } from '@nestjs/common';
+import { CanActivate, ExecutionContext, HttpException, HttpStatus, Inject, Injectable, SetMetadata } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 
 export const RATE_LIMIT_KEY = 'CRM_RATE_LIMIT';
@@ -31,9 +31,11 @@ function cleanup(now: number) {
 
 @Injectable()
 export class CrmRateLimitGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+  constructor(@Inject(Reflector) private readonly reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
+    if (!this.reflector) return true;
+
     const opts = this.reflector.get<RateLimitOptions>(RATE_LIMIT_KEY, context.getHandler());
     if (!opts) return true;
 

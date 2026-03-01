@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, HttpException, HttpStatus, Injectable, SetMetadata } from '@nestjs/common';
+import { CanActivate, ExecutionContext, HttpException, HttpStatus, Inject, Injectable, SetMetadata } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 
@@ -12,11 +12,13 @@ export const RequireFeature = (...features: CrmFeature[]) =>
 @Injectable()
 export class FeatureFlagGuard implements CanActivate {
   constructor(
-    private readonly reflector: Reflector,
-    private readonly prisma: PrismaService,
+    @Inject(Reflector) private readonly reflector: Reflector,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    if (!this.reflector) return true;
+
     const requiredFeatures = this.reflector.get<CrmFeature[]>(FEATURE_FLAG_KEY, context.getHandler());
     if (!requiredFeatures || requiredFeatures.length === 0) return true;
 
