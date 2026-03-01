@@ -39,6 +39,14 @@ interface ContactsDatabaseProps {
 
 const STATUS_FILTER_OPTIONS = ["ALL", "LEAD", "PROSPECT", "CLIENT", "LOST"];
 
+const STATUS_COLORS: Record<string, string> = {
+  ALL: "text-foreground",
+  LEAD: "text-amber-400",
+  PROSPECT: "text-blue-400",
+  CLIENT: "text-emerald-400",
+  LOST: "text-red-400",
+};
+
 const EXPORT_OPTIONS: { format: ExportFormat; label: string; desc: string; icon: typeof FileSpreadsheet }[] = [
   { format: "csv", label: "CSV", desc: "Comma-separated values", icon: FileText },
   { format: "xlsx", label: "Excel", desc: "Microsoft Excel workbook", icon: FileSpreadsheet },
@@ -114,23 +122,21 @@ export function ContactsDatabase({
   }, [db.showColumnPicker, db.closeColumnPicker]);
 
   return (
-    <div className="space-y-4">
-      <div className="kf-card p-4">
+    <div className="space-y-3">
+      <div className="rounded-2xl border border-border/50 bg-card p-5">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-[hsl(var(--kf-accent2))]/10">
-              <Database className="w-4 h-4 text-[hsl(var(--kf-accent2))]" />
-            </div>
+          <div className="flex items-center gap-3">
+            <div className="w-1 h-5 rounded-full bg-gradient-to-b from-[hsl(var(--kf-accent2))] to-[hsl(var(--kf-accent2))]/40" />
             <div>
-              <h3 className="text-sm font-semibold">Contact Database</h3>
-              <p className="text-xs text-muted-foreground">
+              <h3 className="text-sm font-semibold tracking-tight">Contact Database</h3>
+              <p className="text-[11px] text-muted-foreground/60">
                 {db.filteredContacts.length} of {db.activeContacts.length} contacts
                 {db.usingCache && (
-                  <span className="ml-2 text-amber-400/80">(offline cache)</span>
+                  <span className="ml-2 text-amber-400/70">(offline cache)</span>
                 )}
                 {db.lastSync && (
-                  <span className="ml-2 inline-flex items-center gap-1">
-                    <HardDrive className="w-3 h-3" />
+                  <span className="ml-2 inline-flex items-center gap-1 text-muted-foreground/40">
+                    <HardDrive className="w-2.5 h-2.5" />
                     Synced {new Date(db.lastSync).toLocaleTimeString("en-TT", { hour: "2-digit", minute: "2-digit" })}
                   </span>
                 )}
@@ -138,29 +144,29 @@ export function ContactsDatabase({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               onClick={db.handleSync}
               disabled={db.syncing}
-              className="kf-btn-secondary inline-flex items-center gap-1.5 text-xs"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] transition-all disabled:opacity-40"
               aria-label="Sync contacts from cloud"
             >
               {db.syncing ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <Loader2 className="w-3 h-3 animate-spin" />
               ) : (
-                <HardDrive className="w-3.5 h-3.5" />
+                <HardDrive className="w-3 h-3 text-muted-foreground/60" />
               )}
               {db.syncing ? "Syncing…" : "Sync"}
             </button>
             <div className="relative" ref={columnPickerRef}>
               <button
                 onClick={db.toggleColumnPicker}
-                className={`kf-btn-secondary inline-flex items-center gap-1.5 text-xs ${db.showColumnPicker ? "ring-2 ring-[hsl(var(--kf-accent1))]" : ""}`}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] transition-all ${db.showColumnPicker ? "ring-1 ring-[hsl(var(--kf-accent1))]/40" : ""}`}
                 aria-label="Toggle column visibility"
                 aria-haspopup="true"
                 aria-expanded={db.showColumnPicker}
               >
-                <Columns3 className="w-3.5 h-3.5" />
+                <Columns3 className="w-3 h-3 text-muted-foreground/60" />
                 <span className="hidden sm:inline">Columns</span>
               </button>
               {db.showColumnPicker && (
@@ -171,11 +177,11 @@ export function ContactsDatabase({
                     aria-hidden="true"
                   />
                   <div
-                    className="fixed left-2 right-2 top-20 sm:absolute sm:left-auto sm:top-full sm:right-0 sm:mt-2 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 sm:w-80 max-h-[60vh] overflow-y-auto"
+                    className="fixed left-2 right-2 top-20 sm:absolute sm:left-auto sm:top-full sm:right-0 sm:mt-2 z-50 bg-popover/95 backdrop-blur-xl border border-border/50 shadow-xl rounded-xl py-2 sm:w-80 max-h-[60vh] overflow-y-auto"
                     role="group"
                     aria-label="Toggle columns"
                   >
-                  <div className="px-3 py-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                  <div className="px-3 py-1.5 text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">
                     Show / Hide Columns
                   </div>
                   <div className="grid grid-cols-2 gap-x-1">
@@ -185,14 +191,14 @@ export function ContactsDatabase({
                       <button
                         key={col.key}
                         onClick={() => db.toggleColumn(col.key as ColumnKey)}
-                        className="flex items-center gap-2 px-3 py-2 text-xs hover:bg-muted/50 transition-colors text-left"
+                        className="flex items-center gap-2 px-3 py-2 text-[11px] hover:bg-white/[0.04] transition-colors text-left rounded-md"
                         role="checkbox"
                         aria-checked={isVisible}
                       >
-                        <div className={`w-4 h-4 shrink-0 rounded border flex items-center justify-center transition-colors ${isVisible ? "bg-[hsl(var(--kf-accent1))] border-[hsl(var(--kf-accent1))]" : "border-border"}`}>
-                          {isVisible && <Check className="w-3 h-3 text-white" />}
+                        <div className={`w-3.5 h-3.5 shrink-0 rounded border flex items-center justify-center transition-colors ${isVisible ? "bg-[hsl(var(--kf-accent1))] border-[hsl(var(--kf-accent1))]" : "border-border/50"}`}>
+                          {isVisible && <Check className="w-2.5 h-2.5 text-white" />}
                         </div>
-                        <span className={`truncate ${isVisible ? "text-foreground" : "text-muted-foreground"}`}>
+                        <span className={`truncate ${isVisible ? "text-foreground" : "text-muted-foreground/50"}`}>
                           {col.label}
                         </span>
                       </button>
@@ -207,11 +213,11 @@ export function ContactsDatabase({
               <button
                 ref={exportTriggerRef}
                 onClick={db.toggleExport}
-                className="kf-btn-primary inline-flex items-center gap-1.5 text-xs"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-lg bg-gradient-to-r from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all"
                 aria-haspopup="dialog"
                 aria-expanded={db.showExport}
               >
-                <Download className="w-3.5 h-3.5" />
+                <Download className="w-3 h-3" />
                 Export
                 <ChevronDown className={`w-3 h-3 transition-transform ${db.showExport ? "rotate-180" : ""}`} />
               </button>
@@ -224,12 +230,12 @@ export function ContactsDatabase({
                   />
                   <div
                     ref={exportDialogRef}
-                    className="fixed left-2 right-2 top-20 sm:left-1/2 sm:right-auto sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 z-50 kf-card border border-border shadow-2xl rounded-xl py-2 sm:w-64 max-h-[80vh] overflow-y-auto"
+                    className="fixed left-2 right-2 top-20 sm:left-1/2 sm:right-auto sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 z-50 bg-popover/95 backdrop-blur-xl border border-border/50 shadow-xl rounded-xl py-2 sm:w-64 max-h-[80vh] overflow-y-auto"
                     role="dialog"
                     aria-modal="true"
                     aria-label="Export contacts"
                   >
-                    <div className="px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/30 mb-1">
+                    <div className="px-4 py-2 text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider border-b border-border/30 mb-1">
                       Export {db.filteredContacts.length} contacts
                     </div>
                     {EXPORT_OPTIONS.map(({ format, label, desc, icon: Icon }) => (
@@ -237,16 +243,16 @@ export function ContactsDatabase({
                         key={format}
                         onClick={() => db.handleExport(format)}
                         disabled={db.exporting}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-left disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[hsl(var(--kf-accent1))]"
+                        className="w-full flex items-center gap-3 px-4 py-2.5 text-[11px] hover:bg-white/[0.05] transition-colors text-left disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[hsl(var(--kf-accent1))]/40"
                       >
                         {db.exporting ? (
-                          <Loader2 className="w-4 h-4 animate-spin text-[hsl(var(--kf-accent1))]" />
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-[hsl(var(--kf-accent1))]" />
                         ) : (
-                          <Icon className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+                          <Icon className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]/70" />
                         )}
                         <div>
-                          <span className="font-medium">{label}</span>
-                          <p className="text-[11px] text-muted-foreground">{desc}</p>
+                          <span className="font-semibold">{label}</span>
+                          <p className="text-[10px] text-muted-foreground/40">{desc}</p>
                         </div>
                       </button>
                     ))}
@@ -257,30 +263,34 @@ export function ContactsDatabase({
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-3 mb-3">
+        <div className="flex flex-col sm:flex-row gap-2 mb-3">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/40" />
             <input
               type="text"
               placeholder="Search all fields..."
               value={db.searchInput}
               onChange={(e) => db.setSearchInput(e.target.value)}
-              className="kf-input w-full pl-10 text-sm"
+              className="w-full pl-9 pr-8 py-2 text-sm bg-white/[0.03] border border-border/40 rounded-xl focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 focus:border-[hsl(var(--kf-accent1))]/40 placeholder:text-muted-foreground/40 transition-all"
               aria-label="Search contacts database"
             />
             {db.searchInput && (
               <button
                 onClick={handleClearSearch}
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted/50"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-md hover:bg-muted/50 transition-colors"
                 aria-label="Clear search"
               >
-                <X className="w-3.5 h-3.5 text-muted-foreground" />
+                <X className="w-3 h-3 text-muted-foreground/40" />
               </button>
             )}
           </div>
           <button
             onClick={db.toggleFilters}
-            className={`kf-btn-secondary inline-flex items-center gap-1.5 text-sm ${db.showFilters ? "ring-2 ring-[hsl(var(--kf-accent1))]" : ""}`}
+            className={`inline-flex items-center gap-1.5 px-3 py-2 text-[11px] font-medium rounded-xl border transition-all ${
+              db.showFilters
+                ? "border-[hsl(var(--kf-accent1))]/30 bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))]"
+                : "border-border/40 bg-white/[0.02] text-muted-foreground/60 hover:bg-white/[0.05]"
+            }`}
             aria-pressed={db.showFilters}
             aria-label="Toggle status filters"
           >
@@ -298,7 +308,7 @@ export function ContactsDatabase({
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
               exit={{ opacity: 0, height: 0 }}
-              className="flex flex-wrap gap-2 mb-3"
+              className="flex flex-wrap gap-1.5 mb-3"
               role="group"
               aria-label="Filter by status"
             >
@@ -308,14 +318,16 @@ export function ContactsDatabase({
                   <button
                     key={s}
                     onClick={() => db.setStatusFilter(s)}
-                    className={`px-3 py-1 text-xs rounded-lg transition-all inline-flex items-center gap-1.5 ${
-                      db.statusFilter === s ? "kf-btn-primary" : "kf-btn-secondary"
+                    className={`px-3 py-1.5 text-[11px] rounded-lg transition-all inline-flex items-center gap-1.5 font-medium ${
+                      db.statusFilter === s
+                        ? "bg-white/[0.08] border border-border/60 " + (STATUS_COLORS[s] || "")
+                        : "bg-white/[0.02] border border-transparent text-muted-foreground/50 hover:bg-white/[0.04]"
                     }`}
                     aria-pressed={db.statusFilter === s}
                   >
                     {s}
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                      db.statusFilter === s ? "bg-white/20" : "bg-muted/50"
+                    <span className={`text-[9px] font-mono px-1 py-0.5 rounded ${
+                      db.statusFilter === s ? "bg-white/10" : "bg-white/[0.03] text-muted-foreground/40"
                     }`}>
                       {count}
                     </span>
@@ -344,38 +356,38 @@ export function ContactsDatabase({
           columns={db.visibleColumnDefs}
         />
 
-        <div className="flex items-center justify-between mt-3 px-1">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex items-center justify-between mt-4 px-1">
+          <div className="flex items-center gap-2 text-[11px] text-muted-foreground/50">
             <label htmlFor="db-page-size" className="sr-only">Rows per page</label>
-            <span>Rows:</span>
+            <span className="font-medium">Rows</span>
             <select
               id="db-page-size"
               value={db.pageSize}
               onChange={(e) => db.handlePageSizeChange(Number(e.target.value))}
-              className="bg-white/5 border border-border/40 rounded px-2 py-1 text-xs"
+              className="bg-white/[0.03] border border-border/40 rounded-lg px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40"
             >
               {PAGE_SIZE_OPTIONS.map((size) => (
                 <option key={size} value={size}>{size}</option>
               ))}
             </select>
-            <span className="hidden sm:inline">
+            <span className="hidden sm:inline text-muted-foreground/40">
               Showing {Math.min((db.page - 1) * db.pageSize + 1, db.filteredContacts.length)}-{Math.min(db.page * db.pageSize, db.filteredContacts.length)} of {db.filteredContacts.length}
             </span>
           </div>
-          <nav className="flex items-center gap-2 text-xs" aria-label="Table pagination">
+          <nav className="flex items-center gap-1.5 text-[11px]" aria-label="Table pagination">
             <button
               disabled={db.page <= 1}
               onClick={db.handlePrevPage}
-              className="px-3 py-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              className="px-2.5 py-1 rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] disabled:opacity-25 disabled:cursor-not-allowed transition-all font-medium text-muted-foreground/60"
               aria-label="Previous page"
             >
               Previous
             </button>
-            <span className="text-muted-foreground" aria-live="polite">{db.page}/{db.totalPages}</span>
+            <span className="text-muted-foreground/40 font-mono px-2" aria-live="polite">{db.page}/{db.totalPages}</span>
             <button
               disabled={db.page >= db.totalPages}
               onClick={db.handleNextPage}
-              className="px-3 py-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              className="px-2.5 py-1 rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] disabled:opacity-25 disabled:cursor-not-allowed transition-all font-medium text-muted-foreground/60"
               aria-label="Next page"
             >
               Next
@@ -402,22 +414,20 @@ export function ContactsDatabase({
         onSelectAllPages={db.handleSelectAllPages}
       />
 
-      <div className="kf-card">
+      <div className="rounded-2xl border border-border/50 bg-card overflow-hidden">
         <button
           onClick={db.toggleLists}
-          className="w-full flex items-center justify-between p-4 hover:bg-muted/20 transition-colors rounded-xl"
+          className="w-full flex items-center justify-between p-4 hover:bg-white/[0.02] transition-colors"
           aria-expanded={db.showLists}
         >
-          <div className="flex items-center gap-2.5">
-            <div className="p-1.5 rounded-lg bg-[hsl(var(--kf-accent1))]/10">
-              <List className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
-            </div>
+          <div className="flex items-center gap-3">
+            <div className="w-1 h-5 rounded-full bg-gradient-to-b from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent1))]/40" />
             <div className="text-left">
-              <h3 className="text-sm font-semibold">Contact Lists</h3>
-              <p className="text-xs text-muted-foreground">Organize contacts into manual or smart lists</p>
+              <h3 className="text-sm font-semibold tracking-tight">Contact Lists</h3>
+              <p className="text-[11px] text-muted-foreground/50">Organize contacts into manual or smart lists</p>
             </div>
           </div>
-          <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${db.showLists ? "rotate-180" : ""}`} />
+          <ChevronDown className={`w-4 h-4 text-muted-foreground/40 transition-transform duration-200 ${db.showLists ? "rotate-180" : ""}`} />
         </button>
         <AnimatePresence>
           {db.showLists && (

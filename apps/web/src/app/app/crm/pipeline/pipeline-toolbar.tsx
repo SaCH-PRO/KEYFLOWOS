@@ -25,6 +25,14 @@ export type ListTab = "all" | "pinned" | "recent";
 
 const STATUSES = ["ALL", "LEAD", "PROSPECT", "CLIENT", "LOST"] as const;
 
+const STATUS_COLORS: Record<string, string> = {
+  ALL: "text-foreground",
+  LEAD: "text-amber-400",
+  PROSPECT: "text-blue-400",
+  CLIENT: "text-emerald-400",
+  LOST: "text-red-400",
+};
+
 const SORT_OPTIONS: { value: SortOption; label: string }[] = [
   { value: "name", label: "Name A-Z" },
   { value: "newest", label: "Newest First" },
@@ -87,24 +95,43 @@ function PipelineToolbarInner({
   const [showFilters, setShowFilters] = useState(false);
   const [showSort, setShowSort] = useState(false);
 
+  const handleToggleFilters = useCallback(() => {
+    setShowFilters((p) => !p);
+    setShowSort(false);
+  }, []);
+
+  const handleToggleSort = useCallback(() => {
+    setShowSort((p) => !p);
+    setShowFilters(false);
+  }, []);
+
   return (
-    <div className="kf-card p-3 space-y-3">
+    <div className="rounded-2xl border border-border/50 bg-card p-4 space-y-3">
       <div className="flex items-center gap-2">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50" />
           <input
             type="text"
             placeholder="Search contacts..."
             value={searchInput}
             onChange={(e) => onSearchChange(e.target.value)}
             aria-label="Search contacts"
-            className="kf-input w-full pl-9 pr-3 py-2 text-sm"
+            className="w-full pl-9 pr-8 py-2 text-sm bg-white/[0.03] border border-border/40 rounded-xl focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 focus:border-[hsl(var(--kf-accent1))]/40 placeholder:text-muted-foreground/40 transition-all"
           />
+          {searchInput && (
+            <button
+              onClick={() => onSearchChange("")}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-md hover:bg-muted/50 transition-colors"
+              aria-label="Clear search"
+            >
+              <X className="w-3 h-3 text-muted-foreground/50" />
+            </button>
+          )}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5">
           <button
             onClick={onAddContact}
-            className="p-2 rounded-lg bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/25 transition-all"
+            className="p-2 rounded-xl bg-gradient-to-br from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all"
             aria-label="Add contact"
             title="Add contact"
           >
@@ -112,23 +139,23 @@ function PipelineToolbarInner({
           </button>
           <button
             onClick={onToggleSelectMode}
-            className={`p-2 rounded-lg transition-all ${selectMode ? "bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))]" : "text-muted-foreground hover:bg-muted/50"}`}
+            className={`p-2 rounded-xl transition-all ${selectMode ? "bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
             aria-label={selectMode ? "Exit select mode" : "Select contacts"}
             title={selectMode ? "Exit select mode" : "Select contacts"}
           >
             <CheckSquare className="w-4 h-4" />
           </button>
           <button
-            onClick={() => { setShowFilters(!showFilters); setShowSort(false); }}
-            className={`p-2 rounded-lg transition-all ${showFilters ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground hover:bg-muted/50"}`}
+            onClick={handleToggleFilters}
+            className={`p-2 rounded-xl transition-all ${showFilters ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
             aria-label="Filters"
           >
             <Filter className="w-4 h-4" />
           </button>
           <div className="relative">
             <button
-              onClick={() => { setShowSort(!showSort); setShowFilters(false); }}
-              className={`p-2 rounded-lg transition-all ${showSort ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground hover:bg-muted/50"}`}
+              onClick={handleToggleSort}
+              className={`p-2 rounded-xl transition-all ${showSort ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
               aria-label="Sort contacts"
               aria-haspopup="listbox"
               aria-expanded={showSort}
@@ -138,14 +165,14 @@ function PipelineToolbarInner({
             {showSort && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setShowSort(false)} />
-                <div role="listbox" aria-label="Sort options" className="fixed left-2 right-2 top-20 sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-1 z-50 kf-card border border-border shadow-2xl rounded-xl py-1 sm:w-44 max-h-[80vh] overflow-y-auto">
+                <div role="listbox" aria-label="Sort options" className="fixed left-2 right-2 top-20 sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-1 z-50 bg-popover/95 backdrop-blur-xl border border-border/50 shadow-xl rounded-xl py-1 sm:w-44 max-h-[80vh] overflow-y-auto">
                   {SORT_OPTIONS.map((opt) => (
                     <button
                       key={opt.value}
                       role="option"
                       aria-selected={sortBy === opt.value}
                       onClick={() => { onSortChange(opt.value); setShowSort(false); }}
-                      className={`w-full text-left px-4 py-2 text-sm hover:bg-muted/50 transition-colors ${sortBy === opt.value ? "text-[hsl(var(--kf-accent1))] font-medium" : ""}`}
+                      className={`w-full text-left px-3 py-2 text-[11px] hover:bg-white/[0.05] transition-colors ${sortBy === opt.value ? "text-[hsl(var(--kf-accent1))] font-semibold" : "text-muted-foreground"}`}
                     >
                       {opt.label}
                     </button>
@@ -157,7 +184,7 @@ function PipelineToolbarInner({
           <button
             onClick={onRefresh}
             disabled={loading}
-            className="p-2 rounded-lg text-muted-foreground hover:bg-muted/50 transition-all disabled:opacity-50"
+            className="p-2 rounded-xl text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground transition-all disabled:opacity-40"
             aria-label="Refresh"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
@@ -177,7 +204,11 @@ function PipelineToolbarInner({
               <button
                 key={s}
                 onClick={() => onStatusFilterChange(s)}
-                className={`px-3 py-1.5 text-xs rounded-lg transition-all ${statusFilter === s ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] ring-1 ring-[hsl(var(--kf-accent1))]/30 font-medium" : "bg-muted/30 text-muted-foreground"}`}
+                className={`px-3 py-1.5 text-[11px] rounded-lg transition-all font-medium ${
+                  statusFilter === s
+                    ? "bg-white/[0.08] border border-border/60 " + (STATUS_COLORS[s] || "")
+                    : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"
+                }`}
               >
                 {s}
               </button>
@@ -186,7 +217,7 @@ function PipelineToolbarInner({
         )}
       </AnimatePresence>
 
-      <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
+      <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide pb-0.5">
         {SMART_SEGMENTS.map(({ key, label, icon: SIcon, color }) => {
           const count = segmentCounts[key];
           const isActive = activeSegment === key;
@@ -195,17 +226,17 @@ function PipelineToolbarInner({
               key={key}
               onClick={() => onSegmentChange(isActive ? null : key)}
               aria-pressed={isActive}
-              className={`inline-flex items-center gap-1 px-2.5 py-1 text-[11px] rounded-full transition-all whitespace-nowrap flex-shrink-0 ${
+              className={`inline-flex items-center gap-1 px-2.5 py-1 text-[10px] rounded-lg transition-all whitespace-nowrap flex-shrink-0 font-medium ${
                 isActive
-                  ? "ring-1 ring-[hsl(var(--kf-accent1))]/40 bg-[hsl(var(--kf-accent1))]/10 font-medium"
-                  : "bg-muted/30 text-muted-foreground hover:bg-muted/50"
+                  ? "bg-white/[0.08] border border-border/50"
+                  : "bg-white/[0.02] border border-transparent text-muted-foreground/50 hover:bg-white/[0.04] hover:text-muted-foreground"
               }`}
               style={isActive ? { color } : undefined}
             >
               <SIcon className="w-3 h-3" style={{ color }} />
               {label}
               {count > 0 && (
-                <span className="text-[9px] font-bold" style={{ color }}>{count}</span>
+                <span className="text-[9px] font-bold ml-0.5 opacity-70" style={{ color }}>{count}</span>
               )}
             </button>
           );
@@ -213,7 +244,7 @@ function PipelineToolbarInner({
         {activeSegment && (
           <button
             onClick={() => onSegmentChange(null)}
-            className="p-1 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/50 flex-shrink-0"
+            className="p-1 rounded-md text-muted-foreground/40 hover:text-muted-foreground hover:bg-white/[0.04] flex-shrink-0 transition-all"
             aria-label="Clear segment"
           >
             <X className="w-3 h-3" />
@@ -221,7 +252,7 @@ function PipelineToolbarInner({
         )}
       </div>
 
-      <div role="tablist" aria-label="Contact list views" className="flex gap-0.5 border-b border-border/50">
+      <div role="tablist" aria-label="Contact list views" className="flex gap-0.5 border-t border-border/30 pt-2">
         {[
           { key: "all" as const, label: "All", count: allCount, icon: Users },
           { key: "pinned" as const, label: "Pinned", count: pinnedCount, icon: Star },
@@ -232,15 +263,15 @@ function PipelineToolbarInner({
             role="tab"
             aria-selected={activeListTab === key}
             onClick={() => onListTabChange(key)}
-            className={`flex items-center gap-1 px-3 py-1.5 text-xs transition-colors border-b-2 -mb-px ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] rounded-lg transition-all font-medium ${
               activeListTab === key
-                ? "border-[hsl(var(--kf-accent1))] text-foreground font-medium"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+                ? "bg-white/[0.08] text-foreground"
+                : "text-muted-foreground/50 hover:text-muted-foreground hover:bg-white/[0.03]"
             }`}
           >
             <Icon className="w-3 h-3" />
             <span>{label}</span>
-            <span className="text-[10px] opacity-60">{count}</span>
+            <span className={`text-[9px] font-mono ${activeListTab === key ? "opacity-70" : "opacity-40"}`}>{count}</span>
           </button>
         ))}
       </div>
