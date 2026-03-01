@@ -143,8 +143,6 @@ const AlertCards = React.memo(function AlertCards({
   );
 });
 
-type ViewMode = "growth" | "pipeline";
-
 function InsightsTabInner({
   flowIntelligence, revenueData, financialGrowth, contacts, loading,
   businessId, onViewCold, onViewReady, onViewExpiringQuotes, onViewOverdueInvoices,
@@ -156,7 +154,6 @@ function InsightsTabInner({
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [refreshing, setRefreshing] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>("growth");
 
   const togglePeriodMenu = useCallback(() => setShowPeriodMenu((p) => !p), []);
   const closePeriodMenu = useCallback(() => setShowPeriodMenu(false), []);
@@ -204,6 +201,7 @@ function InsightsTabInner({
   const hasTags = periodContacts.some((c) => Array.isArray(c.tags) && c.tags.length > 0);
   const hasLeadScores = periodContacts.some((c) => (c as Record<string, unknown>).leadScore != null);
   const hasMeta = periodContacts.some((c) => (c as Record<string, unknown>).meta);
+  const hasFinancial = !!financialGrowth;
 
   return (
     <motion.div initial="hidden" animate="visible" variants={stagger.container} className="space-y-3">
@@ -211,20 +209,6 @@ function InsightsTabInner({
         <div className="flex items-center gap-2">
           <div className="w-1 h-5 rounded-full bg-gradient-to-b from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))]" />
           <h2 className="text-sm font-semibold tracking-tight">Insights</h2>
-          <div className="flex items-center bg-white/[0.03] border border-border/40 rounded-lg p-0.5">
-            <button
-              onClick={() => setViewMode("growth")}
-              className={`px-2.5 py-1 text-[10px] font-semibold rounded-md transition-all ${viewMode === "growth" ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/50 hover:text-muted-foreground/70"}`}
-            >
-              Financial Growth
-            </button>
-            <button
-              onClick={() => setViewMode("pipeline")}
-              className={`px-2.5 py-1 text-[10px] font-semibold rounded-md transition-all ${viewMode === "pipeline" ? "bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))]" : "text-muted-foreground/50 hover:text-muted-foreground/70"}`}
-            >
-              Pipeline
-            </button>
-          </div>
           <span className="text-[10px] text-muted-foreground/50 font-medium">{contacts.length} contacts</span>
         </div>
         <div className="flex items-center gap-1.5">
@@ -255,110 +239,80 @@ function InsightsTabInner({
         </div>
       </motion.div>
 
-      {viewMode === "growth" ? (
-        <>
-          {financialGrowth && <FinancialKPIs data={financialGrowth} />}
-
-          {!financialGrowth && <HeroStats flowIntelligence={flowIntelligence} revenueData={revenueData} contacts={periodContacts} onNavigatePipeline={onNavigatePipeline} />}
-
-          <LazyWidget height={200}>
-            <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
-              {financialGrowth && (
-                <div className="lg:col-span-7 rounded-xl border border-border/50 bg-card p-3.5">
-                  <RevenueVelocity data={financialGrowth} />
-                </div>
-              )}
-              <div className={`rounded-xl border border-border/50 bg-card p-4 ${financialGrowth ? "lg:col-span-5" : "lg:col-span-12"}`}>
-                {flowIntelligence ? <AlertCards data={flowIntelligence} revenueData={revenueData} onViewCold={onViewCold} onViewReady={onViewReady} onViewExpiringQuotes={onViewExpiringQuotes} onViewOverdueInvoices={onViewOverdueInvoices} /> : (
-                  <div className="flex items-center gap-2.5 px-3 py-3 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04]"><div className="w-7 h-7 rounded-md bg-emerald-500/10 flex items-center justify-center shrink-0"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /></div><span className="text-xs text-emerald-400/70 font-medium">All clear</span></div>
-                )}
-              </div>
-            </motion.div>
-          </LazyWidget>
-
-          <LazyWidget height={200}>
-            <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
-              {financialGrowth && (
-                <div className="lg:col-span-5 rounded-xl border border-border/50 bg-card p-3.5">
-                  <CashFlowHealth data={financialGrowth} />
-                </div>
-              )}
-              <div className={`rounded-xl border border-border/50 bg-card p-3.5 ${financialGrowth ? "lg:col-span-4" : "lg:col-span-6"}`}>
-                {revenueData && financialGrowth ? (
-                  <RevenueAtRisk data={financialGrowth} revenueData={revenueData} onViewExpiringQuotes={onViewExpiringQuotes} onViewOverdueInvoices={onViewOverdueInvoices} />
-                ) : revenueData ? (
-                  <RevenueBreakdown data={revenueData} />
-                ) : (
-                  <InsightEmptyState icon={DollarSign} message="Revenue data appears with invoices" label="Revenue Forecast" />
-                )}
-              </div>
-              <div className={`rounded-xl border border-border/50 bg-card p-3.5 ${financialGrowth ? "lg:col-span-3" : "lg:col-span-6"}`}>
-                {financialGrowth ? (
-                  <TopServicesRevenue data={financialGrowth} />
-                ) : (
-                  <InsightEmptyState icon={BarChart3} message="Service revenue appears with bookings" label="Top Services" />
-                )}
-              </div>
-            </motion.div>
-          </LazyWidget>
-
-          <LazyWidget height={200}>
-            <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
-              <div className="lg:col-span-6 rounded-xl border border-border/50 bg-card p-4">{hasRevenueClients ? <RevenueByClient contacts={periodContacts} onNavigatePipeline={onNavigatePipeline} /> : <InsightEmptyState icon={DollarSign} message="Revenue data appears with invoices" label="Revenue by Client" />}</div>
-              <div className="lg:col-span-6 rounded-xl border border-border/50 bg-card p-4"><GrowthTrend contacts={contacts} period={period} /></div>
-            </motion.div>
-          </LazyWidget>
-        </>
+      {hasFinancial ? (
+        <FinancialKPIs data={financialGrowth!} />
       ) : (
-        <>
-          <HeroStats flowIntelligence={flowIntelligence} revenueData={revenueData} contacts={periodContacts} onNavigatePipeline={onNavigatePipeline} />
+        <HeroStats flowIntelligence={flowIntelligence} revenueData={revenueData} contacts={periodContacts} onNavigatePipeline={onNavigatePipeline} />
+      )}
 
+      <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
+        {hasFinancial ? (
+          <div className="lg:col-span-7 rounded-xl border border-border/50 bg-card p-3.5">
+            <RevenueVelocity data={financialGrowth!} />
+          </div>
+        ) : flowIntelligence ? (
+          <LazyWidget className="lg:col-span-7 rounded-xl border border-border/50 bg-card p-3.5" height={180}>
+            <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5 mb-2.5"><Zap className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />Pipeline Funnel</h3>
+            <FunnelChart data={flowIntelligence} />
+          </LazyWidget>
+        ) : null}
+        <div className={`${hasFinancial || flowIntelligence ? "lg:col-span-5" : "lg:col-span-12"} rounded-xl border border-border/50 bg-card p-4`}>
+          <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5 mb-3"><AlertTriangle className="w-3.5 h-3.5 text-amber-400/60" />Action Items</h3>
+          {flowIntelligence ? <AlertCards data={flowIntelligence} revenueData={revenueData} onViewCold={onViewCold} onViewReady={onViewReady} onViewExpiringQuotes={onViewExpiringQuotes} onViewOverdueInvoices={onViewOverdueInvoices} /> : (
+            <div className="flex items-center gap-2.5 px-3 py-3 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04]"><div className="w-7 h-7 rounded-md bg-emerald-500/10 flex items-center justify-center shrink-0"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /></div><span className="text-xs text-emerald-400/70 font-medium">All clear — no action items right now</span></div>
+          )}
+        </div>
+      </motion.div>
+
+      {hasFinancial && (
+        <LazyWidget height={200}>
           <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
-            {flowIntelligence && (
-              <LazyWidget className="lg:col-span-7 rounded-xl border border-border/50 bg-card p-3.5" height={180}>
-                <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5 mb-2.5"><Zap className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />Pipeline Funnel</h3>
-                <FunnelChart data={flowIntelligence} />
-              </LazyWidget>
-            )}
-            <div className={`${flowIntelligence ? "lg:col-span-5" : "lg:col-span-12"} rounded-xl border border-border/50 bg-card p-4`}>
-              <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5 mb-3"><AlertTriangle className="w-3.5 h-3.5 text-amber-400/60" />Action Items</h3>
-              {flowIntelligence ? <AlertCards data={flowIntelligence} revenueData={revenueData} onViewCold={onViewCold} onViewReady={onViewReady} onViewExpiringQuotes={onViewExpiringQuotes} onViewOverdueInvoices={onViewOverdueInvoices} /> : (
-                <div className="flex items-center gap-2.5 px-3 py-3 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04]"><div className="w-7 h-7 rounded-md bg-emerald-500/10 flex items-center justify-center shrink-0"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /></div><span className="text-xs text-emerald-400/70 font-medium">All clear</span></div>
+            <div className="lg:col-span-5 rounded-xl border border-border/50 bg-card p-3.5">
+              <CashFlowHealth data={financialGrowth!} />
+            </div>
+            <div className="lg:col-span-4 rounded-xl border border-border/50 bg-card p-3.5">
+              {revenueData ? (
+                <RevenueAtRisk data={financialGrowth!} revenueData={revenueData} onViewExpiringQuotes={onViewExpiringQuotes} onViewOverdueInvoices={onViewOverdueInvoices} />
+              ) : (
+                <RevenueAtRisk data={financialGrowth!} revenueData={null} onViewExpiringQuotes={onViewExpiringQuotes} onViewOverdueInvoices={onViewOverdueInvoices} />
               )}
             </div>
+            <div className="lg:col-span-3 rounded-xl border border-border/50 bg-card p-3.5">
+              <TopServicesRevenue data={financialGrowth!} />
+            </div>
           </motion.div>
-
-          <LazyWidget height={200}>
-            <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
-              {revenueData && <div className="lg:col-span-5 rounded-xl border border-border/50 bg-card p-3.5"><RevenueBreakdown data={revenueData} /></div>}
-              <div className={`rounded-xl border border-border/50 bg-card p-4 ${revenueData ? "lg:col-span-7" : "lg:col-span-12"}`}><GrowthTrend contacts={contacts} period={period} /></div>
-            </motion.div>
-          </LazyWidget>
-
-          <LazyWidget height={200}>
-            <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
-              <div className="lg:col-span-5 rounded-xl border border-border/50 bg-card p-4"><DataCompleteness contacts={periodContacts} /></div>
-              <div className="lg:col-span-4 rounded-xl border border-border/50 bg-card p-4"><LeadScoreDistribution contacts={periodContacts} />{!hasLeadScores && <InsightEmptyState icon={Target} message="Scores appear as contacts engage" />}</div>
-              <div className="lg:col-span-3 rounded-xl border border-border/50 bg-card p-4"><TaskHealth contacts={periodContacts} />{!hasMeta && <InsightEmptyState icon={ListChecks} message="Health data appears with tasks" />}</div>
-            </motion.div>
-          </LazyWidget>
-
-          <LazyWidget height={200}>
-            <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
-              <div className="lg:col-span-6 rounded-xl border border-border/50 bg-card p-4">{hasRevenueClients ? <RevenueByClient contacts={periodContacts} onNavigatePipeline={onNavigatePipeline} /> : <InsightEmptyState icon={DollarSign} message="Revenue data appears with invoices" label="Revenue by Client" />}</div>
-              <div className="lg:col-span-6 rounded-xl border border-border/50 bg-card p-4"><EngagementHeatmap contacts={periodContacts} /></div>
-            </motion.div>
-          </LazyWidget>
-
-          <LazyWidget height={200}>
-            <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
-              <div className="lg:col-span-4 rounded-xl border border-border/50 bg-card p-4">{hasClients ? <ConversionTimeline contacts={periodContacts} /> : <InsightEmptyState icon={Clock} message="Conversion data appears with stage changes" label="Conversion Timeline" />}</div>
-              <div className="lg:col-span-4 rounded-xl border border-border/50 bg-card p-4">{hasTags ? <TagPerformance contacts={periodContacts} onNavigatePipeline={onNavigatePipeline} /> : <InsightEmptyState icon={Tag} message="Tag analytics appear with tagged contacts" label="Tag Performance" />}</div>
-              <div className="lg:col-span-4 rounded-xl border border-border/50 bg-card p-4 space-y-5"><SourceConversion contacts={periodContacts} /><TopSources contacts={periodContacts} /><ChannelPreference contacts={periodContacts} />{!periodContacts.some((c) => c.source) && <InsightEmptyState icon={Filter} message="Source data appears with attributed contacts" />}</div>
-            </motion.div>
-          </LazyWidget>
-        </>
+        </LazyWidget>
       )}
+
+      <LazyWidget height={200}>
+        <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
+          {revenueData && !hasFinancial && <div className="lg:col-span-5 rounded-xl border border-border/50 bg-card p-3.5"><RevenueBreakdown data={revenueData} /></div>}
+          <div className={`rounded-xl border border-border/50 bg-card p-4 ${revenueData && !hasFinancial ? "lg:col-span-7" : "lg:col-span-12"}`}><GrowthTrend contacts={contacts} period={period} /></div>
+        </motion.div>
+      </LazyWidget>
+
+      <LazyWidget height={200}>
+        <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
+          <div className="lg:col-span-5 rounded-xl border border-border/50 bg-card p-4"><DataCompleteness contacts={periodContacts} /></div>
+          <div className="lg:col-span-4 rounded-xl border border-border/50 bg-card p-4"><LeadScoreDistribution contacts={periodContacts} />{!hasLeadScores && <InsightEmptyState icon={Target} message="Scores appear as contacts engage" />}</div>
+          <div className="lg:col-span-3 rounded-xl border border-border/50 bg-card p-4"><TaskHealth contacts={periodContacts} />{!hasMeta && <InsightEmptyState icon={ListChecks} message="Health data appears with tasks" />}</div>
+        </motion.div>
+      </LazyWidget>
+
+      <LazyWidget height={200}>
+        <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
+          <div className="lg:col-span-6 rounded-xl border border-border/50 bg-card p-4">{hasRevenueClients ? <RevenueByClient contacts={periodContacts} onNavigatePipeline={onNavigatePipeline} /> : <InsightEmptyState icon={DollarSign} message="Revenue data appears with invoices" label="Revenue by Client" />}</div>
+          <div className="lg:col-span-6 rounded-xl border border-border/50 bg-card p-4"><EngagementHeatmap contacts={periodContacts} /></div>
+        </motion.div>
+      </LazyWidget>
+
+      <LazyWidget height={200}>
+        <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
+          <div className="lg:col-span-4 rounded-xl border border-border/50 bg-card p-4">{hasClients ? <ConversionTimeline contacts={periodContacts} /> : <InsightEmptyState icon={Clock} message="Conversion data appears with stage changes" label="Conversion Timeline" />}</div>
+          <div className="lg:col-span-4 rounded-xl border border-border/50 bg-card p-4">{hasTags ? <TagPerformance contacts={periodContacts} onNavigatePipeline={onNavigatePipeline} /> : <InsightEmptyState icon={Tag} message="Tag analytics appear with tagged contacts" label="Tag Performance" />}</div>
+          <div className="lg:col-span-4 rounded-xl border border-border/50 bg-card p-4 space-y-5"><SourceConversion contacts={periodContacts} /><TopSources contacts={periodContacts} /><ChannelPreference contacts={periodContacts} />{!periodContacts.some((c) => c.source) && <InsightEmptyState icon={Filter} message="Source data appears with attributed contacts" />}</div>
+        </motion.div>
+      </LazyWidget>
 
       <LazyWidget height={100}>
         <motion.div variants={stagger.item}><AiCommandCenter businessId={businessId} contactCount={contacts.length} /></motion.div>
