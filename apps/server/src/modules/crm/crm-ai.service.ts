@@ -1144,6 +1144,88 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
     }
   }
 
+  async interpretCommand(businessId: string, command: string) {
+    const contacts = await this.db.contact.findMany({
+      where: { businessId, deletedAt: null },
+      take: 200,
+      orderBy: { updatedAt: 'desc' },
+      select: {
+        id: true, firstName: true, lastName: true, email: true, phone: true,
+        status: true, companyName: true, tags: true,
+      },
+    });
+
+    const contactSummary = contacts.slice(0, 50).map(c => {
+      const name = [c.firstName, c.lastName].filter(Boolean).join(' ') || c.email || 'Unnamed';
+      return `${name} (${c.id}) [${c.status}]${c.companyName ? ` @ ${c.companyName}` : ''}`;
+    }).join('\n');
+
+    const systemPrompt = `You are KeyFlow CRM's AI command interpreter. Parse the user's natural language command into a structured action intent.
+
+Available actions:
+- add_contact: Open the add contact form. Extract any provided details (firstName, lastName, email, phone, companyName, status).
+- edit_contact: Open edit form for a specific contact. Requires matching a contact from the list.
+- delete_contact: Delete a specific contact. Requires matching a contact.
+- view_contact: Open/select a specific contact to view details. Requires matching a contact.
+- change_status: Change a contact's status. Requires contact match and new status (LEAD, PROSPECT, CLIENT, LOST).
+- add_note: Add a note to a contact. Requires contact match and note body.
+- add_task: Add a task for a contact. Requires contact match and task title.
+- log_communication: Log an interaction. Requires contact match and channel (call, email, whatsapp, meeting, sms).
+- switch_tab: Navigate to a CRM tab (pipeline, database, insights, engage).
+- filter_status: Filter the pipeline by status (LEAD, PROSPECT, CLIENT, LOST, all).
+- open_broadcast: Open the broadcast/bulk messaging tool.
+- import_contacts: Open the contact import modal.
+- search_contacts: Search for contacts (delegate to search, not an action).
+- show_favorites: Show favorite contacts.
+- toggle_favorite: Star/unstar a contact.
+- bulk_tag: Add tags to selected contacts. Requires tag names.
+- generate_ai_summary: Generate AI summary for a contact.
+- generate_ai_score: Generate AI lead score for a contact.
+- generate_prep_brief: Generate AI prep brief for a contact.
+- suggest_tags: Get AI tag suggestions for a contact.
+
+Current contacts:
+${contactSummary}
+
+Respond with JSON:
+{
+  "isAction": true/false,
+  "action": "action_name",
+  "contactId": "id if applicable",
+  "contactName": "matched name for confirmation",
+  "params": { action-specific parameters },
+  "confirmation": "Human-readable description of what will happen",
+  "confidence": 0.0-1.0
+}
+
+If the input is a question/search query rather than an action command, set isAction to false.
+If you cannot determine which contact the user means, set action to "ambiguous_contact" with params.candidates as an array of {id, name} matches.
+Always try to match contacts by partial name, email, or company.`;
+
+    const result = await this.aiUsage.callAi({
+      businessId,
+      feature: 'crm_command',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: command },
+      ],
+      maxTokens: 500,
+      temperature: 0.1,
+    });
+
+    const parsed = this.parseJson(result.content);
+    return {
+      isAction: parsed.isAction === true,
+      action: (parsed.action as string) || '',
+      contactId: (parsed.contactId as string) || null,
+      contactName: (parsed.contactName as string) || null,
+      params: (parsed.params as Record<string, unknown>) || {},
+      confirmation: (parsed.confirmation as string) || '',
+      confidence: Number(parsed.confidence) || 0.5,
+      creditsUsed: result.usage?.creditsUsed ?? 1,
+    };
+  }
+
   private parseJson(content: string): Record<string, unknown> {
     try {
       const jsonMatch = content.match(/\{[\s\S]*\}/);

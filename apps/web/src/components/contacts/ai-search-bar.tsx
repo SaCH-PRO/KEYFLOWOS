@@ -4,42 +4,98 @@ import { useState, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import {
   Sparkles, Search, X, Loader2, User, Building2,
-  Tag, ArrowRight, Brain,
+  Tag, ArrowRight, Brain, Zap, UserPlus, FileEdit,
+  Phone, MessageSquare, Star, Filter, BarChart3,
+  CheckCircle2, AlertTriangle,
 } from "lucide-react";
-import { aiNaturalLanguageSearch, type AiSearchResult } from "@/lib/client";
+import { aiNaturalLanguageSearch, aiInterpretCommand, type AiSearchResult, type AiCommandResult } from "@/lib/client";
+
+export type CrmCommand =
+  | { type: "add_contact"; params?: Record<string, unknown> }
+  | { type: "edit_contact"; contactId: string }
+  | { type: "delete_contact"; contactId: string }
+  | { type: "view_contact"; contactId: string }
+  | { type: "change_status"; contactId: string; status: string }
+  | { type: "add_note"; contactId: string; body?: string }
+  | { type: "add_task"; contactId: string; title?: string }
+  | { type: "log_communication"; contactId: string; channel?: string }
+  | { type: "switch_tab"; tab: string }
+  | { type: "filter_status"; status: string }
+  | { type: "open_broadcast" }
+  | { type: "import_contacts" }
+  | { type: "show_favorites" }
+  | { type: "toggle_favorite"; contactId: string }
+  | { type: "bulk_tag"; tags: string[] }
+  | { type: "generate_ai_summary"; contactId: string }
+  | { type: "generate_ai_score"; contactId: string }
+  | { type: "generate_prep_brief"; contactId: string }
+  | { type: "suggest_tags"; contactId: string }
+  | { type: "search_contacts"; query: string };
 
 interface AiSearchBarProps {
   onSelectContact?: (contactId: string) => void;
   onApplyFilters?: (filters: Record<string, unknown>) => void;
+  onExecuteCommand?: (command: CrmCommand) => void;
 }
 
 const EXAMPLE_QUERIES = [
+  "Add a new contact",
   "Show me clients who haven't been active in 30 days",
+  "Switch to the Insights tab",
   "Find leads from this week",
-  "Who has unpaid invoices?",
-  "High-scoring prospects ready to convert",
+  "Log a call with...",
+  "Prepare a brief for...",
 ];
 
-export function AiSearchBar({ onSelectContact, onApplyFilters }: AiSearchBarProps) {
+const ACTION_ICONS: Record<string, typeof Zap> = {
+  add_contact: UserPlus,
+  edit_contact: FileEdit,
+  view_contact: User,
+  log_communication: Phone,
+  switch_tab: BarChart3,
+  filter_status: Filter,
+  open_broadcast: MessageSquare,
+  import_contacts: UserPlus,
+  show_favorites: Star,
+  toggle_favorite: Star,
+  generate_ai_summary: Sparkles,
+  generate_ai_score: Sparkles,
+  generate_prep_brief: Brain,
+  suggest_tags: Tag,
+};
+
+export function AiSearchBar({ onSelectContact, onApplyFilters, onExecuteCommand }: AiSearchBarProps) {
   const [query, setQuery] = useState("");
   const [data, setData] = useState<AiSearchResult | null>(null);
+  const [commandResult, setCommandResult] = useState<AiCommandResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const search = useCallback(async (searchQuery?: string) => {
+  const processInput = useCallback(async (searchQuery?: string) => {
     const q = (searchQuery ?? query).trim();
     if (!q) return;
     setLoading(true);
+    setData(null);
+    setCommandResult(null);
+
     try {
-      const result = await aiNaturalLanguageSearch(q);
-      if (result.data) {
-        setData(result.data);
+      const cmdResult = await aiInterpretCommand(q);
+      if (cmdResult.data?.isAction) {
+        if (cmdResult.data.action === "ambiguous_contact" || cmdResult.data.confidence >= 0.5) {
+          setCommandResult(cmdResult.data);
+          return;
+        }
+      }
+
+      const searchResult = await aiNaturalLanguageSearch(q);
+      if (searchResult.data) {
+        setData(searchResult.data);
       } else {
-        toast.error(result.error ?? "Search failed");
+        toast.error(searchResult.error ?? "Search failed");
       }
     } catch {
-      toast.error("AI search failed");
+      toast.error("AI processing failed");
     } finally {
       setLoading(false);
     }
@@ -48,7 +104,7 @@ export function AiSearchBar({ onSelectContact, onApplyFilters }: AiSearchBarProp
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") {
       e.preventDefault();
-      search();
+      processInput();
     }
     if (e.key === "Escape") {
       clear();
@@ -58,18 +114,113 @@ export function AiSearchBar({ onSelectContact, onApplyFilters }: AiSearchBarProp
   const clear = () => {
     setQuery("");
     setData(null);
+    setCommandResult(null);
     setFocused(false);
   };
 
   const handleExampleClick = (example: string) => {
     setQuery(example);
-    search(example);
+    processInput(example);
   };
+
+  const executeCommand = useCallback((cmd: AiCommandResult) => {
+    if (!onExecuteCommand) {
+      toast.error("Command execution not available");
+      return;
+    }
+
+    const { action, contactId, params } = cmd;
+
+    const needsContact = [
+      "edit_contact", "delete_contact", "view_contact", "change_status",
+      "add_note", "add_task", "log_communication", "toggle_favorite",
+      "generate_ai_summary", "generate_ai_score", "generate_prep_brief", "suggest_tags",
+    ];
+    if (needsContact.includes(action) && !contactId) {
+      toast.error("Could not determine which contact you mean — try being more specific");
+      return;
+    }
+
+    switch (action) {
+      case "add_contact":
+        onExecuteCommand({ type: "add_contact", params: params ?? {} });
+        break;
+      case "edit_contact":
+        onExecuteCommand({ type: "edit_contact", contactId: contactId! });
+        break;
+      case "delete_contact":
+        onExecuteCommand({ type: "delete_contact", contactId: contactId! });
+        break;
+      case "view_contact":
+        onExecuteCommand({ type: "view_contact", contactId: contactId! });
+        break;
+      case "change_status": {
+        const status = (params?.status as string) || "";
+        if (!status) {
+          toast.error("Could not determine the new status — try specifying LEAD, PROSPECT, CLIENT, or LOST");
+          return;
+        }
+        onExecuteCommand({ type: "change_status", contactId: contactId!, status });
+        break;
+      }
+      case "add_note":
+        onExecuteCommand({ type: "add_note", contactId: contactId!, body: params?.body as string | undefined });
+        break;
+      case "add_task":
+        onExecuteCommand({ type: "add_task", contactId: contactId!, title: params?.title as string | undefined });
+        break;
+      case "log_communication":
+        onExecuteCommand({ type: "log_communication", contactId: contactId!, channel: params?.channel as string | undefined });
+        break;
+      case "switch_tab":
+        onExecuteCommand({ type: "switch_tab", tab: (params?.tab as string) ?? "pipeline" });
+        break;
+      case "filter_status":
+        onExecuteCommand({ type: "filter_status", status: (params?.status as string) ?? "all" });
+        break;
+      case "open_broadcast":
+        onExecuteCommand({ type: "open_broadcast" });
+        break;
+      case "import_contacts":
+        onExecuteCommand({ type: "import_contacts" });
+        break;
+      case "show_favorites":
+        onExecuteCommand({ type: "show_favorites" });
+        break;
+      case "toggle_favorite":
+        onExecuteCommand({ type: "toggle_favorite", contactId: contactId! });
+        break;
+      case "bulk_tag":
+        onExecuteCommand({ type: "bulk_tag", tags: (params?.tags as string[]) ?? [] });
+        break;
+      case "generate_ai_summary":
+        onExecuteCommand({ type: "generate_ai_summary", contactId: contactId! });
+        break;
+      case "generate_ai_score":
+        onExecuteCommand({ type: "generate_ai_score", contactId: contactId! });
+        break;
+      case "generate_prep_brief":
+        onExecuteCommand({ type: "generate_prep_brief", contactId: contactId! });
+        break;
+      case "suggest_tags":
+        onExecuteCommand({ type: "suggest_tags", contactId: contactId! });
+        break;
+      case "search_contacts":
+        onExecuteCommand({ type: "search_contacts", query: (params?.query as string) ?? query });
+        break;
+      default:
+        toast.info(cmd.confirmation || "Command not recognized");
+        return;
+    }
+    clear();
+  }, [onExecuteCommand, query]);
 
   const contactName = (c: AiSearchResult["contacts"][0]) => {
     const name = `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim();
     return name || c.email || "Unnamed";
   };
+
+  const ActionIcon = commandResult ? (ACTION_ICONS[commandResult.action] ?? Zap) : Zap;
 
   return (
     <div className="relative">
@@ -86,8 +237,8 @@ export function AiSearchBar({ onSelectContact, onApplyFilters }: AiSearchBarProp
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           onFocus={() => setFocused(true)}
-          onBlur={() => setTimeout(() => setFocused(false), 200)}
-          placeholder="Ask AI: &quot;Find clients in Port of Spain&quot; or &quot;Who needs follow-up?&quot;"
+          onBlur={() => setTimeout(() => setFocused(false), 300)}
+          placeholder='AI Assistant: "Add a contact", "Show insights", "Prepare brief for..."'
           className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/50 outline-none"
         />
         {query && (
@@ -96,7 +247,7 @@ export function AiSearchBar({ onSelectContact, onApplyFilters }: AiSearchBarProp
           </button>
         )}
         <button
-          onClick={() => search()}
+          onClick={() => processInput()}
           disabled={!query.trim() || loading}
           className="p-1 rounded-lg bg-[hsl(var(--kf-accent1))]/10 hover:bg-[hsl(var(--kf-accent1))]/20 disabled:opacity-30 transition-colors"
         >
@@ -104,9 +255,9 @@ export function AiSearchBar({ onSelectContact, onApplyFilters }: AiSearchBarProp
         </button>
       </div>
 
-      {focused && !data && !loading && !query && (
+      {focused && !data && !commandResult && !loading && !query && (
         <div className="absolute top-full left-0 right-0 mt-1 rounded-xl border border-border/50 bg-card p-3 shadow-xl z-50">
-          <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider mb-2 block">Try asking</span>
+          <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider mb-2 block">Try saying</span>
           <div className="space-y-1">
             {EXAMPLE_QUERIES.map((ex, i) => (
               <button
@@ -114,10 +265,96 @@ export function AiSearchBar({ onSelectContact, onApplyFilters }: AiSearchBarProp
                 onClick={() => handleExampleClick(ex)}
                 className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-white/[0.04] transition-colors text-left"
               >
-                <Sparkles className="w-3 h-3 text-[hsl(var(--kf-accent1))]/50 shrink-0" />
+                {i < 3 ? (
+                  <Zap className="w-3 h-3 text-[hsl(var(--kf-accent2))]/60 shrink-0" />
+                ) : (
+                  <Sparkles className="w-3 h-3 text-[hsl(var(--kf-accent1))]/50 shrink-0" />
+                )}
                 <span className="text-xs text-foreground/70">{ex}</span>
               </button>
             ))}
+          </div>
+          <div className="mt-2 pt-2 border-t border-border/20">
+            <span className="text-[10px] text-muted-foreground/50">
+              Search contacts or give commands — the AI handles both
+            </span>
+          </div>
+        </div>
+      )}
+
+      {commandResult && (
+        <div className="absolute top-full left-0 right-0 mt-1 rounded-xl border border-[hsl(var(--kf-accent2))]/30 bg-card shadow-xl z-50 overflow-hidden">
+          <div className="p-3 space-y-3">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[hsl(var(--kf-accent1))]/20 to-[hsl(var(--kf-accent2))]/20 flex items-center justify-center shrink-0">
+                <ActionIcon className="w-4.5 h-4.5 text-[hsl(var(--kf-accent1))]" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className="text-xs font-semibold text-foreground/90">AI Action</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                    commandResult.confidence >= 0.8
+                      ? 'bg-emerald-500/10 text-emerald-400'
+                      : commandResult.confidence >= 0.6
+                      ? 'bg-amber-500/10 text-amber-400'
+                      : 'bg-red-500/10 text-red-400'
+                  }`}>
+                    {Math.round(commandResult.confidence * 100)}% confident
+                  </span>
+                </div>
+                <p className="text-sm text-foreground/80 leading-relaxed">{commandResult.confirmation}</p>
+                {commandResult.contactName && (
+                  <div className="flex items-center gap-1.5 mt-1.5">
+                    <User className="w-3 h-3 text-muted-foreground/60" />
+                    <span className="text-xs text-muted-foreground/70">{commandResult.contactName}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {commandResult.action === "ambiguous_contact" && commandResult.params?.candidates && (
+              <div className="space-y-1 ml-12">
+                <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider">Did you mean?</span>
+                {(commandResult.params.candidates as Array<{ id: string; name: string }>).map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => {
+                      onSelectContact?.(c.id);
+                      clear();
+                    }}
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-white/[0.04] transition-colors text-left"
+                  >
+                    <User className="w-3.5 h-3.5 text-muted-foreground/50" />
+                    <span className="text-xs text-foreground/70">{c.name}</span>
+                    <ArrowRight className="w-3 h-3 text-muted-foreground/30 ml-auto" />
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {commandResult.action !== "ambiguous_contact" && (
+              <div className="flex items-center gap-2 ml-12">
+                <button
+                  onClick={() => executeCommand(commandResult)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[hsl(var(--kf-accent1))]/15 hover:bg-[hsl(var(--kf-accent1))]/25 text-[hsl(var(--kf-accent1))] text-xs font-medium transition-colors"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Execute
+                </button>
+                <button
+                  onClick={clear}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-white/[0.04] text-muted-foreground/70 text-xs transition-colors"
+                >
+                  Cancel
+                </button>
+                {commandResult.confidence < 0.7 && (
+                  <span className="flex items-center gap-1 text-[10px] text-amber-400/70 ml-auto">
+                    <AlertTriangle className="w-3 h-3" />
+                    Low confidence — verify action
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -166,7 +403,7 @@ export function AiSearchBar({ onSelectContact, onApplyFilters }: AiSearchBarProp
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
                         <span className="text-xs font-medium text-foreground/90 truncate">{contactName(c)}</span>
-                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
                           c.status === 'CLIENT' ? 'bg-emerald-500/10 text-emerald-400' :
                           c.status === 'PROSPECT' ? 'bg-blue-500/10 text-blue-400' :
                           c.status === 'LEAD' ? 'bg-purple-500/10 text-purple-400' :
@@ -175,7 +412,7 @@ export function AiSearchBar({ onSelectContact, onApplyFilters }: AiSearchBarProp
                           {c.status}
                         </span>
                         {c.leadScore != null && (
-                          <span className="text-[9px] text-muted-foreground/60">Score: {c.leadScore}</span>
+                          <span className="text-[10px] text-muted-foreground/60">Score: {c.leadScore}</span>
                         )}
                       </div>
                       <div className="flex items-center gap-2 text-[10px] text-muted-foreground/60">
@@ -189,7 +426,7 @@ export function AiSearchBar({ onSelectContact, onApplyFilters }: AiSearchBarProp
                       {c.tags.length > 0 && (
                         <div className="flex gap-1 mt-0.5">
                           {c.tags.slice(0, 3).map((tag, ti) => (
-                            <span key={ti} className="text-[9px] px-1 py-0.5 rounded bg-white/5 text-muted-foreground/60">
+                            <span key={ti} className="text-[10px] px-1 py-0.5 rounded bg-white/5 text-muted-foreground/60">
                               <Tag className="w-2 h-2 inline mr-0.5" />{tag}
                             </span>
                           ))}

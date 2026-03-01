@@ -714,6 +714,22 @@ export class CrmController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai-command')
+  aiCommand(
+    @Param('businessId') businessId: string,
+    @Body() body: { command: string },
+  ) {
+    if (!body.command || typeof body.command !== 'string') {
+      throw new BadRequestException('command is required');
+    }
+    if (body.command.length > 500) {
+      throw new BadRequestException('command must be 500 characters or less');
+    }
+    checkAiRateLimit(businessId);
+    return this.crmAi.interpretCommand(businessId, body.command);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/ai-analyze')
   aiAnalyze(
     @Param('businessId') businessId: string,

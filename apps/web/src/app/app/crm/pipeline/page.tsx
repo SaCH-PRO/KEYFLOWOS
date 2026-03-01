@@ -15,7 +15,7 @@ import { KanbanSkeleton } from "@/components/ui/skeleton";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
-import { AiSearchBar } from "@/components/contacts/ai-search-bar";
+import { AiSearchBar, type CrmCommand } from "@/components/contacts/ai-search-bar";
 import { AiChurnDetectionPanel } from "@/components/contacts/ai-churn-detection";
 import type { SmartSegment } from "./pipeline-toolbar";
 import { ContactsDatabase } from "./contacts-database";
@@ -103,6 +103,115 @@ export default function ContactsPage() {
   const handleGuideSelectMode = useCallback(() => { state.handleToggleSelectMode(); setCrmViewTab("pipeline"); }, [state.handleToggleSelectMode, setCrmViewTab]);
   const handleTabChange = useCallback((t: string) => setCrmViewTab(t as "pipeline" | "insights" | "engage" | "database"), [setCrmViewTab]);
 
+  const handleAiCommand = useCallback((cmd: CrmCommand) => {
+    switch (cmd.type) {
+      case "add_contact":
+        state.setShowAddForm(true);
+        toast.success("Opening add contact form...");
+        break;
+      case "edit_contact":
+        selectContact(cmd.contactId);
+        setCrmViewTab("pipeline");
+        setTimeout(() => state.handleEditContact(), 300);
+        toast.success("Opening contact for editing...");
+        break;
+      case "delete_contact":
+        selectContact(cmd.contactId);
+        setCrmViewTab("pipeline");
+        setTimeout(() => state.handleDeleteContact(), 300);
+        break;
+      case "view_contact":
+        selectContact(cmd.contactId);
+        setCrmViewTab("pipeline");
+        toast.success("Navigating to contact...");
+        break;
+      case "change_status":
+        selectContact(cmd.contactId);
+        setCrmViewTab("pipeline");
+        state.handleUpdateStatus(cmd.status);
+        toast.success(`Status updated to ${cmd.status}`);
+        break;
+      case "add_note":
+        selectContact(cmd.contactId);
+        setCrmViewTab("pipeline");
+        if (cmd.body) {
+          setTimeout(() => {
+            state.handleAddNote(cmd.body!);
+            toast.success("Note added");
+          }, 400);
+        } else {
+          toast.success("Opening contact — add your note in the Notes tab");
+        }
+        break;
+      case "add_task":
+        selectContact(cmd.contactId);
+        setCrmViewTab("pipeline");
+        if (cmd.title) {
+          setTimeout(() => {
+            state.handleAddTask(cmd.title!);
+            toast.success("Task created");
+          }, 400);
+        } else {
+          toast.success("Opening contact — add your task in the Tasks tab");
+        }
+        break;
+      case "log_communication":
+        selectContact(cmd.contactId);
+        setCrmViewTab("pipeline");
+        toast.success("Opening contact — use the Log Interaction button");
+        break;
+      case "switch_tab":
+        setCrmViewTab(cmd.tab as "pipeline" | "database" | "insights" | "engage");
+        toast.success(`Switched to ${cmd.tab} view`);
+        break;
+      case "filter_status":
+        if (cmd.status === "all") {
+          setStatusFilter("");
+        } else {
+          setStatusFilter(cmd.status);
+        }
+        setCrmViewTab("pipeline");
+        toast.success(cmd.status === "all" ? "Showing all contacts" : `Filtered to ${cmd.status} contacts`);
+        break;
+      case "open_broadcast":
+        state.setShowBroadcast(true);
+        toast.success("Opening broadcast tool...");
+        break;
+      case "import_contacts":
+        state.setShowAddMenu(true);
+        toast.success("Opening contact import...");
+        break;
+      case "show_favorites":
+        state.setActiveSegment("favorites" as any);
+        setCrmViewTab("pipeline");
+        toast.success("Showing favorite contacts");
+        break;
+      case "toggle_favorite":
+        state.handleToggleFavorite(cmd.contactId);
+        break;
+      case "bulk_tag":
+        if (state.selectedIds.size > 0) {
+          cmd.tags.forEach(tag => state.handleBulkTag(tag));
+          toast.success(`Tags applied to ${state.selectedIds.size} contacts`);
+        } else {
+          toast.info("Select contacts first, then try again");
+        }
+        break;
+      case "generate_ai_summary":
+      case "generate_ai_score":
+      case "generate_prep_brief":
+      case "suggest_tags":
+        selectContact(cmd.contactId);
+        setCrmViewTab("pipeline");
+        toast.success("Opening contact — use the AI tools in the detail panel");
+        break;
+      case "search_contacts":
+        state.setSearchInput(cmd.query);
+        setCrmViewTab("pipeline");
+        break;
+    }
+  }, [selectContact, setCrmViewTab, setStatusFilter, state]);
+
   const databaseContacts = useMemo(() => contacts.map((c) => ({
     id: c.id,
     firstName: c.firstName ?? null, lastName: c.lastName ?? null,
@@ -161,6 +270,7 @@ export default function ContactsPage() {
 
       <AiSearchBar
         onSelectContact={(id) => { selectContact(id); setCrmViewTab("pipeline"); }}
+        onExecuteCommand={handleAiCommand}
       />
 
       <TabNav
