@@ -395,74 +395,76 @@ export class CrmService {
     const phoneNormalized = normalizePhone(phone);
     const tags = this.normalizeTags(input.tags);
 
-    if (email) {
-      const existing = await this.prisma.client.contact.findFirst({
-        where: { ...contactWhereBase(businessId), emailNormalized },
-      });
-      if (existing) {
-        return this.mergeContactDetails(existing, businessId, {
-          firstName: input.firstName,
-          lastName: input.lastName,
-          email,
-          phone,
-          source: input.source,
-          sourceDetail: input.sourceDetail,
-          tags,
+    return this.prisma.client.$transaction(async (tx) => {
+      if (email) {
+        const existing = await tx.contact.findFirst({
+          where: { ...contactWhereBase(businessId), emailNormalized },
         });
+        if (existing) {
+          return this.mergeContactDetails(existing, businessId, {
+            firstName: input.firstName,
+            lastName: input.lastName,
+            email,
+            phone,
+            source: input.source,
+            sourceDetail: input.sourceDetail,
+            tags,
+          });
+        }
       }
-    }
-    if (phoneNormalized) {
-      const existingByPhone = await this.prisma.client.contact.findFirst({
-        where: { ...contactWhereBase(businessId), phoneNormalized },
-      });
-      if (existingByPhone) {
-        return this.mergeContactDetails(existingByPhone, businessId, {
-          firstName: input.firstName,
-          lastName: input.lastName,
-          email,
-          phone,
-          source: input.source,
-          sourceDetail: input.sourceDetail,
-          tags,
+      if (phoneNormalized) {
+        const existingByPhone = await tx.contact.findFirst({
+          where: { ...contactWhereBase(businessId), phoneNormalized },
         });
+        if (existingByPhone) {
+          return this.mergeContactDetails(existingByPhone, businessId, {
+            firstName: input.firstName,
+            lastName: input.lastName,
+            email,
+            phone,
+            source: input.source,
+            sourceDetail: input.sourceDetail,
+            tags,
+          });
+        }
       }
-    }
 
-    if (!email && !phoneNormalized && input.firstName && input.lastName && input.sourceDetail) {
-      const recentMatch = await this.prisma.client.contact.findFirst({
-        where: {
-          ...contactWhereBase(businessId),
-          firstName: input.firstName,
-          lastName: input.lastName,
-          source: input.source ?? 'manual',
-          sourceDetail: input.sourceDetail,
-          createdAt: { gte: new Date(Date.now() - 5 * 60 * 1000) },
-        },
-        orderBy: { createdAt: 'desc' },
+      if (!email && !phoneNormalized && input.firstName && input.lastName && input.sourceDetail) {
+        const recentMatch = await tx.contact.findFirst({
+          where: {
+            ...contactWhereBase(businessId),
+            firstName: input.firstName,
+            lastName: input.lastName,
+            source: input.source ?? 'manual',
+            sourceDetail: input.sourceDetail,
+            createdAt: { gte: new Date(Date.now() - 5 * 60 * 1000) },
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (recentMatch) {
+          return recentMatch;
+        }
+      }
+
+      const { firstName: _fn, lastName: _ln, email: _em, phone: _ph, tags: _t, ...extraFields } = input;
+      return this.createContact({
+        businessId,
+        firstName: input.firstName,
+        lastName: input.lastName,
+        email,
+        phone,
+        companyName: input.companyName ?? undefined,
+        source: input.source ?? undefined,
+        sourceDetail: input.sourceDetail ?? undefined,
+        tags,
+        ...extraFields,
       });
-      if (recentMatch) {
-        return recentMatch;
-      }
-    }
-
-    const { firstName: _fn, lastName: _ln, email: _em, phone: _ph, tags: _t, ...extraFields } = input;
-    return this.createContact({
-      businessId,
-      firstName: input.firstName,
-      lastName: input.lastName,
-      email,
-      phone,
-      companyName: input.companyName ?? undefined,
-      source: input.source ?? undefined,
-      sourceDetail: input.sourceDetail ?? undefined,
-      tags,
-      ...extraFields,
-    });
+    }, { isolationLevel: 'Serializable' });
   }
 
   private async mergeContactDetails(
     existing: Contact,
-    businessId: string,
+    _businessId: string,
     input: {
       firstName?: string | null;
       lastName?: string | null;
@@ -474,22 +476,31 @@ export class CrmService {
       tags?: string[];
     },
   ) {
-    const updates: Partial<Contact> & ContactExtraAttributes = {};
-    if (input.firstName && !existing.firstName) updates.firstName = input.firstName;
-    if (input.lastName && !existing.lastName) updates.lastName = input.lastName;
-    if (input.email && !existing.email) updates.email = input.email;
-    if (input.phone && !existing.phone) updates.phone = input.phone;
-    if (input.companyName && !existing.companyName) updates.companyName = input.companyName;
-    if (input.source && !existing.source) updates.source = input.source;
-    if (input.sourceDetail && !existing.sourceDetail) updates.sourceDetail = input.sourceDetail;
+    const data: Record<string, any> = {};
+    if (input.firstName && !existing.firstName) data.firstName = sanitize(input.firstName);
+    if (input.lastName && !existing.lastName) data.lastName = sanitize(input.lastName);
+    if (input.email && !existing.email) {
+      data.email = input.email;
+      data.emailNormalized = normalizeEmail(input.email);
+    }
+    if (input.phone && !existing.phone) {
+      data.phone = input.phone;
+      data.phoneNormalized = normalizePhone(input.phone);
+    }
+    if (input.companyName && !existing.companyName) data.companyName = sanitize(input.companyName);
+    if (input.source && !existing.source) data.source = input.source;
+    if (input.sourceDetail && !existing.sourceDetail) data.sourceDetail = input.sourceDetail;
     if (input.tags && input.tags.length > 0) {
       const merged = new Set([...(existing.tags ?? []), ...input.tags]);
-      updates.tags = Array.from(merged);
+      data.tags = Array.from(merged);
     }
-    if (Object.keys(updates).length === 0) {
+    if (Object.keys(data).length === 0) {
       return existing;
     }
-    return this.updateContact({ businessId, contactId: existing.id, ...updates });
+    return this.prisma.client.contact.update({
+      where: { id: existing.id },
+      data,
+    });
   }
 
   async updateContact(input: {
@@ -654,35 +665,35 @@ export class CrmService {
         where: { id: { in: input.contactIds }, ...contactWhereBase(input.businessId) },
         select: { id: true, tags: true },
       });
-      const ops = contacts.map((c) => {
-        const merged = Array.from(new Set([...(c.tags ?? []), ...(input.addTags ?? [])]));
-        return this.prisma.client.contact.update({
-          where: { id: c.id },
-          data: { ...data, tags: merged },
-        });
+      const results = await this.prisma.client.$transaction(async (tx) => {
+        const updated = [];
+        for (const c of contacts) {
+          const merged = Array.from(new Set([...(c.tags ?? []), ...(input.addTags ?? [])]));
+          const u = await tx.contact.update({ where: { id: c.id }, data: { ...data, tags: merged } });
+          updated.push(u);
+          await this.timeline.logEvent(input.businessId, c.id, 'bulk.updated', {
+            ...(input.status ? { status: input.status } : {}),
+            ...(input.addTags ? { addedTags: input.addTags } : {}),
+          }, tx);
+        }
+        return updated;
       });
-      const results = await this.prisma.client.$transaction(ops);
-      const eventOps = contacts.map((c) =>
-        this.timeline.logEvent(input.businessId, c.id, 'bulk.updated', {
-          ...(input.status ? { status: input.status } : {}),
-          ...(input.addTags ? { addedTags: input.addTags } : {}),
-        }),
-      );
-      await Promise.allSettled(eventOps);
       this.stats.invalidateCache(input.businessId);
       return { updated: results.length };
     }
     if (Object.keys(data).length === 0) {
       throw new BadRequestException('No update fields provided');
     }
-    const result = await this.prisma.client.contact.updateMany({
-      where: { id: { in: input.contactIds }, ...contactWhereBase(input.businessId) },
-      data,
+    const result = await this.prisma.client.$transaction(async (tx) => {
+      const res = await tx.contact.updateMany({
+        where: { id: { in: input.contactIds }, ...contactWhereBase(input.businessId) },
+        data,
+      });
+      for (const cid of input.contactIds) {
+        await this.timeline.logEvent(input.businessId, cid, 'bulk.updated', { status: input.status }, tx);
+      }
+      return res;
     });
-    const eventOps = input.contactIds.map((cid) =>
-      this.timeline.logEvent(input.businessId, cid, 'bulk.updated', { status: input.status }),
-    );
-    await Promise.allSettled(eventOps);
     this.stats.invalidateCache(input.businessId);
     return { updated: result.count };
   }

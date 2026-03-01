@@ -123,9 +123,12 @@ function PipelineTabContentInner({ state }: PipelineTabContentProps) {
               const name = `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || "Unnamed";
               const initials = `${c.firstName?.[0] ?? ""}${c.lastName?.[0] ?? ""}`.toUpperCase() || "?";
               return (
-                <button
+                <div
                   key={c.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => selectContact(c.id)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectContact(c.id); } }}
                   className={`flex-shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl border transition-all hover:bg-white/[0.03] cursor-pointer ${
                     selectedContactId === c.id
                       ? "border-[hsl(var(--kf-accent1))]/50 bg-[hsl(var(--kf-accent1))]/[0.06]"
@@ -152,7 +155,7 @@ function PipelineTabContentInner({ state }: PipelineTabContentProps) {
                   >
                     <Heart className="w-3 h-3 fill-current" />
                   </button>
-                </button>
+                </div>
               );
             })}
           </div>

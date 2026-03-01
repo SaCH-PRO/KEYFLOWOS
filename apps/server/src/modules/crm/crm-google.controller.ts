@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Inject, Logger, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { CrmGoogleService } from './crm-google.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -8,6 +8,8 @@ import type { Response } from 'express';
 @Controller('crm')
 @UseGuards(CrmRateLimitGuard)
 export class CrmGoogleController {
+  private readonly logger = new Logger(CrmGoogleController.name);
+
   constructor(
     @Inject(CrmGoogleService) private readonly google: CrmGoogleService,
   ) {}
@@ -49,7 +51,8 @@ export class CrmGoogleController {
 
       return res.redirect(`${frontendUrl}/app/crm/pipeline?google_success=true&imported=${result.imported}`);
     } catch (err) {
-      return res.redirect(`${frontendUrl}/app/crm/pipeline?google_error=${encodeURIComponent((err as Error).message)}`);
+      this.logger.error('Google OAuth callback failed', (err as Error).message);
+      return res.redirect(`${frontendUrl}/app/crm/pipeline?google_error=import_failed`);
     }
   }
 

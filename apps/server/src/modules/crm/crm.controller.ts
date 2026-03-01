@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpException, HttpStatus, Inject, Param, Patch, Post, Put, Query, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Inject, Param, Patch, Post, Put, Query, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { CrmActionsService } from './crm-actions.service';
 import { CrmFlowService } from './crm-flow.service';
@@ -18,22 +18,9 @@ import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
 import { CrmRateLimitGuard, CrmRateLimit } from './guards/rate-limit.guard';
 import { FeatureFlagGuard, RequireFeature } from './guards/feature-flag.guard';
+import { checkAiRateLimit } from './ai-rate-limit.util';
 import { memoryStorage } from 'multer';
 import type { Express } from 'express';
-
-const AI_RATE_LIMIT = 10;
-const AI_RATE_WINDOW_MS = 60_000;
-const aiRateMap = new Map<string, number[]>();
-
-function checkAiRateLimit(businessId: string) {
-  const now = Date.now();
-  const timestamps = (aiRateMap.get(businessId) ?? []).filter((t) => now - t < AI_RATE_WINDOW_MS);
-  if (timestamps.length >= AI_RATE_LIMIT) {
-    throw new HttpException('AI rate limit exceeded. Please wait a moment before trying again.', HttpStatus.TOO_MANY_REQUESTS);
-  }
-  timestamps.push(now);
-  aiRateMap.set(businessId, timestamps);
-}
 
 @Controller('crm')
 @UseGuards(CrmRateLimitGuard)

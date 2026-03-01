@@ -28,7 +28,9 @@ export class CrmRevenueService {
     const now = new Date();
     const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-    const [activeQuotes, overdueInvoices, expiringQuotes, recurringClients] = await Promise.all([
+    const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+
+    const [activeQuotes, overdueInvoices, expiringQuotes, recurringClients, paidInvoices] = await Promise.all([
       this.db.quote.findMany({
         where: {
           businessId,
@@ -58,6 +60,14 @@ export class CrmRevenueService {
         },
         select: { id: true },
       }),
+      this.db.invoice.findMany({
+        where: {
+          businessId,
+          status: 'PAID',
+          createdAt: { gte: ninetyDaysAgo },
+        },
+        select: { total: true },
+      }),
     ]);
 
     const fromActivePipeline = activeQuotes.reduce((sum, q) => {
@@ -65,7 +75,14 @@ export class CrmRevenueService {
       return sum + val;
     }, 0);
 
-    const fromRecurringClients = recurringClients.length * 1500;
+    const paidTotal = paidInvoices.reduce((sum, inv) => {
+      const val = typeof inv.total === 'object' && inv.total !== null && 'toNumber' in inv.total ? (inv.total as any).toNumber() : Number(inv.total ?? 0);
+      return sum + val;
+    }, 0);
+    const avgClientValue = recurringClients.length > 0 && paidInvoices.length > 0
+      ? paidTotal / recurringClients.length
+      : 0;
+    const fromRecurringClients = Math.round(recurringClients.length * avgClientValue);
 
     const expiringValue = expiringQuotes.reduce((sum, q) => {
       const val = typeof q.total === 'object' && q.total !== null && 'toNumber' in q.total ? (q.total as any).toNumber() : Number(q.total ?? 0);
