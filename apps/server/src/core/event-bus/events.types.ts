@@ -19,6 +19,28 @@ export class ContactMergedPayload {
   duplicateId!: string;
 }
 
+export class ContactDeletedPayload {
+  contact!: Contact;
+  businessId!: string;
+}
+
+export class ContactImportedPayload {
+  businessId!: string;
+  source!: string;
+  count!: number;
+}
+
+export class SequenceStepDuePayload {
+  businessId!: string;
+  contactId!: string;
+  contactName!: string;
+  sequenceId!: string;
+  sequenceName!: string;
+  stepIndex!: number;
+  stepType!: string;
+  enrollmentId!: string;
+}
+
 // Payload for when a new booking is created
 export class BookingCreatedPayload {
   booking!: Booking;
@@ -60,6 +82,9 @@ export interface KeyFlowEventMap {
   'contact.created': ContactCreatedPayload;
   'contact.updated': ContactUpdatedPayload;
   'contact.merged': ContactMergedPayload;
+  'contact.deleted': ContactDeletedPayload;
+  'contact.imported': ContactImportedPayload;
+  'sequence.step_due': SequenceStepDuePayload;
   'booking.created': BookingCreatedPayload;
   'booking.confirmed': BookingConfirmedPayload;
   'booking.completed': BookingCompletedPayload;

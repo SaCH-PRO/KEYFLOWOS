@@ -90,6 +90,12 @@ export class CrmController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/contacts/poll')
+  getContactsPollState(@Param('businessId') businessId: string) {
+    return this.crm.getContactsPollState(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/contacts/favorites')
   getFavorites(@Param('businessId') businessId: string) {
     return this.crm.getFavorites(businessId);

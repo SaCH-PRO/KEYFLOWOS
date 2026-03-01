@@ -309,6 +309,19 @@ export async function fetchContacts(
   );
 }
 
+const contactsPollSchema = z.object({
+  lastUpdatedAt: z.string().nullable(),
+  totalCount: z.number(),
+});
+
+export async function fetchContactsPoll(businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/poll`,
+    contactsPollSchema,
+    null,
+  );
+}
+
 const contactDetailSchema = z.object({
   contact: contactSchema.nullable(),
   events: z.array(eventSchema),
@@ -2435,7 +2448,7 @@ export async function fetchAutopilotActionsForCrm(businessId?: string, opts?: { 
 export async function fetchContactHealthMetrics(contactId: string, businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<HealthMetrics>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiGet(
-    `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/health`,
+    `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/health-metrics`,
     healthMetricsSchema,
     undefined,
     { signal: opts?.signal },
@@ -2465,7 +2478,7 @@ export async function fetchPredictiveRevenue(businessId?: string, opts?: { signa
 export async function fetchConversationContext(contactId: string, businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<ConversationContextData>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiGet(
-    `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/context`,
+    `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/conversation-context`,
     conversationContextSchema,
     undefined,
     { signal: opts?.signal },

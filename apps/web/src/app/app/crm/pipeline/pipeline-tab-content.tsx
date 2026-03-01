@@ -6,6 +6,7 @@ import { X, List, Heart } from "lucide-react";
 import {
   ContactCapture,
   ContactForm,
+  ContactImport,
   type ContactCardData,
   type ContactFormData,
 } from "@/components/contacts";
@@ -63,10 +64,12 @@ function PipelineTabContentInner({ state }: PipelineTabContentProps) {
   } = state;
 
   const [viewMode, setViewMode] = useState<ViewMode>(getStoredViewMode);
+  const [showImport, setShowImport] = useState(false);
   const handleViewModeChange = useCallback((mode: ViewMode) => {
     setViewMode(mode);
     try { localStorage.setItem(PIPELINE_VIEW_KEY, mode); } catch {}
   }, []);
+  const handleToggleImport = useCallback(() => setShowImport((prev) => !prev), []);
 
   const detailPanelRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -191,6 +194,17 @@ function PipelineTabContentInner({ state }: PipelineTabContentProps) {
       </AnimatePresence>
 
       <AnimatePresence>
+        {showImport && (
+          <ContactImport
+            onImportFile={handleImportFile}
+            onImportLink={handleImportLink}
+            loading={isPending}
+            businessId={businessId ?? undefined}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {showAddForm && (
           <ContactForm
             onSubmit={handleSubmitContact}
@@ -234,6 +248,7 @@ function PipelineTabContentInner({ state }: PipelineTabContentProps) {
         onToggleSelectMode={handleToggleSelectMode}
         onRefresh={handleRefresh}
         onAddContact={handleToggleAddMenu}
+        onImport={handleToggleImport}
         viewMode={viewMode}
         onViewModeChange={handleViewModeChange}
       />

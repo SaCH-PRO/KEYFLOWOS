@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Contact, Prisma } from '@prisma/client';
 import {
   ContactCreatedPayload,
+  ContactDeletedPayload,
   ContactMergedPayload,
   ContactUpdatedPayload,
 } from '../../core/event-bus/events.types';
@@ -333,6 +334,22 @@ export class CrmService {
       return contacts;
     }
     return this.attachContactStats(input.businessId, contacts);
+  }
+
+  async getContactsPollState(businessId: string) {
+    const [result, totalCount] = await Promise.all([
+      this.prisma.client.contact.aggregate({
+        where: { businessId, deletedAt: null },
+        _max: { updatedAt: true },
+      }),
+      this.prisma.client.contact.count({
+        where: { businessId, deletedAt: null },
+      }),
+    ]);
+    return {
+      lastUpdatedAt: result._max.updatedAt?.toISOString() ?? null,
+      totalCount,
+    };
   }
 
   async getContactStats(businessId: string) {
@@ -943,7 +960,13 @@ export class CrmService {
       { name: `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() },
       { actorType: 'USER', source: 'crm' },
     );
-    return this.prisma.client.contact.update({ where: { id: input.contactId }, data: { deletedAt: new Date() } });
+    const deleted = await this.prisma.client.contact.update({ where: { id: input.contactId }, data: { deletedAt: new Date() } });
+    const deletedPayload: ContactDeletedPayload = {
+      contact: deleted,
+      businessId: input.businessId,
+    };
+    this.events.emit('contact.deleted', deletedPayload);
+    return deleted;
   }
 
   async bulkUpdateContacts(input: { businessId: string; contactIds: string[]; status?: string; addTags?: string[] }) {
@@ -2018,11 +2041,37 @@ export class CrmService {
     return actions;
   }
 
+  private async cleanContactListIds(list: { id: string; businessId: string; contactIds: string[] }) {
+    if (!list.contactIds || list.contactIds.length === 0) return list;
+    const validContacts = await this.prisma.client.contact.findMany({
+      where: {
+        id: { in: list.contactIds },
+        businessId: list.businessId,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    const validIds = new Set(validContacts.map((c) => c.id));
+    const cleaned = list.contactIds.filter((id) => validIds.has(id));
+    if (cleaned.length !== list.contactIds.length) {
+      await this.prisma.client.contactList.update({
+        where: { id: list.id },
+        data: { contactIds: cleaned },
+      }).catch(() => {});
+      return { ...list, contactIds: cleaned };
+    }
+    return list;
+  }
+
   async listContactLists(businessId: string) {
-    return this.prisma.client.contactList.findMany({
+    const lists = await this.prisma.client.contactList.findMany({
       where: { businessId },
       orderBy: { createdAt: 'desc' },
     });
+    const cleaned = await Promise.all(
+      lists.map((l) => l.type === 'MANUAL' ? this.cleanContactListIds(l) : l),
+    );
+    return cleaned;
   }
 
   async createContactList(input: {
@@ -2083,7 +2132,7 @@ export class CrmService {
   }
 
   async getContactListContacts(input: { businessId: string; listId: string }) {
-    const list = await this.prisma.client.contactList.findFirst({
+    let list = await this.prisma.client.contactList.findFirst({
       where: { id: input.listId, businessId: input.businessId },
     });
     if (!list) throw new NotFoundException('Contact list not found');
@@ -2110,6 +2159,8 @@ export class CrmService {
       });
     }
 
+    list = await this.cleanContactListIds(list) as typeof list;
+
     if (list.contactIds.length === 0) return [];
     return this.prisma.client.contact.findMany({
       where: {
@@ -2122,11 +2173,12 @@ export class CrmService {
   }
 
   async addContactsToList(input: { businessId: string; listId: string; contactIds: string[] }) {
-    const list = await this.prisma.client.contactList.findFirst({
+    let list = await this.prisma.client.contactList.findFirst({
       where: { id: input.listId, businessId: input.businessId },
     });
     if (!list) throw new NotFoundException('Contact list not found');
     if (list.type !== 'MANUAL') throw new BadRequestException('Can only add contacts to MANUAL lists');
+    list = await this.cleanContactListIds(list) as typeof list;
     const merged = Array.from(new Set([...list.contactIds, ...input.contactIds]));
     return this.prisma.client.contactList.update({
       where: { id: input.listId },

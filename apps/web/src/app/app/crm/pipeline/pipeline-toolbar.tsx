@@ -19,6 +19,7 @@ import {
   CheckSquare,
   LayoutGrid,
   List,
+  Upload,
 } from "lucide-react";
 
 export type SortOption = "name" | "newest" | "oldest" | "revenue" | "score";
@@ -72,6 +73,7 @@ export interface PipelineToolbarProps {
   onToggleSelectMode: () => void;
   onRefresh: () => void;
   onAddContact: () => void;
+  onImport?: () => void;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
 }
@@ -96,6 +98,7 @@ function PipelineToolbarInner({
   onToggleSelectMode,
   onRefresh,
   onAddContact,
+  onImport,
   viewMode,
   onViewModeChange,
 }: PipelineToolbarProps) {
@@ -144,6 +147,16 @@ function PipelineToolbarInner({
           >
             <Plus className="w-4 h-4" />
           </button>
+          {onImport && (
+            <button
+              onClick={onImport}
+              className="p-2 rounded-xl text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground transition-all"
+              aria-label="Import contacts"
+              title="Import contacts"
+            >
+              <Upload className="w-4 h-4" />
+            </button>
+          )}
           <button
             onClick={onToggleSelectMode}
             className={`p-2 rounded-xl transition-all ${selectMode ? "bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
