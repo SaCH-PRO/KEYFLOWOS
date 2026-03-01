@@ -321,4 +321,50 @@ function InsightsTabInner({
   );
 }
 
-export const InsightsTab = React.memo(InsightsTabInner);
+class InsightsErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error("[InsightsTab] Render crash:", error, info.componentStack);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <div className="w-14 h-14 rounded-xl bg-red-500/10 flex items-center justify-center mb-4 border border-red-500/30">
+            <BarChart3 className="w-6 h-6 text-red-400" />
+          </div>
+          <p className="text-sm font-semibold text-foreground/60 mb-1">Insights Error</p>
+          <p className="text-xs text-muted-foreground/50 max-w-[280px] leading-relaxed mb-3">
+            {this.state.error?.message || "Something went wrong rendering insights."}
+          </p>
+          <button
+            onClick={() => this.setState({ hasError: false, error: null })}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/[0.05] border border-border/50 hover:bg-white/[0.08] transition-colors"
+          >
+            Try Again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function InsightsTabWrapper(props: InsightsTabProps) {
+  return (
+    <InsightsErrorBoundary>
+      <InsightsTabInner {...props} />
+    </InsightsErrorBoundary>
+  );
+}
+
+export const InsightsTab = React.memo(InsightsTabWrapper);
