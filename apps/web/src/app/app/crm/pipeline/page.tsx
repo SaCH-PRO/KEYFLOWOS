@@ -152,6 +152,7 @@ export default function ContactsPage() {
             onAddContact={handleGuideAddContact}
             onSegmentChange={handleGuideSegment}
             onToggleSelectMode={handleGuideSelectMode}
+            onTabChange={handleTabChange}
           />
         }
       />

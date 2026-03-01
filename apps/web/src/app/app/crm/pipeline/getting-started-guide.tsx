@@ -13,13 +13,24 @@ import {
   Zap,
   Check,
   PartyPopper,
+  LayoutGrid,
+  Database,
+  BarChart3,
+  Sparkles,
+  GripVertical,
+  Eye,
+  Brain,
+  ListChecks,
+  StickyNote,
+  Route,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 const STORAGE_KEY = "kf_guide_state";
 
 interface GuideStep {
   id: string;
-  step: string;
   title: string;
   desc: string;
   icon: typeof Lightbulb;
@@ -27,73 +38,207 @@ interface GuideStep {
   actionLabel?: string;
 }
 
-const GUIDE_STEPS: GuideStep[] = [
+interface GuideSection {
+  id: string;
+  tab: string;
+  label: string;
+  icon: typeof Lightbulb;
+  color: string;
+  steps: GuideStep[];
+}
+
+const GUIDE_SECTIONS: GuideSection[] = [
   {
-    id: "add-contacts",
-    step: "1",
-    title: "Add Contacts",
-    desc: "Create contacts manually, scan business cards, import CSV/VCF files, or sync from Google Contacts.",
-    icon: UserPlus,
+    id: "pipeline",
+    tab: "pipeline",
+    label: "Pipeline",
+    icon: LayoutGrid,
     color: "hsl(var(--kf-accent1))",
-    actionLabel: "Add a contact",
+    steps: [
+      {
+        id: "add-contacts",
+        title: "Add Contacts",
+        desc: "Create contacts manually, scan business cards with AI Vision, import CSV/VCF files, paste from a URL, or sync from Google Contacts.",
+        icon: UserPlus,
+        color: "hsl(var(--kf-accent1))",
+        actionLabel: "Add a contact",
+      },
+      {
+        id: "segment-filter",
+        title: "Smart Segments",
+        desc: "Filter contacts instantly with one-tap segments like High Value, New This Week, At Risk, and more — find who matters most.",
+        icon: SlidersHorizontal,
+        color: "hsl(var(--kf-accent2))",
+        actionLabel: "Try a segment",
+      },
+      {
+        id: "kanban-board",
+        title: "Kanban Board",
+        desc: "Switch to Kanban view to see contacts in status columns — Lead, Prospect, Client, Lost. Drag and drop cards to update status instantly.",
+        icon: GripVertical,
+        color: "hsl(45 93% 47%)",
+      },
+      {
+        id: "communicate",
+        title: "One-Tap Communication",
+        desc: "Reach out via WhatsApp, email, or phone directly from any contact card — no switching apps needed.",
+        icon: MessageCircle,
+        color: "hsl(200 80% 55%)",
+      },
+      {
+        id: "broadcast",
+        title: "Bulk Actions",
+        desc: "Select multiple contacts to send bulk WhatsApp or email messages, assign tags, update statuses, or delete — all at once.",
+        icon: Send,
+        color: "hsl(270 70% 60%)",
+        actionLabel: "Select contacts",
+      },
+      {
+        id: "quick-actions",
+        title: "Quick Actions",
+        desc: "Create invoices, send quotes, book appointments, or add notes directly from a contact — everything in one place.",
+        icon: Zap,
+        color: "hsl(142 76% 36%)",
+      },
+      {
+        id: "notes-tasks",
+        title: "Notes & Tasks",
+        desc: "Add categorized notes (call logs, meeting notes, ideas) and create tasks with priorities, due dates, and reminders — all attached to each contact.",
+        icon: StickyNote,
+        color: "hsl(35 92% 50%)",
+      },
+    ],
   },
   {
-    id: "segment-filter",
-    step: "2",
-    title: "Segment & Filter",
-    desc: "Use smart segments like High Value, New This Week, and At Risk to zero in on the contacts that matter most.",
-    icon: SlidersHorizontal,
-    color: "hsl(var(--kf-accent2))",
-    actionLabel: "Try a segment",
-  },
-  {
-    id: "track-revenue",
-    step: "3",
-    title: "Track Revenue",
-    desc: "See total revenue, invoice count, and booking history on every contact card — no spreadsheets needed.",
-    icon: TrendingUp,
-    color: "hsl(142 76% 36%)",
-  },
-  {
-    id: "communicate",
-    step: "4",
-    title: "Communicate",
-    desc: "Reach out via WhatsApp, email, or phone directly from any contact card with a single tap.",
-    icon: MessageCircle,
+    id: "database",
+    tab: "database",
+    label: "Database",
+    icon: Database,
     color: "hsl(200 80% 55%)",
+    steps: [
+      {
+        id: "database-table",
+        title: "Full Contact Database",
+        desc: "View all contacts in a searchable, sortable table with inline status badges, lead scores, tags, and revenue indicators.",
+        icon: Database,
+        color: "hsl(200 80% 55%)",
+      },
+      {
+        id: "saved-views",
+        title: "Saved Views",
+        desc: "Save your favorite filter, sort, and column combinations as named views. Comes with 4 defaults: All Contacts, Active Leads, Top Clients, and Needs Attention.",
+        icon: Eye,
+        color: "hsl(var(--kf-accent2))",
+      },
+      {
+        id: "column-toggle",
+        title: "Custom Columns",
+        desc: "Show or hide table columns to see exactly the data you need. Columns auto-hide on smaller screens and your preferences are remembered.",
+        icon: SlidersHorizontal,
+        color: "hsl(270 70% 60%)",
+      },
+      {
+        id: "search-keyboard",
+        title: "Search & Navigate",
+        desc: "Search across name, email, phone, company, and tags — with multi-word matching and highlighted results. Navigate rows with your keyboard.",
+        icon: ListChecks,
+        color: "hsl(142 76% 36%)",
+      },
+    ],
   },
   {
-    id: "broadcast",
-    step: "5",
-    title: "Broadcast Messages",
-    desc: "Select multiple contacts and send bulk WhatsApp or email messages in one go.",
-    icon: Send,
-    color: "hsl(270 70% 60%)",
-    actionLabel: "Select contacts",
+    id: "insights",
+    tab: "insights",
+    label: "Insights",
+    icon: BarChart3,
+    color: "hsl(142 76% 36%)",
+    steps: [
+      {
+        id: "dashboard-metrics",
+        title: "Live Dashboard",
+        desc: "See key metrics at a glance — total contacts, conversion rate, revenue, and active pipeline value with sparkline trends.",
+        icon: TrendingUp,
+        color: "hsl(142 76% 36%)",
+      },
+      {
+        id: "interactive-charts",
+        title: "Interactive Charts",
+        desc: "Explore your pipeline funnel, revenue breakdown, growth trends, lead scores, and engagement heatmap — all with interactive tooltips.",
+        icon: BarChart3,
+        color: "hsl(var(--kf-accent1))",
+      },
+      {
+        id: "ai-analyst",
+        title: "AI Analyst",
+        desc: "Ask your AI copilot to analyze your pipeline, identify at-risk clients, suggest revenue tips, or generate follow-up tasks — using real CRM data.",
+        icon: Brain,
+        color: "hsl(270 70% 60%)",
+      },
+      {
+        id: "export-report",
+        title: "Export Reports",
+        desc: "Export your CRM insights as PDF or CSV reports to share with your team or keep for your records.",
+        icon: Send,
+        color: "hsl(200 80% 55%)",
+      },
+    ],
   },
   {
-    id: "quick-actions",
-    step: "6",
-    title: "Quick Actions",
-    desc: "Create invoices, send quotes, or book appointments directly from a contact — everything in one place.",
-    icon: Zap,
-    color: "hsl(45 93% 47%)",
+    id: "engage",
+    tab: "engage",
+    label: "Engage",
+    icon: Sparkles,
+    color: "hsl(var(--kf-accent2))",
+    steps: [
+      {
+        id: "next-actions",
+        title: "Next Actions Queue",
+        desc: "Your AI generates a prioritized queue of what to do next — follow up on overdue tasks, convert stale prospects, re-engage cold leads, and more.",
+        icon: Zap,
+        color: "hsl(45 93% 47%)",
+      },
+      {
+        id: "autopilot",
+        title: "Autopilot Actions",
+        desc: "Let AI handle routine tasks automatically — welcome messages for new leads, payment reminders, post-session follow-ups. Approve or deny each one.",
+        icon: Sparkles,
+        color: "hsl(var(--kf-accent2))",
+      },
+      {
+        id: "sequences",
+        title: "Engagement Sequences",
+        desc: "Build multi-step automated sequences — like a 5-step new lead onboarding or a re-engagement drip. Enroll contacts and track progress through each step.",
+        icon: Route,
+        color: "hsl(var(--kf-accent1))",
+      },
+      {
+        id: "momentum",
+        title: "CRM Momentum",
+        desc: "Earn XP for completing actions, closing deals, and staying consistent. Track your streaks and level up your CRM game with the built-in gamification system.",
+        icon: TrendingUp,
+        color: "hsl(142 76% 36%)",
+      },
+    ],
   },
 ];
+
+const ALL_STEPS = GUIDE_SECTIONS.flatMap((s) => s.steps);
 
 interface GuideState {
   dismissed: boolean;
   completedSteps: string[];
+  collapsedSections: string[];
 }
 
 function loadGuideState(): GuideState {
-  if (typeof window === "undefined") return { dismissed: false, completedSteps: [] };
+  if (typeof window === "undefined") return { dismissed: false, completedSteps: [], collapsedSections: [] };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { dismissed: false, completedSteps: [] };
-    return JSON.parse(raw);
+    if (!raw) return { dismissed: false, completedSteps: [], collapsedSections: [] };
+    const parsed = JSON.parse(raw);
+    return { dismissed: parsed.dismissed ?? false, completedSteps: parsed.completedSteps ?? [], collapsedSections: parsed.collapsedSections ?? [] };
   } catch {
-    return { dismissed: false, completedSteps: [] };
+    return { dismissed: false, completedSteps: [], collapsedSections: [] };
   }
 }
 
@@ -111,6 +256,7 @@ interface GettingStartedGuideProps {
   onAddContact?: () => void;
   onToggleSelectMode?: () => void;
   onSegmentChange?: (segment: string) => void;
+  onTabChange?: (tab: string) => void;
 }
 
 export function GettingStartedGuide({
@@ -119,14 +265,16 @@ export function GettingStartedGuide({
   onAddContact,
   onToggleSelectMode,
   onSegmentChange,
+  onTabChange,
 }: GettingStartedGuideProps) {
   const [guideState, setGuideState] = useState<GuideState>(loadGuideState);
   const dialogRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   const completedCount = guideState.completedSteps.length;
-  const allComplete = completedCount === GUIDE_STEPS.length;
-  const progress = Math.round((completedCount / GUIDE_STEPS.length) * 100);
+  const totalSteps = ALL_STEPS.length;
+  const allComplete = completedCount === totalSteps;
+  const progress = Math.round((completedCount / totalSteps) * 100);
 
   const closeAndRestoreFocus = useCallback(() => {
     onToggle();
@@ -144,6 +292,17 @@ export function GettingStartedGuide({
     });
   }, []);
 
+  const toggleSection = useCallback((sectionId: string) => {
+    setGuideState((prev) => {
+      const collapsed = prev.collapsedSections.includes(sectionId)
+        ? prev.collapsedSections.filter((s) => s !== sectionId)
+        : [...prev.collapsedSections, sectionId];
+      const next = { ...prev, collapsedSections: collapsed };
+      saveGuideState(next);
+      return next;
+    });
+  }, []);
+
   const handleDismiss = useCallback(() => {
     setGuideState((prev) => {
       const next = { ...prev, dismissed: true };
@@ -154,28 +313,19 @@ export function GettingStartedGuide({
   }, [closeAndRestoreFocus]);
 
   const handleReset = useCallback(() => {
-    const next: GuideState = { dismissed: false, completedSteps: [] };
+    const next: GuideState = { dismissed: false, completedSteps: [], collapsedSections: [] };
     setGuideState(next);
     saveGuideState(next);
   }, []);
 
-  const handleStepAction = useCallback((stepId: string) => {
+  const handleStepAction = useCallback((stepId: string, tab: string) => {
     toggleStep(stepId);
-    switch (stepId) {
-      case "add-contacts":
-        onAddContact?.();
-        closeAndRestoreFocus();
-        break;
-      case "segment-filter":
-        onSegmentChange?.("high-value");
-        closeAndRestoreFocus();
-        break;
-      case "broadcast":
-        onToggleSelectMode?.();
-        closeAndRestoreFocus();
-        break;
-    }
-  }, [toggleStep, onAddContact, onToggleSelectMode, onSegmentChange, closeAndRestoreFocus]);
+    onTabChange?.(tab);
+    if (stepId === "add-contacts") onAddContact?.();
+    if (stepId === "segment-filter") onSegmentChange?.("high-value");
+    if (stepId === "broadcast") onToggleSelectMode?.();
+    closeAndRestoreFocus();
+  }, [toggleStep, onAddContact, onToggleSelectMode, onSegmentChange, onTabChange, closeAndRestoreFocus]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -215,7 +365,7 @@ export function GettingStartedGuide({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, closeAndRestoreFocus]);
 
-  const showBadge = !guideState.dismissed && completedCount < GUIDE_STEPS.length;
+  const showBadge = !guideState.dismissed && completedCount < totalSteps;
 
   const handleTriggerClick = useCallback(() => {
     if (guideState.dismissed && !isOpen) {
@@ -274,17 +424,17 @@ export function GettingStartedGuide({
                   <Lightbulb className="w-4 h-4 text-amber-400" />
                 </div>
                 <div className="flex-1">
-                  <h3 className="text-sm font-semibold">Getting Started</h3>
+                  <h3 className="text-sm font-semibold">CRM Feature Guide</h3>
                   <p className="text-xs text-muted-foreground">
                     {allComplete
-                      ? "You've completed all steps!"
-                      : `${completedCount} of ${GUIDE_STEPS.length} steps complete`}
+                      ? "You've explored all features!"
+                      : `${completedCount} of ${totalSteps} features explored`}
                   </p>
                 </div>
                 <button
                   onClick={closeAndRestoreFocus}
                   className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none"
-                  aria-label="Close getting started guide"
+                  aria-label="Close guide"
                 >
                   <X className="w-3.5 h-3.5 text-muted-foreground" />
                 </button>
@@ -316,62 +466,115 @@ export function GettingStartedGuide({
                 >
                   <PartyPopper className="w-5 h-5 text-emerald-400 flex-shrink-0" />
                   <div>
-                    <p className="text-xs font-semibold text-emerald-300">All done!</p>
-                    <p className="text-[11px] text-emerald-400/70">You're ready to manage your contacts like a pro.</p>
+                    <p className="text-xs font-semibold text-emerald-300">All explored!</p>
+                    <p className="text-[11px] text-emerald-400/70">You know your way around the CRM. Time to grow your business.</p>
                   </div>
                 </motion.div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" role="group" aria-label="Guide steps">
-                {GUIDE_STEPS.map((item) => {
-                  const Icon = item.icon;
-                  const isComplete = guideState.completedSteps.includes(item.id);
+              <div className="space-y-2" role="group" aria-label="Feature guide sections">
+                {GUIDE_SECTIONS.map((section) => {
+                  const SectionIcon = section.icon;
+                  const isCollapsed = guideState.collapsedSections.includes(section.id);
+                  const sectionCompleted = section.steps.filter((s) => guideState.completedSteps.includes(s.id)).length;
+                  const sectionTotal = section.steps.length;
+                  const sectionDone = sectionCompleted === sectionTotal;
+
                   return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => handleStepAction(item.id)}
-                      aria-pressed={isComplete}
-                      aria-label={`Step ${item.step}: ${item.title}${isComplete ? " (completed)" : ""}`}
-                      className={`flex gap-2.5 p-2.5 rounded-xl transition-colors text-left group w-full focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none ${
-                        isComplete
-                          ? "bg-muted/20 opacity-70"
-                          : "hover:bg-muted/30"
-                      }`}
-                    >
-                      <div className="relative flex-shrink-0 mt-0.5">
+                    <div key={section.id} className="rounded-xl border border-border/50 overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => toggleSection(section.id)}
+                        className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-white/[0.03] transition-colors focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none rounded-t-xl"
+                        aria-expanded={!isCollapsed}
+                        aria-controls={`guide-section-${section.id}`}
+                      >
                         <div
-                          className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
-                            isComplete
-                              ? "bg-emerald-500/15"
-                              : "group-hover:scale-110"
-                          }`}
-                          style={!isComplete ? { backgroundColor: `${item.color}15` } : undefined}
+                          className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0"
+                          style={{ backgroundColor: `${section.color}15` }}
                         >
-                          {isComplete ? (
-                            <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          ) : (
-                            <Icon className="w-3.5 h-3.5" style={{ color: item.color }} />
-                          )}
+                          <SectionIcon className="w-3.5 h-3.5" style={{ color: section.color }} />
                         </div>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className={`text-xs font-medium leading-tight ${isComplete ? "line-through text-muted-foreground" : ""}`}>
-                          {item.title}
-                        </p>
-                        <p className="text-[11px] text-muted-foreground leading-relaxed mt-0.5">
-                          {item.desc}
-                        </p>
-                        {item.actionLabel && !isComplete && (
-                          <span
-                            className="inline-block text-[10px] font-medium mt-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                            style={{ color: item.color }}
-                          >
-                            {item.actionLabel} →
-                          </span>
+                        <span className="text-xs font-semibold flex-1 text-left">{section.label}</span>
+                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${sectionDone ? "bg-emerald-500/15 text-emerald-400" : "bg-muted/30 text-muted-foreground"}`}>
+                          {sectionCompleted}/{sectionTotal}
+                        </span>
+                        {isCollapsed ? (
+                          <ChevronDown className="w-3.5 h-3.5 text-muted-foreground/50" />
+                        ) : (
+                          <ChevronUp className="w-3.5 h-3.5 text-muted-foreground/50" />
                         )}
-                      </div>
-                    </button>
+                      </button>
+
+                      <AnimatePresence initial={false}>
+                        {!isCollapsed && (
+                          <motion.div
+                            id={`guide-section-${section.id}`}
+                            role="region"
+                            aria-label={`${section.label} features`}
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.2, ease: "easeOut" }}
+                            className="overflow-hidden"
+                          >
+                            <div className="px-2 pb-2 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                              {section.steps.map((item) => {
+                                const Icon = item.icon;
+                                const isComplete = guideState.completedSteps.includes(item.id);
+                                return (
+                                  <button
+                                    key={item.id}
+                                    type="button"
+                                    onClick={() => handleStepAction(item.id, section.tab)}
+                                    aria-pressed={isComplete}
+                                    aria-label={`${item.title}${isComplete ? " (explored)" : ""}`}
+                                    className={`flex gap-2.5 p-2.5 rounded-lg transition-colors text-left group w-full focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none ${
+                                      isComplete
+                                        ? "bg-muted/20 opacity-70"
+                                        : "hover:bg-muted/30"
+                                    }`}
+                                  >
+                                    <div className="relative flex-shrink-0 mt-0.5">
+                                      <div
+                                        className={`w-6 h-6 rounded-md flex items-center justify-center transition-all ${
+                                          isComplete
+                                            ? "bg-emerald-500/15"
+                                            : "group-hover:scale-110"
+                                        }`}
+                                        style={!isComplete ? { backgroundColor: `${item.color}15` } : undefined}
+                                      >
+                                        {isComplete ? (
+                                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                        ) : (
+                                          <Icon className="w-3.5 h-3.5" style={{ color: item.color }} />
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <p className={`text-[11px] font-medium leading-tight ${isComplete ? "line-through text-muted-foreground" : ""}`}>
+                                        {item.title}
+                                      </p>
+                                      <p className="text-[10px] text-muted-foreground/70 leading-relaxed mt-0.5">
+                                        {item.desc}
+                                      </p>
+                                      {item.actionLabel && !isComplete && (
+                                        <span
+                                          className="inline-block text-[10px] font-medium mt-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                          style={{ color: item.color }}
+                                        >
+                                          {item.actionLabel} →
+                                        </span>
+                                      )}
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
                   );
                 })}
               </div>
