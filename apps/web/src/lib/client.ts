@@ -3486,4 +3486,109 @@ export async function unenrollFromSequence(
   });
 }
 
+export type AiContactSummary = {
+  summary: string;
+  sentiment: 'positive' | 'neutral' | 'negative' | 'at_risk';
+  keyInsights: string[];
+  recommendedAction: string;
+  relationshipHealth: 'strong' | 'good' | 'neutral' | 'weak' | 'critical';
+  revenueImpact: 'high' | 'medium' | 'low';
+  creditsUsed: number;
+};
+
+export type AiLeadScore = {
+  score: number;
+  label: 'Hot' | 'Warm' | 'Neutral' | 'Cool' | 'Cold';
+  reasoning: string;
+  factors: Array<{ name: string; impact: 'positive' | 'neutral' | 'negative'; detail: string }>;
+  recommendation: string;
+  creditsUsed: number;
+};
+
+export type AiNoteAnalysis = {
+  sentiment: 'positive' | 'neutral' | 'negative' | 'urgent';
+  sentimentConfidence: number;
+  actionItems: Array<{ title: string; priority: string; dueInDays: number }>;
+  suggestedTags: string[];
+  riskFlags: string[];
+  keyEntities: string[];
+  summary: string;
+  creditsUsed: number;
+};
+
+export type AiChurnRisk = {
+  atRisk: Array<{
+    contactId: string;
+    contactName: string;
+    churnProbability: number;
+    riskLevel: 'critical' | 'high' | 'medium';
+    reasons: string[];
+    recommendedAction: string;
+    estimatedRevenueLoss: number;
+  }>;
+  summary: string;
+  creditsUsed: number;
+};
+
+export type AiSearchResult = {
+  contacts: Array<{
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+    email: string | null;
+    phone: string | null;
+    status: string;
+    companyName: string | null;
+    leadScore: number | null;
+    tags: string[];
+    lastInteractionAt: string | null;
+    createdAt: string;
+  }>;
+  filters: Record<string, unknown>;
+  interpretation: string;
+  confidence: number;
+  totalResults: number;
+  creditsUsed: number;
+};
+
+export async function aiContactSummary(contactId: string, businessId?: string): Promise<ApiResult<AiContactSummary>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AiContactSummary>({
+    path: `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/ai-summary`,
+    body: {},
+  });
+}
+
+export async function aiLeadScore(contactId: string, businessId?: string): Promise<ApiResult<AiLeadScore>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AiLeadScore>({
+    path: `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/ai-score`,
+    body: {},
+  });
+}
+
+export async function aiNoteAnalysis(contactId: string, noteBody: string, noteId?: string, businessId?: string): Promise<ApiResult<AiNoteAnalysis>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AiNoteAnalysis>({
+    path: `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/ai-note-analysis`,
+    body: { noteBody, noteId },
+  });
+}
+
+export async function aiChurnDetection(businessId?: string): Promise<ApiResult<AiChurnRisk>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet<AiChurnRisk>(
+    `/crm/businesses/${encodeURIComponent(bid)}/ai-churn-risk`,
+    z.any(),
+  );
+}
+
+export async function aiNaturalLanguageSearch(query: string, businessId?: string): Promise<ApiResult<AiSearchResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AiSearchResult>({
+    path: `/crm/businesses/${encodeURIComponent(bid)}/ai-search`,
+    body: { query },
+  });
+}
+
 export { DEFAULT_BUSINESS_ID };

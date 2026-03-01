@@ -8,6 +8,8 @@ import { ContactDetailHeader } from "./contact-detail-header";
 import { ContactDetailStats } from "./contact-detail-stats";
 import { ContactDetailInfo } from "./contact-detail-info";
 import { ContactDetailTabs } from "./contact-detail-tabs";
+import { AiContactSummaryPanel } from "./ai-contact-summary";
+import { AiLeadScorePanel } from "./ai-lead-score";
 
 export type ContactDetailData = {
   id: string;
@@ -266,6 +268,11 @@ export function ContactDetail({
             onSetActiveTab={setActiveTab}
             onQuickAction={onQuickAction}
           />
+        </div>
+
+        <div className="shrink-0 space-y-2">
+          <AiContactSummaryPanel contactId={contact.id} />
+          <AiLeadScorePanel contactId={contact.id} currentScore={contact.meta?.leadScore} />
         </div>
 
         <div className="shrink-0">

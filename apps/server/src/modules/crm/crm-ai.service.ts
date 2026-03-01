@@ -299,6 +299,575 @@ OPEN TASKS:
 ${tasks.slice(0, 20).map(t => `- "${t.title}" for ${t.contact.firstName ?? ''} ${t.contact.lastName ?? ''} | Due: ${t.dueDate?.toISOString() ?? 'no date'} | Priority: ${t.priority}`).join('\n')}`;
   }
 
+  async summarizeContact(businessId: string, contactId: string) {
+    const contact = await this.db.contact.findFirst({
+      where: { id: contactId, businessId, deletedAt: null },
+      select: {
+        id: true, firstName: true, lastName: true, email: true, phone: true,
+        status: true, source: true, tags: true, companyName: true, jobTitle: true,
+        industry: true, leadScore: true, lifecycleStage: true, segment: true,
+        lastInteractionAt: true, createdAt: true, city: true, country: true,
+        preferredChannel: true, whatsappNumber: true,
+      },
+    });
+    if (!contact) throw new Error('Contact not found');
+
+    const [notes, events, invoices, tasks, bookings] = await Promise.all([
+      this.db.contactNote.findMany({
+        where: { contactId, businessId },
+        take: 20,
+        orderBy: { createdAt: 'desc' },
+        select: { body: true, createdAt: true, source: true },
+      }),
+      this.db.contactEvent.findMany({
+        where: { contactId },
+        take: 30,
+        orderBy: { createdAt: 'desc' },
+        select: { type: true, createdAt: true, data: true },
+      }),
+      this.db.invoice.findMany({
+        where: { contactId, businessId },
+        take: 20,
+        orderBy: { createdAt: 'desc' },
+        select: { total: true, status: true, createdAt: true, dueDate: true },
+      }),
+      this.db.contactTask.findMany({
+        where: { contactId, businessId, deletedAt: null },
+        take: 15,
+        orderBy: { createdAt: 'desc' },
+        select: { title: true, status: true, priority: true, dueDate: true },
+      }),
+      this.db.booking.findMany({
+        where: { contactId, businessId },
+        take: 10,
+        orderBy: { startTime: 'desc' },
+        select: { startTime: true, status: true },
+      }),
+    ]);
+
+    const name = `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() || 'Unnamed';
+    const now = new Date();
+    const daysSinceCreated = Math.floor((now.getTime() - new Date(contact.createdAt).getTime()) / 86400000);
+    const daysSinceLastInteraction = contact.lastInteractionAt
+      ? Math.floor((now.getTime() - new Date(contact.lastInteractionAt).getTime()) / 86400000)
+      : null;
+
+    const totalRevenue = invoices.filter(i => i.status === 'PAID').reduce((s, i) => s + Number(i.total ?? 0), 0);
+    const outstandingBalance = invoices.filter(i => ['SENT', 'OVERDUE'].includes(i.status)).reduce((s, i) => s + Number(i.total ?? 0), 0);
+
+    const contextBlock = `CONTACT PROFILE:
+Name: ${name} | Email: ${contact.email ?? 'N/A'} | Phone: ${contact.phone ?? 'N/A'}
+Company: ${contact.companyName ?? 'N/A'} | Job Title: ${contact.jobTitle ?? 'N/A'} | Industry: ${contact.industry ?? 'N/A'}
+Status: ${contact.status} | Lifecycle: ${contact.lifecycleStage ?? 'N/A'} | Lead Score: ${contact.leadScore ?? 'N/A'}
+Location: ${[contact.city, contact.country].filter(Boolean).join(', ') || 'N/A'}
+Source: ${contact.source ?? 'manual'} | Tags: ${(contact.tags ?? []).join(', ') || 'none'}
+Preferred Channel: ${contact.preferredChannel ?? 'N/A'} | WhatsApp: ${contact.whatsappNumber ?? 'N/A'}
+Created: ${daysSinceCreated} days ago | Last Interaction: ${daysSinceLastInteraction != null ? `${daysSinceLastInteraction} days ago` : 'never'}
+
+FINANCIAL:
+Total Revenue: TTD ${totalRevenue.toFixed(2)} | Outstanding: TTD ${outstandingBalance.toFixed(2)}
+Invoices: ${invoices.length} total (${invoices.filter(i => i.status === 'PAID').length} paid, ${invoices.filter(i => i.status === 'OVERDUE').length} overdue)
+Bookings: ${bookings.length} total (${bookings.filter(b => b.status === 'COMPLETED').length} completed)
+
+NOTES (recent ${notes.length}):
+${notes.slice(0, 10).map(n => `- [${n.source ?? 'general'}] ${n.body.substring(0, 200)}`).join('\n') || 'No notes'}
+
+RECENT EVENTS (${events.length}):
+${events.slice(0, 15).map(e => `- ${e.type} at ${e.createdAt.toISOString().split('T')[0]}`).join('\n') || 'No events'}
+
+OPEN TASKS:
+${tasks.filter(t => t.status === 'OPEN').map(t => `- ${t.title} (${t.priority ?? 'NORMAL'}, due: ${t.dueDate?.toISOString().split('T')[0] ?? 'no date'})`).join('\n') || 'None'}`;
+
+    const systemPrompt = `You are a CRM intelligence assistant for a Caribbean service business (Trinidad & Tobago, TTD currency).
+Generate a concise, actionable briefing about this contact. Be specific — reference actual data points.
+
+${contextBlock}
+
+Respond in valid JSON:
+{
+  "summary": "2-3 sentence overview of who this person is, their relationship with the business, and current status",
+  "sentiment": "positive|neutral|negative|at_risk",
+  "keyInsights": ["insight1", "insight2", "insight3"],
+  "recommendedAction": "The single most important next step",
+  "relationshipHealth": "strong|good|neutral|weak|critical",
+  "revenueImpact": "high|medium|low"
+}`;
+
+    try {
+      const result = await this.aiUsage.callAi({
+        businessId,
+        feature: 'contact_summary',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Generate a comprehensive briefing for ${name}.` },
+        ],
+        maxTokens: 600,
+        temperature: 0.3,
+      });
+      const parsed = this.parseJson(result.content);
+      return {
+        summary: parsed.summary ?? '',
+        sentiment: parsed.sentiment ?? 'neutral',
+        keyInsights: Array.isArray(parsed.keyInsights) ? parsed.keyInsights : [],
+        recommendedAction: parsed.recommendedAction ?? '',
+        relationshipHealth: parsed.relationshipHealth ?? 'neutral',
+        revenueImpact: parsed.revenueImpact ?? 'low',
+        creditsUsed: result.usage?.creditsUsed ?? 1,
+      };
+    } catch (error) {
+      this.logger.error('Contact summary failed', error);
+      throw error;
+    }
+  }
+
+  async scoreContactWithAi(businessId: string, contactId: string) {
+    const contact = await this.db.contact.findFirst({
+      where: { id: contactId, businessId, deletedAt: null },
+      select: {
+        id: true, firstName: true, lastName: true, email: true, phone: true,
+        status: true, tags: true, companyName: true, leadScore: true,
+        lifecycleStage: true, lastInteractionAt: true, createdAt: true,
+        source: true, industry: true,
+      },
+    });
+    if (!contact) throw new Error('Contact not found');
+
+    const [notes, events, invoices, tasks, bookings] = await Promise.all([
+      this.db.contactNote.findMany({
+        where: { contactId, businessId },
+        take: 15,
+        orderBy: { createdAt: 'desc' },
+        select: { body: true, createdAt: true },
+      }),
+      this.db.contactEvent.findMany({
+        where: { contactId },
+        take: 30,
+        orderBy: { createdAt: 'desc' },
+        select: { type: true, createdAt: true },
+      }),
+      this.db.invoice.findMany({
+        where: { contactId, businessId },
+        select: { total: true, status: true, createdAt: true },
+      }),
+      this.db.contactTask.findMany({
+        where: { contactId, businessId, deletedAt: null },
+        select: { status: true, priority: true, dueDate: true },
+      }),
+      this.db.booking.findMany({
+        where: { contactId, businessId },
+        select: { status: true, startTime: true },
+      }),
+    ]);
+
+    const name = `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() || 'Unnamed';
+    const now = new Date();
+    const daysSinceLastInteraction = contact.lastInteractionAt
+      ? Math.floor((now.getTime() - new Date(contact.lastInteractionAt).getTime()) / 86400000)
+      : null;
+    const totalRevenue = invoices.filter(i => i.status === 'PAID').reduce((s, i) => s + Number(i.total ?? 0), 0);
+    const recentEvents30d = events.filter(e => (now.getTime() - new Date(e.createdAt).getTime()) < 30 * 86400000).length;
+
+    const contextBlock = `CONTACT: ${name}
+Status: ${contact.status} | Current Lead Score: ${contact.leadScore ?? 'N/A'} | Lifecycle: ${contact.lifecycleStage ?? 'N/A'}
+Company: ${contact.companyName ?? 'N/A'} | Industry: ${contact.industry ?? 'N/A'} | Source: ${contact.source ?? 'manual'}
+Tags: ${(contact.tags ?? []).join(', ') || 'none'}
+Last Interaction: ${daysSinceLastInteraction != null ? `${daysSinceLastInteraction} days ago` : 'never'}
+Contact Age: ${Math.floor((now.getTime() - new Date(contact.createdAt).getTime()) / 86400000)} days
+
+ENGAGEMENT:
+Events in last 30 days: ${recentEvents30d} | Total events: ${events.length}
+Event types: ${[...new Set(events.map(e => e.type))].join(', ') || 'none'}
+
+FINANCIAL:
+Total Revenue: TTD ${totalRevenue.toFixed(2)}
+Invoices: ${invoices.length} (${invoices.filter(i => i.status === 'PAID').length} paid, ${invoices.filter(i => i.status === 'OVERDUE').length} overdue)
+Bookings: ${bookings.length} (${bookings.filter(b => b.status === 'COMPLETED').length} completed)
+
+TASKS:
+Open: ${tasks.filter(t => t.status === 'OPEN').length} | Overdue: ${tasks.filter(t => t.status === 'OPEN' && t.dueDate && new Date(t.dueDate) < now).length}
+
+NOTES (sentiment context):
+${notes.slice(0, 8).map(n => `- ${n.body.substring(0, 150)}`).join('\n') || 'No notes'}`;
+
+    const systemPrompt = `You are a lead scoring AI for a Caribbean service business (TTD currency).
+Analyze this contact and provide an intelligent lead score (0-100) with detailed reasoning.
+
+${contextBlock}
+
+Scoring guidelines:
+- 80-100: Hot — active engagement, revenue history, positive sentiment
+- 60-79: Warm — regular interaction, some revenue, good potential
+- 40-59: Neutral — moderate engagement, no red flags
+- 20-39: Cool — declining engagement, no recent revenue
+- 0-19: Cold — no engagement, negative signals
+
+Respond in valid JSON:
+{
+  "score": 75,
+  "label": "Hot|Warm|Neutral|Cool|Cold",
+  "reasoning": "2-3 sentence explanation referencing actual data points",
+  "factors": [
+    {"name": "Engagement Frequency", "impact": "positive|neutral|negative", "detail": "brief explanation"},
+    {"name": "Revenue History", "impact": "positive|neutral|negative", "detail": "brief explanation"},
+    {"name": "Note Sentiment", "impact": "positive|neutral|negative", "detail": "brief explanation"},
+    {"name": "Responsiveness", "impact": "positive|neutral|negative", "detail": "brief explanation"}
+  ],
+  "recommendation": "One specific action to improve or maintain this score"
+}`;
+
+    try {
+      const result = await this.aiUsage.callAi({
+        businessId,
+        feature: 'ai_lead_score',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Score this lead: ${name}` },
+        ],
+        maxTokens: 600,
+        temperature: 0.3,
+      });
+      const parsed = this.parseJson(result.content);
+      const score = Math.max(0, Math.min(100, Number(parsed.score) || 50));
+
+      await this.db.contact.updateMany({
+        where: { id: contactId, businessId },
+        data: { leadScore: score },
+      }).catch(() => {});
+
+      return {
+        score,
+        label: parsed.label ?? (score >= 80 ? 'Hot' : score >= 60 ? 'Warm' : score >= 40 ? 'Neutral' : score >= 20 ? 'Cool' : 'Cold'),
+        reasoning: parsed.reasoning ?? '',
+        factors: Array.isArray(parsed.factors) ? parsed.factors : [],
+        recommendation: parsed.recommendation ?? '',
+        creditsUsed: result.usage?.creditsUsed ?? 1,
+      };
+    } catch (error) {
+      this.logger.error('AI lead scoring failed', error);
+      throw error;
+    }
+  }
+
+  async analyzeNote(businessId: string, contactId: string, noteBody: string, noteId?: string) {
+    const contact = await this.db.contact.findFirst({
+      where: { id: contactId, businessId, deletedAt: null },
+      select: {
+        id: true, firstName: true, lastName: true, status: true,
+        companyName: true, tags: true, leadScore: true,
+      },
+    });
+    if (!contact) throw new Error('Contact not found');
+
+    const recentNotes = await this.db.contactNote.findMany({
+      where: { contactId, businessId },
+      take: 5,
+      orderBy: { createdAt: 'desc' },
+      select: { body: true, createdAt: true },
+    });
+
+    const name = `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() || 'Unnamed';
+
+    const systemPrompt = `You are a CRM note intelligence assistant for a Caribbean service business (Trinidad & Tobago, TTD currency).
+Analyze this note about a contact and extract actionable intelligence.
+
+CONTACT: ${name} | Status: ${contact.status} | Company: ${contact.companyName ?? 'N/A'} | Score: ${contact.leadScore ?? 'N/A'}
+Tags: ${(contact.tags ?? []).join(', ') || 'none'}
+
+PREVIOUS NOTES (for context):
+${recentNotes.slice(0, 3).map(n => `- ${n.body.substring(0, 200)}`).join('\n') || 'No previous notes'}
+
+NEW NOTE TO ANALYZE:
+"${noteBody}"
+
+Respond in valid JSON:
+{
+  "sentiment": "positive|neutral|negative|urgent",
+  "sentimentConfidence": 0.85,
+  "actionItems": [
+    {"title": "Task to create", "priority": "HIGH|NORMAL|LOW", "dueInDays": 3}
+  ],
+  "suggestedTags": ["tag1", "tag2"],
+  "riskFlags": ["Any concerns or red flags detected"],
+  "keyEntities": ["Names, companies, amounts, dates mentioned"],
+  "summary": "One sentence summary of what this note means for the relationship"
+}`;
+
+    try {
+      const result = await this.aiUsage.callAi({
+        businessId,
+        feature: 'note_intelligence',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Analyze this note: "${noteBody}"` },
+        ],
+        maxTokens: 500,
+        temperature: 0.3,
+      });
+      const parsed = this.parseJson(result.content);
+      return {
+        sentiment: parsed.sentiment ?? 'neutral',
+        sentimentConfidence: Number(parsed.sentimentConfidence) || 0.5,
+        actionItems: Array.isArray(parsed.actionItems) ? parsed.actionItems : [],
+        suggestedTags: Array.isArray(parsed.suggestedTags) ? parsed.suggestedTags : [],
+        riskFlags: Array.isArray(parsed.riskFlags) ? parsed.riskFlags : [],
+        keyEntities: Array.isArray(parsed.keyEntities) ? parsed.keyEntities : [],
+        summary: parsed.summary ?? '',
+        creditsUsed: result.usage?.creditsUsed ?? 1,
+      };
+    } catch (error) {
+      this.logger.error('Note intelligence failed', error);
+      throw error;
+    }
+  }
+
+  async detectChurnRisk(businessId: string) {
+    const now = new Date();
+    const contacts = await this.db.contact.findMany({
+      where: { businessId, deletedAt: null, status: { in: ['CLIENT', 'PROSPECT'] } },
+      take: 100,
+      orderBy: { lastInteractionAt: 'asc' },
+      select: {
+        id: true, firstName: true, lastName: true, email: true, phone: true,
+        status: true, tags: true, companyName: true, leadScore: true,
+        lastInteractionAt: true, createdAt: true,
+      },
+    });
+
+    if (contacts.length === 0) {
+      return { atRisk: [], summary: 'No clients or prospects found to analyze.', creditsUsed: 0 };
+    }
+
+    const contactIds = contacts.map(c => c.id);
+
+    const [invoices, events, tasks, notes] = await Promise.all([
+      this.db.invoice.findMany({
+        where: { businessId, contactId: { in: contactIds } },
+        select: { contactId: true, total: true, status: true, createdAt: true },
+      }),
+      this.db.contactEvent.findMany({
+        where: { contactId: { in: contactIds } },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+        select: { contactId: true, type: true, createdAt: true },
+      }),
+      this.db.contactTask.findMany({
+        where: { businessId, contactId: { in: contactIds }, deletedAt: null, status: 'OPEN' },
+        select: { contactId: true, dueDate: true },
+      }),
+      this.db.contactNote.findMany({
+        where: { businessId, contactId: { in: contactIds } },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        select: { contactId: true, body: true, createdAt: true },
+      }),
+    ]);
+
+    const contactProfiles = contacts.map(c => {
+      const name = `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() || 'Unnamed';
+      const cInvoices = invoices.filter(i => i.contactId === c.id);
+      const cEvents = events.filter(e => e.contactId === c.id);
+      const cTasks = tasks.filter(t => t.contactId === c.id);
+      const cNotes = notes.filter(n => n.contactId === c.id);
+      const daysSinceLastInteraction = c.lastInteractionAt
+        ? Math.floor((now.getTime() - new Date(c.lastInteractionAt).getTime()) / 86400000)
+        : 999;
+      const totalRevenue = cInvoices.filter(i => i.status === 'PAID').reduce((s, i) => s + Number(i.total ?? 0), 0);
+      const overdueInvoices = cInvoices.filter(i => i.status === 'OVERDUE').length;
+      const recentEvents = cEvents.filter(e => (now.getTime() - new Date(e.createdAt).getTime()) < 30 * 86400000).length;
+      const overdueTasks = cTasks.filter(t => t.dueDate && new Date(t.dueDate) < now).length;
+
+      return `- ${name} (ID:${c.id}) | Status: ${c.status} | Revenue: TTD ${totalRevenue.toFixed(0)} | Last active: ${daysSinceLastInteraction}d ago | Recent events: ${recentEvents} | Overdue invoices: ${overdueInvoices} | Overdue tasks: ${overdueTasks} | Score: ${c.leadScore ?? 'N/A'} | Latest note: "${cNotes[0]?.body?.substring(0, 100) ?? 'none'}"`;
+    }).join('\n');
+
+    const systemPrompt = `You are a churn prediction AI for a Caribbean service business (Trinidad & Tobago, TTD currency).
+Analyze these contacts and identify who is at risk of churning (leaving or going inactive).
+
+CONTACTS:
+${contactProfiles}
+
+Respond in valid JSON:
+{
+  "atRisk": [
+    {
+      "contactId": "contact ID",
+      "contactName": "name",
+      "churnProbability": 0.85,
+      "riskLevel": "critical|high|medium",
+      "reasons": ["reason1", "reason2"],
+      "recommendedAction": "What to do to retain this client",
+      "estimatedRevenueLoss": 0
+    }
+  ],
+  "summary": "Overview of churn risk across the business"
+}
+
+Only include contacts with meaningful churn risk (probability > 0.4). Sort by churnProbability descending.`;
+
+    try {
+      const result = await this.aiUsage.callAi({
+        businessId,
+        feature: 'churn_detection',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: 'Analyze churn risk for my contacts.' },
+        ],
+        maxTokens: 1500,
+        temperature: 0.3,
+      });
+      const parsed = this.parseJson(result.content);
+      return {
+        atRisk: Array.isArray(parsed.atRisk) ? parsed.atRisk : [],
+        summary: parsed.summary ?? '',
+        creditsUsed: result.usage?.creditsUsed ?? 2,
+      };
+    } catch (error) {
+      this.logger.error('Churn detection failed', error);
+      throw error;
+    }
+  }
+
+  async naturalLanguageSearch(businessId: string, query: string) {
+    const contactFields = await this.db.contact.findMany({
+      where: { businessId, deletedAt: null },
+      take: 5,
+      select: {
+        status: true, tags: true, source: true, city: true,
+        country: true, industry: true, lifecycleStage: true, segment: true,
+      },
+    });
+
+    const knownStatuses = [...new Set(contactFields.map(c => c.status).filter(Boolean))];
+    const knownTags = [...new Set(contactFields.flatMap(c => c.tags ?? []))];
+    const knownSources = [...new Set(contactFields.map(c => c.source).filter(Boolean))];
+    const knownCities = [...new Set(contactFields.map(c => c.city).filter(Boolean))];
+    const knownIndustries = [...new Set(contactFields.map(c => c.industry).filter(Boolean))];
+
+    const systemPrompt = `You are a CRM search translator for a Caribbean service business (TTD currency, Trinidad & Tobago).
+Convert a natural language query into structured CRM filter parameters.
+
+Available filter fields:
+- status: contact status (known values: ${knownStatuses.join(', ') || 'LEAD, PROSPECT, CLIENT, LOST'})
+- search: text search across name, email, phone, company
+- tags: array of tags to filter by (known: ${knownTags.slice(0, 20).join(', ') || 'none yet'})
+- hasUnpaidInvoices: boolean
+- staleDays: number (contacts inactive for N+ days)
+- newThisWeek: boolean
+- city: city name (known: ${knownCities.join(', ') || 'any'})
+- industry: industry (known: ${knownIndustries.join(', ') || 'any'})
+- source: lead source (known: ${knownSources.join(', ') || 'any'})
+- sortBy: name|newest|oldest|revenue|score|lastInteraction
+- sortOrder: asc|desc
+
+Respond in valid JSON:
+{
+  "filters": {
+    "status": "CLIENT",
+    "search": "",
+    "tags": [],
+    "hasUnpaidInvoices": false,
+    "staleDays": null,
+    "newThisWeek": false,
+    "city": null,
+    "industry": null,
+    "source": null,
+    "sortBy": "name",
+    "sortOrder": "asc"
+  },
+  "interpretation": "What you understood the user wants",
+  "confidence": 0.9
+}
+
+Only include filters that are relevant to the query. Set irrelevant filters to null or false.`;
+
+    try {
+      const result = await this.aiUsage.callAi({
+        businessId,
+        feature: 'nl_search',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: query },
+        ],
+        maxTokens: 400,
+        temperature: 0.2,
+      });
+      const parsed = this.parseJson(result.content);
+
+      const filters = parsed.filters ?? {};
+      const cleanFilters: Record<string, unknown> = {};
+      if (filters.status) cleanFilters.status = filters.status;
+      if (filters.search) cleanFilters.search = filters.search;
+      if (Array.isArray(filters.tags) && filters.tags.length > 0) cleanFilters.tags = filters.tags;
+      if (filters.hasUnpaidInvoices === true) cleanFilters.hasUnpaidInvoices = true;
+      if (filters.staleDays && Number(filters.staleDays) > 0) cleanFilters.staleDays = Number(filters.staleDays);
+      if (filters.newThisWeek === true) cleanFilters.newThisWeek = true;
+      if (filters.city) cleanFilters.city = filters.city;
+      if (filters.industry) cleanFilters.industry = filters.industry;
+      if (filters.source) cleanFilters.source = filters.source;
+      if (filters.sortBy) cleanFilters.sortBy = filters.sortBy;
+      if (filters.sortOrder) cleanFilters.sortOrder = filters.sortOrder;
+
+      const contacts = await this.db.contact.findMany({
+        where: {
+          businessId,
+          deletedAt: null,
+          ...(cleanFilters.status ? { status: cleanFilters.status as string } : {}),
+          ...(cleanFilters.search ? {
+            OR: [
+              { firstName: { contains: cleanFilters.search as string, mode: 'insensitive' as const } },
+              { lastName: { contains: cleanFilters.search as string, mode: 'insensitive' as const } },
+              { email: { contains: cleanFilters.search as string, mode: 'insensitive' as const } },
+              { companyName: { contains: cleanFilters.search as string, mode: 'insensitive' as const } },
+            ],
+          } : {}),
+          ...(cleanFilters.tags ? { tags: { hasSome: cleanFilters.tags as string[] } } : {}),
+          ...(cleanFilters.city ? { city: { contains: cleanFilters.city as string, mode: 'insensitive' as const } } : {}),
+          ...(cleanFilters.industry ? { industry: { contains: cleanFilters.industry as string, mode: 'insensitive' as const } } : {}),
+          ...(cleanFilters.source ? { source: { contains: cleanFilters.source as string, mode: 'insensitive' as const } } : {}),
+          ...(cleanFilters.staleDays ? {
+            lastInteractionAt: { lt: new Date(Date.now() - Number(cleanFilters.staleDays) * 86400000) },
+          } : {}),
+          ...(cleanFilters.newThisWeek ? {
+            createdAt: { gte: new Date(Date.now() - 7 * 86400000) },
+          } : {}),
+        },
+        take: 50,
+        orderBy: cleanFilters.sortBy === 'score' ? { leadScore: (cleanFilters.sortOrder as 'asc' | 'desc') ?? 'desc' }
+          : cleanFilters.sortBy === 'revenue' ? { leadScore: (cleanFilters.sortOrder as 'asc' | 'desc') ?? 'desc' }
+          : cleanFilters.sortBy === 'newest' ? { createdAt: 'desc' }
+          : cleanFilters.sortBy === 'oldest' ? { createdAt: 'asc' }
+          : cleanFilters.sortBy === 'lastInteraction' ? { lastInteractionAt: (cleanFilters.sortOrder as 'asc' | 'desc') ?? 'desc' }
+          : { firstName: (cleanFilters.sortOrder as 'asc' | 'desc') ?? 'asc' },
+        select: {
+          id: true, firstName: true, lastName: true, email: true, phone: true,
+          status: true, companyName: true, leadScore: true, tags: true,
+          lastInteractionAt: true, createdAt: true,
+        },
+      });
+
+      return {
+        contacts,
+        filters: cleanFilters,
+        interpretation: parsed.interpretation ?? '',
+        confidence: Number(parsed.confidence) || 0.5,
+        totalResults: contacts.length,
+        creditsUsed: result.usage?.creditsUsed ?? 1,
+      };
+    } catch (error) {
+      this.logger.error('NL search failed', error);
+      throw error;
+    }
+  }
+
+  private parseJson(content: string): Record<string, unknown> {
+    try {
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return {};
+      return JSON.parse(jsonMatch[0]);
+    } catch {
+      return {};
+    }
+  }
+
   private parseJsonResponse(content: string): AiAnalysisResult {
     try {
       const jsonMatch = content.match(/\{[\s\S]*\}/);

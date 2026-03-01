@@ -15,6 +15,8 @@ import { KanbanSkeleton } from "@/components/ui/skeleton";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
+import { AiSearchBar } from "@/components/contacts/ai-search-bar";
+import { AiChurnDetectionPanel } from "@/components/contacts/ai-churn-detection";
 import type { SmartSegment } from "./pipeline-toolbar";
 import { ContactsDatabase } from "./contacts-database";
 import { InsightsTab } from "./insights-tab";
@@ -155,6 +157,10 @@ export default function ContactsPage() {
             onTabChange={handleTabChange}
           />
         }
+      />
+
+      <AiSearchBar
+        onSelectContact={(id) => { selectContact(id); setCrmViewTab("pipeline"); }}
       />
 
       <TabNav

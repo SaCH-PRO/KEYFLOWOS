@@ -12,6 +12,7 @@ import { NextActionQueue } from "@/components/contacts";
 import { AutopilotActions } from "@/components/contacts";
 import { AutopilotSettingsPanel } from "@/components/contacts";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AiChurnDetectionPanel } from "@/components/contacts/ai-churn-detection";
 import { SequencesSection } from "./sequences-section";
 import type { NextAction } from "@/components/contacts/next-action-queue";
 import type { AutopilotAction } from "@/components/contacts/autopilot-actions";
@@ -638,6 +639,8 @@ export function EngageTab({
       {businessId && (
         <SequencesSection businessId={businessId} />
       )}
+
+      <AiChurnDetectionPanel onSelectContact={onViewContact} />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <CompletionTimeline actions={autopilotActions} />
