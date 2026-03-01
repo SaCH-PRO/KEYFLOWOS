@@ -174,6 +174,28 @@ export class CrmSequenceService {
     return { success: true };
   }
 
+  private async logEvent(
+    businessId: string,
+    contactId: string,
+    type: string,
+    data: Record<string, unknown>,
+  ) {
+    try {
+      await this.db.contactEvent.create({
+        data: {
+          businessId,
+          contactId,
+          type,
+          data,
+          actorType: 'system',
+          source: 'sequence',
+        },
+      });
+    } catch (err) {
+      console.warn(`[CrmSequenceService] Failed to log event ${type} for contact ${contactId}:`, err);
+    }
+  }
+
   async enrollContacts(businessId: string, sequenceId: string, contactIds: string[]) {
     if (!Array.isArray(contactIds) || contactIds.length === 0) {
       throw new HttpException('contactIds must be a non-empty array', HttpStatus.BAD_REQUEST);
@@ -220,13 +242,24 @@ export class CrmSequenceService {
       })),
     });
 
+    await Promise.all(
+      newContactIds.map((contactId) =>
+        this.logEvent(businessId, contactId, 'sequence_enrolled', {
+          sequenceId,
+          sequenceName: sequence.name,
+          firstStepType: steps?.[0]?.type ?? null,
+          totalSteps: steps.length,
+        }),
+      ),
+    );
+
     return { enrolled: newContactIds.length, skipped: alreadyEnrolled.size };
   }
 
   async advanceEnrollment(businessId: string, enrollmentId: string) {
     const enrollment = await this.db.crmSequenceEnrollment.findFirst({
       where: { id: enrollmentId },
-      include: { sequence: { select: { businessId: true, steps: true } } },
+      include: { sequence: { select: { businessId: true, name: true, steps: true } } },
     });
 
     if (!enrollment || enrollment.sequence.businessId !== businessId) {
@@ -235,6 +268,7 @@ export class CrmSequenceService {
 
     const steps = enrollment.sequence.steps as any[];
     const nextStep = enrollment.currentStep + 1;
+    const currentStepData = steps[enrollment.currentStep] ?? null;
 
     if (nextStep >= steps.length) {
       await this.db.crmSequenceEnrollment.update({
@@ -246,6 +280,17 @@ export class CrmSequenceService {
           nextStepAt: null,
         },
       });
+
+      await this.logEvent(businessId, enrollment.contactId, 'sequence_step_advanced', {
+        sequenceId: enrollment.sequenceId,
+        sequenceName: enrollment.sequence.name,
+        fromStep: enrollment.currentStep,
+        toStep: nextStep,
+        stepType: currentStepData?.type ?? null,
+        stepSubject: currentStepData?.subject ?? null,
+        completed: true,
+      });
+
       return { status: 'completed', currentStep: nextStep };
     }
 
@@ -260,13 +305,56 @@ export class CrmSequenceService {
       },
     });
 
+    await this.logEvent(businessId, enrollment.contactId, 'sequence_step_advanced', {
+      sequenceId: enrollment.sequenceId,
+      sequenceName: enrollment.sequence.name,
+      fromStep: enrollment.currentStep,
+      toStep: nextStep,
+      stepType: currentStepData?.type ?? null,
+      stepSubject: currentStepData?.subject ?? null,
+      nextStepType: steps[nextStep]?.type ?? null,
+      completed: false,
+    });
+
     return { status: 'active', currentStep: nextStep, nextStepAt: nextStepAt.toISOString() };
+  }
+
+  async duplicateSequence(businessId: string, id: string) {
+    const existing = await this.db.crmSequence.findFirst({
+      where: { id, businessId },
+    });
+
+    if (!existing) {
+      throw new HttpException('Sequence not found', HttpStatus.NOT_FOUND);
+    }
+
+    const sequence = await this.db.crmSequence.create({
+      data: {
+        businessId,
+        name: `${existing.name} (Copy)`,
+        description: existing.description,
+        steps: existing.steps as any,
+        status: 'active',
+      },
+    });
+
+    return {
+      id: sequence.id,
+      businessId: sequence.businessId,
+      name: sequence.name,
+      description: sequence.description,
+      steps: sequence.steps,
+      status: sequence.status,
+      createdAt: sequence.createdAt.toISOString(),
+      updatedAt: sequence.updatedAt.toISOString(),
+      enrollmentCount: 0,
+    };
   }
 
   async unenrollContact(businessId: string, enrollmentId: string) {
     const enrollment = await this.db.crmSequenceEnrollment.findFirst({
       where: { id: enrollmentId },
-      include: { sequence: { select: { businessId: true } } },
+      include: { sequence: { select: { businessId: true, name: true, steps: true } } },
     });
 
     if (!enrollment || enrollment.sequence.businessId !== businessId) {
@@ -276,6 +364,14 @@ export class CrmSequenceService {
     await this.db.crmSequenceEnrollment.update({
       where: { id: enrollmentId },
       data: { status: 'unenrolled', nextStepAt: null },
+    });
+
+    const steps = enrollment.sequence.steps as any[];
+    await this.logEvent(businessId, enrollment.contactId, 'sequence_unenrolled', {
+      sequenceId: enrollment.sequenceId,
+      sequenceName: enrollment.sequence.name,
+      stoppedAtStep: enrollment.currentStep,
+      totalSteps: steps.length,
     });
 
     return { success: true };

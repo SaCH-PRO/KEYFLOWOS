@@ -1,19 +1,20 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   GitBranch, Plus, ChevronDown, ChevronUp, Mail, Phone,
   MessageSquare, Clock, Users, Trash2, Play, Pause, X,
-  ArrowUp, ArrowDown, CheckCircle2, UserPlus, Eye,
+  ArrowUp, ArrowDown, CheckCircle2, UserPlus, Eye, Copy, Pencil,
 } from "lucide-react";
 import {
   fetchSequences, createSequence, fetchSequenceDetail, deleteSequence,
   enrollContactsInSequence, advanceSequenceEnrollment, unenrollFromSequence,
-  fetchContacts,
+  fetchContacts, updateSequence, duplicateSequence,
   type CrmSequence, type CrmSequenceStep, type CrmSequenceDetail, type Contact,
 } from "@/lib/client";
 import { Search } from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 const STEP_TYPES = [
   { value: "email" as const, label: "Email", icon: Mail, color: "text-blue-400" },
@@ -66,14 +67,23 @@ interface SequencesSectionProps {
   businessId: string;
 }
 
+type EditingSequence = {
+  id: string;
+  name: string;
+  description?: string;
+  steps: CrmSequenceStep[];
+};
+
 export const SequencesSection = React.memo(function SequencesSection({ businessId }: SequencesSectionProps) {
   const [expanded, setExpanded] = useState(true);
   const [sequences, setSequences] = useState<CrmSequence[]>([]);
   const [loading, setLoading] = useState(true);
   const [showBuilder, setShowBuilder] = useState(false);
+  const [editingSequence, setEditingSequence] = useState<EditingSequence | null>(null);
   const [selectedSequence, setSelectedSequence] = useState<CrmSequenceDetail | null>(null);
   const [showContactPicker, setShowContactPicker] = useState(false);
   const [enrollSequenceId, setEnrollSequenceId] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
 
   const loadSequences = useCallback(async () => {
     setLoading(true);
@@ -89,11 +99,22 @@ export const SequencesSection = React.memo(function SequencesSection({ businessI
     if (res.data) setSelectedSequence(res.data);
   }, [businessId]);
 
-  const handleDelete = useCallback(async (id: string) => {
-    await deleteSequence(businessId, id);
-    setSequences((prev) => prev.filter((s) => s.id !== id));
-    if (selectedSequence?.id === id) setSelectedSequence(null);
-  }, [businessId, selectedSequence]);
+  const handleDeleteConfirmed = useCallback(async () => {
+    if (!confirmDelete) return;
+    const id = confirmDelete.id;
+    try {
+      const res = await deleteSequence(businessId, id);
+      if (res.data) {
+        setSequences((prev) => prev.filter((s) => s.id !== id));
+        if (selectedSequence?.id === id) setSelectedSequence(null);
+      }
+    } catch { /* swallow */ }
+    setConfirmDelete(null);
+  }, [businessId, selectedSequence, confirmDelete]);
+
+  const handleDeleteRequest = useCallback((id: string, name: string) => {
+    setConfirmDelete({ id, name });
+  }, []);
 
   const handleEnrollClick = useCallback((sequenceId: string) => {
     setEnrollSequenceId(sequenceId);
@@ -102,24 +123,30 @@ export const SequencesSection = React.memo(function SequencesSection({ businessI
 
   const handleEnrollContacts = useCallback(async (contactIds: string[]) => {
     if (!enrollSequenceId) return;
-    await enrollContactsInSequence(businessId, enrollSequenceId, contactIds);
-    setShowContactPicker(false);
-    setEnrollSequenceId(null);
-    if (selectedSequence?.id === enrollSequenceId) {
-      handleViewSequence(enrollSequenceId);
-    }
-    loadSequences();
+    try {
+      await enrollContactsInSequence(businessId, enrollSequenceId, contactIds);
+      setShowContactPicker(false);
+      setEnrollSequenceId(null);
+      if (selectedSequence?.id === enrollSequenceId) {
+        handleViewSequence(enrollSequenceId);
+      }
+      loadSequences();
+    } catch { /* swallow */ }
   }, [businessId, enrollSequenceId, selectedSequence, handleViewSequence, loadSequences]);
 
   const handleAdvance = useCallback(async (sequenceId: string, enrollmentId: string) => {
-    await advanceSequenceEnrollment(businessId, sequenceId, enrollmentId);
-    handleViewSequence(sequenceId);
+    try {
+      await advanceSequenceEnrollment(businessId, sequenceId, enrollmentId);
+      handleViewSequence(sequenceId);
+    } catch { /* swallow */ }
   }, [businessId, handleViewSequence]);
 
   const handleUnenroll = useCallback(async (sequenceId: string, enrollmentId: string) => {
-    await unenrollFromSequence(businessId, sequenceId, enrollmentId);
-    handleViewSequence(sequenceId);
-    loadSequences();
+    try {
+      await unenrollFromSequence(businessId, sequenceId, enrollmentId);
+      handleViewSequence(sequenceId);
+      loadSequences();
+    } catch { /* swallow */ }
   }, [businessId, handleViewSequence, loadSequences]);
 
   const handleCreateSequence = useCallback(async (data: { name: string; description?: string; steps: CrmSequenceStep[] }) => {
@@ -127,6 +154,35 @@ export const SequencesSection = React.memo(function SequencesSection({ businessI
     if (res.data) {
       setSequences((prev) => [res.data!, ...prev]);
       setShowBuilder(false);
+    }
+  }, [businessId]);
+
+  const handleUpdateSequence = useCallback(async (data: { name: string; description?: string; steps: CrmSequenceStep[] }) => {
+    if (!editingSequence) return;
+    const res = await updateSequence(businessId, editingSequence.id, data);
+    if (res.data) {
+      setSequences((prev) => prev.map((s) => s.id === editingSequence.id ? { ...s, ...res.data! } : s));
+      setEditingSequence(null);
+      if (selectedSequence?.id === editingSequence.id) {
+        handleViewSequence(editingSequence.id);
+      }
+    }
+  }, [businessId, editingSequence, selectedSequence, handleViewSequence]);
+
+  const handleEditClick = useCallback(async (seq: CrmSequence) => {
+    const steps = Array.isArray(seq.steps) ? seq.steps : [];
+    setEditingSequence({
+      id: seq.id,
+      name: seq.name,
+      description: seq.description ?? undefined,
+      steps: steps.map((s) => ({ ...s })),
+    });
+  }, []);
+
+  const handleDuplicate = useCallback(async (id: string) => {
+    const res = await duplicateSequence(businessId, id);
+    if (res.data) {
+      setSequences((prev) => [res.data!, ...prev]);
     }
   }, [businessId]);
 
@@ -191,8 +247,10 @@ export const SequencesSection = React.memo(function SequencesSection({ businessI
                       key={seq.id}
                       sequence={seq}
                       onView={() => handleViewSequence(seq.id)}
-                      onDelete={() => handleDelete(seq.id)}
+                      onDelete={() => handleDeleteRequest(seq.id, seq.name)}
                       onEnroll={() => handleEnrollClick(seq.id)}
+                      onEdit={() => handleEditClick(seq)}
+                      onDuplicate={() => handleDuplicate(seq.id)}
                       isSelected={selectedSequence?.id === seq.id}
                     />
                   ))
@@ -218,7 +276,17 @@ export const SequencesSection = React.memo(function SequencesSection({ businessI
       {showBuilder && (
         <SequenceBuilder
           onClose={() => setShowBuilder(false)}
-          onCreate={handleCreateSequence}
+          onSave={handleCreateSequence}
+          mode="create"
+        />
+      )}
+
+      {editingSequence && (
+        <SequenceBuilder
+          onClose={() => setEditingSequence(null)}
+          onSave={handleUpdateSequence}
+          mode="edit"
+          initialData={editingSequence}
         />
       )}
 
@@ -229,17 +297,30 @@ export const SequencesSection = React.memo(function SequencesSection({ businessI
           onClose={() => { setShowContactPicker(false); setEnrollSequenceId(null); }}
         />
       )}
+
+      <ConfirmDialog
+        open={!!confirmDelete}
+        title="Delete Sequence"
+        message={`Are you sure you want to delete "${confirmDelete?.name ?? ""}"? This action cannot be undone.`}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={handleDeleteConfirmed}
+        onCancel={() => setConfirmDelete(null)}
+      />
     </>
   );
 });
 
 const SequenceCard = React.memo(function SequenceCard({
-  sequence, onView, onDelete, onEnroll, isSelected,
+  sequence, onView, onDelete, onEnroll, onEdit, onDuplicate, isSelected,
 }: {
   sequence: CrmSequence;
   onView: () => void;
   onDelete: () => void;
   onEnroll: () => void;
+  onEdit: () => void;
+  onDuplicate: () => void;
   isSelected: boolean;
 }) {
   const steps = Array.isArray(sequence.steps) ? sequence.steps : [];
@@ -284,6 +365,20 @@ const SequenceCard = React.memo(function SequenceCard({
             <UserPlus className="w-3.5 h-3.5 text-muted-foreground/60" />
           </button>
           <button
+            onClick={onEdit}
+            className="p-1.5 rounded-lg hover:bg-white/[0.05] transition-colors"
+            title="Edit sequence"
+          >
+            <Pencil className="w-3.5 h-3.5 text-muted-foreground/60" />
+          </button>
+          <button
+            onClick={onDuplicate}
+            className="p-1.5 rounded-lg hover:bg-white/[0.05] transition-colors"
+            title="Duplicate sequence"
+          >
+            <Copy className="w-3.5 h-3.5 text-muted-foreground/60" />
+          </button>
+          <button
             onClick={onDelete}
             className="p-1.5 rounded-lg hover:bg-red-500/10 transition-colors"
             title="Delete sequence"
@@ -296,6 +391,8 @@ const SequenceCard = React.memo(function SequenceCard({
   );
 });
 
+type EnrollmentStatusFilter = "all" | "active" | "completed" | "unenrolled";
+
 const SequenceDetailPanel = React.memo(function SequenceDetailPanel({
   detail, onClose, onAdvance, onUnenroll, onEnroll,
 }: {
@@ -306,6 +403,36 @@ const SequenceDetailPanel = React.memo(function SequenceDetailPanel({
   onEnroll: () => void;
 }) {
   const steps = Array.isArray(detail.steps) ? detail.steps : [];
+  const [statusFilter, setStatusFilter] = useState<EnrollmentStatusFilter>("all");
+  const [confirmUnenroll, setConfirmUnenroll] = useState<{ id: string; name: string } | null>(null);
+
+  const filteredEnrollments = useMemo(() => {
+    if (statusFilter === "all") return detail.enrollments;
+    return detail.enrollments.filter((e) => e.status === statusFilter);
+  }, [detail.enrollments, statusFilter]);
+
+  const statusCounts = useMemo(() => {
+    const counts = { all: detail.enrollments.length, active: 0, completed: 0, unenrolled: 0 };
+    for (const e of detail.enrollments) {
+      if (e.status === "active") counts.active++;
+      else if (e.status === "completed") counts.completed++;
+      else if (e.status === "unenrolled") counts.unenrolled++;
+    }
+    return counts;
+  }, [detail.enrollments]);
+
+  const filterTabs: { key: EnrollmentStatusFilter; label: string }[] = [
+    { key: "all", label: `All (${statusCounts.all})` },
+    { key: "active", label: `Active (${statusCounts.active})` },
+    { key: "completed", label: `Done (${statusCounts.completed})` },
+    { key: "unenrolled", label: `Left (${statusCounts.unenrolled})` },
+  ];
+
+  const handleUnenrollConfirmed = useCallback(() => {
+    if (!confirmUnenroll) return;
+    onUnenroll(confirmUnenroll.id);
+    setConfirmUnenroll(null);
+  }, [confirmUnenroll, onUnenroll]);
 
   return (
     <div className="rounded-xl border border-border/30 bg-white/[0.02] p-3 space-y-3">
@@ -349,11 +476,31 @@ const SequenceDetailPanel = React.memo(function SequenceDetailPanel({
         </button>
       </div>
 
-      {detail.enrollments.length === 0 ? (
-        <p className="text-[10px] text-muted-foreground/50 text-center py-3">No contacts enrolled yet.</p>
+      {detail.enrollments.length > 0 && (
+        <div className="flex items-center gap-1 flex-wrap">
+          {filterTabs.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setStatusFilter(tab.key)}
+              className={`px-2 py-1 text-[10px] font-semibold rounded-lg transition-colors ${
+                statusFilter === tab.key
+                  ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] border border-[hsl(var(--kf-accent1))]/20"
+                  : "text-muted-foreground/60 hover:bg-white/[0.04] border border-transparent"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {filteredEnrollments.length === 0 ? (
+        <p className="text-[10px] text-muted-foreground/50 text-center py-3">
+          {detail.enrollments.length === 0 ? "No contacts enrolled yet." : "No enrollments match this filter."}
+        </p>
       ) : (
         <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
-          {detail.enrollments.map((enrollment) => (
+          {filteredEnrollments.map((enrollment) => (
             <div key={enrollment.id} className="flex items-center gap-2 p-2 rounded-lg hover:bg-white/[0.02] transition-colors">
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium truncate">{enrollment.contactName}</p>
@@ -386,7 +533,7 @@ const SequenceDetailPanel = React.memo(function SequenceDetailPanel({
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                   </button>
                   <button
-                    onClick={() => onUnenroll(enrollment.id)}
+                    onClick={() => setConfirmUnenroll({ id: enrollment.id, name: enrollment.contactName })}
                     className="p-1 rounded-lg hover:bg-red-500/10 transition-colors"
                     title="Unenroll"
                   >
@@ -398,22 +545,37 @@ const SequenceDetailPanel = React.memo(function SequenceDetailPanel({
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!confirmUnenroll}
+        title="Unenroll Contact"
+        message={`Are you sure you want to unenroll "${confirmUnenroll?.name ?? ""}" from this sequence?`}
+        confirmLabel="Unenroll"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={handleUnenrollConfirmed}
+        onCancel={() => setConfirmUnenroll(null)}
+      />
     </div>
   );
 });
 
 function SequenceBuilder({
-  onClose, onCreate,
+  onClose, onSave, mode, initialData,
 }: {
   onClose: () => void;
-  onCreate: (data: { name: string; description?: string; steps: CrmSequenceStep[] }) => void;
+  onSave: (data: { name: string; description?: string; steps: CrmSequenceStep[] }) => void;
+  mode: "create" | "edit";
+  initialData?: { name: string; description?: string; steps: CrmSequenceStep[] };
 }) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [steps, setSteps] = useState<CrmSequenceStep[]>([
-    { stepNumber: 1, type: "email", delayDays: 0, subject: "", template: "" },
-  ]);
-  const [showTemplates, setShowTemplates] = useState(true);
+  const [name, setName] = useState(initialData?.name ?? "");
+  const [description, setDescription] = useState(initialData?.description ?? "");
+  const [steps, setSteps] = useState<CrmSequenceStep[]>(
+    initialData?.steps?.length
+      ? initialData.steps.map((s) => ({ ...s }))
+      : [{ stepNumber: 1, type: "email", delayDays: 0, subject: "", template: "" }]
+  );
+  const [showTemplates, setShowTemplates] = useState(mode === "create" && !initialData);
 
   const addStep = useCallback(() => {
     setSteps((prev) => [
@@ -449,8 +611,8 @@ function SequenceBuilder({
 
   const handleSubmit = useCallback(() => {
     if (!name.trim()) return;
-    onCreate({ name: name.trim(), description: description.trim() || undefined, steps });
-  }, [name, description, steps, onCreate]);
+    onSave({ name: name.trim(), description: description.trim() || undefined, steps });
+  }, [name, description, steps, onSave]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
@@ -466,7 +628,9 @@ function SequenceBuilder({
           <div className="p-2 rounded-xl bg-gradient-to-br from-purple-500/15 to-purple-500/5">
             <GitBranch className="w-4 h-4 text-purple-400" />
           </div>
-          <h2 className="text-base font-semibold flex-1">Create Sequence</h2>
+          <h2 className="text-base font-semibold flex-1">
+            {mode === "edit" ? "Edit Sequence" : "Create Sequence"}
+          </h2>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/[0.05]">
             <X className="w-4 h-4 text-muted-foreground/50" />
           </button>
@@ -623,7 +787,7 @@ function SequenceBuilder({
                 disabled={!name.trim()}
                 className="flex-1 py-2 text-xs font-semibold rounded-xl bg-gradient-to-r from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] text-white disabled:opacity-50 hover:opacity-90 transition-opacity"
               >
-                Create Sequence
+                {mode === "edit" ? "Save Changes" : "Create Sequence"}
               </button>
             </div>
           </>
@@ -631,6 +795,15 @@ function SequenceBuilder({
       </motion.div>
     </div>
   );
+}
+
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debouncedValue;
 }
 
 function EnrollContactPicker({
@@ -644,17 +817,18 @@ function EnrollContactPicker({
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const debouncedSearch = useDebounce(search, 400);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const res = await fetchContacts(businessId, { take: 100, search: search.trim() || undefined });
+      const res = await fetchContacts(businessId, { take: 100, search: debouncedSearch.trim() || undefined });
       if (!cancelled && res.data) setContacts(res.data);
       if (!cancelled) setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [businessId, search]);
+  }, [businessId, debouncedSearch]);
 
   const toggle = useCallback((id: string) => {
     setSelected((prev) => {

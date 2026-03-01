@@ -3443,6 +3443,16 @@ export async function deleteSequence(
   );
 }
 
+export async function duplicateSequence(
+  businessId: string,
+  sequenceId: string,
+): Promise<ApiResult<CrmSequence>> {
+  return apiPost<CrmSequence>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/sequences/${encodeURIComponent(sequenceId)}/duplicate`,
+    body: {},
+  });
+}
+
 export async function enrollContactsInSequence(
   businessId: string,
   sequenceId: string,

@@ -601,6 +601,39 @@ export class CrmFlowService {
       }
     }
 
+    const dueCallEnrollments = await this.db.crmSequenceEnrollment.findMany({
+      where: {
+        status: 'active',
+        nextStepAt: { lte: now },
+        sequence: { businessId },
+      },
+      include: {
+        contact: true,
+        sequence: true,
+      },
+      take: 10,
+      orderBy: { nextStepAt: 'asc' },
+    });
+
+    for (const enrollment of dueCallEnrollments) {
+      if (!enrollment.contact || !enrollment.sequence) continue;
+      const steps = Array.isArray(enrollment.sequence.steps) ? enrollment.sequence.steps as any[] : [];
+      const currentStep = steps[enrollment.currentStep];
+      if (!currentStep || currentStep.type !== 'call') continue;
+
+      const callDesc = currentStep.notes || currentStep.subject || `Step ${enrollment.currentStep + 1}`;
+      push({
+        id: `seq_call_${enrollment.id}`,
+        type: 'call',
+        contactId: enrollment.contactId,
+        contactName: this.contactName(enrollment.contact),
+        description: `[Sequence: ${enrollment.sequence.name}] ${callDesc}`,
+        estimatedTime: 30,
+        priority: 'high',
+        dueDate: enrollment.nextStepAt?.toISOString(),
+      });
+    }
+
     return actions.sort((a, b) => {
       const priorityOrder = { urgent: 0, high: 1, medium: 2, low: 3 };
       const pDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
@@ -836,6 +869,49 @@ export class CrmFlowService {
         contactEmail: contact.email || undefined,
         description: `Prospect stalled ${daysSince}d — auto-send incentive offer`,
         scheduledAt: now.toISOString(),
+      });
+    }
+
+    const dueEnrollments = await this.db.crmSequenceEnrollment.findMany({
+      where: {
+        status: 'active',
+        nextStepAt: { lte: now },
+        sequence: { businessId },
+      },
+      include: {
+        contact: true,
+        sequence: true,
+      },
+      take: 15,
+      orderBy: { nextStepAt: 'asc' },
+    });
+
+    for (const enrollment of dueEnrollments) {
+      if (!enrollment.contact || !enrollment.sequence) continue;
+      const steps = Array.isArray(enrollment.sequence.steps) ? enrollment.sequence.steps as any[] : [];
+      const currentStep = steps[enrollment.currentStep];
+      if (!currentStep) continue;
+
+      const stepType = currentStep.type as string;
+      const actionType: AutopilotAction['type'] =
+        stepType === 'call' ? 'check_in' :
+        stepType === 'email' || stepType === 'whatsapp' ? 'follow_up' : 'follow_up';
+
+      const stepDesc = currentStep.subject || currentStep.template || currentStep.notes || `Step ${enrollment.currentStep + 1}`;
+      const truncatedDesc = typeof stepDesc === 'string' && stepDesc.length > 80
+        ? stepDesc.slice(0, 80) + '…'
+        : stepDesc;
+
+      push({
+        id: `seq_${enrollment.id}_step${enrollment.currentStep}`,
+        type: actionType,
+        status: 'needs_approval',
+        contactId: enrollment.contactId,
+        contactName: this.contactName(enrollment.contact),
+        contactPhone: enrollment.contact.phone || undefined,
+        contactEmail: enrollment.contact.email || undefined,
+        description: `[Sequence: ${enrollment.sequence.name}] ${stepType} — ${truncatedDesc}`,
+        scheduledAt: enrollment.nextStepAt?.toISOString(),
       });
     }
 

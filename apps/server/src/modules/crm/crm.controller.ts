@@ -762,6 +762,15 @@ export class CrmController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/sequences/:id/duplicate')
+  duplicateSequence(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+  ) {
+    return this.sequences.duplicateSequence(businessId, id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/sequences/:id/enroll')
   enrollContacts(
     @Param('businessId') businessId: string,
