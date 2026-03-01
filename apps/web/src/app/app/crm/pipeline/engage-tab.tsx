@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { NextActionQueue } from "@/components/contacts";
 import { AutopilotActions } from "@/components/contacts";
+import { AutopilotSettingsPanel } from "@/components/contacts";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SequencesSection } from "./sequences-section";
 import type { NextAction } from "@/components/contacts/next-action-queue";
@@ -541,6 +542,7 @@ export function EngageTab({
   const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>("all");
   const [sortBy, setSortBy] = useState<SortOption>("priority");
   const [completedCount, setCompletedCount] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const filteredActions = useMemo(() => {
     let result = [...nextActions];
@@ -624,10 +626,12 @@ export function EngageTab({
         <AutopilotActions
           actions={autopilotActions}
           isPaused={autopilotPaused}
+          businessId={businessId}
           onTogglePause={onTogglePause}
           onApprove={onApprove}
           onDeny={onDeny}
           onViewContact={onViewContact}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
       </motion.div>
 
@@ -655,6 +659,12 @@ export function EngageTab({
           </p>
         </motion.div>
       )}
+
+      <AutopilotSettingsPanel
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        businessId={businessId}
+      />
     </motion.div>
   );
 }

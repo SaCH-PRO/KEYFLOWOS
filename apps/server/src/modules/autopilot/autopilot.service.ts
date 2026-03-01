@@ -313,4 +313,109 @@ export class AutopilotService {
 
     return alerts;
   }
+
+  async getSettings(businessId: string) {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { metaData: true, autopilotEnabled: true },
+    });
+
+    const meta = (business?.metaData as Record<string, unknown>) || {};
+    const autopilot = (meta.autopilot as Record<string, unknown>) || {};
+
+    return {
+      enabled: business?.autopilotEnabled ?? false,
+      pausedUntil: autopilot.pausedUntil ?? null,
+      triggers: {
+        follow_up: autopilot.trigger_follow_up !== false,
+        birthday: autopilot.trigger_birthday !== false,
+        payment_reminder: autopilot.trigger_payment_reminder !== false,
+        check_in: autopilot.trigger_check_in !== false,
+        offer: autopilot.trigger_offer !== false,
+      },
+      autoApproveTypes: (autopilot.autoApproveTypes as string[]) || [],
+      quietHoursStart: autopilot.quietHoursStart ?? '22:00',
+      quietHoursEnd: autopilot.quietHoursEnd ?? '07:00',
+    };
+  }
+
+  async updateSettings(businessId: string, settings: Record<string, unknown>) {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { metaData: true },
+    });
+
+    const meta = (business?.metaData as Record<string, unknown>) || {};
+    const existingAutopilot = (meta.autopilot as Record<string, unknown>) || {};
+
+    const triggers = settings.triggers as Record<string, boolean> | undefined;
+    const updatedAutopilot = {
+      ...existingAutopilot,
+      ...(settings.pausedUntil !== undefined ? { pausedUntil: settings.pausedUntil } : {}),
+      ...(triggers ? {
+        trigger_follow_up: triggers.follow_up,
+        trigger_birthday: triggers.birthday,
+        trigger_payment_reminder: triggers.payment_reminder,
+        trigger_check_in: triggers.check_in,
+        trigger_offer: triggers.offer,
+      } : {}),
+      ...(settings.autoApproveTypes !== undefined ? { autoApproveTypes: settings.autoApproveTypes } : {}),
+      ...(settings.quietHoursStart !== undefined ? { quietHoursStart: settings.quietHoursStart } : {}),
+      ...(settings.quietHoursEnd !== undefined ? { quietHoursEnd: settings.quietHoursEnd } : {}),
+    };
+
+    const updateData: Record<string, unknown> = {
+      metaData: { ...meta, autopilot: updatedAutopilot },
+    };
+
+    if (settings.enabled !== undefined) {
+      updateData.autopilotEnabled = settings.enabled;
+    }
+
+    await this.prisma.client.business.update({
+      where: { id: businessId },
+      data: updateData as any,
+    });
+
+    return this.getSettings(businessId);
+  }
+
+  async executeAction(
+    businessId: string,
+    actionId: string,
+    contactId: string,
+    channel: string,
+    message: string,
+  ) {
+    const eventData: Record<string, unknown> = {
+      actionId,
+      channel,
+      message: message.slice(0, 500),
+      executedAt: new Date().toISOString(),
+      source: 'autopilot',
+    };
+
+    if (contactId) {
+      await this.prisma.client.contactEvent.create({
+        data: {
+          contactId,
+          businessId,
+          type: channel === 'whatsapp' ? 'whatsapp.sent' : channel === 'email' ? 'email.sent' : 'autopilot.executed',
+          description: `Autopilot: ${message.slice(0, 200)}`,
+          data: eventData as any,
+          actorType: 'AI',
+          actorId: 'autopilot',
+        },
+      });
+    }
+
+    const realTaskId = actionId.replace(/^(auto_|pending_|overdue_inv_|checkin_|nudge_|postbooking_|autowelcome_|stalenudge_)/, '');
+    try {
+      await this.updateTaskStatus(realTaskId, businessId, 'AUTO_EXECUTED', 'autopilot');
+    } catch {
+      // Action may not correspond to an AutopilotTask (CRM flow actions use synthetic IDs)
+    }
+
+    return { success: true, eventLogged: !!contactId };
+  }
 }

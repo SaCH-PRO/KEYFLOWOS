@@ -2176,6 +2176,93 @@ export async function fetchCriticalAlerts(businessId?: string) {
   );
 }
 
+export type AutopilotDraft = {
+  subject: string;
+  message: string;
+  tone: string;
+  suggestedChannel: 'whatsapp' | 'email';
+};
+
+export type AutopilotSettings = {
+  enabled: boolean;
+  pausedUntil: string | null;
+  triggers: {
+    follow_up: boolean;
+    birthday: boolean;
+    payment_reminder: boolean;
+    check_in: boolean;
+    offer: boolean;
+  };
+  autoApproveTypes: string[];
+  quietHoursStart: string;
+  quietHoursEnd: string;
+};
+
+const autopilotDraftSchema = z.object({
+  subject: z.string(),
+  message: z.string(),
+  tone: z.string(),
+  suggestedChannel: z.enum(['whatsapp', 'email']),
+});
+
+const autopilotSettingsSchema = z.object({
+  enabled: z.boolean(),
+  pausedUntil: z.string().nullable(),
+  triggers: z.object({
+    follow_up: z.boolean(),
+    birthday: z.boolean(),
+    payment_reminder: z.boolean(),
+    check_in: z.boolean(),
+    offer: z.boolean(),
+  }),
+  autoApproveTypes: z.array(z.string()),
+  quietHoursStart: z.string(),
+  quietHoursEnd: z.string(),
+});
+
+export async function generateAutopilotDraft(
+  actionId: string,
+  body: { type: string; contactId: string; contactName: string; description: string },
+  businessId?: string,
+): Promise<ApiResult<AutopilotDraft>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AutopilotDraft>({
+    path: `/autopilot/businesses/${encodeURIComponent(bid)}/actions/${encodeURIComponent(actionId)}/draft`,
+    body,
+  });
+}
+
+export async function executeAutopilotAction(
+  actionId: string,
+  body: { contactId: string; channel: string; message: string },
+  businessId?: string,
+): Promise<ApiResult<{ success: boolean; eventLogged: boolean }>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{ success: boolean; eventLogged: boolean }>({
+    path: `/autopilot/businesses/${encodeURIComponent(bid)}/actions/${encodeURIComponent(actionId)}/execute`,
+    body,
+  });
+}
+
+export async function fetchAutopilotSettings(businessId?: string): Promise<ApiResult<AutopilotSettings>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/autopilot/businesses/${encodeURIComponent(bid)}/settings`,
+    autopilotSettingsSchema,
+  );
+}
+
+export async function updateAutopilotSettings(
+  settings: Partial<AutopilotSettings>,
+  businessId?: string,
+): Promise<ApiResult<AutopilotSettings>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPatch<AutopilotSettings>(
+    `/autopilot/businesses/${encodeURIComponent(bid)}/settings`,
+    settings,
+  );
+}
+
 const flowIntelligenceSchema = z.object({
   totalContacts: z.number(),
   leads: z.number(),
@@ -2212,6 +2299,8 @@ const autopilotActionSchema = z.object({
   status: z.enum(["completed", "pending", "needs_approval"]),
   contactName: z.string(),
   contactId: z.string(),
+  contactPhone: z.string().optional(),
+  contactEmail: z.string().optional(),
   description: z.string(),
   scheduledAt: z.string().optional(),
   completedAt: z.string().optional(),

@@ -1,5 +1,6 @@
-import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards, Inject, Req } from '@nestjs/common';
 import { AutopilotService } from './autopilot.service';
+import { AutopilotAiService } from './autopilot-ai.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 
@@ -7,7 +8,8 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 @UseGuards(AuthGuard, BusinessGuard)
 export class AutopilotController {
   constructor(
-    @Inject(AutopilotService) private autopilotService: AutopilotService
+    @Inject(AutopilotService) private autopilotService: AutopilotService,
+    @Inject(AutopilotAiService) private autopilotAiService: AutopilotAiService,
   ) {}
 
   @Get('tasks/today')
@@ -104,5 +106,59 @@ export class AutopilotController {
     @Param('businessId') businessId: string
   ) {
     return this.autopilotService.getCriticalAlerts(businessId);
+  }
+
+  @Post('actions/:actionId/draft')
+  async generateDraft(
+    @Param('businessId') businessId: string,
+    @Param('actionId') actionId: string,
+    @Body() body: {
+      type: 'follow_up' | 'birthday' | 'payment_reminder' | 'check_in' | 'offer';
+      contactId: string;
+      contactName: string;
+      description: string;
+    }
+  ) {
+    return this.autopilotAiService.generateDraft(businessId, {
+      id: actionId,
+      type: body.type,
+      contactId: body.contactId,
+      contactName: body.contactName,
+      description: body.description,
+    });
+  }
+
+  @Post('actions/:actionId/execute')
+  async executeAction(
+    @Param('businessId') businessId: string,
+    @Param('actionId') actionId: string,
+    @Body() body: {
+      contactId: string;
+      channel: string;
+      message: string;
+    }
+  ) {
+    return this.autopilotService.executeAction(
+      businessId,
+      actionId,
+      body.contactId,
+      body.channel,
+      body.message,
+    );
+  }
+
+  @Get('settings')
+  async getSettings(
+    @Param('businessId') businessId: string
+  ) {
+    return this.autopilotService.getSettings(businessId);
+  }
+
+  @Patch('settings')
+  async updateSettings(
+    @Param('businessId') businessId: string,
+    @Body() body: Record<string, unknown>
+  ) {
+    return this.autopilotService.updateSettings(businessId, body);
   }
 }
