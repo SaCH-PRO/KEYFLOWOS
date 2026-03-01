@@ -193,6 +193,7 @@ export function useContactsPipeline() {
     autopilotActions: flow.autopilotActions, setAutopilotActions: flow.setAutopilotActions,
     autopilotPaused: flow.autopilotPaused, setAutopilotPaused: flow.setAutopilotPaused,
     revenueData: flow.revenueData,
+    financialGrowth: flow.financialGrowth,
     healthMetrics: detail.healthMetrics,
     journeyMilestones: detail.journeyMilestones,
     conversationContext: detail.conversationContext,

@@ -2510,6 +2510,42 @@ export async function fetchPredictiveRevenue(businessId?: string, opts?: { signa
   );
 }
 
+export interface FinancialGrowthData {
+  monthlyRevenue: { month: string; collected: number; invoiced: number }[];
+  totalCollected: number;
+  totalInvoiced: number;
+  collectionRate: number;
+  avgClientValue: number;
+  clientCount: number;
+  revenueGrowthPct: number;
+  avgDaysToPayment: number;
+  topServices: { name: string; revenue: number; bookings: number }[];
+  revenueAtRisk: number;
+}
+
+const financialGrowthSchema = z.object({
+  monthlyRevenue: z.array(z.object({ month: z.string(), collected: z.number(), invoiced: z.number() })),
+  totalCollected: z.number(),
+  totalInvoiced: z.number(),
+  collectionRate: z.number(),
+  avgClientValue: z.number(),
+  clientCount: z.number(),
+  revenueGrowthPct: z.number(),
+  avgDaysToPayment: z.number(),
+  topServices: z.array(z.object({ name: z.string(), revenue: z.number(), bookings: z.number() })),
+  revenueAtRisk: z.number(),
+});
+
+export async function fetchFinancialGrowth(businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<FinancialGrowthData>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(bid)}/financial-growth`,
+    financialGrowthSchema,
+    undefined,
+    { signal: opts?.signal },
+  );
+}
+
 export async function fetchConversationContext(contactId: string, businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<ConversationContextData>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiGet(
