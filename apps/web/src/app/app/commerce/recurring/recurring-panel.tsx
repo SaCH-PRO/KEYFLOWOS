@@ -414,19 +414,19 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
 
       {loading ? (
         <div className="space-y-3 animate-pulse">
-          {[1, 2, 3].map((i) => <div key={i} className="h-20 bg-muted/30 rounded-2xl" />)}
+          {[1, 2, 3].map((i) => <div key={i} className="h-20 bg-muted/30 rounded-xl border border-border/50" />)}
         </div>
       ) : recurring.length === 0 ? (
-        <div className="text-center py-16">
-          <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mx-auto mb-4">
-            <RefreshCw className="w-8 h-8 text-muted-foreground" />
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <div className="w-14 h-14 rounded-xl bg-white/[0.03] border border-border/50 flex items-center justify-center mb-4">
+            <RefreshCw className="w-7 h-7 text-muted-foreground/50" />
           </div>
           <h3 className="text-lg font-semibold mb-1">No recurring invoices</h3>
           <p className="text-sm text-muted-foreground max-w-sm mx-auto mb-4">
             Set up automatic invoice generation on a schedule for retainer clients, subscriptions, or regular services.
           </p>
           <Button onClick={() => { resetForm(); setShowBuilder(true); }} className="gap-2">
-            <Plus className="w-4 h-4" /> Create Schedule
+            <Plus className="w-4 h-4" /> Create Your First Schedule
           </Button>
         </div>
       ) : (
@@ -436,7 +436,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
               key={rec.id}
               initial={{ opacity: 0, y: 5 }}
               animate={{ opacity: 1, y: 0 }}
-              className={`rounded-2xl border bg-card/80 backdrop-blur-sm p-5 transition-all ${rec.isActive ? "border-border/60 hover:border-primary/40" : "border-border/30 opacity-60"}`}
+              className={`rounded-xl border bg-card p-4 transition-all ${rec.isActive ? "border-border/50 hover:border-border/70" : "border-border/30 opacity-60"}`}
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
