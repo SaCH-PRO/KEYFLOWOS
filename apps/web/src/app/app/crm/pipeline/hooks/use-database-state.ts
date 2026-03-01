@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import type { LocalContact } from "@/lib/contacts-db";
 import { cacheContacts, getCachedContacts, getLastSyncTime, setLastSyncTime } from "@/lib/contacts-db";
 import { exportContacts, type ExportFormat } from "@/lib/contacts-export";
-import { bulkUpdateContacts, bulkDeleteContacts, addContactsToList } from "@/lib/client";
+import { bulkUpdateContacts, bulkDeleteContacts, addContactsToList, fetchContacts } from "@/lib/client";
 import { toast } from "sonner";
 
 export type SortField = "firstName" | "lastName" | "email" | "phone" | "status" | "companyName" | "city" | "country" | "source" | "createdAt" | "lastActive" | "referredBy" | "linkedinUrl" | "instagramUrl" | "twitterUrl";
@@ -244,7 +244,66 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
   const cachedContactsRef = useRef(cachedContacts);
   cachedContactsRef.current = cachedContacts;
 
-  const activeContacts = contacts.length > 0 ? contacts : cachedContacts;
+  const [serverContacts, setServerContacts] = useState<LocalContact[]>([]);
+  const [serverLoading, setServerLoading] = useState(false);
+  const [serverTotalCount, setServerTotalCount] = useState(0);
+  const [serverHasMore, setServerHasMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const serverAbortRef = useRef<AbortController | null>(null);
+
+  const activeContacts = serverContacts.length > 0 ? serverContacts : contacts.length > 0 ? contacts : cachedContacts;
+
+  const mapSortFieldToApi = useCallback((field: SortField): string | undefined => {
+    switch (field) {
+      case "firstName":
+      case "lastName":
+        return "name";
+      case "createdAt":
+        return "newest";
+      case "lastActive":
+        return "lastInteraction";
+      default:
+        return undefined;
+    }
+  }, []);
+
+  const loadServerContacts = useCallback(async (opts?: { append?: boolean }) => {
+    if (!businessId) return;
+    const append = opts?.append ?? false;
+
+    if (serverAbortRef.current) serverAbortRef.current.abort();
+    const controller = new AbortController();
+    serverAbortRef.current = controller;
+
+    setServerLoading(true);
+    try {
+      const apiSortBy = mapSortFieldToApi(sortField);
+      const { data } = await fetchContacts(businessId, {
+        take: pageSize,
+        cursor: append && nextCursor ? nextCursor : undefined,
+        skip: append && !nextCursor ? serverContacts.length : undefined,
+        search: search || undefined,
+        status: statusFilter !== "ALL" ? statusFilter : undefined,
+        sortBy: apiSortBy,
+        sortOrder: sortDir,
+        includeStats: true,
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+      const items = (data?.contacts ?? []) as LocalContact[];
+      if (append) {
+        setServerContacts((prev) => [...prev, ...items]);
+      } else {
+        setServerContacts(items);
+      }
+      setNextCursor(data?.nextCursor ?? null);
+      setServerHasMore(data?.hasMore ?? false);
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+    } finally {
+      if (!controller.signal.aborted) setServerLoading(false);
+    }
+  }, [businessId, search, statusFilter, sortField, sortDir, pageSize, nextCursor, serverContacts.length, mapSortFieldToApi]);
 
   useEffect(() => {
     if (isMobilePrev.current !== isMobile) {
@@ -259,7 +318,12 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     return () => clearTimeout(timeout);
   }, [searchInput]);
 
-  useEffect(() => { setPage(1); }, [search, statusFilter, sortField, sortDir, pageSize]);
+  useEffect(() => {
+    setPage(1);
+    setNextCursor(null);
+    void loadServerContacts();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, statusFilter, sortField, sortDir, pageSize, businessId]);
 
   useEffect(() => {
     getLastSyncTime().then(setLastSync);
@@ -281,7 +345,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     }
   }, [contacts]);
 
-  const filteredContacts = useMemo(() => {
+  const filteredContacts = serverContacts.length > 0 ? serverContacts : (() => {
     let list = [...activeContacts] as LocalContact[];
 
     if (statusFilter !== "ALL") {
@@ -313,7 +377,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     });
 
     return list;
-  }, [activeContacts, search, statusFilter, sortField, sortDir]);
+  })();
 
   const filteredContactsRef = useRef(filteredContacts);
   filteredContactsRef.current = filteredContacts;
@@ -671,6 +735,10 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
 
     confirmState,
     handleConfirmClose,
+
+    serverLoading,
+    serverHasMore,
+    loadServerContacts,
 
     handleSync,
     handleExport,

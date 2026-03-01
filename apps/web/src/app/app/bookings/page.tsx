@@ -112,7 +112,7 @@ export default function BookingsPage() {
       setBookings(bookingsRes.data ?? []);
       setServices(servicesRes.data ?? []);
       setStaff(staffRes.data ?? []);
-      setContacts(contactsRes.data ?? []);
+      setContacts(contactsRes.data?.contacts ?? []);
       setStats(statsRes.data ?? null);
       setCalendarConnected((calendarRes.data as any)?.connected ?? false);
       setCalendarEmail((calendarRes.data as any)?.email ?? null);

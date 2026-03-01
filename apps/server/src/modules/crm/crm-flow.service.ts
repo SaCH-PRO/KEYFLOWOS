@@ -957,19 +957,19 @@ export class CrmFlowService {
     ]);
 
     const fromActivePipeline = activeQuotes.reduce((sum, q) => {
-      const val = q.total?.toNumber?.() ?? q.total ?? 0;
+      const val = typeof q.total === 'object' && q.total !== null && 'toNumber' in q.total ? (q.total as any).toNumber() : Number(q.total ?? 0);
       return sum + val;
     }, 0);
 
     const fromRecurringClients = recurringClients.length * 1500;
 
     const expiringValue = expiringQuotes.reduce((sum, q) => {
-      const val = q.total?.toNumber?.() ?? q.total ?? 0;
+      const val = typeof q.total === 'object' && q.total !== null && 'toNumber' in q.total ? (q.total as any).toNumber() : Number(q.total ?? 0);
       return sum + val;
     }, 0);
 
     const overdueValue = overdueInvoices.reduce((sum, inv) => {
-      const val = inv.total?.toNumber?.() ?? inv.total ?? 0;
+      const val = typeof inv.total === 'object' && inv.total !== null && 'toNumber' in inv.total ? (inv.total as any).toNumber() : Number(inv.total ?? 0);
       return sum + val;
     }, 0);
 
@@ -1066,7 +1066,7 @@ export class CrmFlowService {
         title: quote.status === 'ACCEPTED' ? 'Quote Accepted' : 'Quote Sent',
         description: quote.quoteNumber || undefined,
         date: quote.createdAt.toISOString(),
-        value: quote.total?.toNumber?.() ?? quote.total,
+        value: typeof quote.total === 'object' && quote.total !== null && 'toNumber' in quote.total ? (quote.total as any).toNumber() : Number(quote.total ?? 0),
       });
     }
 
@@ -1077,7 +1077,7 @@ export class CrmFlowService {
         title: 'Payment Received',
         description: invoice.invoiceNumber || undefined,
         date: (invoice.paidAt || invoice.createdAt).toISOString(),
-        value: invoice.total?.toNumber?.() ?? invoice.total,
+        value: typeof invoice.total === 'object' && invoice.total !== null && 'toNumber' in invoice.total ? (invoice.total as any).toNumber() : Number(invoice.total ?? 0),
       });
     }
 
@@ -1329,7 +1329,7 @@ export class CrmFlowService {
     const firstName = contact.firstName || 'This contact';
     const status = contact.status || 'LEAD';
     const paidInvoices = invoices.filter(i => i.status === 'PAID');
-    const totalRevenue = paidInvoices.reduce((sum, i) => sum + (i.total?.toNumber?.() ?? i.total ?? 0), 0);
+    const totalRevenue = paidInvoices.reduce((sum, i) => sum + (typeof i.total === 'object' && i.total !== null && 'toNumber' in i.total ? (i.total as any).toNumber() : Number(i.total ?? 0)), 0);
     
     const summary = `${firstName} is a ${status.toLowerCase()} with ${events} interactions and ${notes} notes. ` +
       (paidInvoices.length > 0 

@@ -162,7 +162,7 @@ export default function OnboardingPage() {
     if (productsRes.data && productsRes.data.length > 0) {
       completed.add("products");
     }
-    if (contactsRes.data && contactsRes.data.length > 0) {
+    if (contactsRes.data?.contacts && contactsRes.data.contacts.length > 0) {
       completed.add("contacts");
     }
     if (playbooksRes.data && playbooksRes.data.length > 0) {

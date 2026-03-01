@@ -792,7 +792,7 @@ Only include filters that are relevant to the query. Set irrelevant filters to n
       });
       const parsed = this.parseJson(result.content);
 
-      const filters = parsed.filters ?? {};
+      const filters: Record<string, any> = parsed.filters ?? {};
       const cleanFilters: Record<string, unknown> = {};
       if (filters.status) cleanFilters.status = filters.status;
       if (filters.search) cleanFilters.search = filters.search;

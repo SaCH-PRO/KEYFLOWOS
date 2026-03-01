@@ -11,6 +11,7 @@ import {
   InvoicePaidPayload,
   InvoiceStatusPayload,
   SequenceStepDuePayload,
+  SequenceStepFailedPayload,
 } from '../../core/event-bus/events.types';
 import { BookingsService } from '../bookings/bookings.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -218,6 +219,28 @@ export class FlowListener {
         stepIndex: payload.stepIndex,
       },
     }).catch((e) => this.logger.error('Failed to create notification', e));
+  }
+
+  @OnEvent('sequence.step_failed')
+  async handleSequenceStepFailed(payload: SequenceStepFailedPayload) {
+    this.logger.error(`Flow observed sequence.step_failed`, payload as any);
+
+    await this.createNotification({
+      businessId: payload.businessId,
+      type: 'sequence.step_failed',
+      title: 'Sequence Step Failed',
+      body: `Sequence step failed for ${payload.contactName} after ${payload.retryCount} retries: ${payload.error}`,
+      data: {
+        contactId: payload.contactId,
+        enrollmentId: payload.enrollmentId,
+        sequenceId: payload.sequenceId,
+        sequenceName: payload.sequenceName,
+        stepType: payload.stepType,
+        stepIndex: payload.stepIndex,
+        error: payload.error,
+        retryCount: payload.retryCount,
+      },
+    }).catch((e) => this.logger.error('Failed to create step_failed notification', e));
   }
 
   private formatContactName(contact: {

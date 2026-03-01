@@ -41,6 +41,19 @@ export class SequenceStepDuePayload {
   enrollmentId!: string;
 }
 
+export class SequenceStepFailedPayload {
+  businessId!: string;
+  contactId!: string;
+  contactName!: string;
+  sequenceId!: string;
+  sequenceName!: string;
+  stepIndex!: number;
+  stepType!: string;
+  enrollmentId!: string;
+  error!: string;
+  retryCount!: number;
+}
+
 // Payload for when a new booking is created
 export class BookingCreatedPayload {
   booking!: Booking;
@@ -85,6 +98,7 @@ export interface KeyFlowEventMap {
   'contact.deleted': ContactDeletedPayload;
   'contact.imported': ContactImportedPayload;
   'sequence.step_due': SequenceStepDuePayload;
+  'sequence.step_failed': SequenceStepFailedPayload;
   'booking.created': BookingCreatedPayload;
   'booking.confirmed': BookingConfirmedPayload;
   'booking.completed': BookingCompletedPayload;

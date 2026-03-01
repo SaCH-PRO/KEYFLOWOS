@@ -270,6 +270,14 @@ async function apiGet<T>(path: string, schema: z.ZodSchema<T>, fallback?: T, opt
   }
 }
 
+const contactListResponseSchema = z.object({
+  contacts: z.array(contactSchema),
+  nextCursor: z.string().nullable(),
+  hasMore: z.boolean(),
+});
+
+export type ContactListResponse = z.infer<typeof contactListResponseSchema>;
+
 export async function fetchContacts(
   businessId: string = DEFAULT_BUSINESS_ID,
   opts?: {
@@ -282,12 +290,13 @@ export async function fetchContacts(
     tags?: string[];
     skip?: number;
     take?: number;
+    cursor?: string;
     includeStats?: boolean;
     sortBy?: string;
     sortOrder?: "asc" | "desc";
     signal?: AbortSignal;
   },
-) {
+): Promise<{ data: ContactListResponse | null; error: string | null }> {
   const params = new URLSearchParams();
   if (opts?.status) params.set("status", opts.status);
   if (opts?.search) params.set("search", opts.search);
@@ -298,15 +307,21 @@ export async function fetchContacts(
   if (opts?.tags?.length) opts.tags.forEach((t) => params.append("tags", t));
   if (opts?.skip !== undefined) params.set("skip", String(opts.skip));
   if (opts?.take !== undefined) params.set("take", String(opts.take));
+  if (opts?.cursor) params.set("cursor", opts.cursor);
   if (opts?.includeStats) params.set("includeStats", "true");
   if (opts?.sortBy) params.set("sortBy", opts.sortBy);
   if (opts?.sortOrder) params.set("sortOrder", opts.sortOrder);
-  return apiGet(
+  const result = await apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts${params.toString() ? `?${params.toString()}` : ""}`,
-    z.array(contactSchema),
-    fallbackContacts,
+    contactListResponseSchema,
+    { contacts: [], nextCursor: null, hasMore: false },
     { signal: opts?.signal },
   );
+  if (result.data && Array.isArray(result.data)) {
+    const arr = result.data as unknown as Contact[];
+    return { data: { contacts: arr, nextCursor: null, hasMore: false }, error: result.error };
+  }
+  return result;
 }
 
 const contactsPollSchema = z.object({

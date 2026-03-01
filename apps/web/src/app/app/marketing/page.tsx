@@ -133,9 +133,9 @@ export default function MarketingPage() {
       ]);
       if (campaignsRes.data) setCampaigns(campaignsRes.data);
       if (formsRes.data) setForms(formsRes.data);
-      if (contactsRes.data) {
+      if (contactsRes.data?.contacts) {
         const tags = new Set<string>();
-        contactsRes.data.forEach(c => c.tags?.forEach(t => tags.add(t)));
+        contactsRes.data.contacts.forEach(c => c.tags?.forEach(t => tags.add(t)));
         setAvailableTags(Array.from(tags));
       }
     } catch {}

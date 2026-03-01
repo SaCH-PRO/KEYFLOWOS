@@ -121,6 +121,7 @@ export function useContactsData() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const nextOffsetRef = useRef(0);
+  const nextCursorRef = useRef<string | null>(null);
 
   const [search, setSearch] = useState("");
 
@@ -220,7 +221,9 @@ export function useContactsData() {
       try {
         if (append) {
           const { data } = await fetchContacts(businessId, {
-            take: PAGE_SIZE, skip: nextOffsetRef.current,
+            take: PAGE_SIZE,
+            cursor: nextCursorRef.current || undefined,
+            skip: nextCursorRef.current ? undefined : nextOffsetRef.current,
             search: search || undefined,
             status: filters.statusFilter !== "ALL" ? filters.statusFilter : undefined,
             includeStats: true,
@@ -228,12 +231,14 @@ export function useContactsData() {
             signal,
           });
           if (signal.aborted) return;
-          const mapped = (data ?? []).map((c) => ({ ...c, tags: c.tags ?? [] }));
+          const items = data?.contacts ?? [];
+          const mapped = items.map((c) => ({ ...c, tags: c.tags ?? [] }));
           setContacts((prev) => [...prev, ...mapped]);
           nextOffsetRef.current += mapped.length;
-          setHasMore(mapped.length === PAGE_SIZE);
+          nextCursorRef.current = data?.nextCursor ?? null;
+          setHasMore(data?.hasMore ?? false);
         } else {
-          const { data: contactData } = await fetchContacts(businessId, {
+          const { data } = await fetchContacts(businessId, {
               take: PAGE_SIZE, skip: 0,
               search: search || undefined,
               status: filters.statusFilter !== "ALL" ? filters.statusFilter : undefined,
@@ -242,10 +247,12 @@ export function useContactsData() {
               signal,
             });
           if (signal.aborted) return;
-          const mapped = (contactData ?? []).map((c) => ({ ...c, tags: c.tags ?? [] }));
+          const items = data?.contacts ?? [];
+          const mapped = items.map((c) => ({ ...c, tags: c.tags ?? [] }));
           setContacts(mapped);
           nextOffsetRef.current = mapped.length;
-          setHasMore(mapped.length === PAGE_SIZE);
+          nextCursorRef.current = data?.nextCursor ?? null;
+          setHasMore(data?.hasMore ?? false);
         }
       } catch (error: unknown) {
         if (error instanceof DOMException && error.name === "AbortError") return;

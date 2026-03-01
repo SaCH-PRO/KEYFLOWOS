@@ -4,7 +4,10 @@ import { CrmAiService } from './crm-ai.service';
 import { CrmFlowService } from './crm-flow.service';
 import { CrmGoogleService } from './crm-google.service';
 import { CrmImportService } from './crm-import.service';
+import { CrmListsService } from './crm-lists.service';
 import { CrmPlaybookService } from './crm-playbook.service';
+import { CrmStatsService } from './crm-stats.service';
+import { CrmTimelineService } from './crm-timeline.service';
 import { CrmVisionService } from './crm-vision.service';
 import { CrmSequenceService } from './crm-sequence.service';
 import { CrmService } from './crm.service';
@@ -35,6 +38,9 @@ function checkAiRateLimit(businessId: string) {
 export class CrmController {
   constructor(
     @Inject(CrmService) private readonly crm: CrmService,
+    @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
+    @Inject(CrmListsService) private readonly lists: CrmListsService,
+    @Inject(CrmStatsService) private readonly crmStats: CrmStatsService,
     @Inject(CrmImportService) private readonly crmImport: CrmImportService,
     @Inject(CrmPlaybookService) private readonly playbook: CrmPlaybookService,
     @Inject(CrmVisionService) private readonly vision: CrmVisionService,
@@ -57,6 +63,7 @@ export class CrmController {
     @Query('tags') tags?: string | string[],
     @Query('skip') skip?: string,
     @Query('take') take?: string,
+    @Query('cursor') cursor?: string,
     @Query('includeStats') includeStats?: string,
     @Query('sortBy') sortBy?: string,
     @Query('sortOrder') sortOrder?: string,
@@ -74,6 +81,7 @@ export class CrmController {
       tags: Array.isArray(tags) ? tags : tags ? [tags] : undefined,
       skip: skip ? Number(skip) : undefined,
       take: take ? Number(take) : undefined,
+      cursor: cursor || undefined,
       includeStats: includeStats === 'true',
       sortBy: sortBy && validSortBy.includes(sortBy) ? sortBy as any : undefined,
       sortOrder: sortOrder && validSortOrder.includes(sortOrder) ? sortOrder as 'asc' | 'desc' : undefined,
@@ -92,13 +100,13 @@ export class CrmController {
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/contacts/poll')
   getContactsPollState(@Param('businessId') businessId: string) {
-    return this.crm.getContactsPollState(businessId);
+    return this.crmStats.getContactsPollState(businessId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/contacts/favorites')
   getFavorites(@Param('businessId') businessId: string) {
-    return this.crm.getFavorites(businessId);
+    return this.crmStats.getFavorites(businessId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -107,7 +115,7 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
   ) {
-    return this.crm.contactDetail({ businessId, contactId });
+    return this.crmStats.contactDetail({ businessId, contactId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -176,7 +184,7 @@ export class CrmController {
     @Body() body: CreateNoteDto,
     @Req() req: any,
   ) {
-    return this.crm.addNote({
+    return this.timeline.addNote({
       businessId,
       contactId,
       body: body.body,
@@ -188,19 +196,19 @@ export class CrmController {
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/contact-stats')
   getContactStats(@Param('businessId') businessId: string) {
-    return this.crm.getContactStats(businessId);
+    return this.crmStats.getContactStats(businessId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/segments')
   segmentSummary(@Param('businessId') businessId: string) {
-    return this.crm.segmentSummary({ businessId });
+    return this.crmStats.segmentSummary({ businessId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/highlights')
   flowHighlights(@Param('businessId') businessId: string) {
-    return this.crm.flowHighlights({ businessId });
+    return this.crmStats.flowHighlights({ businessId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -209,7 +217,7 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Query('windowDays') windowDays?: string,
   ) {
-    return this.crm.dueTasks({
+    return this.timeline.dueTasks({
       businessId,
       windowDays: windowDays ? Number(windowDays) : 7,
     });
@@ -223,7 +231,7 @@ export class CrmController {
     @Body() body: CreateTaskDto,
     @Req() req: any,
   ) {
-    return this.crm.addTask({
+    return this.timeline.addTask({
       businessId,
       contactId,
       title: body.title,
@@ -242,7 +250,7 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Param('taskId') taskId: string,
   ) {
-    return this.crm.completeTask({ businessId, taskId });
+    return this.timeline.completeTask({ businessId, taskId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -251,7 +259,7 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Param('taskId') taskId: string,
   ) {
-    return this.crm.reopenTask({ businessId, taskId });
+    return this.timeline.reopenTask({ businessId, taskId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -261,7 +269,7 @@ export class CrmController {
     @Param('noteId') noteId: string,
     @Body() body: { body?: string; source?: string },
   ) {
-    return this.crm.updateNote({ businessId, noteId, body: body.body, source: body.source });
+    return this.timeline.updateNote({ businessId, noteId, body: body.body, source: body.source });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -270,7 +278,7 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Param('noteId') noteId: string,
   ) {
-    return this.crm.deleteNote({ businessId, noteId });
+    return this.timeline.deleteNote({ businessId, noteId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -280,7 +288,7 @@ export class CrmController {
     @Param('taskId') taskId: string,
     @Body() body: { title?: string; dueDate?: string; priority?: string; remindAt?: string },
   ) {
-    return this.crm.updateTask({
+    return this.timeline.updateTask({
       businessId,
       taskId,
       title: body.title,
@@ -296,7 +304,7 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Param('taskId') taskId: string,
   ) {
-    return this.crm.deleteTask({ businessId, taskId });
+    return this.timeline.deleteTask({ businessId, taskId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -305,7 +313,7 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Param('actionId') actionId: string,
   ) {
-    return this.crm.approveAutopilotAction({ businessId, actionId });
+    return this.timeline.approveAutopilotAction({ businessId, actionId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -314,7 +322,7 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Param('actionId') actionId: string,
   ) {
-    return this.crm.denyAutopilotAction({ businessId, actionId });
+    return this.timeline.denyAutopilotAction({ businessId, actionId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

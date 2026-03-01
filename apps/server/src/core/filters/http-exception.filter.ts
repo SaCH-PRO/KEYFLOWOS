@@ -12,6 +12,17 @@ import { Request, Response } from 'express';
 export class GlobalHttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalHttpExceptionFilter.name);
 
+  private static readonly STATUS_CODE_MAP: Record<number, string> = {
+    [HttpStatus.BAD_REQUEST]: 'BAD_REQUEST',
+    [HttpStatus.UNAUTHORIZED]: 'UNAUTHORIZED',
+    [HttpStatus.FORBIDDEN]: 'FORBIDDEN',
+    [HttpStatus.NOT_FOUND]: 'NOT_FOUND',
+    [HttpStatus.CONFLICT]: 'CONFLICT',
+    [HttpStatus.UNPROCESSABLE_ENTITY]: 'UNPROCESSABLE_ENTITY',
+    [HttpStatus.TOO_MANY_REQUESTS]: 'RATE_LIMIT_EXCEEDED',
+    [HttpStatus.INTERNAL_SERVER_ERROR]: 'INTERNAL_SERVER_ERROR',
+  };
+
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
@@ -20,6 +31,7 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
     let statusCode: number;
     let message: string | string[];
     let error: string;
+    let code: string | undefined;
 
     if (exception instanceof HttpException) {
       statusCode = exception.getStatus();
@@ -31,6 +43,9 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
         const resp = exceptionResponse as Record<string, unknown>;
         message = (resp.message as string | string[]) || exception.message;
         error = (resp.error as string) || exception.name;
+        if (resp.code) {
+          code = resp.code as string;
+        }
       } else {
         message = exception.message;
         error = exception.name;
@@ -45,8 +60,13 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
       );
     }
 
+    if (!code) {
+      code = GlobalHttpExceptionFilter.STATUS_CODE_MAP[statusCode] || 'UNKNOWN_ERROR';
+    }
+
     response.status(statusCode).json({
       statusCode,
+      code,
       message,
       error,
       timestamp: new Date().toISOString(),

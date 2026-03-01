@@ -135,7 +135,7 @@ export function useCommerce() {
         ]);
         setProducts((productsRes.data ?? []).map((p) => ({ ...p, currency: p.currency ?? "TTD" } as Product)));
         setInvoices(invoicesRes.data ?? []);
-        setContacts(contactsRes.data ?? []);
+        setContacts(contactsRes.data?.contacts ?? []);
         setQuotes(quotesRes.data ?? []);
         if (gmailRes.data) setGmailStatus(gmailRes.data);
         if (bizRes.data?.metaData) {
