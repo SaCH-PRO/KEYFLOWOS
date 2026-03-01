@@ -16,8 +16,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { AiSearchBar, type CrmCommand } from "@/components/contacts/ai-search-bar";
-import { AiChurnDetectionPanel } from "@/components/contacts/ai-churn-detection";
-import { ModuleAiAssistant, AiAssistantTrigger } from "@/components/ai/module-ai-assistant";
+import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
 import type { SmartSegment } from "./pipeline-toolbar";
 import { ContactsDatabase } from "./contacts-database";
 import { InsightsTab } from "./insights-tab";
@@ -25,7 +24,8 @@ import { EngageTab } from "./engage-tab";
 import { PipelineTabContent } from "./pipeline-tab-content";
 import { GettingStartedGuide } from "./getting-started-guide";
 import { useContactsPipeline } from "./use-contacts-pipeline";
-import { useCrmAiAssistant } from "./hooks/use-crm-ai-assistant";
+import { useCrmAiHub } from "./hooks/use-crm-ai-hub";
+import { renderCrmToolResult } from "./components/crm-tool-results";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useModuleEmit } from "@/hooks/use-module-events";
 
@@ -34,7 +34,7 @@ export default function ContactsPage() {
   const router = useRouter();
   const googleHandled = useRef(false);
   const state = useContactsPipeline();
-  const crmAi = useCrmAiAssistant();
+  const crmAi = useCrmAiHub();
   const emitEvent = useModuleEmit();
 
   const {
@@ -95,10 +95,11 @@ export default function ContactsPage() {
         { key: "r", description: "Refresh contacts", action: () => { void loadContacts(); void loadFlowData(); } },
         { key: "b", description: "Open broadcast", action: () => state.setShowBroadcast(true) },
         { key: "g", description: "Toggle guide", action: () => setShowGuide((p: boolean) => !p) },
-        { key: "Escape", description: "Close panels", action: () => { if (crmAi.panelOpen) crmAi.setOpen(false); } },
+        { key: "a", shift: true, description: "Toggle AI Hub", action: () => crmAi.togglePanel() },
+        { key: "Escape", description: "Close panels", action: () => { if (crmAi.hubMode === "tool-result") crmAi.clearToolResult(); else if (crmAi.panelOpen) crmAi.setOpen(false); } },
       ],
     },
-  ], [setCrmViewTab, loadContacts, loadFlowData, state.setShowAddMenu, state.setShowBroadcast, setShowGuide, crmAi.panelOpen, crmAi.setOpen]);
+  ], [setCrmViewTab, loadContacts, loadFlowData, state.setShowAddMenu, state.setShowBroadcast, setShowGuide, crmAi.panelOpen, crmAi.setOpen, crmAi.togglePanel, crmAi.hubMode, crmAi.clearToolResult]);
 
   useKeyboardShortcuts(crmShortcuts, !workspaceLoading);
 
@@ -321,25 +322,22 @@ export default function ContactsPage() {
         }
       />
 
-      <div className="flex items-start gap-3">
-        <div className="flex-1">
-          <AiSearchBar
-            onSelectContact={(id) => { selectContact(id); setCrmViewTab("pipeline"); }}
-            onExecuteCommand={handleAiCommand}
-          />
-        </div>
-        <AiAssistantTrigger ai={crmAi} moduleName="CRM" />
-      </div>
+      <AiSearchBar
+        onSelectContact={(id) => { selectContact(id); setCrmViewTab("pipeline"); }}
+        onExecuteCommand={handleAiCommand}
+      />
 
       <AnimatePresence>
         {crmAi.panelOpen && (
-          <ModuleAiAssistant
+          <AiCommandHub
             ai={crmAi}
             moduleName="CRM"
             onAction={handleAiAssistantAction}
+            toolResultRenderer={renderCrmToolResult}
           />
         )}
       </AnimatePresence>
+      <AiHubTrigger ai={crmAi} moduleName="CRM" />
 
       <TabNav
         tabs={[
