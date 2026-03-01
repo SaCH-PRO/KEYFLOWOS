@@ -47,7 +47,7 @@ export function ProductCard({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ duration: 0.2 }}
-      className={`group relative rounded-2xl border border-border/60 bg-card/80 backdrop-blur-sm overflow-hidden hover:shadow-lg hover:shadow-primary/5 hover:border-primary/40 transition-all ${
+      className={`group relative rounded-xl border border-border/50 bg-card overflow-hidden hover:shadow-lg hover:shadow-[hsl(var(--kf-accent1))]/5 hover:border-border/70 transition-all ${
         isInactive ? "opacity-60" : ""
       }`}
     >
@@ -73,7 +73,7 @@ export function ProductCard({
           <span
             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold border backdrop-blur-sm ${style.badge}`}
           >
-            <Tag className="w-2.5 h-2.5" />
+            <Tag className="w-3 h-3" />
             {CATEGORY_LABELS[product.category] ?? "Service"}
           </span>
           {isInactive && (
@@ -111,14 +111,14 @@ export function ProductCard({
 
         <div className="flex items-center gap-2 flex-wrap">
           {product.sku && (
-            <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded-md border border-border/30">
-              <Hash className="w-2.5 h-2.5" />
+            <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground/70 bg-white/[0.03] px-1.5 py-0.5 rounded-md border border-border/40">
+              <Hash className="w-3 h-3" />
               {product.sku}
             </span>
           )}
           {product.category === "SERVICE" && product.duration && (
-            <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-              <Clock className="w-2.5 h-2.5" />
+            <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground/70">
+              <Clock className="w-3 h-3" />
               {product.duration} min
             </span>
           )}
@@ -126,16 +126,16 @@ export function ProductCard({
 
         <div className="flex items-center justify-between pt-2 border-t border-border/40">
           <div className="flex items-center gap-1.5">
-            <span className="text-lg font-bold text-primary">
-              {product.price.toFixed(2)}
+            <span className="text-lg font-bold" style={{ color: "hsl(var(--kf-accent1))" }}>
+              {product.price.toLocaleString("en-TT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
-            <span className="text-[10px] text-muted-foreground">
-              {product.currency}
+            <span className="text-[10px] text-muted-foreground/50">
+              {product.currency ?? "TTD"}
             </span>
           </div>
           <button
             onClick={() => onEdit(product)}
-            className="text-[10px] text-muted-foreground hover:text-primary transition-colors font-medium"
+            className="text-[10px] text-muted-foreground/70 hover:text-[hsl(var(--kf-accent1))] transition-colors font-medium"
           >
             Edit
           </button>
