@@ -340,12 +340,8 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
   const effectiveSelectedCount = allPagesSelected ? filteredContacts.length : selectedIds.size;
 
   const visibleColumnDefs = useMemo(() => {
-    return ALL_COLUMNS.filter((col) => {
-      if (!visibleColumns.has(col.key)) return false;
-      if (isMobile && col.mobileHidden) return false;
-      return true;
-    });
-  }, [visibleColumns, isMobile]);
+    return ALL_COLUMNS.filter((col) => visibleColumns.has(col.key));
+  }, [visibleColumns]);
 
   useEffect(() => {
     if (allPagesSelected) {
