@@ -173,25 +173,29 @@ function PipelineContactListInner({
 
   if (loading && contacts.length === 0) {
     return (
-      <div className="kf-card p-8 text-center">
-        <RefreshCw className="w-8 h-8 animate-spin mx-auto text-muted-foreground mb-3" />
-        <p className="text-muted-foreground">Loading contacts...</p>
+      <div className="rounded-2xl border border-border/50 bg-card p-10 text-center">
+        <div className="w-10 h-10 rounded-xl bg-white/[0.03] flex items-center justify-center mx-auto mb-3">
+          <RefreshCw className="w-5 h-5 animate-spin text-muted-foreground/40" />
+        </div>
+        <p className="text-xs font-medium text-muted-foreground/60">Loading contacts...</p>
       </div>
     );
   }
 
   if (loadError && contacts.length === 0) {
     return (
-      <div className="kf-card p-8 text-center" role="alert">
-        <AlertTriangle className="w-10 h-10 mx-auto text-red-400 mb-3" />
-        <p className="text-sm font-medium text-foreground mb-1">Could not load contacts</p>
-        <p className="text-xs text-muted-foreground mb-4">{loadError}</p>
+      <div className="rounded-2xl border border-border/50 bg-card p-10 text-center" role="alert">
+        <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center mx-auto mb-3">
+          <AlertTriangle className="w-5 h-5 text-red-400/70" />
+        </div>
+        <p className="text-sm font-semibold tracking-tight mb-1">Could not load contacts</p>
+        <p className="text-[11px] text-muted-foreground/50 mb-4">{loadError}</p>
         {onRetry && (
           <button
             onClick={onRetry}
-            className="kf-btn-primary inline-flex items-center gap-2"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-lg bg-gradient-to-r from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all"
           >
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw className="w-3 h-3" />
             Try Again
           </button>
         )}
@@ -201,12 +205,14 @@ function PipelineContactListInner({
 
   if (contacts.length === 0) {
     return (
-      <div className="kf-card p-8 text-center">
-        <Users className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
-        <p className="text-lg font-medium mb-1">
+      <div className="rounded-2xl border border-border/50 bg-card p-10 text-center">
+        <div className="w-10 h-10 rounded-xl bg-white/[0.03] flex items-center justify-center mx-auto mb-3">
+          <Users className="w-5 h-5 text-muted-foreground/30" />
+        </div>
+        <p className="text-sm font-semibold tracking-tight mb-1">
           {activeListTab === "pinned" ? "No pinned contacts" : activeListTab === "recent" ? "No recent contacts" : "No contacts yet"}
         </p>
-        <p className="text-muted-foreground mb-4">
+        <p className="text-[11px] text-muted-foreground/50 mb-4">
           {activeListTab === "pinned"
             ? "Pin your most important contacts for quick access"
             : activeListTab === "recent"
@@ -216,9 +222,9 @@ function PipelineContactListInner({
         {activeListTab === "all" && (
           <button
             onClick={onAddContact}
-            className="kf-btn-primary inline-flex items-center gap-2"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-lg bg-gradient-to-r from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-3 h-3" />
             Add Contact
           </button>
         )}

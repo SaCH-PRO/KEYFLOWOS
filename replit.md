@@ -21,6 +21,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - Graceful error handling with Next.js error boundaries.
 - Search debouncing and client-side pagination with accessibility features (ARIA labels, roles).
 - Component decomposition for modularity, especially in CRM Pipeline and Database features.
+- **Unified CRM Design Language (Pipeline, Database, Insights):** All three CRM tabs share standardized design tokens: `rounded-2xl border-border/50 bg-card` cards, `bg-white/[0.03] border-border/40 rounded-xl` glass search inputs, `bg-popover/95 backdrop-blur-xl` dropdowns, `text-[10px] uppercase tracking-wider` section headers, gradient accent buttons (`bg-gradient-to-r from-accent/15 to-accent/5`), `bg-white/[0.08] border-border/50` active states, `border-border/40 rounded-xl` bordered status badges, gradient accent indicators (`w-1 h-5 rounded-full bg-gradient-to-b`), and consistent empty states with icon containers (`w-10 h-10 rounded-xl bg-white/[0.03]`). Safe array sort (always spread before sort to prevent memoized mutation).
 - Enhanced database table features include column visibility toggle, responsive column auto-hiding, search text highlighting, multi-word search, keyboard-navigable rows, and select-all-across-pages functionality.
 - Contact Lists are enhanced with bulk "Add to List" actions, expandable member panels, and per-member removal.
 - ContactDetail UX improvements include quick actions, smart empty states, recent activity, and lead score explainers.

@@ -289,8 +289,8 @@ export function useContactsData() {
 
   const displayContacts = useMemo(() => {
     let list: Contact[];
-    if (filters.activeListTab === "pinned") list = pinnedContacts;
-    else if (filters.activeListTab === "recent") list = recentContacts;
+    if (filters.activeListTab === "pinned") list = [...pinnedContacts];
+    else if (filters.activeListTab === "recent") list = [...recentContacts];
     else list = [...contacts];
 
     if (filters.activeListContactIds && filters.activeListContactIds.length > 0) {
