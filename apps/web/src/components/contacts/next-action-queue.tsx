@@ -1,12 +1,13 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Zap, MessageSquare, FileText, Phone, Mail, DollarSign,
-  CheckCircle2, ChevronRight, Sparkles, Timer, ArrowRight,
-  AlertCircle,
+  CheckCircle2, ChevronRight, ChevronDown, Sparkles, Timer, ArrowRight,
+  AlertCircle, Copy, ExternalLink,
 } from "lucide-react";
+import { toast } from "sonner";
 
 export interface NextAction {
   id: string;
@@ -44,6 +45,15 @@ const ACTION_LABELS: Record<NextAction["type"], string> = {
   email: "Email",
   payment_reminder: "Payment",
   task: "Task",
+};
+
+const ACTION_DO_LABELS: Record<NextAction["type"], string> = {
+  follow_up: "Message",
+  send_quote: "Quote",
+  call: "Call",
+  email: "Email",
+  payment_reminder: "Remind",
+  task: "Start",
 };
 
 const PRIORITY_STYLES: Record<NextAction["priority"], { bg: string; text: string; border: string; dot: string }> = {
@@ -84,15 +94,27 @@ const ActionCard = React.memo(function ActionCard({
   onViewContact: (id: string) => void;
   onDoAction: (a: NextAction) => void;
 }) {
+  const [showDraft, setShowDraft] = useState(false);
   const Icon = ACTION_ICONS[action.type];
   const style = PRIORITY_STYLES[action.priority];
   const dueInfo = action.dueDate ? formatDueDate(action.dueDate) : null;
   const isCompleting = completing === action.id;
 
+  const handleCopyDraft = useCallback(async () => {
+    if (!action.aiDraft) return;
+    try {
+      await navigator.clipboard.writeText(action.aiDraft);
+      toast.success("Draft copied to clipboard");
+    } catch {
+      toast.error("Failed to copy");
+    }
+  }, [action.aiDraft]);
+
   return (
     <motion.div
       variants={stagger.item}
       layout
+      exit={{ opacity: 0, x: -20, transition: { duration: 0.25 } }}
       className={`group relative rounded-xl border ${style.border} bg-white/[0.02] hover:bg-white/[0.04] transition-all duration-200`}
     >
       <div className="absolute left-0 top-3 bottom-3 w-1 rounded-full" style={{ background: `var(--tw-gradient-stops)` }}>
@@ -105,7 +127,7 @@ const ActionCard = React.memo(function ActionCard({
         </div>
 
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
+          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
             <button
               onClick={() => onViewContact(action.contactId)}
               className="text-sm font-semibold hover:text-[hsl(var(--kf-accent1))] transition-colors truncate"
@@ -116,13 +138,47 @@ const ActionCard = React.memo(function ActionCard({
               {ACTION_LABELS[action.type]}
             </span>
             {action.aiDraft && (
-              <span className="flex items-center gap-0.5 text-[10px] font-medium text-[hsl(var(--kf-accent2))]">
+              <button
+                onClick={() => setShowDraft(!showDraft)}
+                className="flex items-center gap-0.5 text-[10px] font-medium text-[hsl(var(--kf-accent2))] hover:text-[hsl(var(--kf-accent2))]/80 transition-colors"
+                aria-expanded={showDraft}
+                aria-label="Toggle AI draft preview"
+              >
                 <Sparkles className="w-3 h-3" />
-                AI
-              </span>
+                AI Draft
+                <ChevronDown className={`w-3 h-3 transition-transform ${showDraft ? "rotate-180" : ""}`} />
+              </button>
             )}
           </div>
-          <p className="text-xs text-muted-foreground/70 truncate leading-relaxed">{action.description}</p>
+          <p className="text-xs text-muted-foreground/70 leading-relaxed">{action.description}</p>
+
+          <AnimatePresence>
+            {showDraft && action.aiDraft && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <div className="mt-2 p-2.5 rounded-lg bg-[hsl(var(--kf-accent2))]/[0.05] border border-[hsl(var(--kf-accent2))]/15">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--kf-accent2))]/70">Suggested Message</span>
+                    <button
+                      onClick={handleCopyDraft}
+                      className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-md hover:bg-white/[0.06] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                      aria-label="Copy draft to clipboard"
+                    >
+                      <Copy className="w-3 h-3" />
+                      Copy
+                    </button>
+                  </div>
+                  <p className="text-xs text-muted-foreground/80 leading-relaxed whitespace-pre-wrap">{action.aiDraft}</p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <div className="flex items-center gap-3 mt-1.5">
             {dueInfo && (
               <span className={`text-[10px] font-medium ${
@@ -147,9 +203,11 @@ const ActionCard = React.memo(function ActionCard({
           <button
             onClick={() => onDoAction(action)}
             className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-gradient-to-r from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent1))]/80 text-white hover:opacity-90 transition-opacity shadow-sm"
+            title={`${ACTION_LABELS[action.type]} — ${action.contactName}`}
           >
             <ArrowRight className="w-3 h-3" />
-            Do
+            <span className="hidden sm:inline">{ACTION_DO_LABELS[action.type]}</span>
+            <span className="sm:hidden">Do</span>
           </button>
           <button
             onClick={() => onComplete(action.id)}
@@ -159,7 +217,7 @@ const ActionCard = React.memo(function ActionCard({
                 ? "bg-[hsl(var(--kf-accent2))]/20"
                 : "hover:bg-[hsl(var(--kf-accent2))]/10"
             }`}
-            aria-label="Mark complete"
+            aria-label={`Mark "${action.description}" complete`}
           >
             <CheckCircle2 className={`w-4 h-4 transition-colors ${
               isCompleting ? "text-[hsl(var(--kf-accent2))] animate-pulse" : "text-muted-foreground/50 group-hover:text-muted-foreground"
@@ -182,14 +240,21 @@ export const NextActionQueue = React.memo(function NextActionQueue({
   const overdueCount = useMemo(() =>
     actions.filter((a) => a.dueDate && new Date(a.dueDate) < new Date()).length,
   [actions]);
+  const aiDraftCount = useMemo(() => actions.filter((a) => a.aiDraft).length, [actions]);
 
   const visibleActions = showAll ? actions : actions.slice(0, 6);
 
-  const handleComplete = async (actionId: string) => {
+  const handleComplete = useCallback(async (actionId: string) => {
     setCompleting(actionId);
-    await onComplete(actionId);
-    setCompleting(null);
-  };
+    try {
+      await onComplete(actionId);
+      toast.success("Action completed", { duration: 2000 });
+    } catch {
+      toast.error("Failed to complete action");
+    } finally {
+      setCompleting(null);
+    }
+  }, [onComplete]);
 
   return (
     <motion.div
@@ -205,12 +270,12 @@ export const NextActionQueue = React.memo(function NextActionQueue({
               <Zap className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-sm font-semibold">Next Actions</h3>
                 {urgentCount > 0 && (
                   <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold rounded-md bg-red-500/15 text-red-400 border border-red-500/20">
                     <AlertCircle className="w-3 h-3" />
-                    {urgentCount}
+                    {urgentCount} urgent
                   </span>
                 )}
                 {overdueCount > 0 && (
@@ -218,10 +283,16 @@ export const NextActionQueue = React.memo(function NextActionQueue({
                     {overdueCount} overdue
                   </span>
                 )}
+                {aiDraftCount > 0 && (
+                  <span className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-semibold rounded-md bg-[hsl(var(--kf-accent2))]/10 text-[hsl(var(--kf-accent2))] border border-[hsl(var(--kf-accent2))]/20">
+                    <Sparkles className="w-3 h-3" />
+                    {aiDraftCount} drafts
+                  </span>
+                )}
               </div>
               <p className="text-[10px] text-muted-foreground/60 flex items-center gap-1.5 mt-0.5">
                 <Timer className="w-3 h-3" />
-                {totalTime}m total • {actions.length} actions
+                {totalTime}m total · {actions.length} action{actions.length !== 1 ? "s" : ""}
               </p>
             </div>
           </div>
@@ -229,11 +300,13 @@ export const NextActionQueue = React.memo(function NextActionQueue({
 
         {actions.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 text-center">
-            <div className="w-10 h-10 rounded-xl bg-white/[0.03] flex items-center justify-center mb-3">
+            <div className="w-12 h-12 rounded-xl bg-white/[0.03] border border-border/50 flex items-center justify-center mb-3">
               <Sparkles className="w-5 h-5 text-[hsl(var(--kf-accent2))]/60" />
             </div>
             <p className="text-sm font-medium text-foreground/80">All caught up!</p>
-            <p className="text-xs text-muted-foreground/60 mt-1">No pending actions right now</p>
+            <p className="text-xs text-muted-foreground/60 mt-1 max-w-[220px]">
+              No pending actions right now. Keep building your pipeline and smart next steps will appear here.
+            </p>
           </div>
         ) : (
           <motion.div
