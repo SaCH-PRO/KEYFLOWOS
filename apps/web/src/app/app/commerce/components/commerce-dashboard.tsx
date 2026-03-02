@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   DollarSign,
@@ -12,9 +12,10 @@ import {
   CheckCircle,
   RefreshCw,
 } from "lucide-react";
-import { Invoice, Quote, Product } from "@/lib/client";
+import { Invoice, Quote, Product, fetchCommerceStats, type CommerceStats } from "@/lib/client";
 
 interface CommerceDashboardProps {
+  businessId: string | null;
   invoices: Invoice[];
   quotes: Quote[];
   products: Product[];
@@ -37,49 +38,85 @@ const container = {
 
 const item = {
   hidden: { opacity: 0, y: 10 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.3, ease: "easeOut" } },
+  show: { opacity: 1, y: 0, transition: { duration: 0.3, ease: "easeOut" as const } },
 };
 
-export default function CommerceDashboard({ invoices, quotes, products }: CommerceDashboardProps) {
-  const stats = useMemo(() => {
-    const paidInvoices = invoices.filter((inv) => inv.status === "PAID");
-    const totalRevenue = paidInvoices.reduce((sum, inv) => sum + Number(inv.total), 0);
+function computeClientStats(invoices: Invoice[], quotes: Quote[], products: Product[]) {
+  const paidInvoices = invoices.filter((inv) => inv.status === "PAID");
+  const totalRevenue = paidInvoices.reduce((sum, inv) => sum + Number(inv.total), 0);
 
-    const outstandingInvoices = invoices.filter((inv) => inv.status === "SENT" || inv.status === "OVERDUE");
-    const outstanding = outstandingInvoices.reduce((sum, inv) => sum + Number(inv.total), 0);
+  const outstandingInvoices = invoices.filter((inv) => inv.status === "SENT" || inv.status === "OVERDUE");
+  const outstanding = outstandingInvoices.reduce((sum, inv) => sum + Number(inv.total), 0);
 
-    const overdueInvoices = invoices.filter((inv) => inv.status === "OVERDUE");
-    const overdueAmount = overdueInvoices.reduce((sum, inv) => sum + Number(inv.total), 0);
+  const overdueInvoices = invoices.filter((inv) => inv.status === "OVERDUE");
+  const overdueAmount = overdueInvoices.reduce((sum, inv) => sum + Number(inv.total), 0);
 
-    const now = new Date();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
-    const paidThisMonth = paidInvoices.filter((inv) => {
-      const dateStr = inv.paidAt || inv.issueDate;
-      if (!dateStr) return false;
-      const d = new Date(dateStr);
-      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+  const paidThisMonth = paidInvoices.filter((inv) => {
+    const dateStr = inv.paidAt || inv.issueDate;
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+  });
+  const paidThisMonthAmount = paidThisMonth.reduce((sum, inv) => sum + Number(inv.total), 0);
+
+  const activeQuotes = quotes.filter((q) => q.status === "DRAFT" || q.status === "SENT").length;
+  const acceptedQuotes = quotes.filter((q) => q.status === "ACCEPTED").length;
+  const conversionRate = quotes.length > 0 ? Math.round((acceptedQuotes / quotes.length) * 100) : 0;
+  const activeProducts = products.filter((p) => p.isActive !== false).length;
+
+  return {
+    totalRevenue,
+    outstanding,
+    overdueAmount,
+    overdueCount: overdueInvoices.length,
+    paidThisMonthAmount,
+    paidThisMonthCount: paidThisMonth.length,
+    totalProducts: products.length,
+    activeProducts,
+    activeQuotes,
+    conversionRate,
+    totalInvoices: invoices.length,
+  };
+}
+
+export default function CommerceDashboard({ businessId, invoices, quotes, products }: CommerceDashboardProps) {
+  const [serverStats, setServerStats] = useState<CommerceStats | null>(null);
+
+  useEffect(() => {
+    if (!businessId) return;
+    let cancelled = false;
+    fetchCommerceStats(businessId).then((res) => {
+      if (!cancelled && res.data) setServerStats(res.data);
     });
-    const paidThisMonthAmount = paidThisMonth.reduce((sum, inv) => sum + Number(inv.total), 0);
+    return () => { cancelled = true; };
+  }, [businessId, invoices.length, quotes.length, products.length]);
 
-    const activeQuotes = quotes.filter((q) => q.status === "DRAFT" || q.status === "SENT").length;
-    const acceptedQuotes = quotes.filter((q) => q.status === "ACCEPTED").length;
-    const conversionRate = quotes.length > 0 ? Math.round((acceptedQuotes / quotes.length) * 100) : 0;
-    const activeProducts = products.filter((p) => p.isActive !== false).length;
+  const clientStats = useMemo(() => computeClientStats(invoices, quotes, products), [invoices, quotes, products]);
 
-    return {
-      totalRevenue,
-      outstanding,
-      overdueAmount,
-      overdueCount: overdueInvoices.length,
-      paidThisMonthAmount,
-      paidThisMonthCount: paidThisMonth.length,
-      totalProducts: products.length,
-      activeProducts,
-      activeQuotes,
-      conversionRate,
-    };
-  }, [invoices, quotes, products]);
+  const stats = useMemo(() => {
+    if (serverStats) {
+      const overdueBreakdown = serverStats.invoiceStatusBreakdown?.OVERDUE;
+      const overdueCount = overdueBreakdown?.count ?? 0;
+      const paidBreakdown = serverStats.invoiceStatusBreakdown?.PAID;
+      return {
+        totalRevenue: serverStats.totalRevenue,
+        outstanding: serverStats.outstandingAmount,
+        overdueAmount: serverStats.overdueAmount,
+        overdueCount,
+        paidThisMonthAmount: serverStats.monthlyPaid,
+        paidThisMonthCount: paidBreakdown?.count ?? clientStats.paidThisMonthCount,
+        totalProducts: serverStats.productCount,
+        activeProducts: serverStats.activeProductCount,
+        activeQuotes: (serverStats.quoteStatusBreakdown?.DRAFT ?? 0) + (serverStats.quoteStatusBreakdown?.SENT ?? 0),
+        conversionRate: serverStats.quoteConversionRate,
+        totalInvoices: serverStats.invoiceCount,
+      };
+    }
+    return clientStats;
+  }, [serverStats, clientStats]);
 
   const kpiCards = [
     {
@@ -115,7 +152,7 @@ export default function CommerceDashboard({ invoices, quotes, products }: Commer
       mobileLabel: "Monthly",
       value: formatTTD(stats.paidThisMonthAmount),
       mobileValue: formatTTDCompact(stats.paidThisMonthAmount),
-      subtitle: `${stats.paidThisMonthCount} invoice${stats.paidThisMonthCount !== 1 ? "s" : ""}`,
+      subtitle: stats.paidThisMonthCount > 0 ? `${stats.paidThisMonthCount} invoice${stats.paidThisMonthCount !== 1 ? "s" : ""}` : undefined,
       icon: CheckCircle,
       color: "#14b8a6",
       glow: "shadow-teal-500/10",
@@ -126,7 +163,7 @@ export default function CommerceDashboard({ invoices, quotes, products }: Commer
     { icon: Package, label: "products", value: stats.activeProducts, color: "hsl(var(--kf-accent1))" },
     { icon: FileText, label: "active quotes", value: stats.activeQuotes, color: "hsl(200 80% 55%)" },
     { icon: TrendingUp, label: "conversion", value: `${stats.conversionRate}%`, color: "hsl(142 76% 36%)" },
-    { icon: RefreshCw, label: "total invoices", value: invoices.length, color: "hsl(var(--kf-accent2))" },
+    { icon: RefreshCw, label: "total invoices", value: stats.totalInvoices, color: "hsl(var(--kf-accent2))" },
   ];
 
   return (
