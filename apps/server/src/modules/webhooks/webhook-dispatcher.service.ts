@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createHmac } from 'crypto';
@@ -26,7 +26,7 @@ interface WebhookRecord {
 export class WebhookDispatcherService {
   private readonly logger = new Logger(WebhookDispatcherService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   @OnEvent('contact.created')
   async onContactCreated(payload: ContactCreatedPayload) {
@@ -134,34 +134,57 @@ export class WebhookDispatcherService {
     }
   }
 
+  private static readonly MAX_RETRIES = 3;
+  private static readonly BACKOFF_BASE_MS = 1000;
+
   private async send(webhook: WebhookRecord, event: string, timestamp: string, body: string) {
     const signature = createHmac('sha256', webhook.secret).update(body).digest('hex');
 
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10000);
+    for (let attempt = 1; attempt <= WebhookDispatcherService.MAX_RETRIES; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10000);
 
-      const response = await fetch(webhook.url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-KeyFlow-Event': event,
-          'X-KeyFlow-Signature': signature,
-          'X-KeyFlow-Timestamp': timestamp,
-          'User-Agent': 'KeyFlowOS-Webhooks/1.0',
-        },
-        body,
-        signal: controller.signal,
-      });
+        const response = await fetch(webhook.url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-KeyFlow-Event': event,
+            'X-KeyFlow-Signature': signature,
+            'X-KeyFlow-Timestamp': timestamp,
+            'User-Agent': 'KeyFlowOS-Webhooks/1.0',
+          },
+          body,
+          signal: controller.signal,
+        });
 
-      clearTimeout(timeout);
+        clearTimeout(timeout);
 
-      if (!response.ok) {
-        this.logger.warn(`Webhook ${webhook.id} returned ${response.status} for ${webhook.url}`);
+        if (response.ok) {
+          if (attempt > 1) {
+            this.logger.log(`Webhook ${webhook.id} succeeded on attempt ${attempt}`);
+          }
+          return;
+        }
+
+        this.logger.warn(
+          `Webhook ${webhook.id} returned ${response.status} (attempt ${attempt}/${WebhookDispatcherService.MAX_RETRIES})`,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `Webhook ${webhook.id} failed (attempt ${attempt}/${WebhookDispatcherService.MAX_RETRIES}): ${(err as Error).message}`,
+        );
       }
-    } catch (err) {
-      this.logger.warn(`Webhook ${webhook.id} failed: ${(err as Error).message}`);
+
+      if (attempt < WebhookDispatcherService.MAX_RETRIES) {
+        const delay = WebhookDispatcherService.BACKOFF_BASE_MS * Math.pow(4, attempt - 1);
+        await new Promise((r) => setTimeout(r, delay));
+      }
     }
+
+    this.logger.error(
+      `Webhook ${webhook.id} delivery failed after ${WebhookDispatcherService.MAX_RETRIES} attempts for ${event} → ${webhook.url}`,
+    );
   }
 
   private sanitizeContact(contact: any) {

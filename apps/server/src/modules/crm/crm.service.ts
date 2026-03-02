@@ -15,6 +15,7 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CrmTimelineService } from './crm-timeline.service';
 import { CrmStatsService } from './crm-stats.service';
 import { CrmListsService } from './crm-lists.service';
+import { CrmFlowService } from './crm-flow.service';
 import type { ContactMeta, ContactWithStats } from './crm-stats.service';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
 import { normalizeEmail, normalizePhone, findExistingByEmailOrPhone, findExistingBulk } from './crm-duplicate.util';
@@ -85,7 +86,12 @@ export class CrmService {
     @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
     @Inject(CrmStatsService) private readonly stats: CrmStatsService,
     @Inject(CrmListsService) private readonly lists: CrmListsService,
+    @Inject(CrmFlowService) private readonly flow: CrmFlowService,
   ) {}
+
+  async healthPing(): Promise<void> {
+    await this.prisma.client.$queryRaw`SELECT 1`;
+  }
 
   private normalizeTags(tags?: string[] | null) {
     if (!tags) return [];
@@ -364,6 +370,7 @@ export class CrmService {
       this.events.emit('contact.created', payload);
     }
     this.stats.invalidateCache(input.businessId);
+    this.flow.invalidateCache(input.businessId);
     const duration = Date.now() - start;
     this.logger.log(`[CRM] createContact businessId=${input.businessId} duration=${duration}ms`);
     if (duration > 1000) this.logger.warn(`[CRM] createContact slow businessId=${input.businessId} duration=${duration}ms`);
@@ -629,6 +636,7 @@ export class CrmService {
       });
     }
     this.stats.invalidateCache(input.businessId);
+    this.flow.invalidateCache(input.businessId);
     const duration = Date.now() - start;
     this.logger.log(`[CRM] updateContact businessId=${input.businessId} contactId=${input.contactId} duration=${duration}ms`);
     if (duration > 1000) this.logger.warn(`[CRM] updateContact slow businessId=${input.businessId} duration=${duration}ms`);
@@ -651,6 +659,7 @@ export class CrmService {
     };
     this.events.emit('contact.deleted', deletedPayload);
     this.stats.invalidateCache(input.businessId);
+    this.flow.invalidateCache(input.businessId);
     return deleted;
   }
 
@@ -679,6 +688,7 @@ export class CrmService {
         return updated;
       });
       this.stats.invalidateCache(input.businessId);
+    this.flow.invalidateCache(input.businessId);
       return { updated: results.length };
     }
     if (Object.keys(data).length === 0) {
@@ -695,6 +705,7 @@ export class CrmService {
       return res;
     });
     this.stats.invalidateCache(input.businessId);
+    this.flow.invalidateCache(input.businessId);
     return { updated: result.count };
   }
 
@@ -711,6 +722,7 @@ export class CrmService {
       data: { deletedAt: new Date() },
     });
     this.stats.invalidateCache(input.businessId);
+    this.flow.invalidateCache(input.businessId);
     return { deleted: result.count };
   }
 
