@@ -27,6 +27,7 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
+    const correlationId = (request as any).correlationId as string | undefined;
 
     let statusCode: number;
     let message: string | string[];
@@ -55,7 +56,7 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
       message = 'Internal server error';
       error = 'Internal Server Error';
       this.logger.error(
-        `Unhandled exception on ${request.method} ${request.url}`,
+        `Unhandled exception on ${request.method} ${request.url} [${correlationId ?? '-'}]`,
         exception instanceof Error ? exception.stack : String(exception),
       );
     }
@@ -71,6 +72,7 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
       error,
       timestamp: new Date().toISOString(),
       path: request.url,
+      correlationId: correlationId ?? undefined,
     });
   }
 }

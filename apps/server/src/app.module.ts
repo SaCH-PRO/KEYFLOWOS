@@ -1,4 +1,5 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './core/prisma/prisma.module';
@@ -17,6 +18,8 @@ import { FlowModule } from './modules/flow/flow.module';
 import { GamificationModule } from './modules/gamification/gamification.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { AuthMiddleware } from './core/auth/auth.middleware';
+import { CorrelationIdMiddleware } from './core/middleware/correlation-id.middleware';
+import { LoggingInterceptor } from './core/interceptors/logging.interceptor';
 import { ActionsModule } from './modules/actions/actions.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { AutopilotModule } from './modules/autopilot/autopilot.module';
@@ -72,10 +75,15 @@ import { SeedModule } from './core/seed/seed.module';
     SeedModule,
   ],
   controllers: [AppController],
-  providers: [AppService, AuthMiddleware],
+  providers: [
+    AppService,
+    AuthMiddleware,
+    { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
+  ],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
+    consumer.apply(CorrelationIdMiddleware).forRoutes('*');
     consumer.apply(AuthMiddleware).forRoutes('*');
   }
 }

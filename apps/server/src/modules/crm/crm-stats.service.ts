@@ -101,6 +101,8 @@ type FlowHighlightsPayload = {
 export class CrmStatsService {
   private readonly logger = new Logger(CrmStatsService.name);
   private cache: Map<string, { data: any; expires: number }> = new Map();
+  private cacheHits = 0;
+  private cacheMisses = 0;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -109,11 +111,16 @@ export class CrmStatsService {
 
   private getCached<T>(key: string): T | null {
     const entry = this.cache.get(key);
-    if (!entry) return null;
-    if (Date.now() > entry.expires) {
-      this.cache.delete(key);
+    if (!entry) {
+      this.cacheMisses++;
       return null;
     }
+    if (Date.now() > entry.expires) {
+      this.cache.delete(key);
+      this.cacheMisses++;
+      return null;
+    }
+    this.cacheHits++;
     return entry.data as T;
   }
 
@@ -127,6 +134,16 @@ export class CrmStatsService {
         this.cache.delete(key);
       }
     }
+  }
+
+  getCacheMetrics() {
+    const total = this.cacheHits + this.cacheMisses;
+    return {
+      hits: this.cacheHits,
+      misses: this.cacheMisses,
+      hitRate: total > 0 ? Math.round((this.cacheHits / total) * 100) : 0,
+      size: this.cache.size,
+    };
   }
 
   private formatContactName(contact: {

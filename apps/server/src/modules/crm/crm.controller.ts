@@ -38,6 +38,25 @@ export class CrmController {
     @Inject(CrmJourneyService) private readonly journey: CrmJourneyService,
   ) {}
 
+  @Get('health')
+  async healthCheck() {
+    const start = Date.now();
+    let dbOk = false;
+    try {
+      await this.crm.healthPing();
+      dbOk = true;
+    } catch {}
+    const cacheMetrics = this.crmStats.getCacheMetrics();
+    const duration = Date.now() - start;
+    return {
+      status: dbOk ? 'ok' : 'degraded',
+      db: dbOk,
+      cache: cacheMetrics,
+      uptime: Math.round(process.uptime()),
+      responseMs: duration,
+    };
+  }
+
   @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts')
