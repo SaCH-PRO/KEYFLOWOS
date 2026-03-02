@@ -6,9 +6,11 @@ import {
   Sparkles, Search, X, Loader2, User, Building2,
   Tag, ArrowRight, Brain, Zap, UserPlus, FileEdit,
   Phone, MessageSquare, Star, Filter, BarChart3,
-  CheckCircle2, AlertTriangle,
+  CheckCircle2, AlertTriangle, ListPlus, GitMerge,
+  Users, Trash2, ScanSearch, ClipboardCheck,
+  FileText, Receipt, PlayCircle, StopCircle, TrendingUp,
 } from "lucide-react";
-import { aiNaturalLanguageSearch, aiInterpretCommand, type AiSearchResult, type AiCommandResult } from "@/lib/client";
+import { aiNaturalLanguageSearch, aiInterpretCommand, aiExecuteCommand, type AiSearchResult, type AiCommandResult } from "@/lib/client";
 
 export type CrmCommand =
   | { type: "add_contact"; params?: Record<string, unknown> }
@@ -30,7 +32,23 @@ export type CrmCommand =
   | { type: "generate_ai_score"; contactId: string }
   | { type: "generate_prep_brief"; contactId: string }
   | { type: "suggest_tags"; contactId: string }
-  | { type: "search_contacts"; query: string };
+  | { type: "search_contacts"; query: string }
+  | { type: "enroll_sequence"; contactId: string; params: Record<string, unknown> }
+  | { type: "unenroll_sequence"; contactId: string; params: Record<string, unknown> }
+  | { type: "create_list"; params: Record<string, unknown> }
+  | { type: "add_to_list"; contactId: string; params: Record<string, unknown> }
+  | { type: "remove_from_list"; contactId: string; params: Record<string, unknown> }
+  | { type: "merge_contacts"; params: Record<string, unknown> }
+  | { type: "bulk_status_change"; params: Record<string, unknown> }
+  | { type: "bulk_delete"; params: Record<string, unknown> }
+  | { type: "find_duplicates" }
+  | { type: "data_cleanup" }
+  | { type: "create_quote"; contactId: string; params?: Record<string, unknown> }
+  | { type: "create_invoice"; contactId: string; params?: Record<string, unknown> }
+  | { type: "generate_follow_up"; contactId: string }
+  | { type: "revenue_scan" }
+  | { type: "reengagement_scan" }
+  | { type: "ai_execute"; action: string; contactId?: string; params?: Record<string, unknown> };
 
 interface AiSearchBarProps {
   onSelectContact?: (contactId: string) => void;
@@ -39,18 +57,21 @@ interface AiSearchBarProps {
 }
 
 const EXAMPLE_QUERIES = [
-  "Add a new contact",
-  "Show me clients who haven't been active in 30 days",
-  "Switch to the Insights tab",
-  "Find leads from this week",
-  "Log a call with...",
-  "Prepare a brief for...",
+  "Enroll John in the onboarding sequence",
+  "Find duplicate contacts",
+  "Show me stale leads that need re-engagement",
+  "Create a VIP Clients list",
+  "Draft a follow-up message for...",
+  "Scan for revenue opportunities",
+  "Change all leads tagged 'cold' to lost",
+  "Add a note to...",
 ];
 
 const ACTION_ICONS: Record<string, typeof Zap> = {
   add_contact: UserPlus,
   edit_contact: FileEdit,
   view_contact: User,
+  delete_contact: Trash2,
   log_communication: Phone,
   switch_tab: BarChart3,
   filter_status: Filter,
@@ -62,6 +83,21 @@ const ACTION_ICONS: Record<string, typeof Zap> = {
   generate_ai_score: Sparkles,
   generate_prep_brief: Brain,
   suggest_tags: Tag,
+  enroll_sequence: PlayCircle,
+  unenroll_sequence: StopCircle,
+  create_list: ListPlus,
+  add_to_list: ListPlus,
+  remove_from_list: ListPlus,
+  merge_contacts: GitMerge,
+  bulk_status_change: Users,
+  bulk_delete: Trash2,
+  find_duplicates: ScanSearch,
+  data_cleanup: ClipboardCheck,
+  generate_follow_up: MessageSquare,
+  create_quote: FileText,
+  create_invoice: Receipt,
+  revenue_scan: TrendingUp,
+  reengagement_scan: Users,
 };
 
 export function AiSearchBar({ onSelectContact, onApplyFilters, onExecuteCommand }: AiSearchBarProps) {
@@ -154,24 +190,6 @@ export function AiSearchBar({ onSelectContact, onApplyFilters, onExecuteCommand 
       case "view_contact":
         onExecuteCommand({ type: "view_contact", contactId: contactId! });
         break;
-      case "change_status": {
-        const status = (params?.status as string) || "";
-        if (!status) {
-          toast.error("Could not determine the new status — try specifying LEAD, PROSPECT, CLIENT, or LOST");
-          return;
-        }
-        onExecuteCommand({ type: "change_status", contactId: contactId!, status });
-        break;
-      }
-      case "add_note":
-        onExecuteCommand({ type: "add_note", contactId: contactId!, body: params?.body as string | undefined });
-        break;
-      case "add_task":
-        onExecuteCommand({ type: "add_task", contactId: contactId!, title: params?.title as string | undefined });
-        break;
-      case "log_communication":
-        onExecuteCommand({ type: "log_communication", contactId: contactId!, channel: params?.channel as string | undefined });
-        break;
       case "switch_tab":
         onExecuteCommand({ type: "switch_tab", tab: (params?.tab as string) ?? "pipeline" });
         break;
@@ -186,9 +204,6 @@ export function AiSearchBar({ onSelectContact, onApplyFilters, onExecuteCommand 
         break;
       case "show_favorites":
         onExecuteCommand({ type: "show_favorites" });
-        break;
-      case "toggle_favorite":
-        onExecuteCommand({ type: "toggle_favorite", contactId: contactId! });
         break;
       case "bulk_tag":
         onExecuteCommand({ type: "bulk_tag", tags: (params?.tags as string[]) ?? [] });
@@ -207,6 +222,84 @@ export function AiSearchBar({ onSelectContact, onApplyFilters, onExecuteCommand 
         break;
       case "search_contacts":
         onExecuteCommand({ type: "search_contacts", query: (params?.query as string) ?? query });
+        break;
+      case "enroll_sequence":
+        onExecuteCommand({ type: "ai_execute", action: "enroll_sequence", contactId: contactId ?? undefined, params: params ?? {} });
+        break;
+      case "unenroll_sequence":
+        onExecuteCommand({ type: "ai_execute", action: "unenroll_sequence", contactId: contactId ?? undefined, params: params ?? {} });
+        break;
+      case "create_list":
+        onExecuteCommand({ type: "ai_execute", action: "create_list", params: params ?? {} });
+        break;
+      case "add_to_list":
+        onExecuteCommand({ type: "ai_execute", action: "add_to_list", contactId: contactId ?? undefined, params: params ?? {} });
+        break;
+      case "remove_from_list":
+        onExecuteCommand({ type: "ai_execute", action: "remove_from_list", contactId: contactId ?? undefined, params: params ?? {} });
+        break;
+      case "merge_contacts":
+        onExecuteCommand({ type: "merge_contacts", params: params ?? {} });
+        break;
+      case "bulk_status_change":
+        onExecuteCommand({ type: "ai_execute", action: "bulk_status_change", params: params ?? {} });
+        break;
+      case "bulk_delete":
+        toast.warning(cmd.confirmation || "Bulk delete requested — please confirm in the UI");
+        onExecuteCommand({ type: "bulk_delete", params: params ?? {} });
+        break;
+      case "find_duplicates":
+        onExecuteCommand({ type: "find_duplicates" });
+        break;
+      case "data_cleanup":
+        onExecuteCommand({ type: "data_cleanup" });
+        break;
+      case "create_quote":
+        onExecuteCommand({ type: "create_quote", contactId: contactId!, params: params ?? {} });
+        break;
+      case "create_invoice":
+        onExecuteCommand({ type: "create_invoice", contactId: contactId!, params: params ?? {} });
+        break;
+      case "generate_follow_up":
+        onExecuteCommand({ type: "generate_follow_up", contactId: contactId! });
+        break;
+      case "revenue_scan":
+        onExecuteCommand({ type: "revenue_scan" });
+        break;
+      case "reengagement_scan":
+        onExecuteCommand({ type: "reengagement_scan" });
+        break;
+      case "add_note":
+        if (contactId && params?.body) {
+          onExecuteCommand({ type: "ai_execute", action: "add_note", contactId, params: params ?? {} });
+        } else {
+          onExecuteCommand({ type: "add_note", contactId: contactId!, body: params?.body as string | undefined });
+        }
+        break;
+      case "add_task":
+        if (contactId && params?.title) {
+          onExecuteCommand({ type: "ai_execute", action: "add_task", contactId, params: params ?? {} });
+        } else {
+          onExecuteCommand({ type: "add_task", contactId: contactId!, title: params?.title as string | undefined });
+        }
+        break;
+      case "change_status":
+        if (contactId && params?.status) {
+          onExecuteCommand({ type: "ai_execute", action: "change_status", contactId, params: params ?? {} });
+        } else {
+          const status = (params?.status as string) || "";
+          onExecuteCommand({ type: "change_status", contactId: contactId!, status });
+        }
+        break;
+      case "toggle_favorite":
+        onExecuteCommand({ type: "ai_execute", action: "toggle_favorite", contactId: contactId ?? undefined });
+        break;
+      case "log_communication":
+        if (contactId && params?.channel) {
+          onExecuteCommand({ type: "ai_execute", action: "log_communication", contactId, params: params ?? {} });
+        } else {
+          onExecuteCommand({ type: "log_communication", contactId: contactId!, channel: params?.channel as string | undefined });
+        }
         break;
       default:
         toast.info(cmd.confirmation || "Command not recognized");

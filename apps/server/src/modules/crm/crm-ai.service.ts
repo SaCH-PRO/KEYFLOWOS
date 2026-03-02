@@ -1,6 +1,8 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
+import { CrmSequenceService } from './crm-sequence.service';
+import { CrmListsService } from './crm-lists.service';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
 import { buildContactSummaryPrompt } from './prompts/contact-summary.prompt';
 import { buildLeadScoringPrompt } from './prompts/lead-scoring.prompt';
@@ -39,6 +41,8 @@ export class CrmAiService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
+    @Inject(CrmSequenceService) private readonly sequences: CrmSequenceService,
+    @Inject(CrmListsService) private readonly lists: CrmListsService,
   ) {}
 
   private get db() {
@@ -1101,22 +1105,34 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
 
   async interpretCommand(businessId: string, command: string) {
     const sanitizedCommand = this.sanitizeAiInput(command, 500);
-    const contacts = await this.db.contact.findMany({
-      where: contactWhereBase(businessId),
-      take: 200,
-      orderBy: { updatedAt: 'desc' },
-      select: {
-        id: true, firstName: true, lastName: true, email: true, phone: true,
-        status: true, companyName: true, tags: true,
-      },
-    });
+    const [contacts, sequencesList, contactLists] = await Promise.all([
+      this.db.contact.findMany({
+        where: contactWhereBase(businessId),
+        take: 200,
+        orderBy: { updatedAt: 'desc' },
+        select: {
+          id: true, firstName: true, lastName: true, email: true, phone: true,
+          status: true, companyName: true, tags: true,
+        },
+      }),
+      this.sequences.listSequences(businessId).catch(() => []),
+      this.lists.listContactLists(businessId).catch(() => []),
+    ]);
 
     const contactSummary = contacts.slice(0, 50).map(c => {
       const name = [c.firstName, c.lastName].filter(Boolean).join(' ') || c.email || 'Unnamed';
       return `${name} (${c.id}) [${c.status}]${c.companyName ? ` @ ${c.companyName}` : ''}`;
     }).join('\n');
 
-    const systemPrompt = buildCommandInterpreterPrompt(contactSummary);
+    const sequenceSummary = sequencesList.length > 0
+      ? sequencesList.map((s: any) => `${s.name} (${s.id}) [${s.status}] - ${s.enrollmentCount} enrolled`).join('\n')
+      : undefined;
+
+    const listSummary = contactLists.length > 0
+      ? contactLists.map((l: any) => `${l.name} (${l.id}) [${l.type ?? 'MANUAL'}] - ${l.memberCount ?? 0} members`).join('\n')
+      : undefined;
+
+    const systemPrompt = buildCommandInterpreterPrompt(contactSummary, sequenceSummary, listSummary);
 
     const result = await this.aiUsage.callAi({
       businessId,
@@ -1140,6 +1156,493 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
       confidence: Number(parsed.confidence) || 0.5,
       creditsUsed: result.usage?.creditsUsed ?? 1,
     };
+  }
+
+  async executeAiCommand(businessId: string, userId: string, command: { action: string; contactId?: string | null; params?: Record<string, unknown> }) {
+    const { action, contactId, params } = command;
+    this.logger.log(`[CRM AI] executeAiCommand action=${action} businessId=${businessId}`);
+
+    try {
+      switch (action) {
+        case 'enroll_sequence': {
+          const seqName = (params?.sequenceName as string) ?? '';
+          const allSeqs = await this.sequences.listSequences(businessId);
+          const matched = allSeqs.find((s: any) => s.name.toLowerCase().includes(seqName.toLowerCase()));
+          if (!matched) return { success: false, message: `Sequence "${seqName}" not found`, data: null };
+          if (!contactId) return { success: false, message: 'No contact specified for enrollment', data: null };
+          await this.sequences.enrollContacts(businessId, matched.id, [contactId]);
+          return { success: true, message: `Enrolled contact in "${matched.name}"`, data: { sequenceId: matched.id, sequenceName: matched.name } };
+        }
+
+        case 'unenroll_sequence': {
+          const seqName = (params?.sequenceName as string) ?? '';
+          const allSeqs = await this.sequences.listSequences(businessId);
+          const matched = allSeqs.find((s: any) => s.name.toLowerCase().includes(seqName.toLowerCase()));
+          if (!matched) return { success: false, message: `Sequence "${seqName}" not found`, data: null };
+          if (!contactId) return { success: false, message: 'No contact specified', data: null };
+          const enrollment = await this.db.crmSequenceEnrollment.findFirst({
+            where: { sequenceId: matched.id, contactId, status: 'active' },
+          });
+          if (!enrollment) return { success: false, message: 'Contact is not enrolled in this sequence', data: null };
+          await this.db.crmSequenceEnrollment.update({ where: { id: enrollment.id }, data: { status: 'unenrolled' } });
+          return { success: true, message: `Unenrolled contact from "${matched.name}"`, data: { sequenceId: matched.id } };
+        }
+
+        case 'create_list': {
+          const name = (params?.name as string) ?? 'Untitled List';
+          const type = (params?.type as string) ?? 'MANUAL';
+          const description = (params?.description as string) ?? '';
+          const list = await this.lists.createContactList({ businessId, name, type, description });
+          return { success: true, message: `Created list "${name}"`, data: { listId: list.id, listName: name } };
+        }
+
+        case 'add_to_list': {
+          const listName = (params?.listName as string) ?? '';
+          const allLists = await this.lists.listContactLists(businessId);
+          const matched = allLists.find((l: any) => l.name.toLowerCase().includes(listName.toLowerCase()));
+          if (!matched) return { success: false, message: `List "${listName}" not found`, data: null };
+          if (!contactId) return { success: false, message: 'No contact specified', data: null };
+          await this.lists.addContactsToList({ businessId, listId: matched.id, contactIds: [contactId] });
+          return { success: true, message: `Added contact to "${matched.name}"`, data: { listId: matched.id, listName: matched.name } };
+        }
+
+        case 'remove_from_list': {
+          const listName = (params?.listName as string) ?? '';
+          const allLists = await this.lists.listContactLists(businessId);
+          const matched = allLists.find((l: any) => l.name.toLowerCase().includes(listName.toLowerCase()));
+          if (!matched) return { success: false, message: `List "${listName}" not found`, data: null };
+          if (!contactId) return { success: false, message: 'No contact specified', data: null };
+          await this.lists.removeContactFromList({ businessId, listId: matched.id, contactId });
+          return { success: true, message: `Removed contact from "${matched.name}"`, data: { listId: matched.id } };
+        }
+
+        case 'bulk_status_change': {
+          const fromStatus = (params?.fromStatus as string);
+          const toStatus = (params?.toStatus as string);
+          if (!fromStatus || !toStatus) return { success: false, message: 'fromStatus and toStatus are required', data: null };
+          const where: any = { ...contactWhereBase(businessId), status: fromStatus };
+          const filterTag = params?.filter as string;
+          if (filterTag) where.tags = { has: filterTag };
+          const result = await this.db.contact.updateMany({ where, data: { status: toStatus } });
+          return { success: true, message: `Changed ${result.count} contacts from ${fromStatus} to ${toStatus}`, data: { count: result.count } };
+        }
+
+        case 'add_note': {
+          if (!contactId) return { success: false, message: 'No contact specified', data: null };
+          const body = (params?.body as string) ?? '';
+          if (!body) return { success: false, message: 'Note body is required', data: null };
+          const note = await this.db.contactNote.create({
+            data: { contactId, businessId, body, source: 'ai_command', authorId: userId },
+          });
+          return { success: true, message: 'Note added successfully', data: { noteId: note.id } };
+        }
+
+        case 'add_task': {
+          if (!contactId) return { success: false, message: 'No contact specified', data: null };
+          const title = (params?.title as string) ?? '';
+          if (!title) return { success: false, message: 'Task title is required', data: null };
+          const priority = (params?.priority as string) ?? 'NORMAL';
+          const dueDate = params?.dueDate ? new Date(params.dueDate as string) : null;
+          const task = await this.db.contactTask.create({
+            data: { contactId, businessId, title, priority, dueDate, status: 'OPEN', assigneeId: userId },
+          });
+          return { success: true, message: `Task "${title}" created`, data: { taskId: task.id } };
+        }
+
+        case 'change_status': {
+          if (!contactId) return { success: false, message: 'No contact specified', data: null };
+          const status = (params?.status as string) ?? '';
+          if (!['LEAD', 'PROSPECT', 'CLIENT', 'LOST'].includes(status)) {
+            return { success: false, message: `Invalid status: ${status}`, data: null };
+          }
+          await this.db.contact.updateMany({ where: { id: contactId, businessId }, data: { status } });
+          return { success: true, message: `Status changed to ${status}`, data: { status } };
+        }
+
+        case 'toggle_favorite': {
+          if (!contactId) return { success: false, message: 'No contact specified', data: null };
+          const contact = await this.db.contact.findFirst({ where: contactWhereWithId(businessId, contactId), select: { isFavorite: true } });
+          if (!contact) return { success: false, message: 'Contact not found', data: null };
+          const newVal = !contact.isFavorite;
+          await this.db.contact.updateMany({ where: { id: contactId, businessId }, data: { isFavorite: newVal } });
+          return { success: true, message: newVal ? 'Contact starred' : 'Contact unstarred', data: { isFavorite: newVal } };
+        }
+
+        case 'log_communication': {
+          if (!contactId) return { success: false, message: 'No contact specified', data: null };
+          const channel = (params?.channel as string) ?? 'call';
+          const notes = (params?.notes as string) ?? '';
+          const outcome = (params?.outcome as string) ?? 'completed';
+          await this.db.contactEvent.create({
+            data: { contactId, type: `${channel}.logged`, data: { channel, outcome, notes } },
+          });
+          await this.db.contact.updateMany({ where: { id: contactId, businessId }, data: { lastInteractionAt: new Date() } });
+          return { success: true, message: `${channel} logged`, data: { channel, outcome } };
+        }
+
+        default:
+          return { success: false, message: `Action "${action}" must be handled on the frontend`, data: null };
+      }
+    } catch (error: any) {
+      this.logger.error(`[CRM AI] executeAiCommand failed: ${error.message}`, error.stack);
+      return { success: false, message: error.message ?? 'Command execution failed', data: null };
+    }
+  }
+
+  async dataQualityScan(businessId: string) {
+    const contacts = await this.db.contact.findMany({
+      where: contactWhereBase(businessId),
+      select: {
+        id: true, firstName: true, lastName: true, email: true, phone: true,
+        companyName: true, tags: true, status: true, source: true,
+        city: true, country: true, industry: true, jobTitle: true,
+      },
+    });
+
+    const issues: Array<{ contactId: string; contactName: string; missingFields: string[]; completeness: number }> = [];
+    const keyFields = ['email', 'phone', 'companyName', 'tags', 'city', 'industry'];
+
+    for (const c of contacts) {
+      const name = `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() || 'Unnamed';
+      const missing: string[] = [];
+      if (!c.firstName) missing.push('firstName');
+      if (!c.lastName) missing.push('lastName');
+      if (!c.email) missing.push('email');
+      if (!c.phone) missing.push('phone');
+      if (!c.companyName) missing.push('company');
+      if (!c.tags || (c.tags as string[]).length === 0) missing.push('tags');
+      if (!c.city) missing.push('city');
+      if (!c.industry) missing.push('industry');
+      if (!c.jobTitle) missing.push('jobTitle');
+
+      const totalFields = 9;
+      const completeness = Math.round(((totalFields - missing.length) / totalFields) * 100);
+
+      if (missing.length > 0) {
+        issues.push({ contactId: c.id, contactName: name, missingFields: missing, completeness });
+      }
+    }
+
+    issues.sort((a, b) => a.completeness - b.completeness);
+
+    const avgCompleteness = contacts.length > 0
+      ? Math.round(issues.reduce((sum, i) => sum + i.completeness, 0) / Math.max(issues.length, 1))
+      : 100;
+
+    return {
+      totalContacts: contacts.length,
+      contactsWithIssues: issues.length,
+      averageCompleteness: avgCompleteness,
+      topIssues: issues.slice(0, 25),
+      fieldBreakdown: keyFields.map(field => ({
+        field,
+        missing: issues.filter(i => i.missingFields.includes(field === 'company' ? 'company' : field)).length,
+        percentage: contacts.length > 0
+          ? Math.round((issues.filter(i => i.missingFields.includes(field === 'company' ? 'company' : field)).length / contacts.length) * 100)
+          : 0,
+      })),
+    };
+  }
+
+  async findDuplicatesAi(businessId: string) {
+    const contacts = await this.db.contact.findMany({
+      where: contactWhereBase(businessId),
+      select: {
+        id: true, firstName: true, lastName: true, email: true, phone: true,
+        companyName: true, status: true,
+      },
+    });
+
+    const clusters: Array<{ contacts: Array<{ id: string; name: string; email: string | null; phone: string | null }>; reason: string; confidence: number }> = [];
+
+    const emailMap = new Map<string, typeof contacts>();
+    const phoneMap = new Map<string, typeof contacts>();
+    const nameMap = new Map<string, typeof contacts>();
+
+    for (const c of contacts) {
+      if (c.email) {
+        const key = c.email.toLowerCase().trim();
+        if (!emailMap.has(key)) emailMap.set(key, []);
+        emailMap.get(key)!.push(c);
+      }
+      if (c.phone) {
+        const normalized = c.phone.replace(/\D/g, '').slice(-10);
+        if (normalized.length >= 7) {
+          if (!phoneMap.has(normalized)) phoneMap.set(normalized, []);
+          phoneMap.get(normalized)!.push(c);
+        }
+      }
+      const fullName = `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim().toLowerCase();
+      if (fullName && fullName !== 'unnamed' && fullName.length > 2) {
+        if (!nameMap.has(fullName)) nameMap.set(fullName, []);
+        nameMap.get(fullName)!.push(c);
+      }
+    }
+
+    const seenPairs = new Set<string>();
+    const addCluster = (group: typeof contacts, reason: string, confidence: number) => {
+      const ids = group.map(c => c.id).sort().join('-');
+      if (seenPairs.has(ids)) return;
+      seenPairs.add(ids);
+      clusters.push({
+        contacts: group.map(c => ({
+          id: c.id,
+          name: `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() || 'Unnamed',
+          email: c.email,
+          phone: c.phone,
+        })),
+        reason,
+        confidence,
+      });
+    };
+
+    for (const [email, group] of emailMap) {
+      if (group.length > 1) addCluster(group, `Same email: ${email}`, 0.95);
+    }
+    for (const [phone, group] of phoneMap) {
+      if (group.length > 1) addCluster(group, `Same phone: ${phone}`, 0.85);
+    }
+    for (const [name, group] of nameMap) {
+      if (group.length > 1) addCluster(group, `Same name: ${name}`, 0.7);
+    }
+
+    clusters.sort((a, b) => b.confidence - a.confidence);
+
+    return {
+      totalContacts: contacts.length,
+      duplicateClusters: clusters.slice(0, 20),
+      estimatedDuplicates: clusters.reduce((s, c) => s + c.contacts.length - 1, 0),
+    };
+  }
+
+  async bulkReengagementSuggestions(businessId: string) {
+    const now = new Date();
+    const staleThreshold = new Date(now.getTime() - 30 * 86400000);
+
+    const staleContacts = await this.db.contact.findMany({
+      where: {
+        ...contactWhereBase(businessId),
+        status: { in: ['CLIENT', 'PROSPECT', 'LEAD'] },
+        OR: [
+          { lastInteractionAt: { lt: staleThreshold } },
+          { lastInteractionAt: null },
+        ],
+      },
+      take: 50,
+      orderBy: { lastInteractionAt: 'asc' },
+      select: {
+        id: true, firstName: true, lastName: true, email: true,
+        status: true, lastInteractionAt: true, tags: true,
+        leadScore: true, companyName: true,
+      },
+    });
+
+    const sequences = await this.sequences.listSequences(businessId).catch(() => []);
+
+    const suggestions = staleContacts.map(c => {
+      const name = `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() || 'Unnamed';
+      const daysSince = c.lastInteractionAt
+        ? Math.floor((now.getTime() - new Date(c.lastInteractionAt).getTime()) / 86400000)
+        : null;
+
+      let recommendedAction: string;
+      let urgency: 'high' | 'medium' | 'low';
+      let suggestedSequence: string | null = null;
+
+      if (c.status === 'CLIENT') {
+        recommendedAction = 'Check-in call or satisfaction survey';
+        urgency = daysSince && daysSince > 60 ? 'high' : 'medium';
+        suggestedSequence = sequences.find((s: any) => s.name.toLowerCase().includes('follow') || s.name.toLowerCase().includes('check'))?.name ?? null;
+      } else if (c.status === 'PROSPECT') {
+        recommendedAction = 'Follow up on proposal or schedule meeting';
+        urgency = 'high';
+        suggestedSequence = sequences.find((s: any) => s.name.toLowerCase().includes('engage') || s.name.toLowerCase().includes('nurture'))?.name ?? null;
+      } else {
+        recommendedAction = 'Send value content or introductory offer';
+        urgency = 'medium';
+        suggestedSequence = sequences.find((s: any) => s.name.toLowerCase().includes('onboard') || s.name.toLowerCase().includes('welcome'))?.name ?? null;
+      }
+
+      return {
+        contactId: c.id,
+        contactName: name,
+        email: c.email,
+        status: c.status,
+        daysSinceLastInteraction: daysSince,
+        leadScore: c.leadScore,
+        recommendedAction,
+        urgency,
+        suggestedSequence,
+      };
+    });
+
+    suggestions.sort((a, b) => {
+      const order = { high: 0, medium: 1, low: 2 };
+      return order[a.urgency] - order[b.urgency];
+    });
+
+    return {
+      totalStale: staleContacts.length,
+      suggestions,
+      availableSequences: sequences.map((s: any) => ({ id: s.id, name: s.name })),
+    };
+  }
+
+  async revenueOpportunityScan(businessId: string) {
+    const contacts = await this.db.contact.findMany({
+      where: { ...contactWhereBase(businessId), status: { in: ['CLIENT', 'PROSPECT'] } },
+      take: 100,
+      select: {
+        id: true, firstName: true, lastName: true, status: true,
+        companyName: true, leadScore: true, tags: true,
+        lastInteractionAt: true,
+      },
+    });
+
+    const contactIds = contacts.map(c => c.id);
+    const invoices = await this.db.invoice.findMany({
+      where: { businessId, contactId: { in: contactIds } },
+      select: { contactId: true, total: true, status: true, createdAt: true },
+    });
+
+    const now = new Date();
+    const opportunities = contacts.map(c => {
+      const name = `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() || 'Unnamed';
+      const cInvoices = invoices.filter(i => i.contactId === c.id);
+      const totalRevenue = cInvoices.filter(i => i.status === 'PAID').reduce((s, i) => s + Number(i.total ?? 0), 0);
+      const lastInvoice = cInvoices.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+      const daysSinceLastInvoice = lastInvoice
+        ? Math.floor((now.getTime() - new Date(lastInvoice.createdAt).getTime()) / 86400000)
+        : null;
+
+      let opportunityType: string;
+      let estimatedValue: number;
+
+      if (c.status === 'PROSPECT' && (c.leadScore ?? 0) >= 60) {
+        opportunityType = 'Hot prospect — close the deal';
+        estimatedValue = totalRevenue > 0 ? totalRevenue * 0.5 : 500;
+      } else if (c.status === 'CLIENT' && daysSinceLastInvoice && daysSinceLastInvoice > 60) {
+        opportunityType = 'Repeat business — re-engage for new project';
+        estimatedValue = totalRevenue > 0 ? totalRevenue * 0.3 : 300;
+      } else if (c.status === 'CLIENT' && totalRevenue > 1000) {
+        opportunityType = 'Upsell — offer premium service';
+        estimatedValue = totalRevenue * 0.2;
+      } else {
+        return null;
+      }
+
+      return {
+        contactId: c.id,
+        contactName: name,
+        company: c.companyName,
+        status: c.status,
+        totalRevenue,
+        opportunityType,
+        estimatedValue: Math.round(estimatedValue),
+        leadScore: c.leadScore,
+      };
+    }).filter(Boolean);
+
+    const totalEstimated = opportunities.reduce((s, o) => s + (o?.estimatedValue ?? 0), 0);
+
+    return {
+      opportunities: opportunities.slice(0, 20),
+      totalEstimatedRevenue: totalEstimated,
+      contactsAnalyzed: contacts.length,
+    };
+  }
+
+  async generateFollowUpDraft(businessId: string, contactId: string) {
+    const contact = await this.db.contact.findFirst({
+      where: contactWhereWithId(businessId, contactId),
+      select: {
+        id: true, firstName: true, lastName: true, email: true,
+        status: true, companyName: true, tags: true, leadScore: true,
+        lastInteractionAt: true, preferredChannel: true,
+      },
+    });
+    if (!contact) throw new Error('Contact not found');
+
+    const [notes, events, invoices] = await Promise.all([
+      this.db.contactNote.findMany({
+        where: { contactId, businessId },
+        take: 5,
+        orderBy: { createdAt: 'desc' },
+        select: { body: true, createdAt: true },
+      }),
+      this.db.contactEvent.findMany({
+        where: { contactId },
+        take: 10,
+        orderBy: { createdAt: 'desc' },
+        select: { type: true, createdAt: true, data: true },
+      }),
+      this.db.invoice.findMany({
+        where: { contactId, businessId, status: { in: ['SENT', 'OVERDUE'] } },
+        take: 5,
+        select: { total: true, status: true },
+      }),
+    ]);
+
+    const name = `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() || 'there';
+    const firstName = contact.firstName ?? name;
+
+    const contextBlock = `Contact: ${name}
+Status: ${contact.status} | Company: ${contact.companyName ?? 'N/A'} | Score: ${contact.leadScore ?? 'N/A'}
+Channel: ${contact.preferredChannel ?? 'email'}
+Recent Notes: ${notes.map(n => n.body.substring(0, 100)).join('; ') || 'None'}
+Recent Events: ${events.map(e => e.type).join(', ') || 'None'}
+Outstanding Invoices: ${invoices.length > 0 ? invoices.map(i => `TTD ${Number(i.total).toFixed(0)} (${i.status})`).join(', ') : 'None'}`;
+
+    const systemPrompt = `You are a Caribbean business communication specialist writing follow-up messages for a Trinidad & Tobago service business.
+Write in a warm, professional Caribbean style. Use TTD for currency. Be concise and actionable.
+
+${contextBlock}
+
+Generate 2 follow-up message options: one formal and one friendly.
+
+Respond in valid JSON:
+{
+  "messages": [
+    {
+      "tone": "formal",
+      "subject": "Email subject line",
+      "body": "Full message body",
+      "channel": "email|whatsapp"
+    },
+    {
+      "tone": "friendly",
+      "subject": "Email subject line",
+      "body": "Full message body",
+      "channel": "email|whatsapp"
+    }
+  ],
+  "context": "Brief explanation of why this follow-up is needed",
+  "bestTime": "Suggested best time to send"
+}`;
+
+    try {
+      const result = await this.aiUsage.callAi({
+        businessId,
+        feature: 'follow_up_draft',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Generate follow-up messages for ${firstName}.` },
+        ],
+        maxTokens: 800,
+        temperature: 0.5,
+      });
+      const parsed = this.parseJson(result.content);
+      return {
+        messages: Array.isArray(parsed.messages) ? parsed.messages : [],
+        context: parsed.context ?? '',
+        bestTime: parsed.bestTime ?? '',
+        contactName: name,
+        creditsUsed: result.usage?.creditsUsed ?? 2,
+      };
+    } catch (error) {
+      this.logger.error('Follow-up draft generation failed', error);
+      throw error;
+    }
   }
 
   private parseJson(content: string): Record<string, unknown> {
