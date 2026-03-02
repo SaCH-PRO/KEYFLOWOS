@@ -6,6 +6,7 @@ import { Service } from '@keyflow/db';
 import { CrmService } from '../crm/crm.service';
 import { AutomationService } from '../automation/automation.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+import { CommerceStatsService } from './commerce-stats.service';
 
 @Injectable()
 export class CommerceService {
@@ -15,6 +16,7 @@ export class CommerceService {
     @Inject(CrmService) private readonly crm: CrmService,
     @Inject(AutomationService) private readonly automation: AutomationService,
     @Inject(SubscriptionsService) private readonly subscriptions: SubscriptionsService,
+    @Inject(CommerceStatsService) private readonly statsCache: CommerceStatsService,
   ) {}
 
   async listProducts(businessId: string, page = 1, pageSize = 50) {
@@ -52,7 +54,7 @@ export class CommerceService {
     sku?: string | null;
     isActive?: boolean;
   }) {
-    return this.prisma.client.product.create({
+    const result = await this.prisma.client.product.create({
       data: {
         businessId: input.businessId,
         name: input.name,
@@ -66,9 +68,11 @@ export class CommerceService {
         isActive: input.isActive ?? true,
       },
     });
+    this.statsCache.invalidateCache(input.businessId);
+    return result;
   }
 
-  updateProduct(input: { 
+  async updateProduct(input: { 
     businessId: string; 
     productId: string; 
     name?: string; 
@@ -81,7 +85,7 @@ export class CommerceService {
     sku?: string | null;
     isActive?: boolean;
   }) {
-    return this.prisma.client.product.update({
+    const result = await this.prisma.client.product.update({
       where: { id: input.productId, businessId: input.businessId },
       data: {
         ...(input.name !== undefined && { name: input.name }),
@@ -95,13 +99,17 @@ export class CommerceService {
         ...(input.isActive !== undefined && { isActive: input.isActive }),
       },
     });
+    this.statsCache.invalidateCache(input.businessId);
+    return result;
   }
 
-  deleteProduct(businessId: string, productId: string) {
-    return this.prisma.client.product.update({
+  async deleteProduct(businessId: string, productId: string) {
+    const result = await this.prisma.client.product.update({
       where: { id: productId, businessId },
       data: { deletedAt: new Date() },
     });
+    this.statsCache.invalidateCache(businessId);
+    return result;
   }
 
   async createInvoiceForService(businessId: string, contactId: string, service: Service) {
@@ -182,6 +190,7 @@ export class CommerceService {
       data,
       include: { items: true, contact: true },
     });
+    this.statsCache.invalidateCache(input.businessId);
     return invoice;
   }
 
@@ -212,10 +221,12 @@ export class CommerceService {
     if (invoice.status === 'PAID') {
       throw new Error('Cannot delete a paid invoice');
     }
-    return this.prisma.client.invoice.update({
+    const result = await this.prisma.client.invoice.update({
       where: { id: invoiceId },
       data: { deletedAt: new Date() },
     });
+    this.statsCache.invalidateCache(businessId);
+    return result;
   }
 
   async getInvoiceWithBusiness(invoiceId: string, requireShareable = false) {
@@ -404,6 +415,7 @@ export class CommerceService {
         source: 'commerce',
       });
     }
+    this.statsCache.invalidateCache(existingQuote.businessId);
     return quote;
   }
 
@@ -477,6 +489,7 @@ export class CommerceService {
         currency: invoice.currency,
       });
     }
+    this.statsCache.invalidateCache(existingInvoice.businessId);
     return invoice;
   }
 
@@ -584,6 +597,7 @@ export class CommerceService {
         source: 'commerce',
       });
     }
+    this.statsCache.invalidateCache(input.businessId);
     return quote;
   }
 
@@ -651,11 +665,13 @@ export class CommerceService {
       };
     }
     
-    return this.prisma.client.quote.update({
+    const updated = await this.prisma.client.quote.update({
       where: { id: input.quoteId },
       data: updateData,
       include: { items: true, contact: true },
     });
+    this.statsCache.invalidateCache(input.businessId);
+    return updated;
   }
 
   async deleteQuote(quoteId: string, businessId: string) {
@@ -668,10 +684,12 @@ export class CommerceService {
     if (quote.invoiceId) {
       throw new Error('Cannot delete a quote that has been converted to an invoice');
     }
-    return this.prisma.client.quote.update({
+    const result = await this.prisma.client.quote.update({
       where: { id: quoteId },
       data: { deletedAt: new Date() },
     });
+    this.statsCache.invalidateCache(businessId);
+    return result;
   }
 
   async convertQuoteToInvoice(input: {
@@ -754,6 +772,7 @@ export class CommerceService {
       });
     }
 
+    this.statsCache.invalidateCache(input.businessId);
     return invoice;
   }
 
@@ -841,10 +860,12 @@ export class CommerceService {
       updateData.total = total;
     }
 
-    return this.prisma.client.invoice.update({
+    const result = await this.prisma.client.invoice.update({
       where: { id: input.invoiceId },
       data: updateData,
       include: { items: true, contact: true },
     });
+    this.statsCache.invalidateCache(input.businessId);
+    return result;
   }
 }

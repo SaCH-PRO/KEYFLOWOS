@@ -1,10 +1,13 @@
 "use client";
 
+import { useCallback, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { CreditCard, Package, FileText, RefreshCw, Plus } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@keyflow/ui";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
+import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
 
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
@@ -17,6 +20,12 @@ import { ProductFormModal } from "./products/product-form-modal";
 import QuotesPanel from "./quotes/quotes-panel";
 import InvoicesPanel from "./invoices/invoices-panel";
 import RecurringPanel from "./recurring/recurring-panel";
+import { CommerceAiSearchBar, type CommerceCommand } from "./components/commerce-ai-search-bar";
+import { useCommerceAiHub } from "./hooks/use-commerce-ai-hub";
+import { renderCommerceToolResult } from "./components/commerce-tool-results";
+import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
+import { useModuleEmit } from "@/hooks/use-module-events";
+import { commerceAiExecute } from "@/lib/client";
 
 const TABS = [
   { key: "products", label: "Products", icon: Package },
@@ -34,6 +43,8 @@ const TAB_LABELS: Record<string, string> = {
 
 export default function CommercePage() {
   const state = useCommerce();
+  const commerceAi = useCommerceAiHub();
+  const emitEvent = useModuleEmit();
   const {
     businessId, workspaceLoading, workspaceError, tab, handleTabChange,
     products, invoices, quotes, contacts, loading, error,
@@ -42,6 +53,136 @@ export default function CommercePage() {
     handleConnectGmail, handleDisconnectGmail,
     confirmDisconnectGmail, setConfirmDisconnectGmail,
   } = state;
+
+  useEffect(() => {
+    if (businessId) {
+      commerceAi.updateCommerceContext({
+        businessId,
+        activeView: tab,
+        itemCount: tab === "products" ? products.length : tab === "invoices" ? invoices.length : quotes.length,
+      });
+    }
+  }, [businessId, tab, products.length, invoices.length, quotes.length, commerceAi.updateCommerceContext]);
+
+  const handleCommerceCommand = useCallback((cmd: CommerceCommand) => {
+    switch (cmd.type) {
+      case "create_invoice":
+        state.setTab("invoices");
+        state.setShowInvoiceBuilder(true);
+        toast.success("Opening invoice builder...");
+        break;
+      case "create_quote":
+        state.setTab("quotes");
+        state.setShowQuoteBuilder(true);
+        toast.success("Opening quote builder...");
+        break;
+      case "mark_paid":
+        if (cmd.invoiceId) {
+          toast.success("Marking invoice as paid...");
+          commerceAiExecute("mark_paid", { invoiceId: cmd.invoiceId }).then(res => {
+            if (res.data?.success) toast.success(res.data.message ?? "Invoice marked as paid");
+            else toast.error(res.data?.error ?? "Failed to mark as paid");
+          });
+        } else {
+          state.setTab("invoices");
+          toast.info("Select an invoice to mark as paid");
+        }
+        break;
+      case "send_reminder":
+        if (cmd.invoiceId) {
+          toast.success("Sending payment reminder...");
+        } else {
+          state.setTab("invoices");
+          toast.info("Select an invoice to send a reminder");
+        }
+        break;
+      case "void_invoice":
+        if (cmd.invoiceId) {
+          toast.success("Voiding invoice...");
+          commerceAiExecute("void_invoice", { invoiceId: cmd.invoiceId }).then(res => {
+            if (res.data?.success) toast.success(res.data.message ?? "Invoice voided");
+            else toast.error(res.data?.error ?? "Failed to void invoice");
+          });
+        } else {
+          state.setTab("invoices");
+          toast.info("Select an invoice to void");
+        }
+        break;
+      case "view_invoice":
+        state.setTab("invoices");
+        toast.success("Switching to invoices...");
+        break;
+      case "switch_tab":
+        handleTabChange(cmd.tab);
+        toast.success(`Switched to ${cmd.tab}`);
+        break;
+      case "filter_status":
+        state.setTab("invoices");
+        toast.success(`Filtering by ${cmd.status}`);
+        break;
+      case "show_overdue":
+        state.setTab("invoices");
+        toast.success("Showing overdue invoices");
+        break;
+      case "generate_ai_analysis":
+        commerceAi.togglePanel();
+        toast.success("Opening AI analysis...");
+        break;
+      case "ai_execute": {
+        const executing = toast.loading("Executing AI command...");
+        commerceAiExecute(cmd.action, cmd.params ?? {}).then(result => {
+          toast.dismiss(executing);
+          if (result.data?.success) {
+            toast.success(result.data.message ?? "Action completed");
+          } else {
+            toast.error(result.data?.error ?? result.error ?? "Command failed");
+          }
+        }).catch(() => {
+          toast.dismiss(executing);
+          toast.error("Command execution failed");
+        });
+        break;
+      }
+    }
+    emitEvent("module:view_changed", "commerce", { command: cmd.type });
+  }, [state, handleTabChange, commerceAi, emitEvent]);
+
+  const handleAiAssistantAction = useCallback((actionKey: string) => {
+    if (actionKey.startsWith("filter_status:")) {
+      const status = actionKey.split(":")[1];
+      state.setTab("invoices");
+      toast.success(`Filtering by ${status}`);
+    } else if (actionKey.startsWith("switch_tab:")) {
+      const t = actionKey.split(":")[1];
+      handleTabChange(t);
+    } else if (actionKey.startsWith("send_reminders:")) {
+      state.setTab("invoices");
+      toast.success("Opening invoices for reminders...");
+    }
+  }, [state, handleTabChange]);
+
+  const handleWrappedTabChange = useCallback((t: string) => {
+    handleTabChange(t);
+    emitEvent("module:tab_changed", "commerce", { tab: t });
+  }, [handleTabChange, emitEvent]);
+
+  const commerceShortcuts = useMemo<ShortcutGroup[]>(() => [
+    {
+      groupName: "Commerce Navigation",
+      shortcuts: [
+        { key: "n", description: "New item", action: () => handleNewItem() },
+        { key: "/", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('[data-commerce-ai-search]'); el?.focus(); } },
+        { key: "p", description: "Products tab", action: () => handleTabChange("products") },
+        { key: "q", description: "Quotes tab", action: () => handleTabChange("quotes") },
+        { key: "i", description: "Invoices tab", action: () => handleTabChange("invoices") },
+        { key: "r", description: "Recurring tab", action: () => handleTabChange("recurring") },
+        { key: "a", shift: true, description: "Toggle AI Hub", action: () => commerceAi.togglePanel() },
+        { key: "Escape", description: "Close panels", action: () => { if (commerceAi.hubMode === "tool-result") commerceAi.clearToolResult(); else if (commerceAi.panelOpen) commerceAi.setOpen(false); } },
+      ],
+    },
+  ], [handleNewItem, handleTabChange, commerceAi.togglePanel, commerceAi.panelOpen, commerceAi.setOpen, commerceAi.hubMode, commerceAi.clearToolResult]);
+
+  useKeyboardShortcuts(commerceShortcuts, !workspaceLoading);
 
   if (workspaceLoading) return <ListPageSkeleton />;
 
@@ -78,6 +219,20 @@ export default function CommercePage() {
         }
       />
 
+      <CommerceAiSearchBar onExecuteCommand={handleCommerceCommand} />
+
+      <AnimatePresence>
+        {commerceAi.panelOpen && (
+          <AiCommandHub
+            ai={commerceAi}
+            moduleName="Commerce"
+            onAction={handleAiAssistantAction}
+            toolResultRenderer={renderCommerceToolResult}
+          />
+        )}
+      </AnimatePresence>
+      <AiHubTrigger ai={commerceAi} moduleName="Commerce" />
+
       <ConnectionStatus
         gmailStatus={gmailStatus}
         paymentGateways={paymentGateways}
@@ -86,12 +241,12 @@ export default function CommercePage() {
         onDisconnectGmail={() => setConfirmDisconnectGmail(true)}
       />
 
-      <CommerceDashboard invoices={invoices} quotes={quotes} products={products} />
+      <CommerceDashboard businessId={businessId} invoices={invoices} quotes={quotes} products={products} />
 
       <TabNav
         tabs={TABS}
         activeTab={tab}
-        onTabChange={handleTabChange}
+        onTabChange={handleWrappedTabChange}
         layoutId="commerce-tab-pill"
       />
 
