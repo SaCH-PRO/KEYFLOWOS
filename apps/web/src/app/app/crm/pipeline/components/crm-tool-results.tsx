@@ -3,7 +3,8 @@
 import {
   Heart, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, Minus,
   Lightbulb, Target, Shield, MessageSquare, Tags, ShieldAlert,
-  ChevronDown, ChevronUp, Brain, Clock, FileText,
+  ChevronDown, ChevronUp, Brain, Clock, FileText, Users,
+  Mail, Phone, Copy, DollarSign, RefreshCw, Send,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -302,6 +303,235 @@ function AnalysisResult({ data }: { data: any }) {
   );
 }
 
+function DataQualityResult({ data }: { data: any }) {
+  if (!data) return null;
+  const score = data.averageCompleteness ?? 0;
+  const scoreColor = score >= 80 ? "text-emerald-400" : score >= 60 ? "text-amber-400" : "text-red-400";
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-center gap-3">
+        <div className="relative w-14 h-14">
+          <svg className="w-14 h-14 -rotate-90" viewBox="0 0 56 56">
+            <circle cx="28" cy="28" r="24" fill="none" stroke="currentColor" className="text-white/5" strokeWidth="4" />
+            <circle cx="28" cy="28" r="24" fill="none" stroke="currentColor" className={scoreColor} strokeWidth="4"
+              strokeDasharray={`${(score / 100) * 151} 151`} strokeLinecap="round" />
+          </svg>
+          <span className={`absolute inset-0 flex items-center justify-center text-sm font-bold ${scoreColor}`}>
+            {score}%
+          </span>
+        </div>
+        <div>
+          <span className={`text-sm font-semibold ${scoreColor}`}>Avg Completeness</span>
+          <p className="text-[11px] text-muted-foreground/60 mt-0.5">
+            {data.totalContacts} scanned · {data.contactsWithIssues} with issues
+          </p>
+        </div>
+      </div>
+      {data.fieldBreakdown?.length > 0 && (
+        <Section title="Field Breakdown">
+          <div className="space-y-1.5">
+            {data.fieldBreakdown.map((fb: any, i: number) => (
+              <div key={i} className="flex items-center justify-between">
+                <span className="text-[11px] text-muted-foreground/70 capitalize">{fb.field}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-muted-foreground/50">{fb.missing} missing</span>
+                  <span className={`text-[10px] font-medium ${fb.percentage > 30 ? "text-red-400" : fb.percentage > 15 ? "text-amber-400" : "text-emerald-400"}`}>
+                    {fb.percentage}%
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+      {data.topIssues?.length > 0 && (
+        <Section title={`Contacts with Issues (${data.topIssues.length})`}>
+          <div className="space-y-1.5">
+            {data.topIssues.slice(0, 10).map((issue: any, i: number) => (
+              <div key={i} className="flex items-start gap-2 p-2 rounded-lg bg-white/[0.02] border border-border/30">
+                <AlertTriangle className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${issue.completeness < 40 ? "text-red-400" : issue.completeness < 70 ? "text-amber-400" : "text-blue-400"}`} />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-medium text-foreground/80">{issue.contactName}</span>
+                    <span className="text-[10px] text-muted-foreground/50">{issue.completeness}%</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/60">Missing: {issue.missingFields.join(', ')}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+    </div>
+  );
+}
+
+function DuplicateFinderResult({ data }: { data: any }) {
+  if (!data) return null;
+  const clusters = data.duplicateClusters ?? [];
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-center gap-2 mb-1">
+        <Copy className="w-4 h-4 text-amber-400" />
+        <span className="text-xs font-semibold text-foreground/80">
+          {clusters.length} potential duplicate groups · {data.estimatedDuplicates ?? 0} duplicates
+        </span>
+      </div>
+      {clusters.length > 0 && (
+        <div className="space-y-2">
+          {clusters.slice(0, 10).map((cluster: any, i: number) => (
+            <div key={i} className="p-2.5 rounded-lg border border-amber-500/20 bg-amber-500/5">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[11px] font-medium text-amber-400">
+                  {cluster.reason} ({Math.round((cluster.confidence ?? 0.8) * 100)}%)
+                </span>
+              </div>
+              <div className="space-y-1">
+                {cluster.contacts?.map((c: any, ci: number) => (
+                  <div key={ci} className="flex items-center gap-2 text-[11px] text-muted-foreground/70">
+                    <Users className="w-3 h-3 shrink-0" />
+                    <span>{c.name}</span>
+                    {c.email && <span className="text-muted-foreground/50">({c.email})</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {clusters.length === 0 && (
+        <div className="px-3 py-2 rounded-lg bg-emerald-500/5 border border-emerald-500/20">
+          <span className="text-[11px] text-emerald-400 flex items-center gap-1.5">
+            <CheckCircle className="w-3.5 h-3.5" /> No duplicates detected — your database is clean
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReengagementResult({ data }: { data: any }) {
+  if (!data) return null;
+  const suggestions = data.suggestions ?? [];
+  const URGENCY_COLORS: Record<string, string> = { high: "text-red-400", medium: "text-amber-400", low: "text-blue-400" };
+  return (
+    <div className="space-y-2.5">
+      <p className="text-[11px] text-muted-foreground/70">
+        {data.totalStale} stale contacts found
+      </p>
+      {suggestions.length > 0 && (
+        <Section title={`Re-engagement Suggestions (${suggestions.length})`}>
+          <div className="space-y-2">
+            {suggestions.slice(0, 8).map((s: any, i: number) => (
+              <div key={i} className="p-2 rounded-lg border border-border/30 bg-white/[0.02]">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-medium text-foreground/80">{s.contactName}</span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[10px] font-medium ${URGENCY_COLORS[s.urgency] || "text-muted-foreground"}`}>
+                      {s.urgency}
+                    </span>
+                    {s.daysSinceLastInteraction != null && (
+                      <span className="text-[10px] text-muted-foreground/50 flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {s.daysSinceLastInteraction}d
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <p className="text-[10px] text-[hsl(var(--kf-accent1))]">{s.recommendedAction}</p>
+                {s.suggestedSequence && (
+                  <p className="text-[10px] text-muted-foreground/50 mt-0.5">Sequence: {s.suggestedSequence}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+    </div>
+  );
+}
+
+function RevenueOpportunitiesResult({ data }: { data: any }) {
+  if (!data) return null;
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-center justify-between">
+        {data.totalEstimatedRevenue != null && (
+          <div className="px-3 py-2 rounded-lg bg-emerald-500/5 border border-emerald-500/20 flex-1">
+            <span className="text-xs text-emerald-400 flex items-center gap-1.5">
+              <DollarSign className="w-3.5 h-3.5" />
+              Estimated pipeline: TTD {Number(data.totalEstimatedRevenue).toLocaleString()}
+            </span>
+          </div>
+        )}
+        <span className="text-[10px] text-muted-foreground/50 ml-2">{data.contactsAnalyzed} analyzed</span>
+      </div>
+      {data.opportunities?.length > 0 && (
+        <Section title={`Opportunities (${data.opportunities.length})`}>
+          <div className="space-y-2">
+            {data.opportunities.slice(0, 8).map((opp: any, i: number) => (
+              <div key={i} className="p-2 rounded-lg border border-border/30 bg-white/[0.02]">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-medium text-foreground/80">{opp.contactName}</span>
+                  <span className="text-[10px] font-medium text-emerald-400">TTD {Number(opp.estimatedValue || 0).toLocaleString()}</span>
+                </div>
+                <p className="text-[10px] text-[hsl(var(--kf-accent1))]">{opp.opportunityType}</p>
+                {opp.company && (
+                  <p className="text-[10px] text-muted-foreground/50 mt-0.5">{opp.company} · Revenue: TTD {Number(opp.totalRevenue || 0).toLocaleString()}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+    </div>
+  );
+}
+
+function FollowUpDraftResult({ data }: { data: any }) {
+  if (!data) return null;
+  const messages = data.messages ?? [];
+  return (
+    <div className="space-y-2.5">
+      {data.contactName && (
+        <div className="flex items-center gap-2 mb-1">
+          <Send className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
+          <span className="text-xs font-medium text-foreground/80">
+            Follow-up for {data.contactName}
+          </span>
+        </div>
+      )}
+      {data.context && (
+        <p className="text-[11px] text-muted-foreground/70 italic">{data.context}</p>
+      )}
+      {messages.map((msg: any, i: number) => (
+        <div key={i} className="rounded-lg border border-border/30 overflow-hidden">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-white/[0.03] border-b border-border/20">
+            {msg.channel === "email" ? <Mail className="w-3 h-3 text-blue-400" /> :
+             <MessageSquare className="w-3 h-3 text-emerald-400" />}
+            <span className="text-[10px] font-medium text-foreground/70 capitalize">{msg.tone}</span>
+            <span className="text-[10px] text-muted-foreground/40">· {msg.channel}</span>
+          </div>
+          {msg.subject && (
+            <div className="px-3 py-1.5 border-b border-border/10">
+              <span className="text-[10px] text-muted-foreground/50">Subject: </span>
+              <span className="text-[11px] text-foreground/80">{msg.subject}</span>
+            </div>
+          )}
+          <div className="px-3 py-2">
+            <p className="text-[11px] text-muted-foreground/70 whitespace-pre-wrap leading-relaxed">{msg.body}</p>
+          </div>
+        </div>
+      ))}
+      {data.bestTime && (
+        <span className="text-[10px] text-muted-foreground/50 flex items-center gap-1">
+          <Clock className="w-3 h-3" /> Best time: {data.bestTime}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function renderCrmToolResult(toolId: string, result: unknown): React.ReactNode {
   switch (toolId) {
     case "contact-summary":
@@ -316,6 +546,16 @@ export function renderCrmToolResult(toolId: string, result: unknown): React.Reac
       return <ChurnDetectionResult data={result} />;
     case "crm-analysis":
       return <AnalysisResult data={result} />;
+    case "data-quality":
+      return <DataQualityResult data={result} />;
+    case "duplicate-finder":
+      return <DuplicateFinderResult data={result} />;
+    case "reengagement":
+      return <ReengagementResult data={result} />;
+    case "revenue-opportunities":
+      return <RevenueOpportunitiesResult data={result} />;
+    case "follow-up-drafter":
+      return <FollowUpDraftResult data={result} />;
     default:
       return (
         <div className="rounded-xl border border-border/40 p-3 bg-white/[0.02]">

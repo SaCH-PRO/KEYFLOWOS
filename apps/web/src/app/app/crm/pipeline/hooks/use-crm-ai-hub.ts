@@ -9,6 +9,11 @@ import {
   aiPrepBrief,
   aiSuggestTags,
   aiChurnDetection,
+  aiDataQualityScan,
+  aiFindDuplicates,
+  aiReengagementSuggestions,
+  aiRevenueOpportunities,
+  aiFollowUpDraft,
 } from "@/lib/client";
 
 async function generateCrmSuggestions(context: ModuleContext): Promise<AiSuggestion[]> {
@@ -211,6 +216,77 @@ function buildCrmTools(): AiTool[] {
       execute: async (ctx) => {
         const result = await aiAnalyzeContacts(ctx.businessId, "Provide a comprehensive analysis of my CRM pipeline. Include: pipeline health, conversion rates, bottlenecks, top opportunities, and 5 specific action items I should take this week. Be specific with contact names and amounts.");
         if (!result.data) throw new Error("Analysis failed");
+        return result.data;
+      },
+    },
+    {
+      id: "data-quality",
+      name: "Data Quality Scan",
+      description: "Scan your entire contact database for missing fields, invalid emails, formatting issues, and data completeness scores.",
+      icon: "quality",
+      category: "detect",
+      requiresSelection: false,
+      creditCost: 1,
+      execute: async () => {
+        const result = await aiDataQualityScan();
+        if (result.error) throw new Error(result.error);
+        return result.data;
+      },
+    },
+    {
+      id: "duplicate-finder",
+      name: "Duplicate Finder",
+      description: "AI-powered duplicate detection across your contact database. Finds exact and fuzzy matches by name, email, and phone.",
+      icon: "duplicates",
+      category: "detect",
+      requiresSelection: false,
+      creditCost: 1,
+      execute: async () => {
+        const result = await aiFindDuplicates();
+        if (result.error) throw new Error(result.error);
+        return result.data;
+      },
+    },
+    {
+      id: "reengagement",
+      name: "Re-engagement Planner",
+      description: "Identify stale contacts and get AI-crafted re-engagement strategies with personalized message suggestions.",
+      icon: "reengage",
+      category: "generate",
+      requiresSelection: false,
+      creditCost: 2,
+      execute: async () => {
+        const result = await aiReengagementSuggestions();
+        if (result.error) throw new Error(result.error);
+        return result.data;
+      },
+    },
+    {
+      id: "revenue-opportunities",
+      name: "Revenue Opportunities",
+      description: "AI scan of your pipeline to uncover upsell, cross-sell, and conversion opportunities with estimated revenue impact.",
+      icon: "revenue",
+      category: "analyze",
+      requiresSelection: false,
+      creditCost: 2,
+      execute: async () => {
+        const result = await aiRevenueOpportunities();
+        if (result.error) throw new Error(result.error);
+        return result.data;
+      },
+    },
+    {
+      id: "follow-up-drafter",
+      name: "Follow-up Drafter",
+      description: "Generate a personalized follow-up message for the selected contact based on their history, notes, and relationship context.",
+      icon: "followup",
+      category: "generate",
+      requiresSelection: true,
+      creditCost: 1,
+      execute: async (ctx) => {
+        if (!ctx.selectedItemId) throw new Error("Select a contact first");
+        const result = await aiFollowUpDraft(ctx.selectedItemId);
+        if (result.error) throw new Error(result.error);
         return result.data;
       },
     },

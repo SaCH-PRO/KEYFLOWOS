@@ -200,4 +200,68 @@ export class CrmAiController {
     checkAiRateLimit(businessId);
     return this.crmAi.naturalLanguageSearch(businessId, body.query);
   }
+
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @RequireFeature('ai_tools')
+  @CrmRateLimit(10, 60_000)
+  @Post('businesses/:businessId/ai-execute')
+  async aiExecuteCommand(
+    @Param('businessId') businessId: string,
+    @Req() req: any,
+    @Body() body: { action: string; contactId?: string; params?: Record<string, unknown> },
+  ) {
+    if (!body.action || typeof body.action !== 'string') {
+      throw new BadRequestException('action is required');
+    }
+    const userId = req.user?.id ?? req.user?.sub ?? 'system';
+    return this.crmAi.executeAiCommand(businessId, userId, {
+      action: body.action,
+      contactId: body.contactId ?? null,
+      params: body.params ?? {},
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @RequireFeature('ai_tools')
+  @CrmRateLimit(10, 60_000)
+  @Get('businesses/:businessId/ai-data-quality')
+  aiDataQuality(@Param('businessId') businessId: string) {
+    return this.crmAi.dataQualityScan(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @RequireFeature('ai_tools')
+  @CrmRateLimit(10, 60_000)
+  @Get('businesses/:businessId/ai-duplicates')
+  aiFindDuplicates(@Param('businessId') businessId: string) {
+    return this.crmAi.findDuplicatesAi(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @RequireFeature('ai_tools')
+  @CrmRateLimit(10, 60_000)
+  @Get('businesses/:businessId/ai-reengagement')
+  aiReengagement(@Param('businessId') businessId: string) {
+    return this.crmAi.bulkReengagementSuggestions(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @RequireFeature('ai_tools')
+  @CrmRateLimit(10, 60_000)
+  @Get('businesses/:businessId/ai-revenue-opportunities')
+  aiRevenueOpportunities(@Param('businessId') businessId: string) {
+    return this.crmAi.revenueOpportunityScan(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @RequireFeature('ai_tools')
+  @CrmRateLimit(10, 60_000)
+  @Post('businesses/:businessId/contacts/:contactId/ai-follow-up-draft')
+  aiFollowUpDraft(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+  ) {
+    checkAiRateLimit(businessId);
+    return this.crmAi.generateFollowUpDraft(businessId, contactId);
+  }
 }

@@ -3782,4 +3782,121 @@ export async function aiInterpretCommand(command: string, businessId?: string): 
   });
 }
 
+export type AiExecuteResult = {
+  success: boolean;
+  message: string;
+  data: Record<string, unknown> | null;
+};
+
+export async function aiExecuteCommand(
+  action: string,
+  params?: Record<string, unknown>,
+  contactId?: string,
+  businessId?: string,
+): Promise<ApiResult<AiExecuteResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AiExecuteResult>({
+    path: `/crm/businesses/${encodeURIComponent(bid)}/ai-execute`,
+    body: { action, contactId, params },
+  });
+}
+
+export type AiDataQualityResult = {
+  totalContacts: number;
+  contactsWithIssues: number;
+  averageCompleteness: number;
+  topIssues: Array<{ contactId: string; contactName: string; missingFields: string[]; completeness: number }>;
+  fieldBreakdown: Array<{ field: string; missing: number; percentage: number }>;
+};
+
+export async function aiDataQualityScan(businessId?: string): Promise<ApiResult<AiDataQualityResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet<AiDataQualityResult>({
+    path: `/crm/businesses/${encodeURIComponent(bid)}/ai-data-quality`,
+  });
+}
+
+export type AiDuplicatesResult = {
+  totalContacts: number;
+  duplicateClusters: Array<{
+    contacts: Array<{ id: string; name: string; email: string | null; phone: string | null }>;
+    reason: string;
+    confidence: number;
+  }>;
+  estimatedDuplicates: number;
+};
+
+export async function aiFindDuplicates(businessId?: string): Promise<ApiResult<AiDuplicatesResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet<AiDuplicatesResult>({
+    path: `/crm/businesses/${encodeURIComponent(bid)}/ai-duplicates`,
+  });
+}
+
+export type AiReengagementResult = {
+  totalStale: number;
+  suggestions: Array<{
+    contactId: string;
+    contactName: string;
+    email: string | null;
+    status: string;
+    daysSinceLastInteraction: number | null;
+    leadScore: number | null;
+    recommendedAction: string;
+    urgency: 'high' | 'medium' | 'low';
+    suggestedSequence: string | null;
+  }>;
+  availableSequences: Array<{ id: string; name: string }>;
+};
+
+export async function aiReengagementSuggestions(businessId?: string): Promise<ApiResult<AiReengagementResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet<AiReengagementResult>({
+    path: `/crm/businesses/${encodeURIComponent(bid)}/ai-reengagement`,
+  });
+}
+
+export type AiRevenueOpportunitiesResult = {
+  opportunities: Array<{
+    contactId: string;
+    contactName: string;
+    company: string | null;
+    status: string;
+    totalRevenue: number;
+    opportunityType: string;
+    estimatedValue: number;
+    leadScore: number | null;
+  }>;
+  totalEstimatedRevenue: number;
+  contactsAnalyzed: number;
+};
+
+export async function aiRevenueOpportunities(businessId?: string): Promise<ApiResult<AiRevenueOpportunitiesResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet<AiRevenueOpportunitiesResult>({
+    path: `/crm/businesses/${encodeURIComponent(bid)}/ai-revenue-opportunities`,
+  });
+}
+
+export type AiFollowUpDraftResult = {
+  messages: Array<{
+    tone: string;
+    subject: string;
+    body: string;
+    channel: string;
+  }>;
+  context: string;
+  bestTime: string;
+  contactName: string;
+  creditsUsed: number;
+};
+
+export async function aiFollowUpDraft(contactId: string, businessId?: string): Promise<ApiResult<AiFollowUpDraftResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AiFollowUpDraftResult>({
+    path: `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/ai-follow-up-draft`,
+    body: {},
+  });
+}
+
 export { DEFAULT_BUSINESS_ID };

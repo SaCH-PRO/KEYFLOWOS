@@ -16,6 +16,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { AiSearchBar, type CrmCommand } from "@/components/contacts/ai-search-bar";
+import { aiExecuteCommand } from "@/lib/client";
 import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
 import type { SmartSegment } from "./pipeline-toolbar";
 import { ContactsDatabase } from "./contacts-database";
@@ -264,6 +265,68 @@ export default function ContactsPage() {
         state.setSearchInput(cmd.query);
         setCrmViewTab("pipeline");
         break;
+      case "find_duplicates":
+        setCrmViewTab("insights");
+        toast.success("Switching to Insights — use the Duplicate Finder AI tool");
+        break;
+      case "data_cleanup":
+        setCrmViewTab("insights");
+        toast.success("Switching to Insights — use the Data Quality AI tool");
+        break;
+      case "merge_contacts": {
+        const sourceId = cmd.params?.sourceId as string;
+        const targetId = cmd.params?.targetId as string;
+        if (sourceId && targetId) {
+          selectContact(targetId);
+          setCrmViewTab("pipeline");
+          toast.success("Opening target contact — use the merge option in the detail panel");
+        } else {
+          toast.info("Specify the two contacts to merge");
+        }
+        break;
+      }
+      case "bulk_delete":
+        toast.warning("Bulk delete must be confirmed manually for safety");
+        break;
+      case "create_quote":
+        selectContact(cmd.contactId);
+        setCrmViewTab("pipeline");
+        toast.success("Opening contact — create a quote from the Quick Actions menu");
+        break;
+      case "create_invoice":
+        selectContact(cmd.contactId);
+        setCrmViewTab("pipeline");
+        toast.success("Opening contact — create an invoice from the Quick Actions menu");
+        break;
+      case "generate_follow_up":
+        selectContact(cmd.contactId);
+        setCrmViewTab("pipeline");
+        toast.success("Opening contact — use the Follow-up Drafter AI tool");
+        break;
+      case "revenue_scan":
+        setCrmViewTab("insights");
+        toast.success("Switching to Insights — use the Revenue Opportunity AI tool");
+        break;
+      case "reengagement_scan":
+        setCrmViewTab("engage");
+        toast.success("Switching to Engage — use the Re-engagement AI tool");
+        break;
+      case "ai_execute": {
+        const executing = toast.loading("Executing AI command...");
+        aiExecuteCommand(cmd.action, cmd.params, cmd.contactId).then(result => {
+          toast.dismiss(executing);
+          if (result.data?.success) {
+            toast.success(result.data.message);
+            state.refreshContacts?.();
+          } else {
+            toast.error(result.data?.message ?? result.error ?? "Command failed");
+          }
+        }).catch(() => {
+          toast.dismiss(executing);
+          toast.error("Command execution failed");
+        });
+        break;
+      }
     }
   }, [selectContact, setCrmViewTab, setStatusFilter, state]);
 
