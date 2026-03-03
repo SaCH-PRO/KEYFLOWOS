@@ -368,18 +368,16 @@ export function ProductsPanel({
       </AnimatePresence>
 
       {loading ? (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {Array.from({ length: 8 }).map((_, i) => (
+        <div className="grid grid-cols-3 gap-2 sm:gap-3">
+          {Array.from({ length: 9 }).map((_, i) => (
             <div
               key={i}
-              className="rounded-xl border border-border/50 bg-card p-4 animate-pulse space-y-3"
+              className="rounded-xl border border-border/50 bg-card overflow-hidden animate-pulse"
             >
-              <div className="h-24 bg-muted/30 rounded-lg w-full" />
-              <div className="h-4 bg-muted/30 rounded w-3/4" />
-              <div className="h-3 bg-muted/30 rounded w-full" />
-              <div className="flex gap-2 mt-2">
-                <div className="h-5 bg-muted/30 rounded-md w-16" />
-                <div className="h-5 bg-muted/30 rounded-md w-12" />
+              <div className="aspect-[4/3] bg-muted/30 w-full" />
+              <div className="p-2 space-y-1.5">
+                <div className="h-3 bg-muted/30 rounded w-3/4" />
+                <div className="h-3 bg-muted/30 rounded w-1/2" />
               </div>
             </div>
           ))}
@@ -438,7 +436,7 @@ export function ProductsPanel({
               </button>
             </div>
           )}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-3 gap-2 sm:gap-3">
             <AnimatePresence mode="popLayout">
               {filteredProducts.map((product) => (
                 <div key={product.id} className="relative">
