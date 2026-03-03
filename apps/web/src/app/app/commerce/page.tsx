@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { CreditCard, Package, FileText, RefreshCw, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -25,6 +25,7 @@ import { useCommerceAiHub } from "./hooks/use-commerce-ai-hub";
 import { renderCommerceToolResult } from "./components/commerce-tool-results";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useModuleEmit } from "@/hooks/use-module-events";
+import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { commerceAiExecute } from "@/lib/client";
 
 const TABS = [
@@ -45,14 +46,30 @@ export default function CommercePage() {
   const state = useCommerce();
   const commerceAi = useCommerceAiHub();
   const emitEvent = useModuleEmit();
+  const [slideDirection, setSlideDirection] = useState(0);
+  const COMMERCE_TAB_KEYS = TABS.map((t) => t.key);
   const {
-    businessId, workspaceLoading, workspaceError, tab, handleTabChange,
+    businessId, workspaceLoading, workspaceError, tab, handleTabChange: rawTabChange,
     products, invoices, quotes, contacts, loading, error,
     showGuide, handleToggleGuide, handleNewItem,
     gmailStatus, loadingGmail, paymentGateways,
     handleConnectGmail, handleDisconnectGmail,
     confirmDisconnectGmail, setConfirmDisconnectGmail,
   } = state;
+
+  const handleTabChange = useCallback((t: string) => {
+    if (t === tab) return;
+    const oldIndex = COMMERCE_TAB_KEYS.indexOf(tab);
+    const newIndex = COMMERCE_TAB_KEYS.indexOf(t);
+    setSlideDirection(newIndex > oldIndex ? 1 : -1);
+    rawTabChange(t);
+  }, [tab, rawTabChange]);
+
+  const { swipeHandlers } = useSwipeTabs({
+    tabs: COMMERCE_TAB_KEYS,
+    activeTab: tab,
+    onTabChange: handleTabChange,
+  });
 
   useEffect(() => {
     if (businessId) {
@@ -256,78 +273,80 @@ export default function CommercePage() {
         </div>
       )}
 
-      <AnimatePresence mode="wait">
-        {tab === "products" && (
-          <motion.div key="products" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.15 }}>
-            <ProductsPanel
-              products={products}
-              loading={loading}
-              productSearch={state.productSearch}
-              setProductSearch={state.setProductSearch}
-              onEdit={state.openEditProduct}
-              onDelete={state.handleDeleteProduct}
-              onAdd={state.openAddProduct}
-              deleteConfirm={state.deleteConfirm}
-              setDeleteConfirm={state.setDeleteConfirm}
-              cachedImages={state.cachedImages}
-            />
-          </motion.div>
-        )}
-        {tab === "quotes" && (
-          <motion.div key="quotes" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.15 }}>
-            <QuotesPanel
-              quotes={quotes}
-              contacts={contacts}
-              products={products}
-              businessId={businessId}
-              loading={loading}
-              gmailStatus={gmailStatus}
-              showQuoteBuilder={state.showQuoteBuilder}
-              setShowQuoteBuilder={state.setShowQuoteBuilder}
-              editingQuoteId={state.editingQuoteId}
-              setEditingQuoteId={state.setEditingQuoteId}
-              quoteForm={state.quoteForm}
-              setQuoteForm={state.setQuoteForm}
-              resetQuoteForm={state.resetQuoteForm}
-              setProducts={state.setProducts}
-              setQuotes={state.setQuotes}
-              setInvoices={state.setInvoices}
-              setTab={state.setTab}
-            />
-          </motion.div>
-        )}
-        {tab === "invoices" && (
-          <motion.div key="invoices" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.15 }}>
-            <InvoicesPanel
-              invoices={invoices}
-              contacts={contacts}
-              products={products}
-              businessId={businessId}
-              loading={loading}
-              showInvoiceBuilder={state.showInvoiceBuilder}
-              setShowInvoiceBuilder={state.setShowInvoiceBuilder}
-              editingInvoiceId={state.editingInvoiceId}
-              setEditingInvoiceId={state.setEditingInvoiceId}
-              invoiceForm={state.invoiceForm}
-              setInvoiceForm={state.setInvoiceForm}
-              resetInvoiceForm={state.resetInvoiceForm}
-              setProducts={state.setProducts}
-              setInvoices={state.setInvoices}
-              gmailStatus={gmailStatus}
-            />
-          </motion.div>
-        )}
-        {tab === "recurring" && (
-          <motion.div key="recurring" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.15 }}>
-            <RecurringPanel
-              businessId={businessId}
-              contacts={contacts}
-              products={products}
-              triggerNew={state.recurringTriggerNew}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <div {...swipeHandlers} className="touch-pan-y">
+        <AnimatePresence mode="wait" custom={slideDirection}>
+          {tab === "products" && (
+            <motion.div key="products" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
+              <ProductsPanel
+                products={products}
+                loading={loading}
+                productSearch={state.productSearch}
+                setProductSearch={state.setProductSearch}
+                onEdit={state.openEditProduct}
+                onDelete={state.handleDeleteProduct}
+                onAdd={state.openAddProduct}
+                deleteConfirm={state.deleteConfirm}
+                setDeleteConfirm={state.setDeleteConfirm}
+                cachedImages={state.cachedImages}
+              />
+            </motion.div>
+          )}
+          {tab === "quotes" && (
+            <motion.div key="quotes" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
+              <QuotesPanel
+                quotes={quotes}
+                contacts={contacts}
+                products={products}
+                businessId={businessId}
+                loading={loading}
+                gmailStatus={gmailStatus}
+                showQuoteBuilder={state.showQuoteBuilder}
+                setShowQuoteBuilder={state.setShowQuoteBuilder}
+                editingQuoteId={state.editingQuoteId}
+                setEditingQuoteId={state.setEditingQuoteId}
+                quoteForm={state.quoteForm}
+                setQuoteForm={state.setQuoteForm}
+                resetQuoteForm={state.resetQuoteForm}
+                setProducts={state.setProducts}
+                setQuotes={state.setQuotes}
+                setInvoices={state.setInvoices}
+                setTab={state.setTab}
+              />
+            </motion.div>
+          )}
+          {tab === "invoices" && (
+            <motion.div key="invoices" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
+              <InvoicesPanel
+                invoices={invoices}
+                contacts={contacts}
+                products={products}
+                businessId={businessId}
+                loading={loading}
+                showInvoiceBuilder={state.showInvoiceBuilder}
+                setShowInvoiceBuilder={state.setShowInvoiceBuilder}
+                editingInvoiceId={state.editingInvoiceId}
+                setEditingInvoiceId={state.setEditingInvoiceId}
+                invoiceForm={state.invoiceForm}
+                setInvoiceForm={state.setInvoiceForm}
+                resetInvoiceForm={state.resetInvoiceForm}
+                setProducts={state.setProducts}
+                setInvoices={state.setInvoices}
+                gmailStatus={gmailStatus}
+              />
+            </motion.div>
+          )}
+          {tab === "recurring" && (
+            <motion.div key="recurring" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
+              <RecurringPanel
+                businessId={businessId}
+                contacts={contacts}
+                products={products}
+                triggerNew={state.recurringTriggerNew}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
 
       <ProductFormModal
         open={state.showProductForm}

@@ -18,6 +18,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - Premium design token system with elevation shadows, glass surfaces, micro-transitions, and context-aware notifications.
 - Custom Glassmorphism ConfirmDialog for confirmations and skeleton loading states.
 - Unified CRM Design Language across Pipeline, Database, Insights, and Engage tabs, featuring standardized cards, glass search inputs, popover dropdowns, and gradient accents.
+- **Cabinet Folder Tab Navigation:** Redesigned `TabNav` component with folder-tab styling (rounded-t-xl, gradient top accent bar, glassmorphism active state), keyboard navigation (Arrow/Home/End keys), and `useSwipeTabs` hook for touch swipe between tabs. Directional slide animations on both CRM and Commerce pages.
 - Pipeline Kanban Board View with HTML5 drag-and-drop, persistent view preferences, and detailed contact cards.
 - Enhanced database tables with column visibility, responsive auto-hiding, multi-word search, keyboard navigation, and localStorage-persisted "Saved Views".
 - Extensive use of `useMemo` and `useCallback` for performance optimization.

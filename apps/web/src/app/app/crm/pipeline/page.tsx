@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "sonner";
@@ -29,6 +29,7 @@ import { useCrmAiHub } from "./hooks/use-crm-ai-hub";
 import { renderCrmToolResult } from "./components/crm-tool-results";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useModuleEmit } from "@/hooks/use-module-events";
+import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 
 export default function ContactsPage() {
   const searchParams = useSearchParams();
@@ -37,6 +38,9 @@ export default function ContactsPage() {
   const state = useContactsPipeline();
   const crmAi = useCrmAiHub();
   const emitEvent = useModuleEmit();
+  const [slideDirection, setSlideDirection] = useState(0);
+
+  const CRM_TABS = ["pipeline", "database", "insights", "engage"];
 
   const {
     workspaceLoading, workspaceError, businessId,
@@ -155,9 +159,19 @@ export default function ContactsPage() {
   const handleGuideSegment = useCallback((segment: string) => { state.setActiveSegment(segment as SmartSegment); setCrmViewTab("pipeline"); }, [state.setActiveSegment, setCrmViewTab]);
   const handleGuideSelectMode = useCallback(() => { state.handleToggleSelectMode(); setCrmViewTab("pipeline"); }, [state.handleToggleSelectMode, setCrmViewTab]);
   const handleTabChange = useCallback((t: string) => {
+    if (t === crmViewTab) return;
+    const oldIndex = CRM_TABS.indexOf(crmViewTab);
+    const newIndex = CRM_TABS.indexOf(t);
+    setSlideDirection(newIndex > oldIndex ? 1 : -1);
     setCrmViewTab(t as "pipeline" | "insights" | "engage" | "database");
     emitEvent("module:tab_changed", "crm", { tab: t });
-  }, [setCrmViewTab, emitEvent]);
+  }, [crmViewTab, setCrmViewTab, emitEvent]);
+
+  const { swipeHandlers } = useSwipeTabs({
+    tabs: CRM_TABS,
+    activeTab: crmViewTab,
+    onTabChange: handleTabChange,
+  });
 
   const handleAiCommand = useCallback((cmd: CrmCommand) => {
     switch (cmd.type) {
@@ -414,90 +428,96 @@ export default function ContactsPage() {
         onTabChange={handleTabChange}
       />
 
-      <AnimatePresence mode="wait">
-        {crmViewTab === "pipeline" && (
-          <motion.div
-            key="pipeline"
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
-          >
-            <PipelineTabContent state={state} />
-          </motion.div>
-        )}
+      <div {...swipeHandlers} className="touch-pan-y">
+        <AnimatePresence mode="wait" custom={slideDirection}>
+          {crmViewTab === "pipeline" && (
+            <motion.div
+              key="pipeline"
+              custom={slideDirection}
+              initial={{ opacity: 0, x: slideDirection * 60 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: slideDirection * -60 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+            >
+              <PipelineTabContent state={state} />
+            </motion.div>
+          )}
 
-        {crmViewTab === "database" && businessId && (
-          <motion.div
-            key="database"
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
-          >
-            <ContactsDatabase
-              businessId={businessId}
-              contacts={databaseContacts}
-              onRefresh={handleRefreshContacts}
-              activeListId={activeListId}
-              onSelectList={handleSelectList}
-              onListsLoaded={setListsCount}
-              onSelectContact={handleSelectDbContact}
-              favoriteIds={state.favoriteIds}
-              onToggleFavorite={state.handleToggleFavorite}
-            />
-          </motion.div>
-        )}
+          {crmViewTab === "database" && businessId && (
+            <motion.div
+              key="database"
+              custom={slideDirection}
+              initial={{ opacity: 0, x: slideDirection * 60 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: slideDirection * -60 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+            >
+              <ContactsDatabase
+                businessId={businessId}
+                contacts={databaseContacts}
+                onRefresh={handleRefreshContacts}
+                activeListId={activeListId}
+                onSelectList={handleSelectList}
+                onListsLoaded={setListsCount}
+                onSelectContact={handleSelectDbContact}
+                favoriteIds={state.favoriteIds}
+                onToggleFavorite={state.handleToggleFavorite}
+              />
+            </motion.div>
+          )}
 
-        {crmViewTab === "insights" && (
-          <motion.div
-            key="insights"
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
-          >
-            <InsightsTab
-              flowIntelligence={flowIntelligence}
-              revenueData={revenueData}
-              financialGrowth={financialGrowth}
-              contacts={contacts}
-              loading={flowDataLoading}
-              businessId={businessId}
-              onViewCold={handleViewCold}
-              onViewReady={handleViewReady}
-              onViewExpiringQuotes={handleViewExpiringQuotes}
-              onViewOverdueInvoices={handleViewOverdueInvoices}
-              onRefresh={handleInsightsRefresh}
-              onNavigatePipeline={handleNavigatePipeline}
-            />
-          </motion.div>
-        )}
+          {crmViewTab === "insights" && (
+            <motion.div
+              key="insights"
+              custom={slideDirection}
+              initial={{ opacity: 0, x: slideDirection * 60 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: slideDirection * -60 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+            >
+              <InsightsTab
+                flowIntelligence={flowIntelligence}
+                revenueData={revenueData}
+                financialGrowth={financialGrowth}
+                contacts={contacts}
+                loading={flowDataLoading}
+                businessId={businessId}
+                onViewCold={handleViewCold}
+                onViewReady={handleViewReady}
+                onViewExpiringQuotes={handleViewExpiringQuotes}
+                onViewOverdueInvoices={handleViewOverdueInvoices}
+                onRefresh={handleInsightsRefresh}
+                onNavigatePipeline={handleNavigatePipeline}
+              />
+            </motion.div>
+          )}
 
-        {crmViewTab === "engage" && (
-          <motion.div
-            key="engage"
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
-          >
-            <EngageTab
-              nextActions={nextActions}
-              autopilotActions={autopilotActions}
-              autopilotPaused={autopilotPaused}
-              loading={flowDataLoading}
-              businessId={businessId ?? undefined}
-              onComplete={handleCompleteNextAction}
-              onViewContact={handleViewEngageContact}
-              onDoAction={handleDoAction}
-              onTogglePause={handleToggleAutopilotPause}
-              onApprove={handleApproveAutopilot}
-              onDeny={handleDenyAutopilot}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
+          {crmViewTab === "engage" && (
+            <motion.div
+              key="engage"
+              custom={slideDirection}
+              initial={{ opacity: 0, x: slideDirection * 60 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: slideDirection * -60 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+            >
+              <EngageTab
+                nextActions={nextActions}
+                autopilotActions={autopilotActions}
+                autopilotPaused={autopilotPaused}
+                loading={flowDataLoading}
+                businessId={businessId ?? undefined}
+                onComplete={handleCompleteNextAction}
+                onViewContact={handleViewEngageContact}
+                onDoAction={handleDoAction}
+                onTogglePause={handleToggleAutopilotPause}
+                onApprove={handleApproveAutopilot}
+                onDeny={handleDenyAutopilot}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
 
       <BroadcastDrawer
         isOpen={showBroadcast}
