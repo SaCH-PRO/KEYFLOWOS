@@ -305,6 +305,7 @@ export default function CommercePage() {
                 onDelete={state.handleDeleteProduct}
                 onDuplicate={state.handleDuplicateProduct}
                 onToggleActive={state.handleToggleProductActive}
+                onInlineSave={state.handleInlineSave}
                 onAdd={state.openAddProduct}
                 onImport={() => setShowImportModal(true)}
                 deleteConfirm={state.deleteConfirm}

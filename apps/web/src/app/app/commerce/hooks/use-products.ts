@@ -268,6 +268,45 @@ export function useProducts(
     }
   }, [businessId, setProducts]);
 
+  const handleInlineSave = useCallback(async (productId: string, form: ProductForm, imageFile?: File | null) => {
+    if (!businessId) return;
+    const price = Number(form.price);
+    if (!form.name || isNaN(price) || price <= 0) {
+      toast.error("Name and a valid price are required");
+      return;
+    }
+    const durationValue = form.duration ? parseInt(form.duration) : null;
+    const isLocalImage = imageFile != null;
+    const serverImageUrl = isLocalImage ? null : (form.imageUrl || null);
+
+    const { data, error } = await updateProduct({
+      businessId,
+      productId,
+      name: form.name,
+      price,
+      description: form.description || null,
+      category: form.category,
+      duration: durationValue,
+      imageUrl: serverImageUrl,
+      sku: form.sku || null,
+      isActive: form.isActive,
+    });
+    if (error) { toast.error("Failed to update product"); throw new Error(error); }
+    if (data) {
+      if (isLocalImage && imageFile) {
+        const dataUrl = await fileToDataUrl(imageFile);
+        await saveProductImage(productId, dataUrl);
+        setCachedImages((prev) => ({ ...prev, [productId]: dataUrl }));
+      } else if (!form.imageUrl) {
+        await deleteProductImage(productId);
+        setCachedImages((prev) => { const n = { ...prev }; delete n[productId]; return n; });
+      }
+      setProducts((prev) => prev.map((p) => (p.id === productId ? { ...p, ...data } : p)));
+      toast.success("Product updated");
+      notifyProductsChanged();
+    }
+  }, [businessId, setProducts, setCachedImages]);
+
   const handleDeleteProduct = useCallback(async (productId: string) => {
     if (!businessId) return;
     const { error } = await deleteProduct(productId, businessId);
@@ -306,5 +345,6 @@ export function useProducts(
     handleDuplicateProduct,
     handleToggleProductActive,
     handleDeleteProduct,
+    handleInlineSave,
   };
 }

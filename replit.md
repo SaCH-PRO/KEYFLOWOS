@@ -21,6 +21,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - `TabNav` component with folder-tab styling, keyboard navigation, and `useSwipeTabs` hook for touch swipe. Directional slide animations on both CRM and Commerce pages.
 - Pipeline Kanban Board View with HTML5 drag-and-drop, persistent view preferences, and detailed contact cards.
 - Enhanced database tables with column visibility, responsive auto-hiding, multi-word search, keyboard navigation, and localStorage-persisted "Saved Views".
+- **Product Detail Panel:** Centered dialog (not bottom-sheet) with inline editing mode. `ProductDetailPanel` accepts `onSave(form, imageFile)` for async inline saves via `handleInlineSave` in `use-products.ts`. `ProductsPanel` syncs `selectedProduct` with the products array via `useEffect`. Save button shows loading state and only exits edit mode on success.
 - Extensive use of `useMemo` and `useCallback` for performance optimization.
 - Graceful error handling with Next.js error boundaries and comprehensive ARIA accessibility.
 

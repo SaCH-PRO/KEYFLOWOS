@@ -6,6 +6,7 @@ import { Search, Package, Plus, X, Eye, EyeOff, ArrowUpDown, CheckSquare, Square
 import { toast } from "sonner";
 import type { Product } from "@/lib/client";
 import { bulkUpdateProducts } from "@/lib/client";
+import type { ProductForm } from "../components/commerce-types";
 import { ProductCard } from "./product-card";
 import { ProductDetailPanel } from "./product-detail-panel";
 
@@ -18,6 +19,7 @@ interface ProductsPanelProps {
   onDelete: (productId: string) => void;
   onDuplicate?: (product: Product) => void;
   onToggleActive?: (product: Product) => void;
+  onInlineSave?: (productId: string, form: ProductForm, imageFile?: File | null) => Promise<void>;
   onAdd: () => void;
   onImport?: () => void;
   deleteConfirm: string | null;
@@ -58,6 +60,7 @@ export function ProductsPanel({
   onDelete,
   onDuplicate,
   onToggleActive,
+  onInlineSave,
   onAdd,
   onImport,
   deleteConfirm,
@@ -72,6 +75,15 @@ export function ProductsPanel({
   quotes = [],
 }: ProductsPanelProps) {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+
+  useEffect(() => {
+    if (selectedProduct) {
+      const updated = products.find(p => p.id === selectedProduct.id);
+      if (updated && updated !== selectedProduct) setSelectedProduct(updated);
+      else if (!updated) setSelectedProduct(null);
+    }
+  }, [products]);
+
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
   const [showInactive, setShowInactive] = useState(false);
   const [sortBy, setSortBy] = useState<SortOption>("newest");
@@ -480,7 +492,14 @@ export function ProductsPanel({
         <ProductDetailPanel
           product={selectedProduct}
           onClose={() => setSelectedProduct(null)}
-          onEdit={(p) => { setSelectedProduct(null); onEdit(p); }}
+          onSave={async (form, imageFile) => {
+            if (onInlineSave) {
+              await onInlineSave(selectedProduct.id, form, imageFile);
+            } else {
+              setSelectedProduct(null);
+              onEdit(selectedProduct);
+            }
+          }}
           onDelete={(id) => { setSelectedProduct(null); onDelete(id); }}
           onDuplicate={onDuplicate ? (p) => { setSelectedProduct(null); onDuplicate(p); } : undefined}
           onToggleActive={onToggleActive ? (p) => { onToggleActive(p); setSelectedProduct({ ...p, isActive: !(p.isActive ?? true) }); } : undefined}
