@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -19,21 +19,20 @@ import {
   Layers,
   ShoppingCart,
   FileText,
-  BarChart3,
   Zap,
-  Check,
   Upload,
   Link2,
   ImageIcon,
   Wand2,
-  Eye,
   Briefcase,
   ShoppingBag,
   Save,
 } from "lucide-react";
 import type { Product } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
-import { CATEGORIES, type ProductForm } from "../components/commerce-types";
+import { PRODUCT_CATEGORY_CONFIG, type ProductForm } from "../components/commerce-types";
+
+const CATEGORY_ICONS = { SERVICE: Zap, PRODUCT: Package, PACKAGE: Layers } as const;
 
 interface ProductDetailPanelProps {
   product: Product | null;
@@ -50,30 +49,6 @@ interface ProductDetailPanelProps {
   quoteCount?: number;
   totalRevenue?: number;
 }
-
-const CATEGORY_CONFIG: Record<string, { label: string; icon: typeof Package; color: string; bgGradient: string; badge: string }> = {
-  SERVICE: {
-    label: "Service",
-    icon: Zap,
-    color: "text-teal-400",
-    bgGradient: "from-teal-500/30 via-teal-600/10 to-transparent",
-    badge: "bg-teal-500/15 text-teal-400 border-teal-500/30",
-  },
-  PRODUCT: {
-    label: "Product",
-    icon: Package,
-    color: "text-blue-400",
-    bgGradient: "from-blue-500/30 via-blue-600/10 to-transparent",
-    badge: "bg-blue-500/15 text-blue-400 border-blue-500/30",
-  },
-  PACKAGE: {
-    label: "Package",
-    icon: Layers,
-    color: "text-purple-400",
-    bgGradient: "from-purple-500/30 via-purple-600/10 to-transparent",
-    badge: "bg-purple-500/15 text-purple-400 border-purple-500/30",
-  },
-};
 
 const CATEGORY_CARDS: { value: "SERVICE" | "PRODUCT" | "PACKAGE"; label: string; icon: typeof Package; desc: string; color: string }[] = [
   { value: "SERVICE", label: "Service", icon: Briefcase, desc: "Time-based", color: "from-blue-500/20 to-blue-600/10 border-blue-500/40 text-blue-300" },
@@ -106,7 +81,7 @@ function productToForm(product: Product): ProductForm {
   };
 }
 
-export function ProductDetailPanel({
+export const ProductDetailPanel = React.memo(function ProductDetailPanel({
   product,
   onClose,
   onSave,
@@ -128,6 +103,7 @@ export function ProductDetailPanel({
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageMode, setImageMode] = useState<"upload" | "url">("upload");
+  const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -186,8 +162,6 @@ export function ProductDetailPanel({
     setForm(f => ({ ...f, sku: `${prefix}-${namePart || "ITEM"}-${suffix}` }));
   }, [form.category, form.name]);
 
-  const [saving, setSaving] = useState(false);
-
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
@@ -209,8 +183,8 @@ export function ProductDetailPanel({
 
   if (!product) return null;
 
-  const config = CATEGORY_CONFIG[product.category] ?? CATEGORY_CONFIG.SERVICE;
-  const CategoryIcon = config.icon;
+  const config = PRODUCT_CATEGORY_CONFIG[product.category as keyof typeof PRODUCT_CATEGORY_CONFIG] ?? PRODUCT_CATEGORY_CONFIG.SERVICE;
+  const CategoryIcon = CATEGORY_ICONS[product.category as keyof typeof CATEGORY_ICONS] ?? Zap;
   const isInactive = product.isActive === false;
   const displayImage = imagePreview || cachedImage || product.imageUrl;
   const displayCurrency = product.currency ?? currency;
@@ -534,4 +508,4 @@ export function ProductDetailPanel({
       </motion.div>
     </AnimatePresence>
   );
-}
+});

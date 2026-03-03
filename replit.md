@@ -22,6 +22,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - Pipeline Kanban Board View with HTML5 drag-and-drop, persistent view preferences, and detailed contact cards.
 - Enhanced database tables with column visibility, responsive auto-hiding, multi-word search, keyboard navigation, and localStorage-persisted "Saved Views".
 - **Product Detail Panel:** Centered dialog (not bottom-sheet) with inline editing mode. `ProductDetailPanel` accepts `onSave(form, imageFile)` for async inline saves via `handleInlineSave` in `use-products.ts`. `ProductsPanel` syncs `selectedProduct` with the products array via `useEffect`. Save button shows loading state and only exits edit mode on success.
+- **Products Tab Performance:** All product components (`ProductCard`, `ProductDetailPanel`, `ProductsPanel`) wrapped with `React.memo`. Shared `PRODUCT_CATEGORY_CONFIG` extracted to `commerce-types.ts`. Single-pass `categoryCounts`, memoized `productStats` (revenue/invoiceCount/quoteCount), memoized detail panel handlers, lazy image loading, view-mode-aware skeleton loading.
 - Extensive use of `useMemo` and `useCallback` for performance optimization.
 - Graceful error handling with Next.js error boundaries and comprehensive ARIA accessibility.
 
