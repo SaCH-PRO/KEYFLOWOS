@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useCallback, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import React, { useState, useCallback, useRef, useEffect } from "react";
+import { motion, AnimatePresence, useMotionValue, useTransform, useDragControls } from "framer-motion";
 import {
   X,
   Upload,
@@ -13,11 +13,12 @@ import {
   AlertCircle,
   Package,
   Edit3,
-  ChevronDown,
+  ChevronLeft,
+  Download,
+  Globe,
   Briefcase,
   ShoppingBag,
   Layers,
-  Download,
 } from "lucide-react";
 import { Button } from "@keyflow/ui";
 import { toast } from "sonner";
@@ -31,14 +32,20 @@ import {
 import { formatCurrency } from "@/lib/currency";
 import { notifyProductsChanged } from "@/lib/product-sync";
 
-type ImportMode = "choose" | "file" | "scan";
-type ImportStep = "upload" | "preview" | "importing";
+type ImportMode = "file" | "scan" | "url";
+type ImportStep = "choose" | "upload" | "preview" | "importing";
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   SERVICE: <Briefcase className="w-3.5 h-3.5" />,
   PRODUCT: <ShoppingBag className="w-3.5 h-3.5" />,
   PACKAGE: <Layers className="w-3.5 h-3.5" />,
 };
+
+const MODES: { key: ImportMode; label: string; sublabel: string; icon: typeof Upload; color: string }[] = [
+  { key: "file", label: "CSV File", sublabel: "Spreadsheet import", icon: FileSpreadsheet, color: "#10b981" },
+  { key: "scan", label: "AI Scan", sublabel: "Photo or menu", icon: Camera, color: "#a855f7" },
+  { key: "url", label: "URL", sublabel: "Link to file", icon: Globe, color: "#3b82f6" },
+];
 
 interface ProductImportModalProps {
   open: boolean;
@@ -55,32 +62,54 @@ export const ProductImportModal = React.memo(function ProductImportModal({
   currency = "TTD",
   setProducts,
 }: ProductImportModalProps) {
-  const [mode, setMode] = useState<ImportMode>("choose");
-  const [step, setStep] = useState<ImportStep>("upload");
+  const [mode, setMode] = useState<ImportMode | null>(null);
+  const [step, setStep] = useState<ImportStep>("choose");
   const [extracted, setExtracted] = useState<ExtractedProduct[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(false);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [urlInput, setUrlInput] = useState("");
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
+  const dragY = useMotionValue(0);
+  const dragControls = useDragControls();
+  const bgOpacity = useTransform(dragY, [0, 300], [1, 0.3]);
+  const modalScale = useTransform(dragY, [0, 300], [1, 0.92]);
+
+  useEffect(() => {
+    if (open) dragY.set(0);
+  }, [open, dragY]);
+
   const resetState = useCallback(() => {
-    setMode("choose");
-    setStep("upload");
+    setMode(null);
+    setStep("choose");
     setExtracted([]);
     setSelected(new Set());
     setLoading(false);
     setEditingIdx(null);
     setError(null);
     setImagePreview(null);
+    setUrlInput("");
+    setIsDragging(false);
   }, []);
 
   const handleClose = useCallback(() => {
     resetState();
     onClose();
   }, [resetState, onClose]);
+
+  const handleBack = useCallback(() => {
+    setMode(null);
+    setStep("choose");
+    setError(null);
+    setImagePreview(null);
+    setUrlInput("");
+    setIsDragging(false);
+  }, []);
 
   const handleFileUpload = useCallback(async (file: File) => {
     if (!businessId) return;
@@ -97,7 +126,7 @@ export const ProductImportModal = React.memo(function ProductImportModal({
         return;
       }
       setExtracted(data.extracted);
-      setSelected(new Set(data.extracted.map((_, i) => i)));
+      setSelected(new Set(data.extracted.map((_: ExtractedProduct, i: number) => i)));
       setStep("preview");
     } catch {
       setError("Failed to process file");
@@ -126,7 +155,7 @@ export const ProductImportModal = React.memo(function ProductImportModal({
         return;
       }
       setExtracted(data.extracted);
-      setSelected(new Set(data.extracted.map((_, i) => i)));
+      setSelected(new Set(data.extracted.map((_: ExtractedProduct, i: number) => i)));
       setStep("preview");
     } catch {
       setError("Failed to analyze image");
@@ -135,8 +164,29 @@ export const ProductImportModal = React.memo(function ProductImportModal({
     }
   }, [businessId, currency]);
 
+  const handleUrlImport = useCallback(async () => {
+    if (!businessId || !urlInput.trim()) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(urlInput.trim());
+      if (!res.ok) {
+        setError("Could not fetch file from that URL");
+        return;
+      }
+      const blob = await res.blob();
+      const file = new File([blob], "import.csv", { type: blob.type || "text/csv" });
+      await handleFileUpload(file);
+    } catch {
+      setError("Failed to fetch or process URL");
+    } finally {
+      setLoading(false);
+    }
+  }, [businessId, urlInput, handleFileUpload]);
+
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    setIsDragging(false);
     const file = e.dataTransfer.files[0];
     if (!file) return;
     if (mode === "file") {
@@ -167,7 +217,7 @@ export const ProductImportModal = React.memo(function ProductImportModal({
     if (selected.size === extracted.length) {
       setSelected(new Set());
     } else {
-      setSelected(new Set(extracted.map((_, i) => i)));
+      setSelected(new Set(extracted.map((_: ExtractedProduct, i: number) => i)));
     }
   }, [selected.size, extracted.length]);
 
@@ -237,7 +287,7 @@ export const ProductImportModal = React.memo(function ProductImportModal({
   }, [businessId, extracted, selected, currency, handleClose, setProducts]);
 
   const handleDownloadTemplate = useCallback(() => {
-    const csv = "Name,Price,Category,Description,Duration,SKU\nHaircut,150,SERVICE,\"Basic men's haircut\",30,SVC-HAIR-001\nShampoo,45,PRODUCT,\"Professional shampoo\",,"
+    const csv = "Name,Price,Category,Description,Duration,SKU\nHaircut,150,SERVICE,\"Basic men's haircut\",30,SVC-HAIR-001\nShampoo,45,PRODUCT,\"Professional shampoo\",,";
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -247,104 +297,140 @@ export const ProductImportModal = React.memo(function ProductImportModal({
     URL.revokeObjectURL(url);
   }, []);
 
+  const handleModeSelect = useCallback((m: ImportMode) => {
+    setMode(m);
+    setStep("upload");
+    setError(null);
+  }, []);
+
   if (!open) return null;
+
+  const showBackButton = step !== "choose";
+  const headerTitle = step === "choose" ? "Import Products" : mode === "file" ? "CSV File Import" : mode === "scan" ? "AI Scan Import" : "URL Import";
 
   return (
     <AnimatePresence>
       <motion.div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+        className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-16 sm:pt-20"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        onClick={handleClose}
+        style={{ opacity: bgOpacity }}
       >
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={handleClose} />
+
         <motion.div
-          className="relative w-full max-w-2xl max-h-[85vh] mx-4 rounded-2xl border border-white/10 bg-[hsl(var(--kf-card))]/95 backdrop-blur-xl shadow-2xl overflow-hidden flex flex-col"
-          initial={{ scale: 0.95, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.95, opacity: 0 }}
+          className="relative w-full sm:w-[480px] kf-card border border-border shadow-2xl rounded-2xl max-h-[80vh] overflow-hidden flex flex-col z-10"
+          initial={{ opacity: 0, scale: 0.95, y: 8 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.95, y: 200 }}
+          style={{ scale: modalScale }}
+          drag="y"
+          dragControls={dragControls}
+          dragListener={false}
+          dragConstraints={{ top: 0, bottom: 0 }}
+          dragElastic={{ top: 0.05, bottom: 0.5 }}
+          onDragEnd={(_, info) => {
+            if (info.offset.y > 120 || info.velocity.y > 500) {
+              handleClose();
+            } else {
+              dragY.set(0);
+            }
+          }}
           onClick={e => e.stopPropagation()}
         >
-          <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-xl bg-gradient-to-br from-[hsl(var(--kf-accent1))]/20 to-[hsl(var(--kf-accent2))]/20">
-                <Package className="w-5 h-5 text-[hsl(var(--kf-accent1))]" />
-              </div>
-              <div>
-                <h2 className="text-lg font-semibold text-white">Import Products</h2>
-                <p className="text-[12px] text-muted-foreground">
-                  {mode === "choose" ? "Choose import method" :
-                   mode === "file" ? "Import from CSV file" :
-                   "Scan from image"}
-                </p>
-              </div>
+          <div
+            className="flex justify-center pt-3 pb-1 cursor-grab active:cursor-grabbing"
+            onPointerDown={(e) => dragControls.start(e)}
+            style={{ touchAction: "none" }}
+          >
+            <div className="w-10 h-1 rounded-full bg-white/20" />
+          </div>
+
+          <div className="flex items-center justify-between px-4 pb-2">
+            <div className="flex items-center gap-2">
+              {showBackButton && (
+                <button
+                  onClick={step === "preview" ? () => { setStep("upload"); setExtracted([]); setSelected(new Set()); setError(null); } : handleBack}
+                  className="p-1.5 rounded-lg hover:bg-muted/50 text-muted-foreground transition-colors"
+                  aria-label="Back"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+              )}
+              <h2 className="font-semibold text-base">{headerTitle}</h2>
             </div>
-            <button onClick={handleClose} className="p-2 rounded-lg hover:bg-white/10 transition-colors" aria-label="Close">
-              <X className="w-5 h-5 text-muted-foreground" />
+            <button onClick={handleClose} className="p-1.5 rounded-lg hover:bg-muted/50 text-muted-foreground" aria-label="Close">
+              <X className="w-4 h-4" />
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-6">
+          <div className="flex-1 overflow-y-auto">
             <AnimatePresence mode="wait">
-              {mode === "choose" && (
+              {step === "choose" && (
                 <motion.div
                   key="choose"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="grid grid-cols-1 sm:grid-cols-2 gap-4"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="p-4 pt-2"
                 >
-                  <button
-                    onClick={() => setMode("file")}
-                    className="group p-6 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-[hsl(var(--kf-accent1))]/40 transition-all text-left"
-                  >
-                    <div className="p-3 rounded-xl bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 w-fit mb-4">
-                      <FileSpreadsheet className="w-6 h-6 text-emerald-400" />
-                    </div>
-                    <h3 className="text-white font-medium mb-1">Import CSV File</h3>
-                    <p className="text-[12px] text-muted-foreground leading-relaxed">
-                      Upload a spreadsheet with your product catalog. Supports CSV files with columns like Name, Price, Category, etc.
-                    </p>
-                  </button>
-
-                  <button
-                    onClick={() => setMode("scan")}
-                    className="group p-6 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-[hsl(var(--kf-accent2))]/40 transition-all text-left"
-                  >
-                    <div className="p-3 rounded-xl bg-gradient-to-br from-violet-500/20 to-violet-600/10 w-fit mb-4">
-                      <Camera className="w-6 h-6 text-violet-400" />
-                    </div>
-                    <h3 className="text-white font-medium mb-1">Scan Image</h3>
-                    <p className="text-[12px] text-muted-foreground leading-relaxed">
-                      Take a photo or upload an image of a menu, price list, catalog, or flyer. AI will extract the products.
-                    </p>
-                  </button>
+                  <p className="text-xs text-muted-foreground mb-3">Choose how you'd like to import products</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {MODES.map(({ key, label, sublabel, icon: Icon, color }) => (
+                      <button
+                        key={key}
+                        onClick={() => handleModeSelect(key)}
+                        className="flex items-center gap-3 p-3 rounded-xl border border-border hover:border-[hsl(var(--kf-accent1))]/30 hover:bg-muted/30 transition-all text-left group"
+                      >
+                        <div
+                          className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-105"
+                          style={{ background: `${color}15` }}
+                        >
+                          <Icon className="w-5 h-5" style={{ color }} />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-sm font-medium block">{label}</span>
+                          <span className="text-[11px] text-muted-foreground">{sublabel}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
                 </motion.div>
               )}
 
-              {mode === "file" && step === "upload" && (
+              {step === "upload" && mode === "file" && (
                 <motion.div
                   key="file-upload"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  className="p-4 pt-2"
                 >
                   <div
-                    className="border-2 border-dashed border-white/20 rounded-xl p-10 text-center hover:border-[hsl(var(--kf-accent1))]/40 hover:bg-white/5 transition-all cursor-pointer"
+                    className={`border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer ${
+                      isDragging
+                        ? "border-[hsl(var(--kf-accent1))]/60 bg-[hsl(var(--kf-accent1))]/5"
+                        : "border-white/20 hover:border-[hsl(var(--kf-accent1))]/40 hover:bg-muted/20"
+                    }`}
                     onDrop={handleDrop}
-                    onDragOver={e => e.preventDefault()}
+                    onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+                    onDragLeave={e => { e.preventDefault(); setIsDragging(false); }}
                     onClick={() => fileInputRef.current?.click()}
                   >
                     {loading ? (
                       <div className="flex flex-col items-center gap-3">
-                        <Loader2 className="w-10 h-10 text-[hsl(var(--kf-accent1))] animate-spin" />
-                        <p className="text-white font-medium">Parsing file...</p>
+                        <Loader2 className="w-8 h-8 text-[hsl(var(--kf-accent1))] animate-spin" />
+                        <p className="text-sm text-white font-medium">Parsing file...</p>
+                        <p className="text-xs text-muted-foreground">Reading columns and rows</p>
                       </div>
                     ) : (
                       <>
-                        <Upload className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-                        <p className="text-white font-medium mb-1">Drop your CSV file here</p>
-                        <p className="text-[12px] text-muted-foreground">or click to browse</p>
+                        <div className="w-12 h-12 rounded-xl flex items-center justify-center mx-auto mb-3" style={{ background: "#10b98115" }}>
+                          <FileSpreadsheet className="w-6 h-6 text-emerald-400" />
+                        </div>
+                        <p className="text-sm text-white font-medium mb-1">Drop your CSV file here</p>
+                        <p className="text-xs text-muted-foreground">or click to browse</p>
                       </>
                     )}
                   </div>
@@ -360,57 +446,57 @@ export const ProductImportModal = React.memo(function ProductImportModal({
                   />
 
                   {error && (
-                    <div className="mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 flex items-start gap-2">
+                    <div className="mt-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20 flex items-start gap-2">
                       <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
-                      <p className="text-[12px] text-red-300">{error}</p>
+                      <p className="text-xs text-red-300">{error}</p>
                     </div>
                   )}
 
-                  <div className="mt-6 flex items-center justify-between">
-                    <button
-                      onClick={() => setMode("choose")}
-                      className="text-[12px] text-muted-foreground hover:text-white transition-colors"
-                    >
-                      Back
-                    </button>
-                    <button
-                      onClick={handleDownloadTemplate}
-                      className="flex items-center gap-1.5 text-[12px] text-[hsl(var(--kf-accent1))] hover:underline"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      Download template
-                    </button>
-                  </div>
+                  <button
+                    onClick={handleDownloadTemplate}
+                    className="mt-4 flex items-center gap-1.5 text-xs text-[hsl(var(--kf-accent1))] hover:underline mx-auto"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Download CSV template
+                  </button>
                 </motion.div>
               )}
 
-              {mode === "scan" && step === "upload" && (
+              {step === "upload" && mode === "scan" && (
                 <motion.div
                   key="scan-upload"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  className="p-4 pt-2"
                 >
                   <div
-                    className="border-2 border-dashed border-white/20 rounded-xl p-10 text-center hover:border-[hsl(var(--kf-accent2))]/40 hover:bg-white/5 transition-all cursor-pointer"
+                    className={`border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer ${
+                      isDragging
+                        ? "border-purple-400/60 bg-purple-500/5"
+                        : "border-white/20 hover:border-purple-400/40 hover:bg-muted/20"
+                    }`}
                     onDrop={handleDrop}
-                    onDragOver={e => e.preventDefault()}
+                    onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+                    onDragLeave={e => { e.preventDefault(); setIsDragging(false); }}
                     onClick={() => imageInputRef.current?.click()}
                   >
                     {loading ? (
                       <div className="flex flex-col items-center gap-3">
                         {imagePreview && (
-                          <img src={imagePreview} alt="Scanning" className="w-32 h-32 object-cover rounded-lg mb-2 opacity-70" />
+                          <img src={imagePreview} alt="Scanning" className="w-24 h-24 object-cover rounded-lg opacity-70" />
                         )}
-                        <Loader2 className="w-10 h-10 text-[hsl(var(--kf-accent2))] animate-spin" />
-                        <p className="text-white font-medium">AI is analyzing your image...</p>
-                        <p className="text-[12px] text-muted-foreground">Extracting products, prices, and details</p>
+                        <Loader2 className="w-8 h-8 text-purple-400 animate-spin" />
+                        <p className="text-sm text-white font-medium">AI is analyzing your image...</p>
+                        <p className="text-xs text-muted-foreground">Extracting products, prices, and details</p>
                       </div>
                     ) : (
                       <>
-                        <Camera className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-                        <p className="text-white font-medium mb-1">Upload or take a photo</p>
-                        <p className="text-[12px] text-muted-foreground">Menu, price list, catalog, flyer, or any product listing</p>
+                        <div className="w-12 h-12 rounded-xl flex items-center justify-center mx-auto mb-3" style={{ background: "#a855f715" }}>
+                          <Camera className="w-6 h-6 text-purple-400" />
+                        </div>
+                        <p className="text-sm text-white font-medium mb-1">Upload or take a photo</p>
+                        <p className="text-xs text-muted-foreground">Menu, price list, catalog, or flyer</p>
                       </>
                     )}
                   </div>
@@ -427,43 +513,78 @@ export const ProductImportModal = React.memo(function ProductImportModal({
                   />
 
                   {error && (
-                    <div className="mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 flex items-start gap-2">
+                    <div className="mt-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20 flex items-start gap-2">
                       <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
-                      <p className="text-[12px] text-red-300">{error}</p>
+                      <p className="text-xs text-red-300">{error}</p>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+
+              {step === "upload" && mode === "url" && (
+                <motion.div
+                  key="url-upload"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  className="p-4 pt-2"
+                >
+                  <p className="text-xs text-muted-foreground mb-3">Paste a link to a CSV file hosted online</p>
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <input
+                        type="url"
+                        value={urlInput}
+                        onChange={e => setUrlInput(e.target.value)}
+                        placeholder="https://example.com/products.csv"
+                        className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-white/5 border border-border text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:border-[hsl(var(--kf-accent1))]/50"
+                        onKeyDown={e => { if (e.key === "Enter" && urlInput.trim()) handleUrlImport(); }}
+                        autoFocus
+                      />
+                    </div>
+                    <Button
+                      onClick={handleUrlImport}
+                      disabled={!urlInput.trim() || loading}
+                      className="bg-gradient-to-r from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] text-white font-medium px-4 shrink-0"
+                    >
+                      {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Fetch"}
+                    </Button>
+                  </div>
+
+                  {error && (
+                    <div className="mt-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20 flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
+                      <p className="text-xs text-red-300">{error}</p>
                     </div>
                   )}
 
-                  <div className="mt-6">
-                    <button
-                      onClick={() => { setMode("choose"); setError(null); setImagePreview(null); }}
-                      className="text-[12px] text-muted-foreground hover:text-white transition-colors"
-                    >
-                      Back
-                    </button>
-                  </div>
+                  <p className="mt-4 text-[11px] text-muted-foreground text-center">
+                    Supports CSV files. The file must be publicly accessible.
+                  </p>
                 </motion.div>
               )}
 
               {step === "preview" && (
                 <motion.div
                   key="preview"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="space-y-4"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  className="p-4 pt-2 space-y-3"
                 >
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-white font-medium">
+                      <p className="text-sm text-white font-medium">
                         {extracted.length} product{extracted.length === 1 ? '' : 's'} found
                       </p>
-                      <p className="text-[12px] text-muted-foreground">
-                        {selected.size} selected for import. Click to edit details.
+                      <p className="text-xs text-muted-foreground">
+                        {selected.size} selected · tap to edit
                       </p>
                     </div>
                     <button
                       onClick={toggleAll}
-                      className="text-[12px] text-[hsl(var(--kf-accent1))] hover:underline"
+                      className="text-xs text-[hsl(var(--kf-accent1))] hover:underline"
                     >
                       {selected.size === extracted.length ? "Deselect all" : "Select all"}
                     </button>
@@ -472,11 +593,11 @@ export const ProductImportModal = React.memo(function ProductImportModal({
                   {error && (
                     <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 flex items-start gap-2">
                       <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
-                      <p className="text-[12px] text-red-300">{error}</p>
+                      <p className="text-xs text-red-300">{error}</p>
                     </div>
                   )}
 
-                  <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
+                  <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
                     {extracted.map((item, idx) => (
                       <div
                         key={idx}
@@ -503,7 +624,7 @@ export const ProductImportModal = React.memo(function ProductImportModal({
 
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
-                              <span className="text-white font-medium truncate">{item.name || "Unnamed"}</span>
+                              <span className="text-sm text-white font-medium truncate">{item.name || "Unnamed"}</span>
                               {item.category && (
                                 <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-white/10 text-muted-foreground shrink-0">
                                   {CATEGORY_ICONS[item.category]}
@@ -516,7 +637,7 @@ export const ProductImportModal = React.memo(function ProductImportModal({
                             )}
                           </div>
 
-                          <div className="flex items-center gap-2 shrink-0">
+                          <div className="flex items-center gap-1.5 shrink-0">
                             {item.price != null && (
                               <span className="text-white font-medium text-[13px]">
                                 {formatCurrency(item.price, item.currency || currency)}
@@ -611,38 +732,27 @@ export const ProductImportModal = React.memo(function ProductImportModal({
                   key="importing"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  className="flex flex-col items-center gap-4 py-10"
+                  className="flex flex-col items-center gap-4 py-12 px-4"
                 >
-                  <Loader2 className="w-12 h-12 text-[hsl(var(--kf-accent1))] animate-spin" />
-                  <p className="text-white font-medium">Importing {selected.size} product{selected.size === 1 ? '' : 's'}...</p>
-                  <p className="text-[12px] text-muted-foreground">This may take a moment</p>
+                  <Loader2 className="w-10 h-10 text-[hsl(var(--kf-accent1))] animate-spin" />
+                  <p className="text-sm text-white font-medium">Importing {selected.size} product{selected.size === 1 ? '' : 's'}...</p>
+                  <p className="text-xs text-muted-foreground">This may take a moment</p>
                 </motion.div>
               )}
             </AnimatePresence>
           </div>
 
           {step === "preview" && (
-            <div className="px-6 py-4 border-t border-white/10 flex items-center justify-between">
-              <button
-                onClick={() => {
-                  setStep("upload");
-                  setExtracted([]);
-                  setSelected(new Set());
-                  setError(null);
-                }}
-                className="text-[13px] text-muted-foreground hover:text-white transition-colors"
-              >
-                Back
-              </button>
+            <div className="px-4 py-3 border-t border-border flex items-center justify-end">
               <Button
                 onClick={handleConfirmImport}
                 disabled={selected.size === 0 || loading}
-                className="bg-gradient-to-r from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] text-white font-medium px-6"
+                className="bg-gradient-to-r from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] text-white font-medium px-5"
               >
                 {loading ? (
                   <Loader2 className="w-4 h-4 animate-spin mr-2" />
                 ) : (
-                  <Check className="w-4 h-4 mr-2" />
+                  <Package className="w-4 h-4 mr-2" />
                 )}
                 Import {selected.size} Product{selected.size === 1 ? '' : 's'}
               </Button>
