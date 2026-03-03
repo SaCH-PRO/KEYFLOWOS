@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Package, Plus, Filter } from "lucide-react";
+import { Search, Package, Plus, X, Eye, EyeOff } from "lucide-react";
 import { Button } from "@keyflow/ui";
 import type { Product } from "@/lib/client";
 import { ProductCard } from "./product-card";
@@ -78,44 +78,82 @@ export function ProductsPanel({
       transition={{ duration: 0.3 }}
       className="space-y-4"
     >
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50 pointer-events-none" />
-          <input
-            type="text"
-            placeholder="Search products..."
-            value={productSearch}
-            onChange={(e) => setProductSearch(e.target.value)}
-            className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-white/[0.03] border border-border/40 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/30 focus:border-[hsl(var(--kf-accent1))]/50 transition-all"
-          />
+      <div className="rounded-2xl border border-border/50 bg-card p-3 sm:p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="relative flex-1 min-w-0">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/40" />
+            <input
+              type="text"
+              placeholder="Search products..."
+              value={productSearch}
+              onChange={(e) => setProductSearch(e.target.value)}
+              className="w-full pl-9 pr-8 py-1.5 text-sm bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 focus:border-[hsl(var(--kf-accent1))]/40 placeholder:text-muted-foreground/40 transition-all"
+              aria-label="Search products"
+            />
+            {productSearch && (
+              <button
+                onClick={() => setProductSearch("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-md hover:bg-muted/50 transition-colors"
+                aria-label="Clear search"
+              >
+                <X className="w-3 h-3 text-muted-foreground/40" />
+              </button>
+            )}
+          </div>
+
+          <button
+            onClick={onAdd}
+            className="inline-flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium rounded-lg bg-gradient-to-r from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all shrink-0"
+            aria-label="Add product"
+          >
+            <Plus className="w-3 h-3" />
+            <span className="hidden sm:inline">Add Product</span>
+          </button>
+
+          <button
+            onClick={() => setShowInactive(!showInactive)}
+            className={`inline-flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] transition-all shrink-0 ${
+              showInactive ? "ring-1 ring-[hsl(var(--kf-accent1))]/40" : ""
+            }`}
+            aria-label={showInactive ? "Hide inactive products" : "Show inactive products"}
+            aria-pressed={showInactive}
+          >
+            {showInactive ? (
+              <EyeOff className="w-3 h-3 text-muted-foreground/60" />
+            ) : (
+              <Eye className="w-3 h-3 text-muted-foreground/60" />
+            )}
+            <span className="hidden sm:inline">{showInactive ? "Hide" : "Show"} inactive</span>
+          </button>
         </div>
-        <div className="flex items-center gap-1">
-          <Filter className="w-3.5 h-3.5 text-muted-foreground/50" />
-          {CATEGORY_FILTERS.map((f) => (
-            <button
-              key={f.value}
-              onClick={() => setCategoryFilter(f.value)}
-              className={`px-2.5 py-1.5 text-[11px] rounded-lg transition-colors ${
-                categoryFilter === f.value
-                  ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] border border-[hsl(var(--kf-accent1))]/30"
-                  : "text-muted-foreground/70 hover:bg-white/[0.06] border border-transparent"
-              }`}
-            >
-              {f.label}
-              <span className="ml-1 text-muted-foreground/50">{categoryCounts[f.value as keyof typeof categoryCounts]}</span>
-            </button>
-          ))}
+
+        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none" role="group" aria-label="Filter by category">
+          {CATEGORY_FILTERS.map((f) => {
+            const count = categoryCounts[f.value as keyof typeof categoryCounts];
+            return (
+              <button
+                key={f.value}
+                onClick={() => setCategoryFilter(f.value)}
+                className={`px-2.5 py-1 text-[11px] rounded-md transition-all inline-flex items-center gap-1.5 font-medium whitespace-nowrap shrink-0 ${
+                  categoryFilter === f.value
+                    ? "bg-white/[0.08] border border-border/60 text-foreground"
+                    : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.05]"
+                }`}
+                aria-pressed={categoryFilter === f.value}
+              >
+                {f.label}
+                <span className={`text-[10px] font-mono px-1 py-0.5 rounded ${
+                  categoryFilter === f.value ? "bg-white/10" : "bg-white/[0.04] text-muted-foreground/50"
+                }`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+          <span className="ml-auto text-[10px] text-muted-foreground/50 whitespace-nowrap shrink-0 pl-2">
+            {filteredProducts.length} of {categoryCounts.ALL}
+          </span>
         </div>
-        <button
-          onClick={() => setShowInactive(!showInactive)}
-          className={`px-2.5 py-1.5 text-[11px] rounded-lg transition-colors border ${
-            showInactive
-              ? "bg-white/[0.06] text-foreground border-border/50"
-              : "text-muted-foreground/70 hover:bg-white/[0.06] border-transparent"
-          }`}
-        >
-          {showInactive ? "Hide" : "Show"} inactive
-        </button>
       </div>
 
       {loading ? (

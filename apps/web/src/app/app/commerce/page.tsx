@@ -2,9 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { CreditCard, Package, FileText, RefreshCw, Plus } from "lucide-react";
+import { CreditCard, Package, FileText, RefreshCw, BarChart3 } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@keyflow/ui";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
@@ -29,18 +28,12 @@ import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { commerceAiExecute } from "@/lib/client";
 
 const TABS = [
+  { key: "dashboard", label: "Dashboard", icon: BarChart3 },
   { key: "products", label: "Products", icon: Package },
   { key: "quotes", label: "Quotations", icon: FileText },
   { key: "invoices", label: "Invoices", icon: CreditCard },
   { key: "recurring", label: "Recurring", icon: RefreshCw },
 ];
-
-const TAB_LABELS: Record<string, string> = {
-  products: "Add Product",
-  quotes: "New Quote",
-  invoices: "New Invoice",
-  recurring: "New Schedule",
-};
 
 export default function CommercePage() {
   const state = useCommerce();
@@ -189,10 +182,11 @@ export default function CommercePage() {
       shortcuts: [
         { key: "n", description: "New item", action: () => handleNewItem() },
         { key: "/", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('[data-commerce-ai-search]'); el?.focus(); } },
-        { key: "p", description: "Products tab", action: () => handleTabChange("products") },
-        { key: "q", description: "Quotes tab", action: () => handleTabChange("quotes") },
-        { key: "i", description: "Invoices tab", action: () => handleTabChange("invoices") },
-        { key: "r", description: "Recurring tab", action: () => handleTabChange("recurring") },
+        { key: "1", description: "Dashboard tab", action: () => handleTabChange("dashboard") },
+        { key: "2", description: "Products tab", action: () => handleTabChange("products") },
+        { key: "3", description: "Quotes tab", action: () => handleTabChange("quotes") },
+        { key: "4", description: "Invoices tab", action: () => handleTabChange("invoices") },
+        { key: "5", description: "Recurring tab", action: () => handleTabChange("recurring") },
         { key: "a", shift: true, description: "Toggle AI Hub", action: () => commerceAi.togglePanel() },
         { key: "Escape", description: "Close panels", action: () => { if (commerceAi.hubMode === "tool-result") commerceAi.clearToolResult(); else if (commerceAi.panelOpen) commerceAi.setOpen(false); } },
       ],
@@ -228,12 +222,6 @@ export default function CommercePage() {
             onTabChange={handleTabChange}
           />
         }
-        rightSlot={
-          <Button onClick={handleNewItem} className="gap-2">
-            <Plus className="w-4 h-4" />
-            {TAB_LABELS[tab] ?? "New"}
-          </Button>
-        }
       />
 
       <CommerceAiSearchBar onExecuteCommand={handleCommerceCommand} />
@@ -250,21 +238,10 @@ export default function CommercePage() {
       </AnimatePresence>
       <AiHubTrigger ai={commerceAi} moduleName="Commerce" />
 
-      <ConnectionStatus
-        gmailStatus={gmailStatus}
-        paymentGateways={paymentGateways}
-        loadingGmail={loadingGmail}
-        onConnectGmail={handleConnectGmail}
-        onDisconnectGmail={() => setConfirmDisconnectGmail(true)}
-      />
-
-      <CommerceDashboard businessId={businessId} invoices={invoices} quotes={quotes} products={products} />
-
       <TabNav
         tabs={TABS}
         activeTab={tab}
         onTabChange={handleWrappedTabChange}
-        layoutId="commerce-tab-pill"
       />
 
       {error && (
@@ -275,6 +252,20 @@ export default function CommercePage() {
 
       <div {...swipeHandlers} className="touch-pan-y">
         <AnimatePresence mode="wait" custom={slideDirection}>
+          {tab === "dashboard" && (
+            <motion.div key="dashboard" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
+              <div className="space-y-4">
+                <CommerceDashboard businessId={businessId} invoices={invoices} quotes={quotes} products={products} />
+                <ConnectionStatus
+                  gmailStatus={gmailStatus}
+                  paymentGateways={paymentGateways}
+                  loadingGmail={loadingGmail}
+                  onConnectGmail={handleConnectGmail}
+                  onDisconnectGmail={() => setConfirmDisconnectGmail(true)}
+                />
+              </div>
+            </motion.div>
+          )}
           {tab === "products" && (
             <motion.div key="products" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
               <ProductsPanel
