@@ -10,6 +10,28 @@ interface UseSwipeTabsOptions {
   maxTime?: number;
 }
 
+function isInsideScrollableContainer(el: EventTarget | null): boolean {
+  let node = el as HTMLElement | null;
+  while (node) {
+    if (node.scrollWidth > node.clientWidth + 1) {
+      const style = getComputedStyle(node);
+      const overflowX = style.overflowX;
+      if (overflowX === "auto" || overflowX === "scroll") {
+        return true;
+      }
+    }
+    const tag = node.tagName;
+    if (tag === "TABLE" || tag === "THEAD" || tag === "TBODY" || tag === "TR" || tag === "TD" || tag === "TH") {
+      return true;
+    }
+    if (node.dataset?.swipeIgnore !== undefined) {
+      return true;
+    }
+    node = node.parentElement;
+  }
+  return false;
+}
+
 export function useSwipeTabs({
   tabs,
   activeTab,
@@ -23,6 +45,10 @@ export function useSwipeTabs({
   const activeIndex = tabs.indexOf(activeTab);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (isInsideScrollableContainer(e.target)) {
+      touchStart.current = null;
+      return;
+    }
     const touch = e.touches[0];
     touchStart.current = { x: touch.clientX, y: touch.clientY, time: Date.now() };
     directionRef.current = 0;
