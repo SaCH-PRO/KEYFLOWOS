@@ -392,6 +392,7 @@ export default function CommercePage() {
         productForm={state.productForm}
         setProductForm={state.setProductForm}
         formError={state.formError}
+        saving={state.saving}
         imagePreview={state.imagePreview}
         imageMode={state.imageMode}
         setImageMode={state.setImageMode}

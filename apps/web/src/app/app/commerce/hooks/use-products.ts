@@ -62,6 +62,7 @@ export function useProducts(
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageMode, setImageMode] = useState<"upload" | "url">("upload");
+  const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const openAddProduct = useCallback(() => {
@@ -151,30 +152,35 @@ export function useProducts(
       return;
     }
     if (!businessId) return;
-    const isLocalImage = imagePreview?.startsWith("data:");
-    const serverImageUrl = isLocalImage ? null : (productForm.imageUrl || null);
-    const payload = buildProductPayload(productForm, serverImageUrl);
+    setSaving(true);
+    try {
+      const isLocalImage = imagePreview?.startsWith("data:");
+      const serverImageUrl = isLocalImage ? null : (productForm.imageUrl || null);
+      const payload = buildProductPayload(productForm, serverImageUrl);
 
-    if (editingProductId) {
-      const { data, error } = await updateProduct({ businessId, productId: editingProductId, ...payload });
-      if (error) { setFormError(error); toast.error("Failed to update product"); return; }
-      if (data) {
-        await syncImageCache(editingProductId, isLocalImage ? imagePreview : null, !!imagePreview);
-        setProducts((prev) => prev.map((p) => (p.id === editingProductId ? { ...p, ...data } : p)));
-        closeProductForm();
-        toast.success("Product updated");
-        notifyProductsChanged();
+      if (editingProductId) {
+        const { data, error } = await updateProduct({ businessId, productId: editingProductId, ...payload });
+        if (error) { setFormError(error); toast.error("Failed to update product"); return; }
+        if (data) {
+          await syncImageCache(editingProductId, isLocalImage ? imagePreview : null, !!imagePreview);
+          setProducts((prev) => prev.map((p) => (p.id === editingProductId ? { ...p, ...data } : p)));
+          closeProductForm();
+          toast.success("Product updated");
+          notifyProductsChanged();
+        }
+      } else {
+        const { data, error } = await createProduct({ businessId, ...payload });
+        if (error) { setFormError(error); toast.error("Failed to create product"); return; }
+        if (data) {
+          if (isLocalImage && imagePreview) await syncImageCache(data.id, imagePreview, true);
+          setProducts((prev) => [data, ...prev]);
+          closeProductForm();
+          toast.success("Product created");
+          notifyProductsChanged();
+        }
       }
-    } else {
-      const { data, error } = await createProduct({ businessId, ...payload });
-      if (error) { setFormError(error); toast.error("Failed to create product"); return; }
-      if (data) {
-        if (isLocalImage && imagePreview) await syncImageCache(data.id, imagePreview, true);
-        setProducts((prev) => [data, ...prev]);
-        closeProductForm();
-        toast.success("Product created");
-        notifyProductsChanged();
-      }
+    } finally {
+      setSaving(false);
     }
   }, [businessId, productForm, editingProductId, imagePreview, closeProductForm, setProducts, syncImageCache]);
 
@@ -190,21 +196,26 @@ export function useProducts(
       return;
     }
     if (!businessId) return;
-    const isLocalImage = imagePreview?.startsWith("data:");
-    const serverImageUrl = isLocalImage ? null : (productForm.imageUrl || null);
-    const payload = buildProductPayload(productForm, serverImageUrl);
-    const { data, error } = await createProduct({ businessId, ...payload });
-    if (error) { setFormError(error); toast.error("Failed to create product"); return; }
-    if (data) {
-      if (isLocalImage && imagePreview) await syncImageCache(data.id, imagePreview, true);
-      setProducts((prev) => [data, ...prev]);
-      const prevCategory = productForm.category;
-      setProductForm({ ...DEFAULT_PRODUCT_FORM, category: prevCategory });
-      setImagePreview(null);
-      setImageMode("upload");
-      setFormError(null);
-      toast.success(`"${data.name}" created — add another`);
-      notifyProductsChanged();
+    setSaving(true);
+    try {
+      const isLocalImage = imagePreview?.startsWith("data:");
+      const serverImageUrl = isLocalImage ? null : (productForm.imageUrl || null);
+      const payload = buildProductPayload(productForm, serverImageUrl);
+      const { data, error } = await createProduct({ businessId, ...payload });
+      if (error) { setFormError(error); toast.error("Failed to create product"); return; }
+      if (data) {
+        if (isLocalImage && imagePreview) await syncImageCache(data.id, imagePreview, true);
+        setProducts((prev) => [data, ...prev]);
+        const prevCategory = productForm.category;
+        setProductForm({ ...DEFAULT_PRODUCT_FORM, category: prevCategory });
+        setImagePreview(null);
+        setImageMode("upload");
+        setFormError(null);
+        toast.success(`"${data.name}" created — add another`);
+        notifyProductsChanged();
+      }
+    } finally {
+      setSaving(false);
     }
   }, [businessId, productForm, imagePreview, setProducts, syncImageCache]);
 
@@ -293,6 +304,7 @@ export function useProducts(
     productForm,
     setProductForm,
     formError,
+    saving,
     productSearch,
     setProductSearch,
     deleteConfirm,
