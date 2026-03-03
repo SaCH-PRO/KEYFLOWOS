@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useCallback, useEffect, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useMotionValue, useTransform, useDragControls } from "framer-motion";
 import {
   Package,
   X,
@@ -253,11 +253,16 @@ export const ProductFormModal = React.memo(function ProductFormModal({
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [touched, setTouched] = useState<Set<string>>(new Set());
   const [isDragging, setIsDragging] = useState(false);
+  const dragY = useMotionValue(0);
+  const dragOpacity = useTransform(dragY, [0, 200], [1, 0.2]);
+  const dragScale = useTransform(dragY, [0, 200], [1, 0.92]);
+  const dragControls = useDragControls();
 
   useEffect(() => {
     if (open) {
       setFieldErrors({});
       setTouched(new Set());
+      dragY.set(0);
       const timer = setTimeout(() => nameRef.current?.focus(), 100);
       return () => clearTimeout(timer);
     }
@@ -391,6 +396,7 @@ export const ProductFormModal = React.memo(function ProductFormModal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
+          style={{ opacity: dragOpacity }}
           className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto"
           role="dialog"
           aria-modal="true"
@@ -400,11 +406,31 @@ export const ProductFormModal = React.memo(function ProductFormModal({
           <motion.div
             initial={{ scale: 0.95, opacity: 0, y: 10 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}
-            exit={{ scale: 0.95, opacity: 0, y: 10 }}
+            exit={{ scale: 0.95, opacity: 0, y: 200 }}
             transition={{ type: "spring", duration: 0.4 }}
+            style={{ y: dragY, scale: dragScale }}
+            drag="y"
+            dragListener={false}
+            dragControls={dragControls}
+            dragConstraints={{ top: 0, bottom: 0 }}
+            dragElastic={{ top: 0.05, bottom: 0.5 }}
+            onDragEnd={(_e, info) => {
+              if (info.offset.y > 120 || info.velocity.y > 500) {
+                handleClose();
+              } else {
+                dragY.set(0);
+              }
+            }}
             className="w-full max-w-lg rounded-2xl border border-border/50 bg-card shadow-2xl overflow-hidden my-auto"
           >
-            <div className="p-5 border-b border-border/50 flex items-center justify-between sticky top-0 bg-card z-10">
+            <div
+              onPointerDown={(e) => dragControls.start(e)}
+              className="flex justify-center pt-3 pb-1 cursor-grab active:cursor-grabbing select-none"
+              style={{ touchAction: "none" }}
+            >
+              <div className="w-10 h-1 rounded-full bg-white/20" />
+            </div>
+            <div className="p-5 pt-2 border-b border-border/50 flex items-center justify-between sticky top-0 bg-card z-10">
               <div className="flex items-center gap-3">
                 <h2 id="product-modal-title" className="text-lg font-semibold flex items-center gap-2">
                   <div
