@@ -1,16 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { motion } from "framer-motion";
-import {
-  Tag,
-  Clock,
-  Zap,
-  Package,
-  Layers,
-} from "lucide-react";
+import { Clock, Package, Layers, Zap } from "lucide-react";
 import type { Product } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
+import { PRODUCT_CATEGORY_CONFIG } from "../components/commerce-types";
+
+const CATEGORY_ICONS = { SERVICE: Zap, PRODUCT: Package, PACKAGE: Layers } as const;
 
 interface ProductCardProps {
   product: Product;
@@ -19,36 +16,15 @@ interface ProductCardProps {
   currency?: string;
 }
 
-const CATEGORY_CONFIG: Record<string, { label: string; icon: typeof Package; badge: string; accent: string }> = {
-  SERVICE: {
-    label: "Service",
-    icon: Zap,
-    badge: "bg-teal-500/15 text-teal-400 border-teal-500/30",
-    accent: "from-teal-500/25 via-teal-600/10 to-card",
-  },
-  PRODUCT: {
-    label: "Product",
-    icon: Package,
-    badge: "bg-blue-500/15 text-blue-400 border-blue-500/30",
-    accent: "from-blue-500/25 via-blue-600/10 to-card",
-  },
-  PACKAGE: {
-    label: "Package",
-    icon: Layers,
-    badge: "bg-purple-500/15 text-purple-400 border-purple-500/30",
-    accent: "from-purple-500/25 via-purple-600/10 to-card",
-  },
-};
-
-export function ProductCard({
+export const ProductCard = React.memo(function ProductCard({
   product,
   onClick,
   cachedImage,
   currency = "TTD",
 }: ProductCardProps) {
   const [imgError, setImgError] = useState(false);
-  const config = CATEGORY_CONFIG[product.category] ?? CATEGORY_CONFIG.SERVICE;
-  const CategoryIcon = config.icon;
+  const config = PRODUCT_CATEGORY_CONFIG[product.category as keyof typeof PRODUCT_CATEGORY_CONFIG] ?? PRODUCT_CATEGORY_CONFIG.SERVICE;
+  const CategoryIcon = CATEGORY_ICONS[product.category as keyof typeof CATEGORY_ICONS] ?? Zap;
   const isInactive = product.isActive === false;
   const displayImage = cachedImage || product.imageUrl;
   const displayCurrency = product.currency ?? currency;
@@ -73,6 +49,7 @@ export function ProductCard({
           src={displayImage}
           alt=""
           className="absolute inset-0 w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+          loading="lazy"
           onError={() => setImgError(true)}
         />
       ) : (
@@ -119,4 +96,4 @@ export function ProductCard({
       </div>
     </motion.button>
   );
-}
+});

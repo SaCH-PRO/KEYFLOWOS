@@ -49,6 +49,32 @@ export const CATEGORIES = [
   { value: "PACKAGE", label: "Package" },
 ] as const;
 
+export const PRODUCT_CATEGORY_CONFIG = {
+  SERVICE: {
+    label: "Service",
+    badge: "bg-teal-500/15 text-teal-400 border-teal-500/30",
+    accent: "from-teal-500/25 via-teal-600/10 to-card",
+    color: "text-teal-400",
+    bgGradient: "from-teal-500/30 via-teal-600/10 to-transparent",
+  },
+  PRODUCT: {
+    label: "Product",
+    badge: "bg-blue-500/15 text-blue-400 border-blue-500/30",
+    accent: "from-blue-500/25 via-blue-600/10 to-card",
+    color: "text-blue-400",
+    bgGradient: "from-blue-500/30 via-blue-600/10 to-transparent",
+  },
+  PACKAGE: {
+    label: "Package",
+    badge: "bg-purple-500/15 text-purple-400 border-purple-500/30",
+    accent: "from-purple-500/25 via-purple-600/10 to-card",
+    color: "text-purple-400",
+    bgGradient: "from-purple-500/30 via-purple-600/10 to-transparent",
+  },
+} as const;
+
+export type ProductCategory = keyof typeof PRODUCT_CATEGORY_CONFIG;
+
 export const INVOICE_STATUS_FILTERS = [
   { value: "ALL", label: "All Invoices" },
   { value: "DRAFT", label: "Draft" },

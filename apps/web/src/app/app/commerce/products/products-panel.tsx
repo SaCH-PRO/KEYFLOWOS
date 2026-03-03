@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Search, Package, Plus, X, Eye, EyeOff, ArrowUpDown, CheckSquare, Square, Trash2, ToggleLeft, ToggleRight, ChevronDown, Upload, LayoutGrid, List, Camera } from "lucide-react";
 import { toast } from "sonner";
@@ -61,7 +61,7 @@ const SORT_OPTIONS: { value: SortOption; label: string }[] = [
   { value: "price-desc", label: "Price High → Low" },
 ];
 
-export function ProductsPanel({
+export const ProductsPanel = React.memo(function ProductsPanel({
   products,
   loading,
   productSearch,
@@ -136,18 +136,15 @@ export function ProductsPanel({
     };
     document.addEventListener("keydown", handleKeyDown);
     document.addEventListener("mousedown", handleClickOutside);
+    const menuRef = sortMenuRef.current;
+    if (menuRef) {
+      const buttons = menuRef.querySelectorAll("button");
+      if (buttons.length > 0) buttons[0].focus();
+    }
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [showSortMenu]);
-
-  useEffect(() => {
-    if (!showSortMenu || !sortMenuRef.current) return;
-    const buttons = sortMenuRef.current.querySelectorAll("button");
-    if (buttons.length > 0) {
-      buttons[0].focus();
-    }
   }, [showSortMenu]);
 
   const filteredProducts = useMemo(() => {
@@ -181,13 +178,15 @@ export function ProductsPanel({
   }, [products, productSearch, categoryFilter, showInactive, sortBy]);
 
   const categoryCounts = useMemo(() => {
-    const active = showInactive ? products : products.filter((p) => p.isActive !== false);
-    return {
-      ALL: active.length,
-      SERVICE: active.filter((p) => p.category === "SERVICE").length,
-      PRODUCT: active.filter((p) => p.category === "PRODUCT").length,
-      PACKAGE: active.filter((p) => p.category === "PACKAGE").length,
-    };
+    const counts = { ALL: 0, SERVICE: 0, PRODUCT: 0, PACKAGE: 0 };
+    for (const p of products) {
+      if (!showInactive && p.isActive === false) continue;
+      counts.ALL++;
+      if (p.category === "SERVICE") counts.SERVICE++;
+      else if (p.category === "PRODUCT") counts.PRODUCT++;
+      else if (p.category === "PACKAGE") counts.PACKAGE++;
+    }
+    return counts;
   }, [products, showInactive]);
 
   const toggleSelect = useCallback((id: string) => {
@@ -217,6 +216,50 @@ export function ProductsPanel({
     setBulkMode(false);
     onBulkAction?.();
   }, [businessId, selectedIds, onBulkAction]);
+
+  const productStats = useMemo(() => {
+    if (!selectedProduct) return { invoiceCount: 0, quoteCount: 0, totalRevenue: 0 };
+    const pid = selectedProduct.id;
+    const invoiceCount = invoices.filter(inv => inv.items?.some(item => item.productId === pid)).length;
+    const quoteCount = quotes.filter(q => q.items?.some(item => item.productId === pid)).length;
+    const totalRevenue = invoices
+      .filter(inv => (inv as any).status === "PAID")
+      .reduce((sum, inv) => {
+        const matching = inv.items?.filter(item => item.productId === pid) ?? [];
+        return sum + matching.reduce((s, item) => s + ((item as any).total ?? (Number((item as any).unitPrice ?? 0) * Number((item as any).quantity ?? 1))), 0);
+      }, 0);
+    return { invoiceCount, quoteCount, totalRevenue };
+  }, [selectedProduct?.id, invoices, quotes]);
+
+  const handleDetailSave = useCallback(async (form: ProductForm, imageFile?: File | null) => {
+    if (onInlineSave && selectedProduct) {
+      await onInlineSave(selectedProduct.id, form, imageFile);
+    } else if (selectedProduct) {
+      setSelectedProduct(null);
+      onEdit(selectedProduct);
+    }
+  }, [onInlineSave, selectedProduct, onEdit]);
+
+  const handleDetailDelete = useCallback((id: string) => {
+    setSelectedProduct(null);
+    onDelete(id);
+  }, [onDelete]);
+
+  const handleDetailDuplicate = useMemo(() => {
+    if (!onDuplicate) return undefined;
+    return (p: Product) => { setSelectedProduct(null); onDuplicate(p); };
+  }, [onDuplicate]);
+
+  const handleDetailToggleActive = useMemo(() => {
+    if (!onToggleActive) return undefined;
+    return (p: Product) => { onToggleActive(p); setSelectedProduct({ ...p, isActive: !(p.isActive ?? true) }); };
+  }, [onToggleActive]);
+
+  const handleDetailClose = useCallback(() => setSelectedProduct(null), []);
+
+  const handleProductClick = useCallback((p: Product) => {
+    if (!bulkMode) setSelectedProduct(p);
+  }, [bulkMode]);
 
   return (
     <motion.div
@@ -434,20 +477,35 @@ export function ProductsPanel({
       </AnimatePresence>
 
       {loading ? (
-        <div className="grid grid-cols-3 gap-2 sm:gap-3">
-          {Array.from({ length: 9 }).map((_, i) => (
-            <div
-              key={i}
-              className="rounded-xl border border-border/50 bg-card overflow-hidden animate-pulse"
-            >
-              <div className="aspect-[4/3] bg-muted/30 w-full" />
-              <div className="p-2 space-y-1.5">
-                <div className="h-3 bg-muted/30 rounded w-3/4" />
-                <div className="h-3 bg-muted/30 rounded w-1/2" />
+        viewMode === "list" ? (
+          <div className="space-y-1">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-border/30 bg-white/[0.02] animate-pulse">
+                <div className="w-10 h-10 rounded-lg bg-muted/30 shrink-0" />
+                <div className="flex-1 space-y-1.5">
+                  <div className="h-3.5 bg-muted/30 rounded w-2/3" />
+                  <div className="h-2.5 bg-muted/30 rounded w-1/3" />
+                </div>
+                <div className="h-3.5 bg-muted/30 rounded w-16 shrink-0" />
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-2 sm:gap-3">
+            {Array.from({ length: 9 }).map((_, i) => (
+              <div
+                key={i}
+                className="rounded-xl border border-border/50 bg-card overflow-hidden animate-pulse"
+              >
+                <div className="aspect-[4/3] bg-muted/30 w-full" />
+                <div className="p-2 space-y-1.5">
+                  <div className="h-3 bg-muted/30 rounded w-3/4" />
+                  <div className="h-3 bg-muted/30 rounded w-1/2" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )
       ) : filteredProducts.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <div className="w-14 h-14 rounded-xl bg-white/[0.03] border border-border/50 flex items-center justify-center mb-4">
@@ -531,7 +589,7 @@ export function ProductsPanel({
                     )}
                     <ProductCard
                       product={product}
-                      onClick={(p) => { if (!bulkMode) setSelectedProduct(p); }}
+                      onClick={handleProductClick}
                       cachedImage={cachedImages[product.id]}
                       currency={currency}
                     />
@@ -554,7 +612,7 @@ export function ProductsPanel({
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -4 }}
                       transition={{ duration: 0.15 }}
-                      onClick={() => { if (!bulkMode) setSelectedProduct(product); }}
+                      onClick={() => handleProductClick(product)}
                       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border border-border/30 bg-white/[0.02] hover:bg-white/[0.05] hover:border-border/50 transition-all text-left group ${isInactive ? "opacity-50" : ""}`}
                     >
                       {bulkMode && (
@@ -572,7 +630,7 @@ export function ProductsPanel({
                       )}
                       <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 bg-white/[0.04] border border-border/20">
                         {img ? (
-                          <img src={img} alt="" className="w-full h-full object-cover" />
+                          <img src={img} alt="" className="w-full h-full object-cover" loading="lazy" />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center">
                             <Package className="w-4 h-4 text-muted-foreground/30" />
@@ -606,33 +664,20 @@ export function ProductsPanel({
       {selectedProduct && (
         <ProductDetailPanel
           product={selectedProduct}
-          onClose={() => setSelectedProduct(null)}
-          onSave={async (form, imageFile) => {
-            if (onInlineSave) {
-              await onInlineSave(selectedProduct.id, form, imageFile);
-            } else {
-              setSelectedProduct(null);
-              onEdit(selectedProduct);
-            }
-          }}
-          onDelete={(id) => { setSelectedProduct(null); onDelete(id); }}
-          onDuplicate={onDuplicate ? (p) => { setSelectedProduct(null); onDuplicate(p); } : undefined}
-          onToggleActive={onToggleActive ? (p) => { onToggleActive(p); setSelectedProduct({ ...p, isActive: !(p.isActive ?? true) }); } : undefined}
+          onClose={handleDetailClose}
+          onSave={handleDetailSave}
+          onDelete={handleDetailDelete}
+          onDuplicate={handleDetailDuplicate}
+          onToggleActive={handleDetailToggleActive}
           onCreateQuote={onCreateQuote}
           onCreateInvoice={onCreateInvoice}
           currency={currency}
           cachedImage={cachedImages[selectedProduct.id]}
-          invoiceCount={invoices.filter(inv => inv.items?.some(item => item.productId === selectedProduct.id)).length}
-          quoteCount={quotes.filter(q => q.items?.some(item => item.productId === selectedProduct.id)).length}
-          totalRevenue={invoices
-            .filter(inv => (inv as any).status === "PAID")
-            .reduce((sum, inv) => {
-              const matching = inv.items?.filter(item => item.productId === selectedProduct.id) ?? [];
-              return sum + matching.reduce((s, item) => s + ((item as any).total ?? (Number((item as any).unitPrice ?? 0) * Number((item as any).quantity ?? 1))), 0);
-            }, 0)
-          }
+          invoiceCount={productStats.invoiceCount}
+          quoteCount={productStats.quoteCount}
+          totalRevenue={productStats.totalRevenue}
         />
       )}
     </motion.div>
   );
-}
+});
