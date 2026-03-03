@@ -23,10 +23,10 @@ import RecurringPanel from "../recurring/recurring-panel";
 
 export type BillingSegment = "quotes" | "invoices" | "schedules";
 
-const SEGMENTS: { key: BillingSegment; label: string; icon: React.ElementType }[] = [
-  { key: "quotes", label: "Quotes", icon: FileText },
-  { key: "invoices", label: "Invoices", icon: CreditCard },
-  { key: "schedules", label: "Schedules", icon: RefreshCw },
+const SEGMENTS: { key: BillingSegment; label: string; icon: React.ElementType; accent: string; accentMuted: string }[] = [
+  { key: "quotes", label: "Quotes", icon: FileText, accent: "hsl(var(--kf-accent1))", accentMuted: "hsl(var(--kf-accent1) / 0.15)" },
+  { key: "invoices", label: "Invoices", icon: CreditCard, accent: "#10b981", accentMuted: "rgba(16,185,129,0.15)" },
+  { key: "schedules", label: "Schedules", icon: RefreshCw, accent: "#a78bfa", accentMuted: "rgba(167,139,250,0.15)" },
 ];
 
 interface BillingPanelProps {
@@ -187,7 +187,27 @@ export function BillingPanel({
         </button>
       </div>
 
-      <div className="flex gap-1 p-1 rounded-xl bg-white/[0.04] border border-border/40 backdrop-blur-sm">
+      <div
+        role="tablist"
+        aria-label="Billing sections"
+        onKeyDown={(e) => {
+          const keys: Record<string, number> = { ArrowRight: 1, ArrowLeft: -1 };
+          const dir = keys[e.key];
+          if (dir !== undefined) {
+            e.preventDefault();
+            const idx = SEGMENTS.findIndex(s => s.key === segment);
+            const next = idx + dir;
+            if (next >= 0 && next < SEGMENTS.length) handleSegmentChange(SEGMENTS[next].key);
+          } else if (e.key === "Home") {
+            e.preventDefault();
+            handleSegmentChange(SEGMENTS[0].key);
+          } else if (e.key === "End") {
+            e.preventDefault();
+            handleSegmentChange(SEGMENTS[SEGMENTS.length - 1].key);
+          }
+        }}
+        className="relative flex gap-1.5 p-1.5 rounded-2xl bg-white/[0.03] border border-border/30 backdrop-blur-md"
+      >
         {SEGMENTS.map((seg) => {
           const isActive = segment === seg.key;
           const count = segmentCounts[seg.key];
@@ -196,22 +216,51 @@ export function BillingPanel({
               key={seg.key}
               onClick={() => handleSegmentChange(seg.key)}
               className={`
-                flex-1 flex items-center justify-center gap-1.5 sm:gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200
+                relative flex-1 flex items-center justify-center gap-2 px-4 py-2.5 sm:py-3 rounded-xl text-sm font-semibold transition-all duration-200 outline-none
+                focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-offset-background
                 ${isActive
-                  ? "bg-white/10 text-white shadow-sm border border-white/10"
-                  : "text-muted-foreground hover:text-foreground hover:bg-white/[0.04]"
+                  ? "text-white"
+                  : "text-muted-foreground/60 hover:text-muted-foreground hover:bg-white/[0.04]"
                 }
               `}
               aria-selected={isActive}
+              aria-controls={`billing-tabpanel-${seg.key}`}
               role="tab"
+              tabIndex={isActive ? 0 : -1}
             >
-              <seg.icon className="w-3.5 h-3.5 shrink-0" />
-              <span className="hidden sm:inline">{seg.label}</span>
+              {isActive && (
+                <motion.div
+                  layoutId="billing-segment-pill"
+                  className="absolute inset-0 rounded-xl"
+                  style={{
+                    background: `linear-gradient(135deg, ${seg.accentMuted}, transparent 70%)`,
+                    border: `1px solid ${seg.accentMuted}`,
+                    boxShadow: `0 0 20px ${seg.accentMuted}, inset 0 1px 0 rgba(255,255,255,0.06)`,
+                  }}
+                  transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
+                />
+              )}
+              {isActive && (
+                <motion.div
+                  layoutId="billing-segment-bar"
+                  className="absolute top-0 left-3 right-3 h-[2px] rounded-b-full"
+                  style={{ background: `linear-gradient(90deg, transparent, ${seg.accent}, transparent)` }}
+                  transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
+                />
+              )}
+              <seg.icon
+                className="relative z-10 w-4 h-4 shrink-0 transition-colors duration-200"
+                style={isActive ? { color: seg.accent } : undefined}
+              />
+              <span className="relative z-10">{seg.label}</span>
               {count > 0 && (
-                <span className={`
-                  text-[10px] px-1.5 py-0.5 rounded-full min-w-[20px] text-center
-                  ${isActive ? "bg-white/15 text-white" : "bg-white/[0.06] text-muted-foreground"}
-                `}>
+                <span
+                  className="relative z-10 text-[10px] sm:text-xs tabular-nums font-semibold rounded-full px-1.5 py-0.5 min-w-[22px] text-center transition-colors duration-200"
+                  style={isActive
+                    ? { background: seg.accentMuted, color: seg.accent }
+                    : { background: "rgba(255,255,255,0.04)", color: "inherit" }
+                  }
+                >
                   {count}
                 </span>
               )}
@@ -224,6 +273,8 @@ export function BillingPanel({
         {segment === "quotes" && (
           <motion.div
             key="quotes"
+            id="billing-tabpanel-quotes"
+            role="tabpanel"
             custom={slideDir}
             initial={{ opacity: 0, x: slideDir * 40 }}
             animate={{ opacity: 1, x: 0 }}
@@ -253,6 +304,8 @@ export function BillingPanel({
         {segment === "invoices" && (
           <motion.div
             key="invoices"
+            id="billing-tabpanel-invoices"
+            role="tabpanel"
             custom={slideDir}
             initial={{ opacity: 0, x: slideDir * 40 }}
             animate={{ opacity: 1, x: 0 }}
@@ -280,6 +333,8 @@ export function BillingPanel({
         {segment === "schedules" && (
           <motion.div
             key="schedules"
+            id="billing-tabpanel-schedules"
+            role="tabpanel"
             custom={slideDir}
             initial={{ opacity: 0, x: slideDir * 40 }}
             animate={{ opacity: 1, x: 0 }}
