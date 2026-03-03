@@ -15,10 +15,17 @@ import {
 import { apiGet } from "@/lib/api";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { getAllProductImages } from "@/lib/image-store";
-import { Tab } from "../components/commerce-types";
+import { Tab, InvoiceLineItem, generateItemId } from "../components/commerce-types";
 
 import { useProducts } from "./use-products";
 import { useCommerceIntegrations } from "./use-commerce-integrations";
+
+export interface CommercePrefill {
+  contactId?: string;
+  items?: InvoiceLineItem[];
+  targetSegment?: "quotes" | "invoices";
+  _token: number;
+}
 
 export function useCommerce() {
   const [businessId, setBusinessId] = useState<string | null>(null);
@@ -41,6 +48,8 @@ export function useCommerce() {
   const [triggerNewInvoice, setTriggerNewInvoice] = useState(0);
   const [triggerNewSchedule, setTriggerNewSchedule] = useState(0);
 
+  const [pendingPrefill, setPendingPrefill] = useState<CommercePrefill | null>(null);
+
   const productHook = useProducts(businessId, setProducts, cachedImages, setCachedImages);
   const integrations = useCommerceIntegrations(businessId);
 
@@ -54,6 +63,49 @@ export function useCommerce() {
       setWorkspaceLoading(false);
     };
     void initWorkspace();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const urlTab = params.get("tab");
+    const urlSegment = params.get("segment");
+    const urlContactId = params.get("contactId");
+    const urlProductIds = params.get("productIds");
+
+    const validTabs: Tab[] = ["products", "billing", "insights", "engage"];
+    const validSegments = ["quotes", "invoices", "schedules"] as const;
+    if (urlTab && validTabs.includes(urlTab as Tab)) setTab(urlTab as Tab);
+    const safeSegment = validSegments.includes(urlSegment as any) ? (urlSegment as "quotes" | "invoices") : null;
+    if (safeSegment) setActiveBillingSegment(safeSegment);
+
+    if (urlContactId) {
+      const items: InvoiceLineItem[] = urlProductIds
+        ? urlProductIds.split(",").map((pid) => ({
+            id: generateItemId(),
+            productId: pid.trim(),
+            description: "",
+            quantity: "1",
+            unitPrice: "",
+          }))
+        : [];
+      setPendingPrefill({
+        contactId: urlContactId,
+        items: items.length > 0 ? items : undefined,
+        targetSegment: urlSegment ?? "invoices",
+        _token: Date.now(),
+      });
+      if (urlTab !== "billing") setTab("billing");
+    }
+
+    if (urlContactId || urlTab) {
+      const cleanUrl = new URL(window.location.href);
+      cleanUrl.searchParams.delete("tab");
+      cleanUrl.searchParams.delete("segment");
+      cleanUrl.searchParams.delete("contactId");
+      cleanUrl.searchParams.delete("productIds");
+      window.history.replaceState({}, "", cleanUrl.toString());
+    }
   }, []);
 
   useEffect(() => {
@@ -133,6 +185,16 @@ export function useCommerce() {
     }
   }, [tab, activeBillingSegment, productHook.openAddProduct]);
 
+  const prefillForContact = useCallback((contactId: string, target: "quotes" | "invoices" = "invoices", items?: InvoiceLineItem[]) => {
+    setTab("billing");
+    setActiveBillingSegment(target);
+    setPendingPrefill({ contactId, items, targetSegment: target, _token: Date.now() });
+  }, []);
+
+  const clearPrefill = useCallback(() => {
+    setPendingPrefill(null);
+  }, []);
+
   return {
     businessId,
     businessCurrency,
@@ -169,5 +231,10 @@ export function useCommerce() {
     setActiveBillingSegment,
 
     handleNewItem,
+
+    pendingPrefill,
+    setPendingPrefill,
+    prefillForContact,
+    clearPrefill,
   };
 }

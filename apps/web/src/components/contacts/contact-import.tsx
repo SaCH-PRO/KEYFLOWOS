@@ -43,7 +43,7 @@ const CONTACT_FIELDS = [
   { key: "secondaryPhone", label: "Secondary Phone" },
   { key: "whatsapp", label: "WhatsApp" },
   { key: "status", label: "Status" },
-  { key: "company", label: "Company" },
+  { key: "companyName", label: "Company" },
   { key: "jobTitle", label: "Job Title" },
   { key: "department", label: "Department" },
   { key: "industry", label: "Industry" },
@@ -112,11 +112,11 @@ const HEADER_ALIASES: Record<string, string> = {
   "whats app": "whatsapp",
   "status": "status",
   "contact status": "status",
-  "company": "company",
-  "organization": "company",
-  "org": "company",
-  "company name": "company",
-  "company_name": "company",
+  "company": "companyName",
+  "organization": "companyName",
+  "org": "companyName",
+  "company name": "companyName",
+  "company_name": "companyName",
   "job title": "jobTitle",
   "job_title": "jobTitle",
   "jobtitle": "jobTitle",
@@ -186,7 +186,7 @@ interface MappingState {
   mapping: Record<string, string>;
 }
 
-const CSV_TEMPLATE = `firstName,lastName,displayName,email,secondaryEmail,phone,secondaryPhone,whatsapp,status,company,jobTitle,department,industry,segment,address,addressLine2,city,state,postalCode,country,timezone,preferredChannel,language,lifecycleStage,tags,marketingOptIn,doNotContact,notes
+const CSV_TEMPLATE = `firstName,lastName,displayName,email,secondaryEmail,phone,secondaryPhone,whatsapp,status,companyName,jobTitle,department,industry,segment,address,addressLine2,city,state,postalCode,country,timezone,preferredChannel,language,lifecycleStage,tags,marketingOptIn,doNotContact,notes
 John,Doe,Johnny D,john@example.com,john.personal@mail.com,+1868123456,+1868111222,+1868123456,LEAD,Acme Corp,Marketing Manager,Marketing,Technology,Enterprise,123 Main Street,Suite 4,Port of Spain,Trinidad,00100,Trinidad,America/Port_of_Spain,whatsapp,en,Awareness,"vip,tech",Yes,No,Key decision maker
 Jane,Smith,,jane@example.com,,+1868654321,,,PROSPECT,Tech Inc,CEO,,Services,SMB,456 Oak Avenue,,San Fernando,Trinidad,,Trinidad,,email,en,Consideration,local,Yes,No,`;
 
@@ -618,7 +618,7 @@ export function ContactImport({ onImportFile, onImportLink, loading, businessId 
                               </>
                             ) : (
                               <>
-                                Your file should have columns: <strong>firstName</strong>, <strong>lastName</strong>, <strong>email</strong>, <strong>phone</strong>, <strong>company</strong>, <strong>address</strong>, <strong>city</strong>, <strong>country</strong>, <strong>status</strong>. 
+                                Your file should have columns: <strong>firstName</strong>, <strong>lastName</strong>, <strong>email</strong>, <strong>phone</strong>, <strong>companyName</strong>, <strong>address</strong>, <strong>city</strong>, <strong>country</strong>, <strong>status</strong>. 
                                 Download the template for the correct format.
                               </>
                             )}

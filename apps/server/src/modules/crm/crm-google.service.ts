@@ -55,7 +55,8 @@ export class CrmGoogleService {
   private readonly logger = new Logger(CrmGoogleService.name);
   private readonly clientId = process.env.GOOGLE_CLIENT_ID;
   private readonly clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  private readonly redirectUri = process.env.GOOGLE_REDIRECT_URI;
+  private readonly redirectUri = process.env.GOOGLE_REDIRECT_URI
+    || (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}/api/crm/google/callback` : undefined);
   private get stateSecret(): string {
     const secret = process.env.GOOGLE_STATE_SECRET;
     if (!secret) throw new BadRequestException('GOOGLE_STATE_SECRET environment variable is required');

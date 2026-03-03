@@ -21,7 +21,7 @@ import { CommerceAiSearchBar, type CommerceCommand } from "./components/commerce
 import { useCommerceAiHub } from "./hooks/use-commerce-ai-hub";
 import { renderCommerceToolResult } from "./components/commerce-tool-results";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
-import { useModuleEmit } from "@/hooks/use-module-events";
+import { useModuleEmit, useModuleEvent } from "@/hooks/use-module-events";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { commerceAiExecute } from "@/lib/client";
 
@@ -44,6 +44,7 @@ export default function CommercePage() {
     products, invoices, quotes, contacts, loading, error,
     showGuide, handleToggleGuide, handleNewItem,
     gmailStatus,
+    pendingPrefill, clearPrefill, prefillForContact,
   } = state;
 
   const handleTabChange = useCallback((t: string) => {
@@ -59,6 +60,22 @@ export default function CommercePage() {
     activeTab: tab,
     onTabChange: handleTabChange,
   });
+
+  useModuleEvent("commerce:create_quote_for_contact", useCallback((event: any) => {
+    const { contactId, items } = event.data ?? {};
+    if (contactId) {
+      prefillForContact(contactId, "quotes", items);
+      toast.success("Opening quote builder for contact...");
+    }
+  }, [prefillForContact]));
+
+  useModuleEvent("commerce:create_invoice_for_contact", useCallback((event: any) => {
+    const { contactId, items } = event.data ?? {};
+    if (contactId) {
+      prefillForContact(contactId, "invoices", items);
+      toast.success("Opening invoice builder for contact...");
+    }
+  }, [prefillForContact]));
 
   useEffect(() => {
     if (businessId) {
@@ -129,6 +146,18 @@ export default function CommercePage() {
       case "show_overdue":
         state.setTab("engage");
         toast.success("Showing overdue invoices");
+        break;
+      case "create_quote_for_contact":
+        if (cmd.contactId) {
+          prefillForContact(cmd.contactId, "quotes");
+          toast.success(`Opening quote builder for ${cmd.contactName ?? "contact"}...`);
+        }
+        break;
+      case "create_invoice_for_contact":
+        if (cmd.contactId) {
+          prefillForContact(cmd.contactId, "invoices");
+          toast.success(`Opening invoice builder for ${cmd.contactName ?? "contact"}...`);
+        }
         break;
       case "generate_ai_analysis":
         state.setTab("insights");
@@ -305,6 +334,10 @@ export default function CommercePage() {
                 triggerNewInvoice={state.triggerNewInvoice}
                 triggerNewSchedule={state.triggerNewSchedule}
                 onSegmentChange={state.setActiveBillingSegment}
+                prefillContactId={pendingPrefill?.contactId}
+                prefillItems={pendingPrefill?.items}
+                defaultSegment={pendingPrefill?.targetSegment ?? "invoices"}
+                onPrefillApplied={clearPrefill}
               />
             </motion.div>
           )}
