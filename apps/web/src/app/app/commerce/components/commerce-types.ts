@@ -1,4 +1,4 @@
-export type Tab = "dashboard" | "products" | "quotes" | "invoices" | "recurring";
+export type Tab = "products" | "quotes" | "invoices" | "recurring";
 
 export type ProductForm = {
   name: string;

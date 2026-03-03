@@ -28,7 +28,7 @@ export function useCommerce() {
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
 
-  const [tab, setTab] = useState<Tab>("products");
+  const [tab, setTab] = useState<Tab>("products" as Tab);
   const [products, setProducts] = useState<Product[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);

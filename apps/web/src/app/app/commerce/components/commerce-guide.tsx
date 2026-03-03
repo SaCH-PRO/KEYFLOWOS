@@ -197,7 +197,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
   },
   {
     id: "ai-intelligence",
-    tab: "dashboard",
+    tab: "products",
     label: "AI Intelligence",
     icon: Brain,
     color: "hsl(270 70% 60%)",

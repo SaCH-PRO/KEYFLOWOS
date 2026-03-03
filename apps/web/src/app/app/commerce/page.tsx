@@ -2,18 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { CreditCard, Package, FileText, RefreshCw, BarChart3 } from "lucide-react";
+import { CreditCard, Package, FileText, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
 
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { useCommerce } from "./hooks/use-commerce";
 import { CommerceGuide } from "./components/commerce-guide";
-import { ConnectionStatus } from "./components/connection-status";
-import CommerceDashboard from "./components/commerce-dashboard";
+import { CommerceKpiStrip } from "./components/commerce-kpi-strip";
 import { ProductsPanel } from "./products/products-panel";
 import { ProductFormModal } from "./products/product-form-modal";
 import { ProductImportModal } from "./products/product-import-modal";
@@ -29,7 +27,6 @@ import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { commerceAiExecute } from "@/lib/client";
 
 const TABS = [
-  { key: "dashboard", label: "Dashboard", icon: BarChart3 },
   { key: "products", label: "Products", icon: Package },
   { key: "quotes", label: "Quotations", icon: FileText },
   { key: "invoices", label: "Invoices", icon: CreditCard },
@@ -47,9 +44,7 @@ export default function CommercePage() {
     businessId, businessCurrency, workspaceLoading, workspaceError, tab, handleTabChange: rawTabChange,
     products, invoices, quotes, contacts, loading, error,
     showGuide, handleToggleGuide, handleNewItem,
-    gmailStatus, loadingGmail, paymentGateways,
-    handleConnectGmail, handleDisconnectGmail,
-    confirmDisconnectGmail, setConfirmDisconnectGmail,
+    gmailStatus,
   } = state;
 
   const handleTabChange = useCallback((t: string) => {
@@ -184,11 +179,10 @@ export default function CommercePage() {
       shortcuts: [
         { key: "n", description: "New item", action: () => handleNewItem() },
         { key: "/", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('[data-commerce-ai-search]'); el?.focus(); } },
-        { key: "1", description: "Dashboard tab", action: () => handleTabChange("dashboard") },
-        { key: "2", description: "Products tab", action: () => handleTabChange("products") },
-        { key: "3", description: "Quotes tab", action: () => handleTabChange("quotes") },
-        { key: "4", description: "Invoices tab", action: () => handleTabChange("invoices") },
-        { key: "5", description: "Recurring tab", action: () => handleTabChange("recurring") },
+        { key: "1", description: "Products tab", action: () => handleTabChange("products") },
+        { key: "2", description: "Quotes tab", action: () => handleTabChange("quotes") },
+        { key: "3", description: "Invoices tab", action: () => handleTabChange("invoices") },
+        { key: "4", description: "Recurring tab", action: () => handleTabChange("recurring") },
         { key: "a", shift: true, description: "Toggle AI Hub", action: () => commerceAi.togglePanel() },
         { key: "Escape", description: "Close panels", action: () => { if (commerceAi.hubMode === "tool-result") commerceAi.clearToolResult(); else if (commerceAi.panelOpen) commerceAi.setOpen(false); } },
       ],
@@ -240,6 +234,14 @@ export default function CommercePage() {
       </AnimatePresence>
       <AiHubTrigger ai={commerceAi} moduleName="Commerce" />
 
+      <CommerceKpiStrip
+        businessId={businessId}
+        invoices={invoices}
+        quotes={quotes}
+        products={products}
+        currency={businessCurrency}
+      />
+
       <TabNav
         tabs={TABS}
         activeTab={tab}
@@ -254,20 +256,6 @@ export default function CommercePage() {
 
       <div {...swipeHandlers} className="touch-pan-y">
         <AnimatePresence mode="wait" custom={slideDirection}>
-          {tab === "dashboard" && (
-            <motion.div key="dashboard" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
-              <div className="space-y-4">
-                <CommerceDashboard businessId={businessId} invoices={invoices} quotes={quotes} products={products} currency={businessCurrency} />
-                <ConnectionStatus
-                  gmailStatus={gmailStatus}
-                  paymentGateways={paymentGateways}
-                  loadingGmail={loadingGmail}
-                  onConnectGmail={handleConnectGmail}
-                  onDisconnectGmail={() => setConfirmDisconnectGmail(true)}
-                />
-              </div>
-            </motion.div>
-          )}
           {tab === "products" && (
             <motion.div key="products" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
               <ProductsPanel
@@ -375,16 +363,6 @@ export default function CommercePage() {
         businessId={businessId}
         currency={businessCurrency}
         setProducts={state.setProducts}
-      />
-
-      <ConfirmDialog
-        open={confirmDisconnectGmail}
-        title="Disconnect Gmail?"
-        message="You won't be able to send quotes via email until you reconnect."
-        confirmLabel="Disconnect"
-        variant="danger"
-        onConfirm={handleDisconnectGmail}
-        onCancel={() => setConfirmDisconnectGmail(false)}
       />
     </div>
   );
