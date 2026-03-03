@@ -48,6 +48,7 @@ interface BillingPanelProps {
   onSegmentChange?: (segment: BillingSegment) => void;
   prefillContactId?: string;
   prefillItems?: import("../components/commerce-types").InvoiceLineItem[];
+  prefillToken?: number;
   onPrefillApplied?: () => void;
 }
 
@@ -82,6 +83,7 @@ export function BillingPanel({
   onSegmentChange,
   prefillContactId,
   prefillItems,
+  prefillToken,
   onPrefillApplied,
 }: BillingPanelProps) {
   const router = useRouter();
@@ -243,6 +245,7 @@ export function BillingPanel({
               triggerNew={triggerNewQuote}
               prefillContactId={segment === "quotes" ? prefillContactId : undefined}
               prefillItems={segment === "quotes" ? prefillItems : undefined}
+              prefillToken={segment === "quotes" ? prefillToken : undefined}
               onPrefillApplied={onPrefillApplied}
             />
           </motion.div>
@@ -269,6 +272,7 @@ export function BillingPanel({
               triggerNew={triggerNewInvoice}
               prefillContactId={segment === "invoices" ? prefillContactId : undefined}
               prefillItems={segment === "invoices" ? prefillItems : undefined}
+              prefillToken={segment === "invoices" ? prefillToken : undefined}
               onPrefillApplied={onPrefillApplied}
             />
           </motion.div>

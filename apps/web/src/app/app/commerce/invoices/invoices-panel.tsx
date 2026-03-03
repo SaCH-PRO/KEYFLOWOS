@@ -65,6 +65,7 @@ interface InvoicesPanelProps {
   currency?: string;
   prefillContactId?: string;
   prefillItems?: import("../components/commerce-types").InvoiceLineItem[];
+  prefillToken?: number;
   onPrefillApplied?: () => void;
 }
 
@@ -81,6 +82,7 @@ export default function InvoicesPanel({
   currency = "TTD",
   prefillContactId,
   prefillItems,
+  prefillToken,
   onPrefillApplied,
 }: InvoicesPanelProps) {
   const {
@@ -104,14 +106,15 @@ export default function InvoicesPanel({
     }
   }, [triggerNew, resetInvoiceForm, setShowInvoiceBuilder]);
 
-  const prefillAppliedRef = useRef<string | null>(null);
+  const prefillAppliedRef = useRef<number | null>(null);
   useEffect(() => {
     if (!prefillContactId) return;
-    if (prefillAppliedRef.current === prefillContactId && !prefillItems?.length) return;
-    prefillAppliedRef.current = prefillContactId;
+    const token = prefillToken ?? 0;
+    if (prefillAppliedRef.current === token) return;
+    prefillAppliedRef.current = token;
     prefillInvoice({ contactId: prefillContactId, items: prefillItems });
     onPrefillApplied?.();
-  }, [prefillContactId, prefillItems, prefillInvoice, onPrefillApplied]);
+  }, [prefillContactId, prefillItems, prefillToken, prefillInvoice, onPrefillApplied]);
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<string>("ALL");
   const [invoiceSearch, setInvoiceSearch] = useState("");
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
