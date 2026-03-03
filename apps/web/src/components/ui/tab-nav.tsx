@@ -16,48 +16,67 @@ interface TabNavProps {
   layoutId?: string;
 }
 
-export function TabNav({ tabs, activeTab, onTabChange, layoutId = "tab-pill" }: TabNavProps) {
+export function TabNav({ tabs, activeTab, onTabChange, layoutId = "tab-folder" }: TabNavProps) {
   return (
-    <div
-      role="tablist"
-      className="flex gap-1 overflow-x-auto pb-1 scrollbar-hide snap-x snap-mandatory border-b border-[hsl(var(--kf-border)/0.5)]"
-    >
-      {tabs.map((t) => {
-        const Icon = t.icon;
-        const isActive = activeTab === t.key;
-        return (
-          <button
-            key={t.key}
-            role="tab"
-            aria-selected={isActive}
-            onClick={() => onTabChange(t.key)}
-            className={`relative px-4 py-2.5 text-sm font-medium rounded-xl transition-all flex items-center gap-2 whitespace-nowrap snap-start flex-shrink-0 active:scale-95 ${
-              isActive
-                ? "text-white"
-                : "text-muted-foreground hover:text-foreground hover:bg-[hsl(var(--kf-muted)/0.5)]"
-            }`}
-          >
-            {isActive && (
-              <motion.div
-                layoutId={layoutId}
-                className="absolute inset-0 rounded-xl"
-                style={{
-                  background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
-                  boxShadow: "0 4px 12px hsl(var(--kf-accent1) / 0.25)",
-                }}
-                transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
-              />
-            )}
-            <span className="relative z-10 flex items-center gap-2">
-              {Icon && <Icon className="w-4 h-4" />}
-              {t.label}
-              {t.count !== undefined && (
-                <span className={`text-xs ${isActive ? "opacity-80" : "opacity-60"}`}>({t.count})</span>
+    <div className="relative">
+      <div
+        role="tablist"
+        className="flex overflow-x-auto scrollbar-hide snap-x snap-mandatory -mb-px"
+      >
+        {tabs.map((t, i) => {
+          const Icon = t.icon;
+          const isActive = activeTab === t.key;
+          return (
+            <button
+              key={t.key}
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => onTabChange(t.key)}
+              style={{ zIndex: isActive ? 10 : tabs.length - i }}
+              className={`relative flex items-center gap-1.5 sm:gap-2 whitespace-nowrap snap-start flex-shrink-0 transition-all duration-200 active:scale-[0.98]
+                px-3 sm:px-5 py-2 sm:py-2.5
+                text-xs sm:text-sm font-semibold
+                rounded-t-lg
+                border border-b-0
+                ${isActive
+                  ? "bg-card text-foreground border-border/60 shadow-[0_-2px_8px_hsl(var(--kf-accent1)/0.08)]"
+                  : "bg-white/[0.02] text-muted-foreground/60 border-transparent hover:text-muted-foreground hover:bg-white/[0.04] -ml-px first:ml-0"
+                }`}
+            >
+              {isActive && (
+                <motion.div
+                  layoutId={layoutId}
+                  className="absolute inset-x-0 top-0 h-[2px] rounded-t-lg"
+                  style={{
+                    background: "linear-gradient(90deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
+                  }}
+                  transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
+                />
               )}
-            </span>
-          </button>
-        );
-      })}
+
+              {Icon && (
+                <Icon
+                  className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0"
+                  style={isActive ? { color: "hsl(var(--kf-accent1))" } : undefined}
+                />
+              )}
+              <span>{t.label}</span>
+              {t.count !== undefined && (
+                <span
+                  className={`text-[10px] sm:text-xs tabular-nums ${
+                    isActive
+                      ? "text-[hsl(var(--kf-accent1))]"
+                      : "opacity-50"
+                  }`}
+                >
+                  {t.count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      <div className="h-px bg-border/50" />
     </div>
   );
 }
