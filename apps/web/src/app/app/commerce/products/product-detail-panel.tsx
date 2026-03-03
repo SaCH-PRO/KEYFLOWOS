@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useMotionValue, useTransform, useDragControls } from "framer-motion";
 import {
   X,
   Pencil,
@@ -105,6 +105,10 @@ export const ProductDetailPanel = React.memo(function ProductDetailPanel({
   const [imageMode, setImageMode] = useState<"upload" | "url">("upload");
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dragY = useMotionValue(0);
+  const dragOpacity = useTransform(dragY, [0, 200], [1, 0.2]);
+  const dragScale = useTransform(dragY, [0, 200], [1, 0.92]);
+  const dragControls = useDragControls();
 
   useEffect(() => {
     if (product) {
@@ -115,6 +119,7 @@ export const ProductDetailPanel = React.memo(function ProductDetailPanel({
       setImageFile(null);
       setImagePreview(cachedImage || product.imageUrl || null);
       setSaving(false);
+      dragY.set(0);
     }
   }, [product?.id]);
 
@@ -199,6 +204,7 @@ export const ProductDetailPanel = React.memo(function ProductDetailPanel({
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
+        style={{ opacity: dragOpacity }}
         className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6"
         onClick={onClose}
       >
@@ -208,11 +214,32 @@ export const ProductDetailPanel = React.memo(function ProductDetailPanel({
           aria-label={`Product details: ${product.name}`}
           initial={{ scale: 0.95, opacity: 0, y: 20 }}
           animate={{ scale: 1, opacity: 1, y: 0 }}
-          exit={{ scale: 0.95, opacity: 0, y: 20 }}
+          exit={{ scale: 0.95, opacity: 0, y: 200 }}
           transition={{ type: "spring", damping: 25, stiffness: 300 }}
+          style={{ y: dragY, scale: dragScale }}
+          drag="y"
+          dragListener={false}
+          dragControls={dragControls}
+          dragConstraints={{ top: 0, bottom: 0 }}
+          dragElastic={{ top: 0.05, bottom: 0.5 }}
+          onDragEnd={(_e, info) => {
+            if (info.offset.y > 120 || info.velocity.y > 500) {
+              onClose();
+            } else {
+              dragY.set(0);
+            }
+          }}
           onClick={(e) => e.stopPropagation()}
           className="w-full max-w-md max-h-[calc(100vh-1.5rem)] sm:max-h-[calc(100vh-3rem)] rounded-2xl bg-card border border-border/50 overflow-hidden flex flex-col shadow-2xl"
         >
+          <div
+            onPointerDown={(e) => dragControls.start(e)}
+            className="flex justify-center pt-3 pb-1 cursor-grab active:cursor-grabbing shrink-0 select-none"
+            style={{ touchAction: "none" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-10 h-1 rounded-full bg-white/20" />
+          </div>
           <div className="relative overflow-hidden shrink-0">
             {!editing && displayImage && !imgError ? (
               <div className="w-full h-36 sm:h-44 overflow-hidden relative">
