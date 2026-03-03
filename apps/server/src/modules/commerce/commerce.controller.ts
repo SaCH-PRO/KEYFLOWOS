@@ -5,6 +5,7 @@ import { RecurringInvoiceService } from './recurring-invoice.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CreateProductDto } from './dto/create-product.dto';
+import { BulkProductsDto } from './dto/bulk-products.dto';
 import { ReceiptService } from './receipt.service';
 import { GmailService } from './gmail.service';
 import { UpdateInvoiceStatusDto } from './dto/update-invoice-status.dto';
@@ -65,6 +66,15 @@ export class CommerceController {
     @Body() body: CreateProductDto,
   ) {
     return this.commerce.createProduct({ businessId, ...body });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/products/bulk')
+  bulkUpdateProducts(
+    @Param('businessId') businessId: string,
+    @Body() body: BulkProductsDto,
+  ) {
+    return this.commerce.bulkUpdateProducts(businessId, body.ids, body.action);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

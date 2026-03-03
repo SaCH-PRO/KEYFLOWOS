@@ -171,6 +171,12 @@ export function useCommerce() {
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, [businessId]);
 
+  const refreshProducts = useCallback(async () => {
+    if (!businessId) return;
+    const res = await fetchProducts(businessId);
+    setProducts((res.data ?? []).map((p) => ({ ...p, currency: p.currency ?? "TTD" } as Product)));
+  }, [businessId]);
+
   const openAddProduct = useCallback(() => {
     setEditingProductId(null);
     setProductForm({ ...DEFAULT_PRODUCT_FORM });
@@ -304,6 +310,47 @@ export function useCommerce() {
       }
     }
   }, [businessId, productForm, editingProductId, imagePreview, closeProductForm]);
+
+  const handleDuplicateProduct = useCallback(async (product: Product) => {
+    if (!businessId) return;
+    const { data, error } = await createProduct({
+      businessId,
+      name: `${product.name} (Copy)`,
+      price: product.price,
+      description: product.description ?? undefined,
+      category: product.category ?? "SERVICE",
+      duration: product.duration ?? null,
+      imageUrl: product.imageUrl ?? null,
+      sku: product.sku ? `${product.sku}-COPY` : null,
+      isActive: true,
+    });
+    if (error) { toast.error("Failed to duplicate product"); return; }
+    if (data) {
+      if (cachedImages[product.id]) {
+        await saveProductImage(data.id, cachedImages[product.id]);
+        setCachedImages((prev) => ({ ...prev, [data.id]: cachedImages[product.id] }));
+      }
+      setProducts((prev) => [data, ...prev]);
+      toast.success("Product duplicated");
+      notifyProductsChanged();
+    }
+  }, [businessId, cachedImages]);
+
+  const handleToggleProductActive = useCallback(async (product: Product) => {
+    if (!businessId) return;
+    const newActive = !product.isActive;
+    const { data, error } = await updateProduct({
+      businessId,
+      productId: product.id,
+      isActive: newActive,
+    });
+    if (error) { toast.error("Failed to update product status"); return; }
+    if (data) {
+      setProducts((prev) => prev.map((p) => (p.id === product.id ? { ...p, isActive: newActive } : p)));
+      toast.success(newActive ? "Product activated" : "Product deactivated");
+      notifyProductsChanged();
+    }
+  }, [businessId]);
 
   const handleDeleteProduct = useCallback(async (productId: string) => {
     if (!businessId) return;
@@ -439,7 +486,10 @@ export function useCommerce() {
     handleFileSelect,
     removeImage,
     handleSaveProduct,
+    handleDuplicateProduct,
+    handleToggleProductActive,
     handleDeleteProduct,
+    refreshProducts,
 
     paymentGateways,
     showGuide,

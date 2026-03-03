@@ -25,7 +25,7 @@ import { renderCommerceToolResult } from "./components/commerce-tool-results";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useModuleEmit } from "@/hooks/use-module-events";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
-import { commerceAiExecute } from "@/lib/client";
+import { commerceAiExecute, type Product } from "@/lib/client";
 
 const TABS = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
@@ -275,10 +275,15 @@ export default function CommercePage() {
                 setProductSearch={state.setProductSearch}
                 onEdit={state.openEditProduct}
                 onDelete={state.handleDeleteProduct}
+                onDuplicate={state.handleDuplicateProduct}
+                onToggleActive={state.handleToggleProductActive}
                 onAdd={state.openAddProduct}
                 deleteConfirm={state.deleteConfirm}
                 setDeleteConfirm={state.setDeleteConfirm}
                 cachedImages={state.cachedImages}
+                businessId={state.businessId}
+                onProductCreated={(p) => { state.setProducts((prev: Product[]) => [p, ...prev]); }}
+                onBulkAction={state.refreshProducts}
               />
             </motion.div>
           )}

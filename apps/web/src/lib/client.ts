@@ -1098,6 +1098,13 @@ export async function deleteProduct(productId: string, businessId: string = DEFA
   return apiDelete(`/commerce/businesses/${encodeURIComponent(businessId)}/products/${encodeURIComponent(productId)}`);
 }
 
+export async function bulkUpdateProducts(businessId: string, ids: string[], action: 'activate' | 'deactivate' | 'delete') {
+  return apiPatch<{ updated: number; action: string }>(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/products/bulk`,
+    { ids, action },
+  );
+}
+
 export async function createBooking(input: {
   businessId?: string;
   contactId?: string;
