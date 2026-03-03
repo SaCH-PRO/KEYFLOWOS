@@ -101,11 +101,16 @@ export function ProductCard({
         <h3 className="font-semibold text-xs text-white truncate leading-tight">{product.name}</h3>
 
         <div className="flex items-end justify-between gap-1">
-          <span className="text-sm font-bold text-white/95" style={{ textShadow: "0 1px 3px rgba(0,0,0,0.5)" }}>
-            {formatCurrency(product.price, displayCurrency)}
-          </span>
+          <div className="min-w-0">
+            <span className="text-sm font-bold text-white/95 block" style={{ textShadow: "0 1px 3px rgba(0,0,0,0.5)" }}>
+              {formatCurrency(product.price, displayCurrency)}
+            </span>
+            {product.sku && (
+              <span className="text-[10px] text-white/40 font-mono truncate block">{product.sku}</span>
+            )}
+          </div>
           {product.category === "SERVICE" && product.duration && (
-            <span className="inline-flex items-center gap-0.5 text-[10px] text-white/60 font-medium">
+            <span className="inline-flex items-center gap-0.5 text-[10px] text-white/60 font-medium shrink-0">
               <Clock className="w-2.5 h-2.5" />
               {product.duration}m
             </span>

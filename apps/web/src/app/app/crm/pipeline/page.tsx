@@ -331,7 +331,7 @@ export default function ContactsPage() {
           toast.dismiss(executing);
           if (result.data?.success) {
             toast.success(result.data.message);
-            state.refreshContacts?.();
+            loadContacts();
           } else {
             toast.error(result.data?.message ?? result.error ?? "Command failed");
           }
