@@ -336,6 +336,7 @@ export default function CommercePage() {
                 onSegmentChange={state.setActiveBillingSegment}
                 prefillContactId={pendingPrefill?.contactId}
                 prefillItems={pendingPrefill?.items}
+                prefillToken={pendingPrefill?._token}
                 defaultSegment={pendingPrefill?.targetSegment ?? "invoices"}
                 onPrefillApplied={clearPrefill}
               />

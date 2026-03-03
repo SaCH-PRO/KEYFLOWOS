@@ -65,6 +65,7 @@ interface QuotesPanelProps {
   currency?: string;
   prefillContactId?: string;
   prefillItems?: import("../components/commerce-types").InvoiceLineItem[];
+  prefillToken?: number;
   onPrefillApplied?: () => void;
 }
 
@@ -83,6 +84,7 @@ export default function QuotesPanel({
   currency = "TTD",
   prefillContactId,
   prefillItems,
+  prefillToken,
   onPrefillApplied,
 }: QuotesPanelProps) {
   const {
@@ -106,14 +108,15 @@ export default function QuotesPanel({
     }
   }, [triggerNew, handleNewQuote]);
 
-  const prefillAppliedRef = useRef<string | null>(null);
+  const prefillAppliedRef = useRef<number | null>(null);
   useEffect(() => {
     if (!prefillContactId) return;
-    if (prefillAppliedRef.current === prefillContactId && !prefillItems?.length) return;
-    prefillAppliedRef.current = prefillContactId;
+    const token = prefillToken ?? 0;
+    if (prefillAppliedRef.current === token) return;
+    prefillAppliedRef.current = token;
     prefillQuote({ contactId: prefillContactId, items: prefillItems });
     onPrefillApplied?.();
-  }, [prefillContactId, prefillItems, prefillQuote, onPrefillApplied]);
+  }, [prefillContactId, prefillItems, prefillToken, prefillQuote, onPrefillApplied]);
   const [quoteSearch, setQuoteSearch] = useState("");
   const [quoteStatusFilter, setQuoteStatusFilter] = useState<string>("ALL");
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
