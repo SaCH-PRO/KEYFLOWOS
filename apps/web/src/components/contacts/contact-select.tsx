@@ -12,6 +12,7 @@ import { Search, Plus, Loader2, ChevronDown, X } from "lucide-react";
 import { useContactSearch } from "@/hooks/use-contact-search";
 import { createContact } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { moduleEvents } from "@/lib/module-events";
 import { ContactChip } from "./contact-chip";
 
 const STATUS_DOT: Record<string, string> = {
@@ -153,6 +154,12 @@ export function ContactSelect({
       if (res.data) {
         handleSelect(res.data);
         setQuickAddForm({ firstName: "", lastName: "", email: "", phone: "" });
+        moduleEvents.emit("contact:quick_created", "contact-select", {
+          id: res.data.id,
+          firstName: res.data.firstName,
+          lastName: res.data.lastName,
+          email: res.data.email,
+        });
       }
     } catch {
       /* silent */

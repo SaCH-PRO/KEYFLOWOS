@@ -44,6 +44,9 @@ interface BillingPanelProps {
   triggerNewSchedule?: number;
   defaultSegment?: BillingSegment;
   onSegmentChange?: (segment: BillingSegment) => void;
+  prefillContactId?: string;
+  prefillItems?: import("../components/commerce-types").InvoiceLineItem[];
+  onPrefillApplied?: () => void;
 }
 
 function computeBillingStats(invoices: Invoice[], quotes: Quote[]) {
@@ -75,6 +78,9 @@ export function BillingPanel({
   triggerNewSchedule = 0,
   defaultSegment = "invoices",
   onSegmentChange,
+  prefillContactId,
+  prefillItems,
+  onPrefillApplied,
 }: BillingPanelProps) {
   const [segment, setSegment] = useState<BillingSegment>(defaultSegment);
   const [slideDir, setSlideDir] = useState(0);
@@ -208,6 +214,9 @@ export function BillingPanel({
               onSwitchToInvoices={switchToInvoices}
               currency={currency}
               triggerNew={triggerNewQuote}
+              prefillContactId={segment === "quotes" ? prefillContactId : undefined}
+              prefillItems={segment === "quotes" ? prefillItems : undefined}
+              onPrefillApplied={onPrefillApplied}
             />
           </motion.div>
         )}
@@ -231,6 +240,9 @@ export function BillingPanel({
               gmailStatus={gmailStatus}
               currency={currency}
               triggerNew={triggerNewInvoice}
+              prefillContactId={segment === "invoices" ? prefillContactId : undefined}
+              prefillItems={segment === "invoices" ? prefillItems : undefined}
+              onPrefillApplied={onPrefillApplied}
             />
           </motion.div>
         )}

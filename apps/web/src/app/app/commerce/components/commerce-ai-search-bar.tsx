@@ -19,6 +19,8 @@ import {
 export type CommerceCommand =
   | { type: "create_invoice"; params?: Record<string, unknown> }
   | { type: "create_quote"; params?: Record<string, unknown> }
+  | { type: "create_quote_for_contact"; contactId: string; contactName?: string; productIds?: string[] }
+  | { type: "create_invoice_for_contact"; contactId: string; contactName?: string; productIds?: string[] }
   | { type: "mark_paid"; invoiceId?: string; params?: Record<string, unknown> }
   | { type: "send_reminder"; invoiceId?: string; params?: Record<string, unknown> }
   | { type: "void_invoice"; invoiceId?: string; params?: Record<string, unknown> }
@@ -47,6 +49,8 @@ const EXAMPLE_QUERIES = [
 const ACTION_ICONS: Record<string, typeof Zap> = {
   create_invoice: Receipt,
   create_quote: FileText,
+  create_quote_for_contact: FileText,
+  create_invoice_for_contact: Receipt,
   mark_paid: CheckCircle2,
   send_reminder: Send,
   void_invoice: Ban,
@@ -128,6 +132,22 @@ export function CommerceAiSearchBar({ onExecuteCommand }: CommerceAiSearchBarPro
         break;
       case "create_quote":
         onExecuteCommand({ type: "create_quote", params: params ?? {} });
+        break;
+      case "create_quote_for_contact":
+        onExecuteCommand({
+          type: "create_quote_for_contact",
+          contactId: (params?.contactId as string) ?? "",
+          contactName: (params?.contactName as string) ?? undefined,
+          productIds: (params?.productIds as string[]) ?? undefined,
+        });
+        break;
+      case "create_invoice_for_contact":
+        onExecuteCommand({
+          type: "create_invoice_for_contact",
+          contactId: (params?.contactId as string) ?? "",
+          contactName: (params?.contactName as string) ?? undefined,
+          productIds: (params?.productIds as string[]) ?? undefined,
+        });
         break;
       case "mark_paid":
         onExecuteCommand({

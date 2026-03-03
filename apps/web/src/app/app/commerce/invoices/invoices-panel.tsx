@@ -63,6 +63,9 @@ interface InvoicesPanelProps {
   setInvoices: React.Dispatch<React.SetStateAction<Invoice[]>>;
   gmailStatus: { connected: boolean; email: string | null } | null;
   currency?: string;
+  prefillContactId?: string;
+  prefillItems?: import("../components/commerce-types").InvoiceLineItem[];
+  onPrefillApplied?: () => void;
 }
 
 export default function InvoicesPanel({
@@ -76,6 +79,9 @@ export default function InvoicesPanel({
   setInvoices,
   gmailStatus,
   currency = "TTD",
+  prefillContactId,
+  prefillItems,
+  onPrefillApplied,
 }: InvoicesPanelProps) {
   const {
     showInvoiceBuilder,
@@ -85,6 +91,7 @@ export default function InvoicesPanel({
     invoiceForm,
     setInvoiceForm,
     resetInvoiceForm,
+    prefillInvoice,
   } = useInvoiceForm();
   const emitEvent = useModuleEmit();
 
@@ -96,6 +103,15 @@ export default function InvoicesPanel({
       setShowInvoiceBuilder(true);
     }
   }, [triggerNew, resetInvoiceForm, setShowInvoiceBuilder]);
+
+  const prefillAppliedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!prefillContactId) return;
+    if (prefillAppliedRef.current === prefillContactId && !prefillItems?.length) return;
+    prefillAppliedRef.current = prefillContactId;
+    prefillInvoice({ contactId: prefillContactId, items: prefillItems });
+    onPrefillApplied?.();
+  }, [prefillContactId, prefillItems, prefillInvoice, onPrefillApplied]);
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<string>("ALL");
   const [invoiceSearch, setInvoiceSearch] = useState("");
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);

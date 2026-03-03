@@ -3,6 +3,13 @@
 import { useCallback, useState } from "react";
 import { InvoiceLineItem, QuoteFormState, generateItemId } from "../components/commerce-types";
 
+export interface QuotePrefill {
+  contactId?: string;
+  items?: InvoiceLineItem[];
+  notes?: string;
+  expiryDate?: string;
+}
+
 export function useQuoteForm() {
   const [showQuoteBuilder, setShowQuoteBuilder] = useState(false);
   const [editingQuoteId, setEditingQuoteId] = useState<string | null>(null);
@@ -35,6 +42,22 @@ export function useQuoteForm() {
     setShowQuoteBuilder(true);
   }, [resetQuoteForm]);
 
+  const prefillQuote = useCallback((data: QuotePrefill) => {
+    setEditingQuoteId(null);
+    setQuoteForm({
+      contactId: data.contactId ?? "",
+      expiryDate: data.expiryDate ?? "",
+      items: data.items?.length
+        ? data.items
+        : [{ id: generateItemId(), productId: "", description: "", quantity: "1", unitPrice: "" }],
+      taxRate: "12.5",
+      discountType: "PERCENT",
+      discountValue: "",
+      notes: data.notes ?? "",
+    });
+    setShowQuoteBuilder(true);
+  }, []);
+
   return {
     showQuoteBuilder,
     setShowQuoteBuilder,
@@ -44,5 +67,6 @@ export function useQuoteForm() {
     setQuoteForm,
     resetQuoteForm,
     handleNewQuote,
+    prefillQuote,
   };
 }

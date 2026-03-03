@@ -15,6 +15,7 @@ import {
   deleteContactNote, deleteContactTask,
   updateContactNote, updateContactTask,
 } from "@/lib/client";
+import { moduleEvents } from "@/lib/module-events";
 
 interface UseContactActionsParams {
   businessId: string | null;
@@ -443,9 +444,15 @@ export function useContactActions({
 
   const handleQuickAction = useCallback((contactId: string, action: QuickActionType) => {
     switch (action) {
-      case "create-invoice": router.push(`/app/commerce?tab=invoices&contactId=${contactId}`); break;
+      case "create-invoice":
+        moduleEvents.emit("commerce:create_invoice_for_contact", "crm", { contactId });
+        router.push(`/app/commerce?tab=billing&segment=invoices&contactId=${contactId}`);
+        break;
       case "book-appointment": router.push(`/app/bookings?contactId=${contactId}`); break;
-      case "send-quote": router.push(`/app/commerce?tab=quotes&contactId=${contactId}`); break;
+      case "send-quote":
+        moduleEvents.emit("commerce:create_quote_for_contact", "crm", { contactId });
+        router.push(`/app/commerce?tab=billing&segment=quotes&contactId=${contactId}`);
+        break;
     }
   }, [router]);
 

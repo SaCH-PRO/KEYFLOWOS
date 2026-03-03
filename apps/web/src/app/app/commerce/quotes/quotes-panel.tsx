@@ -63,6 +63,9 @@ interface QuotesPanelProps {
   triggerNew?: number;
   onSwitchToInvoices?: () => void;
   currency?: string;
+  prefillContactId?: string;
+  prefillItems?: import("../components/commerce-types").InvoiceLineItem[];
+  onPrefillApplied?: () => void;
 }
 
 export default function QuotesPanel({
@@ -78,6 +81,9 @@ export default function QuotesPanel({
   triggerNew,
   onSwitchToInvoices,
   currency = "TTD",
+  prefillContactId,
+  prefillItems,
+  onPrefillApplied,
 }: QuotesPanelProps) {
   const {
     showQuoteBuilder,
@@ -88,6 +94,7 @@ export default function QuotesPanel({
     setQuoteForm,
     resetQuoteForm,
     handleNewQuote,
+    prefillQuote,
   } = useQuoteForm();
   const emitEvent = useModuleEmit();
 
@@ -98,6 +105,15 @@ export default function QuotesPanel({
       handleNewQuote();
     }
   }, [triggerNew, handleNewQuote]);
+
+  const prefillAppliedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!prefillContactId) return;
+    if (prefillAppliedRef.current === prefillContactId && !prefillItems?.length) return;
+    prefillAppliedRef.current = prefillContactId;
+    prefillQuote({ contactId: prefillContactId, items: prefillItems });
+    onPrefillApplied?.();
+  }, [prefillContactId, prefillItems, prefillQuote, onPrefillApplied]);
   const [quoteSearch, setQuoteSearch] = useState("");
   const [quoteStatusFilter, setQuoteStatusFilter] = useState<string>("ALL");
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
