@@ -13,6 +13,7 @@ import {
   Mail,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { useModuleEmit } from "@/hooks/use-module-events";
 import type { Invoice, Quote, Contact, Product } from "@/lib/client";
 import { fetchCommerceStats, fetchRecurringInvoices, type CommerceStats } from "@/lib/client";
@@ -148,6 +149,12 @@ export function BillingPanel({
     { icon: TrendingUp, label: "Conversion", value: `${stats.conversionRate}%`, color: "hsl(142 76% 36%)" },
   ], [stats, currency]);
 
+  const { swipeHandlers } = useSwipeTabs({
+    tabs: SEGMENTS.map(s => s.key),
+    activeTab: segment,
+    onTabChange: (tab) => handleSegmentChange(tab as BillingSegment),
+  });
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
@@ -187,89 +194,89 @@ export function BillingPanel({
         </button>
       </div>
 
-      <div
-        role="tablist"
-        aria-label="Billing sections"
-        onKeyDown={(e) => {
-          const keys: Record<string, number> = { ArrowRight: 1, ArrowLeft: -1 };
-          const dir = keys[e.key];
-          if (dir !== undefined) {
-            e.preventDefault();
-            const idx = SEGMENTS.findIndex(s => s.key === segment);
-            const next = idx + dir;
-            if (next >= 0 && next < SEGMENTS.length) handleSegmentChange(SEGMENTS[next].key);
-          } else if (e.key === "Home") {
-            e.preventDefault();
-            handleSegmentChange(SEGMENTS[0].key);
-          } else if (e.key === "End") {
-            e.preventDefault();
-            handleSegmentChange(SEGMENTS[SEGMENTS.length - 1].key);
-          }
-        }}
-        className="relative flex gap-1.5 p-1.5 rounded-2xl bg-white/[0.03] border border-border/30 backdrop-blur-md"
-      >
-        {SEGMENTS.map((seg) => {
-          const isActive = segment === seg.key;
-          const count = segmentCounts[seg.key];
-          return (
-            <button
-              key={seg.key}
-              onClick={() => handleSegmentChange(seg.key)}
-              className={`
-                relative flex-1 flex items-center justify-center gap-2 px-4 py-2.5 sm:py-3 rounded-xl text-sm font-semibold transition-all duration-200 outline-none
-                focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-offset-background
-                ${isActive
-                  ? "text-white"
-                  : "text-muted-foreground/60 hover:text-muted-foreground hover:bg-white/[0.04]"
-                }
-              `}
-              aria-selected={isActive}
-              aria-controls={`billing-tabpanel-${seg.key}`}
-              role="tab"
-              tabIndex={isActive ? 0 : -1}
-            >
-              {isActive && (
-                <motion.div
-                  layoutId="billing-segment-pill"
-                  className="absolute inset-0 rounded-xl"
-                  style={{
-                    background: `linear-gradient(135deg, ${seg.accentMuted}, transparent 70%)`,
-                    border: `1px solid ${seg.accentMuted}`,
-                    boxShadow: `0 0 20px ${seg.accentMuted}, inset 0 1px 0 rgba(255,255,255,0.06)`,
-                  }}
-                  transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
-                />
-              )}
-              {isActive && (
-                <motion.div
-                  layoutId="billing-segment-bar"
-                  className="absolute top-0 left-3 right-3 h-[2px] rounded-b-full"
-                  style={{ background: `linear-gradient(90deg, transparent, ${seg.accent}, transparent)` }}
-                  transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
-                />
-              )}
-              <seg.icon
-                className="relative z-10 w-4 h-4 shrink-0 transition-colors duration-200"
-                style={isActive ? { color: seg.accent } : undefined}
-              />
-              <span className="relative z-10">{seg.label}</span>
-              {count > 0 && (
-                <span
-                  className="relative z-10 text-[10px] sm:text-xs tabular-nums font-semibold rounded-full px-1.5 py-0.5 min-w-[22px] text-center transition-colors duration-200"
-                  style={isActive
-                    ? { background: seg.accentMuted, color: seg.accent }
-                    : { background: "rgba(255,255,255,0.04)", color: "inherit" }
+      <div className="rounded-2xl border border-border/30 bg-card/60 backdrop-blur-md overflow-hidden">
+        <div
+          role="tablist"
+          aria-label="Billing sections"
+          onKeyDown={(e) => {
+            const keys: Record<string, number> = { ArrowRight: 1, ArrowLeft: -1 };
+            const dir = keys[e.key];
+            if (dir !== undefined) {
+              e.preventDefault();
+              const idx = SEGMENTS.findIndex(s => s.key === segment);
+              const next = idx + dir;
+              if (next >= 0 && next < SEGMENTS.length) handleSegmentChange(SEGMENTS[next].key);
+            } else if (e.key === "Home") {
+              e.preventDefault();
+              handleSegmentChange(SEGMENTS[0].key);
+            } else if (e.key === "End") {
+              e.preventDefault();
+              handleSegmentChange(SEGMENTS[SEGMENTS.length - 1].key);
+            }
+          }}
+          className="relative flex border-b border-border/20"
+        >
+          {SEGMENTS.map((seg) => {
+            const isActive = segment === seg.key;
+            const count = segmentCounts[seg.key];
+            return (
+              <button
+                key={seg.key}
+                onClick={() => handleSegmentChange(seg.key)}
+                className={`
+                  relative flex-1 flex items-center justify-center gap-2 px-4 py-3 sm:py-3.5 text-sm font-semibold transition-all duration-200 outline-none
+                  focus-visible:ring-2 focus-visible:ring-inset
+                  ${isActive
+                    ? "text-white"
+                    : "text-muted-foreground/50 hover:text-muted-foreground/80 hover:bg-white/[0.02]"
                   }
-                >
-                  {count}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+                `}
+                aria-selected={isActive}
+                aria-controls={`billing-tabpanel-${seg.key}`}
+                role="tab"
+                tabIndex={isActive ? 0 : -1}
+              >
+                {isActive && (
+                  <motion.div
+                    layoutId="billing-segment-bg"
+                    className="absolute inset-0"
+                    style={{
+                      background: `linear-gradient(180deg, ${seg.accentMuted} 0%, transparent 80%)`,
+                    }}
+                    transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
+                  />
+                )}
+                {isActive && (
+                  <motion.div
+                    layoutId="billing-segment-bar"
+                    className="absolute bottom-0 inset-x-0 h-[2px]"
+                    style={{ background: `linear-gradient(90deg, transparent, ${seg.accent}, transparent)` }}
+                    transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
+                  />
+                )}
+                <seg.icon
+                  className="relative z-10 w-4 h-4 shrink-0 transition-colors duration-200"
+                  style={isActive ? { color: seg.accent } : undefined}
+                />
+                <span className="relative z-10">{seg.label}</span>
+                {count > 0 && (
+                  <span
+                    className="relative z-10 text-[10px] sm:text-xs tabular-nums font-semibold rounded-full px-1.5 py-0.5 min-w-[20px] text-center transition-colors duration-200"
+                    style={isActive
+                      ? { background: seg.accentMuted, color: seg.accent }
+                      : { background: "rgba(255,255,255,0.04)", color: "inherit" }
+                    }
+                  >
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
 
-      <AnimatePresence mode="wait" custom={slideDir}>
+        <div className="p-3 sm:p-4" {...swipeHandlers}>
+          <AnimatePresence mode="wait" custom={slideDir}>
         {segment === "quotes" && (
           <motion.div
             key="quotes"
@@ -350,7 +357,10 @@ export function BillingPanel({
             />
           </motion.div>
         )}
-      </AnimatePresence>
+          </AnimatePresence>
+        </div>
+      </div>
+
     </div>
   );
 }
