@@ -2,13 +2,23 @@
 
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Package, Plus, X, Eye, EyeOff, ArrowUpDown, CheckSquare, Square, Trash2, ToggleLeft, ToggleRight, ChevronDown, Upload } from "lucide-react";
+import { Search, Package, Plus, X, Eye, EyeOff, ArrowUpDown, CheckSquare, Square, Trash2, ToggleLeft, ToggleRight, ChevronDown, Upload, LayoutGrid, List, Camera } from "lucide-react";
 import { toast } from "sonner";
 import type { Product } from "@/lib/client";
 import { bulkUpdateProducts } from "@/lib/client";
+import { formatCurrency } from "@/lib/currency";
 import type { ProductForm } from "../components/commerce-types";
 import { ProductCard } from "./product-card";
 import { ProductDetailPanel } from "./product-detail-panel";
+
+type ViewMode = "grid" | "list";
+function getStoredViewMode(): ViewMode {
+  if (typeof window === "undefined") return "grid";
+  return (localStorage.getItem("kf-products-view") as ViewMode) || "grid";
+}
+function storeViewMode(mode: ViewMode) {
+  if (typeof window !== "undefined") localStorage.setItem("kf-products-view", mode);
+}
 
 interface ProductsPanelProps {
   products: Product[];
@@ -75,6 +85,12 @@ export function ProductsPanel({
   quotes = [],
 }: ProductsPanelProps) {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>(getStoredViewMode);
+
+  const handleViewToggle = useCallback((mode: ViewMode) => {
+    setViewMode(mode);
+    storeViewMode(mode);
+  }, []);
 
   useEffect(() => {
     if (selectedProduct) {
@@ -113,8 +129,17 @@ export function ProductsPanel({
         buttons[next].focus();
       }
     };
+    const handleClickOutside = (e: MouseEvent) => {
+      if (sortRef.current && !sortRef.current.contains(e.target as Node)) {
+        setShowSortMenu(false);
+      }
+    };
     document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
   }, [showSortMenu]);
 
   useEffect(() => {
@@ -267,6 +292,25 @@ export function ProductsPanel({
                 </motion.div>
               )}
             </AnimatePresence>
+          </div>
+
+          <div className="inline-flex items-center rounded-lg border border-border/40 bg-white/[0.02] overflow-hidden shrink-0">
+            <button
+              onClick={() => handleViewToggle("grid")}
+              className={`px-1.5 py-1.5 transition-colors ${viewMode === "grid" ? "bg-white/[0.08] text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.05]"}`}
+              aria-label="Grid view"
+              aria-pressed={viewMode === "grid"}
+            >
+              <LayoutGrid className="w-3 h-3" />
+            </button>
+            <button
+              onClick={() => handleViewToggle("list")}
+              className={`px-1.5 py-1.5 transition-colors ${viewMode === "list" ? "bg-white/[0.08] text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.05]"}`}
+              aria-label="List view"
+              aria-pressed={viewMode === "list"}
+            >
+              <List className="w-3 h-3" />
+            </button>
           </div>
 
           <button
@@ -422,7 +466,7 @@ export function ProductsPanel({
               <p className="text-sm text-muted-foreground max-w-sm mb-4">
                 Create your first product or service to start building invoices and quotes.
               </p>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap justify-center">
                 <button
                   onClick={onAdd}
                   className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-xl bg-gradient-to-r from-[hsl(var(--kf-accent1))]/20 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/30 hover:to-[hsl(var(--kf-accent1))]/10 border border-[hsl(var(--kf-accent1))]/20 transition-all"
@@ -438,6 +482,15 @@ export function ProductsPanel({
                   </button>
                 )}
               </div>
+              {onImport && (
+                <button
+                  onClick={onImport}
+                  className="mt-3 inline-flex items-center gap-2 text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                >
+                  <Camera className="w-3.5 h-3.5" />
+                  Or snap a photo of a menu or price list — AI will extract your products
+                </button>
+              )}
             </>
           )}
         </div>
@@ -458,33 +511,95 @@ export function ProductsPanel({
               </button>
             </div>
           )}
-          <div className="grid grid-cols-3 gap-2 sm:gap-3">
-            <AnimatePresence mode="popLayout">
-              {filteredProducts.map((product) => (
-                <div key={product.id} className="relative">
-                  {bulkMode && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); toggleSelect(product.id); }}
-                      className="absolute top-1.5 right-1.5 z-10 w-6 h-6 rounded-md flex items-center justify-center bg-background/80 backdrop-blur-sm border border-border/50 transition-all hover:border-[hsl(var(--kf-accent1))]/50"
-                      aria-label={selectedIds.has(product.id) ? "Deselect" : "Select"}
+          {viewMode === "grid" ? (
+            <div className="grid grid-cols-3 gap-2 sm:gap-3">
+              <AnimatePresence mode="popLayout">
+                {filteredProducts.map((product) => (
+                  <div key={product.id} className="relative">
+                    {bulkMode && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); toggleSelect(product.id); }}
+                        className="absolute top-1.5 right-1.5 z-10 w-6 h-6 rounded-md flex items-center justify-center bg-background/80 backdrop-blur-sm border border-border/50 transition-all hover:border-[hsl(var(--kf-accent1))]/50"
+                        aria-label={selectedIds.has(product.id) ? "Deselect" : "Select"}
+                      >
+                        {selectedIds.has(product.id) ? (
+                          <CheckSquare className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+                        ) : (
+                          <Square className="w-4 h-4 text-muted-foreground/50" />
+                        )}
+                      </button>
+                    )}
+                    <ProductCard
+                      product={product}
+                      onClick={(p) => { if (!bulkMode) setSelectedProduct(p); }}
+                      cachedImage={cachedImages[product.id]}
+                      currency={currency}
+                    />
+                  </div>
+                ))}
+              </AnimatePresence>
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <AnimatePresence mode="popLayout">
+                {filteredProducts.map((product) => {
+                  const isInactive = product.isActive === false;
+                  const displayCurrency = product.currency ?? currency;
+                  const img = cachedImages[product.id] || product.imageUrl;
+                  return (
+                    <motion.button
+                      key={product.id}
+                      layout
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={{ duration: 0.15 }}
+                      onClick={() => { if (!bulkMode) setSelectedProduct(product); }}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border border-border/30 bg-white/[0.02] hover:bg-white/[0.05] hover:border-border/50 transition-all text-left group ${isInactive ? "opacity-50" : ""}`}
                     >
-                      {selectedIds.has(product.id) ? (
-                        <CheckSquare className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
-                      ) : (
-                        <Square className="w-4 h-4 text-muted-foreground/50" />
+                      {bulkMode && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); toggleSelect(product.id); }}
+                          className="shrink-0"
+                          aria-label={selectedIds.has(product.id) ? "Deselect" : "Select"}
+                        >
+                          {selectedIds.has(product.id) ? (
+                            <CheckSquare className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+                          ) : (
+                            <Square className="w-4 h-4 text-muted-foreground/50" />
+                          )}
+                        </button>
                       )}
-                    </button>
-                  )}
-                  <ProductCard
-                    product={product}
-                    onClick={(p) => { if (!bulkMode) setSelectedProduct(p); }}
-                    cachedImage={cachedImages[product.id]}
-                    currency={currency}
-                  />
-                </div>
-              ))}
-            </AnimatePresence>
-          </div>
+                      <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 bg-white/[0.04] border border-border/20">
+                        {img ? (
+                          <img src={img} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <Package className="w-4 h-4 text-muted-foreground/30" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{product.name}</p>
+                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground/60">
+                          <span className="capitalize">{(product.category ?? "service").toLowerCase()}</span>
+                          {product.sku && <span className="font-mono">{product.sku}</span>}
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-sm font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>
+                          {formatCurrency(product.price, displayCurrency)}
+                        </p>
+                        {product.category === "SERVICE" && product.duration && (
+                          <p className="text-[10px] text-muted-foreground/50">{product.duration}m</p>
+                        )}
+                      </div>
+                    </motion.button>
+                  );
+                })}
+              </AnimatePresence>
+            </div>
+          )}
         </>
       )}
 
@@ -509,6 +624,13 @@ export function ProductsPanel({
           cachedImage={cachedImages[selectedProduct.id]}
           invoiceCount={invoices.filter(inv => inv.items?.some(item => item.productId === selectedProduct.id)).length}
           quoteCount={quotes.filter(q => q.items?.some(item => item.productId === selectedProduct.id)).length}
+          totalRevenue={invoices
+            .filter(inv => (inv as any).status === "PAID")
+            .reduce((sum, inv) => {
+              const matching = inv.items?.filter(item => item.productId === selectedProduct.id) ?? [];
+              return sum + matching.reduce((s, item) => s + ((item as any).total ?? (Number((item as any).unitPrice ?? 0) * Number((item as any).quantity ?? 1))), 0);
+            }, 0)
+          }
         />
       )}
     </motion.div>

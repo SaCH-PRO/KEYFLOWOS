@@ -683,7 +683,7 @@ export class CrmService {
           await this.timeline.logEvent(input.businessId, c.id, 'bulk.updated', {
             ...(input.status ? { status: input.status } : {}),
             ...(input.addTags ? { addedTags: input.addTags } : {}),
-          }, tx);
+          }, undefined, tx as any);
         }
         return updated;
       });
@@ -700,7 +700,7 @@ export class CrmService {
         data,
       });
       for (const cid of input.contactIds) {
-        await this.timeline.logEvent(input.businessId, cid, 'bulk.updated', { status: input.status }, tx);
+        await this.timeline.logEvent(input.businessId, cid, 'bulk.updated', { status: input.status }, undefined, tx as any);
       }
       return res;
     });

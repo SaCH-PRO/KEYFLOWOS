@@ -34,6 +34,20 @@ const DEFAULT_PRODUCT_FORM: ProductForm = {
   isActive: true,
 };
 
+function buildProductPayload(form: ProductForm, imageUrl: string | null) {
+  const durationValue = form.duration ? parseInt(form.duration) : null;
+  return {
+    name: form.name,
+    price: Number(form.price),
+    description: form.description || null,
+    category: form.category,
+    duration: durationValue,
+    imageUrl,
+    sku: form.sku || null,
+    isActive: form.isActive,
+  };
+}
+
 export function useProducts(
   businessId: string | null,
   setProducts: React.Dispatch<React.SetStateAction<Product[]>>,
@@ -115,6 +129,16 @@ export function useProducts(
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, []);
 
+  const syncImageCache = useCallback(async (productId: string, localImage: string | null, hasImage: boolean) => {
+    if (localImage) {
+      await saveProductImage(productId, localImage);
+      setCachedImages((prev) => ({ ...prev, [productId]: localImage }));
+    } else if (!hasImage) {
+      await deleteProductImage(productId);
+      setCachedImages((prev) => { const n = { ...prev }; delete n[productId]; return n; });
+    }
+  }, [setCachedImages]);
+
   const handleSaveProduct = useCallback(async () => {
     setFormError(null);
     const parsed = productSchema.safeParse({
@@ -127,62 +151,32 @@ export function useProducts(
       return;
     }
     if (!businessId) return;
-    const durationValue = productForm.duration ? parseInt(productForm.duration) : null;
     const isLocalImage = imagePreview?.startsWith("data:");
     const serverImageUrl = isLocalImage ? null : (productForm.imageUrl || null);
+    const payload = buildProductPayload(productForm, serverImageUrl);
 
     if (editingProductId) {
-      const { data, error } = await updateProduct({
-        businessId,
-        productId: editingProductId,
-        name: parsed.data.name,
-        price: parsed.data.price,
-        description: parsed.data.description ?? null,
-        category: productForm.category,
-        duration: durationValue,
-        imageUrl: serverImageUrl,
-        sku: productForm.sku || null,
-        isActive: productForm.isActive,
-      });
+      const { data, error } = await updateProduct({ businessId, productId: editingProductId, ...payload });
       if (error) { setFormError(error); toast.error("Failed to update product"); return; }
       if (data) {
-        if (isLocalImage && imagePreview) {
-          await saveProductImage(editingProductId, imagePreview);
-          setCachedImages((prev) => ({ ...prev, [editingProductId]: imagePreview }));
-        } else if (!imagePreview) {
-          await deleteProductImage(editingProductId);
-          setCachedImages((prev) => { const n = { ...prev }; delete n[editingProductId]; return n; });
-        }
+        await syncImageCache(editingProductId, isLocalImage ? imagePreview : null, !!imagePreview);
         setProducts((prev) => prev.map((p) => (p.id === editingProductId ? { ...p, ...data } : p)));
         closeProductForm();
         toast.success("Product updated");
         notifyProductsChanged();
       }
     } else {
-      const { data, error } = await createProduct({
-        businessId,
-        name: parsed.data.name,
-        price: parsed.data.price,
-        description: parsed.data.description,
-        category: productForm.category,
-        duration: durationValue,
-        imageUrl: serverImageUrl,
-        sku: productForm.sku || null,
-        isActive: productForm.isActive,
-      });
+      const { data, error } = await createProduct({ businessId, ...payload });
       if (error) { setFormError(error); toast.error("Failed to create product"); return; }
       if (data) {
-        if (isLocalImage && imagePreview) {
-          await saveProductImage(data.id, imagePreview);
-          setCachedImages((prev) => ({ ...prev, [data.id]: imagePreview }));
-        }
+        if (isLocalImage && imagePreview) await syncImageCache(data.id, imagePreview, true);
         setProducts((prev) => [data, ...prev]);
         closeProductForm();
         toast.success("Product created");
         notifyProductsChanged();
       }
     }
-  }, [businessId, productForm, editingProductId, imagePreview, closeProductForm, setProducts, setCachedImages]);
+  }, [businessId, productForm, editingProductId, imagePreview, closeProductForm, setProducts, syncImageCache]);
 
   const handleSaveAndAddAnother = useCallback(async () => {
     setFormError(null);
@@ -196,26 +190,13 @@ export function useProducts(
       return;
     }
     if (!businessId) return;
-    const durationValue = productForm.duration ? parseInt(productForm.duration) : null;
     const isLocalImage = imagePreview?.startsWith("data:");
     const serverImageUrl = isLocalImage ? null : (productForm.imageUrl || null);
-    const { data, error } = await createProduct({
-      businessId,
-      name: parsed.data.name,
-      price: parsed.data.price,
-      description: parsed.data.description,
-      category: productForm.category,
-      duration: durationValue,
-      imageUrl: serverImageUrl,
-      sku: productForm.sku || null,
-      isActive: productForm.isActive,
-    });
+    const payload = buildProductPayload(productForm, serverImageUrl);
+    const { data, error } = await createProduct({ businessId, ...payload });
     if (error) { setFormError(error); toast.error("Failed to create product"); return; }
     if (data) {
-      if (isLocalImage && imagePreview) {
-        await saveProductImage(data.id, imagePreview);
-        setCachedImages((prev) => ({ ...prev, [data.id]: imagePreview }));
-      }
+      if (isLocalImage && imagePreview) await syncImageCache(data.id, imagePreview, true);
       setProducts((prev) => [data, ...prev]);
       const prevCategory = productForm.category;
       setProductForm({ ...DEFAULT_PRODUCT_FORM, category: prevCategory });
@@ -225,7 +206,7 @@ export function useProducts(
       toast.success(`"${data.name}" created — add another`);
       notifyProductsChanged();
     }
-  }, [businessId, productForm, imagePreview, setProducts, setCachedImages]);
+  }, [businessId, productForm, imagePreview, setProducts, syncImageCache]);
 
   const handleDuplicateProduct = useCallback(async (product: Product) => {
     if (!businessId) return;
@@ -273,39 +254,26 @@ export function useProducts(
     const price = Number(form.price);
     if (!form.name || isNaN(price) || price <= 0) {
       toast.error("Name and a valid price are required");
-      return;
+      throw new Error("Name and a valid price are required");
     }
-    const durationValue = form.duration ? parseInt(form.duration) : null;
     const isLocalImage = imageFile != null;
     const serverImageUrl = isLocalImage ? null : (form.imageUrl || null);
+    const payload = buildProductPayload(form, serverImageUrl);
 
-    const { data, error } = await updateProduct({
-      businessId,
-      productId,
-      name: form.name,
-      price,
-      description: form.description || null,
-      category: form.category,
-      duration: durationValue,
-      imageUrl: serverImageUrl,
-      sku: form.sku || null,
-      isActive: form.isActive,
-    });
+    const { data, error } = await updateProduct({ businessId, productId, ...payload });
     if (error) { toast.error("Failed to update product"); throw new Error(error); }
     if (data) {
       if (isLocalImage && imageFile) {
         const dataUrl = await fileToDataUrl(imageFile);
-        await saveProductImage(productId, dataUrl);
-        setCachedImages((prev) => ({ ...prev, [productId]: dataUrl }));
-      } else if (!form.imageUrl) {
-        await deleteProductImage(productId);
-        setCachedImages((prev) => { const n = { ...prev }; delete n[productId]; return n; });
+        await syncImageCache(productId, dataUrl, true);
+      } else {
+        await syncImageCache(productId, null, !!form.imageUrl);
       }
       setProducts((prev) => prev.map((p) => (p.id === productId ? { ...p, ...data } : p)));
       toast.success("Product updated");
       notifyProductsChanged();
     }
-  }, [businessId, setProducts, setCachedImages]);
+  }, [businessId, setProducts, syncImageCache]);
 
   const handleDeleteProduct = useCallback(async (productId: string) => {
     if (!businessId) return;

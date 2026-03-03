@@ -156,6 +156,10 @@ export function ProductDetailPanel({
         else if (editing) setEditing(false);
         else onClose();
       }
+      if (e.key === "e" && !editing && !showDeleteConfirm && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) {
+        e.preventDefault();
+        setEditing(true);
+      }
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
