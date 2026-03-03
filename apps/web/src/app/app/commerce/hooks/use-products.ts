@@ -184,6 +184,49 @@ export function useProducts(
     }
   }, [businessId, productForm, editingProductId, imagePreview, closeProductForm, setProducts, setCachedImages]);
 
+  const handleSaveAndAddAnother = useCallback(async () => {
+    setFormError(null);
+    const parsed = productSchema.safeParse({
+      name: productForm.name,
+      price: Number(productForm.price),
+      description: productForm.description || undefined,
+    });
+    if (!parsed.success) {
+      setFormError(parsed.error.errors[0]?.message ?? "Invalid input");
+      return;
+    }
+    if (!businessId) return;
+    const durationValue = productForm.duration ? parseInt(productForm.duration) : null;
+    const isLocalImage = imagePreview?.startsWith("data:");
+    const serverImageUrl = isLocalImage ? null : (productForm.imageUrl || null);
+    const { data, error } = await createProduct({
+      businessId,
+      name: parsed.data.name,
+      price: parsed.data.price,
+      description: parsed.data.description,
+      category: productForm.category,
+      duration: durationValue,
+      imageUrl: serverImageUrl,
+      sku: productForm.sku || null,
+      isActive: productForm.isActive,
+    });
+    if (error) { setFormError(error); toast.error("Failed to create product"); return; }
+    if (data) {
+      if (isLocalImage && imagePreview) {
+        await saveProductImage(data.id, imagePreview);
+        setCachedImages((prev) => ({ ...prev, [data.id]: imagePreview }));
+      }
+      setProducts((prev) => [data, ...prev]);
+      const prevCategory = productForm.category;
+      setProductForm({ ...DEFAULT_PRODUCT_FORM, category: prevCategory });
+      setImagePreview(null);
+      setImageMode("upload");
+      setFormError(null);
+      toast.success(`"${data.name}" created — add another`);
+      notifyProductsChanged();
+    }
+  }, [businessId, productForm, imagePreview, setProducts, setCachedImages]);
+
   const handleDuplicateProduct = useCallback(async (product: Product) => {
     if (!businessId) return;
     const { data, error } = await createProduct({
@@ -259,6 +302,7 @@ export function useProducts(
     handleFileSelect,
     removeImage,
     handleSaveProduct,
+    handleSaveAndAddAnother,
     handleDuplicateProduct,
     handleToggleProductActive,
     handleDeleteProduct,
