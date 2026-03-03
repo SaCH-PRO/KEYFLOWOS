@@ -368,7 +368,7 @@ export function ProductsPanel({
       </AnimatePresence>
 
       {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {Array.from({ length: 8 }).map((_, i) => (
             <div
               key={i}
@@ -438,7 +438,7 @@ export function ProductsPanel({
               </button>
             </div>
           )}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <AnimatePresence mode="popLayout">
               {filteredProducts.map((product) => (
                 <div key={product.id} className="relative">
