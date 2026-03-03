@@ -1,5 +1,7 @@
-export function formatTTD(value: number): string {
-  return `TTD ${value.toLocaleString("en-TT", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+import { formatCurrency } from './currency';
+
+export function formatTTD(value: number, currency: string = "TTD"): string {
+  return formatCurrency(value, currency);
 }
 
 export function relativeTime(dateStr: string): string {

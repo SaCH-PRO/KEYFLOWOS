@@ -21,6 +21,7 @@ interface LineItemsEditorProps {
   onDiscountValueChange: (value: string) => void;
   notes: string;
   onNotesChange: (value: string) => void;
+  currency?: string;
 }
 
 export default function LineItemsEditor({
@@ -38,6 +39,7 @@ export default function LineItemsEditor({
   onDiscountValueChange,
   notes,
   onNotesChange,
+  currency = "TTD",
 }: LineItemsEditorProps) {
   const totals = useMemo(() => {
     const subtotal = items.reduce((sum, item) => {
@@ -239,23 +241,23 @@ export default function LineItemsEditor({
         <div className="space-y-2 text-sm">
           <div className="flex justify-between text-muted-foreground">
             <span>Subtotal</span>
-            <span>${totals.subtotal.toFixed(2)}</span>
+            <span>{currency} {totals.subtotal.toFixed(2)}</span>
           </div>
           {totals.tax > 0 && (
             <div className="flex justify-between text-muted-foreground">
               <span>Tax ({taxRate}%)</span>
-              <span>${totals.tax.toFixed(2)}</span>
+              <span>{currency} {totals.tax.toFixed(2)}</span>
             </div>
           )}
           {totals.discount > 0 && (
             <div className="flex justify-between text-muted-foreground">
               <span>Discount</span>
-              <span>-${totals.discount.toFixed(2)}</span>
+              <span>-{currency} {totals.discount.toFixed(2)}</span>
             </div>
           )}
           <div className="flex justify-between pt-2 border-t border-border/40 font-bold text-base">
             <span>Total</span>
-            <span className="text-primary">${totals.total.toFixed(2)}</span>
+            <span className="text-primary">{currency} {totals.total.toFixed(2)}</span>
           </div>
         </div>
       </div>

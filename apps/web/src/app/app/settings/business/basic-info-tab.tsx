@@ -1,5 +1,6 @@
 "use client";
 
+import { SUPPORTED_CURRENCIES } from "@/lib/currency";
 import {
   Building2,
   Globe,
@@ -31,7 +32,7 @@ const TIMEZONES = [
   "Australia/Sydney",
 ];
 
-const CURRENCIES = ["TTD", "USD", "EUR", "GBP", "CAD", "AUD"];
+const CURRENCIES = SUPPORTED_CURRENCIES.map((c) => c.code);
 
 type Props = {
   form: FormState;

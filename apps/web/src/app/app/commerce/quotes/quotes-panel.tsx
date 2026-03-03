@@ -18,9 +18,10 @@ import {
   ToggleLeft,
   ToggleRight,
   Plus,
-  Minus,
   Copy,
   MessageCircle,
+  AlertTriangle,
+  Loader2,
 } from "lucide-react";
 import {
   createProduct,
@@ -41,10 +42,11 @@ import { ContactSelect } from "@/components/contacts";
 import {
   QUOTE_STATUS_FILTERS,
   InvoiceLineItem,
-  CATEGORIES,
+  QuoteFormState,
   getStatusBadge,
   generateItemId,
 } from "../components/commerce-types";
+import LineItemsEditor from "../components/line-items-editor";
 
 interface QuotesPanelProps {
   quotes: Quote[];
@@ -57,13 +59,14 @@ interface QuotesPanelProps {
   setShowQuoteBuilder: (show: boolean) => void;
   editingQuoteId: string | null;
   setEditingQuoteId: (id: string | null) => void;
-  quoteForm: any;
-  setQuoteForm: (fn: any) => void;
+  quoteForm: QuoteFormState;
+  setQuoteForm: React.Dispatch<React.SetStateAction<QuoteFormState>>;
   resetQuoteForm: () => void;
   setProducts: React.Dispatch<React.SetStateAction<Product[]>>;
   setQuotes: React.Dispatch<React.SetStateAction<Quote[]>>;
   setInvoices: React.Dispatch<React.SetStateAction<Invoice[]>>;
   setTab: (tab: "products" | "quotes" | "invoices") => void;
+  currency?: string;
 }
 
 export default function QuotesPanel({
@@ -84,6 +87,7 @@ export default function QuotesPanel({
   setQuotes,
   setInvoices,
   setTab,
+  currency = "TTD",
 }: QuotesPanelProps) {
   const [quoteSearch, setQuoteSearch] = useState("");
   const [quoteStatusFilter, setQuoteStatusFilter] = useState<string>("ALL");
@@ -102,6 +106,7 @@ export default function QuotesPanel({
     dueDate: "",
   });
   const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
+  const [actionLoading, setActionLoading] = useState<Record<string, string>>({});
   const [autoConvertToInvoice, setAutoConvertToInvoice] = useState(() => {
     if (typeof window !== "undefined") {
       return localStorage.getItem("kf_auto_convert_quote") === "true";
@@ -185,6 +190,14 @@ export default function QuotesPanel({
         ),
       }));
     }
+  }
+
+  function isQuoteExpired(quote: Quote): boolean {
+    if (!quote.expiryDate) return false;
+    if (quote.status !== "DRAFT" && quote.status !== "SENT") return false;
+    const expiry = new Date(quote.expiryDate);
+    expiry.setHours(23, 59, 59, 999);
+    return expiry < new Date();
   }
 
   const statusCounts = useMemo(() => {
@@ -296,6 +309,8 @@ export default function QuotesPanel({
   }
 
   async function handleAcceptQuote(quote: Quote) {
+    if (actionLoading[quote.id]) return;
+    setActionLoading((prev) => ({ ...prev, [quote.id]: "accept" }));
     try {
       const res = await updateQuoteStatus(quote.id, "ACCEPTED");
       if (res.data) {
@@ -318,31 +333,50 @@ export default function QuotesPanel({
       }
     } catch (err) {
       toast.error("Failed to accept quote");
+    } finally {
+      setActionLoading((prev) => { const next = { ...prev }; delete next[quote.id]; return next; });
     }
   }
 
   async function handleRejectQuote(quote: Quote) {
-    const res = await updateQuoteStatus(quote.id, "REJECTED");
-    if (res.data) {
-      setQuotes((q) => q.map((qItem) => (qItem.id === quote.id ? res.data! : qItem)));
+    if (actionLoading[quote.id]) return;
+    setActionLoading((prev) => ({ ...prev, [quote.id]: "reject" }));
+    try {
+      const res = await updateQuoteStatus(quote.id, "REJECTED");
+      if (res.data) {
+        setQuotes((q) => q.map((qItem) => (qItem.id === quote.id ? res.data! : qItem)));
+      }
+    } finally {
+      setActionLoading((prev) => { const next = { ...prev }; delete next[quote.id]; return next; });
     }
   }
 
   async function handleMarkSent(quote: Quote) {
-    const res = await updateQuoteStatus(quote.id, "SENT");
-    if (res.data) {
-      setQuotes((q) => q.map((qItem) => (qItem.id === quote.id ? res.data! : qItem)));
+    if (actionLoading[quote.id]) return;
+    setActionLoading((prev) => ({ ...prev, [quote.id]: "send" }));
+    try {
+      const res = await updateQuoteStatus(quote.id, "SENT");
+      if (res.data) {
+        setQuotes((q) => q.map((qItem) => (qItem.id === quote.id ? res.data! : qItem)));
+      }
+    } finally {
+      setActionLoading((prev) => { const next = { ...prev }; delete next[quote.id]; return next; });
     }
   }
 
   async function handleDeleteQuote(quote: Quote) {
-    if (!businessId) return;
+    if (!businessId || actionLoading[quote.id]) return;
     setConfirmState({
       open: true,
       action: async () => {
-        await deleteQuote(businessId!, quote.id);
-        setQuotes((q) => q.filter((qItem) => qItem.id !== quote.id));
-        toast.success("Quote deleted");
+        setActionLoading((prev) => ({ ...prev, [quote.id]: "delete" }));
+        try {
+          await deleteQuote(businessId!, quote.id);
+          setQuotes((q) => q.filter((qItem) => qItem.id !== quote.id));
+          toast.success("Quote deleted");
+        } finally {
+          setActionLoading((prev) => { const next = { ...prev }; delete next[quote.id]; return next; });
+        }
       },
     });
   }
@@ -433,21 +467,6 @@ export default function QuotesPanel({
     }
   }
 
-  const quoteTotals = useMemo(() => {
-    const subtotal = quoteForm.items.reduce(
-      (sum: number, item: InvoiceLineItem) =>
-        sum + (parseFloat(item.quantity) || 0) * (parseFloat(item.unitPrice) || 0),
-      0
-    );
-    const taxAmount = (subtotal * (parseFloat(quoteForm.taxRate) || 0)) / 100;
-    const discountAmount =
-      quoteForm.discountType === "PERCENT"
-        ? (subtotal * (parseFloat(quoteForm.discountValue) || 0)) / 100
-        : parseFloat(quoteForm.discountValue) || 0;
-    const total = subtotal + taxAmount - discountAmount;
-    return { subtotal, taxAmount, discountAmount, total };
-  }, [quoteForm.items, quoteForm.taxRate, quoteForm.discountType, quoteForm.discountValue]);
-
   return (
     <motion.div
       key="quotes"
@@ -489,198 +508,23 @@ export default function QuotesPanel({
             />
           </div>
 
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium">Line Items</label>
-              <Button variant="outline" onClick={addQuoteItem} className="text-xs gap-1 px-2 py-1">
-                <Plus className="w-3 h-3" /> Add Item
-              </Button>
-            </div>
-
-            {quoteForm.items.map((item: InvoiceLineItem) => (
-              <div key={item.id} className="p-3 rounded-xl bg-muted/30 border border-border/40 space-y-2">
-                <div className="grid grid-cols-12 gap-2 items-end">
-                  <div className="col-span-12 md:col-span-3">
-                    <label className="text-xs text-muted-foreground mb-1 block">Product/Service</label>
-                    <select
-                      className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                      value={item.productId}
-                      onChange={(e) => selectProductForQuoteItem(item.id, e.target.value)}
-                    >
-                      <option value="">Select item...</option>
-                      <option value="__NEW__">
-                        {item.isNewItem && item.newItemName ? `+ ${item.newItemName}` : "+ New item"}
-                      </option>
-                      {products
-                        .filter((p) => p.isActive !== false)
-                        .map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name} - {p.currency} {Number(p.price).toLocaleString()}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                  {item.isNewItem && (
-                    <>
-                      <div className="col-span-12 md:col-span-3">
-                        <label className="text-xs text-muted-foreground mb-1 block">Item Name</label>
-                        <input
-                          className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                          placeholder="Enter name for new item"
-                          value={item.newItemName || ""}
-                          onChange={(e) => updateQuoteItem(item.id, "newItemName", e.target.value)}
-                        />
-                      </div>
-                      <div className="col-span-6 md:col-span-2">
-                        <label className="text-xs text-muted-foreground mb-1 block">Type</label>
-                        <select
-                          className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                          value={item.newItemCategory || "SERVICE"}
-                          onChange={(e) => updateQuoteItem(item.id, "newItemCategory", e.target.value)}
-                        >
-                          {CATEGORIES.map((cat) => (
-                            <option key={cat.value} value={cat.value}>
-                              {cat.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </>
-                  )}
-                  <div className={`col-span-12 ${item.isNewItem ? "md:col-span-4" : "md:col-span-4"}`}>
-                    <label className="text-xs text-muted-foreground mb-1 block">Description</label>
-                    <input
-                      className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                      placeholder={item.isNewItem ? "New item name/description" : "Item description"}
-                      value={item.description}
-                      onChange={(e) => updateQuoteItem(item.id, "description", e.target.value)}
-                    />
-                  </div>
-                  <div className="col-span-4 md:col-span-2">
-                    <label className="text-xs text-muted-foreground mb-1 block">Qty</label>
-                    <input
-                      className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                      placeholder="1"
-                      type="number"
-                      min="1"
-                      value={item.quantity}
-                      onChange={(e) => updateQuoteItem(item.id, "quantity", e.target.value)}
-                    />
-                  </div>
-                  <div className="col-span-6 md:col-span-2">
-                    <label className="text-xs text-muted-foreground mb-1 block">Price (TTD)</label>
-                    <input
-                      className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                      placeholder="0.00"
-                      type="number"
-                      step="0.01"
-                      value={item.unitPrice}
-                      onChange={(e) => updateQuoteItem(item.id, "unitPrice", e.target.value)}
-                    />
-                  </div>
-                  <div className="col-span-2 md:col-span-1 flex justify-center">
-                    {quoteForm.items.length > 1 && (
-                      <button
-                        onClick={() => removeQuoteItem(item.id)}
-                        className="p-2 rounded-lg hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors"
-                        title="Remove item"
-                      >
-                        <Minus className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {item.isNewItem && (
-                  <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={item.addToCatalog ?? false}
-                      onChange={(e) => updateQuoteItem(item.id, "addToCatalog", e.target.checked)}
-                      className="rounded border-border"
-                    />
-                    Add this item to my product catalog for future use
-                  </label>
-                )}
-              </div>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 border-t border-border/40">
-            <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Tax Rate (%)</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                max="100"
-                className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                value={quoteForm.taxRate}
-                onChange={(e) => setQuoteForm((f: any) => ({ ...f, taxRate: e.target.value }))}
-                placeholder="12.5"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Discount Type</label>
-              <select
-                className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                value={quoteForm.discountType}
-                onChange={(e) =>
-                  setQuoteForm((f: any) => ({ ...f, discountType: e.target.value as "PERCENT" | "FIXED" }))
-                }
-              >
-                <option value="PERCENT">Percentage (%)</option>
-                <option value="FIXED">Fixed Amount (TTD)</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">
-                Discount {quoteForm.discountType === "PERCENT" ? "(%)" : "(TTD)"}
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                value={quoteForm.discountValue}
-                onChange={(e) => setQuoteForm((f: any) => ({ ...f, discountValue: e.target.value }))}
-                placeholder="0"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block">Notes (optional)</label>
-            <textarea
-              className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 min-h-[60px]"
-              value={quoteForm.notes}
-              onChange={(e) => setQuoteForm((f: any) => ({ ...f, notes: e.target.value }))}
-              placeholder="Payment terms, conditions, or additional notes..."
-            />
-          </div>
-
-          <div className="p-3 rounded-xl bg-muted/30 border border-border/40 space-y-1">
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Subtotal:</span>
-              <span className="font-medium">${quoteTotals.subtotal.toFixed(2)} TTD</span>
-            </div>
-            {parseFloat(quoteForm.taxRate) > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Tax ({quoteForm.taxRate}%):</span>
-                <span className="font-medium">+${quoteTotals.taxAmount.toFixed(2)} TTD</span>
-              </div>
-            )}
-            {parseFloat(quoteForm.discountValue) > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">
-                  Discount {quoteForm.discountType === "PERCENT" ? `(${quoteForm.discountValue}%)` : ""}:
-                </span>
-                <span className="font-medium text-emerald-500">-${quoteTotals.discountAmount.toFixed(2)} TTD</span>
-              </div>
-            )}
-            <div className="flex justify-between text-base pt-1 border-t border-border/40">
-              <span className="font-semibold">Total:</span>
-              <span className="font-bold text-primary">${quoteTotals.total.toFixed(2)} TTD</span>
-            </div>
-          </div>
+          <LineItemsEditor
+            items={quoteForm.items}
+            products={products.filter((p) => p.isActive !== false)}
+            onAddItem={addQuoteItem}
+            onRemoveItem={removeQuoteItem}
+            onUpdateItem={updateQuoteItem}
+            onSelectProduct={selectProductForQuoteItem}
+            taxRate={quoteForm.taxRate}
+            discountType={quoteForm.discountType}
+            discountValue={quoteForm.discountValue}
+            onTaxRateChange={(v) => setQuoteForm((f: any) => ({ ...f, taxRate: v }))}
+            onDiscountTypeChange={(v) => setQuoteForm((f: any) => ({ ...f, discountType: v }))}
+            onDiscountValueChange={(v) => setQuoteForm((f: any) => ({ ...f, discountValue: v }))}
+            notes={quoteForm.notes}
+            onNotesChange={(v) => setQuoteForm((f: any) => ({ ...f, notes: v }))}
+            currency={currency}
+          />
 
           <div className="flex justify-end gap-2 pt-2">
             <Button
@@ -826,10 +670,18 @@ export default function QuotesPanel({
                       {quote.contact?.firstName} {quote.contact?.lastName}
                     </td>
                     <td className="px-4 py-3">
-                      <span
-                        className={`px-2 py-1 rounded-full text-xs font-medium border ${getStatusBadge(quote.status)}`}
-                      >
-                        {quote.status}
+                      <span className="inline-flex items-center gap-1.5">
+                        <span
+                          className={`px-2 py-1 rounded-full text-xs font-medium border ${getStatusBadge(quote.status)}`}
+                        >
+                          {quote.status}
+                        </span>
+                        {isQuoteExpired(quote) && (
+                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-semibold border bg-amber-500/20 text-amber-300 border-amber-500/40">
+                            <AlertTriangle className="w-3 h-3" />
+                            Expired
+                          </span>
+                        )}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right font-semibold">
@@ -883,10 +735,11 @@ export default function QuotesPanel({
                         {quote.status === "DRAFT" && (
                           <button
                             onClick={() => handleMarkSent(quote)}
-                            className="p-1.5 rounded-lg hover:bg-primary/20 text-primary"
+                            className="p-1.5 rounded-lg hover:bg-primary/20 text-primary disabled:opacity-50"
                             title="Mark as Sent"
+                            disabled={!!actionLoading[quote.id]}
                           >
-                            <Send className="w-4 h-4" />
+                            {actionLoading[quote.id] === "send" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                           </button>
                         )}
                         {quote.status === "SENT" && (
@@ -896,17 +749,19 @@ export default function QuotesPanel({
                                 e.stopPropagation();
                                 handleAcceptQuote(quote);
                               }}
-                              className="p-1.5 rounded-lg hover:bg-green-500/20 text-green-400"
-                              title="Mark Accepted"
+                              className={`p-1.5 rounded-lg ${isQuoteExpired(quote) ? "opacity-40 cursor-not-allowed" : "hover:bg-green-500/20"} text-green-400 disabled:opacity-50`}
+                              title={isQuoteExpired(quote) ? "Cannot accept — quote has expired" : "Mark Accepted"}
+                              disabled={isQuoteExpired(quote) || !!actionLoading[quote.id]}
                             >
-                              <CheckCircle className="w-4 h-4" />
+                              {actionLoading[quote.id] === "accept" ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
                             </button>
                             <button
                               onClick={() => handleRejectQuote(quote)}
-                              className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400"
+                              className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400 disabled:opacity-50"
                               title="Mark Rejected"
+                              disabled={!!actionLoading[quote.id]}
                             >
-                              <X className="w-4 h-4" />
+                              {actionLoading[quote.id] === "reject" ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
                             </button>
                           </>
                         )}
@@ -924,10 +779,11 @@ export default function QuotesPanel({
                         )}
                         <button
                           onClick={() => handleDeleteQuote(quote)}
-                          className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400"
+                          className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400 disabled:opacity-50"
                           title="Delete Quote"
+                          disabled={!!actionLoading[quote.id]}
                         >
-                          <Trash2 className="w-4 h-4" />
+                          {actionLoading[quote.id] === "delete" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                         </button>
                       </div>
                     </td>
@@ -946,10 +802,18 @@ export default function QuotesPanel({
               >
                 <div className="flex items-center justify-between">
                   <span className="font-mono text-xs text-muted-foreground">{quote.quoteNumber}</span>
-                  <span
-                    className={`px-2 py-1 rounded-full text-xs font-medium border ${getStatusBadge(quote.status)}`}
-                  >
-                    {quote.status}
+                  <span className="inline-flex items-center gap-1.5">
+                    <span
+                      className={`px-2 py-1 rounded-full text-xs font-medium border ${getStatusBadge(quote.status)}`}
+                    >
+                      {quote.status}
+                    </span>
+                    {isQuoteExpired(quote) && (
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-semibold border bg-amber-500/20 text-amber-300 border-amber-500/40">
+                        <AlertTriangle className="w-3 h-3" />
+                        Expired
+                      </span>
+                    )}
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
@@ -990,17 +854,22 @@ export default function QuotesPanel({
                     </button>
                   )}
                   {quote.status === "DRAFT" && (
-                    <button onClick={() => handleMarkSent(quote)} className="p-1.5 rounded-lg hover:bg-primary/20 text-primary" title="Mark as Sent">
-                      <Send className="w-4 h-4" />
+                    <button onClick={() => handleMarkSent(quote)} className="p-1.5 rounded-lg hover:bg-primary/20 text-primary disabled:opacity-50" title="Mark as Sent" disabled={!!actionLoading[quote.id]}>
+                      {actionLoading[quote.id] === "send" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                     </button>
                   )}
                   {quote.status === "SENT" && (
                     <>
-                      <button onClick={() => handleAcceptQuote(quote)} className="p-1.5 rounded-lg hover:bg-green-500/20 text-green-400" title="Accept">
-                        <CheckCircle className="w-4 h-4" />
+                      <button
+                        onClick={() => handleAcceptQuote(quote)}
+                        className={`p-1.5 rounded-lg ${isQuoteExpired(quote) ? "opacity-40 cursor-not-allowed" : "hover:bg-green-500/20"} text-green-400 disabled:opacity-50`}
+                        title={isQuoteExpired(quote) ? "Cannot accept — quote has expired" : "Accept"}
+                        disabled={isQuoteExpired(quote) || !!actionLoading[quote.id]}
+                      >
+                        {actionLoading[quote.id] === "accept" ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
                       </button>
-                      <button onClick={() => handleRejectQuote(quote)} className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400" title="Reject">
-                        <X className="w-4 h-4" />
+                      <button onClick={() => handleRejectQuote(quote)} className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400 disabled:opacity-50" title="Reject" disabled={!!actionLoading[quote.id]}>
+                        {actionLoading[quote.id] === "reject" ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
                       </button>
                     </>
                   )}
@@ -1012,8 +881,8 @@ export default function QuotesPanel({
                       Convert
                     </button>
                   )}
-                  <button onClick={() => handleDeleteQuote(quote)} className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400 ml-auto" title="Delete">
-                    <Trash2 className="w-4 h-4" />
+                  <button onClick={() => handleDeleteQuote(quote)} className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400 ml-auto disabled:opacity-50" title="Delete" disabled={!!actionLoading[quote.id]}>
+                    {actionLoading[quote.id] === "delete" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
@@ -1077,7 +946,7 @@ export default function QuotesPanel({
                     }
                   >
                     <option value="PERCENT">Percentage (%)</option>
-                    <option value="FIXED">Fixed (TTD)</option>
+                    <option value="FIXED">Fixed ({currency})</option>
                   </select>
                 </div>
                 <div>

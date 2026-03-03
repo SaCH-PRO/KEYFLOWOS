@@ -1,4 +1,5 @@
 import type { Contact } from "@/lib/client";
+import { formatCurrency } from "@/lib/currency";
 
 export type Period = "7d" | "30d" | "90d" | "custom";
 
@@ -15,8 +16,8 @@ export const PERIOD_MS: Record<Exclude<Period, "custom">, number> = {
   "90d": 90 * 86_400_000,
 };
 
-export function formatTTD(value: number): string {
-  return `TTD ${value.toLocaleString("en-TT", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+export function formatTTD(value: number, currency: string = "TTD"): string {
+  return formatCurrency(value, currency);
 }
 
 export const stagger = {

@@ -40,6 +40,7 @@ interface RecurringPanelProps {
   contacts: Contact[];
   products: Product[];
   triggerNew?: number;
+  currency?: string;
 }
 
 const FREQUENCIES = [
@@ -50,7 +51,7 @@ const FREQUENCIES = [
   { value: "YEARLY", label: "Yearly" },
 ];
 
-export default function RecurringPanel({ businessId, contacts, products, triggerNew }: RecurringPanelProps) {
+export default function RecurringPanel({ businessId, contacts, products, triggerNew, currency = "TTD" }: RecurringPanelProps) {
   const [recurring, setRecurring] = useState<RecurringInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [showBuilder, setShowBuilder] = useState(false);
@@ -358,7 +359,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
                         <input className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm" type="number" min="1" value={item.quantity} onChange={(e) => updateItem(item.id, "quantity", e.target.value)} />
                       </div>
                       <div className="col-span-6 md:col-span-2">
-                        <label className="text-xs text-muted-foreground mb-1 block">Price (TTD)</label>
+                        <label className="text-xs text-muted-foreground mb-1 block">Price ({currency})</label>
                         <input className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm" type="number" step="0.01" value={item.unitPrice} onChange={(e) => updateItem(item.id, "unitPrice", e.target.value)} placeholder="0.00" />
                       </div>
                       <div className="col-span-2 md:col-span-1 flex justify-center">
@@ -382,20 +383,20 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
                   <label className="text-xs text-muted-foreground mb-1.5 block">Discount Type</label>
                   <select className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm" value={form.discountType} onChange={(e) => setForm((f) => ({ ...f, discountType: e.target.value as "PERCENT" | "FIXED" }))}>
                     <option value="PERCENT">Percentage (%)</option>
-                    <option value="FIXED">Fixed (TTD)</option>
+                    <option value="FIXED">Fixed ({currency})</option>
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 block">Discount {form.discountType === "PERCENT" ? "(%)" : "(TTD)"}</label>
+                  <label className="text-xs text-muted-foreground mb-1.5 block">Discount {form.discountType === "PERCENT" ? "(%)" : `(${currency})`}</label>
                   <input type="number" step="0.01" min="0" className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm" value={form.discountValue} onChange={(e) => setForm((f) => ({ ...f, discountValue: e.target.value }))} placeholder="0" />
                 </div>
               </div>
 
               <div className="p-3 rounded-xl bg-muted/30 border border-border/40 space-y-1 max-w-xs ml-auto">
-                <div className="flex justify-between text-sm text-muted-foreground"><span>Subtotal:</span><span>TTD {totals.subtotal.toFixed(2)}</span></div>
-                {totals.tax > 0 && <div className="flex justify-between text-sm text-muted-foreground"><span>Tax:</span><span>TTD {totals.tax.toFixed(2)}</span></div>}
-                {totals.discount > 0 && <div className="flex justify-between text-sm text-emerald-400"><span>Discount:</span><span>-TTD {totals.discount.toFixed(2)}</span></div>}
-                <div className="flex justify-between text-sm font-bold text-primary border-t border-border/40 pt-1"><span>Per Invoice:</span><span>TTD {totals.total.toFixed(2)}</span></div>
+                <div className="flex justify-between text-sm text-muted-foreground"><span>Subtotal:</span><span>{currency} {totals.subtotal.toFixed(2)}</span></div>
+                {totals.tax > 0 && <div className="flex justify-between text-sm text-muted-foreground"><span>Tax:</span><span>{currency} {totals.tax.toFixed(2)}</span></div>}
+                {totals.discount > 0 && <div className="flex justify-between text-sm text-emerald-400"><span>Discount:</span><span>-{currency} {totals.discount.toFixed(2)}</span></div>}
+                <div className="flex justify-between text-sm font-bold text-primary border-t border-border/40 pt-1"><span>Per Invoice:</span><span>{currency} {totals.total.toFixed(2)}</span></div>
               </div>
 
               <div>

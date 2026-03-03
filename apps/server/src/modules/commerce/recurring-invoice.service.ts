@@ -1,13 +1,31 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Injectable()
-export class RecurringInvoiceService {
+export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RecurringInvoiceService.name);
+  private intervalRef: ReturnType<typeof setInterval> | null = null;
+  private running = false;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
+
+  onModuleInit() {
+    this.intervalRef = setInterval(() => {
+      this.processRecurringInvoices().catch((err) => {
+        this.logger.error('Error processing recurring invoices', err);
+      });
+    }, 60 * 60 * 1000);
+    this.logger.log('Recurring invoice scheduler started (hourly interval)');
+  }
+
+  onModuleDestroy() {
+    if (this.intervalRef) {
+      clearInterval(this.intervalRef);
+      this.intervalRef = null;
+    }
+  }
 
   listRecurringInvoices(businessId: string) {
     return this.prisma.client.recurringInvoice.findMany({

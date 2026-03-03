@@ -28,6 +28,7 @@ interface ProductCardProps {
   deleteConfirm: string | null;
   setDeleteConfirm: (id: string | null) => void;
   cachedImage?: string;
+  currency?: string;
 }
 
 const CATEGORY_STYLES: Record<string, { badge: string; accent: string; border: string }> = {
@@ -63,6 +64,7 @@ export function ProductCard({
   deleteConfirm,
   setDeleteConfirm,
   cachedImage,
+  currency = "TTD",
 }: ProductCardProps) {
   const isInactive = product.isActive === false;
   const isDeleting = deleteConfirm === product.id;
@@ -118,11 +120,11 @@ export function ProductCard({
           )}
         </div>
 
-        <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+        <div className="absolute top-2 right-2 flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity duration-200">
           {onDuplicate && (
             <button
               onClick={(e) => { e.stopPropagation(); onDuplicate(product); }}
-              className="w-7 h-7 rounded-lg flex items-center justify-center bg-background/80 backdrop-blur-sm text-muted-foreground hover:text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/10 transition-colors border border-border/40"
+              className="w-7 h-7 rounded-lg flex items-center justify-center bg-background/80 backdrop-blur-sm text-muted-foreground hover:text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/10 focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/50 focus:ring-offset-2 focus:ring-offset-background transition-colors border border-border/40"
               title="Duplicate product"
             >
               <Copy className="w-3.5 h-3.5" />
@@ -130,14 +132,14 @@ export function ProductCard({
           )}
           <button
             onClick={(e) => { e.stopPropagation(); onEdit(product); }}
-            className="w-7 h-7 rounded-lg flex items-center justify-center bg-background/80 backdrop-blur-sm text-muted-foreground hover:text-foreground hover:bg-background transition-colors border border-border/40"
+            className="w-7 h-7 rounded-lg flex items-center justify-center bg-background/80 backdrop-blur-sm text-muted-foreground hover:text-foreground hover:bg-background focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/50 focus:ring-offset-2 focus:ring-offset-background transition-colors border border-border/40"
             title="Edit product"
           >
             <Pencil className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); setDeleteConfirm(product.id); }}
-            className="w-7 h-7 rounded-lg flex items-center justify-center bg-background/80 backdrop-blur-sm text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors border border-border/40"
+            className="w-7 h-7 rounded-lg flex items-center justify-center bg-background/80 backdrop-blur-sm text-muted-foreground hover:text-red-400 hover:bg-red-500/10 focus:outline-none focus:ring-2 focus:ring-red-500/50 focus:ring-offset-2 focus:ring-offset-background transition-colors border border-border/40"
             title="Delete product"
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -195,7 +197,7 @@ export function ProductCard({
               {product.price.toLocaleString("en-TT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
             <span className="text-[10px] text-muted-foreground/50 font-medium">
-              {product.currency ?? "TTD"}
+              {product.currency ?? currency}
             </span>
           </div>
           <button

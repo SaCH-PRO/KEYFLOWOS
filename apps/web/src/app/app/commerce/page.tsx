@@ -42,7 +42,7 @@ export default function CommercePage() {
   const [slideDirection, setSlideDirection] = useState(0);
   const COMMERCE_TAB_KEYS = TABS.map((t) => t.key);
   const {
-    businessId, workspaceLoading, workspaceError, tab, handleTabChange: rawTabChange,
+    businessId, businessCurrency, workspaceLoading, workspaceError, tab, handleTabChange: rawTabChange,
     products, invoices, quotes, contacts, loading, error,
     showGuide, handleToggleGuide, handleNewItem,
     gmailStatus, loadingGmail, paymentGateways,
@@ -255,7 +255,7 @@ export default function CommercePage() {
           {tab === "dashboard" && (
             <motion.div key="dashboard" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
               <div className="space-y-4">
-                <CommerceDashboard businessId={businessId} invoices={invoices} quotes={quotes} products={products} />
+                <CommerceDashboard businessId={businessId} invoices={invoices} quotes={quotes} products={products} currency={businessCurrency} />
                 <ConnectionStatus
                   gmailStatus={gmailStatus}
                   paymentGateways={paymentGateways}
@@ -284,6 +284,7 @@ export default function CommercePage() {
                 businessId={state.businessId}
                 onProductCreated={(p) => { state.setProducts((prev: Product[]) => [p, ...prev]); }}
                 onBulkAction={state.refreshProducts}
+                currency={businessCurrency}
               />
             </motion.div>
           )}
@@ -307,6 +308,7 @@ export default function CommercePage() {
                 setQuotes={state.setQuotes}
                 setInvoices={state.setInvoices}
                 setTab={state.setTab}
+                currency={businessCurrency}
               />
             </motion.div>
           )}
@@ -328,6 +330,7 @@ export default function CommercePage() {
                 setProducts={state.setProducts}
                 setInvoices={state.setInvoices}
                 gmailStatus={gmailStatus}
+                currency={businessCurrency}
               />
             </motion.div>
           )}
@@ -338,6 +341,7 @@ export default function CommercePage() {
                 contacts={contacts}
                 products={products}
                 triggerNew={state.recurringTriggerNew}
+                currency={businessCurrency}
               />
             </motion.div>
           )}
@@ -359,6 +363,7 @@ export default function CommercePage() {
         onSave={state.handleSaveProduct}
         onFileSelect={state.handleFileSelect}
         onRemoveImage={state.removeImage}
+        currency={businessCurrency}
       />
 
       <ConfirmDialog

@@ -23,6 +23,26 @@ export type InvoiceLineItem = {
   addToCatalog?: boolean;
 };
 
+export type QuoteFormState = {
+  contactId: string;
+  expiryDate: string;
+  items: InvoiceLineItem[];
+  taxRate: string;
+  discountType: "PERCENT" | "FIXED";
+  discountValue: string;
+  notes: string;
+};
+
+export type InvoiceFormState = {
+  contactId: string;
+  dueDate: string;
+  items: InvoiceLineItem[];
+  taxRate: string;
+  discountType: "PERCENT" | "FIXED";
+  discountValue: string;
+  notes: string;
+};
+
 export const CATEGORIES = [
   { value: "SERVICE", label: "Service" },
   { value: "PRODUCT", label: "Product" },
