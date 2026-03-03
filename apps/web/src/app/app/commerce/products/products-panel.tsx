@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Package, Plus, X, Eye, EyeOff, ArrowUpDown, CheckSquare, Square, Trash2, ToggleLeft, ToggleRight, ChevronDown } from "lucide-react";
+import { Search, Package, Plus, X, Eye, EyeOff, ArrowUpDown, CheckSquare, Square, Trash2, ToggleLeft, ToggleRight, ChevronDown, Upload } from "lucide-react";
 import { toast } from "sonner";
 import type { Product } from "@/lib/client";
 import { bulkUpdateProducts } from "@/lib/client";
@@ -18,6 +18,7 @@ interface ProductsPanelProps {
   onDuplicate?: (product: Product) => void;
   onToggleActive?: (product: Product) => void;
   onAdd: () => void;
+  onImport?: () => void;
   deleteConfirm: string | null;
   setDeleteConfirm: (id: string | null) => void;
   cachedImages?: Record<string, string>;
@@ -53,6 +54,7 @@ export function ProductsPanel({
   onDuplicate,
   onToggleActive,
   onAdd,
+  onImport,
   deleteConfirm,
   setDeleteConfirm,
   cachedImages = {},
@@ -269,6 +271,17 @@ export function ProductsPanel({
             )}
           </button>
 
+          {onImport && (
+            <button
+              onClick={onImport}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg bg-white/5 border border-white/10 text-muted-foreground hover:bg-white/10 hover:text-white transition-all shrink-0"
+              aria-label="Import products"
+            >
+              <Upload className="w-3 h-3" />
+              <span className="hidden sm:inline">Import</span>
+            </button>
+          )}
+
           <button
             onClick={onAdd}
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg bg-gradient-to-r from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all shrink-0"
@@ -389,12 +402,22 @@ export function ProductsPanel({
               <p className="text-sm text-muted-foreground max-w-sm mb-4">
                 Create your first product or service to start building invoices and quotes.
               </p>
-              <button
-                onClick={onAdd}
-                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-xl bg-gradient-to-r from-[hsl(var(--kf-accent1))]/20 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/30 hover:to-[hsl(var(--kf-accent1))]/10 border border-[hsl(var(--kf-accent1))]/20 transition-all"
-              >
-                <Plus className="w-4 h-4" /> Add Product
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={onAdd}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-xl bg-gradient-to-r from-[hsl(var(--kf-accent1))]/20 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/30 hover:to-[hsl(var(--kf-accent1))]/10 border border-[hsl(var(--kf-accent1))]/20 transition-all"
+                >
+                  <Plus className="w-4 h-4" /> Add Product
+                </button>
+                {onImport && (
+                  <button
+                    onClick={onImport}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-xl bg-white/5 border border-white/10 text-muted-foreground hover:bg-white/10 hover:text-white transition-all"
+                  >
+                    <Upload className="w-4 h-4" /> Import
+                  </button>
+                )}
+              </div>
             </>
           )}
         </div>

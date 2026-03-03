@@ -4045,4 +4045,67 @@ export async function commerceAiExecute(action: string, params: Record<string, a
   });
 }
 
+export type ExtractedProduct = {
+  name?: string;
+  description?: string;
+  price?: number;
+  currency?: string;
+  category?: 'SERVICE' | 'PRODUCT' | 'PACKAGE';
+  duration?: number;
+  sku?: string;
+};
+
+export async function scanProductImage(imageFile: File, businessId?: string, currency?: string): Promise<ApiResult<{ extracted: ExtractedProduct[]; count: number }>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const formData = new FormData();
+  formData.append('image', imageFile);
+  if (currency) formData.append('currency', currency);
+  try {
+    const headers = getAuthHeaders();
+    const res = await fetch(`${API_BASE}/commerce/businesses/${encodeURIComponent(bid)}/products/import/scan`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json) {
+      const message = (json as any)?.message ?? res.statusText;
+      return { data: null, error: message };
+    }
+    return { data: json, error: null };
+  } catch (error: unknown) {
+    return { data: null, error: error instanceof Error ? error.message : 'Network error' };
+  }
+}
+
+export async function importProductsFile(file: File, businessId?: string): Promise<ApiResult<{ extracted: ExtractedProduct[]; count: number }>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    const headers = getAuthHeaders();
+    const res = await fetch(`${API_BASE}/commerce/businesses/${encodeURIComponent(bid)}/products/import/file`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json) {
+      const message = (json as any)?.message ?? res.statusText;
+      return { data: null, error: message };
+    }
+    return { data: json, error: null };
+  } catch (error: unknown) {
+    return { data: null, error: error instanceof Error ? error.message : 'Network error' };
+  }
+}
+
+export async function confirmProductImport(products: Partial<ExtractedProduct>[], businessId?: string): Promise<ApiResult<{ created: Product[]; count: number }>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{ created: Product[]; count: number }>({
+    path: `/commerce/businesses/${encodeURIComponent(bid)}/products/import/confirm`,
+    body: { products },
+  });
+}
+
 export { DEFAULT_BUSINESS_ID };

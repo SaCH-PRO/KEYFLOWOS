@@ -1,7 +1,9 @@
-import { Body, Controller, Delete, ForbiddenException, Get, Inject, Logger, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Inject, Logger, Param, Patch, Post, Query, Req, Res, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { CommerceService } from './commerce.service';
 import { RecurringInvoiceService } from './recurring-invoice.service';
+import { CommerceVisionService } from './commerce-vision.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -23,6 +25,7 @@ export class CommerceController {
     @Inject(ReceiptService) private readonly receipts: ReceiptService,
     @Inject(GmailService) private readonly gmail: GmailService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(CommerceVisionService) private readonly vision: CommerceVisionService,
   ) {}
 
   private async verifyBusinessAccess(userId: string, businessId: string) {
@@ -94,6 +97,74 @@ export class CommerceController {
     @Param('productId') productId: string,
   ) {
     return this.commerce.deleteProduct(businessId, productId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/products/import/scan')
+  @UseInterceptors(FileInterceptor('image'))
+  async scanProductImage(
+    @Param('businessId') businessId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: { currency?: string },
+  ) {
+    if (!file) throw new ForbiddenException('Image file is required');
+    const base64 = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+    const extracted = await this.vision.extractProductsFromImage(base64, body.currency || 'TTD');
+    return { extracted, count: extracted.length };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/products/import/file')
+  @UseInterceptors(FileInterceptor('file'))
+  async importProductsFile(
+    @Param('businessId') businessId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new ForbiddenException('File is required');
+    const content = file.buffer.toString('utf-8');
+    const extracted = this.vision.parseProductsCsv(content);
+    return { extracted, count: extracted.length };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/products/import/confirm')
+  async confirmImportedProducts(
+    @Param('businessId') businessId: string,
+    @Body() body: { products: CreateProductDto[] },
+  ) {
+    if (!body.products || !Array.isArray(body.products) || body.products.length === 0) {
+      throw new ForbiddenException('At least one product is required');
+    }
+    if (body.products.length > 200) {
+      throw new ForbiddenException('Maximum 200 products per import');
+    }
+    const validProducts = body.products.filter(p => p.name && typeof p.name === 'string' && p.name.trim().length > 0);
+    if (validProducts.length === 0) {
+      throw new ForbiddenException('No valid products found — each product must have a name');
+    }
+    const created = [];
+    const errors: string[] = [];
+    for (const p of validProducts) {
+      try {
+        const result = await this.commerce.createProduct({
+          businessId,
+          name: p.name.trim(),
+          price: typeof p.price === 'number' && p.price >= 0 ? p.price : 0,
+          currency: p.currency || 'TTD',
+          description: p.description || null,
+          category: p.category || 'PRODUCT',
+          duration: p.duration || null,
+          imageUrl: p.imageUrl || null,
+          sku: p.sku || null,
+          isActive: p.isActive ?? true,
+        });
+        created.push(result);
+      } catch (err) {
+        this.logger.warn(`Failed to import product "${p.name}":`, err);
+        errors.push(p.name);
+      }
+    }
+    return { created, count: created.length, errors, totalAttempted: validProducts.length };
   }
 
   @UseGuards(AuthGuard)
