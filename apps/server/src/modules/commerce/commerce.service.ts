@@ -112,6 +112,24 @@ export class CommerceService {
     return result;
   }
 
+  async bulkUpdateProducts(businessId: string, ids: string[], action: 'activate' | 'deactivate' | 'delete') {
+    const where = { id: { in: ids }, businessId, deletedAt: null };
+    let result: { count: number };
+    switch (action) {
+      case 'activate':
+        result = await this.prisma.client.product.updateMany({ where, data: { isActive: true } });
+        break;
+      case 'deactivate':
+        result = await this.prisma.client.product.updateMany({ where, data: { isActive: false } });
+        break;
+      case 'delete':
+        result = await this.prisma.client.product.updateMany({ where, data: { deletedAt: new Date() } });
+        break;
+    }
+    this.statsCache.invalidateCache(businessId);
+    return { updated: result.count, action };
+  }
+
   async createInvoiceForService(businessId: string, contactId: string, service: Service) {
     const total = service.price;
     return this.prisma.client.invoice.create({
