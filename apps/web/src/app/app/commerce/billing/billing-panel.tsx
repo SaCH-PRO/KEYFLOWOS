@@ -10,7 +10,9 @@ import {
   Clock,
   AlertTriangle,
   TrendingUp,
+  Mail,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useModuleEmit } from "@/hooks/use-module-events";
 import type { Invoice, Quote, Contact, Product } from "@/lib/client";
 import { fetchCommerceStats, fetchRecurringInvoices, type CommerceStats } from "@/lib/client";
@@ -82,6 +84,7 @@ export function BillingPanel({
   prefillItems,
   onPrefillApplied,
 }: BillingPanelProps) {
+  const router = useRouter();
   const [segment, setSegment] = useState<BillingSegment>(defaultSegment);
   const [slideDir, setSlideDir] = useState(0);
   const emitEvent = useModuleEmit();
@@ -145,7 +148,7 @@ export function BillingPanel({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-1.5 sm:gap-2">
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
         {kpiChips.map((chip) => (
           <div
             key={chip.label}
@@ -156,6 +159,30 @@ export function BillingPanel({
             <span className="text-[10px] sm:text-[11px] text-muted-foreground/50 hidden sm:inline">{chip.label}</span>
           </div>
         ))}
+
+        <button
+          onClick={() => router.push("/app/settings/connections")}
+          className={`
+            ml-auto inline-flex items-center gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border text-sm transition-all duration-200
+            ${gmailStatus?.connected
+              ? "border-green-500/30 bg-green-500/[0.06] hover:bg-green-500/10"
+              : "border-amber-500/30 bg-amber-500/[0.06] hover:bg-amber-500/10"
+            }
+          `}
+          title={gmailStatus?.connected ? `Email connected: ${gmailStatus.email}` : "Email not connected — click to set up"}
+          aria-label={gmailStatus?.connected ? `Email connected via ${gmailStatus.email}` : "Connect email account"}
+        >
+          <span className="relative flex h-2 w-2">
+            {gmailStatus?.connected && (
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
+            )}
+            <span className={`relative inline-flex h-2 w-2 rounded-full ${gmailStatus?.connected ? "bg-green-500" : "bg-amber-500"}`} />
+          </span>
+          <Mail className={`w-3.5 h-3.5 ${gmailStatus?.connected ? "text-green-400" : "text-amber-400"}`} />
+          <span className={`text-[10px] sm:text-[11px] hidden sm:inline ${gmailStatus?.connected ? "text-green-300" : "text-amber-300"}`}>
+            {gmailStatus?.connected ? "Email" : "Connect"}
+          </span>
+        </button>
       </div>
 
       <div className="flex gap-1 p-1 rounded-xl bg-white/[0.04] border border-border/40 backdrop-blur-sm">
