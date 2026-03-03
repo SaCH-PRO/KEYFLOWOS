@@ -3,10 +3,9 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Search, Package, Plus, X, Eye, EyeOff, ArrowUpDown, CheckSquare, Square, Trash2, ToggleLeft, ToggleRight, ChevronDown } from "lucide-react";
-import { Button } from "@keyflow/ui";
 import { toast } from "sonner";
 import type { Product } from "@/lib/client";
-import { bulkUpdateProducts, createProduct } from "@/lib/client";
+import { bulkUpdateProducts } from "@/lib/client";
 import { ProductCard } from "./product-card";
 
 interface ProductsPanelProps {
@@ -23,7 +22,6 @@ interface ProductsPanelProps {
   setDeleteConfirm: (id: string | null) => void;
   cachedImages?: Record<string, string>;
   businessId?: string | null;
-  onProductCreated?: (product: Product) => void;
   onBulkAction?: () => void;
   currency?: string;
 }
@@ -45,12 +43,6 @@ const SORT_OPTIONS: { value: SortOption; label: string }[] = [
   { value: "price-desc", label: "Price High → Low" },
 ];
 
-const QUICK_ADD_CATEGORIES = [
-  { value: "SERVICE", label: "Service" },
-  { value: "PRODUCT", label: "Product" },
-  { value: "PACKAGE", label: "Package" },
-] as const;
-
 export function ProductsPanel({
   products,
   loading,
@@ -65,7 +57,6 @@ export function ProductsPanel({
   setDeleteConfirm,
   cachedImages = {},
   businessId,
-  onProductCreated,
   onBulkAction,
   currency = "TTD",
 }: ProductsPanelProps) {
@@ -76,12 +67,6 @@ export function ProductsPanel({
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
-  const [showQuickAdd, setShowQuickAdd] = useState(false);
-  const [quickName, setQuickName] = useState("");
-  const [quickPrice, setQuickPrice] = useState("");
-  const [quickCategory, setQuickCategory] = useState<string>("SERVICE");
-  const [quickAdding, setQuickAdding] = useState(false);
-  const quickNameRef = useRef<HTMLInputElement>(null);
   const sortRef = useRef<HTMLDivElement>(null);
   const sortMenuRef = useRef<HTMLDivElement>(null);
 
@@ -184,28 +169,6 @@ export function ProductsPanel({
     onBulkAction?.();
   }, [businessId, selectedIds, onBulkAction]);
 
-  const handleQuickAdd = useCallback(async () => {
-    if (!businessId || !quickName.trim() || !quickPrice.trim()) return;
-    const price = parseFloat(quickPrice);
-    if (isNaN(price) || price <= 0) { toast.error("Enter a valid price"); return; }
-    setQuickAdding(true);
-    const { data, error } = await createProduct({
-      businessId,
-      name: quickName.trim(),
-      price,
-      category: quickCategory,
-    });
-    setQuickAdding(false);
-    if (error) { toast.error(error); return; }
-    if (data) {
-      onProductCreated?.(data);
-      setQuickName("");
-      setQuickPrice("");
-      toast.success(`"${data.name}" added`);
-      quickNameRef.current?.focus();
-    }
-  }, [businessId, quickName, quickPrice, quickCategory, onProductCreated]);
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -307,25 +270,12 @@ export function ProductsPanel({
           </button>
 
           <button
-            onClick={() => { setShowQuickAdd(!showQuickAdd); if (!showQuickAdd) setTimeout(() => quickNameRef.current?.focus(), 100); }}
-            className={`inline-flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium rounded-lg transition-all shrink-0 ${
-              showQuickAdd
-                ? "bg-[hsl(var(--kf-accent1))]/20 text-[hsl(var(--kf-accent1))] border border-[hsl(var(--kf-accent1))]/30"
-                : "bg-gradient-to-r from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10"
-            }`}
-            aria-label="Quick add product"
+            onClick={onAdd}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg bg-gradient-to-r from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all shrink-0"
+            aria-label="Add product"
           >
             <Plus className="w-3 h-3" />
-            <span className="hidden sm:inline">Quick Add</span>
-          </button>
-
-          <button
-            onClick={onAdd}
-            className="inline-flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] text-muted-foreground/60 hover:text-foreground transition-all shrink-0"
-            aria-label="Full product form"
-          >
-            <Package className="w-3 h-3" />
-            <span className="hidden sm:inline">Full Form</span>
+            <span className="hidden sm:inline">Add Product</span>
           </button>
         </div>
 
@@ -357,69 +307,6 @@ export function ProductsPanel({
           </span>
         </div>
       </div>
-
-      <AnimatePresence>
-        {showQuickAdd && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden"
-          >
-            <div className="rounded-2xl border border-[hsl(var(--kf-accent1))]/20 bg-card p-3 sm:p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <Plus className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
-                <span className="text-xs font-semibold text-[hsl(var(--kf-accent1))]">Quick Add</span>
-                <span className="text-[10px] text-muted-foreground/50">Press Enter to add instantly</span>
-              </div>
-              <form
-                onSubmit={(e) => { e.preventDefault(); handleQuickAdd(); }}
-                className="flex items-center gap-2"
-              >
-                <input
-                  ref={quickNameRef}
-                  type="text"
-                  placeholder="Product name..."
-                  value={quickName}
-                  onChange={(e) => setQuickName(e.target.value)}
-                  className="flex-1 min-w-0 px-3 py-2 text-sm bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 placeholder:text-muted-foreground/40"
-                  disabled={quickAdding}
-                />
-                <div className="relative w-28 shrink-0">
-                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground/50">{currency}</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="0.00"
-                    value={quickPrice}
-                    onChange={(e) => setQuickPrice(e.target.value)}
-                    className="w-full pl-9 pr-2 py-2 text-sm bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 placeholder:text-muted-foreground/40"
-                    disabled={quickAdding}
-                  />
-                </div>
-                <select
-                  value={quickCategory}
-                  onChange={(e) => setQuickCategory(e.target.value)}
-                  className="w-24 shrink-0 px-2 py-2 text-sm bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40"
-                  disabled={quickAdding}
-                >
-                  {QUICK_ADD_CATEGORIES.map((c) => (
-                    <option key={c.value} value={c.value}>{c.label}</option>
-                  ))}
-                </select>
-                <button
-                  type="submit"
-                  disabled={quickAdding || !quickName.trim() || !quickPrice.trim()}
-                  className="px-3 py-2 text-sm font-medium rounded-lg bg-[hsl(var(--kf-accent1))] text-white hover:bg-[hsl(var(--kf-accent1))]/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all shrink-0"
-                >
-                  {quickAdding ? "..." : "Add"}
-                </button>
-              </form>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       <AnimatePresence>
         {bulkMode && selectedIds.size > 0 && (
@@ -468,8 +355,8 @@ export function ProductsPanel({
       </AnimatePresence>
 
       {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {Array.from({ length: 6 }).map((_, i) => (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          {Array.from({ length: 8 }).map((_, i) => (
             <div
               key={i}
               className="rounded-xl border border-border/50 bg-card p-4 animate-pulse space-y-3"
@@ -502,17 +389,12 @@ export function ProductsPanel({
               <p className="text-sm text-muted-foreground max-w-sm mb-4">
                 Create your first product or service to start building invoices and quotes.
               </p>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => { setShowQuickAdd(true); setTimeout(() => quickNameRef.current?.focus(), 100); }}
-                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-xl bg-gradient-to-r from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all"
-                >
-                  <Plus className="w-4 h-4" /> Quick Add
-                </button>
-                <Button onClick={onAdd} className="gap-2">
-                  <Package className="w-4 h-4" /> Full Form
-                </Button>
-              </div>
+              <button
+                onClick={onAdd}
+                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-xl bg-gradient-to-r from-[hsl(var(--kf-accent1))]/20 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/30 hover:to-[hsl(var(--kf-accent1))]/10 border border-[hsl(var(--kf-accent1))]/20 transition-all"
+              >
+                <Plus className="w-4 h-4" /> Add Product
+              </button>
             </>
           )}
         </div>
@@ -533,7 +415,7 @@ export function ProductsPanel({
               </button>
             </div>
           )}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
             <AnimatePresence mode="popLayout">
               {filteredProducts.map((product) => (
                 <div key={product.id} className="relative">

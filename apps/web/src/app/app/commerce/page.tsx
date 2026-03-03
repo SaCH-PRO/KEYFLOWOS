@@ -25,7 +25,7 @@ import { renderCommerceToolResult } from "./components/commerce-tool-results";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useModuleEmit } from "@/hooks/use-module-events";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
-import { commerceAiExecute, type Product } from "@/lib/client";
+import { commerceAiExecute } from "@/lib/client";
 
 const TABS = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
@@ -282,7 +282,6 @@ export default function CommercePage() {
                 setDeleteConfirm={state.setDeleteConfirm}
                 cachedImages={state.cachedImages}
                 businessId={state.businessId}
-                onProductCreated={(p) => { state.setProducts((prev: Product[]) => [p, ...prev]); }}
                 onBulkAction={state.refreshProducts}
                 currency={businessCurrency}
               />
@@ -361,6 +360,7 @@ export default function CommercePage() {
         fileInputRef={state.fileInputRef}
         onClose={state.closeProductForm}
         onSave={state.handleSaveProduct}
+        onSaveAndAddAnother={state.handleSaveAndAddAnother}
         onFileSelect={state.handleFileSelect}
         onRemoveImage={state.removeImage}
         currency={businessCurrency}

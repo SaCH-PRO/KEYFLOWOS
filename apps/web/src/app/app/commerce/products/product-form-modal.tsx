@@ -79,6 +79,7 @@ interface ProductFormModalProps {
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   onClose: () => void;
   onSave: () => void;
+  onSaveAndAddAnother?: () => void;
   onFileSelect: (file: File) => void;
   onRemoveImage: () => void;
   currency?: string;
@@ -97,6 +98,7 @@ export const ProductFormModal = React.memo(function ProductFormModal({
   fileInputRef,
   onClose,
   onSave,
+  onSaveAndAddAnother,
   onFileSelect,
   onRemoveImage,
   currency = "TTD",
@@ -237,7 +239,7 @@ export const ProductFormModal = React.memo(function ProductFormModal({
                           >
                             {cat.icon}
                             <span className="text-xs font-semibold">{cat.label}</span>
-                            <span className="text-[9px] opacity-60 leading-tight">
+                            <span className="text-[10px] opacity-60 leading-tight">
                               {cat.description}
                             </span>
                           </button>
@@ -491,13 +493,24 @@ export const ProductFormModal = React.memo(function ProductFormModal({
               </section>
             </div>
 
-            <div className="p-5 border-t border-border/50 flex justify-end gap-2">
+            <div className="p-5 border-t border-border/50 flex items-center justify-between gap-2">
               <Button variant="outline" onClick={onClose}>
                 Cancel
               </Button>
-              <Button onClick={onSave}>
-                {editingProductId ? "Update Product" : "Create Product"}
-              </Button>
+              <div className="flex items-center gap-2">
+                {!editingProductId && onSaveAndAddAnother && (
+                  <button
+                    type="button"
+                    onClick={onSaveAndAddAnother}
+                    className="px-4 py-2 text-sm font-medium rounded-xl border border-[hsl(var(--kf-accent1))]/30 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/10 transition-colors"
+                  >
+                    Save & Add Another
+                  </button>
+                )}
+                <Button onClick={onSave}>
+                  {editingProductId ? "Update Product" : "Create Product"}
+                </Button>
+              </div>
             </div>
           </motion.div>
         </motion.div>

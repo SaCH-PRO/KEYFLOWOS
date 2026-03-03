@@ -243,7 +243,7 @@ const fallbackInvoices: Invoice[] = [
   { id: "inv_2", invoiceNumber: "INV-002", status: "SENT", total: 600, currency: "TTD", contact: { firstName: "John", email: "john@example.com" } },
 ];
 
-async function apiGet<T>(path: string, schema: z.ZodSchema<T>, fallback?: T, opts?: { signal?: AbortSignal }): Promise<ApiResult<T>> {
+async function apiGet<T>(path: string, schema?: z.ZodSchema<T>, fallback?: T, opts?: { signal?: AbortSignal }): Promise<ApiResult<T>> {
   try {
     const sep = path.includes("?") ? "&" : "?";
     const url = `${API_BASE}${path}${sep}_t=${Date.now()}`;
@@ -256,6 +256,9 @@ async function apiGet<T>(path: string, schema: z.ZodSchema<T>, fallback?: T, opt
       }
       console.warn(`[apiGet] ${path} failed:`, message);
       return { data: fallback ?? null, error: message };
+    }
+    if (!schema) {
+      return { data: json as T, error: null };
     }
     const parsed = schema.safeParse(json);
     if (!parsed.success) {
