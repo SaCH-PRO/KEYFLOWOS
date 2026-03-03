@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { motion, AnimatePresence } from "framer-motion";
@@ -38,6 +38,7 @@ import {
   Contact,
 } from "@/lib/client";
 import { apiDelete } from "@/lib/api";
+import { useModuleEmit } from "@/hooks/use-module-events";
 import { ContactSelect } from "@/components/contacts";
 import {
   INVOICE_STATUS_FILTERS,
@@ -49,6 +50,7 @@ import {
   getDueDateFromTerms,
 } from "../components/commerce-types";
 import LineItemsEditor from "../components/line-items-editor";
+import { useInvoiceForm } from "../hooks/use-invoice-form";
 
 interface InvoicesPanelProps {
   invoices: Invoice[];
@@ -56,13 +58,7 @@ interface InvoicesPanelProps {
   products: Product[];
   businessId: string | null;
   loading: boolean;
-  showInvoiceBuilder: boolean;
-  setShowInvoiceBuilder: (show: boolean) => void;
-  editingInvoiceId: string | null;
-  setEditingInvoiceId: (id: string | null) => void;
-  invoiceForm: InvoiceFormState;
-  setInvoiceForm: React.Dispatch<React.SetStateAction<InvoiceFormState>>;
-  resetInvoiceForm: () => void;
+  triggerNew?: number;
   setProducts: React.Dispatch<React.SetStateAction<Product[]>>;
   setInvoices: React.Dispatch<React.SetStateAction<Invoice[]>>;
   gmailStatus: { connected: boolean; email: string | null } | null;
@@ -75,18 +71,31 @@ export default function InvoicesPanel({
   products,
   businessId,
   loading,
-  showInvoiceBuilder,
-  setShowInvoiceBuilder,
-  editingInvoiceId,
-  setEditingInvoiceId,
-  invoiceForm,
-  setInvoiceForm,
-  resetInvoiceForm,
+  triggerNew,
   setProducts,
   setInvoices,
   gmailStatus,
   currency = "TTD",
 }: InvoicesPanelProps) {
+  const {
+    showInvoiceBuilder,
+    setShowInvoiceBuilder,
+    editingInvoiceId,
+    setEditingInvoiceId,
+    invoiceForm,
+    setInvoiceForm,
+    resetInvoiceForm,
+  } = useInvoiceForm();
+  const emitEvent = useModuleEmit();
+
+  const prevTriggerNew = useRef(triggerNew);
+  useEffect(() => {
+    if (triggerNew !== undefined && triggerNew !== prevTriggerNew.current) {
+      prevTriggerNew.current = triggerNew;
+      resetInvoiceForm();
+      setShowInvoiceBuilder(true);
+    }
+  }, [triggerNew, resetInvoiceForm, setShowInvoiceBuilder]);
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<string>("ALL");
   const [invoiceSearch, setInvoiceSearch] = useState("");
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
@@ -322,6 +331,7 @@ export default function InvoicesPanel({
         resetInvoiceForm();
         setShowInvoiceBuilder(false);
         toast.success("Invoice created");
+        emitEvent("billing:invoice_created", "commerce", { invoiceId: data.id });
       }
     }
   }
@@ -334,6 +344,7 @@ export default function InvoicesPanel({
       if (!error && data) {
         setInvoices((prev) => prev.map((i) => (i.id === invoiceId ? { ...i, status: "SENT" } : i)));
         toast.success("Invoice sent");
+        emitEvent("billing:invoice_sent", "commerce", { invoiceId });
       } else {
         toast.error(error ?? "Failed to send invoice");
       }
@@ -357,6 +368,7 @@ export default function InvoicesPanel({
           );
         }
         toast.success("Invoice marked as paid");
+        emitEvent("billing:invoice_paid", "commerce", { invoiceId, total: data.total });
       } else {
         toast.error(error ?? "Failed to mark paid");
       }

@@ -93,7 +93,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
   },
   {
     id: "quotes",
-    tab: "quotes",
+    tab: "billing",
     label: "Quotations",
     icon: FileText,
     color: "hsl(200 80% 55%)",
@@ -130,7 +130,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
   },
   {
     id: "invoices",
-    tab: "invoices",
+    tab: "billing",
     label: "Invoices",
     icon: CreditCard,
     color: "hsl(142 76% 36%)",
@@ -167,7 +167,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
   },
   {
     id: "recurring",
-    tab: "recurring",
+    tab: "billing",
     label: "Recurring Billing",
     icon: RefreshCw,
     color: "hsl(var(--kf-accent2))",

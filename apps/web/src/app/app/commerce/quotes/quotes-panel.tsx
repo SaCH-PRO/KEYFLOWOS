@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { motion, AnimatePresence } from "framer-motion";
@@ -47,6 +47,8 @@ import {
   generateItemId,
 } from "../components/commerce-types";
 import LineItemsEditor from "../components/line-items-editor";
+import { useQuoteForm } from "../hooks/use-quote-form";
+import { useModuleEmit } from "@/hooks/use-module-events";
 
 interface QuotesPanelProps {
   quotes: Quote[];
@@ -55,17 +57,11 @@ interface QuotesPanelProps {
   businessId: string | null;
   loading: boolean;
   gmailStatus: { connected: boolean; email: string | null } | null;
-  showQuoteBuilder: boolean;
-  setShowQuoteBuilder: (show: boolean) => void;
-  editingQuoteId: string | null;
-  setEditingQuoteId: (id: string | null) => void;
-  quoteForm: QuoteFormState;
-  setQuoteForm: React.Dispatch<React.SetStateAction<QuoteFormState>>;
-  resetQuoteForm: () => void;
   setProducts: React.Dispatch<React.SetStateAction<Product[]>>;
   setQuotes: React.Dispatch<React.SetStateAction<Quote[]>>;
   setInvoices: React.Dispatch<React.SetStateAction<Invoice[]>>;
-  setTab: (tab: "products" | "quotes" | "invoices") => void;
+  triggerNew?: number;
+  onSwitchToInvoices?: () => void;
   currency?: string;
 }
 
@@ -76,19 +72,32 @@ export default function QuotesPanel({
   businessId,
   loading,
   gmailStatus,
-  showQuoteBuilder,
-  setShowQuoteBuilder,
-  editingQuoteId,
-  setEditingQuoteId,
-  quoteForm,
-  setQuoteForm,
-  resetQuoteForm,
   setProducts,
   setQuotes,
   setInvoices,
-  setTab,
+  triggerNew,
+  onSwitchToInvoices,
   currency = "TTD",
 }: QuotesPanelProps) {
+  const {
+    showQuoteBuilder,
+    setShowQuoteBuilder,
+    editingQuoteId,
+    setEditingQuoteId,
+    quoteForm,
+    setQuoteForm,
+    resetQuoteForm,
+    handleNewQuote,
+  } = useQuoteForm();
+  const emitEvent = useModuleEmit();
+
+  const triggerRef = useRef(triggerNew);
+  useEffect(() => {
+    if (triggerNew !== undefined && triggerNew !== triggerRef.current) {
+      triggerRef.current = triggerNew;
+      handleNewQuote();
+    }
+  }, [triggerNew, handleNewQuote]);
   const [quoteSearch, setQuoteSearch] = useState("");
   const [quoteStatusFilter, setQuoteStatusFilter] = useState<string>("ALL");
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
@@ -280,6 +289,7 @@ export default function QuotesPanel({
       if (res.data) {
         setQuotes((q) => [res.data!, ...q]);
         toast.success("Quote created");
+        emitEvent("billing:quote_created", "commerce", { quoteId: res.data.id });
       } else if (res.error) {
         toast.error("Failed to create quote");
       }
@@ -316,6 +326,7 @@ export default function QuotesPanel({
       if (res.data) {
         setQuotes((q) => q.map((qItem) => (qItem.id === quote.id ? res.data! : qItem)));
         setSelectedQuote(res.data);
+        emitEvent("billing:quote_accepted", "commerce", { quoteId: quote.id });
         if (autoConvertToInvoice) {
           setConvertForm({
             taxRate: String(res.data.taxRate ?? 12.5),
@@ -428,8 +439,9 @@ export default function QuotesPanel({
       setShowConvertModal(false);
       setSelectedQuote(null);
       setConvertForm({ taxRate: "12.5", discountType: "PERCENT", discountValue: "", notes: "", dueDate: "" });
-      setTab("invoices");
+      onSwitchToInvoices?.();
       toast.success("Quote converted to invoice");
+      emitEvent("billing:quote_converted", "commerce", { quoteId: selectedQuote.id, invoiceId: res.data.id });
     } else if (res.error) {
       toast.error("Failed to convert quote");
     }

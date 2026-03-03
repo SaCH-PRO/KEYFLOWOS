@@ -18,8 +18,6 @@ import { getAllProductImages } from "@/lib/image-store";
 import { Tab } from "../components/commerce-types";
 
 import { useProducts } from "./use-products";
-import { useQuoteForm } from "./use-quote-form";
-import { useInvoiceForm } from "./use-invoice-form";
 import { useCommerceIntegrations } from "./use-commerce-integrations";
 
 export function useCommerce() {
@@ -37,12 +35,13 @@ export function useCommerce() {
   const [error, setError] = useState<string | null>(null);
 
   const [showGuide, setShowGuide] = useState(false);
-  const [recurringTriggerNew, setRecurringTriggerNew] = useState(0);
   const [cachedImages, setCachedImages] = useState<Record<string, string>>({});
 
+  const [triggerNewQuote, setTriggerNewQuote] = useState(0);
+  const [triggerNewInvoice, setTriggerNewInvoice] = useState(0);
+  const [triggerNewSchedule, setTriggerNewSchedule] = useState(0);
+
   const productHook = useProducts(businessId, setProducts, cachedImages, setCachedImages);
-  const quoteHook = useQuoteForm();
-  const invoiceHook = useInvoiceForm();
   const integrations = useCommerceIntegrations(businessId);
 
   useEffect(() => {
@@ -123,16 +122,16 @@ export function useCommerce() {
   const handleToggleGuide = useCallback(() => setShowGuide((prev) => !prev), []);
   const handleTabChange = useCallback((t: string) => setTab(t as Tab), []);
 
-  const handleNewRecurring = useCallback(() => {
-    setRecurringTriggerNew((n) => n + 1);
-  }, []);
+  const [activeBillingSegment, setActiveBillingSegment] = useState<"quotes" | "invoices" | "schedules">("invoices");
 
   const handleNewItem = useCallback(() => {
     if (tab === "products") productHook.openAddProduct();
-    else if (tab === "quotes") quoteHook.handleNewQuote();
-    else if (tab === "invoices") invoiceHook.handleNewInvoice();
-    else if (tab === "recurring") handleNewRecurring();
-  }, [tab, productHook.openAddProduct, quoteHook.handleNewQuote, invoiceHook.handleNewInvoice, handleNewRecurring]);
+    else if (tab === "billing") {
+      if (activeBillingSegment === "quotes") setTriggerNewQuote((n) => n + 1);
+      else if (activeBillingSegment === "schedules") setTriggerNewSchedule((n) => n + 1);
+      else setTriggerNewInvoice((n) => n + 1);
+    }
+  }, [tab, activeBillingSegment, productHook.openAddProduct]);
 
   return {
     businessId,
@@ -152,18 +151,23 @@ export function useCommerce() {
     loading,
     error,
 
-    ...quoteHook,
     ...integrations,
     ...productHook,
 
     refreshProducts,
     showGuide,
     handleToggleGuide,
-    recurringTriggerNew,
 
-    ...invoiceHook,
+    triggerNewQuote,
+    setTriggerNewQuote,
+    triggerNewInvoice,
+    setTriggerNewInvoice,
+    triggerNewSchedule,
+    setTriggerNewSchedule,
 
-    handleNewRecurring,
+    activeBillingSegment,
+    setActiveBillingSegment,
+
     handleNewItem,
   };
 }

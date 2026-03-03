@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { CreditCard, Package, FileText, RefreshCw } from "lucide-react";
+import { CreditCard, Package } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
@@ -11,13 +11,10 @@ import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { useCommerce } from "./hooks/use-commerce";
 import { CommerceGuide } from "./components/commerce-guide";
-import { CommerceKpiStrip } from "./components/commerce-kpi-strip";
 import { ProductsPanel } from "./products/products-panel";
 import { ProductFormModal } from "./products/product-form-modal";
 import { ProductImportModal } from "./products/product-import-modal";
-import QuotesPanel from "./quotes/quotes-panel";
-import InvoicesPanel from "./invoices/invoices-panel";
-import RecurringPanel from "./recurring/recurring-panel";
+import { BillingPanel } from "./billing/billing-panel";
 import { CommerceAiSearchBar, type CommerceCommand } from "./components/commerce-ai-search-bar";
 import { useCommerceAiHub } from "./hooks/use-commerce-ai-hub";
 import { renderCommerceToolResult } from "./components/commerce-tool-results";
@@ -28,9 +25,7 @@ import { commerceAiExecute } from "@/lib/client";
 
 const TABS = [
   { key: "products", label: "Products", icon: Package },
-  { key: "quotes", label: "Quotations", icon: FileText },
-  { key: "invoices", label: "Invoices", icon: CreditCard },
-  { key: "recurring", label: "Recurring", icon: RefreshCw },
+  { key: "billing", label: "Billing", icon: CreditCard },
 ];
 
 export default function CommercePage() {
@@ -66,7 +61,7 @@ export default function CommercePage() {
       commerceAi.updateCommerceContext({
         businessId,
         activeView: tab,
-        itemCount: tab === "products" ? products.length : tab === "invoices" ? invoices.length : quotes.length,
+        itemCount: tab === "products" ? products.length : invoices.length + quotes.length,
       });
     }
   }, [businessId, tab, products.length, invoices.length, quotes.length, commerceAi.updateCommerceContext]);
@@ -74,13 +69,13 @@ export default function CommercePage() {
   const handleCommerceCommand = useCallback((cmd: CommerceCommand) => {
     switch (cmd.type) {
       case "create_invoice":
-        state.setTab("invoices");
-        state.setShowInvoiceBuilder(true);
+        state.setTab("billing");
+        state.setTriggerNewInvoice((n) => n + 1);
         toast.success("Opening invoice builder...");
         break;
       case "create_quote":
-        state.setTab("quotes");
-        state.setShowQuoteBuilder(true);
+        state.setTab("billing");
+        state.setTriggerNewQuote((n) => n + 1);
         toast.success("Opening quote builder...");
         break;
       case "mark_paid":
@@ -91,7 +86,7 @@ export default function CommercePage() {
             else toast.error(res.data?.error ?? "Failed to mark as paid");
           });
         } else {
-          state.setTab("invoices");
+          state.setTab("billing");
           toast.info("Select an invoice to mark as paid");
         }
         break;
@@ -99,7 +94,7 @@ export default function CommercePage() {
         if (cmd.invoiceId) {
           toast.success("Sending payment reminder...");
         } else {
-          state.setTab("invoices");
+          state.setTab("billing");
           toast.info("Select an invoice to send a reminder");
         }
         break;
@@ -111,24 +106,24 @@ export default function CommercePage() {
             else toast.error(res.data?.error ?? "Failed to void invoice");
           });
         } else {
-          state.setTab("invoices");
+          state.setTab("billing");
           toast.info("Select an invoice to void");
         }
         break;
       case "view_invoice":
-        state.setTab("invoices");
-        toast.success("Switching to invoices...");
+        state.setTab("billing");
+        toast.success("Switching to billing...");
         break;
       case "switch_tab":
-        handleTabChange(cmd.tab);
-        toast.success(`Switched to ${cmd.tab}`);
+        handleTabChange(cmd.tab === "quotes" || cmd.tab === "invoices" || cmd.tab === "recurring" ? "billing" : cmd.tab);
+        toast.success(`Switched to ${cmd.tab === "quotes" || cmd.tab === "invoices" || cmd.tab === "recurring" ? "billing" : cmd.tab}`);
         break;
       case "filter_status":
-        state.setTab("invoices");
+        state.setTab("billing");
         toast.success(`Filtering by ${cmd.status}`);
         break;
       case "show_overdue":
-        state.setTab("invoices");
+        state.setTab("billing");
         toast.success("Showing overdue invoices");
         break;
       case "generate_ai_analysis":
@@ -156,15 +151,14 @@ export default function CommercePage() {
 
   const handleAiAssistantAction = useCallback((actionKey: string) => {
     if (actionKey.startsWith("filter_status:")) {
-      const status = actionKey.split(":")[1];
-      state.setTab("invoices");
-      toast.success(`Filtering by ${status}`);
+      state.setTab("billing");
+      toast.success(`Filtering by ${actionKey.split(":")[1]}`);
     } else if (actionKey.startsWith("switch_tab:")) {
       const t = actionKey.split(":")[1];
-      handleTabChange(t);
+      handleTabChange(t === "quotes" || t === "invoices" || t === "recurring" ? "billing" : t);
     } else if (actionKey.startsWith("send_reminders:")) {
-      state.setTab("invoices");
-      toast.success("Opening invoices for reminders...");
+      state.setTab("billing");
+      toast.success("Opening billing for reminders...");
     }
   }, [state, handleTabChange]);
 
@@ -180,9 +174,7 @@ export default function CommercePage() {
         { key: "n", description: "New item", action: () => handleNewItem() },
         { key: "/", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('[data-commerce-ai-search]'); el?.focus(); } },
         { key: "1", description: "Products tab", action: () => handleTabChange("products") },
-        { key: "2", description: "Quotes tab", action: () => handleTabChange("quotes") },
-        { key: "3", description: "Invoices tab", action: () => handleTabChange("invoices") },
-        { key: "4", description: "Recurring tab", action: () => handleTabChange("recurring") },
+        { key: "2", description: "Billing tab", action: () => handleTabChange("billing") },
         { key: "a", shift: true, description: "Toggle AI Hub", action: () => commerceAi.togglePanel() },
         { key: "Escape", description: "Close panels", action: () => { if (commerceAi.hubMode === "tool-result") commerceAi.clearToolResult(); else if (commerceAi.panelOpen) commerceAi.setOpen(false); } },
       ],
@@ -210,7 +202,7 @@ export default function CommercePage() {
       <PageHeader
         icon={CreditCard}
         title="Commerce"
-        subtitle="Manage products, invoices, quotes and billing"
+        subtitle="Manage products and billing"
         titleExtra={
           <CommerceGuide
             isOpen={showGuide}
@@ -233,14 +225,6 @@ export default function CommercePage() {
         )}
       </AnimatePresence>
       <AiHubTrigger ai={commerceAi} moduleName="Commerce" />
-
-      <CommerceKpiStrip
-        businessId={businessId}
-        invoices={invoices}
-        quotes={quotes}
-        products={products}
-        currency={businessCurrency}
-      />
 
       <TabNav
         tabs={TABS}
@@ -278,60 +262,24 @@ export default function CommercePage() {
               />
             </motion.div>
           )}
-          {tab === "quotes" && (
-            <motion.div key="quotes" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
-              <QuotesPanel
-                quotes={quotes}
+          {tab === "billing" && (
+            <motion.div key="billing" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
+              <BillingPanel
+                businessId={businessId}
                 contacts={contacts}
                 products={products}
-                businessId={businessId}
+                quotes={quotes}
+                invoices={invoices}
                 loading={loading}
                 gmailStatus={gmailStatus}
-                showQuoteBuilder={state.showQuoteBuilder}
-                setShowQuoteBuilder={state.setShowQuoteBuilder}
-                editingQuoteId={state.editingQuoteId}
-                setEditingQuoteId={state.setEditingQuoteId}
-                quoteForm={state.quoteForm}
-                setQuoteForm={state.setQuoteForm}
-                resetQuoteForm={state.resetQuoteForm}
+                currency={businessCurrency}
                 setProducts={state.setProducts}
                 setQuotes={state.setQuotes}
                 setInvoices={state.setInvoices}
-                setTab={state.setTab}
-                currency={businessCurrency}
-              />
-            </motion.div>
-          )}
-          {tab === "invoices" && (
-            <motion.div key="invoices" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
-              <InvoicesPanel
-                invoices={invoices}
-                contacts={contacts}
-                products={products}
-                businessId={businessId}
-                loading={loading}
-                showInvoiceBuilder={state.showInvoiceBuilder}
-                setShowInvoiceBuilder={state.setShowInvoiceBuilder}
-                editingInvoiceId={state.editingInvoiceId}
-                setEditingInvoiceId={state.setEditingInvoiceId}
-                invoiceForm={state.invoiceForm}
-                setInvoiceForm={state.setInvoiceForm}
-                resetInvoiceForm={state.resetInvoiceForm}
-                setProducts={state.setProducts}
-                setInvoices={state.setInvoices}
-                gmailStatus={gmailStatus}
-                currency={businessCurrency}
-              />
-            </motion.div>
-          )}
-          {tab === "recurring" && (
-            <motion.div key="recurring" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
-              <RecurringPanel
-                businessId={businessId}
-                contacts={contacts}
-                products={products}
-                triggerNew={state.recurringTriggerNew}
-                currency={businessCurrency}
+                triggerNewQuote={state.triggerNewQuote}
+                triggerNewInvoice={state.triggerNewInvoice}
+                triggerNewSchedule={state.triggerNewSchedule}
+                onSegmentChange={state.setActiveBillingSegment}
               />
             </motion.div>
           )}
