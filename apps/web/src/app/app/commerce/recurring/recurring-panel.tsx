@@ -34,6 +34,7 @@ import {
   CATEGORIES,
   generateItemId,
 } from "../components/commerce-types";
+import { useModuleEmit } from "@/hooks/use-module-events";
 
 interface RecurringPanelProps {
   businessId: string | null;
@@ -52,6 +53,7 @@ const FREQUENCIES = [
 ];
 
 export default function RecurringPanel({ businessId, contacts, products, triggerNew, currency = "TTD" }: RecurringPanelProps) {
+  const emitEvent = useModuleEmit();
   const [recurring, setRecurring] = useState<RecurringInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [showBuilder, setShowBuilder] = useState(false);
@@ -212,6 +214,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
         setShowBuilder(false);
         resetForm();
         toast.success("Recurring schedule created");
+        emitEvent("billing:schedule_created", "commerce", { scheduleId: res.data.id });
       } else {
         setError(res.error || "Failed to create");
         toast.error(res.error || "Failed to create schedule");
@@ -236,6 +239,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
     const res = await toggleRecurringInvoice(businessId, id);
     if (res.data) {
       setRecurring((prev) => prev.map((r) => (r.id === id ? res.data! : r)));
+      emitEvent("billing:schedule_toggled", "commerce", { scheduleId: id, active: res.data.active });
     }
   }
 
