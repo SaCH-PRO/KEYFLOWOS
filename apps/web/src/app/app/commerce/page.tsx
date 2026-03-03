@@ -313,6 +313,18 @@ export default function CommercePage() {
                 businessId={state.businessId}
                 onBulkAction={state.refreshProducts}
                 currency={businessCurrency}
+                onCreateQuote={(p) => {
+                  const items = [{ description: p.name, quantity: 1, unitPrice: p.price, total: p.price, productId: p.id }];
+                  prefillForContact("", "quotes", items);
+                  handleTabChange("billing");
+                }}
+                onCreateInvoice={(p) => {
+                  const items = [{ description: p.name, quantity: 1, unitPrice: p.price, total: p.price, productId: p.id }];
+                  prefillForContact("", "invoices", items);
+                  handleTabChange("billing");
+                }}
+                invoices={invoices}
+                quotes={quotes}
               />
             </motion.div>
           )}
