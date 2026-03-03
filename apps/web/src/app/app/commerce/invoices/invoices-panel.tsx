@@ -16,7 +16,6 @@ import {
   Trash2,
   Copy,
   Plus,
-  Minus,
   DollarSign,
   User,
   Calendar,
@@ -25,6 +24,7 @@ import {
   Mail,
   Clock,
   AlertTriangle,
+  Loader2,
 } from "lucide-react";
 import {
   createProduct,
@@ -37,16 +37,18 @@ import {
   Invoice,
   Contact,
 } from "@/lib/client";
+import { apiDelete } from "@/lib/api";
 import { ContactSelect } from "@/components/contacts";
 import {
   INVOICE_STATUS_FILTERS,
   InvoiceLineItem,
-  CATEGORIES,
+  InvoiceFormState,
   PAYMENT_TERMS,
   getStatusBadge,
   generateItemId,
   getDueDateFromTerms,
 } from "../components/commerce-types";
+import LineItemsEditor from "../components/line-items-editor";
 
 interface InvoicesPanelProps {
   invoices: Invoice[];
@@ -58,12 +60,13 @@ interface InvoicesPanelProps {
   setShowInvoiceBuilder: (show: boolean) => void;
   editingInvoiceId: string | null;
   setEditingInvoiceId: (id: string | null) => void;
-  invoiceForm: any;
-  setInvoiceForm: (fn: any) => void;
+  invoiceForm: InvoiceFormState;
+  setInvoiceForm: React.Dispatch<React.SetStateAction<InvoiceFormState>>;
   resetInvoiceForm: () => void;
   setProducts: React.Dispatch<React.SetStateAction<Product[]>>;
   setInvoices: React.Dispatch<React.SetStateAction<Invoice[]>>;
   gmailStatus: { connected: boolean; email: string | null } | null;
+  currency?: string;
 }
 
 export default function InvoicesPanel({
@@ -82,6 +85,7 @@ export default function InvoicesPanel({
   setProducts,
   setInvoices,
   gmailStatus,
+  currency = "TTD",
 }: InvoicesPanelProps) {
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<string>("ALL");
   const [invoiceSearch, setInvoiceSearch] = useState("");
@@ -93,6 +97,7 @@ export default function InvoicesPanel({
   const [emailForm, setEmailForm] = useState({ email: "", message: "" });
   const [sendingEmail, setSendingEmail] = useState(false);
   const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
+  const [actionLoading, setActionLoading] = useState<Record<string, string>>({});
 
   const statusCounts = useMemo(() => {
     const counts: Record<string, number> = { ALL: invoices.length, DRAFT: 0, SENT: 0, PAID: 0, OVERDUE: 0 };
@@ -322,57 +327,65 @@ export default function InvoicesPanel({
   }
 
   async function handleSendInvoice(invoiceId: string) {
-    const { data, error } = await updateInvoiceStatus(invoiceId, "SENT");
-    if (!error && data) {
-      setInvoices((prev) => prev.map((i) => (i.id === invoiceId ? { ...i, status: "SENT" } : i)));
-      toast.success("Invoice sent");
-    } else {
-      toast.error(error ?? "Failed to send invoice");
+    if (actionLoading[invoiceId]) return;
+    setActionLoading((prev) => ({ ...prev, [invoiceId]: "send" }));
+    try {
+      const { data, error } = await updateInvoiceStatus(invoiceId, "SENT");
+      if (!error && data) {
+        setInvoices((prev) => prev.map((i) => (i.id === invoiceId ? { ...i, status: "SENT" } : i)));
+        toast.success("Invoice sent");
+      } else {
+        toast.error(error ?? "Failed to send invoice");
+      }
+    } finally {
+      setActionLoading((prev) => { const next = { ...prev }; delete next[invoiceId]; return next; });
     }
   }
 
   async function handleMarkPaid(invoiceId: string, inv: Invoice) {
-    const { data, error } = await markInvoicePaid(invoiceId);
-    if (!error && data) {
-      setInvoices((prev) => prev.map((i) => (i.id === invoiceId ? { ...i, status: data.status ?? "PAID" } : i)));
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(
-          new CustomEvent("kf:invoicePaid", {
-            detail: { invoiceNumber: data.invoiceNumber ?? inv.invoiceNumber, total: data.total, currency: data.currency, invoiceId },
-          })
-        );
+    if (actionLoading[invoiceId]) return;
+    setActionLoading((prev) => ({ ...prev, [invoiceId]: "paid" }));
+    try {
+      const { data, error } = await markInvoicePaid(invoiceId);
+      if (!error && data) {
+        setInvoices((prev) => prev.map((i) => (i.id === invoiceId ? { ...i, status: data.status ?? "PAID" } : i)));
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("kf:invoicePaid", {
+              detail: { invoiceNumber: data.invoiceNumber ?? inv.invoiceNumber, total: data.total, currency: data.currency, invoiceId },
+            })
+          );
+        }
+        toast.success("Invoice marked as paid");
+      } else {
+        toast.error(error ?? "Failed to mark paid");
       }
-      toast.success("Invoice marked as paid");
-    } else {
-      toast.error(error ?? "Failed to mark paid");
+    } finally {
+      setActionLoading((prev) => { const next = { ...prev }; delete next[invoiceId]; return next; });
     }
   }
 
   async function handleDeleteInvoice(invoiceId: string) {
-    if (!businessId) return;
+    if (!businessId || actionLoading[invoiceId]) return;
     setConfirmState({
       open: true,
       action: async () => {
+        setActionLoading((prev) => ({ ...prev, [invoiceId]: "delete" }));
         try {
-          const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || "https://keyflowos.replit.app"}/commerce/businesses/${businessId}/invoices/${invoiceId}`, {
-            method: "DELETE",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${localStorage.getItem("kf_token") || ""}`,
-            },
-          });
-          if (res.ok) {
+          const { error } = await apiDelete(`/commerce/businesses/${businessId}/invoices/${invoiceId}`);
+          if (!error) {
             setInvoices((prev) => prev.filter((i) => i.id !== invoiceId));
             if (selectedInvoice?.id === invoiceId) {
               setSelectedInvoice(null);
             }
             toast.success("Invoice deleted");
           } else {
-            const err = await res.json();
-            toast.error(err.message || "Failed to delete invoice");
+            toast.error(error || "Failed to delete invoice");
           }
         } catch (e) {
           toast.error("Failed to delete invoice");
+        } finally {
+          setActionLoading((prev) => { const next = { ...prev }; delete next[invoiceId]; return next; });
         }
       },
     });
@@ -477,220 +490,23 @@ export default function InvoicesPanel({
                 />
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-3 rounded-xl bg-muted/20 border border-border/40">
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 block">Tax Rate (%)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="100"
-                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                    value={invoiceForm.taxRate}
-                    onChange={(e) => setInvoiceForm((f: any) => ({ ...f, taxRate: e.target.value }))}
-                    placeholder="12.5"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 block">Discount Type</label>
-                  <select
-                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                    value={invoiceForm.discountType}
-                    onChange={(e) => setInvoiceForm((f: any) => ({ ...f, discountType: e.target.value as "PERCENT" | "FIXED" }))}
-                  >
-                    <option value="PERCENT">Percentage (%)</option>
-                    <option value="FIXED">Fixed Amount (TTD)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 block">
-                    Discount {invoiceForm.discountType === "PERCENT" ? "(%)" : "(TTD)"}
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                    value={invoiceForm.discountValue}
-                    onChange={(e) => setInvoiceForm((f: any) => ({ ...f, discountValue: e.target.value }))}
-                    placeholder="0"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 block">Notes (optional)</label>
-                  <input
-                    type="text"
-                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                    value={invoiceForm.notes}
-                    onChange={(e) => setInvoiceForm((f: any) => ({ ...f, notes: e.target.value }))}
-                    placeholder="Payment terms, thank you message..."
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium">Line Items</label>
-                  <Button variant="outline" onClick={addInvoiceItem} className="text-xs gap-1 px-2 py-1">
-                    <Plus className="w-3 h-3" /> Add Item
-                  </Button>
-                </div>
-
-                {invoiceForm.items.map((item: InvoiceLineItem) => (
-                  <motion.div
-                    key={item.id}
-                    initial={{ opacity: 0, y: -5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="p-3 rounded-xl bg-muted/30 border border-border/40 space-y-2"
-                  >
-                    <div className="grid grid-cols-12 gap-2 items-end">
-                      <div className="col-span-12 md:col-span-3">
-                        <label className="text-xs text-muted-foreground mb-1 block">Product/Service</label>
-                        <select
-                          className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                          value={item.productId}
-                          onChange={(e) => selectProductForItem(item.id, e.target.value)}
-                        >
-                          <option value="">Select item...</option>
-                          <option value="__NEW__">
-                            {item.isNewItem && item.newItemName ? `+ ${item.newItemName}` : "+ New item"}
-                          </option>
-                          {products.filter(p => p.isActive !== false).map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.name} - {p.currency} {Number(p.price).toLocaleString()}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      {item.isNewItem && (
-                        <>
-                          <div className="col-span-12 md:col-span-3">
-                            <label className="text-xs text-muted-foreground mb-1 block">Item Name</label>
-                            <input
-                              className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                              placeholder="Enter name for new item"
-                              value={item.newItemName || ""}
-                              onChange={(e) => updateInvoiceItem(item.id, "newItemName", e.target.value)}
-                            />
-                          </div>
-                          <div className="col-span-6 md:col-span-2">
-                            <label className="text-xs text-muted-foreground mb-1 block">Type</label>
-                            <select
-                              className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                              value={item.newItemCategory || "SERVICE"}
-                              onChange={(e) => updateInvoiceItem(item.id, "newItemCategory", e.target.value)}
-                            >
-                              {CATEGORIES.map((cat) => (
-                                <option key={cat.value} value={cat.value}>{cat.label}</option>
-                              ))}
-                            </select>
-                          </div>
-                        </>
-                      )}
-                      <div className={`col-span-12 ${item.isNewItem ? "md:col-span-4" : "md:col-span-4"}`}>
-                        <label className="text-xs text-muted-foreground mb-1 block">Description</label>
-                        <input
-                          className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                          placeholder={item.isNewItem ? "New item name/description" : "Item description"}
-                          value={item.description}
-                          onChange={(e) => updateInvoiceItem(item.id, "description", e.target.value)}
-                        />
-                      </div>
-                      <div className="col-span-4 md:col-span-2">
-                        <label className="text-xs text-muted-foreground mb-1 block">Qty</label>
-                        <input
-                          className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                          placeholder="1"
-                          type="number"
-                          min="1"
-                          value={item.quantity}
-                          onChange={(e) => updateInvoiceItem(item.id, "quantity", e.target.value)}
-                        />
-                      </div>
-                      <div className="col-span-6 md:col-span-2">
-                        <label className="text-xs text-muted-foreground mb-1 block">Price (TTD)</label>
-                        <input
-                          className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                          placeholder="0.00"
-                          type="number"
-                          step="0.01"
-                          value={item.unitPrice}
-                          onChange={(e) => updateInvoiceItem(item.id, "unitPrice", e.target.value)}
-                        />
-                      </div>
-                      <div className="col-span-2 md:col-span-1 flex justify-center">
-                        {invoiceForm.items.length > 1 && (
-                          <button
-                            onClick={() => removeInvoiceItem(item.id)}
-                            className="p-2 rounded-lg hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors"
-                            title="Remove item"
-                          >
-                            <Minus className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    {item.isNewItem && (
-                      <div className="flex items-center gap-2 pt-1 pl-1">
-                        <input
-                          type="checkbox"
-                          id={`addToCatalog_${item.id}`}
-                          checked={item.addToCatalog || false}
-                          onChange={(e) => updateInvoiceItem(item.id, "addToCatalog", e.target.checked)}
-                          className="w-4 h-4 rounded border-border text-primary focus:ring-primary/50"
-                        />
-                        <label htmlFor={`addToCatalog_${item.id}`} className="text-xs text-muted-foreground cursor-pointer">
-                          Add this item to my product catalog
-                        </label>
-                      </div>
-                    )}
-                  </motion.div>
-                ))}
-
-                <div className="pt-4 border-t border-border/40 space-y-2">
-                  {(() => {
-                    const subtotal = invoiceForm.items.reduce((sum: number, item: InvoiceLineItem) => {
-                      const qty = parseInt(item.quantity) || 0;
-                      const price = parseFloat(item.unitPrice) || 0;
-                      return sum + (qty * price);
-                    }, 0);
-                    const taxRate = parseFloat(invoiceForm.taxRate) || 0;
-                    const taxAmount = (subtotal * taxRate) / 100;
-                    const discountValue = parseFloat(invoiceForm.discountValue) || 0;
-                    const discountAmount = invoiceForm.discountType === "PERCENT"
-                      ? (subtotal * discountValue) / 100
-                      : discountValue;
-                    const total = subtotal + taxAmount - discountAmount;
-
-                    return (
-                      <div className="flex justify-end">
-                        <div className="text-sm space-y-1 min-w-[200px]">
-                          <div className="flex justify-between text-muted-foreground">
-                            <span>Subtotal:</span>
-                            <span>TTD {subtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                          </div>
-                          {taxRate > 0 && (
-                            <div className="flex justify-between text-muted-foreground">
-                              <span>Tax ({taxRate}%):</span>
-                              <span>TTD {taxAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                            </div>
-                          )}
-                          {discountAmount > 0 && (
-                            <div className="flex justify-between text-emerald-400">
-                              <span>Discount {invoiceForm.discountType === "PERCENT" ? `(${discountValue}%)` : ""}:</span>
-                              <span>-TTD {discountAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                            </div>
-                          )}
-                          <div className="flex justify-between font-bold text-primary border-t border-border/40 pt-1">
-                            <span>Total:</span>
-                            <span>TTD {total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
-              </div>
+              <LineItemsEditor
+                items={invoiceForm.items}
+                products={products.filter((p) => p.isActive !== false)}
+                onAddItem={addInvoiceItem}
+                onRemoveItem={removeInvoiceItem}
+                onUpdateItem={updateInvoiceItem}
+                onSelectProduct={selectProductForItem}
+                taxRate={invoiceForm.taxRate}
+                discountType={invoiceForm.discountType}
+                discountValue={invoiceForm.discountValue}
+                onTaxRateChange={(v) => setInvoiceForm((f: any) => ({ ...f, taxRate: v }))}
+                onDiscountTypeChange={(v) => setInvoiceForm((f: any) => ({ ...f, discountType: v }))}
+                onDiscountValueChange={(v) => setInvoiceForm((f: any) => ({ ...f, discountValue: v }))}
+                notes={invoiceForm.notes}
+                onNotesChange={(v) => setInvoiceForm((f: any) => ({ ...f, notes: v }))}
+                currency={currency}
+              />
 
               <div className="flex gap-2 pt-2">
                 <Button variant="outline" onClick={() => { setShowInvoiceBuilder(false); resetInvoiceForm(); setFormError(null); }}>
@@ -910,17 +726,17 @@ export default function InvoicesPanel({
                             </button>
                           )}
                           {inv.status === "DRAFT" && (
-                            <Button variant="outline" className="px-2.5 py-1 text-xs gap-1" onClick={() => handleSendInvoice(inv.id)}>
-                              <Send className="w-3 h-3" /> Send
+                            <Button variant="outline" className="px-2.5 py-1 text-xs gap-1" onClick={() => handleSendInvoice(inv.id)} disabled={!!actionLoading[inv.id]}>
+                              {actionLoading[inv.id] === "send" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />} Send
                             </Button>
                           )}
                           {(inv.status === "DRAFT" || inv.status === "SENT") && (
-                            <Button variant="outline" className="px-2.5 py-1 text-xs gap-1" onClick={() => handleMarkPaid(inv.id, inv)}>
-                              <CheckCircle className="w-3 h-3" /> Paid
+                            <Button variant="outline" className="px-2.5 py-1 text-xs gap-1" onClick={() => handleMarkPaid(inv.id, inv)} disabled={!!actionLoading[inv.id]}>
+                              {actionLoading[inv.id] === "paid" ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle className="w-3 h-3" />} Paid
                             </Button>
                           )}
-                          <button onClick={() => handleDeleteInvoice(inv.id)} className="p-1.5 rounded-lg hover:bg-red-500/20 transition-colors" title="Delete invoice">
-                            <Trash2 className="w-4 h-4 text-red-400 hover:text-red-300" />
+                          <button onClick={() => handleDeleteInvoice(inv.id)} className="p-1.5 rounded-lg hover:bg-red-500/20 transition-colors disabled:opacity-50" title="Delete invoice" disabled={!!actionLoading[inv.id]}>
+                            {actionLoading[inv.id] === "delete" ? <Loader2 className="w-4 h-4 text-red-400 animate-spin" /> : <Trash2 className="w-4 h-4 text-red-400 hover:text-red-300" />}
                           </button>
                         </div>
                       </td>
@@ -959,13 +775,17 @@ export default function InvoicesPanel({
                     <button onClick={() => duplicateInvoice(inv)} className="p-1.5 rounded-lg hover:bg-muted" title="Duplicate"><Copy className="w-4 h-4 text-muted-foreground" /></button>
                     <button onClick={() => shareViaWhatsApp(inv)} className="p-1.5 rounded-lg hover:bg-green-500/20" title="WhatsApp"><MessageCircle className="w-4 h-4 text-green-400" /></button>
                     {inv.status === "DRAFT" && (
-                      <button onClick={() => handleSendInvoice(inv.id)} className="px-2 py-1 rounded-lg bg-primary/20 text-primary text-xs font-medium">Send</button>
+                      <button onClick={() => handleSendInvoice(inv.id)} className="px-2 py-1 rounded-lg bg-primary/20 text-primary text-xs font-medium disabled:opacity-50 flex items-center gap-1" disabled={!!actionLoading[inv.id]}>
+                        {actionLoading[inv.id] === "send" ? <Loader2 className="w-3 h-3 animate-spin" /> : null} Send
+                      </button>
                     )}
                     {(inv.status === "DRAFT" || inv.status === "SENT") && (
-                      <button onClick={() => handleMarkPaid(inv.id, inv)} className="px-2 py-1 rounded-lg bg-emerald-500/20 text-emerald-400 text-xs font-medium">Paid</button>
+                      <button onClick={() => handleMarkPaid(inv.id, inv)} className="px-2 py-1 rounded-lg bg-emerald-500/20 text-emerald-400 text-xs font-medium disabled:opacity-50 flex items-center gap-1" disabled={!!actionLoading[inv.id]}>
+                        {actionLoading[inv.id] === "paid" ? <Loader2 className="w-3 h-3 animate-spin" /> : null} Paid
+                      </button>
                     )}
-                    <button onClick={() => handleDeleteInvoice(inv.id)} className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400 ml-auto" title="Delete">
-                      <Trash2 className="w-4 h-4" />
+                    <button onClick={() => handleDeleteInvoice(inv.id)} className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400 ml-auto disabled:opacity-50" title="Delete" disabled={!!actionLoading[inv.id]}>
+                      {actionLoading[inv.id] === "delete" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                     </button>
                   </div>
                 </div>
@@ -1095,13 +915,13 @@ export default function InvoicesPanel({
                       </Button>
                     )}
                     {selectedInvoice.status === "DRAFT" && (
-                      <Button className="gap-2 flex-1" onClick={() => { handleSendInvoice(selectedInvoice.id); setSelectedInvoice(null); }}>
-                        <Send className="w-4 h-4" /> Send Invoice
+                      <Button className="gap-2 flex-1" onClick={() => { handleSendInvoice(selectedInvoice.id); setSelectedInvoice(null); }} disabled={!!actionLoading[selectedInvoice.id]}>
+                        {actionLoading[selectedInvoice.id] === "send" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Send Invoice
                       </Button>
                     )}
                     {(selectedInvoice.status === "DRAFT" || selectedInvoice.status === "SENT") && (
-                      <Button className="gap-2 flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => { handleMarkPaid(selectedInvoice.id, selectedInvoice); setSelectedInvoice(null); }}>
-                        <CheckCircle className="w-4 h-4" /> Mark Paid
+                      <Button className="gap-2 flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => { handleMarkPaid(selectedInvoice.id, selectedInvoice); setSelectedInvoice(null); }} disabled={!!actionLoading[selectedInvoice.id]}>
+                        {actionLoading[selectedInvoice.id] === "paid" ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />} Mark Paid
                       </Button>
                     )}
                   </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Search, Package, Plus, X, Eye, EyeOff, ArrowUpDown, CheckSquare, Square, Trash2, ToggleLeft, ToggleRight, ChevronDown } from "lucide-react";
 import { Button } from "@keyflow/ui";
@@ -25,6 +25,7 @@ interface ProductsPanelProps {
   businessId?: string | null;
   onProductCreated?: (product: Product) => void;
   onBulkAction?: () => void;
+  currency?: string;
 }
 
 const CATEGORY_FILTERS = [
@@ -66,6 +67,7 @@ export function ProductsPanel({
   businessId,
   onProductCreated,
   onBulkAction,
+  currency = "TTD",
 }: ProductsPanelProps) {
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
   const [showInactive, setShowInactive] = useState(false);
@@ -81,6 +83,38 @@ export function ProductsPanel({
   const [quickAdding, setQuickAdding] = useState(false);
   const quickNameRef = useRef<HTMLInputElement>(null);
   const sortRef = useRef<HTMLDivElement>(null);
+  const sortMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showSortMenu) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setShowSortMenu(false);
+        return;
+      }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const buttons = sortMenuRef.current?.querySelectorAll("button");
+        if (!buttons || buttons.length === 0) return;
+        const focused = document.activeElement as HTMLElement;
+        const idx = Array.from(buttons).indexOf(focused as HTMLButtonElement);
+        let next = e.key === "ArrowDown" ? idx + 1 : idx - 1;
+        if (next < 0) next = buttons.length - 1;
+        if (next >= buttons.length) next = 0;
+        buttons[next].focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [showSortMenu]);
+
+  useEffect(() => {
+    if (!showSortMenu || !sortMenuRef.current) return;
+    const buttons = sortMenuRef.current.querySelectorAll("button");
+    if (buttons.length > 0) {
+      buttons[0].focus();
+    }
+  }, [showSortMenu]);
 
   const filteredProducts = useMemo(() => {
     let result = products;
@@ -205,20 +239,28 @@ export function ProductsPanel({
           <div className="relative" ref={sortRef}>
             <button
               onClick={() => setShowSortMenu(!showSortMenu)}
-              className={`inline-flex items-center gap-1 px-2 py-1.5 text-[11px] font-medium rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] transition-all shrink-0 ${sortBy !== "newest" ? "ring-1 ring-[hsl(var(--kf-accent1))]/30 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60"}`}
-              aria-label="Sort products"
+              className={`inline-flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] transition-all shrink-0 ${sortBy !== "newest" ? "ring-1 ring-[hsl(var(--kf-accent1))]/30 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60"}`}
+              aria-label={`Sort products: currently sorted by ${SORT_OPTIONS.find(o => o.value === sortBy)?.label || "newest"}`}
+              aria-expanded={showSortMenu}
+              aria-haspopup="listbox"
             >
               <ArrowUpDown className="w-3 h-3" />
+              <span className="hidden sm:inline max-w-[60px] truncate">
+                {SORT_OPTIONS.find(o => o.value === sortBy)?.label}
+              </span>
               <ChevronDown className="w-2.5 h-2.5" />
             </button>
             <AnimatePresence>
               {showSortMenu && (
                 <motion.div
+                  ref={sortMenuRef}
                   initial={{ opacity: 0, y: -4, scale: 0.95 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -4, scale: 0.95 }}
                   transition={{ duration: 0.15 }}
                   className="absolute right-0 top-full mt-1 w-44 rounded-xl border border-border/50 bg-card shadow-xl z-20 py-1 overflow-hidden"
+                  role="listbox"
+                  aria-label="Sort options"
                 >
                   {SORT_OPTIONS.map((opt) => (
                     <button
@@ -229,6 +271,8 @@ export function ProductsPanel({
                           ? "bg-white/[0.08] text-[hsl(var(--kf-accent1))]"
                           : "text-muted-foreground hover:bg-white/[0.04] hover:text-foreground"
                       }`}
+                      role="option"
+                      aria-selected={sortBy === opt.value}
                     >
                       {opt.label}
                     </button>
@@ -342,7 +386,7 @@ export function ProductsPanel({
                   disabled={quickAdding}
                 />
                 <div className="relative w-28 shrink-0">
-                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground/50">TTD</span>
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground/50">{currency}</span>
                   <input
                     type="number"
                     step="0.01"
@@ -515,6 +559,7 @@ export function ProductsPanel({
                     deleteConfirm={deleteConfirm}
                     setDeleteConfirm={setDeleteConfirm}
                     cachedImage={cachedImages[product.id]}
+                    currency={currency}
                   />
                 </div>
               ))}

@@ -13,22 +13,14 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { Invoice, Quote, Product, fetchCommerceStats, type CommerceStats } from "@/lib/client";
+import { formatCurrency, formatCurrencyCompact } from "@/lib/currency";
 
 interface CommerceDashboardProps {
   businessId: string | null;
   invoices: Invoice[];
   quotes: Quote[];
   products: Product[];
-}
-
-function formatTTD(value: number): string {
-  return `TTD ${value.toLocaleString("en-TT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function formatTTDCompact(value: number): string {
-  if (value >= 1000000) return `TTD ${(value / 1000000).toFixed(1)}M`;
-  if (value >= 1000) return `TTD ${(value / 1000).toFixed(1)}k`;
-  return `TTD ${value.toFixed(0)}`;
+  currency?: string;
 }
 
 const container = {
@@ -82,7 +74,7 @@ function computeClientStats(invoices: Invoice[], quotes: Quote[], products: Prod
   };
 }
 
-export default function CommerceDashboard({ businessId, invoices, quotes, products }: CommerceDashboardProps) {
+export default function CommerceDashboard({ businessId, invoices, quotes, products, currency = "TTD" }: CommerceDashboardProps) {
   const [serverStats, setServerStats] = useState<CommerceStats | null>(null);
 
   useEffect(() => {
@@ -122,8 +114,8 @@ export default function CommerceDashboard({ businessId, invoices, quotes, produc
     {
       label: "Revenue",
       mobileLabel: "Revenue",
-      value: formatTTD(stats.totalRevenue),
-      mobileValue: formatTTDCompact(stats.totalRevenue),
+      value: formatCurrency(stats.totalRevenue, currency),
+      mobileValue: formatCurrencyCompact(stats.totalRevenue, currency),
       icon: DollarSign,
       color: "#10b981",
       glow: "shadow-emerald-500/10",
@@ -131,8 +123,8 @@ export default function CommerceDashboard({ businessId, invoices, quotes, produc
     {
       label: "Outstanding",
       mobileLabel: "Owed",
-      value: formatTTD(stats.outstanding),
-      mobileValue: formatTTDCompact(stats.outstanding),
+      value: formatCurrency(stats.outstanding, currency),
+      mobileValue: formatCurrencyCompact(stats.outstanding, currency),
       icon: Clock,
       color: "#f59e0b",
       glow: "shadow-amber-500/10",
@@ -140,8 +132,8 @@ export default function CommerceDashboard({ businessId, invoices, quotes, produc
     {
       label: "Overdue",
       mobileLabel: "Overdue",
-      value: stats.overdueCount > 0 ? formatTTD(stats.overdueAmount) : "None",
-      mobileValue: stats.overdueCount > 0 ? formatTTDCompact(stats.overdueAmount) : "—",
+      value: stats.overdueCount > 0 ? formatCurrency(stats.overdueAmount, currency) : "None",
+      mobileValue: stats.overdueCount > 0 ? formatCurrencyCompact(stats.overdueAmount, currency) : "—",
       subtitle: stats.overdueCount > 0 ? `${stats.overdueCount} invoice${stats.overdueCount !== 1 ? "s" : ""}` : "All clear",
       icon: AlertTriangle,
       color: stats.overdueCount > 0 ? "#ef4444" : "#6b7280",
@@ -150,8 +142,8 @@ export default function CommerceDashboard({ businessId, invoices, quotes, produc
     {
       label: "Paid This Month",
       mobileLabel: "Monthly",
-      value: formatTTD(stats.paidThisMonthAmount),
-      mobileValue: formatTTDCompact(stats.paidThisMonthAmount),
+      value: formatCurrency(stats.paidThisMonthAmount, currency),
+      mobileValue: formatCurrencyCompact(stats.paidThisMonthAmount, currency),
       subtitle: stats.paidThisMonthCount > 0 ? `${stats.paidThisMonthCount} invoice${stats.paidThisMonthCount !== 1 ? "s" : ""}` : undefined,
       icon: CheckCircle,
       color: "#14b8a6",

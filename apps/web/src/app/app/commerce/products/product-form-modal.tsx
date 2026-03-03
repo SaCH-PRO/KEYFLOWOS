@@ -81,6 +81,7 @@ interface ProductFormModalProps {
   onSave: () => void;
   onFileSelect: (file: File) => void;
   onRemoveImage: () => void;
+  currency?: string;
 }
 
 export const ProductFormModal = React.memo(function ProductFormModal({
@@ -98,16 +99,21 @@ export const ProductFormModal = React.memo(function ProductFormModal({
   onSave,
   onFileSelect,
   onRemoveImage,
+  currency = "TTD",
 }: ProductFormModalProps) {
   const formattedPrice = useMemo(() => {
     const num = parseFloat(productForm.price);
     if (isNaN(num) || num <= 0) return null;
-    return new Intl.NumberFormat("en-TT", {
-      style: "currency",
-      currency: "TTD",
-      minimumFractionDigits: 2,
-    }).format(num);
-  }, [productForm.price]);
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency,
+        minimumFractionDigits: 2,
+      }).format(num);
+    } catch {
+      return `${currency} ${num.toFixed(2)}`;
+    }
+  }, [productForm.price, currency]);
 
   const generateSku = useCallback(() => {
     const prefixMap: Record<string, string> = {
@@ -250,7 +256,7 @@ export const ProductFormModal = React.memo(function ProductFormModal({
                 <div className="space-y-3">
                   <div>
                     <label className="text-[11px] font-medium text-muted-foreground/70 mb-1.5 block">
-                      Price (TTD) *
+                      Price ({currency}) *
                     </label>
                     <div className="relative">
                       <input

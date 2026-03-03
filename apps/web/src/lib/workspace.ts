@@ -19,6 +19,7 @@ export interface CachedBusiness {
   onboardingComplete?: boolean;
   primaryColor?: string | null;
   secondaryColor?: string | null;
+  currency?: string | null;
 }
 
 export interface CachedUser {
