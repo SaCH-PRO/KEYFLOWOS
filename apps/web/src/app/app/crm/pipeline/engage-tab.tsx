@@ -330,6 +330,61 @@ const ProgressCard = React.memo(function ProgressCard({
   );
 });
 
+function FilterDropdown({
+  label,
+  icon: Icon,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  icon: typeof Filter;
+  options: { value: string; label: string }[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const activeLabel = options.find((o) => o.value === value)?.label ?? label;
+  const isFiltered = value !== "all";
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className={`flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border transition-all ${
+          isFiltered
+            ? "bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] border-[hsl(var(--kf-accent1))]/20"
+            : "bg-white/[0.03] text-muted-foreground/60 border-border/30 hover:bg-white/[0.05] hover:text-foreground"
+        }`}
+      >
+        <Icon className="w-3 h-3" />
+        <span className="hidden sm:inline">{activeLabel}</span>
+        <span className="sm:hidden">{isFiltered ? activeLabel : label}</span>
+        <ChevronDown className={`w-3 h-3 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full mt-1 z-50 bg-popover/95 backdrop-blur-xl border border-border/50 rounded-xl shadow-lg py-1 min-w-[140px]">
+            {options.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => { onChange(opt.value === value ? "all" : opt.value); setOpen(false); }}
+                className={`w-full text-left px-3 py-2 text-xs hover:bg-white/[0.04] transition-colors flex items-center justify-between ${
+                  value === opt.value ? "text-[hsl(var(--kf-accent1))] font-medium" : "text-foreground"
+                }`}
+              >
+                {opt.label}
+                {value === opt.value && <CheckCircle2 className="w-3 h-3" />}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 const FilterToolbar = React.memo(function FilterToolbar({
   typeFilter, priorityFilter, sortBy, activeFilterCount,
   onTypeFilter, onPriorityFilter, onSortBy, onClear,
@@ -343,100 +398,44 @@ const FilterToolbar = React.memo(function FilterToolbar({
   onSortBy: (v: SortOption) => void;
   onClear: () => void;
 }) {
-  const [showSortMenu, setShowSortMenu] = useState(false);
-
   return (
     <motion.div
       variants={stagger.item}
-      className="rounded-2xl border border-border/50 bg-card p-3"
+      className="flex items-center gap-2 flex-wrap"
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-1.5 mr-1">
-          <Filter className="w-3.5 h-3.5 text-muted-foreground/60" />
-          {activeFilterCount > 0 && (
-            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]">
-              {activeFilterCount}
-            </span>
-          )}
-        </div>
+      <FilterDropdown
+        label="Type"
+        icon={Filter}
+        value={typeFilter}
+        onChange={(v) => onTypeFilter(v as ActionTypeFilter)}
+        options={TYPE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+      />
 
-        {TYPE_OPTIONS.map((opt) => {
-          const Icon = opt.icon;
-          const active = typeFilter === opt.value;
-          return (
-            <button
-              key={opt.value}
-              onClick={() => onTypeFilter(active ? "all" : opt.value)}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-semibold rounded-lg border transition-all ${
-                active
-                  ? "bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] border-[hsl(var(--kf-accent1))]/20"
-                  : "bg-white/[0.02] text-muted-foreground/60 border-transparent hover:bg-white/[0.04] hover:text-foreground"
-              }`}
-            >
-              <Icon className="w-3 h-3" />
-              {opt.label}
-            </button>
-          );
-        })}
+      <FilterDropdown
+        label="Priority"
+        icon={ArrowUpRight}
+        value={priorityFilter}
+        onChange={(v) => onPriorityFilter(v as PriorityFilter)}
+        options={PRIORITY_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+      />
 
-        <div className="h-4 w-px bg-border/50 mx-0.5" />
+      <FilterDropdown
+        label="Sort"
+        icon={ArrowUpDown}
+        value={sortBy}
+        onChange={(v) => onSortBy(v as SortOption)}
+        options={SORT_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+      />
 
-        {PRIORITY_OPTIONS.filter((p) => p.value !== "all").map((opt) => {
-          const active = priorityFilter === opt.value;
-          return (
-            <button
-              key={opt.value}
-              onClick={() => onPriorityFilter(active ? "all" : opt.value)}
-              className={`px-2.5 py-1.5 text-[10px] font-semibold rounded-lg border transition-all ${
-                active
-                  ? opt.color
-                  : "bg-white/[0.02] text-muted-foreground/60 border-transparent hover:bg-white/[0.04] hover:text-foreground"
-              }`}
-            >
-              {opt.label}
-            </button>
-          );
-        })}
-
-        {activeFilterCount > 0 && (
-          <button
-            onClick={onClear}
-            className="flex items-center gap-1 px-2 py-1.5 text-[10px] font-medium text-muted-foreground/60 hover:text-foreground transition-colors"
-          >
-            <X className="w-3 h-3" />
-            Clear
-          </button>
-        )}
-
-        <div className="ml-auto relative">
-          <button
-            onClick={() => setShowSortMenu(!showSortMenu)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-semibold rounded-lg bg-white/[0.03] text-muted-foreground/60 hover:bg-white/[0.05] hover:text-foreground transition-all border border-border/30"
-          >
-            <ArrowUpDown className="w-3 h-3" />
-            {SORT_OPTIONS.find((s) => s.value === sortBy)?.label}
-            <ChevronDown className={`w-3 h-3 transition-transform ${showSortMenu ? "rotate-180" : ""}`} />
-          </button>
-          {showSortMenu && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={() => setShowSortMenu(false)} />
-              <div className="absolute right-0 top-full mt-1 z-50 bg-popover/95 backdrop-blur-xl border border-border/50 rounded-xl shadow-lg py-1 min-w-[140px]">
-                {SORT_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => { onSortBy(opt.value); setShowSortMenu(false); }}
-                    className={`w-full text-left px-3 py-2 text-xs hover:bg-white/[0.04] transition-colors ${
-                      sortBy === opt.value ? "text-[hsl(var(--kf-accent1))] font-medium" : "text-foreground"
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-      </div>
+      {activeFilterCount > 0 && (
+        <button
+          onClick={onClear}
+          className="flex items-center gap-1 px-2 py-1.5 text-[11px] font-medium text-muted-foreground/50 hover:text-foreground transition-colors rounded-lg hover:bg-white/[0.03]"
+        >
+          <X className="w-3 h-3" />
+          Clear
+        </button>
+      )}
     </motion.div>
   );
 });
