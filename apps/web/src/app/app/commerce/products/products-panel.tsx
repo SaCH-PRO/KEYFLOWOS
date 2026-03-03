@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import type { Product } from "@/lib/client";
 import { bulkUpdateProducts } from "@/lib/client";
 import { ProductCard } from "./product-card";
+import { ProductDetailPanel } from "./product-detail-panel";
 
 interface ProductsPanelProps {
   products: Product[];
@@ -25,6 +26,10 @@ interface ProductsPanelProps {
   businessId?: string | null;
   onBulkAction?: () => void;
   currency?: string;
+  onCreateQuote?: (product: Product) => void;
+  onCreateInvoice?: (product: Product) => void;
+  invoices?: Array<{ items?: Array<{ productId?: string | null }> }>;
+  quotes?: Array<{ items?: Array<{ productId?: string | null }> }>;
 }
 
 const CATEGORY_FILTERS = [
@@ -61,7 +66,12 @@ export function ProductsPanel({
   businessId,
   onBulkAction,
   currency = "TTD",
+  onCreateQuote,
+  onCreateInvoice,
+  invoices = [],
+  quotes = [],
 }: ProductsPanelProps) {
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
   const [showInactive, setShowInactive] = useState(false);
   const [sortBy, setSortBy] = useState<SortOption>("newest");
@@ -442,8 +452,8 @@ export function ProductsPanel({
                 <div key={product.id} className="relative">
                   {bulkMode && (
                     <button
-                      onClick={() => toggleSelect(product.id)}
-                      className="absolute top-3 left-3 z-10 w-6 h-6 rounded-md flex items-center justify-center bg-background/80 backdrop-blur-sm border border-border/50 transition-all hover:border-[hsl(var(--kf-accent1))]/50"
+                      onClick={(e) => { e.stopPropagation(); toggleSelect(product.id); }}
+                      className="absolute top-1.5 right-1.5 z-10 w-6 h-6 rounded-md flex items-center justify-center bg-background/80 backdrop-blur-sm border border-border/50 transition-all hover:border-[hsl(var(--kf-accent1))]/50"
                       aria-label={selectedIds.has(product.id) ? "Deselect" : "Select"}
                     >
                       {selectedIds.has(product.id) ? (
@@ -455,12 +465,7 @@ export function ProductsPanel({
                   )}
                   <ProductCard
                     product={product}
-                    onEdit={onEdit}
-                    onDelete={onDelete}
-                    onDuplicate={onDuplicate}
-                    onToggleActive={onToggleActive}
-                    deleteConfirm={deleteConfirm}
-                    setDeleteConfirm={setDeleteConfirm}
+                    onClick={(p) => { if (!bulkMode) setSelectedProduct(p); }}
                     cachedImage={cachedImages[product.id]}
                     currency={currency}
                   />
@@ -469,6 +474,23 @@ export function ProductsPanel({
             </AnimatePresence>
           </div>
         </>
+      )}
+
+      {selectedProduct && (
+        <ProductDetailPanel
+          product={selectedProduct}
+          onClose={() => setSelectedProduct(null)}
+          onEdit={(p) => { setSelectedProduct(null); onEdit(p); }}
+          onDelete={(id) => { setSelectedProduct(null); onDelete(id); }}
+          onDuplicate={onDuplicate ? (p) => { setSelectedProduct(null); onDuplicate(p); } : undefined}
+          onToggleActive={onToggleActive ? (p) => { onToggleActive(p); setSelectedProduct({ ...p, isActive: !(p.isActive ?? true) }); } : undefined}
+          onCreateQuote={onCreateQuote}
+          onCreateInvoice={onCreateInvoice}
+          currency={currency}
+          cachedImage={cachedImages[selectedProduct.id]}
+          invoiceCount={invoices.filter(inv => inv.items?.some(item => item.productId === selectedProduct.id)).length}
+          quoteCount={quotes.filter(q => q.items?.some(item => item.productId === selectedProduct.id)).length}
+        />
       )}
     </motion.div>
   );
