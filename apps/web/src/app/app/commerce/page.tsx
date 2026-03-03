@@ -16,6 +16,7 @@ import { ConnectionStatus } from "./components/connection-status";
 import CommerceDashboard from "./components/commerce-dashboard";
 import { ProductsPanel } from "./products/products-panel";
 import { ProductFormModal } from "./products/product-form-modal";
+import { ProductImportModal } from "./products/product-import-modal";
 import QuotesPanel from "./quotes/quotes-panel";
 import InvoicesPanel from "./invoices/invoices-panel";
 import RecurringPanel from "./recurring/recurring-panel";
@@ -40,6 +41,7 @@ export default function CommercePage() {
   const commerceAi = useCommerceAiHub();
   const emitEvent = useModuleEmit();
   const [slideDirection, setSlideDirection] = useState(0);
+  const [showImportModal, setShowImportModal] = useState(false);
   const COMMERCE_TAB_KEYS = TABS.map((t) => t.key);
   const {
     businessId, businessCurrency, workspaceLoading, workspaceError, tab, handleTabChange: rawTabChange,
@@ -278,6 +280,7 @@ export default function CommercePage() {
                 onDuplicate={state.handleDuplicateProduct}
                 onToggleActive={state.handleToggleProductActive}
                 onAdd={state.openAddProduct}
+                onImport={() => setShowImportModal(true)}
                 deleteConfirm={state.deleteConfirm}
                 setDeleteConfirm={state.setDeleteConfirm}
                 cachedImages={state.cachedImages}
@@ -364,6 +367,14 @@ export default function CommercePage() {
         onFileSelect={state.handleFileSelect}
         onRemoveImage={state.removeImage}
         currency={businessCurrency}
+      />
+
+      <ProductImportModal
+        open={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        businessId={businessId}
+        currency={businessCurrency}
+        setProducts={state.setProducts}
       />
 
       <ConfirmDialog
