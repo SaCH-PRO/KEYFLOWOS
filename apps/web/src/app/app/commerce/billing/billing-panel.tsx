@@ -585,38 +585,62 @@ export function BillingPanel({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-        {kpiChips.map((chip) => (
-          <div
-            key={chip.label}
-            className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-border/50 bg-white/[0.03] text-sm"
-          >
-            <chip.icon className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" style={{ color: chip.color }} />
-            <span className="font-semibold text-[11px] sm:text-xs">{chip.value}</span>
-            <span className="text-[10px] sm:text-[11px] text-muted-foreground/50 hidden sm:inline">{chip.label}</span>
-          </div>
-        ))}
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2" role="group" aria-label="Billing metrics">
+        {loading ? (
+          <>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div
+                key={i}
+                className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-border/50 bg-white/[0.03]"
+                style={{ animation: `pulse 1.5s ease-in-out ${i * 0.1}s infinite` }}
+              >
+                <div className="w-3 h-3 sm:w-3.5 sm:h-3.5 rounded bg-muted/30 shrink-0" />
+                <div className="h-3 bg-muted/30 rounded w-10" />
+                <div className="h-2.5 bg-muted/20 rounded w-12 hidden sm:block" />
+              </div>
+            ))}
+          </>
+        ) : (
+          kpiChips.map((chip) => (
+            <div
+              key={chip.label}
+              className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-border/50 bg-white/[0.03] text-sm"
+              role="status"
+              aria-label={`${chip.label}: ${chip.value}`}
+            >
+              <chip.icon className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" style={{ color: chip.color }} />
+              <span className="font-semibold text-[11px] sm:text-xs">{chip.value}</span>
+              <span className="text-[10px] sm:text-[11px] text-muted-foreground/50 hidden sm:inline">{chip.label}</span>
+            </div>
+          ))
+        )}
 
-        <div className="group relative inline-flex items-center gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-border/50 bg-white/[0.03] text-sm cursor-default">
-          <AlertTriangle className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" style={{ color: hasOverdue ? "#ef4444" : "#6b7280" }} />
-          <span className="font-semibold text-[11px] sm:text-xs">
-            {hasOverdue ? formatCurrencyCompact(totalOverdueAmount, currency) : "—"}
-          </span>
-          <span className="text-[10px] sm:text-[11px] text-muted-foreground/50 hidden sm:inline">Overdue</span>
-          <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 top-full mt-2 z-50 opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 group-hover:pointer-events-auto transition-all duration-150 origin-top">
-            <div className="rounded-lg border border-border/60 bg-popover shadow-xl p-2.5 min-w-[180px]">
-              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Aging Breakdown</p>
-              {agingBuckets.map((bucket) => (
-                <div key={bucket.label} className="flex items-center justify-between gap-3 py-0.5">
-                  <span className="text-[11px] text-muted-foreground">{bucket.label}</span>
-                  <span className="text-[11px] font-medium tabular-nums">
-                    {bucket.count > 0 ? `${formatCurrencyCompact(bucket.amount, currency)} (${bucket.count})` : "—"}
-                  </span>
-                </div>
-              ))}
+        {!loading && (
+          <div
+            className="group relative inline-flex items-center gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-border/50 bg-white/[0.03] text-sm cursor-default"
+            role="status"
+            aria-label={hasOverdue ? `Overdue: ${formatCurrencyCompact(totalOverdueAmount, currency)}` : "No overdue invoices"}
+          >
+            <AlertTriangle className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" style={{ color: hasOverdue ? "#ef4444" : "#6b7280" }} />
+            <span className="font-semibold text-[11px] sm:text-xs">
+              {hasOverdue ? formatCurrencyCompact(totalOverdueAmount, currency) : "—"}
+            </span>
+            <span className="text-[10px] sm:text-[11px] text-muted-foreground/50 hidden sm:inline">Overdue</span>
+            <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 top-full mt-2 z-50 opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 group-hover:pointer-events-auto transition-all duration-150 origin-top">
+              <div className="rounded-lg border border-border/60 bg-popover shadow-xl p-2.5 min-w-[180px]">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Aging Breakdown</p>
+                {agingBuckets.map((bucket) => (
+                  <div key={bucket.label} className="flex items-center justify-between gap-3 py-0.5">
+                    <span className="text-[11px] text-muted-foreground">{bucket.label}</span>
+                    <span className="text-[11px] font-medium tabular-nums">
+                      {bucket.count > 0 ? `${formatCurrencyCompact(bucket.amount, currency)} (${bucket.count})` : "—"}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         <button
           onClick={() => router.push("/app/settings/connections")}
@@ -646,10 +670,12 @@ export function BillingPanel({
       {slots?.renderKpiExtra?.()}
 
       {hasActionItems && (
-        <div className="space-y-2">
+        <div className="space-y-2" aria-live="polite">
           <button
             onClick={() => setShowActionQueues(!showActionQueues)}
             className="flex items-center gap-2 w-full text-left"
+            aria-expanded={showActionQueues}
+            aria-controls="billing-action-queues"
           >
             <div className="w-1 h-4 rounded-full bg-gradient-to-b from-amber-500 to-amber-500/30" />
             <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
@@ -659,6 +685,7 @@ export function BillingPanel({
           <AnimatePresence>
             {showActionQueues && (
               <motion.div
+                id="billing-action-queues"
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
