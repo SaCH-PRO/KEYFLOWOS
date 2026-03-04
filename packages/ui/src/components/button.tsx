@@ -8,10 +8,10 @@ type Size = "xs" | "sm" | "md";
 
 const variantStyles: Record<Variant, string> = {
   default: "bg-indigo-600 text-white hover:bg-indigo-500 focus-visible:ring-indigo-600",
-  secondary: "bg-slate-100 text-slate-900 hover:bg-slate-200 focus-visible:ring-slate-300",
+  secondary: "bg-white/[0.06] text-slate-200 hover:bg-white/[0.1] focus-visible:ring-slate-500",
   outline:
-    "border border-slate-300 text-slate-900 hover:bg-slate-100 focus-visible:ring-slate-300",
-  subtle: "bg-slate-50 border border-slate-200 text-slate-900 hover:bg-slate-100",
+    "border border-white/[0.12] text-slate-200 hover:bg-white/[0.06] focus-visible:ring-slate-500",
+  subtle: "bg-white/[0.04] border border-white/[0.1] text-slate-200 hover:bg-white/[0.08]",
 };
 
 const sizeStyles: Record<Size, string> = {
