@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { motion } from "framer-motion";
-import { Clock, Package, Layers, Zap } from "lucide-react";
+import { Clock, Package, Layers, Zap, Sparkles } from "lucide-react";
 import type { Product } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
 import { PRODUCT_CATEGORY_CONFIG } from "../components/commerce-types";
@@ -14,6 +14,7 @@ interface ProductCardProps {
   onClick: (product: Product) => void;
   cachedImage?: string;
   currency?: string;
+  onAiPricing?: (product: Product) => void;
 }
 
 export const ProductCard = React.memo(function ProductCard({
@@ -21,6 +22,7 @@ export const ProductCard = React.memo(function ProductCard({
   onClick,
   cachedImage,
   currency = "TTD",
+  onAiPricing,
 }: ProductCardProps) {
   const [imgError, setImgError] = useState(false);
   const config = PRODUCT_CATEGORY_CONFIG[product.category as keyof typeof PRODUCT_CATEGORY_CONFIG] ?? PRODUCT_CATEGORY_CONFIG.SERVICE;
@@ -67,11 +69,23 @@ export const ProductCard = React.memo(function ProductCard({
           <CategoryIcon className="w-2.5 h-2.5" />
           {config.label}
         </span>
-        {isInactive && (
-          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-500/20 text-red-400 border border-red-500/25 backdrop-blur-md">
-            Off
-          </span>
-        )}
+        <div className="flex items-center gap-1">
+          {isInactive && (
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-500/20 text-red-400 border border-red-500/25 backdrop-blur-md">
+              Off
+            </span>
+          )}
+          {onAiPricing && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onAiPricing(product); }}
+              className="p-1 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/25 backdrop-blur-md hover:bg-purple-500/30 transition-colors opacity-0 group-hover:opacity-100"
+              title="AI Pricing Advisor"
+              aria-label="AI Pricing Advisor"
+            >
+              <Sparkles className="w-2.5 h-2.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="absolute bottom-0 left-0 right-0 p-2 space-y-0.5">

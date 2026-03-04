@@ -18,6 +18,7 @@ import {
   Copy,
   X,
   ChevronDown,
+  Sparkles,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -462,6 +463,12 @@ interface BillingPanelProps {
   prefillToken?: number;
   onPrefillApplied?: () => void;
   slots?: BillingSlots;
+  onViewContact?: (contactId: string) => void;
+  onViewClientIntel?: (contactId: string) => void;
+  onSelectProduct?: (productId: string) => void;
+  onAiRecoveryPlan?: () => void;
+  onAiForecast?: () => void;
+  onAiDraftReminder?: (invoiceId: string) => void;
 }
 
 export function BillingPanel({
@@ -486,6 +493,12 @@ export function BillingPanel({
   prefillToken,
   onPrefillApplied,
   slots,
+  onViewContact,
+  onViewClientIntel,
+  onSelectProduct,
+  onAiRecoveryPlan,
+  onAiForecast,
+  onAiDraftReminder,
 }: BillingPanelProps) {
   const router = useRouter();
   const [segment, setSegment] = useState<BillingSegment>(defaultSegment);
@@ -529,7 +542,7 @@ export function BillingPanel({
     prevSegmentRef.current = segment;
     setSegment(s);
     onSegmentChange?.(s);
-    emitEvent("billing:segment_changed", "commerce", { segment: s });
+    emitEvent("module:view_changed", "commerce", { segment: s });
   }, [segment, emitEvent, onSegmentChange]);
 
   const segmentIndex = SEGMENTS.findIndex(s => s.key === segment);
@@ -642,6 +655,18 @@ export function BillingPanel({
           </div>
         )}
 
+        {onAiForecast && (
+          <button
+            onClick={onAiForecast}
+            className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-purple-500/30 bg-purple-500/[0.06] hover:bg-purple-500/10 text-sm transition-all duration-200"
+            title="AI Cash Flow Forecast"
+            aria-label="AI Cash Flow Forecast"
+          >
+            <Sparkles className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-purple-400 shrink-0" />
+            <span className="text-[10px] sm:text-[11px] text-purple-300 hidden sm:inline">Forecast</span>
+          </button>
+        )}
+
         <button
           onClick={() => router.push("/app/settings/connections")}
           className={`
@@ -680,6 +705,16 @@ export function BillingPanel({
             <div className="w-1 h-4 rounded-full bg-gradient-to-b from-amber-500 to-amber-500/30" />
             <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Action Required</span>
+            {onAiRecoveryPlan && hasOverdue && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onAiRecoveryPlan(); }}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 border border-purple-500/20 transition-colors text-[10px] font-medium"
+                title="AI Recovery Plan"
+              >
+                <Sparkles className="w-3 h-3" />
+                Recovery Plan
+              </button>
+            )}
             <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground/40 transition-transform ${showActionQueues ? "rotate-180" : ""}`} />
           </button>
           <AnimatePresence>
@@ -863,6 +898,9 @@ export function BillingPanel({
                 prefillToken={segment === "quotes" ? prefillToken : undefined}
                 onPrefillApplied={onPrefillApplied}
                 renderTimelineBadge={slots?.renderTimelineBadge}
+                onViewContact={onViewContact}
+                onViewClientIntel={onViewClientIntel}
+                onSelectProduct={onSelectProduct}
               />
             </motion.div>
           )}
@@ -893,6 +931,10 @@ export function BillingPanel({
                 prefillToken={segment === "invoices" ? prefillToken : undefined}
                 onPrefillApplied={onPrefillApplied}
                 renderTimelineBadge={slots?.renderTimelineBadge}
+                onViewContact={onViewContact}
+                onViewClientIntel={onViewClientIntel}
+                onSelectProduct={onSelectProduct}
+                onAiDraftReminder={onAiDraftReminder}
               />
             </motion.div>
           )}

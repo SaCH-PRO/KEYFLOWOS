@@ -83,6 +83,57 @@ export class CommerceAiController {
   @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
+  @Post('businesses/:businessId/ai-search')
+  aiSearch(
+    @Param('businessId') businessId: string,
+    @Body() body: { query: string },
+  ) {
+    if (!body.query || typeof body.query !== 'string') {
+      throw new BadRequestException('query is required');
+    }
+    if (body.query.length > 500) {
+      throw new BadRequestException('query must be 500 characters or less');
+    }
+    checkAiRateLimit(businessId);
+    return this.commerceAi.naturalLanguageSearch(businessId, body.query);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @RequireFeature('ai_tools')
+  @CrmRateLimit(10, 60_000)
+  @Post('businesses/:businessId/ai-product-health')
+  aiProductHealth(@Param('businessId') businessId: string) {
+    checkAiRateLimit(businessId);
+    return this.commerceAi.productHealthScan(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @RequireFeature('ai_tools')
+  @CrmRateLimit(10, 60_000)
+  @Post('businesses/:businessId/ai-client-intelligence')
+  aiClientIntelligence(
+    @Param('businessId') businessId: string,
+    @Body() body: { contactId: string },
+  ) {
+    if (!body.contactId || typeof body.contactId !== 'string') {
+      throw new BadRequestException('contactId is required');
+    }
+    checkAiRateLimit(businessId);
+    return this.commerceAi.clientPaymentIntelligence(businessId, body.contactId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @RequireFeature('ai_tools')
+  @CrmRateLimit(10, 60_000)
+  @Post('businesses/:businessId/ai-quote-analysis')
+  aiQuoteAnalysis(@Param('businessId') businessId: string) {
+    checkAiRateLimit(businessId);
+    return this.commerceAi.quoteWinAnalysis(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @RequireFeature('ai_tools')
+  @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-command')
   aiCommand(
     @Param('businessId') businessId: string,

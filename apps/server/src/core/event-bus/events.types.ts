@@ -1,4 +1,4 @@
-import { Booking, Contact, Invoice, InvoiceItem, SocialPost } from '@keyflow/db';
+import { Booking, Contact, Invoice, InvoiceItem, Product, Quote, QuoteItem, SocialPost } from '@keyflow/db';
 
 // Payload for when a new contact is created
 export class ContactCreatedPayload {
@@ -90,6 +90,37 @@ export class PostPublishedPayload {
   businessId!: string;
 }
 
+export class ProductCreatedPayload {
+  product!: Product;
+  businessId!: string;
+}
+
+export class ProductUpdatedPayload {
+  product!: Product;
+  businessId!: string;
+}
+
+export class ProductDeactivatedPayload {
+  product!: Product;
+  businessId!: string;
+}
+
+export class QuoteCreatedPayload {
+  quote!: Quote & { items?: QuoteItem[]; contact?: Contact | null };
+  businessId!: string;
+}
+
+export class QuoteSentPayload {
+  quote!: Quote & { contact?: Contact | null };
+  businessId!: string;
+}
+
+export class QuoteConvertedPayload {
+  quote!: Quote;
+  invoice!: Invoice & { items?: InvoiceItem[]; contact?: Contact | null };
+  businessId!: string;
+}
+
 // Master event map for reference and typing
 export interface KeyFlowEventMap {
   'contact.created': ContactCreatedPayload;
@@ -106,4 +137,10 @@ export interface KeyFlowEventMap {
   'invoice.sent': InvoiceStatusPayload;
   'invoice.overdue': InvoiceStatusPayload;
   'post.published': PostPublishedPayload;
+  'product.created': ProductCreatedPayload;
+  'product.updated': ProductUpdatedPayload;
+  'product.deactivated': ProductDeactivatedPayload;
+  'quote.created': QuoteCreatedPayload;
+  'quote.sent': QuoteSentPayload;
+  'quote.converted': QuoteConvertedPayload;
 }

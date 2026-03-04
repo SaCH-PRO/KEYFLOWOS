@@ -4108,4 +4108,103 @@ export async function confirmProductImport(products: Partial<ExtractedProduct>[]
   });
 }
 
+export type CommerceNlSearchResult = {
+  type: string;
+  filters: Record<string, unknown>;
+  interpretation: string;
+  confidence: number;
+  results: Array<Record<string, any>>;
+};
+
+export type CommerceProductHealthResult = {
+  healthScore: number;
+  healthLabel: string;
+  summary: { totalProducts: number; activeProducts: number; inactiveProducts: number; productsWithSales: number; productsWithoutSales: number };
+  issues: Array<{
+    productId: string;
+    productName: string;
+    severity: string;
+    issue: string;
+    suggestion: string;
+  }>;
+  issueCount: { high: number; medium: number; low: number };
+};
+
+export type CommerceClientIntelligenceResult = {
+  contactId: string;
+  contactName: string;
+  reliabilityScore: number;
+  reliabilityLabel: string;
+  lifetimeValue: number;
+  outstandingBalance: number;
+  avgPaymentDelay: number;
+  paymentDelayLabel: string;
+  invoiceSummary: { total: number; paid: number; overdue: number; outstanding: number; void: number };
+  quoteSummary: { total: number; accepted: number; conversionRate: number };
+  avgMonthlyRevenue: number;
+  monthsActive: number;
+  recentInvoices: Array<{
+    id: string;
+    invoiceNumber: string;
+    status: string;
+    total: number;
+    currency: string;
+    createdAt: string;
+    dueDate: string;
+    paidAt: string | null;
+  }>;
+  totalPayments: number;
+};
+
+export type CommerceQuoteAnalysisResult = {
+  conversionRate: number;
+  rejectionRate: number;
+  summary: { total: number; accepted: number; rejected: number; sent: number; draft: number; expired: number; converted: number };
+  values: { avgAcceptedValue: number; avgRejectedValue: number; pipelineValue: number; totalWonValue: number; totalLostValue: number };
+  suggestions: string[];
+  recentQuotes: Array<{
+    id: string;
+    quoteNumber: string;
+    status: string;
+    total: number;
+    currency: string;
+    contactName: string;
+    createdAt: string;
+    expiryDate: string | null;
+    converted: boolean;
+  }>;
+};
+
+export async function commerceAiSearch(query: string, businessId?: string): Promise<ApiResult<CommerceNlSearchResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<CommerceNlSearchResult>({
+    path: `/commerce/businesses/${encodeURIComponent(bid)}/ai-search`,
+    body: { query },
+  });
+}
+
+export async function commerceAiProductHealth(businessId?: string): Promise<ApiResult<CommerceProductHealthResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<CommerceProductHealthResult>({
+    path: `/commerce/businesses/${encodeURIComponent(bid)}/ai-product-health`,
+    body: {},
+  });
+}
+
+export async function commerceAiClientIntelligence(contactId: string, businessId?: string): Promise<ApiResult<CommerceClientIntelligenceResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<CommerceClientIntelligenceResult>({
+    path: `/commerce/businesses/${encodeURIComponent(bid)}/ai-client-intelligence`,
+    body: { contactId },
+  });
+}
+
+export async function commerceAiQuoteAnalysis(businessId?: string): Promise<ApiResult<CommerceQuoteAnalysisResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<CommerceQuoteAnalysisResult>({
+    path: `/commerce/businesses/${encodeURIComponent(bid)}/ai-quote-analysis`,
+    body: {},
+  });
+}
+
 export { DEFAULT_BUSINESS_ID };

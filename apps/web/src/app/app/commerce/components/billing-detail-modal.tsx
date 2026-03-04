@@ -15,6 +15,10 @@ import {
   ChevronRight,
   Eye,
   Printer,
+  User,
+  Brain,
+  Sparkles,
+  Send,
 } from "lucide-react";
 import { formatAmount, getContactInitials } from "../utils/commerce-utils";
 import {
@@ -52,6 +56,7 @@ interface BillingDetailModalProps {
     email?: string | null;
     phone?: string | null;
   } | null;
+  contactId?: string | null;
   total: number;
   currency: string;
   items: Array<{
@@ -60,6 +65,7 @@ interface BillingDetailModalProps {
     quantity?: number;
     unitPrice?: number;
     total?: number;
+    productId?: string | null;
   }>;
   dateLabel1: string;
   dateValue1: string | null;
@@ -76,6 +82,10 @@ interface BillingDetailModalProps {
   businessData?: BusinessDataForPreview | null;
   onSaveBranding?: (overrides: Record<string, string>) => Promise<void>;
   savingBranding?: boolean;
+  onViewContact?: (contactId: string) => void;
+  onViewClientIntel?: (contactId: string) => void;
+  onSelectProduct?: (productId: string) => void;
+  onAiDraftReminder?: (invoiceId: string) => void;
 }
 
 const STATUS_ORDER_QUOTE = ["DRAFT", "SENT", "ACCEPTED", "REJECTED"];
@@ -139,6 +149,7 @@ export function BillingDetailModal({
   number,
   status,
   contact,
+  contactId,
   total,
   currency,
   items,
@@ -157,6 +168,10 @@ export function BillingDetailModal({
   businessData,
   onSaveBranding,
   savingBranding,
+  onViewContact,
+  onViewClientIntel,
+  onSelectProduct,
+  onAiDraftReminder,
 }: BillingDetailModalProps) {
   const theme = BILLING_DOC_THEME[type];
   const panelRef = useRef<HTMLDivElement>(null);
@@ -411,6 +426,32 @@ export function BillingDetailModal({
                       </a>
                     </>
                   )}
+                  {onViewContact && (
+                    <>
+                      <div className="w-px h-5 bg-border/30" />
+                      <button
+                        onClick={() => onViewContact(contactId ?? "")}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 hover:bg-[hsl(var(--kf-accent1))]/10 transition-colors text-xs text-[hsl(var(--kf-accent1))]"
+                        title="View Contact in CRM"
+                      >
+                        <User className="w-3.5 h-3.5" />
+                        View
+                      </button>
+                    </>
+                  )}
+                  {onViewClientIntel && contactId && (
+                    <>
+                      <div className="w-px h-5 bg-border/30" />
+                      <button
+                        onClick={() => onViewClientIntel(contactId)}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 hover:bg-purple-500/10 transition-colors text-xs text-purple-400"
+                        title="AI Client Intelligence"
+                      >
+                        <Brain className="w-3.5 h-3.5" />
+                        Intel
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             )}
@@ -461,6 +502,31 @@ export function BillingDetailModal({
 
             {alerts}
 
+            {(onViewClientIntel || onAiDraftReminder) && contactId && (
+              <div className="flex items-center gap-2">
+                {onViewClientIntel && (
+                  <button
+                    onClick={() => onViewClientIntel(contactId)}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 border border-purple-500/20 transition-colors text-xs font-medium"
+                    title="AI Analyze — client payment intelligence"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    AI Analyze
+                  </button>
+                )}
+                {onAiDraftReminder && type === "invoice" && (status === "OVERDUE" || status === "SENT") && (
+                  <button
+                    onClick={() => onAiDraftReminder(number)}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/20 border border-[hsl(var(--kf-accent1))]/20 transition-colors text-xs font-medium"
+                    title="AI Draft Reminder"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    AI Draft Reminder
+                  </button>
+                )}
+              </div>
+            )}
+
             {items.length > 0 && (
               <div className="rounded-2xl bg-white/[0.03] border border-border/40 overflow-hidden">
                 <div className="flex items-center gap-2 px-4 py-3 border-b border-border/30">
@@ -479,9 +545,19 @@ export function BillingDetailModal({
                       className="px-4 py-3 flex items-start justify-between gap-3 hover:bg-white/[0.02] transition-colors"
                     >
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">
-                          {item.description || "Unnamed item"}
-                        </p>
+                        {item.productId && onSelectProduct ? (
+                          <button
+                            onClick={() => onSelectProduct(item.productId!)}
+                            className="text-sm font-medium truncate text-[hsl(var(--kf-accent1))] hover:underline underline-offset-2 text-left block max-w-full"
+                            title="View product details"
+                          >
+                            {item.description || "Unnamed item"}
+                          </button>
+                        ) : (
+                          <p className="text-sm font-medium truncate">
+                            {item.description || "Unnamed item"}
+                          </p>
+                        )}
                         <p className="text-xs text-muted-foreground mt-0.5">
                           {item.quantity} x{" "}
                           {formatAmount(item.unitPrice ?? 0, currency)}
@@ -681,6 +757,24 @@ export function BillingDetailModal({
                       <Phone className="w-4 h-4 text-violet-400" />
                     </a>
                   )}
+                  {onViewContact && (
+                    <button
+                      onClick={() => onViewContact(contactId ?? "")}
+                      className="p-2 rounded-lg hover:bg-[hsl(var(--kf-accent1))]/10 transition-colors"
+                      title="View Contact"
+                    >
+                      <User className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+                    </button>
+                  )}
+                  {onViewClientIntel && contactId && (
+                    <button
+                      onClick={() => onViewClientIntel(contactId)}
+                      className="p-2 rounded-lg hover:bg-purple-500/10 transition-colors"
+                      title="AI Client Intel"
+                    >
+                      <Brain className="w-4 h-4 text-purple-400" />
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -731,6 +825,31 @@ export function BillingDetailModal({
 
             {alerts}
 
+            {(onViewClientIntel || onAiDraftReminder) && contactId && (
+              <div className="flex items-center gap-2">
+                {onViewClientIntel && (
+                  <button
+                    onClick={() => onViewClientIntel(contactId)}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 border border-purple-500/20 transition-colors text-xs font-medium"
+                    title="AI Analyze — client payment intelligence"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    AI Analyze
+                  </button>
+                )}
+                {onAiDraftReminder && type === "invoice" && (status === "OVERDUE" || status === "SENT") && (
+                  <button
+                    onClick={() => onAiDraftReminder(number)}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/20 border border-[hsl(var(--kf-accent1))]/20 transition-colors text-xs font-medium"
+                    title="AI Draft Reminder"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    AI Draft Reminder
+                  </button>
+                )}
+              </div>
+            )}
+
             {items.length > 0 && (
               <div className="rounded-2xl bg-white/[0.03] border border-border/40 overflow-hidden">
                 <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border/30">
@@ -749,9 +868,19 @@ export function BillingDetailModal({
                       className="px-4 py-2.5 flex items-center justify-between gap-2"
                     >
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">
-                          {item.description || "Unnamed item"}
-                        </p>
+                        {item.productId && onSelectProduct ? (
+                          <button
+                            onClick={() => onSelectProduct(item.productId!)}
+                            className="text-sm font-medium truncate text-[hsl(var(--kf-accent1))] hover:underline underline-offset-2 text-left block max-w-full"
+                            title="View product details"
+                          >
+                            {item.description || "Unnamed item"}
+                          </button>
+                        ) : (
+                          <p className="text-sm font-medium truncate">
+                            {item.description || "Unnamed item"}
+                          </p>
+                        )}
                         <p className="text-[10px] text-muted-foreground">
                           {item.quantity} x{" "}
                           {formatAmount(item.unitPrice ?? 0, currency)}

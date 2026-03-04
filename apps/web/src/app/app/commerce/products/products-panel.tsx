@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Package, Plus, X, Eye, EyeOff, ArrowUpDown, CheckSquare, Square, Trash2, ToggleLeft, ToggleRight, ChevronDown, Upload, LayoutGrid, List, Camera } from "lucide-react";
+import { Search, Package, Plus, X, Eye, EyeOff, ArrowUpDown, CheckSquare, Square, Trash2, ToggleLeft, ToggleRight, ChevronDown, Upload, LayoutGrid, List, Camera, Sparkles } from "lucide-react";
 import { ProductImportModal } from "./product-import-modal";
 import { toast } from "sonner";
 import type { Product } from "@/lib/client";
@@ -47,6 +47,8 @@ interface ProductsPanelProps {
   invoices?: Array<{ items?: Array<{ productId?: string | null }>; status?: string }>;
   quotes?: Array<{ items?: Array<{ productId?: string | null }> }>;
   slots?: ProductSlots;
+  onAiPricing?: (product: Product) => void;
+  onAiHealthScan?: () => void;
 }
 
 const CATEGORY_FILTERS = [
@@ -89,6 +91,8 @@ export const ProductsPanel = React.memo(function ProductsPanel({
   invoices = [],
   quotes = [],
   slots,
+  onAiPricing,
+  onAiHealthScan,
 }: ProductsPanelProps) {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>(getStoredViewMode);
@@ -393,6 +397,16 @@ export const ProductsPanel = React.memo(function ProductsPanel({
                 <Upload className="w-4 h-4" />
               </button>
             )}
+            {onAiHealthScan && (
+              <button
+                onClick={onAiHealthScan}
+                className="p-2 rounded-xl transition-all flex-shrink-0 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 border border-purple-500/20"
+                aria-label="AI Health Scan"
+                title="AI Health Scan — audit products for issues"
+              >
+                <Sparkles className="w-4 h-4" />
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-0.5 border-l border-border/30 pl-2 flex-shrink-0">
             <button
@@ -634,6 +648,7 @@ export const ProductsPanel = React.memo(function ProductsPanel({
                       onClick={handleProductClick}
                       cachedImage={cachedImages[product.id]}
                       currency={currency}
+                      onAiPricing={onAiPricing}
                     />
                     {slots?.renderCardBadge?.(product)}
                   </div>
@@ -695,6 +710,16 @@ export const ProductsPanel = React.memo(function ProductsPanel({
                           <p className="text-[10px] text-muted-foreground/50">{product.duration}m</p>
                         )}
                       </div>
+                      {onAiPricing && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onAiPricing(product); }}
+                          className="p-1.5 rounded-lg bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                          title="AI Pricing Advisor"
+                          aria-label="AI Pricing Advisor"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </motion.button>
                   );
                 })}

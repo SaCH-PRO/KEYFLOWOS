@@ -78,6 +78,10 @@ interface InvoicesPanelProps {
   prefillToken?: number;
   onPrefillApplied?: () => void;
   renderTimelineBadge?: (invoice: Invoice) => ReactNode;
+  onViewContact?: (contactId: string) => void;
+  onViewClientIntel?: (contactId: string) => void;
+  onSelectProduct?: (productId: string) => void;
+  onAiDraftReminder?: (invoiceId: string) => void;
 }
 
 export default function InvoicesPanel({
@@ -96,6 +100,10 @@ export default function InvoicesPanel({
   prefillToken,
   onPrefillApplied,
   renderTimelineBadge,
+  onViewContact,
+  onViewClientIntel,
+  onSelectProduct,
+  onAiDraftReminder,
 }: InvoicesPanelProps) {
   const {
     showInvoiceBuilder,
@@ -377,7 +385,7 @@ export default function InvoicesPanel({
         resetInvoiceForm();
         setShowInvoiceBuilder(false);
         toast.success("Invoice created");
-        emitEvent("billing:invoice_created", "commerce", { invoiceId: data.id });
+        emitEvent("commerce:invoice_created", "commerce", { invoiceId: data.id });
       }
     }
   }
@@ -390,7 +398,7 @@ export default function InvoicesPanel({
       if (!error && data) {
         setInvoices((prev) => prev.map((i) => (i.id === invoiceId ? { ...i, status: "SENT" } : i)));
         toast.success("Invoice sent");
-        emitEvent("billing:invoice_sent", "commerce", { invoiceId });
+        emitEvent("commerce:invoice_created", "commerce", { invoiceId, action: "sent" });
       } else {
         toast.error(error ?? "Failed to send invoice");
       }
@@ -414,7 +422,7 @@ export default function InvoicesPanel({
           );
         }
         toast.success("Invoice marked as paid");
-        emitEvent("billing:invoice_paid", "commerce", { invoiceId, total: data.total });
+        emitEvent("commerce:invoice_paid", "commerce", { invoiceId, total: data.total });
       } else {
         toast.error(error ?? "Failed to mark paid");
       }
@@ -822,11 +830,11 @@ export default function InvoicesPanel({
                 type="invoice"
                 number={inv.invoiceNumber ?? inv.id.slice(0, 8)}
                 status={inv.status}
-                contact={inv.contact}
+                contact={inv.contact ?? null}
                 total={Number(inv.total)}
                 currency={inv.currency}
                 items={inv.items ?? []}
-                date={inv.issueDate}
+                date={inv.issueDate ?? ""}
                 badges={cardBadges}
                 desktopActions={cardDesktopActions}
                 mobileActions={cardMobileActions}
@@ -843,14 +851,15 @@ export default function InvoicesPanel({
             type="invoice"
             number={selectedInvoice.invoiceNumber ?? selectedInvoice.id.slice(0, 8)}
             status={selectedInvoice.status}
-            contact={selectedInvoice.contact}
+            contact={selectedInvoice.contact ?? null}
+            contactId={selectedInvoice.contactId ?? null}
             total={Number(selectedInvoice.total)}
             currency={selectedInvoice.currency}
             items={selectedInvoice.items ?? []}
             dateLabel1="Issue Date"
-            dateValue1={selectedInvoice.issueDate}
+            dateValue1={selectedInvoice.issueDate ?? null}
             dateLabel2="Due Date"
-            dateValue2={selectedInvoice.dueDate}
+            dateValue2={selectedInvoice.dueDate ?? null}
             taxRate={Number(selectedInvoice.taxRate || 0)}
             discountType={selectedInvoice.discountType}
             discountValue={selectedInvoice.discountValue ? Number(selectedInvoice.discountValue) : undefined}
@@ -859,6 +868,10 @@ export default function InvoicesPanel({
             businessData={businessData}
             onSaveBranding={saveBranding}
             savingBranding={savingBranding}
+            onViewContact={onViewContact}
+            onViewClientIntel={onViewClientIntel}
+            onSelectProduct={onSelectProduct}
+            onAiDraftReminder={onAiDraftReminder}
             actions={
               <>
                 <div className="flex items-center justify-between">

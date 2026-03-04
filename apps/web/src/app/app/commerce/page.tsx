@@ -21,6 +21,7 @@ import { renderCommerceToolResult } from "./components/commerce-tool-results";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useModuleEmit, useModuleEvent } from "@/hooks/use-module-events";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
+import { useRouter } from "next/navigation";
 import { commerceAiExecute } from "@/lib/client";
 import type { ProductSlots } from "./utils/commerce-slots";
 import type { BillingSlots } from "./utils/commerce-slots";
@@ -35,6 +36,7 @@ export default function CommercePage() {
   const state = useCommerce();
   const commerceAi = useCommerceAiHub();
   const emitEvent = useModuleEmit();
+  const router = useRouter();
   const [slideDirection, setSlideDirection] = useState(0);
   const COMMERCE_TAB_KEYS = TABS.map((t) => t.key);
   const {
@@ -84,6 +86,57 @@ export default function CommercePage() {
       });
     }
   }, [businessId, tab, products.length, invoices.length, quotes.length, commerceAi.updateCommerceContext]);
+
+  const handleViewContact = useCallback((contactId: string) => {
+    if (contactId) {
+      emitEvent("contact:selected", "commerce", { contactId });
+      router.push(`/app/crm/contacts/${contactId}`);
+    }
+  }, [emitEvent, router]);
+
+  const handleViewClientIntel = useCallback((contactId: string) => {
+    if (contactId) {
+      emitEvent("commerce:view_client_intel", "commerce", { contactId });
+      if (!commerceAi.panelOpen) commerceAi.setOpen(true);
+      commerceAi.executeTool("client-intelligence");
+    }
+  }, [emitEvent, commerceAi]);
+
+  const handleSelectProduct = useCallback((productId: string) => {
+    emitEvent("commerce:product_selected", "commerce", { productId });
+    handleTabChange("products");
+    const product = products.find((p) => p.id === productId);
+    if (product) {
+      toast.success(`Viewing ${product.name}`);
+    }
+  }, [emitEvent, handleTabChange, products]);
+
+  const handleAiPricing = useCallback((product: import("@/lib/client").Product) => {
+    commerceAi.updateCommerceContext({ businessId: businessId!, activeView: tab, selectedItemId: product.id });
+    if (!commerceAi.panelOpen) commerceAi.setOpen(true);
+    commerceAi.executeTool("pricing-advisor");
+  }, [businessId, tab, commerceAi]);
+
+  const handleAiHealthScan = useCallback(() => {
+    if (!commerceAi.panelOpen) commerceAi.setOpen(true);
+    commerceAi.executeTool("product-health-scan");
+  }, [commerceAi]);
+
+  const handleAiRecoveryPlan = useCallback(() => {
+    if (!commerceAi.panelOpen) commerceAi.setOpen(true);
+    commerceAi.executeTool("overdue-recovery");
+  }, [commerceAi]);
+
+  const handleAiForecast = useCallback(() => {
+    if (!commerceAi.panelOpen) commerceAi.setOpen(true);
+    commerceAi.executeTool("cashflow-forecast");
+  }, [commerceAi]);
+
+  const handleAiDraftReminder = useCallback((invoiceId: string) => {
+    commerceAi.updateCommerceContext({ businessId: businessId!, activeView: "billing", selectedItemId: invoiceId });
+    if (!commerceAi.panelOpen) commerceAi.setOpen(true);
+    commerceAi.executeTool("invoice-reminder");
+  }, [businessId, commerceAi]);
 
   const handleCommerceCommand = useCallback((cmd: CommerceCommand) => {
     switch (cmd.type) {
@@ -190,8 +243,12 @@ export default function CommercePage() {
     } else if (actionKey.startsWith("send_reminders:")) {
       state.setTab("billing");
       toast.success("Opening billing for reminders...");
+    } else if (actionKey.startsWith("tool:")) {
+      const toolId = actionKey.split(":")[1];
+      if (!commerceAi.panelOpen) commerceAi.setOpen(true);
+      commerceAi.executeTool(toolId);
     }
-  }, [state, handleTabChange]);
+  }, [state, handleTabChange, commerceAi]);
 
   const handleWrappedTabChange = useCallback((t: string) => {
     handleTabChange(t);
@@ -299,7 +356,25 @@ export default function CommercePage() {
         }
       />
 
-      <CommerceAiSearchBar onExecuteCommand={handleCommerceCommand} />
+      <CommerceAiSearchBar
+        onExecuteCommand={handleCommerceCommand}
+        onSelectResult={(result) => {
+          if (result.type === "product") {
+            handleSelectProduct(result.id);
+          } else if (result.type === "invoice" || result.type === "quote") {
+            handleTabChange("billing");
+            toast.success(`Viewing ${result.type} ${result.id}`);
+          }
+        }}
+        onApplyFilters={(filters) => {
+          if (filters.type === "product") {
+            handleTabChange("products");
+          } else {
+            handleTabChange("billing");
+          }
+          toast.success("Filters applied from AI search");
+        }}
+      />
 
       <AnimatePresence>
         {commerceAi.panelOpen && (
@@ -348,18 +423,22 @@ export default function CommercePage() {
                 onBulkAction={state.refreshProducts}
                 currency={businessCurrency}
                 onCreateQuote={(p) => {
-                  const items = [{ description: p.name, quantity: 1, unitPrice: p.price, total: p.price, productId: p.id }];
+                  const items = [{ id: `item_${Date.now()}`, description: p.name, quantity: "1", unitPrice: String(p.price), productId: p.id }] as any;
                   prefillForContact("", "quotes", items);
                   handleTabChange("billing");
+                  emitEvent("commerce:quote_created", "commerce", { productId: p.id, productName: p.name, source: "product_card" });
                 }}
                 onCreateInvoice={(p) => {
-                  const items = [{ description: p.name, quantity: 1, unitPrice: p.price, total: p.price, productId: p.id }];
+                  const items = [{ id: `item_${Date.now()}`, description: p.name, quantity: "1", unitPrice: String(p.price), productId: p.id }] as any;
                   prefillForContact("", "invoices", items);
                   handleTabChange("billing");
+                  emitEvent("commerce:invoice_created", "commerce", { productId: p.id, productName: p.name, source: "product_card" });
                 }}
                 invoices={invoices}
                 quotes={quotes}
                 slots={productSlots}
+                onAiPricing={handleAiPricing}
+                onAiHealthScan={handleAiHealthScan}
               />
             </motion.div>
           )}
@@ -387,6 +466,12 @@ export default function CommercePage() {
                 defaultSegment={pendingPrefill?.targetSegment ?? "invoices"}
                 onPrefillApplied={clearPrefill}
                 slots={billingSlots}
+                onViewContact={handleViewContact}
+                onViewClientIntel={handleViewClientIntel}
+                onSelectProduct={handleSelectProduct}
+                onAiRecoveryPlan={handleAiRecoveryPlan}
+                onAiForecast={handleAiForecast}
+                onAiDraftReminder={handleAiDraftReminder}
               />
             </motion.div>
           )}

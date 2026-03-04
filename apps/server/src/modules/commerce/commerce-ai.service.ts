@@ -317,6 +317,453 @@ ${allProducts.map((p) => `  - ${p.name}: $${p.price}`).join('\n')}`;
     }
   }
 
+  async naturalLanguageSearch(businessId: string, query: string) {
+    const start = Date.now();
+    const sanitized = this.sanitizeAiInput(query, 500);
+
+    const [products, invoices, quotes] = await Promise.all([
+      this.db.product.findMany({
+        where: { businessId, deletedAt: null },
+        select: { id: true, name: true, price: true, category: true, isActive: true, currency: true, sku: true },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      }),
+      this.db.invoice.findMany({
+        where: { businessId, deletedAt: null },
+        select: {
+          id: true, invoiceNumber: true, status: true, total: true, currency: true,
+          dueDate: true, paidAt: true, createdAt: true,
+          contact: { select: { id: true, firstName: true, lastName: true, email: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      }),
+      this.db.quote.findMany({
+        where: { businessId, deletedAt: null },
+        select: {
+          id: true, quoteNumber: true, status: true, total: true, currency: true,
+          expiryDate: true, createdAt: true,
+          contact: { select: { id: true, firstName: true, lastName: true, email: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      }),
+    ]);
+
+    const knownStatuses = {
+      invoices: [...new Set(invoices.map(i => i.status))],
+      quotes: [...new Set(quotes.map(q => q.status))],
+    };
+    const knownCategories = [...new Set(products.map(p => p.category).filter(Boolean))];
+
+    const prompt = `You are a Commerce search translator for a Caribbean service business (TTD currency, Trinidad & Tobago).
+Convert a natural language query into structured Commerce filter parameters.
+
+Available data types: products, invoices, quotes
+
+Product filter fields:
+- type: "products"
+- search: text search across name, SKU
+- category: product category (known: ${knownCategories.join(', ') || 'SERVICE, PRODUCT, PACKAGE'})
+- isActive: boolean
+- priceMin: minimum price
+- priceMax: maximum price
+- sortBy: name|price|newest|oldest
+
+Invoice filter fields:
+- type: "invoices"
+- search: text search across invoice number, contact name
+- status: invoice status (known: ${knownStatuses.invoices.join(', ') || 'DRAFT, SENT, PAID, OVERDUE, VOID'})
+- totalMin: minimum total
+- totalMax: maximum total
+- overdue: boolean (only overdue invoices)
+- dateFrom: ISO date string
+- dateTo: ISO date string
+- sortBy: newest|oldest|amount|dueDate
+
+Quote filter fields:
+- type: "quotes"
+- search: text search across quote number, contact name
+- status: quote status (known: ${knownStatuses.quotes.join(', ') || 'DRAFT, SENT, ACCEPTED, REJECTED'})
+- totalMin: minimum total
+- totalMax: maximum total
+- expired: boolean
+- sortBy: newest|oldest|amount|expiryDate
+
+Respond in valid JSON:
+{
+  "type": "products|invoices|quotes",
+  "filters": { ... relevant filters only ... },
+  "interpretation": "What you understood the user wants",
+  "confidence": 0.9
+}
+
+Only include filters relevant to the query. Set irrelevant filters to null.`;
+
+    const result = await this.aiUsage.callAi({
+      businessId,
+      feature: 'commerce_nl_search',
+      messages: [
+        { role: 'system', content: prompt },
+        { role: 'user', content: sanitized },
+      ],
+      maxTokens: 600,
+      temperature: 0.2,
+    });
+
+    const duration = Date.now() - start;
+    if (duration > 1000) this.logger.warn(`Commerce NL search took ${duration}ms`);
+
+    try {
+      const parsed = JSON.parse(result.content);
+      const resultData = await this.executeNlSearch(businessId, parsed);
+      return { ...parsed, results: resultData };
+    } catch {
+      return { type: 'invoices', filters: {}, interpretation: result.content, confidence: 0, results: [] };
+    }
+  }
+
+  private async executeNlSearch(businessId: string, parsed: any) {
+    const { type, filters } = parsed;
+    if (!filters) return [];
+
+    if (type === 'products') {
+      const where: any = { businessId, deletedAt: null };
+      if (filters.search) where.name = { contains: filters.search, mode: 'insensitive' };
+      if (filters.category) where.category = filters.category;
+      if (filters.isActive !== undefined && filters.isActive !== null) where.isActive = filters.isActive;
+      if (filters.priceMin || filters.priceMax) {
+        where.price = {};
+        if (filters.priceMin) where.price.gte = Number(filters.priceMin);
+        if (filters.priceMax) where.price.lte = Number(filters.priceMax);
+      }
+      const orderBy: any = {};
+      if (filters.sortBy === 'price') orderBy.price = 'asc';
+      else if (filters.sortBy === 'oldest') orderBy.createdAt = 'asc';
+      else orderBy.createdAt = 'desc';
+      return this.db.product.findMany({ where, orderBy, take: 50 });
+    }
+
+    if (type === 'invoices') {
+      const where: any = { businessId, deletedAt: null };
+      if (filters.status) where.status = filters.status;
+      if (filters.overdue) where.status = 'OVERDUE';
+      if (filters.totalMin || filters.totalMax) {
+        where.total = {};
+        if (filters.totalMin) where.total.gte = Number(filters.totalMin);
+        if (filters.totalMax) where.total.lte = Number(filters.totalMax);
+      }
+      if (filters.dateFrom || filters.dateTo) {
+        where.createdAt = {};
+        if (filters.dateFrom) where.createdAt.gte = new Date(filters.dateFrom);
+        if (filters.dateTo) where.createdAt.lte = new Date(filters.dateTo);
+      }
+      const orderBy: any = {};
+      if (filters.sortBy === 'oldest') orderBy.createdAt = 'asc';
+      else if (filters.sortBy === 'amount') orderBy.total = 'desc';
+      else if (filters.sortBy === 'dueDate') orderBy.dueDate = 'asc';
+      else orderBy.createdAt = 'desc';
+      return this.db.invoice.findMany({
+        where, orderBy, take: 50,
+        include: { contact: { select: { id: true, firstName: true, lastName: true, email: true } } },
+      });
+    }
+
+    if (type === 'quotes') {
+      const where: any = { businessId, deletedAt: null };
+      if (filters.status) where.status = filters.status;
+      if (filters.expired) {
+        where.expiryDate = { lt: new Date() };
+        where.status = { not: 'ACCEPTED' };
+      }
+      if (filters.totalMin || filters.totalMax) {
+        where.total = {};
+        if (filters.totalMin) where.total.gte = Number(filters.totalMin);
+        if (filters.totalMax) where.total.lte = Number(filters.totalMax);
+      }
+      const orderBy: any = {};
+      if (filters.sortBy === 'oldest') orderBy.createdAt = 'asc';
+      else if (filters.sortBy === 'amount') orderBy.total = 'desc';
+      else if (filters.sortBy === 'expiryDate') orderBy.expiryDate = 'asc';
+      else orderBy.createdAt = 'desc';
+      return this.db.quote.findMany({
+        where, orderBy, take: 50,
+        include: { contact: { select: { id: true, firstName: true, lastName: true, email: true } } },
+      });
+    }
+
+    return [];
+  }
+
+  async productHealthScan(businessId: string) {
+    const start = Date.now();
+    const products = await this.db.product.findMany({
+      where: { businessId, deletedAt: null },
+      select: {
+        id: true, name: true, price: true, category: true, isActive: true,
+        currency: true, description: true, sku: true, imageUrl: true, createdAt: true, updatedAt: true,
+      },
+    });
+
+    const invoiceItems = await this.db.invoiceItem.findMany({
+      where: { invoice: { businessId, deletedAt: null }, productId: { not: null } },
+      select: { productId: true, quantity: true, total: true },
+    });
+
+    const salesByProduct = new Map<string, { count: number; totalRevenue: number }>();
+    invoiceItems.forEach((item) => {
+      if (!item.productId) return;
+      const existing = salesByProduct.get(item.productId) ?? { count: 0, totalRevenue: 0 };
+      existing.count += item.quantity;
+      existing.totalRevenue += Number(item.total);
+      salesByProduct.set(item.productId, existing);
+    });
+
+    const issues: Array<{ productId: string; productName: string; issue: string; severity: 'high' | 'medium' | 'low'; suggestion: string }> = [];
+    const now = new Date();
+
+    for (const p of products) {
+      const sales = salesByProduct.get(p.id);
+      if (!p.description || p.description.trim().length < 10) {
+        issues.push({ productId: p.id, productName: p.name, issue: 'Missing or short description', severity: 'medium', suggestion: 'Add a detailed description to improve client understanding and AI recommendations.' });
+      }
+      if (!p.imageUrl) {
+        issues.push({ productId: p.id, productName: p.name, issue: 'No product image', severity: 'low', suggestion: 'Add an image to make the product more appealing in quotes and invoices.' });
+      }
+      if (!p.sku) {
+        issues.push({ productId: p.id, productName: p.name, issue: 'No SKU assigned', severity: 'low', suggestion: 'Assign a SKU for better inventory tracking and searchability.' });
+      }
+      if (p.price <= 0) {
+        issues.push({ productId: p.id, productName: p.name, issue: 'Zero or negative price', severity: 'high', suggestion: 'Set a valid price to enable invoicing.' });
+      }
+      if (!sales || sales.count === 0) {
+        const daysSinceCreated = Math.floor((now.getTime() - new Date(p.createdAt).getTime()) / 86400000);
+        if (daysSinceCreated > 30) {
+          issues.push({ productId: p.id, productName: p.name, issue: `No sales in ${daysSinceCreated} days`, severity: 'high', suggestion: 'Consider promoting this product, adjusting pricing, or bundling it with popular items.' });
+        }
+      }
+      if (!p.isActive) {
+        issues.push({ productId: p.id, productName: p.name, issue: 'Product is inactive', severity: 'medium', suggestion: 'Reactivate if still offered, or archive if discontinued.' });
+      }
+      const daysSinceUpdate = Math.floor((now.getTime() - new Date(p.updatedAt).getTime()) / 86400000);
+      if (daysSinceUpdate > 180) {
+        issues.push({ productId: p.id, productName: p.name, issue: `Pricing not reviewed in ${daysSinceUpdate} days`, severity: 'medium', suggestion: 'Review pricing to account for inflation and market changes.' });
+      }
+    }
+
+    const totalProducts = products.length;
+    const activeProducts = products.filter(p => p.isActive).length;
+    const productsWithSales = salesByProduct.size;
+    const healthScore = totalProducts === 0 ? 100 : Math.max(0, Math.min(100,
+      100 - (issues.filter(i => i.severity === 'high').length * 15)
+          - (issues.filter(i => i.severity === 'medium').length * 5)
+          - (issues.filter(i => i.severity === 'low').length * 2)
+    ));
+
+    const duration = Date.now() - start;
+    if (duration > 1000) this.logger.warn(`Product health scan took ${duration}ms`);
+
+    return {
+      healthScore,
+      healthLabel: healthScore >= 80 ? 'excellent' : healthScore >= 60 ? 'good' : healthScore >= 40 ? 'fair' : 'needs_attention',
+      summary: {
+        totalProducts,
+        activeProducts,
+        inactiveProducts: totalProducts - activeProducts,
+        productsWithSales,
+        productsWithoutSales: totalProducts - productsWithSales,
+      },
+      issues: issues.sort((a, b) => {
+        const sev = { high: 0, medium: 1, low: 2 };
+        return sev[a.severity] - sev[b.severity];
+      }),
+      issueCount: { high: issues.filter(i => i.severity === 'high').length, medium: issues.filter(i => i.severity === 'medium').length, low: issues.filter(i => i.severity === 'low').length },
+    };
+  }
+
+  async clientPaymentIntelligence(businessId: string, contactId: string) {
+    const start = Date.now();
+    const contact = await this.db.contact.findFirst({
+      where: { id: contactId, businessId, deletedAt: null },
+      select: { id: true, firstName: true, lastName: true, email: true, status: true, createdAt: true },
+    });
+    if (!contact) throw new Error('Contact not found');
+
+    const [invoices, quotes, payments] = await Promise.all([
+      this.db.invoice.findMany({
+        where: { contactId, businessId, deletedAt: null },
+        select: { id: true, invoiceNumber: true, status: true, total: true, currency: true, createdAt: true, dueDate: true, paidAt: true, sentAt: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.db.quote.findMany({
+        where: { contactId, businessId, deletedAt: null },
+        select: { id: true, quoteNumber: true, status: true, total: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.db.payment.findMany({
+        where: { invoice: { contactId, businessId } },
+        select: { amount: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    const contactName = `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() || contact.email || 'Unknown';
+    const now = new Date();
+    const paidInvoices = invoices.filter(i => i.status === 'PAID');
+    const overdueInvoices = invoices.filter(i => i.status === 'OVERDUE');
+    const totalRevenue = paidInvoices.reduce((s, i) => s + Number(i.total), 0);
+    const outstandingBalance = invoices.filter(i => ['SENT', 'OVERDUE'].includes(i.status)).reduce((s, i) => s + Number(i.total), 0);
+
+    const paymentDelays = paidInvoices
+      .filter(i => i.dueDate && i.paidAt)
+      .map(i => {
+        const due = new Date(i.dueDate!).getTime();
+        const paid = new Date(i.paidAt!).getTime();
+        return Math.floor((paid - due) / 86400000);
+      });
+    const avgPaymentDelay = paymentDelays.length > 0 ? Math.round(paymentDelays.reduce((s, d) => s + d, 0) / paymentDelays.length) : 0;
+
+    const reliabilityScore = (() => {
+      if (invoices.length === 0) return 50;
+      let score = 70;
+      const paidRatio = paidInvoices.length / invoices.length;
+      score += paidRatio * 20;
+      if (avgPaymentDelay <= 0) score += 10;
+      else if (avgPaymentDelay <= 7) score += 5;
+      else if (avgPaymentDelay > 30) score -= 15;
+      else if (avgPaymentDelay > 14) score -= 5;
+      if (overdueInvoices.length > 0) score -= overdueInvoices.length * 5;
+      return Math.max(0, Math.min(100, Math.round(score)));
+    })();
+
+    const acceptedQuotes = quotes.filter(q => q.status === 'ACCEPTED').length;
+    const quoteConversionRate = quotes.length > 0 ? Math.round((acceptedQuotes / quotes.length) * 100) : 0;
+
+    const daysSinceFirstInvoice = invoices.length > 0
+      ? Math.floor((now.getTime() - new Date(invoices[invoices.length - 1].createdAt).getTime()) / 86400000)
+      : 0;
+    const monthsActive = Math.max(1, Math.ceil(daysSinceFirstInvoice / 30));
+    const avgMonthlyRevenue = Math.round(totalRevenue / monthsActive);
+
+    const duration = Date.now() - start;
+    if (duration > 1000) this.logger.warn(`Client payment intelligence took ${duration}ms`);
+
+    return {
+      contactId,
+      contactName,
+      reliabilityScore,
+      reliabilityLabel: reliabilityScore >= 80 ? 'excellent' : reliabilityScore >= 60 ? 'good' : reliabilityScore >= 40 ? 'fair' : 'risky',
+      lifetimeValue: totalRevenue,
+      outstandingBalance,
+      avgPaymentDelay,
+      paymentDelayLabel: avgPaymentDelay <= 0 ? 'pays_early' : avgPaymentDelay <= 7 ? 'on_time' : avgPaymentDelay <= 14 ? 'slightly_late' : 'frequently_late',
+      invoiceSummary: {
+        total: invoices.length,
+        paid: paidInvoices.length,
+        overdue: overdueInvoices.length,
+        outstanding: invoices.filter(i => ['SENT', 'OVERDUE'].includes(i.status)).length,
+        void: invoices.filter(i => i.status === 'VOID').length,
+      },
+      quoteSummary: {
+        total: quotes.length,
+        accepted: acceptedQuotes,
+        conversionRate: quoteConversionRate,
+      },
+      avgMonthlyRevenue,
+      monthsActive,
+      recentInvoices: invoices.slice(0, 5).map(i => ({
+        id: i.id,
+        invoiceNumber: i.invoiceNumber,
+        status: i.status,
+        total: i.total,
+        currency: i.currency,
+        createdAt: i.createdAt,
+        dueDate: i.dueDate,
+        paidAt: i.paidAt,
+      })),
+      totalPayments: payments.length,
+    };
+  }
+
+  async quoteWinAnalysis(businessId: string) {
+    const start = Date.now();
+    const quotes = await this.db.quote.findMany({
+      where: { businessId, deletedAt: null },
+      select: {
+        id: true, quoteNumber: true, status: true, total: true, currency: true,
+        createdAt: true, expiryDate: true,
+        contact: { select: { id: true, firstName: true, lastName: true } },
+        items: { select: { description: true, quantity: true, unitPrice: true, total: true } },
+        invoiceId: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const now = new Date();
+    const totalQuotes = quotes.length;
+    const accepted = quotes.filter(q => q.status === 'ACCEPTED');
+    const rejected = quotes.filter(q => q.status === 'REJECTED');
+    const sent = quotes.filter(q => q.status === 'SENT');
+    const draft = quotes.filter(q => q.status === 'DRAFT');
+    const expired = sent.filter(q => q.expiryDate && new Date(q.expiryDate) < now);
+    const converted = quotes.filter(q => q.invoiceId);
+
+    const conversionRate = totalQuotes > 0 ? Math.round((accepted.length / totalQuotes) * 100) : 0;
+    const rejectionRate = totalQuotes > 0 ? Math.round((rejected.length / totalQuotes) * 100) : 0;
+
+    const avgAcceptedValue = accepted.length > 0
+      ? Math.round(accepted.reduce((s, q) => s + Number(q.total), 0) / accepted.length)
+      : 0;
+    const avgRejectedValue = rejected.length > 0
+      ? Math.round(rejected.reduce((s, q) => s + Number(q.total), 0) / rejected.length)
+      : 0;
+
+    const pipelineValue = sent.reduce((s, q) => s + Number(q.total), 0) + draft.reduce((s, q) => s + Number(q.total), 0);
+
+    const suggestions: string[] = [];
+    if (conversionRate < 30 && totalQuotes > 5) suggestions.push('Your quote conversion rate is below 30%. Consider reviewing your pricing strategy or follow-up process.');
+    if (expired.length > 0) suggestions.push(`You have ${expired.length} expired quote(s) still marked as sent. Follow up or close them.`);
+    if (avgRejectedValue > avgAcceptedValue * 1.5 && rejected.length > 2) suggestions.push('Rejected quotes tend to be higher value. Consider breaking large proposals into phases.');
+    if (draft.length > sent.length && draft.length > 3) suggestions.push(`You have ${draft.length} draft quotes not yet sent. Review and send them to keep your pipeline moving.`);
+    if (totalQuotes === 0) suggestions.push('Start creating quotes to track your proposal-to-revenue pipeline.');
+
+    const duration = Date.now() - start;
+    if (duration > 1000) this.logger.warn(`Quote win analysis took ${duration}ms`);
+
+    return {
+      conversionRate,
+      rejectionRate,
+      summary: {
+        total: totalQuotes,
+        accepted: accepted.length,
+        rejected: rejected.length,
+        sent: sent.length,
+        draft: draft.length,
+        expired: expired.length,
+        converted: converted.length,
+      },
+      values: {
+        avgAcceptedValue,
+        avgRejectedValue,
+        pipelineValue,
+        totalWonValue: accepted.reduce((s, q) => s + Number(q.total), 0),
+        totalLostValue: rejected.reduce((s, q) => s + Number(q.total), 0),
+      },
+      suggestions,
+      recentQuotes: quotes.slice(0, 10).map(q => ({
+        id: q.id,
+        quoteNumber: q.quoteNumber,
+        status: q.status,
+        total: q.total,
+        currency: q.currency,
+        contactName: q.contact ? `${q.contact.firstName ?? ''} ${q.contact.lastName ?? ''}`.trim() || 'Unknown' : 'No contact',
+        createdAt: q.createdAt,
+        expiryDate: q.expiryDate,
+        converted: !!q.invoiceId,
+      })),
+    };
+  }
+
   async interpretCommand(businessId: string, command: string) {
     const sanitized = this.sanitizeAiInput(command, 500);
     const context = await this.buildCommerceContext(businessId);
