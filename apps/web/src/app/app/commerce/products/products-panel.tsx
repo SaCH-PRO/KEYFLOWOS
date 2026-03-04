@@ -8,6 +8,9 @@ import type { Product } from "@/lib/client";
 import { bulkUpdateProducts } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
 import type { ProductForm } from "../components/commerce-types";
+import type { ProductSlots } from "../utils/commerce-slots";
+import { useCommerceSearch } from "../hooks/use-commerce-search";
+import { useProductStats } from "../hooks/use-product-stats";
 import { ProductCard } from "./product-card";
 import { ProductDetailPanel } from "./product-detail-panel";
 
@@ -40,8 +43,9 @@ interface ProductsPanelProps {
   currency?: string;
   onCreateQuote?: (product: Product) => void;
   onCreateInvoice?: (product: Product) => void;
-  invoices?: Array<{ items?: Array<{ productId?: string | null }> }>;
+  invoices?: Array<{ items?: Array<{ productId?: string | null }>; status?: string }>;
   quotes?: Array<{ items?: Array<{ productId?: string | null }> }>;
+  slots?: ProductSlots;
 }
 
 const CATEGORY_FILTERS = [
@@ -83,6 +87,7 @@ export const ProductsPanel = React.memo(function ProductsPanel({
   onCreateInvoice,
   invoices = [],
   quotes = [],
+  slots,
 }: ProductsPanelProps) {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>(getStoredViewMode);
@@ -151,29 +156,27 @@ export const ProductsPanel = React.memo(function ProductsPanel({
     };
   }, [showSortMenu]);
 
-  const searchIndex = useMemo(() => {
+  const searchableFields = useCallback((p: Product) => {
     const skipKeys = new Set(["id", "imageUrl", "createdAt", "updatedAt", "businessId"]);
-    return new Map(products.map((p) => {
-      const parts: string[] = [
-        p.name,
-        p.description || "",
-        p.sku || "",
-        p.category || "",
-        p.currency || "",
-        String(p.price),
-        p.duration != null ? `${p.duration} min ${p.duration} minutes` : "",
-        p.isActive === false ? "inactive" : "active",
-      ];
-      for (const [k, v] of Object.entries(p)) {
-        if (!skipKeys.has(k) && v != null && typeof v !== "object") {
-          parts.push(String(v));
-        }
+    const parts: string[] = [
+      p.name,
+      p.description || "",
+      p.sku || "",
+      p.category || "",
+      p.currency || "",
+      String(p.price),
+      p.duration != null ? `${p.duration} min ${p.duration} minutes` : "",
+      p.isActive === false ? "inactive" : "active",
+    ];
+    for (const [k, v] of Object.entries(p)) {
+      if (!skipKeys.has(k) && v != null && typeof v !== "object") {
+        parts.push(String(v));
       }
-      return [p.id, parts.join(" ").toLowerCase()] as const;
-    }));
-  }, [products]);
+    }
+    return parts.join(" ");
+  }, []);
 
-  const filteredProducts = useMemo(() => {
+  const preFilteredProducts = useMemo(() => {
     let result = products;
     if (!showInactive) {
       result = result.filter((p) => p.isActive !== false);
@@ -181,14 +184,13 @@ export const ProductsPanel = React.memo(function ProductsPanel({
     if (categoryFilter !== "ALL") {
       result = result.filter((p) => p.category === categoryFilter);
     }
-    if (productSearch.trim()) {
-      const terms = productSearch.toLowerCase().split(/\s+/).filter(Boolean);
-      result = result.filter((p) => {
-        const text = searchIndex.get(p.id) || "";
-        return terms.every((t) => text.indexOf(t) !== -1);
-      });
-    }
-    const sorted = [...result];
+    return result;
+  }, [products, showInactive, categoryFilter]);
+
+  const { filtered: searchedProducts } = useCommerceSearch(preFilteredProducts, searchableFields, productSearch);
+
+  const filteredProducts = useMemo(() => {
+    const sorted = [...searchedProducts];
     switch (sortBy) {
       case "name-asc": sorted.sort((a, b) => a.name.localeCompare(b.name)); break;
       case "name-desc": sorted.sort((a, b) => b.name.localeCompare(a.name)); break;
@@ -199,7 +201,7 @@ export const ProductsPanel = React.memo(function ProductsPanel({
       default: sorted.sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime()); break;
     }
     return sorted;
-  }, [products, productSearch, categoryFilter, showInactive, sortBy, searchIndex]);
+  }, [searchedProducts, sortBy]);
 
   const categoryCounts = useMemo(() => {
     const counts = { ALL: 0, SERVICE: 0, PRODUCT: 0, PACKAGE: 0 };
@@ -241,19 +243,11 @@ export const ProductsPanel = React.memo(function ProductsPanel({
     onBulkAction?.();
   }, [businessId, selectedIds, onBulkAction]);
 
-  const productStats = useMemo(() => {
-    if (!selectedProduct) return { invoiceCount: 0, quoteCount: 0, totalRevenue: 0 };
-    const pid = selectedProduct.id;
-    const invoiceCount = invoices.filter(inv => inv.items?.some(item => item.productId === pid)).length;
-    const quoteCount = quotes.filter(q => q.items?.some(item => item.productId === pid)).length;
-    const totalRevenue = invoices
-      .filter(inv => (inv as any).status === "PAID")
-      .reduce((sum, inv) => {
-        const matching = inv.items?.filter(item => item.productId === pid) ?? [];
-        return sum + matching.reduce((s, item) => s + ((item as any).total ?? (Number((item as any).unitPrice ?? 0) * Number((item as any).quantity ?? 1))), 0);
-      }, 0);
-    return { invoiceCount, quoteCount, totalRevenue };
-  }, [selectedProduct?.id, invoices, quotes]);
+  const productStats = useProductStats({
+    productId: selectedProduct?.id ?? null,
+    invoices,
+    quotes,
+  });
 
   const handleDetailSave = useCallback(async (form: ProductForm, imageFile?: File | null) => {
     if (onInlineSave && selectedProduct) {
@@ -416,6 +410,7 @@ export const ProductsPanel = React.memo(function ProductsPanel({
               <List className="w-4 h-4" />
             </button>
           </div>
+          {slots?.renderHeaderExtra?.()}
         </div>
 
         <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide pb-0.5" role="group" aria-label="Filter by category">
@@ -493,6 +488,8 @@ export const ProductsPanel = React.memo(function ProductsPanel({
         )}
       </AnimatePresence>
 
+      {slots?.renderInsightBanner?.()}
+
       {loading ? (
         viewMode === "list" ? (
           <div className="space-y-1">
@@ -566,6 +563,7 @@ export const ProductsPanel = React.memo(function ProductsPanel({
                   Or snap a photo of a menu or price list — AI will extract your products
                 </button>
               )}
+              {slots?.renderEmptyExtra?.()}
             </>
           )}
         </div>
@@ -610,6 +608,7 @@ export const ProductsPanel = React.memo(function ProductsPanel({
                       cachedImage={cachedImages[product.id]}
                       currency={currency}
                     />
+                    {slots?.renderCardBadge?.(product)}
                   </div>
                 ))}
               </AnimatePresence>

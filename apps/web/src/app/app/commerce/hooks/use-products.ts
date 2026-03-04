@@ -15,6 +15,7 @@ import {
   fileToDataUrl,
 } from "@/lib/image-store";
 import { notifyProductsChanged } from "@/lib/product-sync";
+import { moduleEvents } from "@/lib/module-events";
 import { ProductForm } from "../components/commerce-types";
 
 const productSchema = z.object({
@@ -167,6 +168,7 @@ export function useProducts(
           closeProductForm();
           toast.success("Product updated");
           notifyProductsChanged();
+          moduleEvents.emit("commerce:product_updated", "commerce", { productId: editingProductId, name: data.name });
         }
       } else {
         const { data, error } = await createProduct({ businessId, ...payload });
@@ -177,6 +179,7 @@ export function useProducts(
           closeProductForm();
           toast.success("Product created");
           notifyProductsChanged();
+          moduleEvents.emit("commerce:product_created", "commerce", { productId: data.id, name: data.name, price: data.price });
         }
       }
     } finally {
@@ -213,6 +216,7 @@ export function useProducts(
         setFormError(null);
         toast.success(`"${data.name}" created — add another`);
         notifyProductsChanged();
+        moduleEvents.emit("commerce:product_created", "commerce", { productId: data.id, name: data.name, price: data.price });
       }
     } finally {
       setSaving(false);
@@ -241,6 +245,7 @@ export function useProducts(
       setProducts((prev) => [data, ...prev]);
       toast.success("Product duplicated");
       notifyProductsChanged();
+      moduleEvents.emit("commerce:product_created", "commerce", { productId: data.id, name: data.name, price: data.price });
     }
   }, [businessId, cachedImages, setProducts, setCachedImages]);
 
@@ -257,6 +262,7 @@ export function useProducts(
       setProducts((prev) => prev.map((p) => (p.id === product.id ? { ...p, isActive: newActive } : p)));
       toast.success(newActive ? "Product activated" : "Product deactivated");
       notifyProductsChanged();
+      moduleEvents.emit("commerce:product_updated", "commerce", { productId: product.id, name: product.name });
     }
   }, [businessId, setProducts]);
 
@@ -283,6 +289,7 @@ export function useProducts(
       setProducts((prev) => prev.map((p) => (p.id === productId ? { ...p, ...data } : p)));
       toast.success("Product updated");
       notifyProductsChanged();
+      moduleEvents.emit("commerce:product_updated", "commerce", { productId, name: data.name });
     }
   }, [businessId, setProducts, syncImageCache]);
 
@@ -296,6 +303,7 @@ export function useProducts(
     setDeleteConfirm(null);
     toast.success("Product deleted");
     notifyProductsChanged();
+    moduleEvents.emit("commerce:product_deleted", "commerce", { productId });
   }, [businessId, setProducts, setCachedImages]);
 
   return {

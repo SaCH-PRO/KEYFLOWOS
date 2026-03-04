@@ -24,6 +24,8 @@ import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-s
 import { useModuleEmit, useModuleEvent } from "@/hooks/use-module-events";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { commerceAiExecute } from "@/lib/client";
+import type { ProductSlots } from "./utils/commerce-slots";
+import type { BillingSlots } from "./utils/commerce-slots";
 
 const TABS = [
   { key: "products", label: "Products", icon: Package },
@@ -237,6 +239,58 @@ export default function CommercePage() {
 
   useKeyboardShortcuts(commerceShortcuts, !workspaceLoading);
 
+  const productSlots = useMemo<ProductSlots>(() => {
+    const topSuggestion = commerceAi.suggestions.find(
+      (s) => s.priority === "high" && (s.type === "warning" || s.type === "insight"),
+    );
+    if (!topSuggestion) return {};
+    return {
+      renderInsightBanner: () => (
+        <div className="flex items-center gap-3 rounded-xl border border-border/30 bg-white/[0.03] px-4 py-2.5 text-sm">
+          <span className="text-base">{topSuggestion.type === "warning" ? "⚠" : "💡"}</span>
+          <div className="flex-1 min-w-0">
+            <span className="font-medium text-foreground/90">{topSuggestion.title}</span>
+            <span className="text-muted-foreground/60 ml-1.5">{topSuggestion.description}</span>
+          </div>
+          {topSuggestion.actionLabel && topSuggestion.actionKey && (
+            <button
+              onClick={() => handleAiAssistantAction(topSuggestion.actionKey!)}
+              className="shrink-0 rounded-lg px-3 py-1 text-xs font-medium border border-border/40 bg-white/[0.04] hover:bg-white/[0.08] transition-colors"
+            >
+              {topSuggestion.actionLabel}
+            </button>
+          )}
+        </div>
+      ),
+    };
+  }, [commerceAi.suggestions, handleAiAssistantAction]);
+
+  const billingSlots = useMemo<BillingSlots>(() => {
+    const billingSuggestion = commerceAi.suggestions.find(
+      (s) => s.priority === "high" && s.type === "warning",
+    );
+    if (!billingSuggestion) return {};
+    return {
+      renderInsightBanner: () => (
+        <div className="flex items-center gap-3 rounded-xl border border-border/30 bg-white/[0.03] px-4 py-2.5 text-sm">
+          <span className="text-base">⚠</span>
+          <div className="flex-1 min-w-0">
+            <span className="font-medium text-foreground/90">{billingSuggestion.title}</span>
+            <span className="text-muted-foreground/60 ml-1.5">{billingSuggestion.description}</span>
+          </div>
+          {billingSuggestion.actionLabel && billingSuggestion.actionKey && (
+            <button
+              onClick={() => handleAiAssistantAction(billingSuggestion.actionKey!)}
+              className="shrink-0 rounded-lg px-3 py-1 text-xs font-medium border border-border/40 bg-white/[0.04] hover:bg-white/[0.08] transition-colors"
+            >
+              {billingSuggestion.actionLabel}
+            </button>
+          )}
+        </div>
+      ),
+    };
+  }, [commerceAi.suggestions, handleAiAssistantAction]);
+
   if (workspaceLoading) return <ListPageSkeleton />;
 
   if (workspaceError) {
@@ -326,6 +380,7 @@ export default function CommercePage() {
                 }}
                 invoices={invoices}
                 quotes={quotes}
+                slots={productSlots}
               />
             </motion.div>
           )}
@@ -352,6 +407,7 @@ export default function CommercePage() {
                 prefillToken={pendingPrefill?._token}
                 defaultSegment={pendingPrefill?.targetSegment ?? "invoices"}
                 onPrefillApplied={clearPrefill}
+                slots={billingSlots}
               />
             </motion.div>
           )}

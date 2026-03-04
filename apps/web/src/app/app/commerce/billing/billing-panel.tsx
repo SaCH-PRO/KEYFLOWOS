@@ -18,6 +18,8 @@ import { useModuleEmit } from "@/hooks/use-module-events";
 import type { Invoice, Quote, Contact, Product } from "@/lib/client";
 import { fetchCommerceStats, fetchRecurringInvoices, type CommerceStats } from "@/lib/client";
 import { formatCurrencyCompact } from "@/lib/currency";
+import { useBillingStats } from "../hooks/use-billing-stats";
+import type { BillingSlots } from "../utils/commerce-slots";
 import QuotesPanel from "../quotes/quotes-panel";
 import InvoicesPanel from "../invoices/invoices-panel";
 import RecurringPanel from "../recurring/recurring-panel";
@@ -51,18 +53,7 @@ interface BillingPanelProps {
   prefillItems?: import("../components/commerce-types").InvoiceLineItem[];
   prefillToken?: number;
   onPrefillApplied?: () => void;
-}
-
-function computeBillingStats(invoices: Invoice[], quotes: Quote[]) {
-  const paidInvoices = invoices.filter((inv) => inv.status === "PAID");
-  const totalRevenue = paidInvoices.reduce((sum, inv) => sum + Number(inv.total), 0);
-  const outstandingInvoices = invoices.filter((inv) => inv.status === "SENT" || inv.status === "OVERDUE");
-  const outstanding = outstandingInvoices.reduce((sum, inv) => sum + Number(inv.total), 0);
-  const overdueInvoices = invoices.filter((inv) => inv.status === "OVERDUE");
-  const overdueAmount = overdueInvoices.reduce((sum, inv) => sum + Number(inv.total), 0);
-  const acceptedQuotes = quotes.filter((q) => q.status === "ACCEPTED").length;
-  const conversionRate = quotes.length > 0 ? Math.round((acceptedQuotes / quotes.length) * 100) : 0;
-  return { totalRevenue, outstanding, overdueAmount, overdueCount: overdueInvoices.length, conversionRate };
+  slots?: BillingSlots;
 }
 
 export function BillingPanel({
@@ -86,6 +77,7 @@ export function BillingPanel({
   prefillItems,
   prefillToken,
   onPrefillApplied,
+  slots,
 }: BillingPanelProps) {
   const router = useRouter();
   const [segment, setSegment] = useState<BillingSegment>(defaultSegment);
@@ -107,7 +99,7 @@ export function BillingPanel({
     return () => { cancelled = true; };
   }, [businessId, invoices.length, quotes.length]);
 
-  const clientStats = useMemo(() => computeBillingStats(invoices, quotes), [invoices, quotes]);
+  const clientStats = useBillingStats(invoices, quotes);
 
   const stats = useMemo(() => {
     if (serverStats) {
@@ -196,7 +188,10 @@ export function BillingPanel({
         </button>
       </div>
 
+      {slots?.renderKpiExtra?.()}
+
       <div className="relative">
+        {slots?.renderHeaderExtra?.()}
         <div
           role="tablist"
           aria-label="Billing sections"
@@ -302,6 +297,8 @@ export function BillingPanel({
         </div>
       </div>
 
+      {slots?.renderInsightBanner?.()}
+
       <div className="p-3 sm:p-4" data-swipe-ignore {...swipeHandlers}>
         <AnimatePresence mode="wait" custom={slideDir}>
           {segment === "quotes" && (
@@ -332,6 +329,7 @@ export function BillingPanel({
                 prefillItems={segment === "quotes" ? prefillItems : undefined}
                 prefillToken={segment === "quotes" ? prefillToken : undefined}
                 onPrefillApplied={onPrefillApplied}
+                renderTimelineBadge={slots?.renderTimelineBadge}
               />
             </motion.div>
           )}
@@ -361,6 +359,7 @@ export function BillingPanel({
                 prefillItems={segment === "invoices" ? prefillItems : undefined}
                 prefillToken={segment === "invoices" ? prefillToken : undefined}
                 onPrefillApplied={onPrefillApplied}
+                renderTimelineBadge={slots?.renderTimelineBadge}
               />
             </motion.div>
           )}
