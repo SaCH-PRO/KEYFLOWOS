@@ -38,6 +38,7 @@ import type { BillingSlots } from "../utils/commerce-slots";
 import QuotesPanel from "../quotes/quotes-panel";
 import InvoicesPanel from "../invoices/invoices-panel";
 import RecurringPanel from "../recurring/recurring-panel";
+import { BillingSettingsPanel } from "../components/billing-settings-panel";
 
 function getDaysOverdue(dueDate: string | null | undefined): number {
   if (!dueDate) return 0;
@@ -889,6 +890,10 @@ export function BillingPanel({
             </motion.div>
           )}
         </AnimatePresence>
+      </div>
+
+      <div className="p-3 sm:p-4 pt-0">
+        <BillingSettingsPanel />
       </div>
 
     </div>
