@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useCallback, useRef } from "react";
+import { type ReactNode, useEffect, useCallback, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   FileText,
@@ -13,6 +13,7 @@ import {
   Package,
   StickyNote,
   ChevronRight,
+  Eye,
 } from "lucide-react";
 import { formatAmount, getContactInitials } from "../utils/commerce-utils";
 import {
@@ -20,6 +21,23 @@ import {
   BILLING_DOC_THEME,
   type BillingDocType,
 } from "./commerce-types";
+import { TemplateCustomizer } from "./invoice-templates/template-customizer";
+import type { TemplateId, InvoiceTemplateData } from "./invoice-templates/template-types";
+
+export interface BusinessDataForPreview {
+  name: string;
+  logoUrl?: string | null;
+  address?: string | null;
+  city?: string | null;
+  country?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  website?: string | null;
+  tagline?: string | null;
+  primaryColor: string;
+  secondaryColor: string;
+  invoiceTemplate?: string | null;
+}
 
 interface BillingDetailModalProps {
   type: BillingDocType;
@@ -52,6 +70,9 @@ interface BillingDetailModalProps {
   alerts?: ReactNode;
   actions: ReactNode;
   onClose: () => void;
+  businessData?: BusinessDataForPreview | null;
+  onSaveBranding?: (overrides: Record<string, string>) => Promise<void>;
+  savingBranding?: boolean;
 }
 
 const STATUS_ORDER_QUOTE = ["DRAFT", "SENT", "ACCEPTED", "REJECTED"];
@@ -130,10 +151,14 @@ export function BillingDetailModal({
   alerts,
   actions,
   onClose,
+  businessData,
+  onSaveBranding,
+  savingBranding,
 }: BillingDetailModalProps) {
   const theme = BILLING_DOC_THEME[type];
   const panelRef = useRef<HTMLDivElement>(null);
   const dialogId = `billing-detail-${type}-${number}`;
+  const [showTemplatePreview, setShowTemplatePreview] = useState(false);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -466,6 +491,16 @@ export function BillingDetailModal({
                 </div>
               </div>
             )}
+
+            {businessData && (
+              <button
+                onClick={() => setShowTemplatePreview(true)}
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-border/40 bg-white/[0.03] hover:bg-white/[0.06] transition-colors text-sm font-medium text-foreground/80 hover:text-foreground"
+              >
+                <Eye className="w-4 h-4" style={{ color: theme.accentColor }} />
+                View as Customer
+              </button>
+            )}
           </div>
         </div>
 
@@ -690,6 +725,16 @@ export function BillingDetailModal({
                 </p>
               </div>
             )}
+
+            {businessData && (
+              <button
+                onClick={() => setShowTemplatePreview(true)}
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-border/40 bg-white/[0.03] hover:bg-white/[0.06] transition-colors text-sm font-medium text-foreground/80 hover:text-foreground"
+              >
+                <Eye className="w-4 h-4" style={{ color: theme.accentColor }} />
+                View as Customer
+              </button>
+            )}
           </div>
         </div>
 
@@ -697,6 +742,48 @@ export function BillingDetailModal({
           {actions}
         </div>
       </motion.div>
+
+      {businessData && showTemplatePreview && (
+        <TemplateCustomizer
+          open={showTemplatePreview}
+          onClose={() => setShowTemplatePreview(false)}
+          activeTemplate={(businessData.invoiceTemplate as TemplateId) || "classic"}
+          onSaveBranding={onSaveBranding}
+          savingBranding={savingBranding}
+          data={{
+            type: type === "invoice" ? "invoice" : "quote",
+            number: number,
+            status: status,
+            issueDate: dateValue1,
+            dueDate: type === "invoice" ? dateValue2 : null,
+            expiryDate: type === "quote" ? dateValue2 : null,
+            contact: contact,
+            items: items,
+            subtotal: subtotal,
+            taxRate: taxRate || 0,
+            taxAmount: taxAmount,
+            discountType: discountType,
+            discountValue: discountValue ? Number(discountValue) : null,
+            discountAmount: discountAmount,
+            total: total,
+            currency: currency,
+            notes: notes,
+            business: {
+              name: businessData.name,
+              logoUrl: businessData.logoUrl || null,
+              address: businessData.address,
+              city: businessData.city,
+              country: businessData.country,
+              phone: businessData.phone,
+              email: businessData.email,
+              website: businessData.website,
+              tagline: businessData.tagline,
+              primaryColor: businessData.primaryColor,
+              secondaryColor: businessData.secondaryColor,
+            },
+          }}
+        />
+      )}
     </motion.div>
   );
 }

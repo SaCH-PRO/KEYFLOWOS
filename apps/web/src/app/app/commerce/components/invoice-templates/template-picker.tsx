@@ -198,16 +198,25 @@ export function TemplatePicker({
                 <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">{meta.description}</p>
               </div>
 
-              <button
+              <div
+                role="button"
+                tabIndex={0}
                 onClick={(e) => {
                   e.stopPropagation();
                   setPreviewing(id);
                 }}
-                className="absolute top-3 right-3 p-1 rounded-md bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    setPreviewing(id);
+                  }
+                }}
+                className="absolute top-3 right-3 p-1 rounded-md bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                 title="Preview"
               >
                 <Eye className="w-3 h-3" />
-              </button>
+              </div>
             </button>
           );
         })}
