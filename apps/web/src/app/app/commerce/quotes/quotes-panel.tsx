@@ -1167,43 +1167,44 @@ export default function QuotesPanel({
             }
             actions={
               <>
-                <div className="flex items-center gap-1">
-                  <button onClick={() => duplicateQuote(selectedQuote)} className="p-2 rounded-lg hover:bg-white/[0.06] transition-colors" title="Duplicate">
-                    <Copy className="w-4 h-4 text-slate-400" />
-                  </button>
-                  <button onClick={() => shareQuoteViaWhatsApp(selectedQuote)} className="p-2 rounded-lg hover:bg-emerald-500/10 transition-colors" title="WhatsApp">
-                    <MessageCircle className="w-4 h-4 text-emerald-400" />
-                  </button>
-                  <button onClick={() => setShowEmailModal(true)} className="p-2 rounded-lg hover:bg-blue-500/10 transition-colors" title="Email">
-                    <Mail className="w-4 h-4 text-blue-400" />
-                  </button>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-0.5">
+                    <button onClick={() => duplicateQuote(selectedQuote)} className="p-2 rounded-lg hover:bg-white/[0.06] transition-colors" title="Duplicate quote">
+                      <Copy className="w-4 h-4 text-slate-400" />
+                    </button>
+                    <div className="w-px h-4 bg-border/30 mx-0.5" />
+                    <button onClick={() => shareQuoteViaWhatsApp(selectedQuote)} className="p-2 rounded-lg hover:bg-emerald-500/10 transition-colors" title="Share via WhatsApp">
+                      <MessageCircle className="w-4 h-4 text-emerald-400" />
+                    </button>
+                    <button onClick={() => setShowEmailModal(true)} className="p-2 rounded-lg hover:bg-blue-500/10 transition-colors" title="Send via email">
+                      <Mail className="w-4 h-4 text-blue-400" />
+                    </button>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  {selectedQuote.status === "DRAFT" && (
-                    <Button size="sm" className="gap-1.5 flex-1" onClick={() => { handleMarkSent(selectedQuote); setSelectedQuote(null); }} disabled={!!actionLoading[selectedQuote.id]}>
-                      {actionLoading[selectedQuote.id] === "send" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send Quote
-                    </Button>
-                  )}
-                  {selectedQuote.status === "SENT" && !isQuoteExpired(selectedQuote) && (
-                    <Button size="sm" className="gap-1.5 flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => handleAcceptQuote(selectedQuote)} disabled={!!actionLoading[selectedQuote.id]}>
-                      {actionLoading[selectedQuote.id] === "accept" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Accept Quote
-                    </Button>
-                  )}
-                  {selectedQuote.status === "ACCEPTED" && !selectedQuote.invoiceId && (
-                    <Button size="sm" className="gap-1.5 flex-1" onClick={() => {
-                      setConvertForm({
-                        taxRate: String(selectedQuote.taxRate ?? 12.5),
-                        discountType: (selectedQuote.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
-                        discountValue: selectedQuote.discountValue ? String(selectedQuote.discountValue) : "",
-                        notes: selectedQuote.notes ?? "",
-                        dueDate: "",
-                      });
-                      setShowConvertModal(true);
-                    }}>
-                      Convert to Invoice
-                    </Button>
-                  )}
-                </div>
+                {selectedQuote.status === "DRAFT" && (
+                  <Button size="sm" className="gap-1.5 w-full" onClick={() => { handleMarkSent(selectedQuote); setSelectedQuote(null); }} disabled={!!actionLoading[selectedQuote.id]}>
+                    {actionLoading[selectedQuote.id] === "send" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send Quote
+                  </Button>
+                )}
+                {selectedQuote.status === "SENT" && !isQuoteExpired(selectedQuote) && (
+                  <Button size="sm" className="gap-1.5 w-full bg-emerald-600 hover:bg-emerald-700" onClick={() => handleAcceptQuote(selectedQuote)} disabled={!!actionLoading[selectedQuote.id]}>
+                    {actionLoading[selectedQuote.id] === "accept" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Accept Quote
+                  </Button>
+                )}
+                {selectedQuote.status === "ACCEPTED" && !selectedQuote.invoiceId && (
+                  <Button size="sm" className="gap-1.5 w-full" onClick={() => {
+                    setConvertForm({
+                      taxRate: String(selectedQuote.taxRate ?? 12.5),
+                      discountType: (selectedQuote.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
+                      discountValue: selectedQuote.discountValue ? String(selectedQuote.discountValue) : "",
+                      notes: selectedQuote.notes ?? "",
+                      dueDate: "",
+                    });
+                    setShowConvertModal(true);
+                  }}>
+                    Convert to Invoice
+                  </Button>
+                )}
               </>
             }
             onClose={() => setSelectedQuote(null)}
