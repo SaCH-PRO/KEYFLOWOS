@@ -13,7 +13,9 @@ import {
 import {
   commerceAiCommand,
   commerceAiExecute,
+  commerceAiSearch,
   type CommerceCommandResult,
+  type CommerceNlSearchResult,
 } from "@/lib/client";
 
 export type CommerceCommand =
@@ -33,14 +35,16 @@ export type CommerceCommand =
 
 interface CommerceAiSearchBarProps {
   onExecuteCommand?: (command: CommerceCommand) => void;
+  onSelectResult?: (result: { id: string; type: string }) => void;
+  onApplyFilters?: (filters: Record<string, unknown>) => void;
 }
 
 const EXAMPLE_QUERIES = [
+  "Show invoices over $5000",
+  "Find products with no sales",
+  "Quotes from last month",
   "Create an invoice for John",
   "Mark invoice #42 as paid",
-  "Send a reminder for overdue invoices",
-  "Show me revenue this month",
-  "Create a quote for web design",
   "What's my cash flow forecast?",
   "Show all overdue invoices",
   "Switch to products tab",
@@ -70,9 +74,56 @@ const ACTION_ICONS: Record<string, typeof Zap> = {
   apply_discount: CreditCard,
 };
 
-export function CommerceAiSearchBar({ onExecuteCommand }: CommerceAiSearchBarProps) {
+const RESULT_TYPE_ICONS: Record<string, typeof Zap> = {
+  products: Package,
+  invoices: Receipt,
+  quotes: FileText,
+  product: Package,
+  invoice: Receipt,
+  quote: FileText,
+};
+
+const RESULT_TYPE_COLORS: Record<string, string> = {
+  products: "bg-blue-500/10 text-blue-400",
+  invoices: "bg-emerald-500/10 text-emerald-400",
+  quotes: "bg-purple-500/10 text-purple-400",
+  product: "bg-blue-500/10 text-blue-400",
+  invoice: "bg-emerald-500/10 text-emerald-400",
+  quote: "bg-purple-500/10 text-purple-400",
+};
+
+function mapSearchResult(type: string, r: Record<string, any>): { id: string; type: string; name: string; status?: string; total?: number; date?: string } {
+  if (type === "products") {
+    return { id: r.id, type: "product", name: r.name || "Untitled", status: r.isActive ? "ACTIVE" : "INACTIVE", total: r.price ? Number(r.price) : undefined };
+  }
+  if (type === "invoices") {
+    const cn = r.contact ? `${r.contact.firstName ?? ""} ${r.contact.lastName ?? ""}`.trim() : "";
+    return { id: r.id, type: "invoice", name: r.invoiceNumber ? `${r.invoiceNumber}${cn ? ` — ${cn}` : ""}` : cn || "Invoice", status: r.status, total: r.total ? Number(r.total) : undefined, date: r.createdAt };
+  }
+  if (type === "quotes") {
+    const cn = r.contact ? `${r.contact.firstName ?? ""} ${r.contact.lastName ?? ""}`.trim() : "";
+    return { id: r.id, type: "quote", name: r.quoteNumber ? `${r.quoteNumber}${cn ? ` — ${cn}` : ""}` : cn || "Quote", status: r.status, total: r.total ? Number(r.total) : undefined, date: r.createdAt };
+  }
+  return { id: r.id, type, name: r.name || r.invoiceNumber || r.quoteNumber || "Item" };
+}
+
+const STATUS_COLORS: Record<string, string> = {
+  PAID: "bg-emerald-500/10 text-emerald-400",
+  SENT: "bg-blue-500/10 text-blue-400",
+  DRAFT: "bg-muted text-muted-foreground",
+  OVERDUE: "bg-red-500/10 text-red-400",
+  VOID: "bg-muted text-muted-foreground",
+  ACCEPTED: "bg-emerald-500/10 text-emerald-400",
+  DECLINED: "bg-red-500/10 text-red-400",
+  PENDING: "bg-amber-500/10 text-amber-400",
+  ACTIVE: "bg-emerald-500/10 text-emerald-400",
+  INACTIVE: "bg-muted text-muted-foreground",
+};
+
+export function CommerceAiSearchBar({ onExecuteCommand, onSelectResult, onApplyFilters }: CommerceAiSearchBarProps) {
   const [query, setQuery] = useState("");
   const [commandResult, setCommandResult] = useState<CommerceCommandResult | null>(null);
+  const [searchData, setSearchData] = useState<CommerceNlSearchResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -82,13 +133,22 @@ export function CommerceAiSearchBar({ onExecuteCommand }: CommerceAiSearchBarPro
     if (!q) return;
     setLoading(true);
     setCommandResult(null);
+    setSearchData(null);
 
     try {
       const cmdResult = await commerceAiCommand(q);
-      if (cmdResult.data) {
+      if (cmdResult.data?.isAction && cmdResult.data.confidence >= 0.5) {
+        setCommandResult(cmdResult.data);
+        return;
+      }
+
+      const searchResult = await commerceAiSearch(q);
+      if (searchResult.data) {
+        setSearchData(searchResult.data);
+      } else if (cmdResult.data) {
         setCommandResult(cmdResult.data);
       } else {
-        toast.error(cmdResult.error ?? "Failed to interpret command");
+        toast.error(searchResult.error ?? "Search failed");
       }
     } catch {
       toast.error("AI processing failed");
@@ -110,6 +170,7 @@ export function CommerceAiSearchBar({ onExecuteCommand }: CommerceAiSearchBarPro
   const clear = () => {
     setQuery("");
     setCommandResult(null);
+    setSearchData(null);
     setFocused(false);
   };
 
@@ -117,6 +178,13 @@ export function CommerceAiSearchBar({ onExecuteCommand }: CommerceAiSearchBarPro
     setQuery(example);
     processInput(example);
   };
+
+  const handleResultClick = useCallback((result: { id: string; type: string }) => {
+    if (onSelectResult) {
+      onSelectResult(result);
+    }
+    clear();
+  }, [onSelectResult]);
 
   const executeCommand = useCallback(async (cmd: CommerceCommandResult) => {
     if (!onExecuteCommand) {
@@ -213,6 +281,11 @@ export function CommerceAiSearchBar({ onExecuteCommand }: CommerceAiSearchBarPro
     clear();
   }, [onExecuteCommand]);
 
+  const formatCurrency = (amount?: number) => {
+    if (amount == null) return "";
+    return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0 }).format(amount);
+  };
+
   const ActionIcon = commandResult ? (ACTION_ICONS[commandResult.action ?? ""] ?? Zap) : Zap;
 
   return (
@@ -232,7 +305,7 @@ export function CommerceAiSearchBar({ onExecuteCommand }: CommerceAiSearchBarPro
           onKeyDown={handleKeyDown}
           onFocus={() => setFocused(true)}
           onBlur={() => setTimeout(() => setFocused(false), 300)}
-          placeholder='AI Commerce: "Create invoice", "Show overdue", "Cash flow forecast"'
+          placeholder='AI Commerce: "Show invoices over $5000", "Find products with no sales", "Mark paid"'
           className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/50 outline-none"
         />
         {query && (
@@ -249,7 +322,7 @@ export function CommerceAiSearchBar({ onExecuteCommand }: CommerceAiSearchBarPro
         </button>
       </div>
 
-      {focused && !commandResult && !loading && !query && (
+      {focused && !commandResult && !searchData && !loading && !query && (
         <div className="absolute top-full left-0 right-0 mt-1 rounded-xl border border-border/50 bg-card p-3 shadow-xl z-50">
           <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider mb-2 block">Try saying</span>
           <div className="space-y-1">
@@ -260,6 +333,8 @@ export function CommerceAiSearchBar({ onExecuteCommand }: CommerceAiSearchBarPro
                 className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-white/[0.04] transition-colors text-left"
               >
                 {i < 3 ? (
+                  <Search className="w-3 h-3 text-[hsl(var(--kf-accent2))]/60 shrink-0" />
+                ) : i < 6 ? (
                   <Zap className="w-3 h-3 text-[hsl(var(--kf-accent2))]/60 shrink-0" />
                 ) : (
                   <Sparkles className="w-3 h-3 text-[hsl(var(--kf-accent1))]/50 shrink-0" />
@@ -270,11 +345,95 @@ export function CommerceAiSearchBar({ onExecuteCommand }: CommerceAiSearchBarPro
           </div>
           <div className="mt-2 pt-2 border-t border-border/20">
             <span className="text-[10px] text-muted-foreground/50">
-              Manage invoices, quotes & products — the AI handles commerce commands
+              Search products, invoices & quotes or give commands — the AI handles both
             </span>
           </div>
         </div>
       )}
+
+      {searchData && (() => {
+        const mappedResults = (searchData.results || []).map((r: Record<string, any>) => mapSearchResult(searchData.type, r));
+        return (
+        <div className="absolute top-full left-0 right-0 mt-1 rounded-xl border border-border/50 bg-card shadow-xl z-50 max-h-[400px] overflow-hidden flex flex-col">
+          <div className="px-3 py-2 border-b border-border/30 shrink-0">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-foreground/80">{searchData.interpretation}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-muted-foreground/50">{mappedResults.length} results</span>
+                {searchData.confidence > 0 && (
+                  <span className="text-[10px] text-muted-foreground/40">{Math.round(searchData.confidence * 100)}%</span>
+                )}
+                {onApplyFilters && Object.keys(searchData.filters || {}).length > 0 && (
+                  <button
+                    onClick={() => { onApplyFilters(searchData.filters); clear(); }}
+                    className="text-[10px] font-medium text-[hsl(var(--kf-accent1))] hover:underline"
+                  >
+                    Apply filters
+                  </button>
+                )}
+                <button onClick={clear} className="p-0.5 rounded hover:bg-white/10">
+                  <X className="w-3 h-3 text-muted-foreground/50" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="overflow-y-auto flex-1">
+            {mappedResults.length === 0 ? (
+              <div className="p-6 text-center">
+                <span className="text-sm text-muted-foreground/60">No results match this query</span>
+              </div>
+            ) : (
+              <div className="p-1.5 space-y-0.5">
+                {mappedResults.map((r) => {
+                  const TypeIcon = RESULT_TYPE_ICONS[r.type] ?? Package;
+                  const typeColor = RESULT_TYPE_COLORS[r.type] ?? "bg-muted text-muted-foreground";
+                  const statusColor = STATUS_COLORS[r.status ?? ""] ?? "bg-muted text-muted-foreground";
+
+                  return (
+                    <button
+                      key={r.id}
+                      onClick={() => handleResultClick(r)}
+                      className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-white/[0.04] transition-colors text-left group"
+                    >
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[hsl(var(--kf-accent1))]/20 to-[hsl(var(--kf-accent2))]/20 flex items-center justify-center shrink-0">
+                        <TypeIcon className="w-4 h-4 text-foreground/50" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-medium text-foreground/90 truncate">{r.name}</span>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${typeColor}`}>
+                            {r.type}
+                          </span>
+                          {r.status && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${statusColor}`}>
+                              {r.status}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 text-[10px] text-muted-foreground/60">
+                          {r.total != null && (
+                            <span className="flex items-center gap-0.5">
+                              <DollarSign className="w-2.5 h-2.5" /> {formatCurrency(r.total)}
+                            </span>
+                          )}
+                          {r.date && (
+                            <span className="flex items-center gap-0.5">
+                              <Clock className="w-2.5 h-2.5" /> {new Date(r.date).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/30 group-hover:text-[hsl(var(--kf-accent1))] transition-colors shrink-0" />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+        );
+      })()}
 
       {commandResult && (
         <div className="absolute top-full left-0 right-0 mt-1 rounded-xl border border-[hsl(var(--kf-accent2))]/30 bg-card shadow-xl z-50 overflow-hidden">

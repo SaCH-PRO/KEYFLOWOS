@@ -7,6 +7,10 @@ import {
   commerceAiCashFlow,
   commerceAiInvoiceReminder,
   commerceAiPricing,
+  commerceAiSearch,
+  commerceAiProductHealth,
+  commerceAiClientIntelligence,
+  commerceAiQuoteAnalysis,
   fetchCommerceStats,
 } from "@/lib/client";
 
@@ -66,17 +70,82 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
       });
     }
 
-    if (activeView === "invoices" && stats.invoiceStatusBreakdown?.SENT) {
-      const sent = stats.invoiceStatusBreakdown.SENT;
-      suggestions.push({
-        id: `sent-invoices-${Date.now()}`,
-        type: "action",
-        title: "Pending Invoices",
-        description: `${sent.count} invoices totaling $${sent.total.toLocaleString()} are awaiting payment.`,
-        priority: "medium",
-        actionLabel: "Send reminders",
-        actionKey: "send_reminders:sent",
-      });
+    if (activeView === "products") {
+      if (stats.productCount > 0 && stats.topProducts?.length > 0) {
+        const lowPerformers = stats.topProducts.filter((p: any) => p.count === 0);
+        if (lowPerformers.length > 0) {
+          suggestions.push({
+            id: `no-sales-products-${Date.now()}`,
+            type: "insight",
+            title: "Products With No Sales",
+            description: `${lowPerformers.length} product${lowPerformers.length > 1 ? "s have" : " has"} no sales yet. Run an AI health scan to find optimization opportunities.`,
+            priority: "medium",
+            actionLabel: "Run Health Scan",
+            actionKey: "tool:product-health-scan",
+          });
+        }
+      }
+
+      if (stats.productCount > 5) {
+        suggestions.push({
+          id: `pricing-review-${Date.now()}`,
+          type: "tip",
+          title: "Pricing Review",
+          description: `With ${stats.productCount} products, periodic pricing reviews can optimize revenue. Use AI Pricing Advisor on individual products.`,
+          priority: "low",
+        });
+      }
+    }
+
+    if (activeView === "billing" || activeView === "invoices") {
+      if (stats.invoiceStatusBreakdown?.SENT) {
+        const sent = stats.invoiceStatusBreakdown.SENT;
+        suggestions.push({
+          id: `sent-invoices-${Date.now()}`,
+          type: "action",
+          title: "Pending Invoices",
+          description: `${sent.count} invoices totaling $${sent.total.toLocaleString()} are awaiting payment.`,
+          priority: "medium",
+          actionLabel: "Send reminders",
+          actionKey: "send_reminders:sent",
+        });
+      }
+
+      if (stats.overdueAmount > 0) {
+        suggestions.push({
+          id: `recovery-plan-${Date.now()}`,
+          type: "action",
+          title: "AI Recovery Plan",
+          description: `Generate an AI-powered recovery strategy for $${stats.overdueAmount.toLocaleString()} in overdue payments.`,
+          priority: "high",
+          actionLabel: "Generate plan",
+          actionKey: "tool:overdue-recovery",
+        });
+      }
+
+      if (stats.averageInvoiceValue > 0) {
+        suggestions.push({
+          id: `avg-invoice-${Date.now()}`,
+          type: "tip",
+          title: "Invoice Insights",
+          description: `Average invoice value: $${stats.averageInvoiceValue.toLocaleString()}. Run Client Intelligence on key accounts to optimize billing.`,
+          priority: "low",
+        });
+      }
+    }
+
+    if (activeView === "quotes") {
+      if (stats.quoteCount > 0) {
+        suggestions.push({
+          id: `quote-analysis-${Date.now()}`,
+          type: "insight",
+          title: "Quote Win Analysis",
+          description: `Analyze ${stats.quoteCount} quotes to discover conversion patterns and improvement opportunities.`,
+          priority: "medium",
+          actionLabel: "Analyze quotes",
+          actionKey: "tool:quote-win-analysis",
+        });
+      }
     }
 
     if (suggestions.length === 0) {
@@ -127,6 +196,64 @@ function buildCommerceTools(): AiTool[] {
       creditCost: 3,
       execute: async (ctx) => {
         const result = await commerceAiCashFlow(ctx.businessId);
+        if (result.error) throw new Error(result.error);
+        return result.data;
+      },
+    },
+    {
+      id: "product-health-scan",
+      name: "Product Health Scan",
+      description: "Audit all products for data quality issues — missing descriptions, no sales, stale pricing, and optimization opportunities.",
+      icon: "analysis",
+      category: "detect",
+      requiresSelection: false,
+      creditCost: 2,
+      execute: async (ctx) => {
+        const result = await commerceAiProductHealth(ctx.businessId);
+        if (result.error) throw new Error(result.error);
+        return result.data;
+      },
+    },
+    {
+      id: "client-intelligence",
+      name: "Client Payment Intelligence",
+      description: "Analyze a contact's payment patterns, reliability score, lifetime value, and risk assessment.",
+      icon: "score",
+      category: "analyze",
+      requiresSelection: true,
+      creditCost: 2,
+      execute: async (ctx) => {
+        if (!ctx.selectedItemId) throw new Error("Select a contact first");
+        const result = await commerceAiClientIntelligence(ctx.selectedItemId, ctx.businessId);
+        if (result.error) throw new Error(result.error);
+        return result.data;
+      },
+    },
+    {
+      id: "quote-win-analysis",
+      name: "Quote Win Analysis",
+      description: "Analyze quote conversion patterns, identify what wins deals, and get suggestions to improve close rates.",
+      icon: "pipeline",
+      category: "analyze",
+      requiresSelection: false,
+      creditCost: 2,
+      execute: async (ctx) => {
+        const result = await commerceAiQuoteAnalysis(ctx.businessId);
+        if (result.error) throw new Error(result.error);
+        return result.data;
+      },
+    },
+    {
+      id: "commerce-nl-search",
+      name: "Natural Language Search",
+      description: "Search products, invoices, and quotes using natural language — e.g. 'invoices over $5000' or 'products with no sales'.",
+      icon: "default",
+      category: "analyze",
+      requiresSelection: false,
+      creditCost: 1,
+      execute: async (ctx) => {
+        const query = ctx.customData?.searchQuery as string || "show all recent activity";
+        const result = await commerceAiSearch(query, ctx.businessId);
         if (result.error) throw new Error(result.error);
         return result.data;
       },

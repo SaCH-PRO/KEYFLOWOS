@@ -80,6 +80,9 @@ interface QuotesPanelProps {
   prefillToken?: number;
   onPrefillApplied?: () => void;
   renderTimelineBadge?: (quote: Quote) => ReactNode;
+  onViewContact?: (contactId: string) => void;
+  onViewClientIntel?: (contactId: string) => void;
+  onSelectProduct?: (productId: string) => void;
 }
 
 export default function QuotesPanel({
@@ -100,6 +103,9 @@ export default function QuotesPanel({
   prefillToken,
   onPrefillApplied,
   renderTimelineBadge,
+  onViewContact,
+  onViewClientIntel,
+  onSelectProduct,
 }: QuotesPanelProps) {
   const {
     showQuoteBuilder,
@@ -385,7 +391,7 @@ export default function QuotesPanel({
       if (res.data) {
         setQuotes((q) => [res.data!, ...q]);
         toast.success("Quote created");
-        emitEvent("billing:quote_created", "commerce", { quoteId: res.data.id });
+        emitEvent("commerce:quote_created", "commerce", { quoteId: res.data.id });
       } else if (res.error) {
         toast.error("Failed to create quote");
       }
@@ -422,7 +428,7 @@ export default function QuotesPanel({
       if (res.data) {
         setQuotes((q) => q.map((qItem) => (qItem.id === quote.id ? res.data! : qItem)));
         setSelectedQuote(res.data);
-        emitEvent("billing:quote_accepted", "commerce", { quoteId: quote.id });
+        emitEvent("commerce:quote_created", "commerce", { quoteId: quote.id, action: "accepted" });
         if (autoConvertToInvoice) {
           setConvertForm({
             taxRate: String(res.data.taxRate ?? 12.5),
@@ -537,7 +543,8 @@ export default function QuotesPanel({
       setConvertForm({ taxRate: "12.5", discountType: "PERCENT", discountValue: "", notes: "", dueDate: "" });
       onSwitchToInvoices?.();
       toast.success("Quote converted to invoice");
-      emitEvent("billing:quote_converted", "commerce", { quoteId: selectedQuote.id, invoiceId: res.data.id });
+      emitEvent("commerce:quote_converted", "commerce", { quoteId: selectedQuote.id, invoiceId: res.data.id });
+      emitEvent("commerce:invoice_created", "commerce", { invoiceId: res.data.id, fromQuote: selectedQuote.id });
     } else if (res.error) {
       toast.error("Failed to convert quote");
     }
@@ -1110,9 +1117,10 @@ export default function QuotesPanel({
             number={selectedQuote.quoteNumber}
             status={selectedQuote.status}
             contact={selectedQuote.contact ?? null}
+            contactId={selectedQuote.contactId}
             total={Number(selectedQuote.total)}
             currency={selectedQuote.currency}
-            items={(selectedQuote.items ?? []) as Array<{ id?: string; description?: string | null; quantity?: number; unitPrice?: number; total?: number }>}
+            items={(selectedQuote.items ?? []) as Array<{ id?: string; description?: string | null; quantity?: number; unitPrice?: number; total?: number; productId?: string | null }>}
             dateLabel1="Issue Date"
             dateValue1={selectedQuote.issueDate}
             dateLabel2="Expiry Date"
@@ -1134,6 +1142,9 @@ export default function QuotesPanel({
             businessData={businessData}
             onSaveBranding={saveBranding}
             savingBranding={savingBranding}
+            onViewContact={onViewContact}
+            onViewClientIntel={onViewClientIntel}
+            onSelectProduct={onSelectProduct}
             alerts={
               isQuoteExpired(selectedQuote) && (selectedQuote.status === "DRAFT" || selectedQuote.status === "SENT") ? (
                 <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-2">

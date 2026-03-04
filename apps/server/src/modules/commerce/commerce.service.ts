@@ -1,6 +1,6 @@
 import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { InvoicePaidPayload, InvoiceStatusPayload } from '../../core/event-bus/events.types';
+import { InvoicePaidPayload, InvoiceStatusPayload, ProductCreatedPayload, ProductUpdatedPayload, ProductDeactivatedPayload, QuoteCreatedPayload, QuoteSentPayload, QuoteConvertedPayload } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { Service } from '@keyflow/db';
 import { CrmService } from '../crm/crm.service';
@@ -69,6 +69,7 @@ export class CommerceService {
       },
     });
     this.statsCache.invalidateCache(input.businessId);
+    this.events.emit('product.created', { product: result, businessId: input.businessId } as ProductCreatedPayload);
     return result;
   }
 
@@ -100,6 +101,7 @@ export class CommerceService {
       },
     });
     this.statsCache.invalidateCache(input.businessId);
+    this.events.emit('product.updated', { product: result, businessId: input.businessId } as ProductUpdatedPayload);
     return result;
   }
 
@@ -109,6 +111,7 @@ export class CommerceService {
       data: { deletedAt: new Date() },
     });
     this.statsCache.invalidateCache(businessId);
+    this.events.emit('product.deactivated', { product: result, businessId } as ProductDeactivatedPayload);
     return result;
   }
 
@@ -425,6 +428,9 @@ export class CommerceService {
       data: { status: params.status },
       include: { contact: true },
     });
+    if (params.status === 'SENT') {
+      this.events.emit('quote.sent', { quote, businessId: quote.businessId } as QuoteSentPayload);
+    }
     if (quote.contactId) {
       await this.crm.logContactEvent({
         businessId: quote.businessId,
@@ -608,6 +614,7 @@ export class CommerceService {
       },
       include: { items: true, contact: true },
     });
+    this.events.emit('quote.created', { quote, businessId: input.businessId } as QuoteCreatedPayload);
     if (input.contactId) {
       await this.crm.logContactEvent({
         businessId: input.businessId,
@@ -781,6 +788,8 @@ export class CommerceService {
       where: { id: quote.id },
       data: { invoiceId: invoice.id },
     });
+
+    this.events.emit('quote.converted', { quote, invoice, businessId: quote.businessId } as QuoteConvertedPayload);
 
     if (quote.contactId) {
       await this.crm.logContactEvent({
