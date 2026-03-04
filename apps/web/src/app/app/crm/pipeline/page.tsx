@@ -53,7 +53,7 @@ export default function ContactsPage() {
     contacts, loadContacts,
     activeListId, setActiveListId, setActiveListContactIds,
     setListsCount,
-    flowIntelligence, flowDataLoading, revenueData, financialGrowth,
+    flowIntelligence, flowDataLoading, revenueData,
     setStatusFilter,
     nextActions, autopilotActions, autopilotPaused,
     setAutopilotPaused,
@@ -478,7 +478,6 @@ export default function ContactsPage() {
               <InsightsTab
                 flowIntelligence={flowIntelligence}
                 revenueData={revenueData}
-                financialGrowth={financialGrowth}
                 contacts={contacts}
                 loading={flowDataLoading}
                 businessId={businessId}
@@ -507,6 +506,7 @@ export default function ContactsPage() {
                 autopilotPaused={autopilotPaused}
                 loading={flowDataLoading}
                 businessId={businessId ?? undefined}
+                revenueData={revenueData}
                 onComplete={handleCompleteNextAction}
                 onViewContact={handleViewEngageContact}
                 onDoAction={handleDoAction}

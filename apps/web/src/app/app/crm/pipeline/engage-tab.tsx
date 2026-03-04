@@ -6,8 +6,10 @@ import {
   Sparkles, Filter, ArrowUpDown, History, CheckCircle2,
   MessageSquare, FileText, Phone, Mail, DollarSign, Clock,
   Zap, Bot, ChevronDown, X, Timer, Target, TrendingUp,
-  ArrowUpRight, Activity,
+  ArrowUpRight, Activity, AlertTriangle, ExternalLink,
 } from "lucide-react";
+import Link from "next/link";
+import type { RevenueData } from "@/components/contacts/predictive-revenue";
 import { NextActionQueue } from "@/components/contacts";
 import { AutopilotActions } from "@/components/contacts";
 import { AutopilotSettingsPanel } from "@/components/contacts";
@@ -59,6 +61,7 @@ interface EngageTabProps {
   autopilotPaused: boolean;
   loading?: boolean;
   businessId?: string;
+  revenueData?: RevenueData | null;
   onComplete: (id: string) => Promise<void>;
   onViewContact: (id: string) => void;
   onDoAction: (action: NextAction) => void;
@@ -532,9 +535,82 @@ const ActionBreakdown = React.memo(function ActionBreakdown({ actions }: { actio
   );
 });
 
+const BillingActivityCard = React.memo(function BillingActivityCard({
+  revenueData,
+}: {
+  revenueData: RevenueData;
+}) {
+  const overdueCount = revenueData.overdueInvoices.count;
+  const overdueValue = revenueData.overdueInvoices.value;
+  const quotesCount = revenueData.expiringQuotes.count;
+  const quotesValue = revenueData.expiringQuotes.value;
+
+  if (overdueCount === 0 && quotesCount === 0) return null;
+
+  const formatCurrency = (v: number) =>
+    v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${v.toFixed(0)}`;
+
+  return (
+    <motion.div
+      variants={stagger.item}
+      className="rounded-2xl border border-border/50 bg-card overflow-hidden"
+    >
+      <div className="p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-1 h-5 rounded-full bg-gradient-to-b from-amber-500 to-amber-500/30" />
+          <DollarSign className="w-3.5 h-3.5 text-amber-400" />
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+            Billing Activity
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          {overdueCount > 0 && (
+            <div className="flex items-start gap-3 p-3 rounded-xl bg-red-500/[0.04] border border-red-500/10">
+              <div className="p-1.5 rounded-lg bg-red-500/10 shrink-0 mt-0.5">
+                <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-red-400">{overdueCount}</p>
+                <p className="text-[11px] text-muted-foreground/70">Overdue invoices</p>
+                <p className="text-xs font-semibold mt-1">{formatCurrency(overdueValue)}</p>
+                <p className="text-[10px] text-muted-foreground/50">outstanding</p>
+              </div>
+            </div>
+          )}
+
+          {quotesCount > 0 && (
+            <div className="flex items-start gap-3 p-3 rounded-xl bg-amber-500/[0.04] border border-amber-500/10">
+              <div className="p-1.5 rounded-lg bg-amber-500/10 shrink-0 mt-0.5">
+                <FileText className="w-3.5 h-3.5 text-amber-400" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-amber-400">{quotesCount}</p>
+                <p className="text-[11px] text-muted-foreground/70">Pending quotes</p>
+                <p className="text-xs font-semibold mt-1">{formatCurrency(quotesValue)}</p>
+                <p className="text-[10px] text-muted-foreground/50">total value</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-3 flex justify-end">
+          <Link
+            href="/app/commerce?tab=billing"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold rounded-lg bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/20 transition-colors border border-[hsl(var(--kf-accent1))]/20"
+          >
+            View Billing
+            <ExternalLink className="w-3 h-3" />
+          </Link>
+        </div>
+      </div>
+    </motion.div>
+  );
+});
+
 export function EngageTab({
   nextActions, autopilotActions, autopilotPaused, loading,
-  businessId,
+  businessId, revenueData,
   onComplete, onViewContact, onDoAction,
   onTogglePause, onApprove, onDeny,
 }: EngageTabProps) {
@@ -634,6 +710,10 @@ export function EngageTab({
           onOpenSettings={() => setSettingsOpen(true)}
         />
       </motion.div>
+
+      {revenueData && (
+        <BillingActivityCard revenueData={revenueData} />
+      )}
 
       {businessId && (
         <SequencesSection businessId={businessId} />

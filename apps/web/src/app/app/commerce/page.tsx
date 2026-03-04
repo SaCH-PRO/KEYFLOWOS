@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { CreditCard, Package, BarChart3, Zap } from "lucide-react";
+import { CreditCard, Package, BarChart3 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
@@ -15,7 +15,6 @@ import { ProductsPanel } from "./products/products-panel";
 import { ProductFormModal } from "./products/product-form-modal";
 import { BillingPanel } from "./billing/billing-panel";
 import { CommerceInsightsTab } from "./insights/commerce-insights-tab";
-import { CommerceEngageTab } from "./engage/commerce-engage-tab";
 import { CommerceAiSearchBar, type CommerceCommand } from "./components/commerce-ai-search-bar";
 import { useCommerceAiHub } from "./hooks/use-commerce-ai-hub";
 import { renderCommerceToolResult } from "./components/commerce-tool-results";
@@ -30,7 +29,6 @@ const TABS = [
   { key: "products", label: "Products", icon: Package },
   { key: "billing", label: "Billing", icon: CreditCard },
   { key: "insights", label: "Insights", icon: BarChart3 },
-  { key: "engage", label: "Engage", icon: Zap },
 ];
 
 export default function CommercePage() {
@@ -107,7 +105,7 @@ export default function CommercePage() {
             else toast.error(res.data?.error ?? "Failed to mark as paid");
           });
         } else {
-          state.setTab("engage");
+          state.setTab("billing");
           toast.info("Select an invoice to mark as paid");
         }
         break;
@@ -115,7 +113,7 @@ export default function CommercePage() {
         if (cmd.invoiceId) {
           toast.success("Sending payment reminder...");
         } else {
-          state.setTab("engage");
+          state.setTab("billing");
           toast.info("Select an invoice to send a reminder");
         }
         break;
@@ -144,7 +142,7 @@ export default function CommercePage() {
         toast.success(`Filtering by ${cmd.status}`);
         break;
       case "show_overdue":
-        state.setTab("engage");
+        state.setTab("billing");
         toast.success("Showing overdue invoices");
         break;
       case "create_quote_for_contact":
@@ -190,8 +188,8 @@ export default function CommercePage() {
       const t = actionKey.split(":")[1];
       handleTabChange(t === "quotes" || t === "invoices" || t === "recurring" ? "billing" : t);
     } else if (actionKey.startsWith("send_reminders:")) {
-      state.setTab("engage");
-      toast.success("Opening engage for reminders...");
+      state.setTab("billing");
+      toast.success("Opening billing for reminders...");
     }
   }, [state, handleTabChange]);
 
@@ -200,24 +198,6 @@ export default function CommercePage() {
     emitEvent("module:tab_changed", "commerce", { tab: t });
   }, [handleTabChange, emitEvent]);
 
-  const switchToBilling = useCallback(() => {
-    handleTabChange("billing");
-  }, [handleTabChange]);
-
-  const triggerCreateInvoice = useCallback(() => {
-    state.setTab("billing");
-    state.setTriggerNewInvoice((n) => n + 1);
-  }, [state]);
-
-  const triggerCreateQuote = useCallback(() => {
-    state.setTab("billing");
-    state.setTriggerNewQuote((n) => n + 1);
-  }, [state]);
-
-  const triggerCreateSchedule = useCallback(() => {
-    state.setTab("billing");
-    state.setTriggerNewSchedule((n) => n + 1);
-  }, [state]);
 
   const commerceShortcuts = useMemo<ShortcutGroup[]>(() => [
     {
@@ -228,7 +208,6 @@ export default function CommercePage() {
         { key: "1", description: "Products tab", action: () => handleTabChange("products") },
         { key: "2", description: "Billing tab", action: () => handleTabChange("billing") },
         { key: "3", description: "Insights tab", action: () => handleTabChange("insights") },
-        { key: "4", description: "Engage tab", action: () => handleTabChange("engage") },
         { key: "a", shift: true, description: "Toggle AI Hub", action: () => commerceAi.togglePanel() },
         { key: "Escape", description: "Close panels", action: () => { if (commerceAi.hubMode === "tool-result") commerceAi.clearToolResult(); else if (commerceAi.panelOpen) commerceAi.setOpen(false); } },
       ],
@@ -308,7 +287,7 @@ export default function CommercePage() {
       <PageHeader
         icon={CreditCard}
         title="Commerce"
-        subtitle="Products, billing, insights and engagement"
+        subtitle="Products, billing and insights"
         titleExtra={
           <CommerceGuide
             isOpen={showGuide}
@@ -417,23 +396,6 @@ export default function CommercePage() {
                 quotes={quotes}
                 currency={businessCurrency}
                 loading={loading}
-              />
-            </motion.div>
-          )}
-          {tab === "engage" && (
-            <motion.div key="engage" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
-              <CommerceEngageTab
-                invoices={invoices}
-                quotes={quotes}
-                businessId={businessId}
-                currency={businessCurrency}
-                loading={loading}
-                setInvoices={state.setInvoices}
-                setQuotes={state.setQuotes}
-                onCreateInvoice={triggerCreateInvoice}
-                onCreateQuote={triggerCreateQuote}
-                onCreateSchedule={triggerCreateSchedule}
-                onSwitchToBilling={switchToBilling}
               />
             </motion.div>
           )}
