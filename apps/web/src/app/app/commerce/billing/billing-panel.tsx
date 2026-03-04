@@ -136,12 +136,16 @@ export function BillingPanel({
     schedules: schedulesCount,
   }), [quotes.length, invoices.length, schedulesCount]);
 
+  const agingBuckets = clientStats.aging;
+
   const kpiChips = useMemo(() => [
     { icon: DollarSign, label: "Revenue", value: formatCurrencyCompact(stats.totalRevenue, currency), color: "#10b981" },
     { icon: Clock, label: "Owed", value: formatCurrencyCompact(stats.outstanding, currency), color: "#f59e0b" },
-    { icon: AlertTriangle, label: "Overdue", value: stats.overdueCount > 0 ? formatCurrencyCompact(stats.overdueAmount, currency) : "—", color: stats.overdueCount > 0 ? "#ef4444" : "#6b7280" },
     { icon: TrendingUp, label: "Conversion", value: `${stats.conversionRate}%`, color: "hsl(142 76% 36%)" },
   ], [stats, currency]);
+
+  const hasOverdue = agingBuckets.slice(1).some(b => b.count > 0);
+  const totalOverdueAmount = agingBuckets.slice(1).reduce((s, b) => s + b.amount, 0);
 
   const { swipeHandlers } = useSwipeTabs({
     tabs: SEGMENTS.map(s => s.key),
@@ -162,6 +166,27 @@ export function BillingPanel({
             <span className="text-[10px] sm:text-[11px] text-muted-foreground/50 hidden sm:inline">{chip.label}</span>
           </div>
         ))}
+
+        <div className="group relative inline-flex items-center gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-border/50 bg-white/[0.03] text-sm cursor-default">
+          <AlertTriangle className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" style={{ color: hasOverdue ? "#ef4444" : "#6b7280" }} />
+          <span className="font-semibold text-[11px] sm:text-xs">
+            {hasOverdue ? formatCurrencyCompact(totalOverdueAmount, currency) : "—"}
+          </span>
+          <span className="text-[10px] sm:text-[11px] text-muted-foreground/50 hidden sm:inline">Overdue</span>
+          <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 top-full mt-2 z-50 opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 group-hover:pointer-events-auto transition-all duration-150 origin-top">
+            <div className="rounded-lg border border-border/60 bg-popover shadow-xl p-2.5 min-w-[180px]">
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Aging Breakdown</p>
+              {agingBuckets.map((bucket) => (
+                <div key={bucket.label} className="flex items-center justify-between gap-3 py-0.5">
+                  <span className="text-[11px] text-muted-foreground">{bucket.label}</span>
+                  <span className="text-[11px] font-medium tabular-nums">
+                    {bucket.count > 0 ? `${formatCurrencyCompact(bucket.amount, currency)} (${bucket.count})` : "—"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
 
         <button
           onClick={() => router.push("/app/settings/connections")}
