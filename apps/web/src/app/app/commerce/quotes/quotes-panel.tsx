@@ -8,7 +8,6 @@ import { Button, Input } from "@keyflow/ui";
 import {
   Search,
   FileText,
-  Eye,
   Pencil,
   Send,
   CheckCircle,
@@ -39,6 +38,46 @@ import {
   Invoice,
 } from "@/lib/client";
 import { ContactSelect } from "@/components/contacts";
+
+function formatRelativeDate(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 7) return `${diffDays}d ago`;
+  if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function getStatusAccentColor(status: string): string {
+  const map: Record<string, string> = {
+    DRAFT: "rgba(148,163,184,0.6)",
+    SENT: "rgb(96,165,250)",
+    ACCEPTED: "rgb(52,211,153)",
+    PAID: "rgb(52,211,153)",
+    REJECTED: "rgb(248,113,113)",
+    OVERDUE: "rgb(248,113,113)",
+    VOID: "rgba(100,116,139,0.5)",
+  };
+  return map[status] ?? "rgba(148,163,184,0.6)";
+}
+
+function getContactInitials(contact: any): string {
+  if (!contact) return "?";
+  const f = (contact.firstName ?? "")[0] ?? "";
+  const l = (contact.lastName ?? "")[0] ?? "";
+  return (f + l).toUpperCase() || "?";
+}
+
+function getItemsSummary(items: any[]): string {
+  if (!items || items.length === 0) return "No items";
+  const names = items.slice(0, 2).map((i: any) => i.description).filter(Boolean);
+  const suffix = items.length > 2 ? ` +${items.length - 2} more` : "";
+  return `${items.length} item${items.length !== 1 ? "s" : ""} · ${names.join(", ")}${suffix}`;
+}
+
 import {
   QUOTE_STATUS_FILTERS,
   InvoiceLineItem,
@@ -679,247 +718,184 @@ export default function QuotesPanel({
           </p>
         </div>
       ) : (
-        <>
-          {/* Desktop table */}
-          <div className="hidden md:block rounded-xl border border-border/50 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-white/[0.02] border-b border-border/40">
-                <tr>
-                  <th className="text-left px-4 py-3 text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Quote #</th>
-                  <th className="text-left px-4 py-3 text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Contact</th>
-                  <th className="text-left px-4 py-3 text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Status</th>
-                  <th className="text-right px-4 py-3 text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Total</th>
-                  <th className="text-left px-4 py-3 text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Date</th>
-                  <th className="text-right px-4 py-3 text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredQuotes.map((quote) => (
-                  <tr key={quote.id} className="border-t border-border/40 hover:bg-muted/20">
-                    <td className="px-4 py-3 font-mono text-xs">{quote.quoteNumber}</td>
-                    <td className="px-4 py-3">
-                      {quote.contact?.firstName} {quote.contact?.lastName}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="inline-flex items-center gap-1.5">
-                        <span
-                          className={`px-2 py-1 rounded-full text-xs font-medium border ${getStatusBadge(quote.status)}`}
-                        >
-                          {quote.status}
-                        </span>
-                        {isQuoteExpired(quote) && (
-                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-semibold border bg-amber-500/20 text-amber-300 border-amber-500/40">
-                            <AlertTriangle className="w-3 h-3" />
-                            Expired
-                          </span>
-                        )}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right font-semibold">
-                      ${quote.total.toFixed(2)} {quote.currency}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      {new Date(quote.issueDate).toLocaleDateString()}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => setSelectedQuote(quote)}
-                          className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
-                          title="View Details"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => openEditQuote(quote)}
-                          className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
-                          title="Edit Quote"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => duplicateQuote(quote)}
-                          className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
-                          title="Duplicate Quote"
-                        >
-                          <Copy className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => shareQuoteViaWhatsApp(quote)}
-                          className="p-1.5 rounded-lg hover:bg-green-500/20 text-green-400"
-                          title="Share via WhatsApp"
-                        >
-                          <MessageCircle className="w-4 h-4" />
-                        </button>
-                        {(quote.status === "DRAFT" || quote.status === "SENT") && (
-                          <button
-                            onClick={() => {
-                              setSelectedQuote(quote);
-                              setShowEmailModal(true);
-                            }}
-                            className="p-1.5 rounded-lg hover:bg-blue-500/20 text-blue-400"
-                            title="Send to Email"
-                          >
-                            <Mail className="w-4 h-4" />
-                          </button>
-                        )}
-                        {quote.status === "DRAFT" && (
-                          <button
-                            onClick={() => handleMarkSent(quote)}
-                            className="p-1.5 rounded-lg hover:bg-primary/20 text-primary disabled:opacity-50"
-                            title="Mark as Sent"
-                            disabled={!!actionLoading[quote.id]}
-                          >
-                            {actionLoading[quote.id] === "send" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                          </button>
-                        )}
-                        {quote.status === "SENT" && (
-                          <>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleAcceptQuote(quote);
-                              }}
-                              className={`p-1.5 rounded-lg ${isQuoteExpired(quote) ? "opacity-40 cursor-not-allowed" : "hover:bg-green-500/20"} text-green-400 disabled:opacity-50`}
-                              title={isQuoteExpired(quote) ? "Cannot accept — quote has expired" : "Mark Accepted"}
-                              disabled={isQuoteExpired(quote) || !!actionLoading[quote.id]}
-                            >
-                              {actionLoading[quote.id] === "accept" ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-                            </button>
-                            <button
-                              onClick={() => handleRejectQuote(quote)}
-                              className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400 disabled:opacity-50"
-                              title="Mark Rejected"
-                              disabled={!!actionLoading[quote.id]}
-                            >
-                              {actionLoading[quote.id] === "reject" ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
-                            </button>
-                          </>
-                        )}
-                        {quote.status === "ACCEPTED" && !quote.invoiceId && (
-                          <button
-                            onClick={() => {
-                              setSelectedQuote(quote);
-                              setShowConvertModal(true);
-                            }}
-                            className="px-2 py-1 rounded-lg bg-primary/20 text-primary text-xs font-medium hover:bg-primary/30"
-                            title="Convert to Invoice"
-                          >
-                            Convert
-                          </button>
-                        )}
-                        <button
-                          onClick={() => handleDeleteQuote(quote)}
-                          className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400 disabled:opacity-50"
-                          title="Delete Quote"
-                          disabled={!!actionLoading[quote.id]}
-                        >
-                          {actionLoading[quote.id] === "delete" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Mobile card layout */}
-          <div className="md:hidden space-y-3">
-            {filteredQuotes.map((quote) => (
+        <div className="space-y-2">
+          {filteredQuotes.map((quote) => {
+            const expired = isQuoteExpired(quote);
+            return (
               <div
                 key={quote.id}
-                className="rounded-xl border border-border/50 bg-card p-3.5 space-y-3"
+                role="button"
+                tabIndex={0}
+                onClick={() => setSelectedQuote(quote)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedQuote(quote); } }}
+                className="group relative flex items-start gap-3 pl-4 pr-3 py-3 rounded-xl border border-border/30 bg-white/[0.02] hover:bg-white/[0.04] cursor-pointer transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-xs text-muted-foreground">{quote.quoteNumber}</span>
-                  <span className="inline-flex items-center gap-1.5">
-                    <span
-                      className={`px-2 py-1 rounded-full text-xs font-medium border ${getStatusBadge(quote.status)}`}
-                    >
+                <div className="absolute left-0 top-3 bottom-3 w-[3px] rounded-full" style={{ backgroundColor: getStatusAccentColor(quote.status) }} />
+
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white/[0.06] flex items-center justify-center text-xs font-semibold text-muted-foreground/70 shrink-0">
+                  {getContactInitials(quote.contact)}
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-xs text-muted-foreground/70">{quote.quoteNumber}</span>
+                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${getStatusBadge(quote.status)}`}>
                       {quote.status}
                     </span>
-                    {isQuoteExpired(quote) && (
-                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-semibold border bg-amber-500/20 text-amber-300 border-amber-500/40">
-                        <AlertTriangle className="w-3 h-3" />
+                    {expired && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-amber-500/20 text-amber-300 border-amber-500/40">
+                        <AlertTriangle className="w-3.5 h-3.5" />
                         Expired
                       </span>
                     )}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">
+                  </div>
+                  <div className="text-sm font-medium truncate mt-0.5">
                     {quote.contact?.firstName} {quote.contact?.lastName}
-                  </span>
-                  <span className="font-semibold">
-                    ${quote.total.toFixed(2)} {quote.currency}
-                  </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-1 text-[11px] text-muted-foreground/60">
+                    <span className="truncate">{getItemsSummary(quote.items as any[])}</span>
+                    <span className="shrink-0">·</span>
+                    <span className="shrink-0">{formatRelativeDate(quote.issueDate)}</span>
+                  </div>
                 </div>
-                <div className="text-xs text-muted-foreground">
-                  {new Date(quote.issueDate).toLocaleDateString()}
-                </div>
-                <div className="flex items-center gap-1 pt-2 border-t border-border/40 flex-wrap">
-                  <button
-                    onClick={() => setSelectedQuote(quote)}
-                    className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
-                    title="View"
-                  >
-                    <Eye className="w-4 h-4" />
-                  </button>
-                  <button onClick={() => openEditQuote(quote)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground" title="Edit">
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                  <button onClick={() => duplicateQuote(quote)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground" title="Duplicate">
-                    <Copy className="w-4 h-4" />
-                  </button>
-                  <button onClick={() => shareQuoteViaWhatsApp(quote)} className="p-1.5 rounded-lg hover:bg-green-500/20 text-green-400" title="WhatsApp">
-                    <MessageCircle className="w-4 h-4" />
-                  </button>
-                  {(quote.status === "DRAFT" || quote.status === "SENT") && (
+
+                <div className="flex flex-col items-end gap-1.5 shrink-0">
+                  <span className="text-sm font-bold whitespace-nowrap">
+                    ${quote.total.toFixed(2)} <span className="text-[10px] font-normal text-muted-foreground/60">{quote.currency}</span>
+                  </span>
+
+                  <div className="hidden md:flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
                     <button
-                      onClick={() => { setSelectedQuote(quote); setShowEmailModal(true); }}
-                      className="p-1.5 rounded-lg hover:bg-blue-500/20 text-blue-400"
-                      title="Send to Email"
+                      onClick={() => openEditQuote(quote)}
+                      className="p-1 rounded-lg hover:bg-muted text-muted-foreground/70 hover:text-foreground"
+                      title="Edit Quote"
                     >
-                      <Mail className="w-4 h-4" />
+                      <Pencil className="w-3.5 h-3.5" />
                     </button>
-                  )}
-                  {quote.status === "DRAFT" && (
-                    <button onClick={() => handleMarkSent(quote)} className="p-1.5 rounded-lg hover:bg-primary/20 text-primary disabled:opacity-50" title="Mark as Sent" disabled={!!actionLoading[quote.id]}>
-                      {actionLoading[quote.id] === "send" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    <button
+                      onClick={() => duplicateQuote(quote)}
+                      className="p-1 rounded-lg hover:bg-muted text-muted-foreground/70 hover:text-foreground"
+                      title="Duplicate Quote"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
                     </button>
-                  )}
-                  {quote.status === "SENT" && (
-                    <>
+                    <button
+                      onClick={() => shareQuoteViaWhatsApp(quote)}
+                      className="p-1 rounded-lg hover:bg-green-500/20 text-green-400"
+                      title="Share via WhatsApp"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5" />
+                    </button>
+                    {(quote.status === "DRAFT" || quote.status === "SENT") && (
+                      <button
+                        onClick={() => {
+                          setSelectedQuote(quote);
+                          setShowEmailModal(true);
+                        }}
+                        className="p-1 rounded-lg hover:bg-blue-500/20 text-blue-400"
+                        title="Send to Email"
+                      >
+                        <Mail className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    {quote.status === "DRAFT" && (
+                      <button
+                        onClick={() => handleMarkSent(quote)}
+                        className="p-1 rounded-lg hover:bg-primary/20 text-primary disabled:opacity-50"
+                        title="Mark as Sent"
+                        disabled={!!actionLoading[quote.id]}
+                      >
+                        {actionLoading[quote.id] === "send" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                      </button>
+                    )}
+                    {quote.status === "SENT" && (
+                      <>
+                        <button
+                          onClick={() => handleAcceptQuote(quote)}
+                          className={`p-1 rounded-lg ${expired ? "opacity-50 cursor-not-allowed" : "hover:bg-green-500/20"} text-green-400 disabled:opacity-50`}
+                          title={expired ? "Cannot accept — quote has expired" : "Mark Accepted"}
+                          disabled={expired || !!actionLoading[quote.id]}
+                        >
+                          {actionLoading[quote.id] === "accept" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
+                        </button>
+                        <button
+                          onClick={() => handleRejectQuote(quote)}
+                          className="p-1 rounded-lg hover:bg-red-500/20 text-red-400 disabled:opacity-50"
+                          title="Mark Rejected"
+                          disabled={!!actionLoading[quote.id]}
+                        >
+                          {actionLoading[quote.id] === "reject" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
+                        </button>
+                      </>
+                    )}
+                    {quote.status === "ACCEPTED" && !quote.invoiceId && (
+                      <button
+                        onClick={() => {
+                          setSelectedQuote(quote);
+                          setShowConvertModal(true);
+                        }}
+                        className="px-1.5 py-0.5 rounded-lg bg-primary/20 text-primary text-[10px] font-medium hover:bg-primary/30"
+                        title="Convert to Invoice"
+                      >
+                        Convert
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleDeleteQuote(quote)}
+                      className="p-1 rounded-lg hover:bg-red-500/20 text-red-400 disabled:opacity-50"
+                      title="Delete Quote"
+                      disabled={!!actionLoading[quote.id]}
+                    >
+                      {actionLoading[quote.id] === "delete" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+
+                  <div className="flex md:hidden items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                    {quote.status === "DRAFT" && (
+                      <button
+                        onClick={() => handleMarkSent(quote)}
+                        className="p-1 rounded-lg hover:bg-primary/20 text-primary disabled:opacity-50"
+                        title="Mark as Sent"
+                        disabled={!!actionLoading[quote.id]}
+                      >
+                        {actionLoading[quote.id] === "send" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                      </button>
+                    )}
+                    {quote.status === "SENT" && (
                       <button
                         onClick={() => handleAcceptQuote(quote)}
-                        className={`p-1.5 rounded-lg ${isQuoteExpired(quote) ? "opacity-40 cursor-not-allowed" : "hover:bg-green-500/20"} text-green-400 disabled:opacity-50`}
-                        title={isQuoteExpired(quote) ? "Cannot accept — quote has expired" : "Accept"}
-                        disabled={isQuoteExpired(quote) || !!actionLoading[quote.id]}
+                        className={`p-1 rounded-lg ${expired ? "opacity-50 cursor-not-allowed" : "hover:bg-green-500/20"} text-green-400 disabled:opacity-50`}
+                        title={expired ? "Cannot accept — expired" : "Accept"}
+                        disabled={expired || !!actionLoading[quote.id]}
                       >
-                        {actionLoading[quote.id] === "accept" ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                        {actionLoading[quote.id] === "accept" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
                       </button>
-                      <button onClick={() => handleRejectQuote(quote)} className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400 disabled:opacity-50" title="Reject" disabled={!!actionLoading[quote.id]}>
-                        {actionLoading[quote.id] === "reject" ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
+                    )}
+                    {quote.status === "ACCEPTED" && !quote.invoiceId && (
+                      <button
+                        onClick={() => {
+                          setSelectedQuote(quote);
+                          setShowConvertModal(true);
+                        }}
+                        className="px-1.5 py-0.5 rounded-lg bg-primary/20 text-primary text-[10px] font-medium hover:bg-primary/30"
+                      >
+                        Convert
                       </button>
-                    </>
-                  )}
-                  {quote.status === "ACCEPTED" && !quote.invoiceId && (
+                    )}
                     <button
-                      onClick={() => { setSelectedQuote(quote); setShowConvertModal(true); }}
-                      className="px-2 py-1 rounded-lg bg-primary/20 text-primary text-xs font-medium hover:bg-primary/30"
+                      onClick={() => handleDeleteQuote(quote)}
+                      className="p-1 rounded-lg hover:bg-red-500/20 text-red-400 disabled:opacity-50"
+                      title="Delete"
+                      disabled={!!actionLoading[quote.id]}
                     >
-                      Convert
+                      {actionLoading[quote.id] === "delete" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
                     </button>
-                  )}
-                  <button onClick={() => handleDeleteQuote(quote)} className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400 ml-auto disabled:opacity-50" title="Delete" disabled={!!actionLoading[quote.id]}>
-                    {actionLoading[quote.id] === "delete" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                  </button>
+                  </div>
                 </div>
               </div>
-            ))}
-          </div>
-        </>
+            );
+          })}
+        </div>
       )}
 
       <AnimatePresence>
