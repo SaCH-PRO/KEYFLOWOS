@@ -83,7 +83,7 @@ function StatusPipeline({
                   color:
                     isPast || isActive
                       ? accentColor
-                      : "rgba(148,163,184,0.3)",
+                      : "rgba(148,163,184,0.5)",
                 }}
               />
             )}
@@ -98,7 +98,7 @@ function StatusPipeline({
                     }
                   : isPast
                     ? { color: accentColor, opacity: 0.6 }
-                    : { color: "rgba(148,163,184,0.4)" }
+                    : { color: "rgba(148,163,184,0.55)" }
               }
             >
               {step.charAt(0) + step.slice(1).toLowerCase()}
@@ -245,7 +245,7 @@ export function BillingDetailModal({
 
             <div className="flex items-end justify-between">
               <div>
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mb-0.5">
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">
                   Total Amount
                 </p>
                 <p
@@ -255,7 +255,7 @@ export function BillingDetailModal({
                   {formatAmount(total, currency)}
                 </p>
               </div>
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground/60">
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Hash className="w-3 h-3" />
                 <span>{items.length} item{items.length !== 1 ? "s" : ""}</span>
               </div>
@@ -337,9 +337,9 @@ export function BillingDetailModal({
                 <div className="flex items-center gap-1.5 mb-1.5">
                   <Calendar
                     className="w-3.5 h-3.5"
-                    style={{ color: theme.accentColor, opacity: 0.7 }}
+                    style={{ color: theme.accentColor, opacity: 0.85 }}
                   />
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground/70">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
                     {dateLabel1}
                   </p>
                 </div>
@@ -357,9 +357,9 @@ export function BillingDetailModal({
                 <div className="flex items-center gap-1.5 mb-1.5">
                   <Calendar
                     className="w-3.5 h-3.5"
-                    style={{ color: theme.accentColor, opacity: 0.7 }}
+                    style={{ color: theme.accentColor, opacity: 0.85 }}
                   />
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground/70">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
                     {dateLabel2}
                   </p>
                 </div>
@@ -383,9 +383,9 @@ export function BillingDetailModal({
                 <div className="flex items-center gap-2 px-4 py-3 border-b border-border/30">
                   <Package
                     className="w-4 h-4"
-                    style={{ color: theme.accentColor, opacity: 0.7 }}
+                    style={{ color: theme.accentColor, opacity: 0.85 }}
                   />
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                     Line Items
                   </h4>
                 </div>
@@ -453,14 +453,14 @@ export function BillingDetailModal({
                 <div className="flex items-center gap-2 px-4 py-3 border-b border-border/30">
                   <StickyNote
                     className="w-4 h-4"
-                    style={{ color: theme.accentColor, opacity: 0.7 }}
+                    style={{ color: theme.accentColor, opacity: 0.85 }}
                   />
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                     Notes
                   </h4>
                 </div>
                 <div className="px-4 py-3">
-                  <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                  <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap">
                     {notes}
                   </p>
                 </div>
@@ -587,9 +587,9 @@ export function BillingDetailModal({
                 <div className="flex items-center gap-1.5 mb-1">
                   <Calendar
                     className="w-3.5 h-3.5"
-                    style={{ color: theme.accentColor, opacity: 0.7 }}
+                    style={{ color: theme.accentColor, opacity: 0.85 }}
                   />
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground/70">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
                     {dateLabel1}
                   </p>
                 </div>
@@ -607,9 +607,9 @@ export function BillingDetailModal({
                 <div className="flex items-center gap-1.5 mb-1">
                   <Calendar
                     className="w-3.5 h-3.5"
-                    style={{ color: theme.accentColor, opacity: 0.7 }}
+                    style={{ color: theme.accentColor, opacity: 0.85 }}
                   />
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground/70">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
                     {dateLabel2}
                   </p>
                 </div>
@@ -633,9 +633,9 @@ export function BillingDetailModal({
                 <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border/30">
                   <Package
                     className="w-3.5 h-3.5"
-                    style={{ color: theme.accentColor, opacity: 0.7 }}
+                    style={{ color: theme.accentColor, opacity: 0.85 }}
                   />
-                  <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                  <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                     Line Items
                   </h4>
                 </div>
@@ -679,13 +679,13 @@ export function BillingDetailModal({
                 <div className="flex items-center gap-1.5 mb-1.5">
                   <StickyNote
                     className="w-3.5 h-3.5"
-                    style={{ color: theme.accentColor, opacity: 0.7 }}
+                    style={{ color: theme.accentColor, opacity: 0.85 }}
                   />
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground/70">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
                     Notes
                   </p>
                 </div>
-                <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap">
                   {notes}
                 </p>
               </div>
