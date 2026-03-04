@@ -52,44 +52,9 @@ import {
 import LineItemsEditor from "../components/line-items-editor";
 import { useInvoiceForm } from "../hooks/use-invoice-form";
 
-function formatRelativeDate(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-  if (diffDays === 0) return "Today";
-  if (diffDays === 1) return "Yesterday";
-  if (diffDays < 7) return `${diffDays}d ago`;
-  if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-function getStatusAccentColor(status: string): string {
-  const map: Record<string, string> = {
-    DRAFT: "rgba(148,163,184,0.6)",
-    SENT: "rgb(96,165,250)",
-    ACCEPTED: "rgb(52,211,153)",
-    PAID: "rgb(52,211,153)",
-    REJECTED: "rgb(248,113,113)",
-    OVERDUE: "rgb(248,113,113)",
-    VOID: "rgba(100,116,139,0.5)",
-  };
-  return map[status] ?? "rgba(148,163,184,0.6)";
-}
-
-function getContactInitials(contact: any): string {
-  if (!contact) return "?";
-  const f = (contact.firstName ?? "")[0] ?? "";
-  const l = (contact.lastName ?? "")[0] ?? "";
-  return (f + l).toUpperCase() || "?";
-}
-
-function getItemsSummary(items: any[]): string {
-  if (!items || items.length === 0) return "No items";
-  const names = items.slice(0, 2).map((i: any) => i.description).filter(Boolean);
-  const suffix = items.length > 2 ? ` +${items.length - 2} more` : "";
-  return `${items.length} item${items.length !== 1 ? "s" : ""} · ${names.join(", ")}${suffix}`;
-}
+import { formatRelativeDate, getStatusAccentColor, getContactInitials, getItemsSummary, getDaysUntilDue } from "../utils/commerce-utils";
+import { useCommerceSearch } from "../hooks/use-commerce-search";
+import type { ReactNode } from "react";
 
 interface InvoicesPanelProps {
   invoices: Invoice[];
@@ -106,6 +71,7 @@ interface InvoicesPanelProps {
   prefillItems?: import("../components/commerce-types").InvoiceLineItem[];
   prefillToken?: number;
   onPrefillApplied?: () => void;
+  renderTimelineBadge?: (invoice: Invoice) => ReactNode;
 }
 
 export default function InvoicesPanel({
@@ -123,6 +89,7 @@ export default function InvoicesPanel({
   prefillItems,
   prefillToken,
   onPrefillApplied,
+  renderTimelineBadge,
 }: InvoicesPanelProps) {
   const {
     showInvoiceBuilder,
@@ -174,23 +141,16 @@ export default function InvoicesPanel({
     return counts;
   }, [invoices]);
 
-  const filteredInvoices = useMemo(() => {
-    let result = invoices;
-    if (invoiceStatusFilter !== "ALL") {
-      result = result.filter((inv) => inv.status === invoiceStatusFilter);
-    }
-    if (invoiceSearch.trim()) {
-      const q = invoiceSearch.toLowerCase();
-      result = result.filter(
-        (inv) =>
-          (inv.invoiceNumber ?? "").toLowerCase().includes(q) ||
-          (inv.contact?.firstName ?? "").toLowerCase().includes(q) ||
-          (inv.contact?.lastName ?? "").toLowerCase().includes(q) ||
-          (inv.contact?.email ?? "").toLowerCase().includes(q)
-      );
-    }
-    return result;
-  }, [invoices, invoiceStatusFilter, invoiceSearch]);
+  const statusFiltered = useMemo(() => {
+    if (invoiceStatusFilter === "ALL") return invoices;
+    return invoices.filter((inv) => inv.status === invoiceStatusFilter);
+  }, [invoices, invoiceStatusFilter]);
+
+  const { filtered: filteredInvoices } = useCommerceSearch(
+    statusFiltered,
+    (inv) => `${inv.invoiceNumber ?? ""} ${inv.contact?.firstName ?? ""} ${inv.contact?.lastName ?? ""} ${inv.contact?.email ?? ""}`,
+    invoiceSearch,
+  );
 
   function addInvoiceItem() {
     setInvoiceForm((f: any) => ({
@@ -494,17 +454,6 @@ export default function InvoicesPanel({
     }
   }
 
-  function getDaysUntilDue(dueDate: string | null | undefined): { days: number; label: string; color: string } | null {
-    if (!dueDate) return null;
-    const due = new Date(dueDate);
-    const now = new Date();
-    const diff = Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-    if (diff < 0) return { days: Math.abs(diff), label: `${Math.abs(diff)}d overdue`, color: "text-red-400" };
-    if (diff === 0) return { days: 0, label: "Due today", color: "text-amber-400" };
-    if (diff <= 7) return { days: diff, label: `Due in ${diff}d`, color: "text-amber-400" };
-    return { days: diff, label: `Due in ${diff}d`, color: "text-muted-foreground" };
-  }
-
   return (
     <motion.div
       key="invoices"
@@ -724,6 +673,7 @@ export default function InvoicesPanel({
                     {dueInfo && inv.status !== "PAID" && (
                       <span className={`text-[10px] font-medium ${dueInfo.color}`}>{dueInfo.label}</span>
                     )}
+                    {renderTimelineBadge?.(inv)}
                   </div>
                   <div className="text-xs text-muted-foreground/70 mt-0.5 truncate">{contactName}</div>
                   <div className="flex items-center gap-1.5 mt-1 text-[11px] text-muted-foreground/50">

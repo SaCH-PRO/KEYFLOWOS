@@ -39,45 +39,9 @@ import {
 } from "@/lib/client";
 import { ContactSelect } from "@/components/contacts";
 
-function formatRelativeDate(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-  if (diffDays === 0) return "Today";
-  if (diffDays === 1) return "Yesterday";
-  if (diffDays < 7) return `${diffDays}d ago`;
-  if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-function getStatusAccentColor(status: string): string {
-  const map: Record<string, string> = {
-    DRAFT: "rgba(148,163,184,0.6)",
-    SENT: "rgb(96,165,250)",
-    ACCEPTED: "rgb(52,211,153)",
-    PAID: "rgb(52,211,153)",
-    REJECTED: "rgb(248,113,113)",
-    OVERDUE: "rgb(248,113,113)",
-    VOID: "rgba(100,116,139,0.5)",
-  };
-  return map[status] ?? "rgba(148,163,184,0.6)";
-}
-
-function getContactInitials(contact: any): string {
-  if (!contact) return "?";
-  const f = (contact.firstName ?? "")[0] ?? "";
-  const l = (contact.lastName ?? "")[0] ?? "";
-  return (f + l).toUpperCase() || "?";
-}
-
-function getItemsSummary(items: any[]): string {
-  if (!items || items.length === 0) return "No items";
-  const names = items.slice(0, 2).map((i: any) => i.description).filter(Boolean);
-  const suffix = items.length > 2 ? ` +${items.length - 2} more` : "";
-  return `${items.length} item${items.length !== 1 ? "s" : ""} · ${names.join(", ")}${suffix}`;
-}
-
+import { formatRelativeDate, getStatusAccentColor, getContactInitials, getItemsSummary } from "../utils/commerce-utils";
+import { useCommerceSearch } from "../hooks/use-commerce-search";
+import type { ReactNode } from "react";
 import {
   QUOTE_STATUS_FILTERS,
   InvoiceLineItem,
@@ -106,6 +70,7 @@ interface QuotesPanelProps {
   prefillItems?: import("../components/commerce-types").InvoiceLineItem[];
   prefillToken?: number;
   onPrefillApplied?: () => void;
+  renderTimelineBadge?: (quote: Quote) => ReactNode;
 }
 
 export default function QuotesPanel({
@@ -125,6 +90,7 @@ export default function QuotesPanel({
   prefillItems,
   prefillToken,
   onPrefillApplied,
+  renderTimelineBadge,
 }: QuotesPanelProps) {
   const {
     showQuoteBuilder,
@@ -275,17 +241,16 @@ export default function QuotesPanel({
     return counts;
   }, [quotes]);
 
-  const filteredQuotes = useMemo(() => {
-    return quotes
-      .filter((q) => quoteStatusFilter === "ALL" || q.status === quoteStatusFilter)
-      .filter(
-        (q) =>
-          !quoteSearch ||
-          q.quoteNumber.toLowerCase().includes(quoteSearch.toLowerCase()) ||
-          q.contact?.firstName?.toLowerCase().includes(quoteSearch.toLowerCase()) ||
-          q.contact?.lastName?.toLowerCase().includes(quoteSearch.toLowerCase())
-      );
-  }, [quotes, quoteStatusFilter, quoteSearch]);
+  const statusFiltered = useMemo(() => {
+    if (quoteStatusFilter === "ALL") return quotes;
+    return quotes.filter((q) => q.status === quoteStatusFilter);
+  }, [quotes, quoteStatusFilter]);
+
+  const { filtered: filteredQuotes } = useCommerceSearch(
+    statusFiltered,
+    (q) => `${q.quoteNumber} ${q.contact?.firstName ?? ""} ${q.contact?.lastName ?? ""}`,
+    quoteSearch,
+  );
 
   async function handleSaveQuote() {
     if (!businessId || !quoteForm.contactId) return;
@@ -748,6 +713,7 @@ export default function QuotesPanel({
                         Expired
                       </span>
                     )}
+                    {renderTimelineBadge?.(quote)}
                   </div>
                   <div className="text-sm font-medium truncate mt-0.5">
                     {quote.contact?.firstName} {quote.contact?.lastName}
