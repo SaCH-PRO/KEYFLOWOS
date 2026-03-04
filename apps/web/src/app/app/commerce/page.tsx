@@ -13,7 +13,6 @@ import { useCommerce } from "./hooks/use-commerce";
 import { CommerceGuide } from "./components/commerce-guide";
 import { ProductsPanel } from "./products/products-panel";
 import { ProductFormModal } from "./products/product-form-modal";
-import { ProductImportModal } from "./products/product-import-modal";
 import { BillingPanel } from "./billing/billing-panel";
 import { CommerceInsightsTab } from "./insights/commerce-insights-tab";
 import { CommerceEngageTab } from "./engage/commerce-engage-tab";
@@ -39,7 +38,6 @@ export default function CommercePage() {
   const commerceAi = useCommerceAiHub();
   const emitEvent = useModuleEmit();
   const [slideDirection, setSlideDirection] = useState(0);
-  const [showImportModal, setShowImportModal] = useState(false);
   const COMMERCE_TAB_KEYS = TABS.map((t) => t.key);
   const {
     businessId, businessCurrency, workspaceLoading, workspaceError, tab, handleTabChange: rawTabChange,
@@ -361,7 +359,7 @@ export default function CommercePage() {
                 onToggleActive={state.handleToggleProductActive}
                 onInlineSave={state.handleInlineSave}
                 onAdd={state.openAddProduct}
-                onImport={() => setShowImportModal(true)}
+                setProducts={state.setProducts}
                 deleteConfirm={state.deleteConfirm}
                 setDeleteConfirm={state.setDeleteConfirm}
                 cachedImages={state.cachedImages}
@@ -462,13 +460,6 @@ export default function CommercePage() {
         currency={businessCurrency}
       />
 
-      <ProductImportModal
-        open={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        businessId={businessId}
-        currency={businessCurrency}
-        setProducts={state.setProducts}
-      />
     </div>
   );
 }
