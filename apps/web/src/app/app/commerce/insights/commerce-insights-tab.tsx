@@ -6,7 +6,7 @@ import {
   BarChart3, DollarSign, Clock, TrendingUp, AlertTriangle,
   CheckCircle2, ArrowRight, RefreshCw, Calendar, ChevronDown,
   FileText, CreditCard, Package, ArrowUpRight, ArrowDownRight,
-  Zap,
+  Zap, Target,
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -428,6 +428,80 @@ const CashFlowForecastWidget = React.memo(function CashFlowForecastWidget({
   );
 });
 
+function getDaysOverdue(dueDate: string | null | undefined): number {
+  if (!dueDate) return 0;
+  const due = new Date(dueDate);
+  const now = new Date();
+  const diff = Math.ceil((now.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
+  return Math.max(0, diff);
+}
+
+const RevenueRecoveryPlanner = React.memo(function RevenueRecoveryPlanner({
+  invoices,
+  currency,
+}: {
+  invoices: Invoice[];
+  currency: string;
+}) {
+  const agedReceivables = useMemo(() => {
+    const unpaid = invoices.filter((inv) => inv.status === "OVERDUE" || inv.status === "SENT");
+    const buckets = { current: 0, thirtyDay: 0, sixtyDay: 0, ninetyPlus: 0 };
+    let totalCollectible = 0;
+
+    unpaid.forEach((inv) => {
+      const amount = Number(inv.total);
+      totalCollectible += amount;
+      const days = getDaysOverdue(inv.dueDate);
+      if (days <= 0) buckets.current += amount;
+      else if (days <= 30) buckets.thirtyDay += amount;
+      else if (days <= 60) buckets.sixtyDay += amount;
+      else buckets.ninetyPlus += amount;
+    });
+
+    return { ...buckets, totalCollectible, count: unpaid.length };
+  }, [invoices]);
+
+  const maxBucket = Math.max(agedReceivables.current, agedReceivables.thirtyDay, agedReceivables.sixtyDay, agedReceivables.ninetyPlus, 1);
+
+  const bars = [
+    { label: "Current", amount: agedReceivables.current, color: "bg-emerald-500/60" },
+    { label: "1-30 days", amount: agedReceivables.thirtyDay, color: "bg-amber-500/60" },
+    { label: "31-60 days", amount: agedReceivables.sixtyDay, color: "bg-orange-500/60" },
+    { label: "90+ days", amount: agedReceivables.ninetyPlus, color: "bg-red-500/60" },
+  ];
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-baseline gap-2 mb-2">
+        <span className="text-lg font-bold">{formatCurrencyCompact(agedReceivables.totalCollectible, currency)}</span>
+        <span className="text-[10px] text-muted-foreground/50">collectible across {agedReceivables.count} invoices</span>
+      </div>
+      <div className="space-y-2.5">
+        {bars.map((bar) => {
+          const pct = maxBucket > 0 ? (bar.amount / maxBucket) * 100 : 0;
+          return (
+            <div key={bar.label} className="flex items-center gap-2.5">
+              <span className="text-[10px] text-muted-foreground/60 w-16 shrink-0">{bar.label}</span>
+              <div className="flex-1 h-5 rounded-md bg-white/[0.03] overflow-hidden">
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${pct}%` }}
+                  transition={{ duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
+                  className={`h-full rounded-md ${bar.color} flex items-center justify-end pr-2`}
+                >
+                  {bar.amount > 0 && (
+                    <span className="text-[10px] font-semibold text-white/80">{formatCurrencyCompact(bar.amount, currency)}</span>
+                  )}
+                </motion.div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+});
+
 const AlertCards = React.memo(function AlertCards({
   stats, invoices, quotes, currency,
 }: {
@@ -619,6 +693,13 @@ function CommerceInsightsInner({
           <Zap className="w-3.5 h-3.5 text-amber-400/60" />Cash Flow Forecast
         </h3>
         <CashFlowForecastWidget forecast={cashFlow} currency={currency} />
+      </motion.div>
+
+      <motion.div variants={stagger.item} className="rounded-xl border border-border/50 bg-card p-4">
+        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5 mb-3">
+          <Target className="w-3.5 h-3.5 text-emerald-400/60" />Revenue Recovery
+        </h3>
+        <RevenueRecoveryPlanner invoices={invoices} currency={currency} />
       </motion.div>
     </motion.div>
   );

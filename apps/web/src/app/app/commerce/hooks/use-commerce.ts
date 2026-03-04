@@ -73,7 +73,7 @@ export function useCommerce() {
     const urlContactId = params.get("contactId");
     const urlProductIds = params.get("productIds");
 
-    const validTabs: Tab[] = ["products", "billing", "insights", "engage"];
+    const validTabs: Tab[] = ["products", "billing", "insights"];
     const validSegments = ["quotes", "invoices", "schedules"] as const;
     if (urlTab && validTabs.includes(urlTab as Tab)) setTab(urlTab as Tab);
     const safeSegment = validSegments.includes(urlSegment as any) ? (urlSegment as "quotes" | "invoices") : null;
