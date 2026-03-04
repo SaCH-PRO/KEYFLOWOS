@@ -204,15 +204,17 @@ export default function CommercePage() {
       groupName: "Commerce Navigation",
       shortcuts: [
         { key: "n", description: "New item", action: () => handleNewItem() },
+        { key: "f", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('[data-commerce-ai-search]'); el?.focus(); } },
         { key: "/", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('[data-commerce-ai-search]'); el?.focus(); } },
         { key: "1", description: "Products tab", action: () => handleTabChange("products") },
         { key: "2", description: "Billing tab", action: () => handleTabChange("billing") },
         { key: "3", description: "Insights tab", action: () => handleTabChange("insights") },
+        { key: "r", description: "Refresh data", action: () => { state.refreshProducts(); } },
         { key: "a", shift: true, description: "Toggle AI Hub", action: () => commerceAi.togglePanel() },
         { key: "Escape", description: "Close panels", action: () => { if (commerceAi.hubMode === "tool-result") commerceAi.clearToolResult(); else if (commerceAi.panelOpen) commerceAi.setOpen(false); } },
       ],
     },
-  ], [handleNewItem, handleTabChange, commerceAi.togglePanel, commerceAi.panelOpen, commerceAi.setOpen, commerceAi.hubMode, commerceAi.clearToolResult]);
+  ], [handleNewItem, handleTabChange, state.refreshProducts, commerceAi.togglePanel, commerceAi.panelOpen, commerceAi.setOpen, commerceAi.hubMode, commerceAi.clearToolResult]);
 
   useKeyboardShortcuts(commerceShortcuts, !workspaceLoading);
 

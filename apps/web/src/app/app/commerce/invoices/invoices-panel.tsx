@@ -682,9 +682,26 @@ export default function InvoicesPanel({
       </div>
 
       {loading ? (
-        <div className="space-y-3 animate-pulse">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-16 bg-muted/30 rounded-xl border border-border/50" />
+        <div className="space-y-2" role="status" aria-label="Loading invoices">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="flex items-center gap-3 p-3 rounded-xl border border-border/30 bg-white/[0.02] animate-pulse">
+              <div className="w-9 h-9 rounded-lg bg-muted/30 shrink-0" />
+              <div className="flex-1 space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <div className="h-3.5 bg-muted/30 rounded w-24" />
+                  <div className="h-4 bg-muted/20 rounded-full w-14" />
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="h-2.5 bg-muted/20 rounded w-32" />
+                  <div className="h-2.5 bg-muted/20 rounded w-16" />
+                </div>
+              </div>
+              <div className="h-4 bg-muted/30 rounded w-20 shrink-0" />
+              <div className="flex gap-1 shrink-0">
+                <div className="w-7 h-7 rounded-lg bg-muted/20" />
+                <div className="w-7 h-7 rounded-lg bg-muted/20" />
+              </div>
+            </div>
           ))}
         </div>
       ) : invoices.length === 0 ? (

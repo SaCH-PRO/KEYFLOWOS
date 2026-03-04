@@ -742,7 +742,29 @@ export default function QuotesPanel({
         </div>
       </div>
 
-      {quotes.length === 0 ? (
+      {loading ? (
+        <div className="space-y-2" role="status" aria-label="Loading quotes">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="flex items-center gap-3 p-3 rounded-xl border border-border/30 bg-white/[0.02] animate-pulse">
+              <div className="w-9 h-9 rounded-lg bg-muted/30 shrink-0" />
+              <div className="flex-1 space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <div className="h-3.5 bg-muted/30 rounded w-20" />
+                  <div className="h-4 bg-muted/20 rounded-full w-12" />
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="h-2.5 bg-muted/20 rounded w-28" />
+                  <div className="h-2.5 bg-muted/20 rounded w-14" />
+                </div>
+              </div>
+              <div className="h-4 bg-muted/30 rounded w-16 shrink-0" />
+              <div className="flex gap-1 shrink-0">
+                <div className="w-7 h-7 rounded-lg bg-muted/20" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : quotes.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <div className="w-14 h-14 rounded-xl bg-white/[0.03] border border-border/50 flex items-center justify-center mb-4">
             <FileText className="w-7 h-7 text-muted-foreground/50" />
