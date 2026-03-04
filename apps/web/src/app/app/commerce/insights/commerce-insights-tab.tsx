@@ -13,6 +13,7 @@ import {
   BarChart, Bar, Cell,
 } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
+import { LazyWidget } from "@/app/app/crm/pipeline/components/insights/lazy-widget";
 import {
   fetchCommerceStats, commerceAiCashFlow,
   type CommerceStats, type CommerceCashFlowForecast,
@@ -653,54 +654,58 @@ function CommerceInsightsInner({
       <HeroStats stats={stats} currency={currency} />
 
       <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
-        <div className="lg:col-span-7 rounded-xl border border-border/50 bg-card p-3.5">
+        <LazyWidget className="lg:col-span-7 rounded-xl border border-border/50 bg-card p-3.5" height={220}>
           <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5 mb-2.5">
             <TrendingUp className="w-3.5 h-3.5" style={{ color: "hsl(142 76% 36%)" }} />Revenue Trend
           </h3>
           <RevenueTrendChart revenueByMonth={filteredRevenueByMonth} currency={currency} />
-        </div>
-        <div className="lg:col-span-5 rounded-xl border border-border/50 bg-card p-4">
+        </LazyWidget>
+        <LazyWidget className="lg:col-span-5 rounded-xl border border-border/50 bg-card p-4" height={220}>
           <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5 mb-3">
             <AlertTriangle className="w-3.5 h-3.5 text-amber-400/60" />Action Items
           </h3>
           <AlertCards stats={stats} invoices={invoices} quotes={quotes} currency={currency} />
-        </div>
+        </LazyWidget>
       </motion.div>
 
       <motion.div variants={stagger.item} className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
-        <div className="lg:col-span-5 rounded-xl border border-border/50 bg-card p-3.5">
+        <LazyWidget className="lg:col-span-5 rounded-xl border border-border/50 bg-card p-3.5" height={200}>
           <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5 mb-2.5">
             <CreditCard className="w-3.5 h-3.5 text-blue-400/60" />Invoice Status
           </h3>
           <InvoiceStatusBreakdown breakdown={stats.invoiceStatusBreakdown ?? {}} currency={currency} />
-        </div>
-        <div className="lg:col-span-3 rounded-xl border border-border/50 bg-card p-3.5">
+        </LazyWidget>
+        <LazyWidget className="lg:col-span-3 rounded-xl border border-border/50 bg-card p-3.5" height={200}>
           <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5 mb-2.5">
             <FileText className="w-3.5 h-3.5 text-emerald-400/60" />Quote Funnel
           </h3>
           <QuoteFunnel breakdown={stats.quoteStatusBreakdown ?? {}} />
-        </div>
-        <div className="lg:col-span-4 rounded-xl border border-border/50 bg-card p-3.5">
+        </LazyWidget>
+        <LazyWidget className="lg:col-span-4 rounded-xl border border-border/50 bg-card p-3.5" height={200}>
           <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5 mb-2.5">
             <Package className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />Top Products
           </h3>
           <TopProductsChart topProducts={stats.topProducts ?? []} currency={currency} />
-        </div>
+        </LazyWidget>
       </motion.div>
 
-      <motion.div variants={stagger.item} className="rounded-xl border border-border/50 bg-card p-4">
-        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5 mb-3">
-          <Zap className="w-3.5 h-3.5 text-amber-400/60" />Cash Flow Forecast
-        </h3>
-        <CashFlowForecastWidget forecast={cashFlow} currency={currency} />
-      </motion.div>
+      <LazyWidget height={200}>
+        <motion.div variants={stagger.item} className="rounded-xl border border-border/50 bg-card p-4">
+          <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5 mb-3">
+            <Zap className="w-3.5 h-3.5 text-amber-400/60" />Cash Flow Forecast
+          </h3>
+          <CashFlowForecastWidget forecast={cashFlow} currency={currency} />
+        </motion.div>
+      </LazyWidget>
 
-      <motion.div variants={stagger.item} className="rounded-xl border border-border/50 bg-card p-4">
-        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5 mb-3">
-          <Target className="w-3.5 h-3.5 text-emerald-400/60" />Revenue Recovery
-        </h3>
-        <RevenueRecoveryPlanner invoices={invoices} currency={currency} />
-      </motion.div>
+      <LazyWidget height={200}>
+        <motion.div variants={stagger.item} className="rounded-xl border border-border/50 bg-card p-4">
+          <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5 mb-3">
+            <Target className="w-3.5 h-3.5 text-emerald-400/60" />Revenue Recovery
+          </h3>
+          <RevenueRecoveryPlanner invoices={invoices} currency={currency} />
+        </motion.div>
+      </LazyWidget>
     </motion.div>
   );
 }

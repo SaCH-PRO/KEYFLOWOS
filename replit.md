@@ -14,9 +14,9 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 
 **UI/UX Decisions:**
 - Custom design system with a warm Caribbean-inspired color palette, Glassmorphism elements, and a dark theme, including PWA capabilities and mobile-optimized navigation.
-- Unified CRM Design Language across Pipeline, Database, Insights, and Engage tabs.
+- Unified Design Language across all modules: TabNav with folder-tab styling, `useSwipeTabs` hook, `useKeyboardShortcuts`, framer-motion directional slide transitions, error boundaries, and bespoke skeleton loaders.
 - Custom Glassmorphism ConfirmDialog and skeleton loading states.
-- `TabNav` component with folder-tab styling and `useSwipeTabs` hook.
+- Consistent module patterns: PageHeader, TabNav, keyboard shortcuts (1-N for tabs, N=new, R=refresh, Escape=close), mobile swipe navigation, and EmptyState components.
 - Pipeline Kanban Board View with HTML5 drag-and-drop and persistent view preferences.
 - Enhanced database tables with column visibility, responsive auto-hiding, multi-word search, and "Saved Views".
 - Product detail and form components emphasize inline editing, real-time previews, validation, and performance optimizations using `React.memo`, `useMemo`, and `useCallback`.
