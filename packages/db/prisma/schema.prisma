@@ -60,6 +60,7 @@ model Business {
   primaryColor   String?  @default("#F97316") @map("primary_color")
   secondaryColor String?  @default("#14B8A6") @map("secondary_color")
   defaultTaxRate Float?   @default(0) @map("default_tax_rate")
+  invoiceTemplate String? @default("classic") @map("invoice_template")
 
   // Business Autopilot Settings
   businessIntent   String?  @map("business_intent")    // Free-text description of business idea

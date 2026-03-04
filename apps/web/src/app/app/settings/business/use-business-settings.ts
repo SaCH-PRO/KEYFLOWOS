@@ -26,6 +26,7 @@ export type Business = {
   primaryColor: string | null;
   secondaryColor: string | null;
   defaultTaxRate: number | null;
+  invoiceTemplate: string | null;
   tagline: string | null;
   description: string | null;
   city: string | null;
@@ -52,6 +53,7 @@ export type FormState = {
   primaryColor: string;
   secondaryColor: string;
   defaultTaxRate: string;
+  invoiceTemplate: string;
   tagline: string;
   description: string;
   city: string;
@@ -79,6 +81,7 @@ function businessToForm(data: Business): FormState {
     primaryColor: data.primaryColor || "#F97316",
     secondaryColor: data.secondaryColor || "#14B8A6",
     defaultTaxRate: (data.defaultTaxRate ?? 12.5).toString(),
+    invoiceTemplate: data.invoiceTemplate || "classic",
     tagline: data.tagline || "",
     description: data.description || "",
     city: data.city || "",
@@ -92,7 +95,8 @@ const emptyForm: FormState = {
   facebook: "", instagram: "", twitter: "", linkedin: "",
   tiktok: "", youtube: "", whatsapp: "",
   primaryColor: "#F97316", secondaryColor: "#14B8A6",
-  defaultTaxRate: "12.5", tagline: "", description: "",
+  defaultTaxRate: "12.5", invoiceTemplate: "classic",
+  tagline: "", description: "",
   city: "", country: "",
 };
 

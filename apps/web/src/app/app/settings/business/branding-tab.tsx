@@ -1,10 +1,12 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Palette, Percent, Eye, Sparkles } from "lucide-react";
+import { Palette, Percent, Eye, Sparkles, FileText } from "lucide-react";
 import { Input } from "@keyflow/ui";
 import { FormState } from "./use-business-settings";
 import { useThemeColors } from "@/lib/theme-context";
+import { TemplatePicker } from "@/app/app/commerce/components/invoice-templates";
+import type { TemplateId } from "@/app/app/commerce/components/invoice-templates";
 
 type Props = {
   form: FormState;
@@ -183,6 +185,24 @@ export function BrandingTab({ form, setField }: Props) {
             Applied by default when creating new invoices. Trinidad VAT is 12.5%.
           </p>
         </label>
+      </motion.div>
+
+      <motion.div variants={fadeUp} className="border-t border-border/40 pt-6">
+        <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
+          <FileText className="h-4 w-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+          Invoice & Quote Template
+        </h3>
+        <p className="text-[11px] text-muted-foreground mb-4">
+          Choose a template for your invoices and quotes. Your brand colors are automatically applied. Click the eye icon to see a full-size preview.
+        </p>
+        <TemplatePicker
+          selected={(form.invoiceTemplate || "classic") as TemplateId}
+          onChange={(id) => setField("invoiceTemplate", id)}
+          businessName={form.name}
+          primaryColor={form.primaryColor}
+          secondaryColor={form.secondaryColor}
+          logoUrl={null}
+        />
       </motion.div>
     </motion.div>
   );
