@@ -14,6 +14,7 @@ import {
   StickyNote,
   ChevronRight,
   Eye,
+  Printer,
 } from "lucide-react";
 import { formatAmount, getContactInitials } from "../utils/commerce-utils";
 import {
@@ -22,6 +23,8 @@ import {
   type BillingDocType,
 } from "./commerce-types";
 import { TemplateCustomizer } from "./invoice-templates/template-customizer";
+import { InvoiceTemplateRenderer } from "./invoice-templates/template-renderer";
+import { printFromRef } from "./invoice-templates/print-document";
 import type { TemplateId, InvoiceTemplateData } from "./invoice-templates/template-types";
 
 export interface BusinessDataForPreview {
@@ -157,6 +160,7 @@ export function BillingDetailModal({
 }: BillingDetailModalProps) {
   const theme = BILLING_DOC_THEME[type];
   const panelRef = useRef<HTMLDivElement>(null);
+  const printTemplateRef = useRef<HTMLDivElement>(null);
   const dialogId = `billing-detail-${type}-${number}`;
   const [showTemplatePreview, setShowTemplatePreview] = useState(false);
 
@@ -177,6 +181,13 @@ export function BillingDetailModal({
     };
   }, [handleKeyDown]);
 
+  const handlePrint = useCallback(() => {
+    const docType = type === "invoice" ? "Invoice" : "Quote";
+    printFromRef(printTemplateRef, docType, number);
+  }, [type, number]);
+
+  const templateId: TemplateId = (businessData?.invoiceTemplate as TemplateId) || "classic";
+
   const subtotal = items.reduce(
     (sum, item) => sum + Number(item.total || 0),
     0,
@@ -189,6 +200,41 @@ export function BillingDetailModal({
         ? subtotal * (Number(discountValue) / 100)
         : Number(discountValue);
   }
+
+  const templateData: InvoiceTemplateData | null = businessData
+    ? {
+        type: type === "invoice" ? "invoice" : "quote",
+        number,
+        status,
+        issueDate: dateValue1,
+        dueDate: type === "invoice" ? dateValue2 : null,
+        expiryDate: type === "quote" ? dateValue2 : null,
+        contact,
+        items,
+        subtotal,
+        taxRate: taxRate || 0,
+        taxAmount,
+        discountType: discountType,
+        discountValue: discountValue ? Number(discountValue) : null,
+        discountAmount,
+        total,
+        currency,
+        notes,
+        business: {
+          name: businessData.name,
+          logoUrl: businessData.logoUrl || null,
+          address: businessData.address,
+          city: businessData.city,
+          country: businessData.country,
+          phone: businessData.phone,
+          email: businessData.email,
+          website: businessData.website,
+          tagline: businessData.tagline,
+          primaryColor: businessData.primaryColor,
+          secondaryColor: businessData.secondaryColor,
+        },
+      }
+    : null;
 
   const contactName = contact
     ? `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "Unknown"
@@ -259,13 +305,25 @@ export function BillingDetailModal({
                   </div>
                 </div>
               </div>
-              <button
-                onClick={onClose}
-                className="p-2 rounded-xl hover:bg-white/[0.06] transition-colors"
-                aria-label="Close"
-              >
-                <X className="w-5 h-5 text-muted-foreground" />
-              </button>
+              <div className="flex items-center gap-1">
+                {businessData && (
+                  <button
+                    onClick={handlePrint}
+                    className="p-2 rounded-xl hover:bg-white/[0.06] transition-colors"
+                    aria-label="Print"
+                    title="Print / Save as PDF"
+                  >
+                    <Printer className="w-4.5 h-4.5" style={{ color: theme.accentColor }} />
+                  </button>
+                )}
+                <button
+                  onClick={onClose}
+                  className="p-2 rounded-xl hover:bg-white/[0.06] transition-colors"
+                  aria-label="Close"
+                >
+                  <X className="w-5 h-5 text-muted-foreground" />
+                </button>
+              </div>
             </div>
 
             <div className="flex items-end justify-between">
@@ -493,13 +551,23 @@ export function BillingDetailModal({
             )}
 
             {businessData && (
-              <button
-                onClick={() => setShowTemplatePreview(true)}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-border/40 bg-white/[0.03] hover:bg-white/[0.06] transition-colors text-sm font-medium text-foreground/80 hover:text-foreground"
-              >
-                <Eye className="w-4 h-4" style={{ color: theme.accentColor }} />
-                View as Customer
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowTemplatePreview(true)}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl border border-border/40 bg-white/[0.03] hover:bg-white/[0.06] transition-colors text-sm font-medium text-foreground/80 hover:text-foreground"
+                >
+                  <Eye className="w-4 h-4" style={{ color: theme.accentColor }} />
+                  View as Customer
+                </button>
+                <button
+                  onClick={handlePrint}
+                  className="flex items-center justify-center gap-2 px-5 py-3 rounded-2xl border border-border/40 bg-white/[0.03] hover:bg-white/[0.06] transition-colors text-sm font-medium text-foreground/80 hover:text-foreground"
+                  title="Print / Save as PDF"
+                >
+                  <Printer className="w-4 h-4" style={{ color: theme.accentColor }} />
+                  Print
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -727,13 +795,22 @@ export function BillingDetailModal({
             )}
 
             {businessData && (
-              <button
-                onClick={() => setShowTemplatePreview(true)}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-border/40 bg-white/[0.03] hover:bg-white/[0.06] transition-colors text-sm font-medium text-foreground/80 hover:text-foreground"
-              >
-                <Eye className="w-4 h-4" style={{ color: theme.accentColor }} />
-                View as Customer
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowTemplatePreview(true)}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl border border-border/40 bg-white/[0.03] hover:bg-white/[0.06] transition-colors text-sm font-medium text-foreground/80 hover:text-foreground"
+                >
+                  <Eye className="w-4 h-4" style={{ color: theme.accentColor }} />
+                  Preview
+                </button>
+                <button
+                  onClick={handlePrint}
+                  className="flex items-center justify-center gap-2 px-4 py-3 rounded-2xl border border-border/40 bg-white/[0.03] hover:bg-white/[0.06] transition-colors text-sm font-medium text-foreground/80 hover:text-foreground"
+                  title="Print / Save as PDF"
+                >
+                  <Printer className="w-4 h-4" style={{ color: theme.accentColor }} />
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -742,6 +819,16 @@ export function BillingDetailModal({
           {actions}
         </div>
       </motion.div>
+
+      {templateData && (
+        <div
+          ref={printTemplateRef}
+          aria-hidden="true"
+          style={{ position: "absolute", left: "-9999px", top: 0, width: "794px", pointerEvents: "none" }}
+        >
+          <InvoiceTemplateRenderer templateId={templateId} data={templateData} />
+        </div>
+      )}
 
       {businessData && showTemplatePreview && (
         <TemplateCustomizer
