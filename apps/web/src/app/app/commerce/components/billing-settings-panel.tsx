@@ -94,9 +94,17 @@ export const BillingSettingsPanel = React.memo(function BillingSettingsPanel() {
   return (
     <>
       <div className="rounded-xl border border-border/30 bg-white/[0.03] overflow-hidden">
-        <button
+        <div
+          role="button"
+          tabIndex={0}
           onClick={() => setOpen((v) => !v)}
-          className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-foreground/90 hover:bg-white/[0.04] transition-colors"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setOpen((v) => !v);
+            }
+          }}
+          className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-foreground/90 hover:bg-white/[0.04] transition-colors cursor-pointer select-none"
         >
           <span className="flex items-center gap-2">
             <Settings className="w-4 h-4 text-muted-foreground" />
@@ -105,7 +113,7 @@ export const BillingSettingsPanel = React.memo(function BillingSettingsPanel() {
           <ChevronDown
             className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${open ? "rotate-180" : ""}`}
           />
-        </button>
+        </div>
 
         <AnimatePresence>
           {open && (
