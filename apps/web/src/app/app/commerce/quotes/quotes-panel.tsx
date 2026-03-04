@@ -1167,30 +1167,30 @@ export default function QuotesPanel({
             }
             actions={
               <>
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" className="gap-2 flex-1" onClick={() => duplicateQuote(selectedQuote)}>
-                    <Copy className="w-4 h-4" /> Duplicate
-                  </Button>
-                  <Button variant="outline" className="gap-2 flex-1" onClick={() => shareQuoteViaWhatsApp(selectedQuote)}>
-                    <MessageCircle className="w-4 h-4 text-green-400" /> WhatsApp
-                  </Button>
-                  <Button variant="outline" className="gap-2 flex-1" onClick={() => setShowEmailModal(true)}>
-                    <Mail className="w-4 h-4 text-blue-400" /> Email
-                  </Button>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => duplicateQuote(selectedQuote)} className="p-2 rounded-lg hover:bg-white/[0.06] transition-colors" title="Duplicate">
+                    <Copy className="w-4 h-4 text-slate-400" />
+                  </button>
+                  <button onClick={() => shareQuoteViaWhatsApp(selectedQuote)} className="p-2 rounded-lg hover:bg-emerald-500/10 transition-colors" title="WhatsApp">
+                    <MessageCircle className="w-4 h-4 text-emerald-400" />
+                  </button>
+                  <button onClick={() => setShowEmailModal(true)} className="p-2 rounded-lg hover:bg-blue-500/10 transition-colors" title="Email">
+                    <Mail className="w-4 h-4 text-blue-400" />
+                  </button>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex gap-2">
                   {selectedQuote.status === "DRAFT" && (
-                    <Button className="gap-2 flex-1" onClick={() => { handleMarkSent(selectedQuote); setSelectedQuote(null); }} disabled={!!actionLoading[selectedQuote.id]}>
-                      {actionLoading[selectedQuote.id] === "send" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Send Quote
+                    <Button size="sm" className="gap-1.5 flex-1" onClick={() => { handleMarkSent(selectedQuote); setSelectedQuote(null); }} disabled={!!actionLoading[selectedQuote.id]}>
+                      {actionLoading[selectedQuote.id] === "send" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send Quote
                     </Button>
                   )}
                   {selectedQuote.status === "SENT" && !isQuoteExpired(selectedQuote) && (
-                    <Button className="gap-2 flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => handleAcceptQuote(selectedQuote)} disabled={!!actionLoading[selectedQuote.id]}>
-                      {actionLoading[selectedQuote.id] === "accept" ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />} Accept Quote
+                    <Button size="sm" className="gap-1.5 flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => handleAcceptQuote(selectedQuote)} disabled={!!actionLoading[selectedQuote.id]}>
+                      {actionLoading[selectedQuote.id] === "accept" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Accept Quote
                     </Button>
                   )}
                   {selectedQuote.status === "ACCEPTED" && !selectedQuote.invoiceId && (
-                    <Button className="gap-2 flex-1" onClick={() => {
+                    <Button size="sm" className="gap-1.5 flex-1" onClick={() => {
                       setConvertForm({
                         taxRate: String(selectedQuote.taxRate ?? 12.5),
                         discountType: (selectedQuote.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
