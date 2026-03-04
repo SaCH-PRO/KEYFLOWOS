@@ -21,6 +21,8 @@ import {
   Image as ImageIcon,
   ScanLine,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -53,6 +55,7 @@ interface ProductImportModalProps {
   businessId: string | null;
   currency?: string;
   setProducts: React.Dispatch<React.SetStateAction<Product[]>>;
+  variant?: "modal" | "inline";
 }
 
 function formatFileSize(bytes: number) {
@@ -67,7 +70,9 @@ export const ProductImportModal = React.memo(function ProductImportModal({
   businessId,
   currency = "TTD",
   setProducts,
+  variant = "modal",
 }: ProductImportModalProps) {
+  const [expanded, setExpanded] = useState(true);
   const [activeMode, setActiveMode] = useState<ImportMode | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [link, setLink] = useState("");
@@ -86,6 +91,7 @@ export const ProductImportModal = React.memo(function ProductImportModal({
   const galleryInputRef = useRef<HTMLInputElement>(null);
 
   const resetState = useCallback(() => {
+    setExpanded(true);
     setActiveMode(null);
     setFile(null);
     setLink("");
@@ -339,25 +345,9 @@ export const ProductImportModal = React.memo(function ProductImportModal({
 
   if (!open) return null;
 
-  return (
-    <>
-      <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" onClick={handleClose} />
-      <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-16 sm:pt-20 pointer-events-none">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95, y: 8 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: 8 }}
-          className="w-full sm:w-[440px] kf-card border border-border shadow-2xl rounded-2xl max-h-[80vh] overflow-y-auto pointer-events-auto"
-        >
-          <div className="flex items-center justify-between p-4 pb-2">
-            <h2 className="font-semibold text-base">Import Products</h2>
-            <button onClick={handleClose} className="p-1.5 rounded-lg hover:bg-muted/50 text-muted-foreground" aria-label="Close">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          <AnimatePresence mode="wait">
-            {showPreview ? (
+  const importContent = (
+    <AnimatePresence mode="wait">
+      {showPreview ? (
               <motion.div
                 key="preview"
                 initial={{ opacity: 0, x: 20 }}
@@ -834,7 +824,72 @@ export const ProductImportModal = React.memo(function ProductImportModal({
                 </div>
               </motion.div>
             ) : null}
-          </AnimatePresence>
+    </AnimatePresence>
+  );
+
+  if (variant === "inline") {
+    return (
+      <div className="kf-card overflow-hidden">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="w-full p-4 flex items-center justify-between hover:bg-muted/30 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-[hsl(var(--kf-accent1))]/10">
+              <Upload className="w-5 h-5 text-[hsl(var(--kf-accent1))]" />
+            </div>
+            <div className="text-left">
+              <span className="font-medium">Import Products</span>
+              <p className="text-xs text-muted-foreground">CSV, AI Scan, or URL</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {showPreview && extracted.length > 0 && (
+              <span className="flex items-center gap-1 text-xs text-[hsl(var(--kf-accent1))]">
+                <CheckCircle2 className="w-4 h-4" />
+                {extracted.length} found
+              </span>
+            )}
+            {expanded ? (
+              <ChevronUp className="w-5 h-5 text-muted-foreground" />
+            ) : (
+              <ChevronDown className="w-5 h-5 text-muted-foreground" />
+            )}
+          </div>
+        </button>
+        <AnimatePresence>
+          {expanded && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="border-t border-border"
+            >
+              {importContent}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" onClick={handleClose} />
+      <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-16 sm:pt-20 pointer-events-none">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95, y: 8 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.95, y: 8 }}
+          className="w-full sm:w-[440px] kf-card border border-border shadow-2xl rounded-2xl max-h-[80vh] overflow-y-auto pointer-events-auto"
+        >
+          <div className="flex items-center justify-between p-4 pb-2">
+            <h2 className="font-semibold text-base">Import Products</h2>
+            <button onClick={handleClose} className="p-1.5 rounded-lg hover:bg-muted/50 text-muted-foreground" aria-label="Close">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          {importContent}
         </motion.div>
       </div>
     </>

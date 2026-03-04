@@ -3,6 +3,7 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Search, Package, Plus, X, Eye, EyeOff, ArrowUpDown, CheckSquare, Square, Trash2, ToggleLeft, ToggleRight, ChevronDown, Upload, LayoutGrid, List, Camera } from "lucide-react";
+import { ProductImportModal } from "./product-import-modal";
 import { toast } from "sonner";
 import type { Product } from "@/lib/client";
 import { bulkUpdateProducts } from "@/lib/client";
@@ -34,7 +35,7 @@ interface ProductsPanelProps {
   onToggleActive?: (product: Product) => void;
   onInlineSave?: (productId: string, form: ProductForm, imageFile?: File | null) => Promise<void>;
   onAdd: () => void;
-  onImport?: () => void;
+  setProducts?: React.Dispatch<React.SetStateAction<Product[]>>;
   deleteConfirm: string | null;
   setDeleteConfirm: (id: string | null) => void;
   cachedImages?: Record<string, string>;
@@ -76,7 +77,7 @@ export const ProductsPanel = React.memo(function ProductsPanel({
   onToggleActive,
   onInlineSave,
   onAdd,
-  onImport,
+  setProducts,
   deleteConfirm,
   setDeleteConfirm,
   cachedImages = {},
@@ -91,6 +92,7 @@ export const ProductsPanel = React.memo(function ProductsPanel({
 }: ProductsPanelProps) {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>(getStoredViewMode);
+  const [showImport, setShowImport] = useState(false);
 
   const handleViewToggle = useCallback((mode: ViewMode) => {
     setViewMode(mode);
@@ -381,10 +383,10 @@ export const ProductsPanel = React.memo(function ProductsPanel({
             >
               {showInactive ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
-            {onImport && (
+            {setProducts && (
               <button
-                onClick={onImport}
-                className="p-2 rounded-xl text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground transition-all flex-shrink-0"
+                onClick={() => setShowImport(!showImport)}
+                className={`p-2 rounded-xl transition-all flex-shrink-0 ${showImport ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
                 aria-label="Import products"
                 title="Import products"
               >
@@ -490,6 +492,26 @@ export const ProductsPanel = React.memo(function ProductsPanel({
 
       {slots?.renderInsightBanner?.()}
 
+      <AnimatePresence>
+        {showImport && setProducts && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            <ProductImportModal
+              open={showImport}
+              onClose={() => setShowImport(false)}
+              businessId={businessId ?? null}
+              currency={currency}
+              setProducts={setProducts}
+              variant="inline"
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {loading ? (
         viewMode === "list" ? (
           <div className="space-y-1">
@@ -545,18 +567,18 @@ export const ProductsPanel = React.memo(function ProductsPanel({
                 >
                   <Plus className="w-4 h-4" /> Add Product
                 </button>
-                {onImport && (
+                {setProducts && (
                   <button
-                    onClick={onImport}
+                    onClick={() => setShowImport(true)}
                     className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-xl bg-white/5 border border-white/10 text-muted-foreground hover:bg-white/10 hover:text-white transition-all"
                   >
                     <Upload className="w-4 h-4" /> Import
                   </button>
                 )}
               </div>
-              {onImport && (
+              {setProducts && (
                 <button
-                  onClick={onImport}
+                  onClick={() => setShowImport(true)}
                   className="mt-3 inline-flex items-center gap-2 text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors"
                 >
                   <Camera className="w-3.5 h-3.5" />
