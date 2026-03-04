@@ -17,7 +17,7 @@ import {
   ToggleLeft,
   ToggleRight,
   Plus,
-  Copy,
+  Files,
   MessageCircle,
   AlertTriangle,
   Loader2,
@@ -804,7 +804,7 @@ export default function QuotesPanel({
                   className="p-1 rounded-lg hover:bg-muted text-muted-foreground/70 hover:text-foreground"
                   title="Duplicate Quote"
                 >
-                  <Copy className="w-3.5 h-3.5" />
+                  <Files className="w-3.5 h-3.5" />
                 </button>
                 <button
                   onClick={() => shareQuoteViaWhatsApp(quote)}
@@ -884,7 +884,7 @@ export default function QuotesPanel({
                   <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
                 </button>
                 <button onClick={() => duplicateQuote(quote)} className="p-1 rounded-lg hover:bg-muted" title="Duplicate">
-                  <Copy className="w-3.5 h-3.5 text-muted-foreground" />
+                  <Files className="w-3.5 h-3.5 text-muted-foreground" />
                 </button>
                 <button onClick={() => shareQuoteViaWhatsApp(quote)} className="p-1 rounded-lg hover:bg-green-500/20" title="WhatsApp">
                   <MessageCircle className="w-3.5 h-3.5 text-green-400" />
@@ -1170,7 +1170,7 @@ export default function QuotesPanel({
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-0.5">
                     <button onClick={() => duplicateQuote(selectedQuote)} className="p-2 rounded-lg hover:bg-white/[0.06] transition-colors" title="Duplicate quote">
-                      <Copy className="w-4 h-4 text-slate-400" />
+                      <Files className="w-4 h-4 text-slate-400" />
                     </button>
                     <div className="w-px h-4 bg-border/30 mx-0.5" />
                     <button onClick={() => shareQuoteViaWhatsApp(selectedQuote)} className="p-2 rounded-lg hover:bg-emerald-500/10 transition-colors" title="Share via WhatsApp">
