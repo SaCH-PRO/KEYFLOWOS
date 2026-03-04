@@ -36,6 +36,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Observability:** Request correlation ID middleware, global logging interceptor, and health check endpoints.
 - **Learn Module (MasterClass, 3 tabs: My Learning | Catalog | Certificates):** Componentized with course-card, course-catalog, learn-skeleton, lesson-viewer, and progress-tracker. Full CRM-standard patterns: TabNav, keyboard shortcuts, useSwipeTabs, framer-motion transitions, error boundary, PageHeader, bespoke skeletons.
 - **Community Module (2 tabs: Feed | Cohorts):** Componentized with feed, post-card, create-post, cohort-list, and community-skeleton. Full CRM-standard patterns: TabNav, keyboard shortcuts, useSwipeTabs, framer-motion transitions, error boundary, PageHeader, post type filtering, cohort join/leave.
+- **Error Boundaries:** All core modules have dedicated `error.tsx` boundaries (CRM, Commerce, Bookings, Expenses, Marketing, Projects, Reports, Learn, Community) providing graceful degradation with retry and dashboard navigation.
 - **Core Modules:** Identity, CRM, Commerce, Marketplace, Bookings, Social, Projects & Playbooks, Flow, Reports, Command, Expenses, Webhooks, AI, Email Marketing, Lead Forms, Templates, Education, Community.
 
 ## External Dependencies

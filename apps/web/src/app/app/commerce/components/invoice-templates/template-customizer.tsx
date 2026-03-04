@@ -21,6 +21,7 @@ import {
   Mail,
   Globe,
   Type,
+  SlidersHorizontal,
 } from "lucide-react";
 import type { TemplateId, InvoiceTemplateData } from "./template-types";
 import { TEMPLATE_META } from "./template-types";
@@ -165,6 +166,148 @@ function BrandInput({
   );
 }
 
+function SidebarContent({
+  selectedTemplate,
+  branding,
+  onSelectTemplate,
+  setBrandField,
+}: {
+  selectedTemplate: TemplateId;
+  branding: BrandingOverrides;
+  onSelectTemplate: (id: TemplateId) => void;
+  setBrandField: (field: keyof BrandingOverrides, value: string) => void;
+}) {
+  return (
+    <>
+      <SidebarSection title="Template" icon={Eye} defaultOpen>
+        <div className="space-y-2">
+          {TEMPLATE_IDS.map((id) => {
+            const meta = TEMPLATE_META[id];
+            const isSelected = selectedTemplate === id;
+            return (
+              <button
+                key={id}
+                onClick={() => onSelectTemplate(id)}
+                className="w-full flex items-center gap-3 p-2.5 rounded-lg transition-all text-left"
+                style={{
+                  backgroundColor: isSelected ? `${branding.primaryColor}15` : "transparent",
+                  border: isSelected
+                    ? `1px solid ${branding.primaryColor}40`
+                    : "1px solid transparent",
+                }}
+              >
+                <div
+                  className="w-10 h-12 rounded-md bg-white overflow-hidden shrink-0 shadow-sm"
+                  style={{
+                    border: isSelected ? `2px solid ${branding.primaryColor}` : "1px solid rgba(255,255,255,0.1)",
+                  }}
+                >
+                  <MiniThumb id={id} primaryColor={branding.primaryColor} secondaryColor={branding.secondaryColor} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-white/90 flex items-center gap-1.5">
+                    {meta.name}
+                    {isSelected && (
+                      <span
+                        className="w-4 h-4 rounded-full flex items-center justify-center"
+                        style={{ backgroundColor: branding.primaryColor }}
+                      >
+                        <Check className="w-2.5 h-2.5 text-white" />
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-[10px] text-white/40 leading-tight mt-0.5 line-clamp-2">{meta.description}</p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </SidebarSection>
+
+      <SidebarSection title="Brand Colors" icon={Palette} defaultOpen>
+        <div>
+          <label className="text-[11px] text-white/50 mb-2 block">Color Presets</label>
+          <div className="flex flex-wrap gap-2">
+            {PRESET_COLORS.map((preset) => (
+              <button
+                key={preset.label}
+                onClick={() => {
+                  setBrandField("primaryColor", preset.primary);
+                  setBrandField("secondaryColor", preset.secondary);
+                }}
+                title={preset.label}
+                className="flex items-center gap-0.5 p-1 rounded-md border transition-all hover:scale-105"
+                style={{
+                  borderColor:
+                    branding.primaryColor === preset.primary
+                      ? "rgba(255,255,255,0.4)"
+                      : "rgba(255,255,255,0.08)",
+                  backgroundColor:
+                    branding.primaryColor === preset.primary
+                      ? "rgba(255,255,255,0.06)"
+                      : "transparent",
+                }}
+              >
+                <div className="w-5 h-5 rounded-sm" style={{ backgroundColor: preset.primary }} />
+                <div className="w-5 h-5 rounded-sm" style={{ backgroundColor: preset.secondary }} />
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3 mt-1">
+          <div>
+            <label className="text-[11px] text-white/50 mb-1.5 block">Primary</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={branding.primaryColor}
+                onChange={(e) => setBrandField("primaryColor", e.target.value)}
+                className="w-8 h-8 rounded-lg border border-white/10 cursor-pointer bg-transparent"
+              />
+              <input
+                type="text"
+                value={branding.primaryColor}
+                onChange={(e) => setBrandField("primaryColor", e.target.value)}
+                className="flex-1 bg-white/[0.06] border border-white/[0.08] rounded-md px-2 py-1.5 text-[11px] text-white/80 font-mono focus:outline-none focus:ring-1 focus:ring-white/20"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="text-[11px] text-white/50 mb-1.5 block">Secondary</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={branding.secondaryColor}
+                onChange={(e) => setBrandField("secondaryColor", e.target.value)}
+                className="w-8 h-8 rounded-lg border border-white/10 cursor-pointer bg-transparent"
+              />
+              <input
+                type="text"
+                value={branding.secondaryColor}
+                onChange={(e) => setBrandField("secondaryColor", e.target.value)}
+                className="flex-1 bg-white/[0.06] border border-white/[0.08] rounded-md px-2 py-1.5 text-[11px] text-white/80 font-mono focus:outline-none focus:ring-1 focus:ring-white/20"
+              />
+            </div>
+          </div>
+        </div>
+      </SidebarSection>
+
+      <SidebarSection title="Business Details" icon={Building2}>
+        <BrandInput label="Business Name" value={branding.name} onChange={(v) => setBrandField("name", v)} icon={Building2} placeholder="Your Business" />
+        <BrandInput label="Tagline" value={branding.tagline} onChange={(v) => setBrandField("tagline", v)} icon={Type} placeholder="Your tagline..." />
+        <BrandInput label="Address" value={branding.address} onChange={(v) => setBrandField("address", v)} icon={MapPin} placeholder="123 Main Street" />
+        <div className="grid grid-cols-2 gap-2">
+          <BrandInput label="City" value={branding.city} onChange={(v) => setBrandField("city", v)} icon={MapPin} placeholder="Port of Spain" />
+          <BrandInput label="Country" value={branding.country} onChange={(v) => setBrandField("country", v)} icon={Globe} placeholder="Trinidad" />
+        </div>
+        <BrandInput label="Phone" value={branding.phone} onChange={(v) => setBrandField("phone", v)} icon={Phone} placeholder="+1 868 555 0000" />
+        <BrandInput label="Email" value={branding.email} onChange={(v) => setBrandField("email", v)} icon={Mail} placeholder="hello@business.com" />
+        <BrandInput label="Website" value={branding.website} onChange={(v) => setBrandField("website", v)} icon={Globe} placeholder="www.business.com" />
+      </SidebarSection>
+    </>
+  );
+}
+
 export function TemplateCustomizer({
   open,
   onClose,
@@ -176,6 +319,7 @@ export function TemplateCustomizer({
 }: TemplateCustomizerProps) {
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateId>(activeTemplate);
   const [viewMode, setViewMode] = useState<ViewMode>("desktop");
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [branding, setBranding] = useState<BrandingOverrides>({
     primaryColor: data.business.primaryColor,
     secondaryColor: data.business.secondaryColor,
@@ -206,6 +350,7 @@ export function TemplateCustomizer({
         website: data.business.website || "",
       });
       setViewMode("desktop");
+      setMobileDrawerOpen(false);
     }
   }, [open, activeTemplate, data.business]);
 
@@ -303,11 +448,17 @@ export function TemplateCustomizer({
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        if (mobileDrawerOpen) {
+          setMobileDrawerOpen(false);
+        } else {
+          onClose();
+        }
+      }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [open, onClose]);
+  }, [open, onClose, mobileDrawerOpen]);
 
   if (!open) return null;
 
@@ -343,131 +494,12 @@ export function TemplateCustomizer({
             </div>
 
             <div className="flex-1 overflow-y-auto">
-              <SidebarSection title="Template" icon={Eye} defaultOpen>
-                <div className="space-y-2">
-                  {TEMPLATE_IDS.map((id) => {
-                    const meta = TEMPLATE_META[id];
-                    const isSelected = selectedTemplate === id;
-                    return (
-                      <button
-                        key={id}
-                        onClick={() => handleSelectTemplate(id)}
-                        className="w-full flex items-center gap-3 p-2.5 rounded-lg transition-all text-left"
-                        style={{
-                          backgroundColor: isSelected ? `${branding.primaryColor}15` : "transparent",
-                          border: isSelected
-                            ? `1px solid ${branding.primaryColor}40`
-                            : "1px solid transparent",
-                        }}
-                      >
-                        <div
-                          className="w-10 h-12 rounded-md bg-white overflow-hidden shrink-0 shadow-sm"
-                          style={{
-                            border: isSelected ? `2px solid ${branding.primaryColor}` : "1px solid rgba(255,255,255,0.1)",
-                          }}
-                        >
-                          <MiniThumb id={id} primaryColor={branding.primaryColor} secondaryColor={branding.secondaryColor} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-semibold text-white/90 flex items-center gap-1.5">
-                            {meta.name}
-                            {isSelected && (
-                              <span
-                                className="w-4 h-4 rounded-full flex items-center justify-center"
-                                style={{ backgroundColor: branding.primaryColor }}
-                              >
-                                <Check className="w-2.5 h-2.5 text-white" />
-                              </span>
-                            )}
-                          </p>
-                          <p className="text-[10px] text-white/40 leading-tight mt-0.5 line-clamp-2">{meta.description}</p>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </SidebarSection>
-
-              <SidebarSection title="Brand Colors" icon={Palette} defaultOpen>
-                <div>
-                  <label className="text-[11px] text-white/50 mb-2 block">Color Presets</label>
-                  <div className="flex flex-wrap gap-2">
-                    {PRESET_COLORS.map((preset) => (
-                      <button
-                        key={preset.label}
-                        onClick={() => {
-                          setBrandField("primaryColor", preset.primary);
-                          setBrandField("secondaryColor", preset.secondary);
-                        }}
-                        title={preset.label}
-                        className="flex items-center gap-0.5 p-1 rounded-md border transition-all hover:scale-105"
-                        style={{
-                          borderColor:
-                            branding.primaryColor === preset.primary
-                              ? "rgba(255,255,255,0.4)"
-                              : "rgba(255,255,255,0.08)",
-                          backgroundColor:
-                            branding.primaryColor === preset.primary
-                              ? "rgba(255,255,255,0.06)"
-                              : "transparent",
-                        }}
-                      >
-                        <div className="w-5 h-5 rounded-sm" style={{ backgroundColor: preset.primary }} />
-                        <div className="w-5 h-5 rounded-sm" style={{ backgroundColor: preset.secondary }} />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3 mt-1">
-                  <div>
-                    <label className="text-[11px] text-white/50 mb-1.5 block">Primary</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="color"
-                        value={branding.primaryColor}
-                        onChange={(e) => setBrandField("primaryColor", e.target.value)}
-                        className="w-8 h-8 rounded-lg border border-white/10 cursor-pointer bg-transparent"
-                      />
-                      <input
-                        type="text"
-                        value={branding.primaryColor}
-                        onChange={(e) => setBrandField("primaryColor", e.target.value)}
-                        className="flex-1 bg-white/[0.06] border border-white/[0.08] rounded-md px-2 py-1.5 text-[11px] text-white/80 font-mono focus:outline-none focus:ring-1 focus:ring-white/20"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-[11px] text-white/50 mb-1.5 block">Secondary</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="color"
-                        value={branding.secondaryColor}
-                        onChange={(e) => setBrandField("secondaryColor", e.target.value)}
-                        className="w-8 h-8 rounded-lg border border-white/10 cursor-pointer bg-transparent"
-                      />
-                      <input
-                        type="text"
-                        value={branding.secondaryColor}
-                        onChange={(e) => setBrandField("secondaryColor", e.target.value)}
-                        className="flex-1 bg-white/[0.06] border border-white/[0.08] rounded-md px-2 py-1.5 text-[11px] text-white/80 font-mono focus:outline-none focus:ring-1 focus:ring-white/20"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </SidebarSection>
-
-              <SidebarSection title="Business Details" icon={Building2}>
-                <BrandInput label="Business Name" value={branding.name} onChange={(v) => setBrandField("name", v)} icon={Building2} placeholder="Your Business" />
-                <BrandInput label="Tagline" value={branding.tagline} onChange={(v) => setBrandField("tagline", v)} icon={Type} placeholder="Your tagline..." />
-                <BrandInput label="Address" value={branding.address} onChange={(v) => setBrandField("address", v)} icon={MapPin} placeholder="123 Main Street" />
-                <div className="grid grid-cols-2 gap-2">
-                  <BrandInput label="City" value={branding.city} onChange={(v) => setBrandField("city", v)} icon={MapPin} placeholder="Port of Spain" />
-                  <BrandInput label="Country" value={branding.country} onChange={(v) => setBrandField("country", v)} icon={Globe} placeholder="Trinidad" />
-                </div>
-                <BrandInput label="Phone" value={branding.phone} onChange={(v) => setBrandField("phone", v)} icon={Phone} placeholder="+1 868 555 0000" />
-                <BrandInput label="Email" value={branding.email} onChange={(v) => setBrandField("email", v)} icon={Mail} placeholder="hello@business.com" />
-                <BrandInput label="Website" value={branding.website} onChange={(v) => setBrandField("website", v)} icon={Globe} placeholder="www.business.com" />
-              </SidebarSection>
+              <SidebarContent
+                selectedTemplate={selectedTemplate}
+                branding={branding}
+                onSelectTemplate={handleSelectTemplate}
+                setBrandField={setBrandField}
+              />
             </div>
 
             <div className="border-t border-white/[0.06] p-3 space-y-2">
@@ -500,8 +532,8 @@ export function TemplateCustomizer({
           </div>
 
           <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-white/[0.06] bg-[#111318]/80 backdrop-blur-sm">
-              <div className="flex items-center gap-4">
+            <div className="flex items-center justify-between px-3 sm:px-6 py-3 border-b border-white/[0.06] bg-[#111318]/80 backdrop-blur-sm">
+              <div className="flex items-center gap-2 sm:gap-4">
                 <div className="lg:hidden flex items-center gap-2">
                   <div
                     className="w-8 h-8 rounded-lg flex items-center justify-center"
@@ -509,15 +541,15 @@ export function TemplateCustomizer({
                   >
                     <Eye className="w-4 h-4" style={{ color: branding.primaryColor }} />
                   </div>
-                  <span className="text-sm font-semibold text-white">Template Studio</span>
+                  <span className="text-sm font-semibold text-white hidden sm:inline">Template Studio</span>
                 </div>
 
-                <div className="flex items-center gap-1 bg-white/[0.04] rounded-lg p-1 border border-white/[0.06]">
+                <div className="flex items-center gap-0.5 sm:gap-1 bg-white/[0.04] rounded-lg p-0.5 sm:p-1 border border-white/[0.06]">
                   {viewModes.map(({ id, icon: ModeIcon, label }) => (
                     <button
                       key={id}
                       onClick={() => setViewMode(id)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                      className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium transition-all"
                       style={{
                         backgroundColor: viewMode === id ? `${branding.primaryColor}20` : "transparent",
                         color: viewMode === id ? branding.primaryColor : "rgba(255,255,255,0.5)",
@@ -530,7 +562,7 @@ export function TemplateCustomizer({
                   ))}
                 </div>
 
-                <div className="hidden sm:flex items-center gap-2 text-xs text-white/40">
+                <div className="hidden md:flex items-center gap-2 text-xs text-white/40">
                   <span className="px-2 py-0.5 rounded bg-white/[0.04] border border-white/[0.06]">
                     {TEMPLATE_META[selectedTemplate].name}
                   </span>
@@ -540,14 +572,22 @@ export function TemplateCustomizer({
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <button
+                  onClick={() => setMobileDrawerOpen(true)}
+                  className="lg:hidden flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-white/70 bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.06] transition-colors"
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Customize</span>
+                </button>
                 {viewMode === "print" && (
                   <button
                     onClick={handlePrint}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors"
                     style={{ backgroundColor: branding.primaryColor }}
                   >
-                    <Printer className="w-3.5 h-3.5" /> Print
+                    <Printer className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Print</span>
                   </button>
                 )}
                 <button
@@ -560,26 +600,24 @@ export function TemplateCustomizer({
             </div>
 
             <div className="flex-1 overflow-y-auto bg-[#0c0e12]">
-              <div className="flex items-start justify-center p-4 sm:p-8 min-h-full">
+              <div className="flex items-start justify-center p-3 sm:p-8 min-h-full">
                 <motion.div
                   key={`${selectedTemplate}-${viewMode}`}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.25 }}
-                  className="relative"
+                  className="relative w-full"
                   style={{
-                    width:
+                    maxWidth:
                       viewMode === "mobile"
                         ? "375px"
                         : viewMode === "print"
                           ? "210mm"
-                          : "100%",
-                    maxWidth:
-                      viewMode === "desktop" ? "800px" : undefined,
+                          : "800px",
                   }}
                 >
                   {viewMode === "mobile" && (
-                    <div className="absolute -inset-3 rounded-[2.5rem] border-2 border-white/[0.08] bg-black/40 pointer-events-none z-0">
+                    <div className="absolute -inset-3 rounded-[2.5rem] border-2 border-white/[0.08] bg-black/40 pointer-events-none z-0 hidden sm:block">
                       <div className="absolute top-2 left-1/2 -translate-x-1/2 w-20 h-1.5 rounded-full bg-white/10" />
                       <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/10" />
                     </div>
@@ -589,7 +627,7 @@ export function TemplateCustomizer({
                     ref={printRef}
                     className="relative z-10"
                     style={{
-                      transform: viewMode === "mobile" ? "scale(0.95)" : undefined,
+                      transform: viewMode === "mobile" && typeof window !== "undefined" && window.innerWidth >= 640 ? "scale(0.95)" : undefined,
                       transformOrigin: "top center",
                     }}
                   >
@@ -611,7 +649,7 @@ export function TemplateCustomizer({
               </div>
             </div>
 
-            <div className="lg:hidden border-t border-white/[0.06] bg-[#111318]/90 backdrop-blur-sm px-4 py-2.5">
+            <div className="lg:hidden border-t border-white/[0.06] bg-[#111318]/90 backdrop-blur-sm px-3 sm:px-4 py-2 safe-area-pb">
               <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
                 {TEMPLATE_IDS.map((id) => {
                   const isSelected = selectedTemplate === id;
@@ -631,9 +669,98 @@ export function TemplateCustomizer({
                     </button>
                   );
                 })}
+
+                {isDirty && onSaveBranding && (
+                  <button
+                    onClick={handleSave}
+                    disabled={savingBranding}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-white transition-all shrink-0"
+                    style={{ backgroundColor: branding.primaryColor }}
+                  >
+                    {savingBranding ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Save className="w-3 h-3" />
+                    )}
+                    Save
+                  </button>
+                )}
               </div>
             </div>
           </div>
+
+          <AnimatePresence>
+            {mobileDrawerOpen && (
+              <>
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 bg-black/50 z-[60] lg:hidden"
+                  onClick={() => setMobileDrawerOpen(false)}
+                />
+                <motion.div
+                  initial={{ x: "100%" }}
+                  animate={{ x: 0 }}
+                  exit={{ x: "100%" }}
+                  transition={{ type: "spring", damping: 30, stiffness: 300 }}
+                  className="fixed top-0 right-0 bottom-0 w-[min(85vw,340px)] bg-[#111318] border-l border-white/[0.06] z-[61] flex flex-col lg:hidden"
+                >
+                  <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <SlidersHorizontal className="w-4 h-4 text-white/50" />
+                      <span className="text-sm font-semibold text-white">Customize</span>
+                    </div>
+                    <button
+                      onClick={() => setMobileDrawerOpen(false)}
+                      className="p-1.5 rounded-lg text-white/50 hover:text-white hover:bg-white/[0.06] transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto">
+                    <SidebarContent
+                      selectedTemplate={selectedTemplate}
+                      branding={branding}
+                      onSelectTemplate={(id) => {
+                        handleSelectTemplate(id);
+                      }}
+                      setBrandField={setBrandField}
+                    />
+                  </div>
+
+                  <div className="border-t border-white/[0.06] p-3 safe-area-pb">
+                    {isDirty && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={resetBranding}
+                          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-xs font-medium text-white/70 bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.08] transition-colors"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" /> Reset
+                        </button>
+                        {onSaveBranding && (
+                          <button
+                            onClick={handleSave}
+                            disabled={savingBranding}
+                            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-xs font-medium text-white transition-colors"
+                            style={{ backgroundColor: branding.primaryColor }}
+                          >
+                            {savingBranding ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Save className="w-3.5 h-3.5" />
+                            )}
+                            {savingBranding ? "Saving..." : "Save"}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
         </motion.div>
       )}
     </AnimatePresence>
