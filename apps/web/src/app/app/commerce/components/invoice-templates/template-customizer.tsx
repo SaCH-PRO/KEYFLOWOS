@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useCallback, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -26,9 +27,17 @@ import {
 import type { TemplateId, InvoiceTemplateData } from "./template-types";
 import { TEMPLATE_META } from "./template-types";
 import { InvoiceTemplateRenderer } from "./template-renderer";
+import { PreviewFrame } from "./preview-frame";
+import { printFromHtml } from "./print-document";
 
 type ViewMode = "desktop" | "mobile" | "print";
 const TEMPLATE_IDS: TemplateId[] = ["classic", "modern", "minimal"];
+
+const VIEW_DIMENSIONS: Record<ViewMode, number> = {
+  desktop: 800,
+  mobile: 375,
+  print: 794,
+};
 
 interface BrandingOverrides {
   primaryColor: string;
@@ -51,35 +60,6 @@ interface TemplateCustomizerProps {
   onTemplateChange?: (id: TemplateId) => void;
   onSaveBranding?: (overrides: Partial<BrandingOverrides>) => Promise<void>;
   savingBranding?: boolean;
-}
-
-function ColorSwatch({
-  color,
-  selected,
-  onClick,
-  label,
-}: {
-  color: string;
-  selected: boolean;
-  onClick: () => void;
-  label: string;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      title={label}
-      className="relative w-8 h-8 rounded-lg border-2 transition-all hover:scale-110"
-      style={{
-        backgroundColor: color,
-        borderColor: selected ? "white" : "rgba(255,255,255,0.15)",
-        boxShadow: selected ? `0 0 0 2px ${color}, 0 0 12px ${color}40` : "none",
-      }}
-    >
-      {selected && (
-        <Check className="w-3.5 h-3.5 text-white absolute inset-0 m-auto drop-shadow-md" />
-      )}
-    </button>
-  );
 }
 
 const PRESET_COLORS = [
@@ -332,7 +312,8 @@ export function TemplateCustomizer({
     email: data.business.email || "",
     website: data.business.website || "",
   });
-  const printRef = useRef<HTMLDivElement>(null);
+  const hiddenRef = useRef<HTMLDivElement>(null);
+  const [capturedHtml, setCapturedHtml] = useState("");
 
   useEffect(() => {
     if (open) {
@@ -353,6 +334,16 @@ export function TemplateCustomizer({
       setMobileDrawerOpen(false);
     }
   }, [open, activeTemplate, data.business]);
+
+  useEffect(() => {
+    if (!open) return;
+    const timer = setTimeout(() => {
+      if (hiddenRef.current) {
+        setCapturedHtml(hiddenRef.current.innerHTML);
+      }
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [open, selectedTemplate, branding, data]);
 
   const setBrandField = useCallback(
     (field: keyof BrandingOverrides, value: string) => {
@@ -394,30 +385,9 @@ export function TemplateCustomizer({
   };
 
   const handlePrint = useCallback(() => {
-    if (!printRef.current) return;
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) return;
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>${data.type === "quote" ? "Quote" : "Invoice"} #${data.number}</title>
-          <style>
-            *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-            @media print { @page { margin: 0.5cm; size: A4; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
-          </style>
-          <script src="https://cdn.tailwindcss.com"><\/script>
-        </head>
-        <body>
-          ${printRef.current.innerHTML}
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-    setTimeout(() => {
-      printWindow.print();
-    }, 600);
+    if (!hiddenRef.current) return;
+    const docType = data.type === "quote" ? "Quote" : "Invoice";
+    printFromHtml(hiddenRef.current.innerHTML, docType, data.number);
   }, [data.type, data.number]);
 
   const handleSelectTemplate = useCallback(
@@ -462,11 +432,13 @@ export function TemplateCustomizer({
 
   if (!open) return null;
 
-  const viewModes: { id: ViewMode; icon: React.ElementType; label: string }[] = [
-    { id: "desktop", icon: Monitor, label: "Desktop" },
-    { id: "mobile", icon: Smartphone, label: "Mobile" },
-    { id: "print", icon: Printer, label: "Print" },
+  const viewModes: { id: ViewMode; icon: React.ElementType; label: string; desc: string }[] = [
+    { id: "desktop", icon: Monitor, label: "Desktop", desc: "800px" },
+    { id: "mobile", icon: Smartphone, label: "Mobile", desc: "375px" },
+    { id: "print", icon: Printer, label: "Print", desc: "A4" },
   ];
+
+  const showIframe = viewMode === "mobile" || viewMode === "print";
 
   return (
     <AnimatePresence>
@@ -545,11 +517,12 @@ export function TemplateCustomizer({
                 </div>
 
                 <div className="flex items-center gap-0.5 sm:gap-1 bg-white/[0.04] rounded-lg p-0.5 sm:p-1 border border-white/[0.06]">
-                  {viewModes.map(({ id, icon: ModeIcon, label }) => (
+                  {viewModes.map(({ id, icon: ModeIcon, label, desc }) => (
                     <button
                       key={id}
                       onClick={() => setViewMode(id)}
                       className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                      title={`${label} (${desc})`}
                       style={{
                         backgroundColor: viewMode === id ? `${branding.primaryColor}20` : "transparent",
                         color: viewMode === id ? branding.primaryColor : "rgba(255,255,255,0.5)",
@@ -569,6 +542,9 @@ export function TemplateCustomizer({
                   <span>
                     {data.type === "quote" ? "Quote" : "Invoice"} #{data.number}
                   </span>
+                  <span className="px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.06] font-mono">
+                    {VIEW_DIMENSIONS[viewMode]}px
+                  </span>
                 </div>
               </div>
 
@@ -580,16 +556,15 @@ export function TemplateCustomizer({
                   <SlidersHorizontal className="w-3.5 h-3.5" />
                   <span className="hidden sm:inline">Customize</span>
                 </button>
-                {viewMode === "print" && (
-                  <button
-                    onClick={handlePrint}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors"
-                    style={{ backgroundColor: branding.primaryColor }}
-                  >
-                    <Printer className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Print</span>
-                  </button>
-                )}
+                <button
+                  onClick={handlePrint}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors"
+                  style={{ backgroundColor: branding.primaryColor }}
+                  title="Print / Save as PDF"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Print</span>
+                </button>
                 <button
                   onClick={onClose}
                   className="p-2 rounded-lg text-white/50 hover:text-white hover:bg-white/[0.06] transition-colors"
@@ -606,33 +581,53 @@ export function TemplateCustomizer({
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.25 }}
-                  className="relative w-full"
-                  style={{
-                    maxWidth:
-                      viewMode === "mobile"
-                        ? "375px"
-                        : viewMode === "print"
-                          ? "210mm"
-                          : "800px",
-                  }}
+                  className="relative"
+                  style={{ width: "100%", maxWidth: viewMode === "desktop" ? "800px" : viewMode === "print" ? "860px" : "440px" }}
                 >
                   {viewMode === "mobile" && (
-                    <div className="absolute -inset-3 rounded-[2.5rem] border-2 border-white/[0.08] bg-black/40 pointer-events-none z-0 hidden sm:block">
-                      <div className="absolute top-2 left-1/2 -translate-x-1/2 w-20 h-1.5 rounded-full bg-white/10" />
-                      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/10" />
+                    <div className="flex items-center justify-center gap-2 mb-4">
+                      <Smartphone className="w-3.5 h-3.5 text-white/30" />
+                      <span className="text-xs text-white/30">Mobile Preview (375px)</span>
+                    </div>
+                  )}
+                  {viewMode === "print" && (
+                    <div className="flex items-center justify-center gap-2 mb-4">
+                      <Printer className="w-3.5 h-3.5 text-white/30" />
+                      <span className="text-xs text-white/30">Print Preview (A4)</span>
                     </div>
                   )}
 
-                  <div
-                    ref={printRef}
-                    className="relative z-10"
-                    style={{
-                      transform: viewMode === "mobile" && typeof window !== "undefined" && window.innerWidth >= 640 ? "scale(0.95)" : undefined,
-                      transformOrigin: "top center",
-                    }}
-                  >
-                    <InvoiceTemplateRenderer templateId={selectedTemplate} data={previewData} />
-                  </div>
+                  {viewMode === "mobile" && (
+                    <div className="relative mx-auto" style={{ maxWidth: "420px" }}>
+                      <div className="absolute -inset-4 rounded-[2.5rem] border-2 border-white/[0.08] bg-black/30 pointer-events-none z-0 hidden sm:block">
+                        <div className="absolute top-2.5 left-1/2 -translate-x-1/2 w-20 h-1.5 rounded-full bg-white/10" />
+                        <div className="absolute bottom-2.5 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/10" />
+                      </div>
+                      <div className="relative z-10 rounded-2xl sm:rounded-none overflow-hidden">
+                        <PreviewFrame
+                          html={capturedHtml}
+                          width={375}
+                          title={`${data.type === "quote" ? "Quote" : "Invoice"} #${data.number}`}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {viewMode === "print" && (
+                    <div className="mx-auto rounded-lg overflow-hidden shadow-2xl" style={{ border: "1px solid rgba(255,255,255,0.08)" }}>
+                      <PreviewFrame
+                        html={capturedHtml}
+                        width={794}
+                        title={`${data.type === "quote" ? "Quote" : "Invoice"} #${data.number}`}
+                      />
+                    </div>
+                  )}
+
+                  {viewMode === "desktop" && (
+                    <div className="w-full">
+                      <InvoiceTemplateRenderer templateId={selectedTemplate} data={previewData} />
+                    </div>
+                  )}
 
                   {viewMode === "print" && (
                     <div className="mt-6 flex items-center justify-center">
@@ -761,6 +756,14 @@ export function TemplateCustomizer({
               </>
             )}
           </AnimatePresence>
+
+          <div
+            ref={hiddenRef}
+            aria-hidden="true"
+            style={{ position: "absolute", left: "-9999px", top: 0, width: `${VIEW_DIMENSIONS[viewMode]}px`, pointerEvents: "none" }}
+          >
+            <InvoiceTemplateRenderer templateId={selectedTemplate} data={previewData} />
+          </div>
         </motion.div>
       )}
     </AnimatePresence>
