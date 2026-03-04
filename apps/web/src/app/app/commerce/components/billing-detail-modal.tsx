@@ -469,7 +469,7 @@ export function BillingDetailModal({
           </div>
         </div>
 
-        <div className="border-t border-border/40 bg-card/80 backdrop-blur-sm p-4 space-y-2">
+        <div className="border-t border-border/40 bg-card/80 backdrop-blur-sm px-4 py-3 space-y-2">
           {actions}
         </div>
       </motion.div>

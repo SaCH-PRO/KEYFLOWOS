@@ -879,47 +879,44 @@ export default function InvoicesPanel({
             onClose={() => setSelectedInvoice(null)}
             actions={
               <>
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" className="gap-2 flex-1" onClick={() => copyPaymentLink(selectedInvoice.id)}>
-                    <Copy className={`w-4 h-4 ${copiedLink === selectedInvoice.id ? "text-emerald-400" : ""}`} />
-                    {copiedLink === selectedInvoice.id ? "Copied!" : "Copy Link"}
-                  </Button>
-                  <Button variant="outline" className="gap-2 flex-1" onClick={() => duplicateInvoice(selectedInvoice)}>
-                    <Copy className="w-4 h-4" /> Duplicate
-                  </Button>
-                  <Button variant="outline" className="gap-2 flex-1" onClick={() => shareViaWhatsApp(selectedInvoice)}>
-                    <MessageCircle className="w-4 h-4 text-green-400" /> WhatsApp
-                  </Button>
-                </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex items-center gap-1">
+                  <button onClick={() => copyPaymentLink(selectedInvoice.id)} className="p-2 rounded-lg hover:bg-white/[0.06] transition-colors" title={copiedLink === selectedInvoice.id ? "Copied!" : "Copy Link"}>
+                    <Copy className={`w-4 h-4 ${copiedLink === selectedInvoice.id ? "text-emerald-400" : "text-slate-400"}`} />
+                  </button>
+                  <button onClick={() => duplicateInvoice(selectedInvoice)} className="p-2 rounded-lg hover:bg-white/[0.06] transition-colors" title="Duplicate">
+                    <Copy className="w-4 h-4 text-slate-400" />
+                  </button>
+                  <button onClick={() => shareViaWhatsApp(selectedInvoice)} className="p-2 rounded-lg hover:bg-emerald-500/10 transition-colors" title="WhatsApp">
+                    <MessageCircle className="w-4 h-4 text-emerald-400" />
+                  </button>
                   {gmailStatus?.connected && (
-                    <Button variant="outline" className="gap-2 flex-1" onClick={() => setShowEmailModal(true)}>
-                      <Mail className="w-4 h-4 text-blue-400" /> Email
-                    </Button>
+                    <button onClick={() => setShowEmailModal(true)} className="p-2 rounded-lg hover:bg-blue-500/10 transition-colors" title="Email">
+                      <Mail className="w-4 h-4 text-blue-400" />
+                    </button>
                   )}
                   {(selectedInvoice.status === "SENT" || selectedInvoice.status === "OVERDUE") && gmailStatus?.connected && (
-                    <Button variant="outline" className="gap-2 flex-1" onClick={() => openReminderEmail(selectedInvoice)}>
-                      <Bell className="w-4 h-4 text-amber-400" /> Reminder
-                    </Button>
+                    <button onClick={() => openReminderEmail(selectedInvoice)} className="p-2 rounded-lg hover:bg-amber-500/10 transition-colors" title="Send Reminder">
+                      <Bell className="w-4 h-4 text-amber-400" />
+                    </button>
                   )}
+                  {(selectedInvoice.status === "DRAFT" || selectedInvoice.status === "SENT" || selectedInvoice.status === "OVERDUE") && (
+                    <button onClick={() => handleVoidInvoice(selectedInvoice.id)} disabled={!!actionLoading[selectedInvoice.id]} className="p-2 rounded-lg hover:bg-slate-500/10 transition-colors ml-auto" title="Void Invoice">
+                      {actionLoading[selectedInvoice.id] === "void" ? <Loader2 className="w-4 h-4 animate-spin text-slate-400" /> : <Ban className="w-4 h-4 text-slate-400" />}
+                    </button>
+                  )}
+                </div>
+                <div className="flex gap-2">
                   {selectedInvoice.status === "DRAFT" && (
-                    <Button className="gap-2 flex-1" onClick={() => { handleSendInvoice(selectedInvoice.id); setSelectedInvoice(null); }} disabled={!!actionLoading[selectedInvoice.id]}>
-                      {actionLoading[selectedInvoice.id] === "send" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Send Invoice
+                    <Button size="sm" className="gap-1.5 flex-1" onClick={() => { handleSendInvoice(selectedInvoice.id); setSelectedInvoice(null); }} disabled={!!actionLoading[selectedInvoice.id]}>
+                      {actionLoading[selectedInvoice.id] === "send" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send Invoice
                     </Button>
                   )}
                   {(selectedInvoice.status === "DRAFT" || selectedInvoice.status === "SENT") && (
-                    <Button className="gap-2 flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => { handleMarkPaid(selectedInvoice.id, selectedInvoice); setSelectedInvoice(null); }} disabled={!!actionLoading[selectedInvoice.id]}>
-                      {actionLoading[selectedInvoice.id] === "paid" ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />} Mark Paid
+                    <Button size="sm" className="gap-1.5 flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => { handleMarkPaid(selectedInvoice.id, selectedInvoice); setSelectedInvoice(null); }} disabled={!!actionLoading[selectedInvoice.id]}>
+                      {actionLoading[selectedInvoice.id] === "paid" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Mark Paid
                     </Button>
                   )}
                 </div>
-                {(selectedInvoice.status === "DRAFT" || selectedInvoice.status === "SENT" || selectedInvoice.status === "OVERDUE") && (
-                  <div className="flex gap-2">
-                    <Button variant="outline" className="gap-2 flex-1 text-slate-400 hover:text-slate-300 hover:bg-slate-500/10" onClick={() => handleVoidInvoice(selectedInvoice.id)} disabled={!!actionLoading[selectedInvoice.id]}>
-                      {actionLoading[selectedInvoice.id] === "void" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Ban className="w-4 h-4" />} Void Invoice
-                    </Button>
-                  </div>
-                )}
               </>
             }
           />
