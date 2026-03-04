@@ -151,6 +151,28 @@ export const ProductsPanel = React.memo(function ProductsPanel({
     };
   }, [showSortMenu]);
 
+  const searchIndex = useMemo(() => {
+    const skipKeys = new Set(["id", "imageUrl", "createdAt", "updatedAt", "businessId"]);
+    return new Map(products.map((p) => {
+      const parts: string[] = [
+        p.name,
+        p.description || "",
+        p.sku || "",
+        p.category || "",
+        p.currency || "",
+        String(p.price),
+        p.duration != null ? `${p.duration} min ${p.duration} minutes` : "",
+        p.isActive === false ? "inactive" : "active",
+      ];
+      for (const [k, v] of Object.entries(p)) {
+        if (!skipKeys.has(k) && v != null && typeof v !== "object") {
+          parts.push(String(v));
+        }
+      }
+      return [p.id, parts.join(" ").toLowerCase()] as const;
+    }));
+  }, [products]);
+
   const filteredProducts = useMemo(() => {
     let result = products;
     if (!showInactive) {
@@ -160,13 +182,11 @@ export const ProductsPanel = React.memo(function ProductsPanel({
       result = result.filter((p) => p.category === categoryFilter);
     }
     if (productSearch.trim()) {
-      const q = productSearch.toLowerCase();
-      result = result.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          (p.description && p.description.toLowerCase().includes(q)) ||
-          (p.sku && p.sku.toLowerCase().includes(q))
-      );
+      const terms = productSearch.toLowerCase().split(/\s+/).filter(Boolean);
+      result = result.filter((p) => {
+        const text = searchIndex.get(p.id) || "";
+        return terms.every((t) => text.indexOf(t) !== -1);
+      });
     }
     const sorted = [...result];
     switch (sortBy) {
@@ -179,7 +199,7 @@ export const ProductsPanel = React.memo(function ProductsPanel({
       default: sorted.sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime()); break;
     }
     return sorted;
-  }, [products, productSearch, categoryFilter, showInactive, sortBy]);
+  }, [products, productSearch, categoryFilter, showInactive, sortBy, searchIndex]);
 
   const categoryCounts = useMemo(() => {
     const counts = { ALL: 0, SERVICE: 0, PRODUCT: 0, PACKAGE: 0 };
@@ -278,7 +298,7 @@ export const ProductsPanel = React.memo(function ProductsPanel({
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50" />
             <input
               type="text"
-              placeholder="Search products..."
+              placeholder="Search by name, price, category..."
               value={productSearch}
               onChange={(e) => setProductSearch(e.target.value)}
               aria-label="Search products"
