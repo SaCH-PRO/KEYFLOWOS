@@ -632,7 +632,7 @@ export default function InvoicesPanel({
               </button>
             );
           })}
-          <span className="ml-auto text-[10px] text-muted-foreground/50 whitespace-nowrap shrink-0 pl-2">
+          <span className="ml-auto text-[10px] text-muted-foreground/50 whitespace-nowrap shrink-0 pl-2" aria-live="polite" role="status">
             {filteredInvoices.length} of {invoices.length}
           </span>
         </div>
@@ -641,7 +641,11 @@ export default function InvoicesPanel({
       {loading ? (
         <div className="space-y-2" role="status" aria-label="Loading invoices">
           {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="flex items-center gap-3 p-3 rounded-xl border border-border/30 bg-white/[0.02] animate-pulse">
+            <div
+              key={i}
+              className="flex items-center gap-3 p-3 rounded-xl border border-border/30 bg-white/[0.02]"
+              style={{ animation: `pulse 1.5s ease-in-out ${(i - 1) * 0.1}s infinite` }}
+            >
               <div className="w-9 h-9 rounded-lg bg-muted/30 shrink-0" />
               <div className="flex-1 space-y-1.5">
                 <div className="flex items-center gap-2">

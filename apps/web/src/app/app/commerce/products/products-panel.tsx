@@ -438,7 +438,7 @@ export const ProductsPanel = React.memo(function ProductsPanel({
               </button>
             );
           })}
-          <span className="ml-auto text-[10px] text-muted-foreground/50 whitespace-nowrap shrink-0 pl-2">
+          <span className="ml-auto text-[10px] text-muted-foreground/50 whitespace-nowrap shrink-0 pl-2" aria-live="polite" role="status">
             {filteredProducts.length} of {categoryCounts.ALL}
           </span>
         </div>
@@ -514,27 +514,32 @@ export const ProductsPanel = React.memo(function ProductsPanel({
 
       {loading ? (
         viewMode === "list" ? (
-          <div className="space-y-1">
+          <div className="space-y-1" role="status" aria-label="Loading products">
             {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-border/30 bg-white/[0.02] animate-pulse">
+              <div
+                key={i}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-border/30 bg-white/[0.02]"
+                style={{ animation: `pulse 1.5s ease-in-out ${i * 0.1}s infinite` }}
+              >
                 <div className="w-10 h-10 rounded-lg bg-muted/30 shrink-0" />
                 <div className="flex-1 space-y-1.5">
                   <div className="h-3.5 bg-muted/30 rounded w-2/3" />
-                  <div className="h-2.5 bg-muted/30 rounded w-1/3" />
+                  <div className="h-2.5 bg-muted/20 rounded w-1/3" />
                 </div>
                 <div className="h-3.5 bg-muted/30 rounded w-16 shrink-0" />
               </div>
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-3 gap-2 sm:gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3">
             {Array.from({ length: 9 }).map((_, i) => (
               <div
                 key={i}
-                className="rounded-xl border border-border/50 bg-card overflow-hidden animate-pulse"
+                className="relative rounded-xl border border-border/50 bg-card overflow-hidden"
+                style={{ animation: `pulse 1.5s ease-in-out ${i * 0.08}s infinite` }}
               >
-                <div className="aspect-[4/3] bg-muted/30 w-full" />
-                <div className="p-2 space-y-1.5">
+                <div className="aspect-square bg-muted/20 w-full" />
+                <div className="absolute bottom-0 left-0 right-0 p-2 space-y-1.5">
                   <div className="h-3 bg-muted/30 rounded w-3/4" />
                   <div className="h-3 bg-muted/30 rounded w-1/2" />
                 </div>
@@ -607,7 +612,7 @@ export const ProductsPanel = React.memo(function ProductsPanel({
             </div>
           )}
           {viewMode === "grid" ? (
-            <div className="grid grid-cols-3 gap-2 sm:gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3">
               <AnimatePresence mode="popLayout">
                 {filteredProducts.map((product) => (
                   <div key={product.id} className="relative">
