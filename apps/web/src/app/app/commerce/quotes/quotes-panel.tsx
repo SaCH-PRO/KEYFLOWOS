@@ -57,6 +57,7 @@ import {
 import LineItemsEditor from "../components/line-items-editor";
 import { BillingCard } from "../components/billing-card";
 import { BillingDetailModal } from "../components/billing-detail-modal";
+import { BillingFormModal } from "../components/billing-form-modal";
 import { useQuoteForm } from "../hooks/use-quote-form";
 import { useModuleEmit } from "@/hooks/use-module-events";
 
@@ -580,73 +581,33 @@ export default function QuotesPanel({
       exit={{ opacity: 0, y: -10 }}
       className="space-y-4"
     >
-      {showQuoteBuilder && (
-        <div className="rounded-2xl border border-primary/30 bg-card p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-base font-semibold flex items-center gap-2">
-              <FileText className="w-5 h-5 text-primary" /> {editingQuoteId ? "Edit Quote" : "Create Quote"}
-            </h3>
-            <button
-              onClick={() => {
-                setShowQuoteBuilder(false);
-                resetQuoteForm();
-              }}
-              className="p-1 rounded hover:bg-muted"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <ContactSelect
-              value={quoteForm.contactId}
-              onChange={(id) => setQuoteForm((f: any) => ({ ...f, contactId: id }))}
-              contacts={contacts}
-              label="Contact"
-              required
-            />
-            <Input
-              label="Expiry Date"
-              type="date"
-              value={quoteForm.expiryDate}
-              onChange={(e) => setQuoteForm((f: any) => ({ ...f, expiryDate: e.target.value }))}
-            />
-          </div>
-
-          <LineItemsEditor
-            items={quoteForm.items}
-            products={products.filter((p) => p.isActive !== false)}
-            onAddItem={addQuoteItem}
-            onRemoveItem={removeQuoteItem}
-            onUpdateItem={updateQuoteItem}
-            onSelectProduct={selectProductForQuoteItem}
-            taxRate={quoteForm.taxRate}
-            discountType={quoteForm.discountType}
-            discountValue={quoteForm.discountValue}
-            onTaxRateChange={(v) => setQuoteForm((f: any) => ({ ...f, taxRate: v }))}
-            onDiscountTypeChange={(v) => setQuoteForm((f: any) => ({ ...f, discountType: v }))}
-            onDiscountValueChange={(v) => setQuoteForm((f: any) => ({ ...f, discountValue: v }))}
-            notes={quoteForm.notes}
-            onNotesChange={(v) => setQuoteForm((f: any) => ({ ...f, notes: v }))}
-            currency={currency}
-          />
-
-          <div className="flex justify-end gap-2 pt-2">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowQuoteBuilder(false);
-                resetQuoteForm();
-              }}
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleSaveQuote} className="gap-2">
-              {editingQuoteId ? "Update Quote" : "Create Quote"}
-            </Button>
-          </div>
-        </div>
-      )}
+      <BillingFormModal
+        open={showQuoteBuilder}
+        onClose={() => { setShowQuoteBuilder(false); resetQuoteForm(); }}
+        onSubmit={handleSaveQuote}
+        docType="quote"
+        isEditing={!!editingQuoteId}
+        contacts={contacts}
+        products={products}
+        currency={currency}
+        contactId={quoteForm.contactId}
+        onContactChange={(id) => setQuoteForm((f: any) => ({ ...f, contactId: id }))}
+        dateValue={quoteForm.expiryDate}
+        onDateChange={(v) => setQuoteForm((f: any) => ({ ...f, expiryDate: v }))}
+        items={quoteForm.items}
+        onAddItem={addQuoteItem}
+        onRemoveItem={removeQuoteItem}
+        onUpdateItem={updateQuoteItem}
+        onSelectProduct={selectProductForQuoteItem}
+        taxRate={quoteForm.taxRate}
+        onTaxRateChange={(v) => setQuoteForm((f: any) => ({ ...f, taxRate: v }))}
+        discountType={quoteForm.discountType}
+        onDiscountTypeChange={(v) => setQuoteForm((f: any) => ({ ...f, discountType: v }))}
+        discountValue={quoteForm.discountValue}
+        onDiscountValueChange={(v) => setQuoteForm((f: any) => ({ ...f, discountValue: v }))}
+        notes={quoteForm.notes}
+        onNotesChange={(v) => setQuoteForm((f: any) => ({ ...f, notes: v }))}
+      />
 
       <div className="rounded-2xl border border-border/50 bg-card p-3 sm:p-4">
         <div className="flex items-center gap-2 mb-3">

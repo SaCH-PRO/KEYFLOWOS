@@ -54,6 +54,7 @@ import {
 import LineItemsEditor from "../components/line-items-editor";
 import { BillingCard } from "../components/billing-card";
 import { BillingDetailModal } from "../components/billing-detail-modal";
+import { BillingFormModal } from "../components/billing-form-modal";
 import { useInvoiceForm } from "../hooks/use-invoice-form";
 
 import { formatAmount, formatRelativeDate, getStatusAccentColor, getContactInitials, getItemsSummary, getDaysUntilDue } from "../utils/commerce-utils";
@@ -518,81 +519,35 @@ export default function InvoicesPanel({
       exit={{ opacity: 0, y: -10 }}
       className="space-y-4"
     >
-      <AnimatePresence>
-        {showInvoiceBuilder && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden"
-          >
-            <div className="rounded-2xl border border-primary/30 bg-card/80 backdrop-blur-sm p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-base font-semibold flex items-center gap-2">
-                  <FileText className="w-5 h-5 text-primary" /> {editingInvoiceId ? "Edit Invoice" : "Create Invoice"}
-                </h3>
-                <button onClick={() => { setShowInvoiceBuilder(false); resetInvoiceForm(); setFormError(null); }} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-              {formError && <div className="text-xs text-amber-400 rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2">{formError}</div>}
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <ContactSelect
-                  value={invoiceForm.contactId}
-                  onChange={(id) => setInvoiceForm((f: any) => ({ ...f, contactId: id }))}
-                  contacts={contacts}
-                  label="Contact (optional)"
-                />
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 block">Payment Terms</label>
-                  <select
-                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                    defaultValue=""
-                    onChange={(e) => applyPaymentTerms(e.target.value)}
-                  >
-                    <option value="" disabled>Select terms...</option>
-                    {PAYMENT_TERMS.map((t) => (
-                      <option key={t.value} value={t.value}>{t.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <Input
-                  label="Due Date"
-                  type="date"
-                  value={invoiceForm.dueDate}
-                  onChange={(e) => setInvoiceForm((f: any) => ({ ...f, dueDate: e.target.value }))}
-                />
-              </div>
-
-              <LineItemsEditor
-                items={invoiceForm.items}
-                products={products.filter((p) => p.isActive !== false)}
-                onAddItem={addInvoiceItem}
-                onRemoveItem={removeInvoiceItem}
-                onUpdateItem={updateInvoiceItem}
-                onSelectProduct={selectProductForItem}
-                taxRate={invoiceForm.taxRate}
-                discountType={invoiceForm.discountType}
-                discountValue={invoiceForm.discountValue}
-                onTaxRateChange={(v) => setInvoiceForm((f: any) => ({ ...f, taxRate: v }))}
-                onDiscountTypeChange={(v) => setInvoiceForm((f: any) => ({ ...f, discountType: v }))}
-                onDiscountValueChange={(v) => setInvoiceForm((f: any) => ({ ...f, discountValue: v }))}
-                notes={invoiceForm.notes}
-                onNotesChange={(v) => setInvoiceForm((f: any) => ({ ...f, notes: v }))}
-                currency={currency}
-              />
-
-              <div className="flex gap-2 pt-2">
-                <Button variant="outline" onClick={() => { setShowInvoiceBuilder(false); resetInvoiceForm(); setFormError(null); }}>
-                  Cancel
-                </Button>
-                <Button onClick={handleCreateOrUpdateInvoice}>{editingInvoiceId ? "Update Invoice" : "Create Invoice"}</Button>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <BillingFormModal
+        open={showInvoiceBuilder}
+        onClose={() => { setShowInvoiceBuilder(false); resetInvoiceForm(); setFormError(null); }}
+        onSubmit={handleCreateOrUpdateInvoice}
+        docType="invoice"
+        isEditing={!!editingInvoiceId}
+        formError={formError}
+        contacts={contacts}
+        products={products}
+        currency={currency}
+        contactId={invoiceForm.contactId}
+        onContactChange={(id) => setInvoiceForm((f: any) => ({ ...f, contactId: id }))}
+        dateValue={invoiceForm.dueDate}
+        onDateChange={(v) => setInvoiceForm((f: any) => ({ ...f, dueDate: v }))}
+        items={invoiceForm.items}
+        onAddItem={addInvoiceItem}
+        onRemoveItem={removeInvoiceItem}
+        onUpdateItem={updateInvoiceItem}
+        onSelectProduct={selectProductForItem}
+        taxRate={invoiceForm.taxRate}
+        onTaxRateChange={(v) => setInvoiceForm((f: any) => ({ ...f, taxRate: v }))}
+        discountType={invoiceForm.discountType}
+        onDiscountTypeChange={(v) => setInvoiceForm((f: any) => ({ ...f, discountType: v }))}
+        discountValue={invoiceForm.discountValue}
+        onDiscountValueChange={(v) => setInvoiceForm((f: any) => ({ ...f, discountValue: v }))}
+        notes={invoiceForm.notes}
+        onNotesChange={(v) => setInvoiceForm((f: any) => ({ ...f, notes: v }))}
+        onPaymentTermsChange={applyPaymentTerms}
+      />
 
       {invoiceError && (
         <motion.div
