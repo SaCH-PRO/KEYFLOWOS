@@ -132,6 +132,8 @@ export function BillingPanel({
     emitEvent("billing:segment_changed", "commerce", { segment: s });
   }, [segment, emitEvent, onSegmentChange]);
 
+  const segmentIndex = SEGMENTS.findIndex(s => s.key === segment);
+
   const switchToInvoices = useCallback(() => {
     handleSegmentChange("invoices");
   }, [handleSegmentChange]);
@@ -194,7 +196,7 @@ export function BillingPanel({
         </button>
       </div>
 
-      <div className="rounded-2xl border border-border/30 bg-card/60 backdrop-blur-md overflow-hidden">
+      <div className="relative">
         <div
           role="tablist"
           aria-label="Billing sections"
@@ -214,54 +216,63 @@ export function BillingPanel({
               handleSegmentChange(SEGMENTS[SEGMENTS.length - 1].key);
             }
           }}
-          className="relative flex border-b border-border/20"
+          className="flex -mb-px"
         >
-          {SEGMENTS.map((seg) => {
+          {SEGMENTS.map((seg, i) => {
             const isActive = segment === seg.key;
             const count = segmentCounts[seg.key];
             return (
               <button
                 key={seg.key}
                 onClick={() => handleSegmentChange(seg.key)}
-                className={`
-                  relative flex-1 flex items-center justify-center gap-2 px-4 py-3 sm:py-3.5 text-sm font-semibold transition-all duration-200 outline-none
-                  focus-visible:ring-2 focus-visible:ring-inset
-                  ${isActive
-                    ? "text-white"
-                    : "text-muted-foreground/50 hover:text-muted-foreground/80 hover:bg-white/[0.02]"
-                  }
-                `}
+                role="tab"
+                id={`billing-tab-${seg.key}`}
                 aria-selected={isActive}
                 aria-controls={`billing-tabpanel-${seg.key}`}
-                role="tab"
                 tabIndex={isActive ? 0 : -1}
+                style={{ zIndex: isActive ? 10 : SEGMENTS.length - i }}
+                className={`group relative flex-1 flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap
+                  transition-colors duration-200 outline-none
+                  focus-visible:ring-2 focus-visible:ring-[hsl(var(--kf-accent1)/0.5)] focus-visible:ring-offset-1 focus-visible:ring-offset-background
+                  px-3 sm:px-5 py-2.5 sm:py-3
+                  text-xs sm:text-sm font-semibold
+                  rounded-t-xl
+                  border-x border-t border-b-0
+                  ${isActive
+                    ? "bg-card/80 backdrop-blur-sm text-foreground border-border/40"
+                    : "bg-transparent text-muted-foreground/50 border-transparent hover:text-muted-foreground/80 hover:bg-white/[0.03]"
+                  }`}
               >
                 {isActive && (
                   <motion.div
-                    layoutId="billing-segment-bg"
-                    className="absolute inset-0"
+                    layoutId="billing-tab-bar"
+                    className="absolute inset-x-0 top-0 h-[2px] rounded-t-xl"
                     style={{
-                      background: `linear-gradient(180deg, ${seg.accentMuted} 0%, transparent 80%)`,
+                      background: `linear-gradient(90deg, ${seg.accent}, ${seg.accent})`,
                     }}
                     transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
                   />
                 )}
                 {isActive && (
                   <motion.div
-                    layoutId="billing-segment-bar"
-                    className="absolute bottom-0 inset-x-0 h-[2px]"
-                    style={{ background: `linear-gradient(90deg, transparent, ${seg.accent}, transparent)` }}
+                    layoutId="billing-tab-bg"
+                    className="absolute inset-0 rounded-t-xl"
+                    style={{
+                      background: `linear-gradient(180deg, ${seg.accentMuted} 0%, transparent 100%)`,
+                    }}
                     transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
                   />
                 )}
                 <seg.icon
-                  className="relative z-10 w-4 h-4 shrink-0 transition-colors duration-200"
+                  className={`relative z-10 w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 transition-colors duration-200 ${
+                    !isActive ? "group-hover:text-muted-foreground/70" : ""
+                  }`}
                   style={isActive ? { color: seg.accent } : undefined}
                 />
                 <span className="relative z-10">{seg.label}</span>
                 {count > 0 && (
                   <span
-                    className="relative z-10 text-[10px] sm:text-xs tabular-nums font-semibold rounded-full px-1.5 py-0.5 min-w-[20px] text-center transition-colors duration-200"
+                    className="relative z-10 text-[10px] sm:text-xs tabular-nums rounded-full px-1.5 py-px min-w-[20px] text-center transition-colors duration-200"
                     style={isActive
                       ? { background: seg.accentMuted, color: seg.accent }
                       : { background: "rgba(255,255,255,0.04)", color: "inherit" }
@@ -275,90 +286,105 @@ export function BillingPanel({
           })}
         </div>
 
-        <div className="p-3 sm:p-4" {...swipeHandlers}>
-          <AnimatePresence mode="wait" custom={slideDir}>
-        {segment === "quotes" && (
-          <motion.div
-            key="quotes"
-            id="billing-tabpanel-quotes"
-            role="tabpanel"
-            custom={slideDir}
-            initial={{ opacity: 0, x: slideDir * 40 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: slideDir * -40 }}
-            transition={{ duration: 0.18, ease: "easeOut" }}
-          >
-            <QuotesPanel
-              quotes={quotes}
-              contacts={contacts}
-              products={products}
-              businessId={businessId}
-              loading={loading}
-              gmailStatus={gmailStatus}
-              setProducts={setProducts}
-              setQuotes={setQuotes}
-              setInvoices={setInvoices}
-              onSwitchToInvoices={switchToInvoices}
-              currency={currency}
-              triggerNew={triggerNewQuote}
-              prefillContactId={segment === "quotes" ? prefillContactId : undefined}
-              prefillItems={segment === "quotes" ? prefillItems : undefined}
-              prefillToken={segment === "quotes" ? prefillToken : undefined}
-              onPrefillApplied={onPrefillApplied}
+        <div className="h-px bg-border/40" />
+
+        <div className="absolute bottom-0 left-0 right-0 h-px pointer-events-none" style={{ zIndex: 1 }}>
+          {segmentIndex >= 0 && (
+            <motion.div
+              className="absolute bottom-0 h-px bg-card/80"
+              animate={{
+                left: `${(segmentIndex / SEGMENTS.length) * 100}%`,
+                width: `${100 / SEGMENTS.length}%`,
+              }}
+              transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
             />
-          </motion.div>
-        )}
-        {segment === "invoices" && (
-          <motion.div
-            key="invoices"
-            id="billing-tabpanel-invoices"
-            role="tabpanel"
-            custom={slideDir}
-            initial={{ opacity: 0, x: slideDir * 40 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: slideDir * -40 }}
-            transition={{ duration: 0.18, ease: "easeOut" }}
-          >
-            <InvoicesPanel
-              invoices={invoices}
-              contacts={contacts}
-              products={products}
-              businessId={businessId}
-              loading={loading}
-              setProducts={setProducts}
-              setInvoices={setInvoices}
-              gmailStatus={gmailStatus}
-              currency={currency}
-              triggerNew={triggerNewInvoice}
-              prefillContactId={segment === "invoices" ? prefillContactId : undefined}
-              prefillItems={segment === "invoices" ? prefillItems : undefined}
-              prefillToken={segment === "invoices" ? prefillToken : undefined}
-              onPrefillApplied={onPrefillApplied}
-            />
-          </motion.div>
-        )}
-        {segment === "schedules" && (
-          <motion.div
-            key="schedules"
-            id="billing-tabpanel-schedules"
-            role="tabpanel"
-            custom={slideDir}
-            initial={{ opacity: 0, x: slideDir * 40 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: slideDir * -40 }}
-            transition={{ duration: 0.18, ease: "easeOut" }}
-          >
-            <RecurringPanel
-              businessId={businessId}
-              contacts={contacts}
-              products={products}
-              triggerNew={triggerNewSchedule}
-              currency={currency}
-            />
-          </motion.div>
-        )}
-          </AnimatePresence>
+          )}
         </div>
+      </div>
+
+      <div className="p-3 sm:p-4" data-swipe-ignore {...swipeHandlers}>
+        <AnimatePresence mode="wait" custom={slideDir}>
+          {segment === "quotes" && (
+            <motion.div
+              key="quotes"
+              id="billing-tabpanel-quotes"
+              role="tabpanel"
+              custom={slideDir}
+              initial={{ opacity: 0, x: slideDir * 40 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: slideDir * -40 }}
+              transition={{ duration: 0.18, ease: "easeOut" }}
+            >
+              <QuotesPanel
+                quotes={quotes}
+                contacts={contacts}
+                products={products}
+                businessId={businessId}
+                loading={loading}
+                gmailStatus={gmailStatus}
+                setProducts={setProducts}
+                setQuotes={setQuotes}
+                setInvoices={setInvoices}
+                onSwitchToInvoices={switchToInvoices}
+                currency={currency}
+                triggerNew={triggerNewQuote}
+                prefillContactId={segment === "quotes" ? prefillContactId : undefined}
+                prefillItems={segment === "quotes" ? prefillItems : undefined}
+                prefillToken={segment === "quotes" ? prefillToken : undefined}
+                onPrefillApplied={onPrefillApplied}
+              />
+            </motion.div>
+          )}
+          {segment === "invoices" && (
+            <motion.div
+              key="invoices"
+              id="billing-tabpanel-invoices"
+              role="tabpanel"
+              custom={slideDir}
+              initial={{ opacity: 0, x: slideDir * 40 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: slideDir * -40 }}
+              transition={{ duration: 0.18, ease: "easeOut" }}
+            >
+              <InvoicesPanel
+                invoices={invoices}
+                contacts={contacts}
+                products={products}
+                businessId={businessId}
+                loading={loading}
+                setProducts={setProducts}
+                setInvoices={setInvoices}
+                gmailStatus={gmailStatus}
+                currency={currency}
+                triggerNew={triggerNewInvoice}
+                prefillContactId={segment === "invoices" ? prefillContactId : undefined}
+                prefillItems={segment === "invoices" ? prefillItems : undefined}
+                prefillToken={segment === "invoices" ? prefillToken : undefined}
+                onPrefillApplied={onPrefillApplied}
+              />
+            </motion.div>
+          )}
+          {segment === "schedules" && (
+            <motion.div
+              key="schedules"
+              id="billing-tabpanel-schedules"
+              role="tabpanel"
+              custom={slideDir}
+              initial={{ opacity: 0, x: slideDir * 40 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: slideDir * -40 }}
+              transition={{ duration: 0.18, ease: "easeOut" }}
+            >
+              <RecurringPanel
+                businessId={businessId}
+                contacts={contacts}
+                products={products}
+                triggerNew={triggerNewSchedule}
+                currency={currency}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
     </div>

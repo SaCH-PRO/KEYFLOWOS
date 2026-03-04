@@ -52,6 +52,45 @@ import {
 import LineItemsEditor from "../components/line-items-editor";
 import { useInvoiceForm } from "../hooks/use-invoice-form";
 
+function formatRelativeDate(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 7) return `${diffDays}d ago`;
+  if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function getStatusAccentColor(status: string): string {
+  const map: Record<string, string> = {
+    DRAFT: "rgba(148,163,184,0.6)",
+    SENT: "rgb(96,165,250)",
+    ACCEPTED: "rgb(52,211,153)",
+    PAID: "rgb(52,211,153)",
+    REJECTED: "rgb(248,113,113)",
+    OVERDUE: "rgb(248,113,113)",
+    VOID: "rgba(100,116,139,0.5)",
+  };
+  return map[status] ?? "rgba(148,163,184,0.6)";
+}
+
+function getContactInitials(contact: any): string {
+  if (!contact) return "?";
+  const f = (contact.firstName ?? "")[0] ?? "";
+  const l = (contact.lastName ?? "")[0] ?? "";
+  return (f + l).toUpperCase() || "?";
+}
+
+function getItemsSummary(items: any[]): string {
+  if (!items || items.length === 0) return "No items";
+  const names = items.slice(0, 2).map((i: any) => i.description).filter(Boolean);
+  const suffix = items.length > 2 ? ` +${items.length - 2} more` : "";
+  return `${items.length} item${items.length !== 1 ? "s" : ""} · ${names.join(", ")}${suffix}`;
+}
+
 interface InvoicesPanelProps {
   invoices: Invoice[];
   contacts: Contact[];
@@ -655,175 +694,129 @@ export default function InvoicesPanel({
           </p>
         </div>
       ) : (
-        <>
-          <div className="hidden md:block rounded-xl border border-border/50 overflow-hidden">
-            <table className="w-full">
-              <thead className="bg-white/[0.02] border-b border-border/40">
-                <tr>
-                  <th className="px-4 py-3 text-left text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Invoice</th>
-                  <th className="px-4 py-3 text-left text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Contact</th>
-                  <th className="px-4 py-3 text-left text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Amount</th>
-                  <th className="px-4 py-3 text-left text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Due</th>
-                  <th className="px-4 py-3 text-left text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Status</th>
-                  <th className="px-4 py-3 text-right text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/40">
-                {filteredInvoices.map((inv) => {
-                  const dueInfo = getDaysUntilDue(inv.dueDate);
-                  return (
-                    <tr key={inv.id} className="hover:bg-muted/20 transition-colors">
-                      <td className="px-4 py-3">
-                        <button
-                          onClick={() => setSelectedInvoice(inv)}
-                          className="font-mono text-sm text-primary hover:underline"
-                        >
-                          {inv.invoiceNumber ?? inv.id.slice(0, 8)}
-                        </button>
-                        <div className="text-xs text-muted-foreground mt-0.5">
-                          {inv.issueDate ? new Date(inv.issueDate).toLocaleDateString() : ""}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="text-sm">
-                          {inv.contact
-                            ? `${inv.contact.firstName ?? ""} ${inv.contact.lastName ?? ""}`.trim() || inv.contact.email || "—"
-                            : "—"}
-                        </div>
-                        {inv.contact?.email && (
-                          <div className="text-xs text-muted-foreground truncate max-w-[160px]">{inv.contact.email}</div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="text-sm font-semibold">{inv.currency} {Number(inv.total).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        {dueInfo && inv.status !== "PAID" ? (
-                          <span className={`text-xs font-medium ${dueInfo.color}`}>{dueInfo.label}</span>
-                        ) : inv.dueDate ? (
-                          <span className="text-xs text-muted-foreground">{new Date(inv.dueDate).toLocaleDateString()}</span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium ${getStatusBadge(inv.status)}`}>
-                          {inv.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex justify-end gap-1">
-                          <button onClick={() => setSelectedInvoice(inv)} className="p-1.5 rounded-lg hover:bg-muted transition-colors" title="View details">
-                            <Eye className="w-4 h-4 text-muted-foreground hover:text-foreground" />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setEditingInvoiceId(inv.id);
-                              setInvoiceForm({
-                                contactId: inv.contactId || "",
-                                dueDate: inv.dueDate ? inv.dueDate.split("T")[0] : "",
-                                items: (inv.items ?? []).map((item: any) => ({
-                                  id: item.id,
-                                  productId: item.productId ?? "",
-                                  description: item.description,
-                                  quantity: String(item.quantity),
-                                  unitPrice: String(item.unitPrice),
-                                })),
-                                taxRate: String(inv.taxRate || 0),
-                                discountType: (inv.discountType as "PERCENT" | "FIXED") || "PERCENT",
-                                discountValue: inv.discountValue ? String(inv.discountValue) : "",
-                                notes: inv.notes || "",
-                              });
-                              setShowInvoiceBuilder(true);
-                            }}
-                            className="p-1.5 rounded-lg hover:bg-muted transition-colors"
-                            title="Edit invoice"
-                          >
-                            <Pencil className="w-4 h-4 text-muted-foreground hover:text-foreground" />
-                          </button>
-                          <button onClick={() => duplicateInvoice(inv)} className="p-1.5 rounded-lg hover:bg-muted transition-colors" title="Duplicate invoice">
-                            <Copy className="w-4 h-4 text-muted-foreground hover:text-foreground" />
-                          </button>
-                          <button onClick={() => shareViaWhatsApp(inv)} className="p-1.5 rounded-lg hover:bg-green-500/20 transition-colors" title="Share via WhatsApp">
-                            <MessageCircle className="w-4 h-4 text-green-400" />
-                          </button>
-                          {gmailStatus?.connected && (
-                            <button
-                              onClick={() => { setSelectedInvoice(inv); setShowEmailModal(true); }}
-                              className="p-1.5 rounded-lg hover:bg-blue-500/20 transition-colors"
-                              title="Send via email"
-                            >
-                              <Mail className="w-4 h-4 text-blue-400" />
-                            </button>
-                          )}
-                          {inv.status === "DRAFT" && (
-                            <Button variant="outline" className="px-2.5 py-1 text-xs gap-1" onClick={() => handleSendInvoice(inv.id)} disabled={!!actionLoading[inv.id]}>
-                              {actionLoading[inv.id] === "send" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />} Send
-                            </Button>
-                          )}
-                          {(inv.status === "DRAFT" || inv.status === "SENT") && (
-                            <Button variant="outline" className="px-2.5 py-1 text-xs gap-1" onClick={() => handleMarkPaid(inv.id, inv)} disabled={!!actionLoading[inv.id]}>
-                              {actionLoading[inv.id] === "paid" ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle className="w-3 h-3" />} Paid
-                            </Button>
-                          )}
-                          <button onClick={() => handleDeleteInvoice(inv.id)} className="p-1.5 rounded-lg hover:bg-red-500/20 transition-colors disabled:opacity-50" title="Delete invoice" disabled={!!actionLoading[inv.id]}>
-                            {actionLoading[inv.id] === "delete" ? <Loader2 className="w-4 h-4 text-red-400 animate-spin" /> : <Trash2 className="w-4 h-4 text-red-400 hover:text-red-300" />}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+        <div className="space-y-2">
+          {filteredInvoices.map((inv) => {
+            const dueInfo = getDaysUntilDue(inv.dueDate);
+            const contactName = inv.contact
+              ? `${inv.contact.firstName ?? ""} ${inv.contact.lastName ?? ""}`.trim() || inv.contact.email || "—"
+              : "—";
+            return (
+              <div
+                key={inv.id}
+                role="button"
+                tabIndex={0}
+                className="group relative flex items-start gap-3 pl-4 pr-3 py-3 rounded-xl border border-border/30 bg-white/[0.02] hover:bg-white/[0.04] cursor-pointer transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => setSelectedInvoice(inv)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedInvoice(inv); } }}
+              >
+                <div className="absolute left-0 top-3 bottom-3 w-[3px] rounded-full" style={{ backgroundColor: getStatusAccentColor(inv.status) }} />
 
-          <div className="md:hidden space-y-3">
-            {filteredInvoices.map((inv) => {
-              const dueInfo = getDaysUntilDue(inv.dueDate);
-              return (
-                <div key={inv.id} className="rounded-xl border border-border/50 bg-card p-3.5 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <button onClick={() => setSelectedInvoice(inv)} className="font-mono text-xs text-primary hover:underline">
-                      {inv.invoiceNumber ?? inv.id.slice(0, 8)}
-                    </button>
-                    <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${getStatusBadge(inv.status)}`}>
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white/[0.06] flex items-center justify-center text-xs font-semibold text-muted-foreground/70 shrink-0">
+                  {getContactInitials(inv.contact)}
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-sm text-foreground">{inv.invoiceNumber ?? inv.id.slice(0, 8)}</span>
+                    <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium ${getStatusBadge(inv.status)}`}>
                       {inv.status}
                     </span>
+                    {dueInfo && inv.status !== "PAID" && (
+                      <span className={`text-[10px] font-medium ${dueInfo.color}`}>{dueInfo.label}</span>
+                    )}
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm">
-                      {inv.contact ? `${inv.contact.firstName ?? ""} ${inv.contact.lastName ?? ""}`.trim() || "—" : "—"}
-                    </span>
-                    <span className="font-semibold">{inv.currency} {Number(inv.total).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  <div className="text-xs text-muted-foreground/70 mt-0.5 truncate">{contactName}</div>
+                  <div className="flex items-center gap-1.5 mt-1 text-[11px] text-muted-foreground/50">
+                    <span>{getItemsSummary(inv.items ?? [])}</span>
+                    <span className="text-muted-foreground/30">·</span>
+                    <span>{inv.issueDate ? formatRelativeDate(inv.issueDate) : ""}</span>
                   </div>
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>{inv.issueDate ? new Date(inv.issueDate).toLocaleDateString() : ""}</span>
-                    {dueInfo && inv.status !== "PAID" && <span className={dueInfo.color}>{dueInfo.label}</span>}
-                  </div>
-                  <div className="flex items-center gap-1 pt-2 border-t border-border/40 flex-wrap">
-                    <button onClick={() => setSelectedInvoice(inv)} className="p-1.5 rounded-lg hover:bg-muted" title="View"><Eye className="w-4 h-4 text-muted-foreground" /></button>
-                    <button onClick={() => duplicateInvoice(inv)} className="p-1.5 rounded-lg hover:bg-muted" title="Duplicate"><Copy className="w-4 h-4 text-muted-foreground" /></button>
-                    <button onClick={() => shareViaWhatsApp(inv)} className="p-1.5 rounded-lg hover:bg-green-500/20" title="WhatsApp"><MessageCircle className="w-4 h-4 text-green-400" /></button>
+                </div>
+
+                <div className="text-right shrink-0 flex flex-col items-end gap-1">
+                  <span className="text-sm font-bold text-foreground whitespace-nowrap">
+                    {inv.currency} {Number(inv.total).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </span>
+
+                  <div className="hidden md:flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                    <button onClick={() => setSelectedInvoice(inv)} className="p-1 rounded-lg hover:bg-muted transition-colors" title="View details">
+                      <Eye className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEditingInvoiceId(inv.id);
+                        setInvoiceForm({
+                          contactId: inv.contactId || "",
+                          dueDate: inv.dueDate ? inv.dueDate.split("T")[0] : "",
+                          items: (inv.items ?? []).map((item: any) => ({
+                            id: item.id,
+                            productId: item.productId ?? "",
+                            description: item.description,
+                            quantity: String(item.quantity),
+                            unitPrice: String(item.unitPrice),
+                          })),
+                          taxRate: String(inv.taxRate || 0),
+                          discountType: (inv.discountType as "PERCENT" | "FIXED") || "PERCENT",
+                          discountValue: inv.discountValue ? String(inv.discountValue) : "",
+                          notes: inv.notes || "",
+                        });
+                        setShowInvoiceBuilder(true);
+                      }}
+                      className="p-1 rounded-lg hover:bg-muted transition-colors"
+                      title="Edit invoice"
+                    >
+                      <Pencil className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
+                    </button>
+                    <button onClick={() => duplicateInvoice(inv)} className="p-1 rounded-lg hover:bg-muted transition-colors" title="Duplicate">
+                      <Copy className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
+                    </button>
+                    <button onClick={() => shareViaWhatsApp(inv)} className="p-1 rounded-lg hover:bg-green-500/20 transition-colors" title="WhatsApp">
+                      <MessageCircle className="w-3.5 h-3.5 text-green-400" />
+                    </button>
+                    {gmailStatus?.connected && (
+                      <button
+                        onClick={() => { setSelectedInvoice(inv); setShowEmailModal(true); }}
+                        className="p-1 rounded-lg hover:bg-blue-500/20 transition-colors"
+                        title="Send via email"
+                      >
+                        <Mail className="w-3.5 h-3.5 text-blue-400" />
+                      </button>
+                    )}
                     {inv.status === "DRAFT" && (
-                      <button onClick={() => handleSendInvoice(inv.id)} className="px-2 py-1 rounded-lg bg-primary/20 text-primary text-xs font-medium disabled:opacity-50 flex items-center gap-1" disabled={!!actionLoading[inv.id]}>
-                        {actionLoading[inv.id] === "send" ? <Loader2 className="w-3 h-3 animate-spin" /> : null} Send
+                      <button onClick={() => handleSendInvoice(inv.id)} className="px-1.5 py-0.5 rounded-lg bg-blue-500/15 text-blue-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]}>
+                        {actionLoading[inv.id] === "send" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send
                       </button>
                     )}
                     {(inv.status === "DRAFT" || inv.status === "SENT") && (
-                      <button onClick={() => handleMarkPaid(inv.id, inv)} className="px-2 py-1 rounded-lg bg-emerald-500/20 text-emerald-400 text-xs font-medium disabled:opacity-50 flex items-center gap-1" disabled={!!actionLoading[inv.id]}>
-                        {actionLoading[inv.id] === "paid" ? <Loader2 className="w-3 h-3 animate-spin" /> : null} Paid
+                      <button onClick={() => handleMarkPaid(inv.id, inv)} className="px-1.5 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]}>
+                        {actionLoading[inv.id] === "paid" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Paid
                       </button>
                     )}
-                    <button onClick={() => handleDeleteInvoice(inv.id)} className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400 ml-auto disabled:opacity-50" title="Delete" disabled={!!actionLoading[inv.id]}>
-                      {actionLoading[inv.id] === "delete" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                    <button onClick={() => handleDeleteInvoice(inv.id)} className="p-1 rounded-lg hover:bg-red-500/20 transition-colors disabled:opacity-50" title="Delete" disabled={!!actionLoading[inv.id]}>
+                      {actionLoading[inv.id] === "delete" ? <Loader2 className="w-3.5 h-3.5 text-red-400 animate-spin" /> : <Trash2 className="w-3.5 h-3.5 text-red-400 hover:text-red-300" />}
+                    </button>
+                  </div>
+
+                  <div className="flex md:hidden items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                    {inv.status === "DRAFT" && (
+                      <button onClick={() => handleSendInvoice(inv.id)} className="px-1.5 py-0.5 rounded-lg bg-blue-500/15 text-blue-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]}>
+                        {actionLoading[inv.id] === "send" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send
+                      </button>
+                    )}
+                    {(inv.status === "DRAFT" || inv.status === "SENT") && (
+                      <button onClick={() => handleMarkPaid(inv.id, inv)} className="px-1.5 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]}>
+                        {actionLoading[inv.id] === "paid" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Paid
+                      </button>
+                    )}
+                    <button onClick={() => handleDeleteInvoice(inv.id)} className="p-1 rounded-lg hover:bg-red-500/20 transition-colors disabled:opacity-50" title="Delete" disabled={!!actionLoading[inv.id]}>
+                      {actionLoading[inv.id] === "delete" ? <Loader2 className="w-3.5 h-3.5 text-red-400 animate-spin" /> : <Trash2 className="w-3.5 h-3.5 text-red-400" />}
                     </button>
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        </>
+              </div>
+            );
+          })}
+        </div>
       )}
 
       <AnimatePresence>
