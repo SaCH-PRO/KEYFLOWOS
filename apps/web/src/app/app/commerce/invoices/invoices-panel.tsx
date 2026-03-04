@@ -16,10 +16,6 @@ import {
   Trash2,
   Copy,
   Plus,
-  DollarSign,
-  User,
-  Calendar,
-  CreditCard,
   MessageCircle,
   Mail,
   Clock,
@@ -55,6 +51,8 @@ import {
   getDueDateFromTerms,
 } from "../components/commerce-types";
 import LineItemsEditor from "../components/line-items-editor";
+import { BillingCard } from "../components/billing-card";
+import { BillingDetailModal } from "../components/billing-detail-modal";
 import { useInvoiceForm } from "../hooks/use-invoice-form";
 
 import { formatAmount, formatRelativeDate, getStatusAccentColor, getContactInitials, getItemsSummary, getDaysUntilDue } from "../utils/commerce-utils";
@@ -716,158 +714,145 @@ export default function InvoicesPanel({
         <div className="space-y-2">
           {filteredInvoices.map((inv) => {
             const dueInfo = getDaysUntilDue(inv.dueDate);
-            const contactName = inv.contact
-              ? `${inv.contact.firstName ?? ""} ${inv.contact.lastName ?? ""}`.trim() || inv.contact.email || "—"
-              : "—";
+
+            const cardBadges = (
+              <>
+                {dueInfo && inv.status !== "PAID" && (
+                  <span className={`text-[10px] font-medium ${dueInfo.color}`}>{dueInfo.label}</span>
+                )}
+                {renderTimelineBadge?.(inv)}
+              </>
+            );
+
+            const cardDesktopActions = (
+              <>
+                <button onClick={() => setSelectedInvoice(inv)} className="p-1 rounded-lg hover:bg-muted transition-colors" title="View details">
+                  <Eye className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
+                </button>
+                <button
+                  onClick={() => {
+                    setEditingInvoiceId(inv.id);
+                    setInvoiceForm({
+                      contactId: inv.contactId || "",
+                      dueDate: inv.dueDate ? inv.dueDate.split("T")[0] : "",
+                      items: (inv.items ?? []).map((item: any) => ({
+                        id: item.id,
+                        productId: item.productId ?? "",
+                        description: item.description,
+                        quantity: String(item.quantity),
+                        unitPrice: String(item.unitPrice),
+                      })),
+                      taxRate: String(inv.taxRate || 0),
+                      discountType: (inv.discountType as "PERCENT" | "FIXED") || "PERCENT",
+                      discountValue: inv.discountValue ? String(inv.discountValue) : "",
+                      notes: inv.notes || "",
+                    });
+                    setShowInvoiceBuilder(true);
+                  }}
+                  className="p-1 rounded-lg hover:bg-muted transition-colors"
+                  title="Edit invoice"
+                >
+                  <Pencil className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
+                </button>
+                <button onClick={() => duplicateInvoice(inv)} className="p-1 rounded-lg hover:bg-muted transition-colors" title="Duplicate">
+                  <Copy className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
+                </button>
+                <button onClick={() => shareViaWhatsApp(inv)} className="p-1 rounded-lg hover:bg-green-500/20 transition-colors" title="WhatsApp">
+                  <MessageCircle className="w-3.5 h-3.5 text-green-400" />
+                </button>
+                {gmailStatus?.connected && (
+                  <button
+                    onClick={() => { setSelectedInvoice(inv); setShowEmailModal(true); }}
+                    className="p-1 rounded-lg hover:bg-blue-500/20 transition-colors"
+                    title="Send via email"
+                  >
+                    <Mail className="w-3.5 h-3.5 text-blue-400" />
+                  </button>
+                )}
+                {(inv.status === "SENT" || inv.status === "OVERDUE") && gmailStatus?.connected && (
+                  <button onClick={() => openReminderEmail(inv)} className="p-1 rounded-lg hover:bg-amber-500/20 transition-colors" title="Send reminder">
+                    <Bell className="w-3.5 h-3.5 text-amber-400" />
+                  </button>
+                )}
+                {inv.status === "DRAFT" && (
+                  <button onClick={() => handleSendInvoice(inv.id)} className="px-1.5 py-0.5 rounded-lg bg-blue-500/15 text-blue-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]}>
+                    {actionLoading[inv.id] === "send" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send
+                  </button>
+                )}
+                {(inv.status === "DRAFT" || inv.status === "SENT") && (
+                  <button onClick={() => handleMarkPaid(inv.id, inv)} className="px-1.5 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]}>
+                    {actionLoading[inv.id] === "paid" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Paid
+                  </button>
+                )}
+                {(inv.status === "DRAFT" || inv.status === "SENT" || inv.status === "OVERDUE") && (
+                  <button onClick={() => handleVoidInvoice(inv.id)} className="p-1 rounded-lg hover:bg-slate-500/20 transition-colors disabled:opacity-50" title="Void invoice" disabled={!!actionLoading[inv.id]}>
+                    {actionLoading[inv.id] === "void" ? <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin" /> : <Ban className="w-3.5 h-3.5 text-slate-400" />}
+                  </button>
+                )}
+                <button onClick={() => handleDeleteInvoice(inv.id)} className="p-1 rounded-lg hover:bg-red-500/20 transition-colors disabled:opacity-50" title="Delete" disabled={!!actionLoading[inv.id]}>
+                  {actionLoading[inv.id] === "delete" ? <Loader2 className="w-3.5 h-3.5 text-red-400 animate-spin" /> : <Trash2 className="w-3.5 h-3.5 text-red-400 hover:text-red-300" />}
+                </button>
+              </>
+            );
+
+            const cardMobileActions = (
+              <>
+                <button onClick={() => setSelectedInvoice(inv)} className="p-1 rounded-lg hover:bg-muted" title="View">
+                  <Eye className="w-3.5 h-3.5 text-muted-foreground" />
+                </button>
+                <button onClick={() => duplicateInvoice(inv)} className="p-1 rounded-lg hover:bg-muted" title="Duplicate">
+                  <Copy className="w-3.5 h-3.5 text-muted-foreground" />
+                </button>
+                <button onClick={() => shareViaWhatsApp(inv)} className="p-1 rounded-lg hover:bg-green-500/20" title="WhatsApp">
+                  <MessageCircle className="w-3.5 h-3.5 text-green-400" />
+                </button>
+                {gmailStatus?.connected && (
+                  <button onClick={() => { setSelectedInvoice(inv); setShowEmailModal(true); }} className="p-1 rounded-lg hover:bg-blue-500/20" title="Email">
+                    <Mail className="w-3.5 h-3.5 text-blue-400" />
+                  </button>
+                )}
+                {(inv.status === "SENT" || inv.status === "OVERDUE") && gmailStatus?.connected && (
+                  <button onClick={() => openReminderEmail(inv)} className="p-1 rounded-lg hover:bg-amber-500/20" title="Remind">
+                    <Bell className="w-3.5 h-3.5 text-amber-400" />
+                  </button>
+                )}
+                {inv.status === "DRAFT" && (
+                  <button onClick={() => handleSendInvoice(inv.id)} className="px-1.5 py-0.5 rounded-lg bg-blue-500/15 text-blue-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]}>
+                    {actionLoading[inv.id] === "send" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send
+                  </button>
+                )}
+                {(inv.status === "DRAFT" || inv.status === "SENT") && (
+                  <button onClick={() => handleMarkPaid(inv.id, inv)} className="px-1.5 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]}>
+                    {actionLoading[inv.id] === "paid" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Paid
+                  </button>
+                )}
+                {(inv.status === "DRAFT" || inv.status === "SENT" || inv.status === "OVERDUE") && (
+                  <button onClick={() => handleVoidInvoice(inv.id)} className="p-1 rounded-lg hover:bg-slate-500/20 disabled:opacity-50" title="Void" disabled={!!actionLoading[inv.id]}>
+                    {actionLoading[inv.id] === "void" ? <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin" /> : <Ban className="w-3.5 h-3.5 text-slate-400" />}
+                  </button>
+                )}
+                <button onClick={() => handleDeleteInvoice(inv.id)} className="p-1 rounded-lg hover:bg-red-500/20 disabled:opacity-50" title="Delete" disabled={!!actionLoading[inv.id]}>
+                  {actionLoading[inv.id] === "delete" ? <Loader2 className="w-3.5 h-3.5 text-red-400 animate-spin" /> : <Trash2 className="w-3.5 h-3.5 text-red-400" />}
+                </button>
+              </>
+            );
+
             return (
-              <div
+              <BillingCard
                 key={inv.id}
-                role="button"
-                tabIndex={0}
-                className="group relative flex items-start gap-3 pl-4 pr-3 py-3 rounded-xl border border-border/30 bg-white/[0.02] hover:bg-white/[0.04] cursor-pointer transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                type="invoice"
+                number={inv.invoiceNumber ?? inv.id.slice(0, 8)}
+                status={inv.status}
+                contact={inv.contact}
+                total={Number(inv.total)}
+                currency={inv.currency}
+                items={inv.items ?? []}
+                date={inv.issueDate}
+                badges={cardBadges}
+                desktopActions={cardDesktopActions}
+                mobileActions={cardMobileActions}
                 onClick={() => setSelectedInvoice(inv)}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedInvoice(inv); } }}
-              >
-                <div className="absolute left-0 top-3 bottom-3 w-[3px] rounded-full" style={{ backgroundColor: getStatusAccentColor(inv.status) }} />
-
-                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white/[0.06] flex items-center justify-center text-xs font-semibold text-muted-foreground/70 shrink-0">
-                  {getContactInitials(inv.contact)}
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-mono text-sm text-foreground">{inv.invoiceNumber ?? inv.id.slice(0, 8)}</span>
-                    <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium ${getStatusBadge(inv.status)}`}>
-                      {inv.status}
-                    </span>
-                    {dueInfo && inv.status !== "PAID" && (
-                      <span className={`text-[10px] font-medium ${dueInfo.color}`}>{dueInfo.label}</span>
-                    )}
-                    {renderTimelineBadge?.(inv)}
-                  </div>
-                  <div className="text-xs text-muted-foreground/70 mt-0.5 truncate">{contactName}</div>
-                  <div className="flex items-center gap-1.5 mt-1 text-[11px] text-muted-foreground/50">
-                    <span>{getItemsSummary(inv.items ?? [])}</span>
-                    <span className="text-muted-foreground/30">·</span>
-                    <span>{inv.issueDate ? formatRelativeDate(inv.issueDate) : ""}</span>
-                  </div>
-                </div>
-
-                <div className="text-right shrink-0 flex flex-col items-end gap-1">
-                  <span className="text-sm font-bold text-foreground whitespace-nowrap">
-                    {formatAmount(inv.total, inv.currency)}
-                  </span>
-
-                  <div className="hidden md:flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                    <button onClick={() => setSelectedInvoice(inv)} className="p-1 rounded-lg hover:bg-muted transition-colors" title="View details">
-                      <Eye className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
-                    </button>
-                    <button
-                      onClick={() => {
-                        setEditingInvoiceId(inv.id);
-                        setInvoiceForm({
-                          contactId: inv.contactId || "",
-                          dueDate: inv.dueDate ? inv.dueDate.split("T")[0] : "",
-                          items: (inv.items ?? []).map((item: any) => ({
-                            id: item.id,
-                            productId: item.productId ?? "",
-                            description: item.description,
-                            quantity: String(item.quantity),
-                            unitPrice: String(item.unitPrice),
-                          })),
-                          taxRate: String(inv.taxRate || 0),
-                          discountType: (inv.discountType as "PERCENT" | "FIXED") || "PERCENT",
-                          discountValue: inv.discountValue ? String(inv.discountValue) : "",
-                          notes: inv.notes || "",
-                        });
-                        setShowInvoiceBuilder(true);
-                      }}
-                      className="p-1 rounded-lg hover:bg-muted transition-colors"
-                      title="Edit invoice"
-                    >
-                      <Pencil className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
-                    </button>
-                    <button onClick={() => duplicateInvoice(inv)} className="p-1 rounded-lg hover:bg-muted transition-colors" title="Duplicate">
-                      <Copy className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
-                    </button>
-                    <button onClick={() => shareViaWhatsApp(inv)} className="p-1 rounded-lg hover:bg-green-500/20 transition-colors" title="WhatsApp">
-                      <MessageCircle className="w-3.5 h-3.5 text-green-400" />
-                    </button>
-                    {gmailStatus?.connected && (
-                      <button
-                        onClick={() => { setSelectedInvoice(inv); setShowEmailModal(true); }}
-                        className="p-1 rounded-lg hover:bg-blue-500/20 transition-colors"
-                        title="Send via email"
-                      >
-                        <Mail className="w-3.5 h-3.5 text-blue-400" />
-                      </button>
-                    )}
-                    {(inv.status === "SENT" || inv.status === "OVERDUE") && gmailStatus?.connected && (
-                      <button onClick={() => openReminderEmail(inv)} className="p-1 rounded-lg hover:bg-amber-500/20 transition-colors" title="Send reminder">
-                        <Bell className="w-3.5 h-3.5 text-amber-400" />
-                      </button>
-                    )}
-                    {inv.status === "DRAFT" && (
-                      <button onClick={() => handleSendInvoice(inv.id)} className="px-1.5 py-0.5 rounded-lg bg-blue-500/15 text-blue-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]}>
-                        {actionLoading[inv.id] === "send" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send
-                      </button>
-                    )}
-                    {(inv.status === "DRAFT" || inv.status === "SENT") && (
-                      <button onClick={() => handleMarkPaid(inv.id, inv)} className="px-1.5 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]}>
-                        {actionLoading[inv.id] === "paid" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Paid
-                      </button>
-                    )}
-                    {(inv.status === "DRAFT" || inv.status === "SENT" || inv.status === "OVERDUE") && (
-                      <button onClick={() => handleVoidInvoice(inv.id)} className="p-1 rounded-lg hover:bg-slate-500/20 transition-colors disabled:opacity-50" title="Void invoice" disabled={!!actionLoading[inv.id]}>
-                        {actionLoading[inv.id] === "void" ? <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin" /> : <Ban className="w-3.5 h-3.5 text-slate-400" />}
-                      </button>
-                    )}
-                    <button onClick={() => handleDeleteInvoice(inv.id)} className="p-1 rounded-lg hover:bg-red-500/20 transition-colors disabled:opacity-50" title="Delete" disabled={!!actionLoading[inv.id]}>
-                      {actionLoading[inv.id] === "delete" ? <Loader2 className="w-3.5 h-3.5 text-red-400 animate-spin" /> : <Trash2 className="w-3.5 h-3.5 text-red-400 hover:text-red-300" />}
-                    </button>
-                  </div>
-
-                  <div className="flex md:hidden items-center gap-0.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
-                    <button onClick={() => setSelectedInvoice(inv)} className="p-1 rounded-lg hover:bg-muted" title="View">
-                      <Eye className="w-3.5 h-3.5 text-muted-foreground" />
-                    </button>
-                    <button onClick={() => duplicateInvoice(inv)} className="p-1 rounded-lg hover:bg-muted" title="Duplicate">
-                      <Copy className="w-3.5 h-3.5 text-muted-foreground" />
-                    </button>
-                    <button onClick={() => shareViaWhatsApp(inv)} className="p-1 rounded-lg hover:bg-green-500/20" title="WhatsApp">
-                      <MessageCircle className="w-3.5 h-3.5 text-green-400" />
-                    </button>
-                    {gmailStatus?.connected && (
-                      <button onClick={() => { setSelectedInvoice(inv); setShowEmailModal(true); }} className="p-1 rounded-lg hover:bg-blue-500/20" title="Email">
-                        <Mail className="w-3.5 h-3.5 text-blue-400" />
-                      </button>
-                    )}
-                    {(inv.status === "SENT" || inv.status === "OVERDUE") && gmailStatus?.connected && (
-                      <button onClick={() => openReminderEmail(inv)} className="p-1 rounded-lg hover:bg-amber-500/20" title="Remind">
-                        <Bell className="w-3.5 h-3.5 text-amber-400" />
-                      </button>
-                    )}
-                    {inv.status === "DRAFT" && (
-                      <button onClick={() => handleSendInvoice(inv.id)} className="px-1.5 py-0.5 rounded-lg bg-blue-500/15 text-blue-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]}>
-                        {actionLoading[inv.id] === "send" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send
-                      </button>
-                    )}
-                    {(inv.status === "DRAFT" || inv.status === "SENT") && (
-                      <button onClick={() => handleMarkPaid(inv.id, inv)} className="px-1.5 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]}>
-                        {actionLoading[inv.id] === "paid" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Paid
-                      </button>
-                    )}
-                    {(inv.status === "DRAFT" || inv.status === "SENT" || inv.status === "OVERDUE") && (
-                      <button onClick={() => handleVoidInvoice(inv.id)} className="p-1 rounded-lg hover:bg-slate-500/20 disabled:opacity-50" title="Void" disabled={!!actionLoading[inv.id]}>
-                        {actionLoading[inv.id] === "void" ? <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin" /> : <Ban className="w-3.5 h-3.5 text-slate-400" />}
-                      </button>
-                    )}
-                    <button onClick={() => handleDeleteInvoice(inv.id)} className="p-1 rounded-lg hover:bg-red-500/20 disabled:opacity-50" title="Delete" disabled={!!actionLoading[inv.id]}>
-                      {actionLoading[inv.id] === "delete" ? <Loader2 className="w-3.5 h-3.5 text-red-400 animate-spin" /> : <Trash2 className="w-3.5 h-3.5 text-red-400" />}
-                    </button>
-                  </div>
-                </div>
-              </div>
+              />
             );
           })}
         </div>
@@ -875,189 +860,69 @@ export default function InvoicesPanel({
 
       <AnimatePresence>
         {selectedInvoice && !showEmailModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-            onClick={(e) => e.target === e.currentTarget && setSelectedInvoice(null)}
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-lg bg-card rounded-2xl border border-border shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto"
-            >
-              <div className="p-5 border-b border-border flex items-center justify-between">
-                <h2 className="text-lg font-semibold flex items-center gap-2">
-                  <FileText className="w-5 h-5 text-primary" />
-                  Invoice {selectedInvoice.invoiceNumber ?? selectedInvoice.id.slice(0, 8)}
-                </h2>
-                <button onClick={() => setSelectedInvoice(null)} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <div className="p-5 space-y-5">
-                <div className="flex items-center justify-between">
-                  <span className={`inline-flex rounded-full border px-3 py-1 text-sm font-medium ${getStatusBadge(selectedInvoice.status)}`}>
-                    {selectedInvoice.status}
-                  </span>
-                  <span className="text-2xl font-bold text-primary">
-                    {formatAmount(selectedInvoice.total, selectedInvoice.currency)}
-                  </span>
+          <BillingDetailModal
+            type="invoice"
+            number={selectedInvoice.invoiceNumber ?? selectedInvoice.id.slice(0, 8)}
+            status={selectedInvoice.status}
+            contact={selectedInvoice.contact}
+            total={Number(selectedInvoice.total)}
+            currency={selectedInvoice.currency}
+            items={selectedInvoice.items ?? []}
+            dateLabel1="Issue Date"
+            dateValue1={selectedInvoice.issueDate}
+            dateLabel2="Due Date"
+            dateValue2={selectedInvoice.dueDate}
+            taxRate={Number(selectedInvoice.taxRate || 0)}
+            discountType={selectedInvoice.discountType}
+            discountValue={selectedInvoice.discountValue ? Number(selectedInvoice.discountValue) : undefined}
+            notes={selectedInvoice.notes}
+            onClose={() => setSelectedInvoice(null)}
+            actions={
+              <>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" className="gap-2 flex-1" onClick={() => copyPaymentLink(selectedInvoice.id)}>
+                    <Copy className={`w-4 h-4 ${copiedLink === selectedInvoice.id ? "text-emerald-400" : ""}`} />
+                    {copiedLink === selectedInvoice.id ? "Copied!" : "Copy Link"}
+                  </Button>
+                  <Button variant="outline" className="gap-2 flex-1" onClick={() => duplicateInvoice(selectedInvoice)}>
+                    <Copy className="w-4 h-4" /> Duplicate
+                  </Button>
+                  <Button variant="outline" className="gap-2 flex-1" onClick={() => shareViaWhatsApp(selectedInvoice)}>
+                    <MessageCircle className="w-4 h-4 text-green-400" /> WhatsApp
+                  </Button>
                 </div>
-
-                {selectedInvoice.contact && (
-                  <div className="flex items-start gap-3 p-3 rounded-xl bg-muted/30 border border-border/40">
-                    <div className="w-9 h-9 rounded-full bg-white/[0.06] flex items-center justify-center text-xs font-semibold text-muted-foreground/70 shrink-0">
-                      {getContactInitials(selectedInvoice.contact)}
-                    </div>
-                    <div>
-                      <p className="font-medium">
-                        {`${selectedInvoice.contact.firstName ?? ""} ${selectedInvoice.contact.lastName ?? ""}`.trim() || "Unknown"}
-                      </p>
-                      {selectedInvoice.contact.email && (
-                        <p className="text-sm text-muted-foreground">{selectedInvoice.contact.email}</p>
-                      )}
-                      {selectedInvoice.contact.phone && (
-                        <p className="text-xs text-muted-foreground/60">{selectedInvoice.contact.phone}</p>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div className="p-3 rounded-xl bg-muted/20 border border-border/40">
-                    <p className="text-xs text-muted-foreground mb-1">Issue Date</p>
-                    <p className="font-medium flex items-center gap-1.5">
-                      <Calendar className="w-3.5 h-3.5" />
-                      {selectedInvoice.issueDate ? new Date(selectedInvoice.issueDate).toLocaleDateString() : "—"}
-                    </p>
-                  </div>
-                  <div className="p-3 rounded-xl bg-muted/20 border border-border/40">
-                    <p className="text-xs text-muted-foreground mb-1">Due Date</p>
-                    <p className="font-medium flex items-center gap-1.5">
-                      <Calendar className="w-3.5 h-3.5" />
-                      {selectedInvoice.dueDate ? new Date(selectedInvoice.dueDate).toLocaleDateString() : "—"}
-                    </p>
-                  </div>
-                </div>
-
-                {selectedInvoice.items && selectedInvoice.items.length > 0 && (() => {
-                  const subtotal = selectedInvoice.items.reduce((sum: number, item: any) => sum + Number(item.total || 0), 0);
-                  const taxRate = Number(selectedInvoice.taxRate || 0);
-                  const taxAmount = subtotal * (taxRate / 100);
-                  let discountAmount = 0;
-                  if (selectedInvoice.discountValue) {
-                    discountAmount = selectedInvoice.discountType === "PERCENT"
-                      ? subtotal * (Number(selectedInvoice.discountValue) / 100)
-                      : Number(selectedInvoice.discountValue);
-                  }
-                  const computedTotal = subtotal + taxAmount - discountAmount;
-                  return (
-                    <div className="space-y-2">
-                      <h4 className="text-sm font-medium text-muted-foreground">Line Items</h4>
-                      <div className="rounded-xl border border-border/60 overflow-hidden">
-                        <table className="w-full text-sm">
-                          <thead className="bg-muted/30 border-b border-border/40">
-                            <tr>
-                              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Description</th>
-                              <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground">Qty</th>
-                              <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground">Price</th>
-                              <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground">Total</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-border/30">
-                            {selectedInvoice.items.map((item: any, idx: number) => (
-                              <tr key={item.id ?? idx}>
-                                <td className="px-3 py-2">{item.description}</td>
-                                <td className="px-3 py-2 text-right">{item.quantity}</td>
-                                <td className="px-3 py-2 text-right">{formatAmount(item.unitPrice, selectedInvoice.currency)}</td>
-                                <td className="px-3 py-2 text-right font-medium">{formatAmount(item.total, selectedInvoice.currency)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                      <div className="space-y-1.5 pt-2">
-                        <div className="flex justify-between text-sm text-muted-foreground">
-                          <span>Subtotal</span>
-                          <span>{formatAmount(subtotal, selectedInvoice.currency)}</span>
-                        </div>
-                        {taxRate > 0 && (
-                          <div className="flex justify-between text-sm text-muted-foreground">
-                            <span>Tax ({taxRate}%)</span>
-                            <span>{formatAmount(taxAmount, selectedInvoice.currency)}</span>
-                          </div>
-                        )}
-                        {discountAmount > 0 && (
-                          <div className="flex justify-between text-sm text-emerald-400">
-                            <span>Discount {selectedInvoice.discountType === "PERCENT" ? `(${selectedInvoice.discountValue}%)` : ""}</span>
-                            <span>-{formatAmount(discountAmount, selectedInvoice.currency)}</span>
-                          </div>
-                        )}
-                        <div className="flex justify-between text-base font-bold pt-1.5 border-t border-border/40">
-                          <span>Total</span>
-                          <span className="text-primary">{formatAmount(computedTotal, selectedInvoice.currency)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {selectedInvoice.notes && (
-                  <div className="p-3 rounded-xl bg-muted/20 border border-border/40">
-                    <p className="text-xs text-muted-foreground mb-1">Notes</p>
-                    <p className="text-sm">{selectedInvoice.notes}</p>
-                  </div>
-                )}
-
-                <div className="pt-4 border-t border-border/40 space-y-2">
-                  <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" className="gap-2 flex-1" onClick={() => copyPaymentLink(selectedInvoice.id)}>
-                      <Copy className={`w-4 h-4 ${copiedLink === selectedInvoice.id ? "text-emerald-400" : ""}`} />
-                      {copiedLink === selectedInvoice.id ? "Copied!" : "Copy Link"}
+                <div className="flex flex-wrap gap-2">
+                  {gmailStatus?.connected && (
+                    <Button variant="outline" className="gap-2 flex-1" onClick={() => setShowEmailModal(true)}>
+                      <Mail className="w-4 h-4 text-blue-400" /> Email
                     </Button>
-                    <Button variant="outline" className="gap-2 flex-1" onClick={() => duplicateInvoice(selectedInvoice)}>
-                      <Copy className="w-4 h-4" /> Duplicate
+                  )}
+                  {(selectedInvoice.status === "SENT" || selectedInvoice.status === "OVERDUE") && gmailStatus?.connected && (
+                    <Button variant="outline" className="gap-2 flex-1" onClick={() => openReminderEmail(selectedInvoice)}>
+                      <Bell className="w-4 h-4 text-amber-400" /> Reminder
                     </Button>
-                    <Button variant="outline" className="gap-2 flex-1" onClick={() => shareViaWhatsApp(selectedInvoice)}>
-                      <MessageCircle className="w-4 h-4 text-green-400" /> WhatsApp
+                  )}
+                  {selectedInvoice.status === "DRAFT" && (
+                    <Button className="gap-2 flex-1" onClick={() => { handleSendInvoice(selectedInvoice.id); setSelectedInvoice(null); }} disabled={!!actionLoading[selectedInvoice.id]}>
+                      {actionLoading[selectedInvoice.id] === "send" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Send Invoice
                     </Button>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {gmailStatus?.connected && (
-                      <Button variant="outline" className="gap-2 flex-1" onClick={() => setShowEmailModal(true)}>
-                        <Mail className="w-4 h-4 text-blue-400" /> Email
-                      </Button>
-                    )}
-                    {(selectedInvoice.status === "SENT" || selectedInvoice.status === "OVERDUE") && gmailStatus?.connected && (
-                      <Button variant="outline" className="gap-2 flex-1" onClick={() => openReminderEmail(selectedInvoice)}>
-                        <Bell className="w-4 h-4 text-amber-400" /> Reminder
-                      </Button>
-                    )}
-                    {selectedInvoice.status === "DRAFT" && (
-                      <Button className="gap-2 flex-1" onClick={() => { handleSendInvoice(selectedInvoice.id); setSelectedInvoice(null); }} disabled={!!actionLoading[selectedInvoice.id]}>
-                        {actionLoading[selectedInvoice.id] === "send" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Send Invoice
-                      </Button>
-                    )}
-                    {(selectedInvoice.status === "DRAFT" || selectedInvoice.status === "SENT") && (
-                      <Button className="gap-2 flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => { handleMarkPaid(selectedInvoice.id, selectedInvoice); setSelectedInvoice(null); }} disabled={!!actionLoading[selectedInvoice.id]}>
-                        {actionLoading[selectedInvoice.id] === "paid" ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />} Mark Paid
-                      </Button>
-                    )}
-                  </div>
-                  {(selectedInvoice.status === "DRAFT" || selectedInvoice.status === "SENT" || selectedInvoice.status === "OVERDUE") && (
-                    <div className="flex gap-2">
-                      <Button variant="outline" className="gap-2 flex-1 text-slate-400 hover:text-slate-300 hover:bg-slate-500/10" onClick={() => handleVoidInvoice(selectedInvoice.id)} disabled={!!actionLoading[selectedInvoice.id]}>
-                        {actionLoading[selectedInvoice.id] === "void" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Ban className="w-4 h-4" />} Void Invoice
-                      </Button>
-                    </div>
+                  )}
+                  {(selectedInvoice.status === "DRAFT" || selectedInvoice.status === "SENT") && (
+                    <Button className="gap-2 flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => { handleMarkPaid(selectedInvoice.id, selectedInvoice); setSelectedInvoice(null); }} disabled={!!actionLoading[selectedInvoice.id]}>
+                      {actionLoading[selectedInvoice.id] === "paid" ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />} Mark Paid
+                    </Button>
                   )}
                 </div>
-              </div>
-            </motion.div>
-          </motion.div>
+                {(selectedInvoice.status === "DRAFT" || selectedInvoice.status === "SENT" || selectedInvoice.status === "OVERDUE") && (
+                  <div className="flex gap-2">
+                    <Button variant="outline" className="gap-2 flex-1 text-slate-400 hover:text-slate-300 hover:bg-slate-500/10" onClick={() => handleVoidInvoice(selectedInvoice.id)} disabled={!!actionLoading[selectedInvoice.id]}>
+                      {actionLoading[selectedInvoice.id] === "void" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Ban className="w-4 h-4" />} Void Invoice
+                    </Button>
+                  </div>
+                )}
+              </>
+            }
+          />
         )}
 
         {showEmailModal && selectedInvoice && (
