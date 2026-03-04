@@ -59,6 +59,7 @@ import { BillingCard } from "../components/billing-card";
 import { BillingDetailModal } from "../components/billing-detail-modal";
 import { BillingFormModal } from "../components/billing-form-modal";
 import { useQuoteForm } from "../hooks/use-quote-form";
+import { useBusinessPreview } from "../hooks/use-business-preview";
 import { useModuleEmit } from "@/hooks/use-module-events";
 
 interface QuotesPanelProps {
@@ -112,6 +113,7 @@ export default function QuotesPanel({
     prefillQuote,
   } = useQuoteForm();
   const emitEvent = useModuleEmit();
+  const { businessData, saveBranding, savingBranding } = useBusinessPreview();
 
   const triggerRef = useRef(triggerNew);
   useEffect(() => {
@@ -1125,6 +1127,9 @@ export default function QuotesPanel({
             discountType={selectedQuote.discountType}
             discountValue={selectedQuote.discountValue ?? undefined}
             notes={selectedQuote.notes}
+            businessData={businessData}
+            onSaveBranding={saveBranding}
+            savingBranding={savingBranding}
             alerts={
               isQuoteExpired(selectedQuote) && (selectedQuote.status === "DRAFT" || selectedQuote.status === "SENT") ? (
                 <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-2">

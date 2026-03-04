@@ -56,6 +56,7 @@ import { BillingCard } from "../components/billing-card";
 import { BillingDetailModal } from "../components/billing-detail-modal";
 import { BillingFormModal } from "../components/billing-form-modal";
 import { useInvoiceForm } from "../hooks/use-invoice-form";
+import { useBusinessPreview } from "../hooks/use-business-preview";
 
 import { formatAmount, formatRelativeDate, getStatusAccentColor, getContactInitials, getItemsSummary, getDaysUntilDue } from "../utils/commerce-utils";
 import { useCommerceSearch } from "../hooks/use-commerce-search";
@@ -107,6 +108,7 @@ export default function InvoicesPanel({
     prefillInvoice,
   } = useInvoiceForm();
   const emitEvent = useModuleEmit();
+  const { businessData, saveBranding, savingBranding } = useBusinessPreview();
 
   const prevTriggerNew = useRef(triggerNew);
   useEffect(() => {
@@ -850,6 +852,9 @@ export default function InvoicesPanel({
             discountValue={selectedInvoice.discountValue ? Number(selectedInvoice.discountValue) : undefined}
             notes={selectedInvoice.notes}
             onClose={() => setSelectedInvoice(null)}
+            businessData={businessData}
+            onSaveBranding={saveBranding}
+            savingBranding={savingBranding}
             actions={
               <>
                 <div className="flex items-center justify-between">
