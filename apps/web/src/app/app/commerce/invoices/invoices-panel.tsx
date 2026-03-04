@@ -25,6 +25,9 @@ import {
   Clock,
   AlertTriangle,
   Loader2,
+  Ban,
+  Bell,
+  ArrowUpDown,
 } from "lucide-react";
 import {
   createProduct,
@@ -45,6 +48,8 @@ import {
   InvoiceLineItem,
   InvoiceFormState,
   PAYMENT_TERMS,
+  BILLING_SORT_OPTIONS,
+  BillingSortKey,
   getStatusBadge,
   generateItemId,
   getDueDateFromTerms,
@@ -52,7 +57,7 @@ import {
 import LineItemsEditor from "../components/line-items-editor";
 import { useInvoiceForm } from "../hooks/use-invoice-form";
 
-import { formatRelativeDate, getStatusAccentColor, getContactInitials, getItemsSummary, getDaysUntilDue } from "../utils/commerce-utils";
+import { formatAmount, formatRelativeDate, getStatusAccentColor, getContactInitials, getItemsSummary, getDaysUntilDue } from "../utils/commerce-utils";
 import { useCommerceSearch } from "../hooks/use-commerce-search";
 import type { ReactNode } from "react";
 
@@ -123,6 +128,7 @@ export default function InvoicesPanel({
   }, [prefillContactId, prefillItems, prefillToken, prefillInvoice, onPrefillApplied]);
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<string>("ALL");
   const [invoiceSearch, setInvoiceSearch] = useState("");
+  const [sortKey, setSortKey] = useState<BillingSortKey>("date-desc");
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -134,21 +140,41 @@ export default function InvoicesPanel({
   const [actionLoading, setActionLoading] = useState<Record<string, string>>({});
 
   const statusCounts = useMemo(() => {
-    const counts: Record<string, number> = { ALL: invoices.length, DRAFT: 0, SENT: 0, PAID: 0, OVERDUE: 0 };
+    const counts: Record<string, number> = { ALL: invoices.length, DRAFT: 0, SENT: 0, PAID: 0, OVERDUE: 0, VOID: 0 };
     for (const inv of invoices) {
       if (inv.status && counts[inv.status] !== undefined) counts[inv.status]++;
     }
     return counts;
   }, [invoices]);
 
+  const sorted = useMemo(() => {
+    const list = [...invoices];
+    switch (sortKey) {
+      case "date-asc":
+        return list.sort((a, b) => new Date(a.issueDate ?? 0).getTime() - new Date(b.issueDate ?? 0).getTime());
+      case "amount-desc":
+        return list.sort((a, b) => Number(b.total) - Number(a.total));
+      case "amount-asc":
+        return list.sort((a, b) => Number(a.total) - Number(b.total));
+      case "name-asc":
+        return list.sort((a, b) => {
+          const nameA = `${a.contact?.firstName ?? ""} ${a.contact?.lastName ?? ""}`.trim().toLowerCase();
+          const nameB = `${b.contact?.firstName ?? ""} ${b.contact?.lastName ?? ""}`.trim().toLowerCase();
+          return nameA.localeCompare(nameB);
+        });
+      default:
+        return list.sort((a, b) => new Date(b.issueDate ?? 0).getTime() - new Date(a.issueDate ?? 0).getTime());
+    }
+  }, [invoices, sortKey]);
+
   const statusFiltered = useMemo(() => {
-    if (invoiceStatusFilter === "ALL") return invoices;
-    return invoices.filter((inv) => inv.status === invoiceStatusFilter);
-  }, [invoices, invoiceStatusFilter]);
+    if (invoiceStatusFilter === "ALL") return sorted;
+    return sorted.filter((inv) => inv.status === invoiceStatusFilter);
+  }, [sorted, invoiceStatusFilter]);
 
   const { filtered: filteredInvoices } = useCommerceSearch(
     statusFiltered,
-    (inv) => `${inv.invoiceNumber ?? ""} ${inv.contact?.firstName ?? ""} ${inv.contact?.lastName ?? ""} ${inv.contact?.email ?? ""}`,
+    (inv) => `${inv.invoiceNumber ?? ""} ${inv.contact?.firstName ?? ""} ${inv.contact?.lastName ?? ""} ${inv.contact?.email ?? ""} ${(inv.items ?? []).map((i: any) => `${i.description ?? ""}`).join(" ")} ${inv.notes ?? ""} ${Number(inv.total).toFixed(2)}`,
     invoiceSearch,
   );
 
@@ -248,7 +274,7 @@ export default function InvoicesPanel({
     const contactName = inv.contact
       ? `${inv.contact.firstName ?? ""} ${inv.contact.lastName ?? ""}`.trim()
       : "there";
-    const msg = `Hi ${contactName}, here is your invoice ${inv.invoiceNumber ?? ""} for ${inv.currency} ${Number(inv.total).toLocaleString(undefined, { minimumFractionDigits: 2 })}. You can view and pay it here: ${link}`;
+    const msg = `Hi ${contactName}, here is your invoice ${inv.invoiceNumber ?? ""} for ${formatAmount(inv.total, inv.currency)}. You can view and pay it here: ${link}`;
     window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
   }
 
@@ -421,6 +447,37 @@ export default function InvoicesPanel({
     });
   }
 
+  async function handleVoidInvoice(invoiceId: string) {
+    if (actionLoading[invoiceId]) return;
+    setActionLoading((prev) => ({ ...prev, [invoiceId]: "void" }));
+    try {
+      const { data, error } = await updateInvoiceStatus(invoiceId, "VOID");
+      if (!error && data) {
+        setInvoices((prev) => prev.map((i) => (i.id === invoiceId ? { ...i, status: "VOID" } : i)));
+        if (selectedInvoice?.id === invoiceId) {
+          setSelectedInvoice((prev) => prev ? { ...prev, status: "VOID" } : null);
+        }
+        toast.success("Invoice voided");
+      } else {
+        toast.error(error ?? "Failed to void invoice");
+      }
+    } finally {
+      setActionLoading((prev) => { const next = { ...prev }; delete next[invoiceId]; return next; });
+    }
+  }
+
+  function openReminderEmail(inv: Invoice) {
+    setSelectedInvoice(inv);
+    const contactName = inv.contact
+      ? `${inv.contact.firstName ?? ""} ${inv.contact.lastName ?? ""}`.trim()
+      : "there";
+    setEmailForm({
+      email: inv.contact?.email ?? "",
+      message: `Hi ${contactName}, this is a friendly reminder that invoice ${inv.invoiceNumber ?? ""} for ${formatAmount(inv.total, inv.currency)} is ${inv.status === "OVERDUE" ? "overdue" : "awaiting payment"}. Please let us know if you have any questions.`,
+    });
+    setShowEmailModal(true);
+  }
+
   async function handleSendInvoiceEmail() {
     if (!selectedInvoice || !businessId) return;
     const targetEmail = emailForm.email || selectedInvoice.contact?.email;
@@ -434,7 +491,7 @@ export default function InvoicesPanel({
         businessId,
         quoteId: selectedInvoice.id,
         recipientEmail: targetEmail,
-        message: emailForm.message || `Please find attached your invoice ${selectedInvoice.invoiceNumber ?? ""} for ${selectedInvoice.currency} ${Number(selectedInvoice.total).toLocaleString()}.`,
+        message: emailForm.message || `Please find attached your invoice ${selectedInvoice.invoiceNumber ?? ""} for ${formatAmount(selectedInvoice.total, selectedInvoice.currency)}.`,
       });
       if (res.data?.success) {
         setInvoices((prev) =>
@@ -573,6 +630,19 @@ export default function InvoicesPanel({
               </button>
             )}
           </div>
+          <div className="relative shrink-0">
+            <ArrowUpDown className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50 pointer-events-none" />
+            <select
+              value={sortKey}
+              onChange={(e) => setSortKey(e.target.value as BillingSortKey)}
+              className="appearance-none pl-7 pr-2 py-1.5 text-[11px] bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 text-muted-foreground cursor-pointer"
+              aria-label="Sort invoices"
+            >
+              {BILLING_SORT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
           <button
             onClick={() => setShowInvoiceBuilder(true)}
             className="inline-flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium rounded-lg bg-gradient-to-r from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all shrink-0"
@@ -685,7 +755,7 @@ export default function InvoicesPanel({
 
                 <div className="text-right shrink-0 flex flex-col items-end gap-1">
                   <span className="text-sm font-bold text-foreground whitespace-nowrap">
-                    {inv.currency} {Number(inv.total).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    {formatAmount(inv.total, inv.currency)}
                   </span>
 
                   <div className="hidden md:flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
@@ -732,6 +802,11 @@ export default function InvoicesPanel({
                         <Mail className="w-3.5 h-3.5 text-blue-400" />
                       </button>
                     )}
+                    {(inv.status === "SENT" || inv.status === "OVERDUE") && gmailStatus?.connected && (
+                      <button onClick={() => openReminderEmail(inv)} className="p-1 rounded-lg hover:bg-amber-500/20 transition-colors" title="Send reminder">
+                        <Bell className="w-3.5 h-3.5 text-amber-400" />
+                      </button>
+                    )}
                     {inv.status === "DRAFT" && (
                       <button onClick={() => handleSendInvoice(inv.id)} className="px-1.5 py-0.5 rounded-lg bg-blue-500/15 text-blue-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]}>
                         {actionLoading[inv.id] === "send" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send
@@ -740,6 +815,11 @@ export default function InvoicesPanel({
                     {(inv.status === "DRAFT" || inv.status === "SENT") && (
                       <button onClick={() => handleMarkPaid(inv.id, inv)} className="px-1.5 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]}>
                         {actionLoading[inv.id] === "paid" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Paid
+                      </button>
+                    )}
+                    {(inv.status === "DRAFT" || inv.status === "SENT" || inv.status === "OVERDUE") && (
+                      <button onClick={() => handleVoidInvoice(inv.id)} className="p-1 rounded-lg hover:bg-slate-500/20 transition-colors disabled:opacity-50" title="Void invoice" disabled={!!actionLoading[inv.id]}>
+                        {actionLoading[inv.id] === "void" ? <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin" /> : <Ban className="w-3.5 h-3.5 text-slate-400" />}
                       </button>
                     )}
                     <button onClick={() => handleDeleteInvoice(inv.id)} className="p-1 rounded-lg hover:bg-red-500/20 transition-colors disabled:opacity-50" title="Delete" disabled={!!actionLoading[inv.id]}>
@@ -747,7 +827,26 @@ export default function InvoicesPanel({
                     </button>
                   </div>
 
-                  <div className="flex md:hidden items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex md:hidden items-center gap-0.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                    <button onClick={() => setSelectedInvoice(inv)} className="p-1 rounded-lg hover:bg-muted" title="View">
+                      <Eye className="w-3.5 h-3.5 text-muted-foreground" />
+                    </button>
+                    <button onClick={() => duplicateInvoice(inv)} className="p-1 rounded-lg hover:bg-muted" title="Duplicate">
+                      <Copy className="w-3.5 h-3.5 text-muted-foreground" />
+                    </button>
+                    <button onClick={() => shareViaWhatsApp(inv)} className="p-1 rounded-lg hover:bg-green-500/20" title="WhatsApp">
+                      <MessageCircle className="w-3.5 h-3.5 text-green-400" />
+                    </button>
+                    {gmailStatus?.connected && (
+                      <button onClick={() => { setSelectedInvoice(inv); setShowEmailModal(true); }} className="p-1 rounded-lg hover:bg-blue-500/20" title="Email">
+                        <Mail className="w-3.5 h-3.5 text-blue-400" />
+                      </button>
+                    )}
+                    {(inv.status === "SENT" || inv.status === "OVERDUE") && gmailStatus?.connected && (
+                      <button onClick={() => openReminderEmail(inv)} className="p-1 rounded-lg hover:bg-amber-500/20" title="Remind">
+                        <Bell className="w-3.5 h-3.5 text-amber-400" />
+                      </button>
+                    )}
                     {inv.status === "DRAFT" && (
                       <button onClick={() => handleSendInvoice(inv.id)} className="px-1.5 py-0.5 rounded-lg bg-blue-500/15 text-blue-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]}>
                         {actionLoading[inv.id] === "send" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send
@@ -758,7 +857,12 @@ export default function InvoicesPanel({
                         {actionLoading[inv.id] === "paid" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Paid
                       </button>
                     )}
-                    <button onClick={() => handleDeleteInvoice(inv.id)} className="p-1 rounded-lg hover:bg-red-500/20 transition-colors disabled:opacity-50" title="Delete" disabled={!!actionLoading[inv.id]}>
+                    {(inv.status === "DRAFT" || inv.status === "SENT" || inv.status === "OVERDUE") && (
+                      <button onClick={() => handleVoidInvoice(inv.id)} className="p-1 rounded-lg hover:bg-slate-500/20 disabled:opacity-50" title="Void" disabled={!!actionLoading[inv.id]}>
+                        {actionLoading[inv.id] === "void" ? <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin" /> : <Ban className="w-3.5 h-3.5 text-slate-400" />}
+                      </button>
+                    )}
+                    <button onClick={() => handleDeleteInvoice(inv.id)} className="p-1 rounded-lg hover:bg-red-500/20 disabled:opacity-50" title="Delete" disabled={!!actionLoading[inv.id]}>
                       {actionLoading[inv.id] === "delete" ? <Loader2 className="w-3.5 h-3.5 text-red-400 animate-spin" /> : <Trash2 className="w-3.5 h-3.5 text-red-400" />}
                     </button>
                   </div>
@@ -799,19 +903,24 @@ export default function InvoicesPanel({
                     {selectedInvoice.status}
                   </span>
                   <span className="text-2xl font-bold text-primary">
-                    {selectedInvoice.currency} {Number(selectedInvoice.total).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    {formatAmount(selectedInvoice.total, selectedInvoice.currency)}
                   </span>
                 </div>
 
                 {selectedInvoice.contact && (
                   <div className="flex items-start gap-3 p-3 rounded-xl bg-muted/30 border border-border/40">
-                    <User className="w-5 h-5 text-muted-foreground mt-0.5" />
+                    <div className="w-9 h-9 rounded-full bg-white/[0.06] flex items-center justify-center text-xs font-semibold text-muted-foreground/70 shrink-0">
+                      {getContactInitials(selectedInvoice.contact)}
+                    </div>
                     <div>
                       <p className="font-medium">
                         {`${selectedInvoice.contact.firstName ?? ""} ${selectedInvoice.contact.lastName ?? ""}`.trim() || "Unknown"}
                       </p>
                       {selectedInvoice.contact.email && (
                         <p className="text-sm text-muted-foreground">{selectedInvoice.contact.email}</p>
+                      )}
+                      {selectedInvoice.contact.phone && (
+                        <p className="text-xs text-muted-foreground/60">{selectedInvoice.contact.phone}</p>
                       )}
                     </div>
                   </div>
@@ -834,33 +943,67 @@ export default function InvoicesPanel({
                   </div>
                 </div>
 
-                {selectedInvoice.items && selectedInvoice.items.length > 0 && (
-                  <div className="space-y-2">
-                    <h4 className="text-sm font-medium text-muted-foreground">Line Items</h4>
-                    <div className="rounded-xl border border-border/60 overflow-hidden">
-                      <table className="w-full text-sm">
-                        <thead className="bg-muted/30 border-b border-border/40">
-                          <tr>
-                            <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Description</th>
-                            <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground">Qty</th>
-                            <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground">Price</th>
-                            <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground">Total</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border/30">
-                          {selectedInvoice.items.map((item: any, idx: number) => (
-                            <tr key={item.id ?? idx}>
-                              <td className="px-3 py-2">{item.description}</td>
-                              <td className="px-3 py-2 text-right">{item.quantity}</td>
-                              <td className="px-3 py-2 text-right">{Number(item.unitPrice).toLocaleString()}</td>
-                              <td className="px-3 py-2 text-right font-medium">{Number(item.total).toLocaleString()}</td>
+                {selectedInvoice.items && selectedInvoice.items.length > 0 && (() => {
+                  const subtotal = selectedInvoice.items.reduce((sum: number, item: any) => sum + Number(item.total || 0), 0);
+                  const taxRate = Number(selectedInvoice.taxRate || 0);
+                  const taxAmount = subtotal * (taxRate / 100);
+                  let discountAmount = 0;
+                  if (selectedInvoice.discountValue) {
+                    discountAmount = selectedInvoice.discountType === "PERCENT"
+                      ? subtotal * (Number(selectedInvoice.discountValue) / 100)
+                      : Number(selectedInvoice.discountValue);
+                  }
+                  const computedTotal = subtotal + taxAmount - discountAmount;
+                  return (
+                    <div className="space-y-2">
+                      <h4 className="text-sm font-medium text-muted-foreground">Line Items</h4>
+                      <div className="rounded-xl border border-border/60 overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted/30 border-b border-border/40">
+                            <tr>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Description</th>
+                              <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground">Qty</th>
+                              <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground">Price</th>
+                              <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground">Total</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody className="divide-y divide-border/30">
+                            {selectedInvoice.items.map((item: any, idx: number) => (
+                              <tr key={item.id ?? idx}>
+                                <td className="px-3 py-2">{item.description}</td>
+                                <td className="px-3 py-2 text-right">{item.quantity}</td>
+                                <td className="px-3 py-2 text-right">{formatAmount(item.unitPrice, selectedInvoice.currency)}</td>
+                                <td className="px-3 py-2 text-right font-medium">{formatAmount(item.total, selectedInvoice.currency)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="space-y-1.5 pt-2">
+                        <div className="flex justify-between text-sm text-muted-foreground">
+                          <span>Subtotal</span>
+                          <span>{formatAmount(subtotal, selectedInvoice.currency)}</span>
+                        </div>
+                        {taxRate > 0 && (
+                          <div className="flex justify-between text-sm text-muted-foreground">
+                            <span>Tax ({taxRate}%)</span>
+                            <span>{formatAmount(taxAmount, selectedInvoice.currency)}</span>
+                          </div>
+                        )}
+                        {discountAmount > 0 && (
+                          <div className="flex justify-between text-sm text-emerald-400">
+                            <span>Discount {selectedInvoice.discountType === "PERCENT" ? `(${selectedInvoice.discountValue}%)` : ""}</span>
+                            <span>-{formatAmount(discountAmount, selectedInvoice.currency)}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between text-base font-bold pt-1.5 border-t border-border/40">
+                          <span>Total</span>
+                          <span className="text-primary">{formatAmount(computedTotal, selectedInvoice.currency)}</span>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {selectedInvoice.notes && (
                   <div className="p-3 rounded-xl bg-muted/20 border border-border/40">
@@ -888,6 +1031,11 @@ export default function InvoicesPanel({
                         <Mail className="w-4 h-4 text-blue-400" /> Email
                       </Button>
                     )}
+                    {(selectedInvoice.status === "SENT" || selectedInvoice.status === "OVERDUE") && gmailStatus?.connected && (
+                      <Button variant="outline" className="gap-2 flex-1" onClick={() => openReminderEmail(selectedInvoice)}>
+                        <Bell className="w-4 h-4 text-amber-400" /> Reminder
+                      </Button>
+                    )}
                     {selectedInvoice.status === "DRAFT" && (
                       <Button className="gap-2 flex-1" onClick={() => { handleSendInvoice(selectedInvoice.id); setSelectedInvoice(null); }} disabled={!!actionLoading[selectedInvoice.id]}>
                         {actionLoading[selectedInvoice.id] === "send" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Send Invoice
@@ -899,6 +1047,13 @@ export default function InvoicesPanel({
                       </Button>
                     )}
                   </div>
+                  {(selectedInvoice.status === "DRAFT" || selectedInvoice.status === "SENT" || selectedInvoice.status === "OVERDUE") && (
+                    <div className="flex gap-2">
+                      <Button variant="outline" className="gap-2 flex-1 text-slate-400 hover:text-slate-300 hover:bg-slate-500/10" onClick={() => handleVoidInvoice(selectedInvoice.id)} disabled={!!actionLoading[selectedInvoice.id]}>
+                        {actionLoading[selectedInvoice.id] === "void" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Ban className="w-4 h-4" />} Void Invoice
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
             </motion.div>
@@ -929,7 +1084,7 @@ export default function InvoicesPanel({
               </div>
               <p className="text-sm text-muted-foreground">
                 Sending invoice <span className="font-mono text-foreground">{selectedInvoice.invoiceNumber}</span> for{" "}
-                {selectedInvoice.currency} {Number(selectedInvoice.total).toLocaleString()}
+                {formatAmount(selectedInvoice.total, selectedInvoice.currency)}
               </p>
               <div>
                 <label className="text-xs text-muted-foreground mb-1.5 block">Recipient Email</label>

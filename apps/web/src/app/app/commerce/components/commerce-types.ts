@@ -81,6 +81,7 @@ export const INVOICE_STATUS_FILTERS = [
   { value: "SENT", label: "Sent" },
   { value: "PAID", label: "Paid" },
   { value: "OVERDUE", label: "Overdue" },
+  { value: "VOID", label: "Void" },
 ] as const;
 
 export const QUOTE_STATUS_FILTERS = [
@@ -118,6 +119,16 @@ export function getDueDateFromTerms(termKey: string): string {
   now.setDate(now.getDate() + days);
   return now.toISOString().split("T")[0];
 }
+
+export const BILLING_SORT_OPTIONS = [
+  { value: "date-desc", label: "Newest first" },
+  { value: "date-asc", label: "Oldest first" },
+  { value: "amount-desc", label: "Highest amount" },
+  { value: "amount-asc", label: "Lowest amount" },
+  { value: "name-asc", label: "Client A–Z" },
+] as const;
+
+export type BillingSortKey = (typeof BILLING_SORT_OPTIONS)[number]["value"];
 
 export function getStatusBadge(status: string) {
   const styles: Record<string, string> = {
