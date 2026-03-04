@@ -14,7 +14,6 @@ import {
   CheckCircle,
   X,
   Trash2,
-  Copy,
   Plus,
   MessageCircle,
   Mail,
@@ -24,6 +23,8 @@ import {
   Ban,
   Bell,
   ArrowUpDown,
+  Link,
+  Files,
 } from "lucide-react";
 import {
   createProduct,
@@ -755,7 +756,7 @@ export default function InvoicesPanel({
                   <Pencil className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
                 </button>
                 <button onClick={() => duplicateInvoice(inv)} className="p-1 rounded-lg hover:bg-muted transition-colors" title="Duplicate">
-                  <Copy className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
+                  <Files className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
                 </button>
                 <button onClick={() => shareViaWhatsApp(inv)} className="p-1 rounded-lg hover:bg-green-500/20 transition-colors" title="WhatsApp">
                   <MessageCircle className="w-3.5 h-3.5 text-green-400" />
@@ -801,7 +802,7 @@ export default function InvoicesPanel({
                   <Eye className="w-3.5 h-3.5 text-muted-foreground" />
                 </button>
                 <button onClick={() => duplicateInvoice(inv)} className="p-1 rounded-lg hover:bg-muted" title="Duplicate">
-                  <Copy className="w-3.5 h-3.5 text-muted-foreground" />
+                  <Files className="w-3.5 h-3.5 text-muted-foreground" />
                 </button>
                 <button onClick={() => shareViaWhatsApp(inv)} className="p-1 rounded-lg hover:bg-green-500/20" title="WhatsApp">
                   <MessageCircle className="w-3.5 h-3.5 text-green-400" />
@@ -882,10 +883,10 @@ export default function InvoicesPanel({
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-0.5">
                     <button onClick={() => copyPaymentLink(selectedInvoice.id)} className="p-2 rounded-lg hover:bg-white/[0.06] transition-colors" title={copiedLink === selectedInvoice.id ? "Copied!" : "Copy payment link"}>
-                      <Copy className={`w-4 h-4 ${copiedLink === selectedInvoice.id ? "text-emerald-400" : "text-slate-400"}`} />
+                      <Link className={`w-4 h-4 ${copiedLink === selectedInvoice.id ? "text-emerald-400" : "text-slate-400"}`} />
                     </button>
                     <button onClick={() => duplicateInvoice(selectedInvoice)} className="p-2 rounded-lg hover:bg-white/[0.06] transition-colors" title="Duplicate invoice">
-                      <Copy className="w-4 h-4 text-slate-400" />
+                      <Files className="w-4 h-4 text-slate-400" />
                     </button>
                     <div className="w-px h-4 bg-border/30 mx-0.5" />
                     <button onClick={() => shareViaWhatsApp(selectedInvoice)} className="p-2 rounded-lg hover:bg-emerald-500/10 transition-colors" title="Share via WhatsApp">
