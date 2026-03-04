@@ -130,6 +130,25 @@ export const BILLING_SORT_OPTIONS = [
 
 export type BillingSortKey = (typeof BILLING_SORT_OPTIONS)[number]["value"];
 
+export type BillingDocType = "quote" | "invoice";
+
+export const BILLING_DOC_THEME = {
+  quote: {
+    label: "Quote",
+    avatarBg: "rgba(139,92,246,0.12)",
+    avatarText: "text-violet-300",
+    accentColor: "rgb(139,92,246)",
+    headerGradient: "from-violet-500/10 via-transparent to-transparent",
+  },
+  invoice: {
+    label: "Invoice",
+    avatarBg: "rgba(6,182,212,0.12)",
+    avatarText: "text-cyan-300",
+    accentColor: "rgb(6,182,212)",
+    headerGradient: "from-cyan-500/10 via-transparent to-transparent",
+  },
+} as const;
+
 export function getStatusBadge(status: string) {
   const styles: Record<string, string> = {
     DRAFT: "bg-slate-500/20 text-slate-300 border-slate-500/40",
