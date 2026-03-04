@@ -130,7 +130,11 @@ export const ProductsPanel = React.memo(function ProductsPanel({
       }
     };
     const handleClickOutside = (e: MouseEvent) => {
-      if (sortRef.current && !sortRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        sortRef.current && !sortRef.current.contains(target) &&
+        sortMenuRef.current && !sortMenuRef.current.contains(target)
+      ) {
         setShowSortMenu(false);
       }
     };
@@ -268,17 +272,17 @@ export const ProductsPanel = React.memo(function ProductsPanel({
       transition={{ duration: 0.3 }}
       className="space-y-4"
     >
-      <div className="rounded-2xl border border-border/50 bg-card p-3 sm:p-4">
-        <div className="flex items-center gap-2 mb-3">
+      <div className="rounded-2xl border border-border/50 bg-card p-3 sm:p-4 space-y-3 overflow-hidden">
+        <div className="flex items-center gap-2 min-w-0">
           <div className="relative flex-1 min-w-0">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/40" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50" />
             <input
               type="text"
-              placeholder="Search products, services, SKU..."
+              placeholder="Search products..."
               value={productSearch}
               onChange={(e) => setProductSearch(e.target.value)}
-              className="w-full pl-9 pr-8 py-1.5 text-sm bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 focus:border-[hsl(var(--kf-accent1))]/40 placeholder:text-muted-foreground/40 transition-all"
               aria-label="Search products"
+              className="w-full pl-9 pr-8 py-2 text-sm bg-white/[0.03] border border-border/40 rounded-xl focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 focus:border-[hsl(var(--kf-accent1))]/40 placeholder:text-muted-foreground/40 transition-all"
             />
             {productSearch && (
               <button
@@ -286,132 +290,125 @@ export const ProductsPanel = React.memo(function ProductsPanel({
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-md hover:bg-muted/50 transition-colors"
                 aria-label="Clear search"
               >
-                <X className="w-3 h-3 text-muted-foreground/40" />
+                <X className="w-3 h-3 text-muted-foreground/50" />
               </button>
             )}
           </div>
-
-          <div className="relative" ref={sortRef}>
-            <button
-              onClick={() => setShowSortMenu(!showSortMenu)}
-              className={`inline-flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] transition-all shrink-0 ${sortBy !== "newest" ? "ring-1 ring-[hsl(var(--kf-accent1))]/30 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60"}`}
-              aria-label={`Sort products: currently sorted by ${SORT_OPTIONS.find(o => o.value === sortBy)?.label || "newest"}`}
-              aria-expanded={showSortMenu}
-              aria-haspopup="listbox"
-            >
-              <ArrowUpDown className="w-3 h-3" />
-              <span className="hidden sm:inline max-w-[60px] truncate">
-                {SORT_OPTIONS.find(o => o.value === sortBy)?.label}
-              </span>
-              <ChevronDown className="w-2.5 h-2.5" />
-            </button>
-            <AnimatePresence>
-              {showSortMenu && (
-                <motion.div
-                  ref={sortMenuRef}
-                  initial={{ opacity: 0, y: -4, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -4, scale: 0.95 }}
-                  transition={{ duration: 0.15 }}
-                  className="absolute right-0 top-full mt-1 w-44 rounded-xl border border-border/50 bg-card shadow-xl z-20 py-1 overflow-hidden"
-                  role="listbox"
-                  aria-label="Sort options"
-                >
-                  {SORT_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.value}
-                      onClick={() => { setSortBy(opt.value); setShowSortMenu(false); }}
-                      className={`w-full text-left px-3 py-1.5 text-[11px] font-medium transition-colors ${
-                        sortBy === opt.value
-                          ? "bg-white/[0.08] text-[hsl(var(--kf-accent1))]"
-                          : "text-muted-foreground hover:bg-white/[0.04] hover:text-foreground"
-                      }`}
-                      role="option"
-                      aria-selected={sortBy === opt.value}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          <div className="inline-flex items-center rounded-lg border border-border/40 bg-white/[0.02] overflow-hidden shrink-0">
-            <button
-              onClick={() => handleViewToggle("grid")}
-              className={`px-1.5 py-1.5 transition-colors ${viewMode === "grid" ? "bg-white/[0.08] text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.05]"}`}
-              aria-label="Grid view"
-              aria-pressed={viewMode === "grid"}
-            >
-              <LayoutGrid className="w-3 h-3" />
-            </button>
-            <button
-              onClick={() => handleViewToggle("list")}
-              className={`px-1.5 py-1.5 transition-colors ${viewMode === "list" ? "bg-white/[0.08] text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.05]"}`}
-              aria-label="List view"
-              aria-pressed={viewMode === "list"}
-            >
-              <List className="w-3 h-3" />
-            </button>
-          </div>
-
-          <button
-            onClick={() => { setBulkMode(!bulkMode); setSelectedIds(new Set()); }}
-            className={`inline-flex items-center gap-1 px-2 py-1.5 text-[11px] font-medium rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] transition-all shrink-0 ${bulkMode ? "ring-1 ring-[hsl(var(--kf-accent1))]/40 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60"}`}
-            aria-label="Bulk select"
-            aria-pressed={bulkMode}
-          >
-            <CheckSquare className="w-3 h-3" />
-          </button>
-
-          <button
-            onClick={() => setShowInactive(!showInactive)}
-            className={`inline-flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] transition-all shrink-0 ${
-              showInactive ? "ring-1 ring-[hsl(var(--kf-accent1))]/40" : ""
-            }`}
-            aria-label={showInactive ? "Hide inactive products" : "Show inactive products"}
-            aria-pressed={showInactive}
-          >
-            {showInactive ? (
-              <EyeOff className="w-3 h-3 text-muted-foreground/60" />
-            ) : (
-              <Eye className="w-3 h-3 text-muted-foreground/60" />
-            )}
-          </button>
-
-          {onImport && (
-            <button
-              onClick={onImport}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg bg-white/5 border border-white/10 text-muted-foreground hover:bg-white/10 hover:text-white transition-all shrink-0"
-              aria-label="Import products"
-            >
-              <Upload className="w-3 h-3" />
-              <span className="hidden sm:inline">Import</span>
-            </button>
-          )}
-
           <button
             onClick={onAdd}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg bg-gradient-to-r from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all shrink-0"
+            className="p-2 rounded-xl bg-gradient-to-br from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all flex-shrink-0"
             aria-label="Add product"
+            title="Add product"
           >
-            <Plus className="w-3 h-3" />
-            <span className="hidden sm:inline">Add Product</span>
+            <Plus className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none" role="group" aria-label="Filter by category">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
+            <div className="relative" ref={sortRef}>
+              <button
+                onClick={() => setShowSortMenu(!showSortMenu)}
+                className={`p-2 rounded-xl transition-all flex-shrink-0 ${showSortMenu || sortBy !== "newest" ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
+                aria-label="Sort products"
+                aria-haspopup="listbox"
+                aria-expanded={showSortMenu}
+                title="Sort"
+              >
+                <ArrowUpDown className="w-4 h-4" />
+              </button>
+              <AnimatePresence>
+                {showSortMenu && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setShowSortMenu(false)} />
+                    <motion.div
+                      ref={sortMenuRef}
+                      initial={{ opacity: 0, y: -4, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -4, scale: 0.95 }}
+                      transition={{ duration: 0.15 }}
+                      className="fixed left-2 right-2 top-20 sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-1 z-50 bg-popover/95 backdrop-blur-xl border border-border/50 shadow-xl rounded-xl py-1 sm:w-44 max-h-[80vh] overflow-y-auto"
+                      role="listbox"
+                      aria-label="Sort options"
+                    >
+                      {SORT_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.value}
+                          onClick={() => { setSortBy(opt.value); setShowSortMenu(false); }}
+                          className={`w-full text-left px-3 py-2.5 text-xs hover:bg-white/[0.05] transition-colors ${
+                            sortBy === opt.value
+                              ? "text-[hsl(var(--kf-accent1))] font-semibold"
+                              : "text-muted-foreground"
+                          }`}
+                          role="option"
+                          aria-selected={sortBy === opt.value}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
+            <button
+              onClick={() => { setBulkMode(!bulkMode); setSelectedIds(new Set()); }}
+              className={`p-2 rounded-xl transition-all flex-shrink-0 ${bulkMode ? "bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
+              aria-label={bulkMode ? "Exit bulk select" : "Bulk select"}
+              title={bulkMode ? "Exit bulk select" : "Bulk select"}
+            >
+              <CheckSquare className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setShowInactive(!showInactive)}
+              className={`p-2 rounded-xl transition-all flex-shrink-0 ${showInactive ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
+              aria-label={showInactive ? "Hide inactive" : "Show inactive"}
+              title={showInactive ? "Hide inactive" : "Show inactive"}
+            >
+              {showInactive ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+            {onImport && (
+              <button
+                onClick={onImport}
+                className="p-2 rounded-xl text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground transition-all flex-shrink-0"
+                aria-label="Import products"
+                title="Import products"
+              >
+                <Upload className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-0.5 border-l border-border/30 pl-2 flex-shrink-0">
+            <button
+              onClick={() => handleViewToggle("grid")}
+              className={`p-2 rounded-xl transition-all ${viewMode === "grid" ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
+              aria-label="Grid view"
+              title="Grid view"
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => handleViewToggle("list")}
+              className={`p-2 rounded-xl transition-all ${viewMode === "list" ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
+              aria-label="List view"
+              title="List view"
+            >
+              <List className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide pb-0.5" role="group" aria-label="Filter by category">
           {CATEGORY_FILTERS.map((f) => {
             const count = categoryCounts[f.value as keyof typeof categoryCounts];
             return (
               <button
                 key={f.value}
                 onClick={() => setCategoryFilter(f.value)}
-                className={`px-2.5 py-1 text-[11px] rounded-md transition-all inline-flex items-center gap-1.5 font-medium whitespace-nowrap shrink-0 ${
+                className={`px-2.5 py-1.5 text-[11px] rounded-lg transition-all inline-flex items-center gap-1.5 font-medium whitespace-nowrap shrink-0 ${
                   categoryFilter === f.value
                     ? "bg-white/[0.08] border border-border/60 text-foreground"
-                    : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.05]"
+                    : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.05] hover:text-muted-foreground"
                 }`}
                 aria-pressed={categoryFilter === f.value}
               >
