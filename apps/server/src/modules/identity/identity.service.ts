@@ -44,6 +44,8 @@ export class IdentityService {
     whatsapp: true,
     primaryColor: true,
     secondaryColor: true,
+    defaultTaxRate: true,
+    invoiceTemplate: true,
     timezone: true,
     currency: true,
     storeEnabled: true,

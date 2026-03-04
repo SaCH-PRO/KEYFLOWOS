@@ -20,17 +20,22 @@ import {
   Shield,
   ChevronLeft,
 } from "lucide-react";
+import { InvoiceTemplateRenderer } from "@/app/app/commerce/components/invoice-templates";
+import type { TemplateId, InvoiceTemplateData } from "@/app/app/commerce/components/invoice-templates";
 
 type Business = {
   id: string;
   name: string;
   logoUrl: string | null;
   address: string | null;
+  city: string | null;
+  country: string | null;
   phone: string | null;
   email: string | null;
   website: string | null;
   primaryColor: string | null;
   secondaryColor: string | null;
+  invoiceTemplate: string | null;
   facebook: string | null;
   instagram: string | null;
   twitter: string | null;
@@ -308,160 +313,42 @@ export default function PublicPaymentPage() {
     );
   }
 
+  const templateId = (business?.invoiceTemplate || "classic") as TemplateId;
+  const templateData: InvoiceTemplateData = {
+    type: "invoice",
+    number: invoice?.invoiceNumber ?? "",
+    status: invoice?.status ?? "DRAFT",
+    issueDate: invoice?.issueDate ?? null,
+    dueDate: invoice?.dueDate ?? null,
+    contact: invoice?.contact ?? null,
+    items: invoice?.items ?? [],
+    subtotal,
+    taxRate,
+    taxAmount,
+    discountType: invoice?.discountType,
+    discountValue: invoice?.discountValue,
+    discountAmount,
+    total,
+    currency: invoice?.currency ?? "TTD",
+    notes: invoice?.notes,
+    business: {
+      name: business?.name ?? "Invoice",
+      logoUrl,
+      address: business?.address,
+      city: business?.city,
+      country: business?.country,
+      phone: business?.phone,
+      email: business?.email,
+      website: business?.website,
+      primaryColor,
+      secondaryColor: business?.secondaryColor || "#14B8A6",
+    },
+  };
+
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white px-4 py-8">
       <div className="mx-auto max-w-2xl space-y-4">
-        <Card className="bg-slate-900/80 border-border/60 overflow-hidden">
-          <div className="h-2 w-full" style={{ backgroundColor: primaryColor }} />
-          <div className="p-6 space-y-6">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-4">
-                {logoUrl ? (
-                  <img src={logoUrl} alt={business?.name} className="h-14 w-14 object-contain rounded-xl" />
-                ) : business ? (
-                  <div
-                    className="h-14 w-14 rounded-xl flex items-center justify-center text-white font-bold text-xl"
-                    style={{ backgroundColor: primaryColor }}
-                  >
-                    {business.name?.charAt(0) || "K"}
-                  </div>
-                ) : (
-                  <div className="h-14 w-14 rounded-xl bg-primary/20 flex items-center justify-center">
-                    <Building2 className="w-7 h-7 text-primary" />
-                  </div>
-                )}
-                <div>
-                  <h2 className="text-lg font-semibold" style={{ color: primaryColor }}>
-                    {business?.name || "Invoice"}
-                  </h2>
-                  {business?.address && (
-                    <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
-                      <MapPin className="w-3 h-3" />
-                      {business.address}
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-xs text-muted-foreground">Invoice</div>
-                <div className="font-semibold">#{invoice?.invoiceNumber}</div>
-                <div className={`rounded-full px-2.5 py-0.5 text-xs inline-block mt-1 ${
-                  invoice?.status === "PAID" ? "bg-emerald-500/20 text-emerald-300" :
-                  invoice?.status === "OVERDUE" ? "bg-red-500/20 text-red-300" :
-                  "bg-amber-500/20 text-amber-300"
-                }`}>
-                  {invoice?.status}
-                </div>
-              </div>
-            </div>
-
-            {business && (business.phone || business.email || business.website) && (
-              <div className="flex flex-wrap gap-3 text-xs text-muted-foreground border-t border-border/40 pt-3">
-                {business.phone && (
-                  <span className="flex items-center gap-1">
-                    <Phone className="w-3 h-3" />
-                    {business.phone}
-                  </span>
-                )}
-                {business.email && (
-                  <span className="flex items-center gap-1">
-                    <Mail className="w-3 h-3" />
-                    {business.email}
-                  </span>
-                )}
-                {business.website && (
-                  <span className="flex items-center gap-1">
-                    <Globe className="w-3 h-3" />
-                    {business.website}
-                  </span>
-                )}
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-4 text-sm border-t border-border/40 pt-4">
-              <div>
-                <div className="text-xs text-muted-foreground mb-1">Bill To</div>
-                {invoice?.contact ? (
-                  <>
-                    <div className="font-medium">{invoice.contact.firstName} {invoice.contact.lastName}</div>
-                    {invoice.contact.email && <div className="text-xs text-muted-foreground">{invoice.contact.email}</div>}
-                  </>
-                ) : (
-                  <div className="text-muted-foreground">-</div>
-                )}
-              </div>
-              <div className="text-right">
-                <div className="text-xs text-muted-foreground mb-1">Invoice Date</div>
-                <div className="text-sm">{invoice?.issueDate ? new Date(invoice.issueDate).toLocaleDateString() : "-"}</div>
-                {invoice?.dueDate && (
-                  <>
-                    <div className="text-xs text-muted-foreground mt-2 mb-1">Due Date</div>
-                    <div className="text-sm">{new Date(invoice.dueDate).toLocaleDateString()}</div>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {invoice?.items && invoice.items.length > 0 && (
-              <div className="border-t border-border/40 pt-4">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-xs text-muted-foreground border-b border-border/40">
-                      <th className="text-left pb-2">Description</th>
-                      <th className="text-center pb-2">Qty</th>
-                      <th className="text-right pb-2">Price</th>
-                      <th className="text-right pb-2">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {invoice.items.map((item) => (
-                      <tr key={item.id} className="border-b border-border/20">
-                        <td className="py-2">{item.description}</td>
-                        <td className="text-center py-2">{item.quantity}</td>
-                        <td className="text-right py-2">{invoice.currency} {item.unitPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                        <td className="text-right py-2">{invoice.currency} {item.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            <div className="border-t border-border/40 pt-4">
-              <div className="flex justify-end">
-                <div className="w-64 space-y-1.5 text-sm">
-                  <div className="flex justify-between text-muted-foreground">
-                    <span>Subtotal</span>
-                    <span>{invoice?.currency} {subtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                  </div>
-                  {taxRate > 0 && (
-                    <div className="flex justify-between text-muted-foreground">
-                      <span>Tax ({taxRate}%)</span>
-                      <span>{invoice?.currency} {taxAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                    </div>
-                  )}
-                  {discountAmount > 0 && (
-                    <div className="flex justify-between text-emerald-400">
-                      <span>Discount</span>
-                      <span>-{invoice?.currency} {discountAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between font-bold text-lg border-t border-border/40 pt-2" style={{ color: primaryColor }}>
-                    <span>Total</span>
-                    <span>{invoice?.currency} {total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {invoice?.notes && (
-              <div className="border-t border-border/40 pt-4">
-                <div className="text-xs text-muted-foreground mb-1">Notes</div>
-                <p className="text-sm">{invoice.notes}</p>
-              </div>
-            )}
-          </div>
-        </Card>
+        <InvoiceTemplateRenderer templateId={templateId} data={templateData} />
 
         {!paid && invoice?.status !== "PAID" && (
           <Card className="bg-slate-900/80 border-border/60 overflow-hidden">
