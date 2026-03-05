@@ -32,7 +32,9 @@ export const ProductCard = React.memo(function ProductCard({
   const displayCurrency = product.currency ?? currency;
 
   return (
-    <motion.button
+    <motion.div
+      role="button"
+      tabIndex={0}
       layout
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
@@ -41,6 +43,7 @@ export const ProductCard = React.memo(function ProductCard({
       whileHover={{ scale: 1.03 }}
       whileTap={{ scale: 0.97 }}
       onClick={() => onClick(product)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(product); } }}
       className={`group relative aspect-square rounded-xl border border-border/50 bg-card overflow-hidden transition-all duration-300 cursor-pointer text-left w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--kf-accent1))]/40 ${
         isInactive ? "opacity-50 grayscale-[40%]" : ""
       } hover:border-border/80 hover:shadow-lg hover:shadow-black/20`}
@@ -111,6 +114,6 @@ export const ProductCard = React.memo(function ProductCard({
           )}
         </div>
       </div>
-    </motion.button>
+    </motion.div>
   );
 });
