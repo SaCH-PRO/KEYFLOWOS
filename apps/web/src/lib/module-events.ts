@@ -25,6 +25,9 @@ export type ModuleEventType =
   | "commerce:create_invoice_for_contact"
   | "booking:created"
   | "booking:confirmed"
+  | "booking:cancelled"
+  | "booking:view_contact"
+  | "booking:create_invoice"
   | "module:tab_changed"
   | "module:view_changed";
 

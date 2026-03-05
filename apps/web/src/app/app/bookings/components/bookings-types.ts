@@ -1,7 +1,7 @@
 export type { Booking, Service, StaffMember, Contact, BookingStats } from "@/lib/client";
 import type { Booking } from "@/lib/client";
 
-export type Tab = "schedule" | "staff";
+export type Tab = "calendar" | "services" | "insights";
 export type StatusFilter = "ALL" | "PENDING" | "CONFIRMED" | "CANCELLED" | "COMPLETED";
 
 export const STATUS_COLORS: Record<string, string> = {
