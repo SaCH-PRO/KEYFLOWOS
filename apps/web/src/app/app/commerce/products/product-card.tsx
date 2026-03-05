@@ -76,14 +76,17 @@ export const ProductCard = React.memo(function ProductCard({
             </span>
           )}
           {onAiPricing && (
-            <button
+            <div
+              role="button"
+              tabIndex={0}
               onClick={(e) => { e.stopPropagation(); onAiPricing(product); }}
-              className="p-1 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/25 backdrop-blur-md hover:bg-purple-500/30 transition-colors opacity-0 group-hover:opacity-100"
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); e.preventDefault(); onAiPricing(product); } }}
+              className="p-1 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/25 backdrop-blur-md hover:bg-purple-500/30 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
               title="AI Pricing Advisor"
               aria-label="AI Pricing Advisor"
             >
               <Sparkles className="w-2.5 h-2.5" />
-            </button>
+            </div>
           )}
         </div>
       </div>
