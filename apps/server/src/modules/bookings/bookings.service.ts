@@ -90,6 +90,11 @@ export class BookingsService {
     }
 
     if (status === 'CANCELLED' && booking.contactId) {
+      this.events.emit('booking.cancelled', {
+        booking: updated,
+        contact: updated.contact ?? undefined,
+        businessId,
+      });
       await this.crm.logContactEvent({
         businessId,
         contactId: booking.contactId,

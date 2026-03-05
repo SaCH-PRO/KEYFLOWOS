@@ -4207,4 +4207,85 @@ export async function commerceAiQuoteAnalysis(businessId?: string): Promise<ApiR
   });
 }
 
+export type BookingsAiSearchResult = {
+  type: string;
+  filters: Record<string, unknown>;
+  interpretation: string;
+  confidence: number;
+  results: unknown[];
+};
+
+export type BookingsScheduleOptimizerResult = {
+  summary: string;
+  peakHours: { hour: number; bookings: number; label: string }[];
+  peakDays: { day: string; bookings: number }[];
+  gaps: { description: string; suggestion: string }[];
+  recommendations: { title: string; description: string; impact: string; category: string }[];
+  utilizationScore: number;
+  utilizationLabel: string;
+};
+
+export type BookingsNoShowResult = {
+  summary: string;
+  overallCancellationRate: number;
+  atRiskBookings: {
+    bookingId: string;
+    clientName: string;
+    serviceName: string;
+    scheduledTime: string;
+    riskScore: number;
+    riskLevel: string;
+    reasons: string[];
+    suggestedAction: string;
+  }[];
+  patterns: { pattern: string; impact: string }[];
+  recommendations: { title: string; description: string; expectedImpact: string }[];
+};
+
+export type BookingsRevenueInsightsResult = {
+  summary: string;
+  totalRevenue: number;
+  revenueGrowth: number;
+  averageBookingValue: number;
+  topServices: { name: string; revenue: number; bookings: number; revenuePerHour: number }[];
+  topStaff: { name: string; revenue: number; bookings: number }[];
+  peakHours: { hour: string; revenue: number }[];
+  trends: { trend: string; direction: string; impact: string }[];
+  recommendations: { title: string; description: string; expectedImpact: string; priority: string }[];
+  revenueHealthScore: number;
+  revenueHealthLabel: string;
+};
+
+export async function bookingsAiSearch(query: string, businessId?: string): Promise<ApiResult<BookingsAiSearchResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<BookingsAiSearchResult>({
+    path: `/bookings/businesses/${encodeURIComponent(bid)}/ai-search`,
+    body: { query },
+  });
+}
+
+export async function bookingsAiScheduleOptimizer(businessId?: string): Promise<ApiResult<BookingsScheduleOptimizerResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<BookingsScheduleOptimizerResult>({
+    path: `/bookings/businesses/${encodeURIComponent(bid)}/ai-schedule-optimizer`,
+    body: {},
+  });
+}
+
+export async function bookingsAiNoShowPredictor(businessId?: string): Promise<ApiResult<BookingsNoShowResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<BookingsNoShowResult>({
+    path: `/bookings/businesses/${encodeURIComponent(bid)}/ai-no-show-predictor`,
+    body: {},
+  });
+}
+
+export async function bookingsAiRevenueInsights(businessId?: string): Promise<ApiResult<BookingsRevenueInsightsResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<BookingsRevenueInsightsResult>({
+    path: `/bookings/businesses/${encodeURIComponent(bid)}/ai-revenue-insights`,
+    body: {},
+  });
+}
+
 export { DEFAULT_BUSINESS_ID };
