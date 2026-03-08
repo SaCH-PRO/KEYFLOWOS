@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Mail,
@@ -32,6 +32,20 @@ const STATUS_COLORS: Record<string, string> = {
   SENDING: "#3b82f6",
 };
 
+const ACCENT_COLORS: Record<string, string> = {
+  DRAFT: "#f59e0b",
+  SENT: "#22c55e",
+  SCHEDULED: "#3b82f6",
+  SENDING: "#6366f1",
+};
+
+const FILTER_PILLS = [
+  { key: "all", label: "All" },
+  { key: "draft", label: "Draft" },
+  { key: "sent", label: "Sent" },
+  { key: "scheduled", label: "Scheduled" },
+];
+
 interface CampaignsPanelProps {
   businessId: string | null;
   campaigns: EmailCampaign[];
@@ -58,6 +72,31 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
   const [campaignForm, setCampaignForm] = useState({ name: "", subject: "", body: "", segmentType: "all", tags: [] as string[], status: "" });
   const [confirmSendId, setConfirmSendId] = useState<string | null>(null);
   const [expandedCampaign, setExpandedCampaign] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<string>("newest");
+
+  const filtered = useMemo(() => {
+    const base = statusFilter === "all" ? campaigns : campaigns.filter(c => c.status === statusFilter.toUpperCase());
+    const sorted = [...base];
+    switch (sortBy) {
+      case "name":
+        sorted.sort((a, b) => a.name.localeCompare(b.name));
+        break;
+      case "recipients":
+        sorted.sort((a, b) => (b.totalRecipients ?? 0) - (a.totalRecipients ?? 0));
+        break;
+      case "openrate":
+        sorted.sort((a, b) => {
+          const rateA = a.sentCount ? (a.openCount ?? 0) / a.sentCount : 0;
+          const rateB = b.sentCount ? (b.openCount ?? 0) / b.sentCount : 0;
+          return rateB - rateA;
+        });
+        break;
+      default:
+        sorted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    }
+    return sorted;
+  }, [campaigns, statusFilter, sortBy]);
 
   const openNewCampaign = useCallback(() => {
     setEditingCampaign(null);
@@ -125,6 +164,34 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
   return (
     <>
       <div className="space-y-4">
+        <button data-marketing-new-campaign onClick={openNewCampaign} className="hidden" aria-hidden="true" tabIndex={-1} />
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            {FILTER_PILLS.map(pill => (
+              <button
+                key={pill.key}
+                onClick={() => setStatusFilter(pill.key)}
+                className={statusFilter === pill.key
+                  ? "text-[10px] px-2.5 py-1 rounded-lg font-medium transition-all bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]"
+                  : "text-[10px] px-2.5 py-1 rounded-lg font-medium transition-all text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                }
+              >
+                {pill.label}
+              </button>
+            ))}
+          </div>
+          <select
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value)}
+            className="bg-muted/30 border border-border/40 rounded-lg text-xs px-2 py-1 focus:outline-none"
+          >
+            <option value="newest">Newest</option>
+            <option value="name">Name</option>
+            <option value="recipients">Recipients</option>
+            <option value="openrate">Open Rate</option>
+          </select>
+        </div>
+        <p className="text-[11px] text-muted-foreground">{filtered.length} campaigns</p>
         {campaigns.length === 0 ? (
           <EmptyState
             icon={Mail}
@@ -134,8 +201,8 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
             onAction={openNewCampaign}
           />
         ) : (
-          campaigns.map(campaign => (
-            <motion.div key={campaign.id} layout className="kf-card border border-border/40 rounded-xl overflow-hidden">
+          filtered.map(campaign => (
+            <motion.div key={campaign.id} layout className="kf-card border border-border/40 rounded-xl overflow-hidden" style={{ borderLeft: `3px solid ${ACCENT_COLORS[campaign.status] || ACCENT_COLORS.DRAFT}` }}>
               <div className="p-4">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
