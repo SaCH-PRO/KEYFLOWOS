@@ -135,6 +135,29 @@ export class QuoteConvertedPayload {
   businessId!: string;
 }
 
+export class CampaignCreatedPayload {
+  campaign!: Record<string, any>;
+  businessId!: string;
+}
+
+export class CampaignSentPayload {
+  campaign!: Record<string, any>;
+  businessId!: string;
+  recipientCount!: number;
+}
+
+export class LeadFormCreatedPayload {
+  form!: Record<string, any>;
+  businessId!: string;
+}
+
+export class LeadFormSubmittedPayload {
+  submission!: Record<string, any>;
+  form!: Record<string, any>;
+  businessId!: string;
+  contactId!: string | null;
+}
+
 // Master event map for reference and typing
 export interface KeyFlowEventMap {
   'contact.created': ContactCreatedPayload;
@@ -159,4 +182,8 @@ export interface KeyFlowEventMap {
   'quote.created': QuoteCreatedPayload;
   'quote.sent': QuoteSentPayload;
   'quote.converted': QuoteConvertedPayload;
+  'campaign.created': CampaignCreatedPayload;
+  'campaign.sent': CampaignSentPayload;
+  'lead_form.created': LeadFormCreatedPayload;
+  'lead_form.submitted': LeadFormSubmittedPayload;
 }

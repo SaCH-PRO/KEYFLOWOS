@@ -3151,6 +3151,81 @@ export async function fetchLeadFormSubmissions(businessId: string, formId: strin
   return apiGetSimple<LeadFormSubmission[]>(`/businesses/${encodeURIComponent(businessId)}/lead-forms/${formId}/submissions`);
 }
 
+export interface MarketingAiSearchResult {
+  type: string;
+  interpretation: string;
+  confidence: number;
+  filters: Record<string, unknown>;
+  results: Record<string, unknown>[];
+}
+export interface MarketingAiContentResult {
+  subjectLines: { text: string; predictedOpenRate?: number }[];
+  bodyContent: string;
+  ctas: { text: string; style: string }[];
+  summary: string;
+}
+export interface MarketingAiPerformanceResult {
+  summary: string;
+  openRate: number;
+  clickRate: number;
+  trends: { label: string; direction: string; detail: string }[];
+  recommendations: { title: string; description: string; priority: string; expectedImpact?: string }[];
+}
+export interface MarketingAiAudienceResult {
+  summary: string;
+  segments: { name: string; description: string; size: number; predictedEngagement: number }[];
+  recommendations: { title: string; description: string; priority: string }[];
+}
+export interface MarketingAiSubjectLineResult {
+  original?: string;
+  variations: { text: string; predictedOpenRate: number; style: string }[];
+  bestPick: string;
+  tips: string[];
+}
+export interface MarketingAiFormOptimizerResult {
+  summary: string;
+  conversionRate: number;
+  fieldAnalysis: { field: string; issue?: string; suggestion: string; impact: string }[];
+  recommendations: { title: string; description: string; priority: string; expectedImpact?: string }[];
+}
+
+export async function marketingAiSearch(query: string, businessId: string): Promise<ApiResult<MarketingAiSearchResult>> {
+  return apiPost<MarketingAiSearchResult>({
+    path: `/marketing/businesses/${encodeURIComponent(businessId)}/marketing/ai-search`,
+    body: { query },
+  });
+}
+export async function marketingAiCampaignContent(query: string, businessId: string): Promise<ApiResult<MarketingAiContentResult>> {
+  return apiPost<MarketingAiContentResult>({
+    path: `/marketing/businesses/${encodeURIComponent(businessId)}/marketing/ai-campaign-content`,
+    body: { query },
+  });
+}
+export async function marketingAiPerformance(query: string, businessId: string): Promise<ApiResult<MarketingAiPerformanceResult>> {
+  return apiPost<MarketingAiPerformanceResult>({
+    path: `/marketing/businesses/${encodeURIComponent(businessId)}/marketing/ai-performance`,
+    body: { query },
+  });
+}
+export async function marketingAiAudience(query: string, businessId: string): Promise<ApiResult<MarketingAiAudienceResult>> {
+  return apiPost<MarketingAiAudienceResult>({
+    path: `/marketing/businesses/${encodeURIComponent(businessId)}/marketing/ai-audience`,
+    body: { query },
+  });
+}
+export async function marketingAiSubjectLines(query: string, businessId: string): Promise<ApiResult<MarketingAiSubjectLineResult>> {
+  return apiPost<MarketingAiSubjectLineResult>({
+    path: `/marketing/businesses/${encodeURIComponent(businessId)}/marketing/ai-subject-lines`,
+    body: { query },
+  });
+}
+export async function marketingAiFormOptimizer(query: string, businessId: string): Promise<ApiResult<MarketingAiFormOptimizerResult>> {
+  return apiPost<MarketingAiFormOptimizerResult>({
+    path: `/marketing/businesses/${encodeURIComponent(businessId)}/marketing/ai-form-optimizer`,
+    body: { query },
+  });
+}
+
 // ---
 // BUSINESS TEMPLATES
 // ---

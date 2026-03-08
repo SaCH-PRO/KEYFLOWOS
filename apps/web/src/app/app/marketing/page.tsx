@@ -1,48 +1,26 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Megaphone,
-  Plus,
-  Trash2,
-  Pencil,
-  Send,
   Mail,
-  MailOpen,
-  MousePointerClick,
-  Users,
-  Eye,
-  EyeOff,
-  Copy,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  X,
-  FileText,
-  ToggleLeft,
-  ToggleRight,
   ClipboardList,
-  Code,
+  BarChart3,
+  Send,
+  Lightbulb,
+  X,
   Facebook,
   Instagram,
   Linkedin,
   Twitter,
   Share2,
-  Lightbulb,
 } from "lucide-react";
 import {
   fetchCampaigns,
-  createCampaign,
-  updateCampaign,
-  deleteCampaign,
-  sendCampaign,
   fetchLeadForms,
-  createLeadForm,
-  updateLeadForm,
-  deleteLeadForm,
-  fetchLeadFormSubmissions,
   fetchContacts,
+  fetchLeadFormSubmissions,
   EmailCampaign,
   LeadForm,
   LeadFormSubmission,
@@ -52,21 +30,30 @@ import { getGmailAuthUrl } from "@/lib/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { ContactPickerDrawer } from "@/components/contacts";
 import { TabNav } from "@/components/ui/tab-nav";
-import { EmptyState } from "@/components/ui/empty-state";
 import { ConnectionBanner, ConnectionsSummary } from "@/components/ui/connection-banner";
 import { useConnections } from "@/hooks/use-connections";
+import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
+import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useRouter } from "next/navigation";
+import { useModuleEmit, useModuleEvent } from "@/hooks/use-module-events";
+import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
+import { useMarketingAiHub } from "./hooks/use-marketing-ai-hub";
+import { renderMarketingToolResult } from "./components/marketing-tool-results";
+import { MarketingAiSearchBar } from "./components/marketing-ai-search-bar";
+import { MarketingSkeleton } from "./components/marketing-skeleton";
+import { CampaignsPanel } from "./components/campaigns-panel";
+import { LeadFormsPanel } from "./components/lead-forms-panel";
+import MarketingInsightsTab from "./insights/marketing-insights-tab";
 
-const STATUS_COLORS: Record<string, string> = {
-  DRAFT: "#94a3b8",
-  SCHEDULED: "#f59e0b",
-  SENT: "#22c55e",
-  SENDING: "#3b82f6",
-};
+type MarketingTab = "campaigns" | "forms" | "insights";
 
-const FIELD_TYPES = ["text", "email", "phone", "select", "textarea"];
+const TABS: { key: MarketingTab; label: string; icon: React.ElementType }[] = [
+  { key: "campaigns", label: "Campaigns", icon: Mail },
+  { key: "forms", label: "Lead Forms", icon: ClipboardList },
+  { key: "insights", label: "Insights", icon: BarChart3 },
+];
 
-type FormField = { name: string; type: string; label: string; required: boolean };
+const TAB_KEYS = TABS.map((t) => t.key);
 
 const SOCIAL_PLATFORM_META: Record<string, { icon: React.ElementType; color: string }> = {
   facebook: { icon: Facebook, color: "#1877F2" },
@@ -75,20 +62,37 @@ const SOCIAL_PLATFORM_META: Record<string, { icon: React.ElementType; color: str
   twitter: { icon: Twitter, color: "#1DA1F2" },
 };
 
+const slideVariants = {
+  enter: (dir: number) => ({ x: dir > 0 ? 60 : -60, opacity: 0 }),
+  center: { x: 0, opacity: 1 },
+  exit: (dir: number) => ({ x: dir > 0 ? -60 : 60, opacity: 0 }),
+};
+
 export default function MarketingPage() {
   const router = useRouter();
+  const emitEvent = useModuleEmit();
+  const marketingAi = useMarketingAiHub();
   const [businessId, setBusinessId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"campaigns" | "forms">("campaigns");
+  const [activeTab, setActiveTab] = useState<MarketingTab>("campaigns");
   const [loading, setLoading] = useState(true);
   const { gmailConnected, gmailEmail, socialConnections, loading: connectionsLoading } = useConnections();
 
-  const handleGmailConnect = async () => {
+  const [campaigns, setCampaigns] = useState<EmailCampaign[]>([]);
+  const [forms, setForms] = useState<LeadForm[]>([]);
+  const [submissions, setSubmissions] = useState<Record<string, LeadFormSubmission[]>>({});
+  const [availableTags, setAvailableTags] = useState<string[]>([]);
+  const [showContactPicker, setShowContactPicker] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
+
+  const directionRef = useRef<number>(0);
+
+  const handleGmailConnect = useCallback(async () => {
     if (!businessId) return;
     const res = await getGmailAuthUrl(businessId);
     if (res?.data?.url) window.location.href = res.data.url;
-  };
+  }, [businessId]);
 
-  const socialSummary = ["facebook", "instagram", "linkedin", "twitter"].map((platform) => {
+  const socialSummary = useMemo(() => ["facebook", "instagram", "linkedin", "twitter"].map((platform) => {
     const conn = socialConnections.find((c) => c.platform.toLowerCase() === platform);
     const meta = SOCIAL_PLATFORM_META[platform] || { icon: Share2, color: "#6366f1" };
     return {
@@ -97,25 +101,7 @@ export default function MarketingPage() {
       color: meta.color,
       connected: conn?.status === "CONNECTED",
     };
-  });
-
-  const [campaigns, setCampaigns] = useState<EmailCampaign[]>([]);
-  const [showCampaignModal, setShowCampaignModal] = useState(false);
-  const [editingCampaign, setEditingCampaign] = useState<EmailCampaign | null>(null);
-  const [campaignForm, setCampaignForm] = useState({ name: "", subject: "", body: "", segmentType: "all", tags: [] as string[], status: "" });
-  const [confirmSendId, setConfirmSendId] = useState<string | null>(null);
-  const [expandedCampaign, setExpandedCampaign] = useState<string | null>(null);
-
-  const [forms, setForms] = useState<LeadForm[]>([]);
-  const [showFormModal, setShowFormModal] = useState(false);
-  const [editingForm, setEditingForm] = useState<LeadForm | null>(null);
-  const [formBuilder, setFormBuilder] = useState({ name: "", description: "", fields: [{ name: "email", type: "email", label: "Email", required: true }] as FormField[], thankYouMessage: "Thank you for your submission!", redirectUrl: "" });
-  const [expandedForm, setExpandedForm] = useState<string | null>(null);
-  const [submissions, setSubmissions] = useState<Record<string, LeadFormSubmission[]>>({});
-  const [copiedEmbed, setCopiedEmbed] = useState<string | null>(null);
-  const [availableTags, setAvailableTags] = useState<string[]>([]);
-  const [showContactPicker, setShowContactPicker] = useState(false);
-  const [showGuide, setShowGuide] = useState(false);
+  }), [socialConnections]);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -132,7 +118,19 @@ export default function MarketingPage() {
         fetchContacts(businessId, { take: 200 }),
       ]);
       if (campaignsRes.data) setCampaigns(campaignsRes.data);
-      if (formsRes.data) setForms(formsRes.data);
+      if (formsRes.data) {
+        setForms(formsRes.data);
+        const subsMap: Record<string, LeadFormSubmission[]> = {};
+        await Promise.all(
+          formsRes.data.map(async (f) => {
+            try {
+              const subRes = await fetchLeadFormSubmissions(businessId, f.id);
+              if (subRes.data) subsMap[f.id] = subRes.data;
+            } catch {}
+          })
+        );
+        setSubmissions(subsMap);
+      }
       if (contactsRes.data?.contacts) {
         const tags = new Set<string>();
         contactsRes.data.contacts.forEach(c => c.tags?.forEach(t => tags.add(t)));
@@ -144,173 +142,133 @@ export default function MarketingPage() {
 
   useEffect(() => { void loadData(); }, [loadData]);
 
-  const openNewCampaign = () => {
-    setEditingCampaign(null);
-    setCampaignForm({ name: "", subject: "", body: "", segmentType: "all", tags: [], status: "" });
-    setShowCampaignModal(true);
-  };
+  const handleTabChange = useCallback((key: string) => {
+    const newIndex = TAB_KEYS.indexOf(key as MarketingTab);
+    const oldIndex = TAB_KEYS.indexOf(activeTab);
+    directionRef.current = newIndex > oldIndex ? 1 : -1;
+    setActiveTab(key as MarketingTab);
+    emitEvent("module:tab_changed", "marketing", { tab: key });
+  }, [activeTab, emitEvent]);
 
-  const openEditCampaign = (c: EmailCampaign) => {
-    setEditingCampaign(c);
-    const segType = c.segmentFilter?.tags?.length ? "tags" : c.segmentFilter?.status ? "status" : "all";
-    setCampaignForm({
-      name: c.name,
-      subject: c.subject,
-      body: c.body,
-      segmentType: segType,
-      tags: c.segmentFilter?.tags || [],
-      status: c.segmentFilter?.status || "",
-    });
-    setShowCampaignModal(true);
-  };
+  const { swipeHandlers } = useSwipeTabs({
+    tabs: TAB_KEYS,
+    activeTab,
+    onTabChange: handleTabChange,
+  });
 
-  const handleSaveCampaign = async () => {
-    if (!businessId || !campaignForm.name.trim() || !campaignForm.subject.trim()) return;
-    const segmentFilter: { tags?: string[]; status?: string } = {};
-    if (campaignForm.segmentType === "tags" && campaignForm.tags.length) segmentFilter.tags = campaignForm.tags;
-    if (campaignForm.segmentType === "status" && campaignForm.status) segmentFilter.status = campaignForm.status;
-
-    const data = { name: campaignForm.name, subject: campaignForm.subject, body: campaignForm.body, segmentFilter };
-    if (editingCampaign) {
-      const res = await updateCampaign(businessId, editingCampaign.id, data);
-      if (res.data) setCampaigns(prev => prev.map(c => c.id === editingCampaign.id ? res.data! : c));
-    } else {
-      const res = await createCampaign(businessId, data);
-      if (res.data) setCampaigns(prev => [res.data!, ...prev]);
+  useEffect(() => {
+    if (businessId) {
+      marketingAi.updateMarketingContext({
+        businessId,
+        activeView: activeTab,
+        itemCount: activeTab === "campaigns" ? campaigns.length : forms.length,
+        campaigns,
+        forms,
+      });
     }
-    setShowCampaignModal(false);
-  };
+  }, [businessId, activeTab, campaigns.length, forms.length, marketingAi.updateMarketingContext]);
 
-  const handleDeleteCampaign = async (id: string) => {
-    if (!businessId) return;
-    await deleteCampaign(businessId, id);
-    setCampaigns(prev => prev.filter(c => c.id !== id));
-  };
+  useModuleEvent("marketing:create_campaign_for_segment", useCallback((event: any) => {
+    const { segmentTags, segmentStatus } = event.data ?? {};
+    handleTabChange("campaigns");
+    const el = document.querySelector<HTMLButtonElement>('[data-marketing-new-campaign]');
+    el?.click();
+  }, [handleTabChange]));
 
-  const handleSendCampaign = async (id: string) => {
-    if (!businessId) return;
-    const res = await sendCampaign(businessId, id);
-    if (res.data) setCampaigns(prev => prev.map(c => c.id === id ? res.data! : c));
-    setConfirmSendId(null);
-  };
+  const handleViewContact = useCallback((contactId: string) => {
+    emitEvent("marketing:view_contact", "marketing", { contactId });
+    router.push(`/app/crm/contacts/${contactId}`);
+  }, [emitEvent, router]);
 
-  const openNewForm = () => {
-    setEditingForm(null);
-    setFormBuilder({ name: "", description: "", fields: [{ name: "email", type: "email", label: "Email", required: true }], thankYouMessage: "Thank you for your submission!", redirectUrl: "" });
-    setShowFormModal(true);
-  };
+  const handleCampaignCreated = useCallback((campaign: EmailCampaign) => {
+    emitEvent("marketing:campaign_created", "marketing", { campaignId: campaign.id, name: campaign.name });
+  }, [emitEvent]);
 
-  const openEditForm = (f: LeadForm) => {
-    setEditingForm(f);
-    setFormBuilder({
-      name: f.name,
-      description: f.description || "",
-      fields: f.fields.length ? f.fields : [{ name: "email", type: "email", label: "Email", required: true }],
-      thankYouMessage: f.settings?.thankYouMessage || "Thank you for your submission!",
-      redirectUrl: f.settings?.redirectUrl || "",
-    });
-    setShowFormModal(true);
-  };
+  const handleCampaignSent = useCallback((campaign: EmailCampaign) => {
+    emitEvent("marketing:campaign_sent", "marketing", { campaignId: campaign.id, name: campaign.name, recipientCount: campaign.totalRecipients });
+  }, [emitEvent]);
 
-  const handleSaveForm = async () => {
-    if (!businessId || !formBuilder.name.trim()) return;
-    const data = {
-      name: formBuilder.name,
-      description: formBuilder.description,
-      fields: formBuilder.fields.map(f => ({ ...f, name: f.label.toLowerCase().replace(/\s+/g, "_") })),
-      settings: { thankYouMessage: formBuilder.thankYouMessage, redirectUrl: formBuilder.redirectUrl },
-    };
-    if (editingForm) {
-      const res = await updateLeadForm(businessId, editingForm.id, data);
-      if (res.data) setForms(prev => prev.map(f => f.id === editingForm.id ? res.data! : f));
-    } else {
-      const res = await createLeadForm(businessId, data);
-      if (res.data) setForms(prev => [res.data!, ...prev]);
+  const handleAiWrite = useCallback(() => {
+    if (!marketingAi.panelOpen) marketingAi.setOpen(true);
+    marketingAi.executeTool("campaign-content-generator");
+  }, [marketingAi]);
+
+  const handleAiOptimizeForm = useCallback(() => {
+    if (!marketingAi.panelOpen) marketingAi.setOpen(true);
+    marketingAi.executeTool("lead-form-optimizer");
+  }, [marketingAi]);
+
+  const handleAiAnalyze = useCallback(() => {
+    if (!marketingAi.panelOpen) marketingAi.setOpen(true);
+    marketingAi.executeTool("campaign-performance");
+  }, [marketingAi]);
+
+  const handleAiAssistantAction = useCallback((actionKey: string) => {
+    if (actionKey.startsWith("filter_status:")) {
+      handleTabChange("campaigns");
+    } else if (actionKey.startsWith("switch_tab:")) {
+      const t = actionKey.split(":")[1];
+      handleTabChange(t);
+    } else if (actionKey.startsWith("tool:")) {
+      const toolId = actionKey.split(":")[1];
+      if (!marketingAi.panelOpen) marketingAi.setOpen(true);
+      marketingAi.executeTool(toolId);
     }
-    setShowFormModal(false);
-  };
+  }, [handleTabChange, marketingAi]);
 
-  const handleToggleForm = async (form: LeadForm) => {
-    if (!businessId) return;
-    const res = await updateLeadForm(businessId, form.id, { isActive: !form.isActive });
-    if (res.data) setForms(prev => prev.map(f => f.id === form.id ? res.data! : f));
-  };
-
-  const handleDeleteForm = async (id: string) => {
-    if (!businessId) return;
-    await deleteLeadForm(businessId, id);
-    setForms(prev => prev.filter(f => f.id !== id));
-  };
-
-  const loadSubmissions = async (formId: string) => {
-    if (!businessId) return;
-    if (expandedForm === formId) { setExpandedForm(null); return; }
-    setExpandedForm(formId);
-    if (!submissions[formId]) {
-      const res = await fetchLeadFormSubmissions(businessId, formId);
-      if (res.data) setSubmissions(prev => ({ ...prev, [formId]: res.data! }));
+  const handleNewItem = useCallback(() => {
+    if (activeTab === "campaigns") {
+      const el = document.querySelector<HTMLButtonElement>('[data-marketing-new-campaign]');
+      el?.click();
+    } else if (activeTab === "forms") {
+      const el = document.querySelector<HTMLButtonElement>('[data-marketing-new-form]');
+      el?.click();
     }
-  };
+  }, [activeTab]);
 
-  const copyEmbed = (formId: string) => {
-    const url = `${window.location.origin}/forms/${formId}`;
-    const snippet = `<iframe src="${url}" width="100%" height="500" frameborder="0"></iframe>`;
-    navigator.clipboard.writeText(snippet);
-    setCopiedEmbed(formId);
-    setTimeout(() => setCopiedEmbed(null), 2000);
-  };
+  const marketingShortcuts = useMemo<ShortcutGroup[]>(() => [
+    {
+      groupName: "Marketing Navigation",
+      shortcuts: [
+        { key: "1", description: "Campaigns tab", action: () => handleTabChange("campaigns") },
+        { key: "2", description: "Lead Forms tab", action: () => handleTabChange("forms") },
+        { key: "3", description: "Insights tab", action: () => handleTabChange("insights") },
+        { key: "n", description: "New campaign/form", action: handleNewItem },
+        { key: "r", description: "Refresh data", action: () => { void loadData(); } },
+        { key: "f", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('[data-marketing-ai-search]'); el?.focus(); } },
+        { key: "a", shift: true, description: "Toggle AI Hub", action: () => marketingAi.togglePanel() },
+        { key: "Escape", description: "Close panels", action: () => {
+          if (marketingAi.hubMode === "tool-result") marketingAi.clearToolResult();
+          else if (marketingAi.panelOpen) marketingAi.setOpen(false);
+          else { setShowGuide(false); setShowContactPicker(false); }
+        } },
+      ],
+    },
+  ], [handleTabChange, handleNewItem, loadData, marketingAi.togglePanel, marketingAi.panelOpen, marketingAi.setOpen, marketingAi.hubMode, marketingAi.clearToolResult]);
 
-  const addField = () => {
-    setFormBuilder(prev => ({
-      ...prev,
-      fields: [...prev.fields, { name: "", type: "text", label: "", required: false }],
-    }));
-  };
-
-  const removeField = (index: number) => {
-    setFormBuilder(prev => ({ ...prev, fields: prev.fields.filter((_, i) => i !== index) }));
-  };
-
-  const updateField = (index: number, updates: Partial<FormField>) => {
-    setFormBuilder(prev => ({
-      ...prev,
-      fields: prev.fields.map((f, i) => i === index ? { ...f, ...updates } : f),
-    }));
-  };
-
-  const toggleTag = (tag: string) => {
-    setCampaignForm(prev => ({
-      ...prev,
-      tags: prev.tags.includes(tag) ? prev.tags.filter(t => t !== tag) : [...prev.tags, tag],
-    }));
-  };
+  useKeyboardShortcuts(marketingShortcuts, !loading);
 
   if (loading) {
     return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl md:text-2xl font-semibold tracking-tight">Marketing</h1>
-            <p className="text-sm text-muted-foreground">Loading...</p>
-          </div>
-        </div>
-        <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="rounded-2xl border border-border/60 bg-slate-950/70 p-4 h-32 animate-pulse" />
-          ))}
-        </div>
+      <div className="space-y-6">
+        <PageHeader
+          icon={Megaphone}
+          title="Marketing"
+          subtitle="Campaigns, lead forms & insights"
+        />
+        <MarketingSkeleton />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" aria-label="Marketing">
       <PageHeader
         icon={Megaphone}
         title="Marketing"
         subtitle={`${campaigns.length} campaigns · ${forms.length} lead forms`}
-        actionLabel={activeTab === "campaigns" ? "New Campaign" : "New Form"}
-        onAction={activeTab === "campaigns" ? openNewCampaign : openNewForm}
+        actionLabel={activeTab === "campaigns" ? "New Campaign" : activeTab === "forms" ? "New Form" : undefined}
+        onAction={activeTab === "insights" ? undefined : handleNewItem}
         titleExtra={
           <div className="relative">
             <button
@@ -344,7 +302,7 @@ export default function MarketingPage() {
                         <h4 className="text-sm font-semibold">Getting Started</h4>
                         <p className="text-[11px] text-muted-foreground">Your quick-start guide</p>
                       </div>
-                      <button onClick={() => setShowGuide(false)} className="ml-auto p-1 rounded hover:bg-muted/50">
+                      <button onClick={() => setShowGuide(false)} className="ml-auto p-1 rounded hover:bg-muted/50" aria-label="Close guide">
                         <X className="w-3.5 h-3.5 text-muted-foreground" />
                       </button>
                     </div>
@@ -378,6 +336,7 @@ export default function MarketingPage() {
           <button
             onClick={() => setShowContactPicker(true)}
             className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="Broadcast"
           >
             <Send className="w-4 h-4" />
             Broadcast
@@ -405,435 +364,82 @@ export default function MarketingPage() {
         </div>
       )}
 
+      <MarketingAiSearchBar businessId={businessId} />
+
+      <AnimatePresence>
+        {marketingAi.panelOpen && (
+          <AiCommandHub
+            ai={marketingAi}
+            moduleName="Marketing"
+            onAction={handleAiAssistantAction}
+            toolResultRenderer={renderMarketingToolResult}
+          />
+        )}
+      </AnimatePresence>
+      <AiHubTrigger ai={marketingAi} moduleName="Marketing" />
+
       <TabNav
-        tabs={[
-          { key: "campaigns", label: "Campaigns", icon: Mail },
-          { key: "forms", label: "Lead Forms", icon: ClipboardList },
-        ]}
+        tabs={TABS}
         activeTab={activeTab}
-        onTabChange={(key) => setActiveTab(key as "campaigns" | "forms")}
+        onTabChange={handleTabChange}
         layoutId="marketing-tab-pill"
       />
 
-      <AnimatePresence mode="wait">
-        {activeTab === "campaigns" ? (
-          <motion.div key="campaigns" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
-            {campaigns.length === 0 ? (
-              <EmptyState
-                icon={Mail}
-                title="No campaigns yet"
-                description="Create your first email campaign to start reaching your contacts."
-                actionLabel="New Campaign"
-                onAction={openNewCampaign}
+      <div {...swipeHandlers} className="touch-pan-y">
+        <AnimatePresence mode="wait" custom={directionRef.current}>
+          <motion.div
+            key={activeTab}
+            custom={directionRef.current}
+            variants={slideVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ type: "spring", bounce: 0.15, duration: 0.35 }}
+          >
+            {activeTab === "campaigns" && (
+              <CampaignsPanel
+                businessId={businessId}
+                campaigns={campaigns}
+                setCampaigns={setCampaigns}
+                availableTags={availableTags}
+                onCampaignCreated={handleCampaignCreated}
+                onCampaignSent={handleCampaignSent}
+                onViewContact={handleViewContact}
+                onAiWrite={handleAiWrite}
               />
-            ) : (
-              campaigns.map(campaign => (
-                <motion.div key={campaign.id} layout className="bg-white/5 backdrop-blur border border-white/10 rounded-xl overflow-hidden">
-                  <div className="p-4">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-3 mb-1">
-                          <h3 className="text-sm font-semibold truncate">{campaign.name}</h3>
-                          <span
-                            className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
-                            style={{ background: `${STATUS_COLORS[campaign.status] || STATUS_COLORS.DRAFT}20`, color: STATUS_COLORS[campaign.status] || STATUS_COLORS.DRAFT }}
-                          >
-                            {campaign.status}
-                          </span>
-                        </div>
-                        <p className="text-xs text-muted-foreground truncate">{campaign.subject}</p>
-                        <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                          <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {campaign.totalRecipients} recipients</span>
-                          {campaign.status === "SENT" && (
-                            <>
-                              <span className="flex items-center gap-1"><Send className="w-3 h-3" /> {campaign.sentCount} sent</span>
-                              <span className="flex items-center gap-1"><MailOpen className="w-3 h-3" /> {campaign.openCount} opened</span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        {campaign.status === "DRAFT" && (
-                          <>
-                            <button onClick={() => openEditCampaign(campaign)} className="p-1.5 rounded-lg text-muted-foreground hover:text-white hover:bg-white/10 transition-colors">
-                              <Pencil className="w-4 h-4" />
-                            </button>
-                            <button onClick={() => setConfirmSendId(campaign.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors">
-                              <Send className="w-4 h-4" />
-                            </button>
-                          </>
-                        )}
-                        {campaign.status === "SENT" && (
-                          <button onClick={() => setExpandedCampaign(expandedCampaign === campaign.id ? null : campaign.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-white hover:bg-white/10 transition-colors">
-                            {expandedCampaign === campaign.id ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                          </button>
-                        )}
-                        <button onClick={() => handleDeleteCampaign(campaign.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <AnimatePresence>
-                    {expandedCampaign === campaign.id && campaign.status === "SENT" && (
-                      <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
-                        <div className="px-4 pb-4 pt-2 border-t border-white/5">
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                            {[
-                              { label: "Recipients", value: campaign.totalRecipients, icon: Users, color: "#6366f1" },
-                              { label: "Sent", value: campaign.sentCount, icon: Send, color: "#3b82f6" },
-                              { label: "Opened", value: campaign.openCount, icon: MailOpen, color: "#22c55e" },
-                              { label: "Clicked", value: campaign.clickCount, icon: MousePointerClick, color: "#f59e0b" },
-                            ].map(stat => (
-                              <div key={stat.label} className="bg-white/5 rounded-lg p-3 text-center">
-                                <stat.icon className="w-4 h-4 mx-auto mb-1" style={{ color: stat.color }} />
-                                <p className="text-lg font-bold">{stat.value}</p>
-                                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{stat.label}</p>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </motion.div>
-              ))
             )}
-          </motion.div>
-        ) : (
-          <motion.div key="forms" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
-            {forms.length === 0 ? (
-              <EmptyState
-                icon={ClipboardList}
-                title="No lead forms yet"
-                description="Create a lead capture form to grow your contact list."
-                actionLabel="New Form"
-                onAction={openNewForm}
+            {activeTab === "forms" && (
+              <LeadFormsPanel
+                businessId={businessId}
+                forms={forms}
+                setForms={setForms}
+                onViewContact={handleViewContact}
+                onAiOptimize={handleAiOptimizeForm}
               />
-            ) : (
-              forms.map(form => (
-                <motion.div key={form.id} layout className="bg-white/5 backdrop-blur border border-white/10 rounded-xl overflow-hidden">
-                  <div className="p-4">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-3 mb-1">
-                          <h3 className="text-sm font-semibold truncate">{form.name}</h3>
-                          <button
-                            onClick={() => handleToggleForm(form)}
-                            className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full transition-colors"
-                            style={{
-                              background: form.isActive ? "#22c55e20" : "#94a3b820",
-                              color: form.isActive ? "#22c55e" : "#94a3b8",
-                            }}
-                          >
-                            {form.isActive ? <ToggleRight className="w-3 h-3" /> : <ToggleLeft className="w-3 h-3" />}
-                            {form.isActive ? "Active" : "Inactive"}
-                          </button>
-                        </div>
-                        {form.description && <p className="text-xs text-muted-foreground mb-2">{form.description}</p>}
-                        <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                          <span className="flex items-center gap-1"><FileText className="w-3 h-3" /> {form.fields.length} fields</span>
-                          <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {form._count?.submissions ?? 0} submissions</span>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <button onClick={() => loadSubmissions(form.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-white hover:bg-white/10 transition-colors" title="View submissions">
-                          {expandedForm === form.id ? <ChevronDown className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                        </button>
-                        <button onClick={() => copyEmbed(form.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-white hover:bg-white/10 transition-colors" title="Copy embed code">
-                          {copiedEmbed === form.id ? <Check className="w-4 h-4 text-emerald-400" /> : <Code className="w-4 h-4" />}
-                        </button>
-                        <button onClick={() => openEditForm(form)} className="p-1.5 rounded-lg text-muted-foreground hover:text-white hover:bg-white/10 transition-colors">
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button onClick={() => handleDeleteForm(form.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <AnimatePresence>
-                    {expandedForm === form.id && (
-                      <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
-                        <div className="px-4 pb-4 pt-2 border-t border-white/5">
-                          <div className="mb-3 flex items-center justify-between">
-                            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Submissions</h4>
-                            <div className="bg-white/5 rounded-lg px-2.5 py-1 text-[10px] text-muted-foreground font-mono flex items-center gap-2">
-                              <Code className="w-3 h-3" />
-                              <span className="truncate max-w-[200px]">{`<iframe src="${typeof window !== 'undefined' ? window.location.origin : ''}/forms/${form.id}" ...>`}</span>
-                              <button onClick={() => copyEmbed(form.id)} className="hover:text-white"><Copy className="w-3 h-3" /></button>
-                            </div>
-                          </div>
-                          {(submissions[form.id] || []).length === 0 ? (
-                            <p className="text-xs text-muted-foreground py-4 text-center">No submissions yet</p>
-                          ) : (
-                            <div className="space-y-2 max-h-64 overflow-y-auto">
-                              {(submissions[form.id] || []).map(sub => (
-                                <div key={sub.id} className="bg-white/5 rounded-lg p-3 text-xs">
-                                  <div className="flex items-center justify-between mb-1.5">
-                                    <span className="text-muted-foreground">{new Date(sub.createdAt).toLocaleString()}</span>
-                                    {sub.source && <span className="text-[10px] text-muted-foreground px-1.5 py-0.5 bg-white/5 rounded">{sub.source}</span>}
-                                  </div>
-                                  <div className="grid grid-cols-2 gap-1.5">
-                                    {Object.entries(sub.data).map(([key, value]) => (
-                                      <div key={key}>
-                                        <span className="text-muted-foreground capitalize">{key.replace(/_/g, " ")}: </span>
-                                        <span className="text-white">{value}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </motion.div>
-              ))
             )}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {showCampaignModal && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setShowCampaignModal(false)}>
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} onClick={e => e.stopPropagation()} className="relative w-full max-w-lg bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-h-[85vh] overflow-y-auto">
-              <div className="flex items-center justify-between p-4 border-b border-white/5">
-                <h2 className="text-lg font-semibold">{editingCampaign ? "Edit Campaign" : "New Campaign"}</h2>
-                <button onClick={() => setShowCampaignModal(false)} className="p-1 text-muted-foreground hover:text-white"><X className="w-5 h-5" /></button>
-              </div>
-              <div className="p-4 space-y-4">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground block mb-1">Campaign Name</label>
-                  <input
-                    value={campaignForm.name}
-                    onChange={e => setCampaignForm(p => ({ ...p, name: e.target.value }))}
-                    placeholder="e.g. Monthly Newsletter"
-                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground block mb-1">Subject Line</label>
-                  <input
-                    value={campaignForm.subject}
-                    onChange={e => setCampaignForm(p => ({ ...p, subject: e.target.value }))}
-                    placeholder="e.g. Exciting updates for you!"
-                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground block mb-1">Body</label>
-                  <textarea
-                    value={campaignForm.body}
-                    onChange={e => setCampaignForm(p => ({ ...p, body: e.target.value }))}
-                    rows={6}
-                    placeholder="Write your email content here..."
-                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))] resize-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground block mb-1">Segment</label>
-                  <div className="flex gap-2 mb-2">
-                    {[
-                      { key: "all", label: "All Contacts" },
-                      { key: "tags", label: "By Tag" },
-                      { key: "status", label: "By Status" },
-                    ].map(opt => (
-                      <button
-                        key={opt.key}
-                        onClick={() => setCampaignForm(p => ({ ...p, segmentType: opt.key }))}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                          campaignForm.segmentType === opt.key
-                            ? "bg-white/10 text-white border border-white/20"
-                            : "text-muted-foreground hover:text-white bg-white/5 border border-transparent"
-                        }`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                  {campaignForm.segmentType === "tags" && (
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                      {availableTags.length > 0 ? availableTags.map(tag => (
-                        <button
-                          key={tag}
-                          onClick={() => toggleTag(tag)}
-                          className={`px-2.5 py-1 rounded-full text-xs transition-all ${
-                            campaignForm.tags.includes(tag)
-                              ? "bg-[hsl(var(--kf-accent1))]/20 text-[hsl(var(--kf-accent1))] border border-[hsl(var(--kf-accent1))]/40"
-                              : "bg-white/5 text-muted-foreground border border-white/10 hover:bg-white/10"
-                          }`}
-                        >
-                          {tag}
-                        </button>
-                      )) : (
-                        <p className="text-xs text-muted-foreground">No tags found on contacts</p>
-                      )}
-                    </div>
-                  )}
-                  {campaignForm.segmentType === "status" && (
-                    <select
-                      value={campaignForm.status}
-                      onChange={e => setCampaignForm(p => ({ ...p, status: e.target.value }))}
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none mt-2"
-                    >
-                      <option value="">Select status...</option>
-                      <option value="LEAD">Lead</option>
-                      <option value="PROSPECT">Prospect</option>
-                      <option value="CLIENT">Client</option>
-                      <option value="LOST">Lost</option>
-                    </select>
-                  )}
-                </div>
-              </div>
-              <div className="flex gap-2 p-4 border-t border-white/5">
-                <button onClick={handleSaveCampaign} disabled={!campaignForm.name.trim() || !campaignForm.subject.trim()} className="kf-btn-primary px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-40 flex-1">
-                  {editingCampaign ? "Save Changes" : "Create Campaign"}
-                </button>
-                <button onClick={() => setShowCampaignModal(false)} className="px-4 py-2 rounded-xl text-sm text-muted-foreground hover:bg-white/5 transition-colors">
-                  Cancel
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {confirmSendId && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setConfirmSendId(null)} />
-            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="relative bg-slate-900 border border-white/10 rounded-2xl p-6 max-w-sm w-full">
-              <div className="text-center">
-                <Send className="w-10 h-10 mx-auto mb-3" style={{ color: "hsl(var(--kf-accent1))" }} />
-                <h3 className="text-lg font-semibold mb-2">Send Campaign?</h3>
-                <p className="text-sm text-muted-foreground mb-4">
-                  This will send the email to all matching recipients. This action cannot be undone.
-                </p>
-                <div className="flex gap-2">
-                  <button onClick={() => handleSendCampaign(confirmSendId)} className="kf-btn-primary px-4 py-2 rounded-xl text-sm font-medium flex-1">
-                    Yes, Send Now
-                  </button>
-                  <button onClick={() => setConfirmSendId(null)} className="px-4 py-2 rounded-xl text-sm text-muted-foreground hover:bg-white/5 flex-1">
-                    Cancel
+            {activeTab === "insights" && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-end">
+                  <button
+                    onClick={handleAiAnalyze}
+                    className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/20 transition-colors"
+                    aria-label="AI Analyze"
+                  >
+                    <BarChart3 className="w-3.5 h-3.5" />
+                    AI Analyze
                   </button>
                 </div>
+                <MarketingInsightsTab
+                  campaigns={campaigns}
+                  forms={forms}
+                  submissions={submissions}
+                />
               </div>
-            </motion.div>
+            )}
           </motion.div>
-        )}
-      </AnimatePresence>
+        </AnimatePresence>
+      </div>
 
-      <AnimatePresence>
-        {showFormModal && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setShowFormModal(false)}>
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} onClick={e => e.stopPropagation()} className="relative w-full max-w-lg bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-h-[85vh] overflow-y-auto">
-              <div className="flex items-center justify-between p-4 border-b border-white/5">
-                <h2 className="text-lg font-semibold">{editingForm ? "Edit Form" : "New Lead Form"}</h2>
-                <button onClick={() => setShowFormModal(false)} className="p-1 text-muted-foreground hover:text-white"><X className="w-5 h-5" /></button>
-              </div>
-              <div className="p-4 space-y-4">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground block mb-1">Form Name</label>
-                  <input
-                    value={formBuilder.name}
-                    onChange={e => setFormBuilder(p => ({ ...p, name: e.target.value }))}
-                    placeholder="e.g. Contact Us"
-                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground block mb-1">Description</label>
-                  <textarea
-                    value={formBuilder.description}
-                    onChange={e => setFormBuilder(p => ({ ...p, description: e.target.value }))}
-                    rows={2}
-                    placeholder="Optional description..."
-                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))] resize-none"
-                  />
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="text-xs font-medium text-muted-foreground">Fields</label>
-                    <button onClick={addField} className="text-xs flex items-center gap-1 px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-muted-foreground hover:text-white transition-colors">
-                      <Plus className="w-3 h-3" /> Add Field
-                    </button>
-                  </div>
-                  <div className="space-y-2">
-                    {formBuilder.fields.map((field, i) => (
-                      <div key={i} className="bg-white/5 border border-white/10 rounded-lg p-3 space-y-2">
-                        <div className="flex items-center gap-2">
-                          <input
-                            value={field.label}
-                            onChange={e => updateField(i, { label: e.target.value })}
-                            placeholder="Field label"
-                            className="flex-1 bg-transparent border border-white/10 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-[hsl(var(--kf-accent1))]"
-                          />
-                          <select
-                            value={field.type}
-                            onChange={e => updateField(i, { type: e.target.value })}
-                            className="bg-white/5 border border-white/10 rounded px-2 py-1.5 text-xs focus:outline-none"
-                          >
-                            {FIELD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                          </select>
-                          <button
-                            onClick={() => updateField(i, { required: !field.required })}
-                            className={`text-[10px] font-bold px-2 py-1 rounded transition-colors ${
-                              field.required ? "bg-amber-500/20 text-amber-400" : "bg-white/5 text-muted-foreground"
-                            }`}
-                          >
-                            {field.required ? "Required" : "Optional"}
-                          </button>
-                          <button onClick={() => removeField(i)} className="p-1 text-muted-foreground hover:text-red-400 transition-colors">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="border-t border-white/5 pt-4 space-y-3">
-                  <h4 className="text-xs font-medium text-muted-foreground">Settings</h4>
-                  <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Thank You Message</label>
-                    <input
-                      value={formBuilder.thankYouMessage}
-                      onChange={e => setFormBuilder(p => ({ ...p, thankYouMessage: e.target.value }))}
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Redirect URL (optional)</label>
-                    <input
-                      value={formBuilder.redirectUrl}
-                      onChange={e => setFormBuilder(p => ({ ...p, redirectUrl: e.target.value }))}
-                      placeholder="https://..."
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]"
-                    />
-                  </div>
-                </div>
-              </div>
-              <div className="flex gap-2 p-4 border-t border-white/5">
-                <button onClick={handleSaveForm} disabled={!formBuilder.name.trim()} className="kf-btn-primary px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-40 flex-1">
-                  {editingForm ? "Save Changes" : "Create Form"}
-                </button>
-                <button onClick={() => setShowFormModal(false)} className="px-4 py-2 rounded-xl text-sm text-muted-foreground hover:bg-white/5 transition-colors">
-                  Cancel
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
       <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
     </div>
   );

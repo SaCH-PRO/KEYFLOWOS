@@ -1,10 +1,13 @@
 import { Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { LeadFormCreatedPayload, LeadFormSubmittedPayload } from '../../core/event-bus/events.types';
 
 @Injectable()
 export class LeadFormsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
 
   async listForms(businessId: string) {
@@ -36,7 +39,7 @@ export class LeadFormsService {
     fields: any;
     settings?: any;
   }) {
-    return this.prisma.client.leadForm.create({
+    const form = await this.prisma.client.leadForm.create({
       data: {
         businessId: input.businessId,
         name: input.name,
@@ -45,6 +48,8 @@ export class LeadFormsService {
         settings: input.settings ?? null,
       },
     });
+    this.events.emit('lead_form.created', { form, businessId: input.businessId } as LeadFormCreatedPayload);
+    return form;
   }
 
   async updateForm(input: {
@@ -138,7 +143,7 @@ export class LeadFormsService {
       }
     }
 
-    await this.prisma.client.leadFormSubmission.create({
+    const submission = await this.prisma.client.leadFormSubmission.create({
       data: {
         formId,
         businessId: form.businessId,
@@ -148,6 +153,7 @@ export class LeadFormsService {
         ipAddress: ipAddress ?? null,
       },
     });
+    this.events.emit('lead_form.submitted', { submission, form, businessId: form.businessId, contactId } as LeadFormSubmittedPayload);
 
     const settings = form.settings as any;
     return {
