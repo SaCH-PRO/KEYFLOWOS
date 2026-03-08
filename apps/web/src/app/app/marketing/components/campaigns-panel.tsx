@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Mail,
@@ -15,6 +15,8 @@ import {
   ChevronRight,
   X,
   Sparkles,
+  Loader2,
+  Copy,
 } from "lucide-react";
 import {
   EmailCampaign,
@@ -24,6 +26,7 @@ import {
   sendCampaign,
 } from "@/lib/client";
 import { EmptyState } from "@/components/ui/empty-state";
+import { toast } from "sonner";
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: "#94a3b8",
@@ -71,9 +74,36 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
   const [editingCampaign, setEditingCampaign] = useState<EmailCampaign | null>(null);
   const [campaignForm, setCampaignForm] = useState({ name: "", subject: "", body: "", segmentType: "all", tags: [] as string[], status: "" });
   const [confirmSendId, setConfirmSendId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [expandedCampaign, setExpandedCampaign] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<string>("newest");
+  const [saving, setSaving] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+  const initialFormRef = useRef({ name: "", subject: "", body: "", segmentType: "all", tags: [] as string[], status: "" });
+  const operationInFlight = saving || sending || !!deletingId;
+
+  const isDirty = useCallback(() => {
+    const init = initialFormRef.current;
+    return (
+      campaignForm.name !== init.name ||
+      campaignForm.subject !== init.subject ||
+      campaignForm.body !== init.body ||
+      campaignForm.segmentType !== init.segmentType ||
+      campaignForm.status !== init.status ||
+      JSON.stringify(campaignForm.tags) !== JSON.stringify(init.tags)
+    );
+  }, [campaignForm]);
+
+  const tryCloseModal = useCallback(() => {
+    if (isDirty()) {
+      setShowDiscardConfirm(true);
+    } else {
+      setShowCampaignModal(false);
+    }
+  }, [isDirty]);
 
   const filtered = useMemo(() => {
     const base = statusFilter === "all" ? campaigns : campaigns.filter(c => c.status === statusFilter.toUpperCase());
@@ -100,59 +130,112 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
 
   const openNewCampaign = useCallback(() => {
     setEditingCampaign(null);
-    setCampaignForm({ name: "", subject: "", body: "", segmentType: "all", tags: [], status: "" });
+    const init = { name: "", subject: "", body: "", segmentType: "all", tags: [] as string[], status: "" };
+    setCampaignForm(init);
+    initialFormRef.current = init;
     setShowCampaignModal(true);
   }, []);
 
   const openEditCampaign = useCallback((c: EmailCampaign) => {
     setEditingCampaign(c);
     const segType = c.segmentFilter?.tags?.length ? "tags" : c.segmentFilter?.status ? "status" : "all";
-    setCampaignForm({
+    const init = {
       name: c.name,
       subject: c.subject,
       body: c.body,
       segmentType: segType,
       tags: c.segmentFilter?.tags || [],
       status: c.segmentFilter?.status || "",
-    });
+    };
+    setCampaignForm(init);
+    initialFormRef.current = init;
     setShowCampaignModal(true);
   }, []);
 
   const handleSaveCampaign = useCallback(async () => {
     if (!businessId || !campaignForm.name.trim() || !campaignForm.subject.trim()) return;
+    setSaving(true);
     const segmentFilter: { tags?: string[]; status?: string } = {};
     if (campaignForm.segmentType === "tags" && campaignForm.tags.length) segmentFilter.tags = campaignForm.tags;
     if (campaignForm.segmentType === "status" && campaignForm.status) segmentFilter.status = campaignForm.status;
 
     const data = { name: campaignForm.name, subject: campaignForm.subject, body: campaignForm.body, segmentFilter };
-    if (editingCampaign) {
-      const res = await updateCampaign(businessId, editingCampaign.id, data);
-      if (res.data) setCampaigns(prev => prev.map(c => c.id === editingCampaign.id ? res.data! : c));
-    } else {
-      const res = await createCampaign(businessId, data);
-      if (res.data) {
-        setCampaigns(prev => [res.data!, ...prev]);
-        onCampaignCreated?.(res.data);
+    try {
+      if (editingCampaign) {
+        const res = await updateCampaign(businessId, editingCampaign.id, data);
+        if (res.data) {
+          setCampaigns(prev => prev.map(c => c.id === editingCampaign.id ? res.data! : c));
+          toast.success("Campaign updated");
+        }
+      } else {
+        const res = await createCampaign(businessId, data);
+        if (res.data) {
+          setCampaigns(prev => [res.data!, ...prev]);
+          onCampaignCreated?.(res.data);
+          toast.success("Campaign created");
+        }
       }
+      setShowCampaignModal(false);
+    } catch {
+      toast.error("Failed to save campaign");
+    } finally {
+      setSaving(false);
     }
-    setShowCampaignModal(false);
   }, [businessId, campaignForm, editingCampaign, setCampaigns, onCampaignCreated]);
 
   const handleDeleteCampaign = useCallback(async (id: string) => {
     if (!businessId) return;
-    await deleteCampaign(businessId, id);
-    setCampaigns(prev => prev.filter(c => c.id !== id));
+    setDeletingId(id);
+    try {
+      await deleteCampaign(businessId, id);
+      setCampaigns(prev => prev.filter(c => c.id !== id));
+      toast.success("Campaign deleted");
+    } catch {
+      toast.error("Failed to delete campaign");
+    } finally {
+      setDeletingId(null);
+    }
   }, [businessId, setCampaigns]);
 
   const handleSendCampaign = useCallback(async (id: string) => {
     if (!businessId) return;
-    const res = await sendCampaign(businessId, id);
-    if (res.data) {
-      setCampaigns(prev => prev.map(c => c.id === id ? res.data! : c));
-      onCampaignSent?.(res.data);
+    setSending(true);
+    try {
+      const res = await sendCampaign(businessId, id);
+      if (res.data) {
+        setCampaigns(prev => prev.map(c => c.id === id ? res.data! : c));
+        onCampaignSent?.(res.data);
+        toast.success(`Campaign sent to ${res.data.totalRecipients ?? 0} recipients`);
+      }
+    } catch {
+      toast.error("Failed to send campaign");
+    } finally {
+      setSending(false);
     }
     setConfirmSendId(null);
   }, [businessId, setCampaigns, onCampaignSent]);
+
+  const handleDuplicateCampaign = useCallback(async (campaign: EmailCampaign) => {
+    if (!businessId) return;
+    const segmentFilter: { tags?: string[]; status?: string } = {};
+    if (campaign.segmentFilter?.tags?.length) segmentFilter.tags = campaign.segmentFilter.tags;
+    if (campaign.segmentFilter?.status) segmentFilter.status = campaign.segmentFilter.status;
+    try {
+      const res = await createCampaign(businessId, {
+        name: `Copy of ${campaign.name}`,
+        subject: campaign.subject,
+        body: campaign.body,
+        segmentFilter,
+      });
+      if (res.data) {
+        setCampaigns(prev => [res.data!, ...prev]);
+        onCampaignCreated?.(res.data);
+        toast.success("Campaign duplicated");
+      }
+    } catch {
+      toast.error("Failed to duplicate campaign");
+    }
+  }, [businessId, setCampaigns, onCampaignCreated]);
 
   const toggleTag = useCallback((tag: string) => {
     setCampaignForm(prev => ({
@@ -228,16 +311,16 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
                   </div>
                   <div className="flex items-center gap-1.5">
                     {onAiWrite && campaign.status === "DRAFT" && (
-                      <button onClick={onAiWrite} className="p-1.5 rounded-lg text-muted-foreground hover:text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/10 transition-colors" aria-label="AI Write" title="AI Write">
+                      <button onClick={onAiWrite} disabled={operationInFlight} className="p-1.5 rounded-lg text-muted-foreground hover:text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/10 transition-colors disabled:opacity-40" aria-label="AI Write" title="AI Write">
                         <Sparkles className="w-4 h-4" />
                       </button>
                     )}
                     {campaign.status === "DRAFT" && (
                       <>
-                        <button onClick={() => openEditCampaign(campaign)} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors" aria-label="Edit campaign">
+                        <button onClick={() => openEditCampaign(campaign)} disabled={operationInFlight} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors disabled:opacity-40" aria-label="Edit campaign">
                           <Pencil className="w-4 h-4" />
                         </button>
-                        <button onClick={() => setConfirmSendId(campaign.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors" aria-label="Send campaign">
+                        <button onClick={() => setConfirmSendId(campaign.id)} disabled={operationInFlight} className="p-1.5 rounded-lg text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-40" aria-label="Send campaign">
                           <Send className="w-4 h-4" />
                         </button>
                       </>
@@ -247,8 +330,11 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
                         {expandedCampaign === campaign.id ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                       </button>
                     )}
-                    <button onClick={() => handleDeleteCampaign(campaign.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors" aria-label="Delete campaign">
-                      <Trash2 className="w-4 h-4" />
+                    <button onClick={() => handleDuplicateCampaign(campaign)} disabled={operationInFlight} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors disabled:opacity-40" aria-label="Duplicate campaign" title="Duplicate">
+                      <Copy className="w-4 h-4" />
+                    </button>
+                    <button onClick={() => setConfirmDeleteId(campaign.id)} disabled={operationInFlight} className="p-1.5 rounded-lg text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40" aria-label="Delete campaign">
+                      {deletingId === campaign.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                     </button>
                   </div>
                 </div>
@@ -283,12 +369,12 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
 
       <AnimatePresence>
         {showCampaignModal && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setShowCampaignModal(false)}>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={tryCloseModal}>
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
             <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} onClick={e => e.stopPropagation()} className="relative w-full max-w-lg kf-card border border-border rounded-2xl shadow-2xl max-h-[85vh] overflow-y-auto">
               <div className="flex items-center justify-between p-4 border-b border-border/40">
                 <h2 className="text-lg font-semibold">{editingCampaign ? "Edit Campaign" : "New Campaign"}</h2>
-                <button onClick={() => setShowCampaignModal(false)} className="p-1 text-muted-foreground hover:text-foreground" aria-label="Close"><X className="w-5 h-5" /></button>
+                <button onClick={tryCloseModal} className="p-1 text-muted-foreground hover:text-foreground" aria-label="Close"><X className="w-5 h-5" /></button>
               </div>
               <div className="p-4 space-y-4">
                 <div>
@@ -375,10 +461,11 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
                 </div>
               </div>
               <div className="flex gap-2 p-4 border-t border-border/40">
-                <button onClick={handleSaveCampaign} disabled={!campaignForm.name.trim() || !campaignForm.subject.trim()} className="kf-btn-primary px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-40 flex-1">
+                <button onClick={handleSaveCampaign} disabled={!campaignForm.name.trim() || !campaignForm.subject.trim() || saving} className="kf-btn-primary px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-40 flex-1 flex items-center justify-center gap-2">
+                  {saving && <Loader2 className="w-4 h-4 animate-spin" />}
                   {editingCampaign ? "Save Changes" : "Create Campaign"}
                 </button>
-                <button onClick={() => setShowCampaignModal(false)} className="px-4 py-2 rounded-xl text-sm text-muted-foreground hover:bg-muted/50 transition-colors">
+                <button onClick={tryCloseModal} className="px-4 py-2 rounded-xl text-sm text-muted-foreground hover:bg-muted/50 transition-colors">
                   Cancel
                 </button>
               </div>
@@ -388,9 +475,35 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
       </AnimatePresence>
 
       <AnimatePresence>
+        {confirmDeleteId && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setConfirmDeleteId(null)} />
+            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="relative kf-card border border-border rounded-2xl p-6 max-w-sm w-full">
+              <div className="text-center">
+                <Trash2 className="w-10 h-10 mx-auto mb-3 text-red-400" />
+                <h3 className="text-lg font-semibold mb-2">Delete Campaign?</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  This cannot be undone.
+                </p>
+                <div className="flex gap-2">
+                  <button onClick={() => { handleDeleteCampaign(confirmDeleteId); setConfirmDeleteId(null); }} disabled={!!deletingId} className="px-4 py-2 rounded-xl text-sm font-medium flex-1 bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
+                    {deletingId && <Loader2 className="w-4 h-4 animate-spin" />}
+                    Delete
+                  </button>
+                  <button onClick={() => setConfirmDeleteId(null)} disabled={!!deletingId} className="px-4 py-2 rounded-xl text-sm text-muted-foreground hover:bg-muted/50 flex-1">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {confirmSendId && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setConfirmSendId(null)} />
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !sending && setConfirmSendId(null)} />
             <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="relative kf-card border border-border rounded-2xl p-6 max-w-sm w-full">
               <div className="text-center">
                 <Send className="w-10 h-10 mx-auto mb-3" style={{ color: "hsl(var(--kf-accent1))" }} />
@@ -399,11 +512,37 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
                   This will send the email to all matching recipients. This action cannot be undone.
                 </p>
                 <div className="flex gap-2">
-                  <button onClick={() => handleSendCampaign(confirmSendId)} className="kf-btn-primary px-4 py-2 rounded-xl text-sm font-medium flex-1">
+                  <button onClick={() => handleSendCampaign(confirmSendId)} disabled={sending} className="kf-btn-primary px-4 py-2 rounded-xl text-sm font-medium flex-1 disabled:opacity-40 flex items-center justify-center gap-2">
+                    {sending && <Loader2 className="w-4 h-4 animate-spin" />}
                     Yes, Send Now
                   </button>
-                  <button onClick={() => setConfirmSendId(null)} className="px-4 py-2 rounded-xl text-sm text-muted-foreground hover:bg-muted/50 flex-1">
+                  <button onClick={() => setConfirmSendId(null)} disabled={sending} className="px-4 py-2 rounded-xl text-sm text-muted-foreground hover:bg-muted/50 flex-1">
                     Cancel
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showDiscardConfirm && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="relative kf-card border border-border rounded-2xl p-6 max-w-sm w-full">
+              <div className="text-center">
+                <X className="w-10 h-10 mx-auto mb-3 text-amber-400" />
+                <h3 className="text-lg font-semibold mb-2">Discard unsaved changes?</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  You have unsaved changes that will be lost.
+                </p>
+                <div className="flex gap-2">
+                  <button onClick={() => { setShowDiscardConfirm(false); setShowCampaignModal(false); }} className="px-4 py-2 rounded-xl text-sm font-medium flex-1 bg-red-500 text-white hover:bg-red-600 transition-colors">
+                    Discard
+                  </button>
+                  <button onClick={() => setShowDiscardConfirm(false)} className="px-4 py-2 rounded-xl text-sm text-muted-foreground hover:bg-muted/50 flex-1">
+                    Keep Editing
                   </button>
                 </div>
               </div>
