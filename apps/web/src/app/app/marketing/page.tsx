@@ -24,6 +24,7 @@ import {
   LeadFormSubmission,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { toast } from "sonner";
 import { getGmailAuthUrl } from "@/lib/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { ContactPickerDrawer } from "@/components/contacts";
@@ -127,7 +128,9 @@ export default function MarketingPage() {
             try {
               const subRes = await fetchLeadFormSubmissions(businessId, f.id);
               if (subRes.data) subsMap[f.id] = subRes.data;
-            } catch {}
+            } catch {
+              toast.error(`Failed to load submissions for form "${f.name}"`);
+            }
           })
         );
         setSubmissions(subsMap);
@@ -137,7 +140,9 @@ export default function MarketingPage() {
         contactsRes.data.contacts.forEach(c => c.tags?.forEach(t => tags.add(t)));
         setAvailableTags(Array.from(tags));
       }
-    } catch {}
+    } catch {
+      toast.error("Failed to load marketing data");
+    }
     setLoading(false);
   }, [businessId]);
 
@@ -245,8 +250,15 @@ export default function MarketingPage() {
   const handleToggleForm = useCallback(async (form: LeadForm) => {
     const { updateLeadForm: updateFormApi } = await import("@/lib/client");
     if (!businessId) return;
-    const res = await updateFormApi(businessId, form.id, { isActive: !form.isActive });
-    if (res.data) setForms(prev => prev.map(f => f.id === form.id ? res.data! : f));
+    try {
+      const res = await updateFormApi(businessId, form.id, { isActive: !form.isActive });
+      if (res.data) {
+        setForms(prev => prev.map(f => f.id === form.id ? res.data! : f));
+        toast.success(res.data.isActive ? "Form activated" : "Form deactivated");
+      }
+    } catch {
+      toast.error("Failed to toggle form status");
+    }
   }, [businessId]);
 
   const toggleGuide = useCallback(() => setShowGuide(prev => !prev), []);

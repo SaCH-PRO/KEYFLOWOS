@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus,
@@ -18,6 +18,7 @@ import {
   ClipboardList,
   Code,
   Sparkles,
+  Loader2,
 } from "lucide-react";
 import {
   LeadForm,
@@ -28,6 +29,7 @@ import {
   fetchLeadFormSubmissions,
 } from "@/lib/client";
 import { EmptyState } from "@/components/ui/empty-state";
+import { toast } from "sonner";
 
 const FIELD_TYPES = ["text", "email", "phone", "select", "textarea"];
 
@@ -56,12 +58,39 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
 }: LeadFormsPanelProps) {
   const [showFormModal, setShowFormModal] = useState(false);
   const [editingForm, setEditingForm] = useState<LeadForm | null>(null);
-  const [formBuilder, setFormBuilder] = useState({ name: "", description: "", fields: [{ name: "email", type: "email", label: "Email", required: true }] as FormField[], thankYouMessage: "Thank you for your submission!", redirectUrl: "" });
+  const defaultFields: FormField[] = [{ name: "email", type: "email", label: "Email", required: true }];
+  const [formBuilder, setFormBuilder] = useState({ name: "", description: "", fields: defaultFields, thankYouMessage: "Thank you for your submission!", redirectUrl: "" });
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [expandedForm, setExpandedForm] = useState<string | null>(null);
   const [submissions, setSubmissions] = useState<Record<string, LeadFormSubmission[]>>({});
   const [copiedEmbed, setCopiedEmbed] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<string>("newest");
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+  const initialFormRef = useRef({ name: "", description: "", fields: defaultFields, thankYouMessage: "Thank you for your submission!", redirectUrl: "" });
+  const operationInFlight = saving || !!deletingId || !!togglingId;
+
+  const isDirty = useCallback(() => {
+    const init = initialFormRef.current;
+    return (
+      formBuilder.name !== init.name ||
+      formBuilder.description !== init.description ||
+      formBuilder.thankYouMessage !== init.thankYouMessage ||
+      formBuilder.redirectUrl !== init.redirectUrl ||
+      JSON.stringify(formBuilder.fields) !== JSON.stringify(init.fields)
+    );
+  }, [formBuilder]);
+
+  const tryCloseModal = useCallback(() => {
+    if (isDirty()) {
+      setShowDiscardConfirm(true);
+    } else {
+      setShowFormModal(false);
+    }
+  }, [isDirty]);
 
   const filtered = useMemo(() => {
     let base = forms;
@@ -83,50 +112,85 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
 
   const openNewForm = useCallback(() => {
     setEditingForm(null);
-    setFormBuilder({ name: "", description: "", fields: [{ name: "email", type: "email", label: "Email", required: true }], thankYouMessage: "Thank you for your submission!", redirectUrl: "" });
+    const init = { name: "", description: "", fields: [{ name: "email", type: "email", label: "Email", required: true }] as FormField[], thankYouMessage: "Thank you for your submission!", redirectUrl: "" };
+    setFormBuilder(init);
+    initialFormRef.current = init;
     setShowFormModal(true);
   }, []);
 
   const openEditForm = useCallback((f: LeadForm) => {
     setEditingForm(f);
-    setFormBuilder({
+    const init = {
       name: f.name,
       description: f.description || "",
-      fields: f.fields.length ? f.fields : [{ name: "email", type: "email", label: "Email", required: true }],
+      fields: (f.fields.length ? f.fields : [{ name: "email", type: "email", label: "Email", required: true }]) as FormField[],
       thankYouMessage: f.settings?.thankYouMessage || "Thank you for your submission!",
       redirectUrl: f.settings?.redirectUrl || "",
-    });
+    };
+    setFormBuilder(init);
+    initialFormRef.current = init;
     setShowFormModal(true);
   }, []);
 
   const handleSaveForm = useCallback(async () => {
     if (!businessId || !formBuilder.name.trim()) return;
+    setSaving(true);
     const data = {
       name: formBuilder.name,
       description: formBuilder.description,
       fields: formBuilder.fields.map(f => ({ ...f, name: f.label.toLowerCase().replace(/\s+/g, "_") })),
       settings: { thankYouMessage: formBuilder.thankYouMessage, redirectUrl: formBuilder.redirectUrl },
     };
-    if (editingForm) {
-      const res = await updateLeadForm(businessId, editingForm.id, data);
-      if (res.data) setForms(prev => prev.map(f => f.id === editingForm.id ? res.data! : f));
-    } else {
-      const res = await createLeadForm(businessId, data);
-      if (res.data) setForms(prev => [res.data!, ...prev]);
+    try {
+      if (editingForm) {
+        const res = await updateLeadForm(businessId, editingForm.id, data);
+        if (res.data) {
+          setForms(prev => prev.map(f => f.id === editingForm.id ? res.data! : f));
+          toast.success("Form updated");
+        }
+      } else {
+        const res = await createLeadForm(businessId, data);
+        if (res.data) {
+          setForms(prev => [res.data!, ...prev]);
+          toast.success("Form created");
+        }
+      }
+      setShowFormModal(false);
+    } catch {
+      toast.error("Failed to save form");
+    } finally {
+      setSaving(false);
     }
-    setShowFormModal(false);
   }, [businessId, formBuilder, editingForm, setForms]);
 
   const handleToggleForm = useCallback(async (form: LeadForm) => {
     if (!businessId) return;
-    const res = await updateLeadForm(businessId, form.id, { isActive: !form.isActive });
-    if (res.data) setForms(prev => prev.map(f => f.id === form.id ? res.data! : f));
+    setTogglingId(form.id);
+    try {
+      const res = await updateLeadForm(businessId, form.id, { isActive: !form.isActive });
+      if (res.data) {
+        setForms(prev => prev.map(f => f.id === form.id ? res.data! : f));
+        toast.success(res.data.isActive ? "Form activated" : "Form deactivated");
+      }
+    } catch {
+      toast.error("Failed to toggle form status");
+    } finally {
+      setTogglingId(null);
+    }
   }, [businessId, setForms]);
 
   const handleDeleteForm = useCallback(async (id: string) => {
     if (!businessId) return;
-    await deleteLeadForm(businessId, id);
-    setForms(prev => prev.filter(f => f.id !== id));
+    setDeletingId(id);
+    try {
+      await deleteLeadForm(businessId, id);
+      setForms(prev => prev.filter(f => f.id !== id));
+      toast.success("Form deleted");
+    } catch {
+      toast.error("Failed to delete form");
+    } finally {
+      setDeletingId(null);
+    }
   }, [businessId, setForms]);
 
   const loadSubmissions = useCallback(async (formId: string) => {
@@ -134,8 +198,12 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
     if (expandedForm === formId) { setExpandedForm(null); return; }
     setExpandedForm(formId);
     if (!submissions[formId]) {
-      const res = await fetchLeadFormSubmissions(businessId, formId);
-      if (res.data) setSubmissions(prev => ({ ...prev, [formId]: res.data! }));
+      try {
+        const res = await fetchLeadFormSubmissions(businessId, formId);
+        if (res.data) setSubmissions(prev => ({ ...prev, [formId]: res.data! }));
+      } catch {
+        toast.error("Failed to load submissions");
+      }
     }
   }, [businessId, expandedForm, submissions]);
 
@@ -213,14 +281,15 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
                       <h3 className="text-sm font-semibold truncate">{form.name}</h3>
                       <button
                         onClick={() => handleToggleForm(form)}
-                        className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full transition-colors"
+                        disabled={operationInFlight}
+                        className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full transition-colors disabled:opacity-40"
                         style={{
                           background: form.isActive ? "#22c55e20" : "#94a3b820",
                           color: form.isActive ? "#22c55e" : "#94a3b8",
                         }}
                         aria-label={form.isActive ? "Deactivate form" : "Activate form"}
                       >
-                        {form.isActive ? <ToggleRight className="w-3 h-3" /> : <ToggleLeft className="w-3 h-3" />}
+                        {togglingId === form.id ? <Loader2 className="w-3 h-3 animate-spin" /> : form.isActive ? <ToggleRight className="w-3 h-3" /> : <ToggleLeft className="w-3 h-3" />}
                         {form.isActive ? "Active" : "Inactive"}
                       </button>
                     </div>
@@ -232,21 +301,21 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
                   </div>
                   <div className="flex items-center gap-1.5">
                     {onAiOptimize && (
-                      <button onClick={onAiOptimize} className="p-1.5 rounded-lg text-muted-foreground hover:text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/10 transition-colors" aria-label="AI Optimize" title="AI Optimize">
+                      <button onClick={onAiOptimize} disabled={operationInFlight} className="p-1.5 rounded-lg text-muted-foreground hover:text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/10 transition-colors disabled:opacity-40" aria-label="AI Optimize" title="AI Optimize">
                         <Sparkles className="w-4 h-4" />
                       </button>
                     )}
-                    <button onClick={() => loadSubmissions(form.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors" title="View submissions" aria-label="View submissions">
+                    <button onClick={() => loadSubmissions(form.id)} disabled={operationInFlight} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors disabled:opacity-40" title="View submissions" aria-label="View submissions">
                       {expandedForm === form.id ? <ChevronDown className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                     <button onClick={() => copyEmbed(form.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors" title="Copy embed code" aria-label="Copy embed code">
                       {copiedEmbed === form.id ? <Check className="w-4 h-4 text-emerald-400" /> : <Code className="w-4 h-4" />}
                     </button>
-                    <button onClick={() => openEditForm(form)} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors" aria-label="Edit form">
+                    <button onClick={() => openEditForm(form)} disabled={operationInFlight} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors disabled:opacity-40" aria-label="Edit form">
                       <Pencil className="w-4 h-4" />
                     </button>
-                    <button onClick={() => handleDeleteForm(form.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors" aria-label="Delete form">
-                      <Trash2 className="w-4 h-4" />
+                    <button onClick={() => setConfirmDeleteId(form.id)} disabled={operationInFlight} className="p-1.5 rounded-lg text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40" aria-label="Delete form">
+                      {deletingId === form.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                     </button>
                   </div>
                 </div>
@@ -296,13 +365,39 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
       </div>
 
       <AnimatePresence>
+        {confirmDeleteId && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setConfirmDeleteId(null)} />
+            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="relative kf-card border border-border rounded-2xl p-6 max-w-sm w-full">
+              <div className="text-center">
+                <Trash2 className="w-10 h-10 mx-auto mb-3 text-red-400" />
+                <h3 className="text-lg font-semibold mb-2">Delete Form?</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  This cannot be undone.
+                </p>
+                <div className="flex gap-2">
+                  <button onClick={() => { handleDeleteForm(confirmDeleteId); setConfirmDeleteId(null); }} disabled={!!deletingId} className="px-4 py-2 rounded-xl text-sm font-medium flex-1 bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
+                    {deletingId && <Loader2 className="w-4 h-4 animate-spin" />}
+                    Delete
+                  </button>
+                  <button onClick={() => setConfirmDeleteId(null)} disabled={!!deletingId} className="px-4 py-2 rounded-xl text-sm text-muted-foreground hover:bg-muted/50 flex-1">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {showFormModal && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setShowFormModal(false)}>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={tryCloseModal}>
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
             <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} onClick={e => e.stopPropagation()} className="relative w-full max-w-lg kf-card border border-border rounded-2xl shadow-2xl max-h-[85vh] overflow-y-auto">
               <div className="flex items-center justify-between p-4 border-b border-border/40">
                 <h2 className="text-lg font-semibold">{editingForm ? "Edit Form" : "New Lead Form"}</h2>
-                <button onClick={() => setShowFormModal(false)} className="p-1 text-muted-foreground hover:text-foreground" aria-label="Close"><X className="w-5 h-5" /></button>
+                <button onClick={tryCloseModal} className="p-1 text-muted-foreground hover:text-foreground" aria-label="Close"><X className="w-5 h-5" /></button>
               </div>
               <div className="p-4 space-y-4">
                 <div>
@@ -388,12 +483,38 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
                 </div>
               </div>
               <div className="flex gap-2 p-4 border-t border-border/40">
-                <button onClick={handleSaveForm} disabled={!formBuilder.name.trim()} className="kf-btn-primary px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-40 flex-1">
+                <button onClick={handleSaveForm} disabled={!formBuilder.name.trim() || saving} className="kf-btn-primary px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-40 flex-1 flex items-center justify-center gap-2">
+                  {saving && <Loader2 className="w-4 h-4 animate-spin" />}
                   {editingForm ? "Save Changes" : "Create Form"}
                 </button>
-                <button onClick={() => setShowFormModal(false)} className="px-4 py-2 rounded-xl text-sm text-muted-foreground hover:bg-muted/50 transition-colors">
+                <button onClick={tryCloseModal} className="px-4 py-2 rounded-xl text-sm text-muted-foreground hover:bg-muted/50 transition-colors">
                   Cancel
                 </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showDiscardConfirm && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="relative kf-card border border-border rounded-2xl p-6 max-w-sm w-full">
+              <div className="text-center">
+                <X className="w-10 h-10 mx-auto mb-3 text-amber-400" />
+                <h3 className="text-lg font-semibold mb-2">Discard unsaved changes?</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  You have unsaved changes that will be lost.
+                </p>
+                <div className="flex gap-2">
+                  <button onClick={() => { setShowDiscardConfirm(false); setShowFormModal(false); }} className="px-4 py-2 rounded-xl text-sm font-medium flex-1 bg-red-500 text-white hover:bg-red-600 transition-colors">
+                    Discard
+                  </button>
+                  <button onClick={() => setShowDiscardConfirm(false)} className="px-4 py-2 rounded-xl text-sm text-muted-foreground hover:bg-muted/50 flex-1">
+                    Keep Editing
+                  </button>
+                </div>
               </div>
             </motion.div>
           </motion.div>
