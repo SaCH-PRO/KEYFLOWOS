@@ -7,6 +7,9 @@ import {
   MessageSquare, Package, Receipt, Search, Users, Activity,
 } from "lucide-react";
 import { useState } from "react";
+import { formatCurrencyShort } from "@/lib/currency";
+
+const fc = (v: number | string, cur = "TTD") => formatCurrencyShort(Number(v) || 0, cur);
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   const [open, setOpen] = useState(true);
@@ -102,7 +105,7 @@ function RevenueAnalysisResult({ data }: { data: any }) {
                   <span className="text-[11px] font-medium text-foreground/80">{c.name}</span>
                   <p className="text-[10px] text-muted-foreground/50">{c.invoiceCount} invoices</p>
                 </div>
-                <span className="text-[11px] font-medium text-emerald-400">${Number(c.revenue).toLocaleString()}</span>
+                <span className="text-[11px] font-medium text-emerald-400"> {fc(c.revenue)}</span>
               </div>
             ))}
           </div>
@@ -153,15 +156,15 @@ function CashFlowForecastResult({ data }: { data: any }) {
                 <div className="grid grid-cols-3 gap-2 mt-1">
                   <div>
                     <span className="text-[10px] text-muted-foreground/50">Conservative</span>
-                    <p className="text-[11px] text-amber-400">${Number(f.conservative).toLocaleString()}</p>
+                    <p className="text-[11px] text-amber-400"> {fc(f.conservative)}</p>
                   </div>
                   <div>
                     <span className="text-[10px] text-muted-foreground/50">Expected</span>
-                    <p className="text-[11px] text-blue-400 font-medium">${Number(f.expected).toLocaleString()}</p>
+                    <p className="text-[11px] text-blue-400 font-medium"> {fc(f.expected)}</p>
                   </div>
                   <div>
                     <span className="text-[10px] text-muted-foreground/50">Optimistic</span>
-                    <p className="text-[11px] text-emerald-400">${Number(f.optimistic).toLocaleString()}</p>
+                    <p className="text-[11px] text-emerald-400"> {fc(f.optimistic)}</p>
                   </div>
                 </div>
               </div>
@@ -194,7 +197,7 @@ function CashFlowForecastResult({ data }: { data: any }) {
                   <p className="text-[10px] text-muted-foreground/50">{cp.invoiceRef} · {cp.daysPastDue}d overdue</p>
                 </div>
                 <div className="text-right">
-                  <span className="text-[11px] font-medium text-red-400">${Number(cp.amount).toLocaleString()}</span>
+                  <span className="text-[11px] font-medium text-red-400"> {fc(cp.amount)}</span>
                   <p className="text-[10px] text-muted-foreground/50">{cp.suggestedAction}</p>
                 </div>
               </div>
@@ -211,7 +214,7 @@ function CashFlowForecastResult({ data }: { data: any }) {
                 <div>
                   <span className="text-[11px] text-foreground/80">{o.description}</span>
                   <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-[10px] text-emerald-400">${Number(o.estimatedValue).toLocaleString()}</span>
+                    <span className="text-[10px] text-emerald-400"> {fc(o.estimatedValue)}</span>
                     <span className="text-[10px] text-muted-foreground/50">{o.timeframe}</span>
                   </div>
                 </div>
@@ -279,18 +282,18 @@ function PricingAdvisorResult({ data }: { data: any }) {
       <div className="flex items-center gap-4">
         <div className="p-3 rounded-xl bg-white/[0.02] border border-border/30">
           <span className="text-[10px] text-muted-foreground/50 block">Current</span>
-          <span className="text-lg font-bold text-foreground/80">${data.currentPrice}</span>
+          <span className="text-lg font-bold text-foreground/80">{fc(data.currentPrice)}</span>
         </div>
         <ArrowRight className="w-4 h-4 text-muted-foreground/30" />
         <div className={`p-3 rounded-xl border ${priceDirection === "up" ? "bg-emerald-500/5 border-emerald-500/20" : priceDirection === "down" ? "bg-red-500/5 border-red-500/20" : "bg-blue-500/5 border-blue-500/20"}`}>
           <span className="text-[10px] text-muted-foreground/50 block">Suggested</span>
-          <span className={`text-lg font-bold ${priceColor}`}>${data.suggestedPrice}</span>
+          <span className={`text-lg font-bold ${priceColor}`}>{fc(data.suggestedPrice)}</span>
         </div>
       </div>
       {data.priceRange && (
         <div className="px-3 py-2 rounded-lg bg-white/[0.02] border border-border/30">
           <span className="text-[10px] text-muted-foreground/50">Price Range: </span>
-          <span className="text-[11px] text-foreground/80">${data.priceRange.min} — ${data.priceRange.max}</span>
+          <span className="text-[11px] text-foreground/80">{fc(data.priceRange.min)} — {fc(data.priceRange.max)}</span>
         </div>
       )}
       {data.reasoning && (
@@ -353,7 +356,7 @@ function PipelineAnalysisResult({ data }: { data: any }) {
         </div>
         <div className="p-2 rounded-lg bg-white/[0.02] border border-border/30 text-center">
           <span className="text-[10px] text-muted-foreground/50 block">Avg Invoice</span>
-          <span className="text-lg font-bold text-foreground/80">${Number(data.averageInvoiceValue || 0).toLocaleString()}</span>
+          <span className="text-lg font-bold text-foreground/80"> {fc(data.averageInvoiceValue || 0)}</span>
         </div>
       </div>
       <div className="grid grid-cols-3 gap-2">
@@ -369,7 +372,7 @@ function PipelineAnalysisResult({ data }: { data: any }) {
         </div>
         <div className="p-2 rounded-lg bg-white/[0.02] border border-border/30 text-center">
           <DollarSign className="w-3.5 h-3.5 text-emerald-400 mx-auto mb-1" />
-          <span className="text-[11px] font-bold text-foreground/80">${Number(data.totalRevenue || 0).toLocaleString()}</span>
+          <span className="text-[11px] font-bold text-foreground/80"> {fc(data.totalRevenue || 0)}</span>
           <span className="text-[10px] text-muted-foreground/50 block">Revenue</span>
         </div>
       </div>
@@ -404,7 +407,7 @@ function PipelineAnalysisResult({ data }: { data: any }) {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-muted-foreground/50">{p.count} sold</span>
-                  <span className="text-[11px] text-emerald-400">${Number(p.revenue).toLocaleString()}</span>
+                  <span className="text-[11px] text-emerald-400"> {fc(p.revenue)}</span>
                 </div>
               </div>
             ))}
@@ -419,7 +422,7 @@ function PipelineAnalysisResult({ data }: { data: any }) {
                 <span className="text-[11px] text-muted-foreground/70">{m.month}</span>
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-muted-foreground/50">{m.invoiceCount} inv</span>
-                  <span className="text-[11px] font-medium text-foreground/80">${Number(m.revenue).toLocaleString()}</span>
+                  <span className="text-[11px] font-medium text-foreground/80"> {fc(m.revenue)}</span>
                 </div>
               </div>
             ))}
@@ -437,11 +440,11 @@ function OverdueRecoveryResult({ data }: { data: any }) {
       <div className="grid grid-cols-2 gap-2">
         <div className="px-3 py-2 rounded-lg bg-red-500/5 border border-red-500/20">
           <span className="text-[10px] text-muted-foreground/50 block">Overdue</span>
-          <span className="text-sm font-bold text-red-400">${Number(data.overdueAmount || 0).toLocaleString()}</span>
+          <span className="text-sm font-bold text-red-400"> {fc(data.overdueAmount || 0)}</span>
         </div>
         <div className="px-3 py-2 rounded-lg bg-amber-500/5 border border-amber-500/20">
           <span className="text-[10px] text-muted-foreground/50 block">Outstanding</span>
-          <span className="text-sm font-bold text-amber-400">${Number(data.outstandingAmount || 0).toLocaleString()}</span>
+          <span className="text-sm font-bold text-amber-400"> {fc(data.outstandingAmount || 0)}</span>
         </div>
       </div>
       {data.overdueAmount === 0 && (
@@ -458,7 +461,7 @@ function OverdueRecoveryResult({ data }: { data: any }) {
               <div key={i} className="p-2 rounded-lg border border-border/30 bg-white/[0.02]">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-medium text-foreground/80">{cp.contactName}</span>
-                  <span className="text-[11px] font-medium text-red-400">${Number(cp.amount).toLocaleString()}</span>
+                  <span className="text-[11px] font-medium text-red-400"> {fc(cp.amount)}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-muted-foreground/50">{cp.invoiceRef}</span>
@@ -496,7 +499,7 @@ function OverdueRecoveryResult({ data }: { data: any }) {
                 <div>
                   <span className="text-[11px] text-foreground/80">{o.description}</span>
                   <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-[10px] text-emerald-400">${Number(o.estimatedValue).toLocaleString()}</span>
+                    <span className="text-[10px] text-emerald-400"> {fc(o.estimatedValue)}</span>
                     <span className="text-[10px] text-muted-foreground/50">{o.timeframe}</span>
                   </div>
                 </div>
@@ -604,7 +607,7 @@ function ClientIntelligenceResult({ data }: { data: any }) {
       <div className="grid grid-cols-2 gap-2">
         <div className="p-2 rounded-lg bg-white/[0.02] border border-border/30 text-center">
           <span className="text-[10px] text-muted-foreground/50 block">Lifetime Value</span>
-          <span className="text-sm font-bold text-emerald-400">${Number(data.lifetimeValue || 0).toLocaleString()}</span>
+          <span className="text-sm font-bold text-emerald-400"> {fc(data.lifetimeValue || 0)}</span>
         </div>
         <div className="p-2 rounded-lg bg-white/[0.02] border border-border/30 text-center">
           <span className="text-[10px] text-muted-foreground/50 block">Avg Pay Delay</span>
@@ -653,7 +656,7 @@ function ClientIntelligenceResult({ data }: { data: any }) {
                   <span className="text-[11px] text-foreground/80">{inv.invoiceNumber}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-emerald-400">${Number(inv.total).toLocaleString()}</span>
+                  <span className="text-[11px] text-emerald-400"> {fc(inv.total)}</span>
                   <span className={`text-[10px] font-medium ${inv.status === "PAID" ? "text-emerald-400" : inv.status === "OVERDUE" ? "text-red-400" : "text-blue-400"}`}>
                     {inv.status}
                   </span>
@@ -705,7 +708,7 @@ function QuoteWinAnalysisResult({ data }: { data: any }) {
         </div>
         <div className="p-2 rounded-lg bg-white/[0.02] border border-border/30 text-center">
           <DollarSign className="w-3.5 h-3.5 text-emerald-400 mx-auto mb-1" />
-          <span className="text-[11px] font-bold text-emerald-400">${Number(v.totalWonValue || 0).toLocaleString()}</span>
+          <span className="text-[11px] font-bold text-emerald-400"> {fc(v.totalWonValue || 0)}</span>
           <span className="text-[10px] text-muted-foreground/50 block">Won Value</span>
         </div>
       </div>
@@ -763,7 +766,7 @@ function QuoteWinAnalysisResult({ data }: { data: any }) {
                   <span className="text-[10px] text-muted-foreground/50 ml-1">{q.contactName}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-emerald-400">${Number(q.total).toLocaleString()}</span>
+                  <span className="text-[11px] text-emerald-400"> {fc(q.total)}</span>
                   <span className={`text-[10px] font-medium ${q.status === "ACCEPTED" ? "text-emerald-400" : q.status === "REJECTED" ? "text-red-400" : "text-blue-400"}`}>
                     {q.status}
                   </span>
@@ -840,7 +843,7 @@ function CommerceNlSearchResult({ data }: { data: any }) {
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   {mapped.total != null && (
-                    <span className="text-[11px] font-medium text-emerald-400">${Number(mapped.total).toLocaleString()}</span>
+                    <span className="text-[11px] font-medium text-emerald-400"> {fc(mapped.total)}</span>
                   )}
                   {mapped.status && (
                     <span className={`text-[10px] font-medium ${STATUS_COLORS[mapped.status] || "text-muted-foreground/50"}`}>
