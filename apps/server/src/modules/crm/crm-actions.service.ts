@@ -1,5 +1,6 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { AiUsageService } from '../ai/ai-usage.service';
 import { contactWhereBase } from './crm.helpers';
 
 type NextAction = {
@@ -28,10 +29,21 @@ type AutopilotAction = {
   completedAt?: string;
 };
 
+type AiNextAction = {
+  type: 'follow_up' | 'send_quote' | 'payment_reminder' | 'add_note';
+  contactId: string;
+  contactName: string;
+  reason: string;
+  priority: 'high' | 'medium' | 'low';
+};
+
 @Injectable()
 export class CrmActionsService {
+  private readonly logger = new Logger(CrmActionsService.name);
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {}
 
   private get db() {
@@ -940,5 +952,188 @@ export class CrmActionsService {
       console.error('Error completing action:', error);
       return { success: false, message: 'Failed to complete action' };
     }
+  }
+
+  async getAiNextActions(businessId: string): Promise<AiNextAction[]> {
+    const now = new Date();
+    const DAY = 24 * 60 * 60 * 1000;
+    const fourteenDaysAgo = new Date(now.getTime() - 14 * DAY);
+    const sevenDaysAgo = new Date(now.getTime() - 7 * DAY);
+
+    const [staleContacts, highScoreNoQuote, overdueInvoiceContacts, newLeadsNoNotes] = await Promise.all([
+      this.db.contact.findMany({
+        where: {
+          ...contactWhereBase(businessId),
+          lastInteractionAt: { lte: fourteenDaysAgo },
+        },
+        select: { id: true, firstName: true, lastName: true, status: true, lastInteractionAt: true, leadScore: true },
+        orderBy: { lastInteractionAt: 'asc' },
+        take: 10,
+      }),
+      this.db.contact.findMany({
+        where: {
+          ...contactWhereBase(businessId),
+          leadScore: { gte: 70 },
+          invoices: { none: { deletedAt: null } },
+          status: { in: ['LEAD', 'PROSPECT'] },
+        },
+        select: { id: true, firstName: true, lastName: true, status: true, leadScore: true },
+        orderBy: { leadScore: 'desc' },
+        take: 10,
+      }),
+      this.db.contact.findMany({
+        where: {
+          ...contactWhereBase(businessId),
+          invoices: { some: { status: 'OVERDUE', deletedAt: null } },
+        },
+        select: { id: true, firstName: true, lastName: true, status: true, invoices: { where: { status: 'OVERDUE', deletedAt: null }, select: { total: true, dueDate: true } } },
+        take: 10,
+      }),
+      this.db.contact.findMany({
+        where: {
+          ...contactWhereBase(businessId),
+          createdAt: { gte: sevenDaysAgo },
+          notes: { none: {} },
+        },
+        select: { id: true, firstName: true, lastName: true, status: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      }),
+    ]);
+
+    const contactSummaries: string[] = [];
+
+    for (const c of staleContacts.slice(0, 5)) {
+      const name = this.contactName(c);
+      const daysSince = this.daysBetween(new Date(c.lastInteractionAt || now), now);
+      contactSummaries.push(`STALE: "${name}" (id:${c.id}) - No interaction in ${daysSince} days, status: ${c.status}`);
+    }
+    for (const c of highScoreNoQuote.slice(0, 5)) {
+      const name = this.contactName(c);
+      contactSummaries.push(`HIGH_SCORE_NO_QUOTE: "${name}" (id:${c.id}) - Lead score ${c.leadScore}, status: ${c.status}, no quote/invoice sent`);
+    }
+    for (const c of overdueInvoiceContacts.slice(0, 5)) {
+      const name = this.contactName(c);
+      const totalOverdue = c.invoices.reduce((sum: number, inv: any) => sum + (Number(inv.total) || 0), 0);
+      contactSummaries.push(`OVERDUE_INVOICE: "${name}" (id:${c.id}) - ${c.invoices.length} overdue invoice(s) totaling ${totalOverdue}`);
+    }
+    for (const c of newLeadsNoNotes.slice(0, 5)) {
+      const name = this.contactName(c);
+      const daysAgo = this.daysBetween(new Date(c.createdAt), now);
+      contactSummaries.push(`NEW_NO_NOTES: "${name}" (id:${c.id}) - New lead from ${daysAgo} day(s) ago, no notes added`);
+    }
+
+    if (contactSummaries.length === 0) {
+      return [];
+    }
+
+    try {
+      const result = await this.aiUsage.callAi({
+        businessId,
+        feature: 'crm_next_actions',
+        model: 'gpt-5-mini',
+        maxTokens: 800,
+        temperature: 0.4,
+        messages: [
+          {
+            role: 'system',
+            content: `You are a CRM advisor. Analyze the contact data and suggest prioritized next actions.
+Return ONLY a JSON array of actions. Each action must have:
+- "type": one of "follow_up", "send_quote", "payment_reminder", "add_note"
+- "contactId": the contact's id
+- "contactName": the contact's name
+- "reason": a brief actionable reason (max 80 chars)
+- "priority": "high", "medium", or "low"
+
+Rules:
+- STALE contacts → suggest "follow_up" to re-engage
+- HIGH_SCORE_NO_QUOTE → suggest "send_quote"
+- OVERDUE_INVOICE → suggest "payment_reminder"
+- NEW_NO_NOTES → suggest "add_note"
+- Return max 8 actions, sorted by priority (high first)
+- Be specific and actionable in reasons`,
+          },
+          {
+            role: 'user',
+            content: `Here are the contacts needing attention:\n${contactSummaries.join('\n')}`,
+          },
+        ],
+      });
+
+      const parsed = JSON.parse(result.content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim());
+      if (!Array.isArray(parsed)) return [];
+
+      const validTypes = ['follow_up', 'send_quote', 'payment_reminder', 'add_note'];
+      const validPriorities = ['high', 'medium', 'low'];
+
+      return parsed
+        .filter((a: any) =>
+          a && typeof a === 'object' &&
+          validTypes.includes(a.type) &&
+          typeof a.contactId === 'string' &&
+          typeof a.contactName === 'string' &&
+          typeof a.reason === 'string' &&
+          validPriorities.includes(a.priority)
+        )
+        .slice(0, 8)
+        .map((a: any) => ({
+          type: a.type,
+          contactId: a.contactId,
+          contactName: a.contactName,
+          reason: a.reason.slice(0, 120),
+          priority: a.priority,
+        }));
+    } catch (err) {
+      this.logger.warn('AI next actions generation failed', (err as Error).message);
+      return this.getFallbackAiActions(staleContacts, highScoreNoQuote, overdueInvoiceContacts, newLeadsNoNotes);
+    }
+  }
+
+  private getFallbackAiActions(
+    stale: any[],
+    highScore: any[],
+    overdue: any[],
+    newNoNotes: any[],
+  ): AiNextAction[] {
+    const actions: AiNextAction[] = [];
+
+    for (const c of stale.slice(0, 2)) {
+      actions.push({
+        type: 'follow_up',
+        contactId: c.id,
+        contactName: this.contactName(c),
+        reason: `Re-engage ${this.contactName(c)} — no interaction in 14+ days`,
+        priority: 'high',
+      });
+    }
+    for (const c of highScore.slice(0, 2)) {
+      actions.push({
+        type: 'send_quote',
+        contactId: c.id,
+        contactName: this.contactName(c),
+        reason: `Send quote to ${this.contactName(c)} — high lead score (${c.leadScore}) but no quote`,
+        priority: 'high',
+      });
+    }
+    for (const c of overdue.slice(0, 2)) {
+      actions.push({
+        type: 'payment_reminder',
+        contactId: c.id,
+        contactName: this.contactName(c),
+        reason: `Follow up on payment with ${this.contactName(c)} — overdue invoices`,
+        priority: 'medium',
+      });
+    }
+    for (const c of newNoNotes.slice(0, 2)) {
+      actions.push({
+        type: 'add_note',
+        contactId: c.id,
+        contactName: this.contactName(c),
+        reason: `Add notes for ${this.contactName(c)} — new lead with no notes`,
+        priority: 'low',
+      });
+    }
+
+    return actions.slice(0, 8);
   }
 }

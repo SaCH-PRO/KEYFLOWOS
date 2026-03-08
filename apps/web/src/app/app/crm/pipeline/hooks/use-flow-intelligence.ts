@@ -9,11 +9,12 @@ import type { RevenueData } from "@/components/contacts/predictive-revenue";
 import {
   fetchFlowIntelligence, fetchNextActions,
   fetchAutopilotActionsForCrm, fetchPredictiveRevenue,
-  fetchFinancialGrowth,
+  fetchFinancialGrowth, fetchAiNextActions,
   completeNextAction,
   approveAutopilotAction as approveAutopilotActionApi,
   denyAutopilotAction as denyAutopilotActionApi,
   type FinancialGrowthData,
+  type AiNextAction,
 } from "@/lib/client";
 
 export function useFlowIntelligence(businessId: string | null) {
@@ -23,6 +24,7 @@ export function useFlowIntelligence(businessId: string | null) {
   const [autopilotPaused, setAutopilotPaused] = useState(false);
   const [revenueData, setRevenueData] = useState<RevenueData | null>(null);
   const [financialGrowth, setFinancialGrowth] = useState<FinancialGrowthData | null>(null);
+  const [aiNextActions, setAiNextActions] = useState<AiNextAction[]>([]);
   const [flowDataLoading, setFlowDataLoading] = useState(false);
   const flowAbortRef = useRef<AbortController | null>(null);
 
@@ -37,12 +39,13 @@ export function useFlowIntelligence(businessId: string | null) {
     flowAbortRef.current = controller;
     setFlowDataLoading(true);
     try {
-      const [flowRes, actionsRes, autopilotRes, revenueRes, growthRes] = await Promise.allSettled([
+      const [flowRes, actionsRes, autopilotRes, revenueRes, growthRes, aiActionsRes] = await Promise.allSettled([
         fetchFlowIntelligence(businessId, { signal: controller.signal }),
         fetchNextActions(businessId, { signal: controller.signal }),
         fetchAutopilotActionsForCrm(businessId, { signal: controller.signal }),
         fetchPredictiveRevenue(businessId, { signal: controller.signal }),
         fetchFinancialGrowth(businessId, { signal: controller.signal }),
+        fetchAiNextActions(businessId, { signal: controller.signal }),
       ]);
       if (controller.signal.aborted) return;
       if (flowRes.status === "fulfilled" && flowRes.value.data) setFlowIntelligence(flowRes.value.data);
@@ -56,6 +59,7 @@ export function useFlowIntelligence(businessId: string | null) {
       if (autopilotRes.status === "fulfilled" && autopilotRes.value.data) setAutopilotActions(autopilotRes.value.data);
       if (revenueRes.status === "fulfilled" && revenueRes.value.data) setRevenueData(revenueRes.value.data);
       if (growthRes.status === "fulfilled" && growthRes.value.data) setFinancialGrowth(growthRes.value.data);
+      if (aiActionsRes.status === "fulfilled" && aiActionsRes.value.data) setAiNextActions(aiActionsRes.value.data);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
       toast.error("Failed to load flow intelligence");
@@ -104,7 +108,7 @@ export function useFlowIntelligence(businessId: string | null) {
     flowIntelligence, flowDataLoading,
     nextActions, autopilotActions, setAutopilotActions,
     autopilotPaused, setAutopilotPaused,
-    revenueData, financialGrowth,
+    revenueData, financialGrowth, aiNextActions,
     loadFlowData,
     handleCompleteNextAction, handleApproveAutopilot, handleDenyAutopilot,
   };

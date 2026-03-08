@@ -543,6 +543,9 @@ model Invoice {
   quote    Quote?    @relation(fields: [quoteId], references: [id], onUpdate: NoAction, onDelete: NoAction) // DATA INTEGRITY
   quoteId  String?   @unique @map("quote_id")
 
+  campaignId String?       @map("campaign_id")
+  campaign   EmailCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
   deletedAt DateTime? @map("deleted_at") // Soft delete
@@ -1097,6 +1100,7 @@ model EmailCampaign {
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   recipients EmailCampaignContact[]
+  invoices   Invoice[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")

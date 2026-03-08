@@ -18,6 +18,7 @@ import { AiChurnDetectionPanel } from "@/components/contacts/ai-churn-detection"
 import { SequencesSection } from "./sequences-section";
 import type { NextAction } from "@/components/contacts/next-action-queue";
 import type { AutopilotAction } from "@/components/contacts/autopilot-actions";
+import type { AiNextAction } from "@/lib/client";
 
 type ActionTypeFilter = NextAction["type"] | "all";
 type PriorityFilter = NextAction["priority"] | "all";
@@ -62,6 +63,7 @@ interface EngageTabProps {
   loading?: boolean;
   businessId?: string;
   revenueData?: RevenueData | null;
+  aiNextActions?: AiNextAction[];
   onComplete: (id: string) => Promise<void>;
   onViewContact: (id: string) => void;
   onDoAction: (action: NextAction) => void;
@@ -535,6 +537,81 @@ const ActionBreakdown = React.memo(function ActionBreakdown({ actions }: { actio
   );
 });
 
+const AI_ACTION_CONFIG: Record<string, { icon: typeof Sparkles; label: string; color: string; action: string }> = {
+  follow_up: { icon: MessageSquare, label: "Re-engage", color: "text-[hsl(var(--kf-accent1))]", action: "View Contact" },
+  send_quote: { icon: FileText, label: "Send Quote", color: "text-[hsl(var(--kf-accent2))]", action: "Create Quote" },
+  payment_reminder: { icon: DollarSign, label: "Payment", color: "text-amber-400", action: "View Invoice" },
+  add_note: { icon: Mail, label: "Add Notes", color: "text-blue-400", action: "Open Contact" },
+};
+
+const PRIORITY_COLORS: Record<string, string> = {
+  high: "bg-red-500/15 text-red-400 border-red-500/20",
+  medium: "bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))] border-[hsl(var(--kf-accent2))]/20",
+  low: "bg-muted/50 text-muted-foreground border-border/50",
+};
+
+const AiNextActionsCard = React.memo(function AiNextActionsCard({
+  actions,
+  onViewContact,
+}: {
+  actions: AiNextAction[];
+  onViewContact: (contactId: string) => void;
+}) {
+  if (actions.length === 0) return null;
+
+  return (
+    <motion.div variants={stagger.item} className="rounded-2xl border border-border/50 bg-card p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <div className="w-1 h-5 rounded-full bg-gradient-to-b from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))]" />
+        <Sparkles className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+          AI Suggested Actions
+        </span>
+        <span className="ml-auto text-[10px] text-muted-foreground/50 font-medium">
+          {actions.length} suggestion{actions.length !== 1 ? "s" : ""}
+        </span>
+      </div>
+
+      <div className="space-y-1.5">
+        {actions.map((action, i) => {
+          const config = AI_ACTION_CONFIG[action.type] || AI_ACTION_CONFIG.follow_up;
+          const Icon = config.icon;
+          const priorityClass = PRIORITY_COLORS[action.priority] || PRIORITY_COLORS.medium;
+
+          return (
+            <div
+              key={`ai-${action.contactId}-${action.type}-${i}`}
+              className="flex items-center gap-3 p-2.5 rounded-xl bg-white/[0.02] hover:bg-white/[0.04] transition-colors group"
+            >
+              <div className={`p-1.5 rounded-lg bg-white/[0.04] shrink-0`}>
+                <Icon className={`w-3.5 h-3.5 ${config.color}`} />
+              </div>
+
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <span className="text-xs font-medium truncate">{action.contactName}</span>
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full border font-semibold ${priorityClass}`}>
+                    {action.priority}
+                  </span>
+                </div>
+                <p className="text-[11px] text-muted-foreground/60 truncate">{action.reason}</p>
+              </div>
+
+              <button
+                onClick={() => onViewContact(action.contactId)}
+                className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold rounded-lg bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/20 transition-colors border border-[hsl(var(--kf-accent1))]/20 opacity-0 group-hover:opacity-100"
+              >
+                {config.action}
+                <ArrowUpRight className="w-3 h-3" />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </motion.div>
+  );
+});
+
 const BillingActivityCard = React.memo(function BillingActivityCard({
   revenueData,
 }: {
@@ -610,7 +687,7 @@ const BillingActivityCard = React.memo(function BillingActivityCard({
 
 export function EngageTab({
   nextActions, autopilotActions, autopilotPaused, loading,
-  businessId, revenueData,
+  businessId, revenueData, aiNextActions,
   onComplete, onViewContact, onDoAction,
   onTogglePause, onApprove, onDeny,
 }: EngageTabProps) {
@@ -710,6 +787,10 @@ export function EngageTab({
           onOpenSettings={() => setSettingsOpen(true)}
         />
       </motion.div>
+
+      {aiNextActions && aiNextActions.length > 0 && (
+        <AiNextActionsCard actions={aiNextActions} onViewContact={onViewContact} />
+      )}
 
       {revenueData && (
         <BillingActivityCard revenueData={revenueData} />

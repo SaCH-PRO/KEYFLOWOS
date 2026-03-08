@@ -22,6 +22,7 @@ export function getStatusAccentColor(status: string): string {
     SENT: "rgb(96,165,250)",
     ACCEPTED: "rgb(52,211,153)",
     PAID: "rgb(52,211,153)",
+    PARTIALLY_PAID: "rgb(251,191,36)",
     REJECTED: "rgb(248,113,113)",
     OVERDUE: "rgb(248,113,113)",
     VOID: "rgba(100,116,139,0.5)",
