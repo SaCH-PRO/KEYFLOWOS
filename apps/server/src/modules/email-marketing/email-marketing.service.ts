@@ -1,10 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { CampaignCreatedPayload, CampaignSentPayload } from '../../core/event-bus/events.types';
 
 @Injectable()
 export class EmailMarketingService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
 
   async listCampaigns(businessId: string) {
@@ -34,7 +37,7 @@ export class EmailMarketingService {
     segmentFilter?: any;
     scheduledAt?: string;
   }) {
-    return this.prisma.client.emailCampaign.create({
+    const campaign = await this.prisma.client.emailCampaign.create({
       data: {
         businessId: input.businessId,
         name: input.name,
@@ -44,6 +47,8 @@ export class EmailMarketingService {
         scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : null,
       },
     });
+    this.events.emit('campaign.created', { campaign, businessId: input.businessId } as CampaignCreatedPayload);
+    return campaign;
   }
 
   async updateCampaign(input: {
@@ -118,7 +123,7 @@ export class EmailMarketingService {
       });
     }
 
-    await this.prisma.client.emailCampaign.update({
+    const updatedCampaign = await this.prisma.client.emailCampaign.update({
       where: { id, businessId },
       data: {
         status: 'SENT',
@@ -127,6 +132,7 @@ export class EmailMarketingService {
         sentCount: recipientData.length,
       },
     });
+    this.events.emit('campaign.sent', { campaign: updatedCampaign, businessId, recipientCount: recipientData.length } as CampaignSentPayload);
 
     return { sent: recipientData.length };
   }

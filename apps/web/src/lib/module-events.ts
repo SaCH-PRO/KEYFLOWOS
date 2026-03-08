@@ -28,6 +28,11 @@ export type ModuleEventType =
   | "booking:cancelled"
   | "booking:view_contact"
   | "booking:create_invoice"
+  | "marketing:campaign_created"
+  | "marketing:campaign_sent"
+  | "marketing:lead_captured"
+  | "marketing:view_contact"
+  | "marketing:create_campaign_for_segment"
   | "module:tab_changed"
   | "module:view_changed";
 
