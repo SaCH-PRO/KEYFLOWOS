@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus,
@@ -31,6 +31,12 @@ import { EmptyState } from "@/components/ui/empty-state";
 
 const FIELD_TYPES = ["text", "email", "phone", "select", "textarea"];
 
+const FORM_FILTER_PILLS = [
+  { key: "all", label: "All" },
+  { key: "active", label: "Active" },
+  { key: "inactive", label: "Inactive" },
+];
+
 type FormField = { name: string; type: string; label: string; required: boolean };
 
 interface LeadFormsPanelProps {
@@ -54,6 +60,26 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
   const [expandedForm, setExpandedForm] = useState<string | null>(null);
   const [submissions, setSubmissions] = useState<Record<string, LeadFormSubmission[]>>({});
   const [copiedEmbed, setCopiedEmbed] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<string>("newest");
+
+  const filtered = useMemo(() => {
+    let base = forms;
+    if (statusFilter === "active") base = forms.filter(f => f.isActive);
+    else if (statusFilter === "inactive") base = forms.filter(f => !f.isActive);
+    const sorted = [...base];
+    switch (sortBy) {
+      case "name":
+        sorted.sort((a, b) => a.name.localeCompare(b.name));
+        break;
+      case "submissions":
+        sorted.sort((a, b) => (b._count?.submissions ?? 0) - (a._count?.submissions ?? 0));
+        break;
+      default:
+        sorted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    }
+    return sorted;
+  }, [forms, statusFilter, sortBy]);
 
   const openNewForm = useCallback(() => {
     setEditingForm(null);
@@ -142,6 +168,33 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
   return (
     <>
       <div className="space-y-4">
+        <button data-marketing-new-form onClick={openNewForm} className="hidden" aria-hidden="true" tabIndex={-1} />
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            {FORM_FILTER_PILLS.map(pill => (
+              <button
+                key={pill.key}
+                onClick={() => setStatusFilter(pill.key)}
+                className={statusFilter === pill.key
+                  ? "text-[10px] px-2.5 py-1 rounded-lg font-medium transition-all bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]"
+                  : "text-[10px] px-2.5 py-1 rounded-lg font-medium transition-all text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                }
+              >
+                {pill.label}
+              </button>
+            ))}
+          </div>
+          <select
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value)}
+            className="bg-muted/30 border border-border/40 rounded-lg text-xs px-2 py-1 focus:outline-none"
+          >
+            <option value="newest">Newest</option>
+            <option value="name">Name</option>
+            <option value="submissions">Submissions</option>
+          </select>
+        </div>
+        <p className="text-[11px] text-muted-foreground">{filtered.length} forms</p>
         {forms.length === 0 ? (
           <EmptyState
             icon={ClipboardList}
@@ -151,8 +204,8 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
             onAction={openNewForm}
           />
         ) : (
-          forms.map(form => (
-            <motion.div key={form.id} layout className="kf-card border border-border/40 rounded-xl overflow-hidden">
+          filtered.map(form => (
+            <motion.div key={form.id} layout className="kf-card border border-border/40 rounded-xl overflow-hidden" style={{ borderLeft: `3px solid ${form.isActive ? "#22c55e" : "#94a3b8"}` }}>
               <div className="p-4">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">

@@ -46,6 +46,9 @@ export const EVENT_LABELS: Record<string, string> = {
   "whatsapp.sent": "WhatsApp message sent",
   "message.copied": "Message copied",
   "form.submitted": "Form submitted",
+  "campaign.sent": "Campaign sent",
+  "campaign.opened": "Campaign opened",
+  "lead_form.submitted": "Lead form submitted",
   "followup.scheduled": "Follow-up scheduled",
   "automation.run": "Automation triggered",
   "automation.executed": "Automation executed",
@@ -86,6 +89,9 @@ export const EVENT_ICONS: Record<string, { icon: typeof MessageSquare; color: st
   "whatsapp.sent": { icon: MessageCircle, color: "hsl(142 76% 36%)" },
   "message.copied": { icon: Copy, color: "hsl(var(--kf-muted-foreground))" },
   "form.submitted": { icon: FileText, color: "hsl(var(--kf-accent1))" },
+  "campaign.sent": { icon: Mail, color: "hsl(270 70% 60%)" },
+  "campaign.opened": { icon: Mail, color: "hsl(142 76% 36%)" },
+  "lead_form.submitted": { icon: FileText, color: "hsl(var(--kf-accent2))" },
   "followup.scheduled": { icon: Bell, color: "hsl(var(--kf-accent1))" },
   "automation.run": { icon: Zap, color: "hsl(var(--kf-accent2))" },
   "automation.executed": { icon: Zap, color: "hsl(var(--kf-accent2))" },
@@ -102,6 +108,8 @@ export const MILESTONE_ICONS: Record<string, { icon: typeof MessageSquare; color
   completed: { icon: Star, color: "hsl(45 93% 47%)" },
   milestone: { icon: Gift, color: "hsl(var(--kf-accent1))" },
   note: { icon: MessageSquare, color: "hsl(var(--kf-muted-foreground))" },
+  campaign_sent: { icon: Mail, color: "hsl(270 70% 60%)" },
+  form_submitted: { icon: FileText, color: "hsl(var(--kf-accent2))" },
 };
 
 export const HEALTH_METRICS_CONFIG = [

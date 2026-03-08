@@ -8,8 +8,6 @@ import {
   ClipboardList,
   BarChart3,
   Send,
-  Lightbulb,
-  X,
   Facebook,
   Instagram,
   Linkedin,
@@ -41,8 +39,11 @@ import { useMarketingAiHub } from "./hooks/use-marketing-ai-hub";
 import { renderMarketingToolResult } from "./components/marketing-tool-results";
 import { MarketingAiSearchBar } from "./components/marketing-ai-search-bar";
 import { MarketingSkeleton } from "./components/marketing-skeleton";
+import { MarketingGuide } from "./components/marketing-guide";
 import { CampaignsPanel } from "./components/campaigns-panel";
 import { LeadFormsPanel } from "./components/lead-forms-panel";
+import { CampaignActionQueue } from "./components/campaign-action-queue";
+import { FormOptimizationQueue } from "./components/form-optimization-queue";
 import MarketingInsightsTab from "./insights/marketing-insights-tab";
 
 type MarketingTab = "campaigns" | "forms" | "insights";
@@ -226,6 +227,30 @@ export default function MarketingPage() {
     }
   }, [activeTab]);
 
+  const handleEditCampaign = useCallback((campaign: EmailCampaign) => {
+    const el = document.querySelector<HTMLButtonElement>(`[data-campaign-edit="${campaign.id}"]`);
+    el?.click();
+  }, []);
+
+  const handleSendCampaign = useCallback((id: string) => {
+    const el = document.querySelector<HTMLButtonElement>(`[data-campaign-send="${id}"]`);
+    el?.click();
+  }, []);
+
+  const handleEditForm = useCallback((form: LeadForm) => {
+    const el = document.querySelector<HTMLButtonElement>(`[data-form-edit="${form.id}"]`);
+    el?.click();
+  }, []);
+
+  const handleToggleForm = useCallback(async (form: LeadForm) => {
+    const { updateLeadForm: updateFormApi } = await import("@/lib/client");
+    if (!businessId) return;
+    const res = await updateFormApi(businessId, form.id, { isActive: !form.isActive });
+    if (res.data) setForms(prev => prev.map(f => f.id === form.id ? res.data! : f));
+  }, [businessId]);
+
+  const toggleGuide = useCallback(() => setShowGuide(prev => !prev), []);
+
   const marketingShortcuts = useMemo<ShortcutGroup[]>(() => [
     {
       groupName: "Marketing Navigation",
@@ -236,6 +261,7 @@ export default function MarketingPage() {
         { key: "n", description: "New campaign/form", action: handleNewItem },
         { key: "r", description: "Refresh data", action: () => { void loadData(); } },
         { key: "f", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('[data-marketing-ai-search]'); el?.focus(); } },
+        { key: "g", description: "Toggle guide", action: toggleGuide },
         { key: "a", shift: true, description: "Toggle AI Hub", action: () => marketingAi.togglePanel() },
         { key: "Escape", description: "Close panels", action: () => {
           if (marketingAi.hubMode === "tool-result") marketingAi.clearToolResult();
@@ -244,7 +270,7 @@ export default function MarketingPage() {
         } },
       ],
     },
-  ], [handleTabChange, handleNewItem, loadData, marketingAi.togglePanel, marketingAi.panelOpen, marketingAi.setOpen, marketingAi.hubMode, marketingAi.clearToolResult]);
+  ], [handleTabChange, handleNewItem, loadData, toggleGuide, marketingAi.togglePanel, marketingAi.panelOpen, marketingAi.setOpen, marketingAi.hubMode, marketingAi.clearToolResult]);
 
   useKeyboardShortcuts(marketingShortcuts, !loading);
 
@@ -270,67 +296,11 @@ export default function MarketingPage() {
         actionLabel={activeTab === "campaigns" ? "New Campaign" : activeTab === "forms" ? "New Form" : undefined}
         onAction={activeTab === "insights" ? undefined : handleNewItem}
         titleExtra={
-          <div className="relative">
-            <button
-              onClick={() => setShowGuide(!showGuide)}
-              className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
-                showGuide
-                  ? "bg-amber-400 text-white shadow-md shadow-amber-400/40 scale-110"
-                  : "bg-amber-400/15 text-amber-400 hover:bg-amber-400/25 hover:shadow-sm hover:shadow-amber-400/20 hover:scale-105"
-              }`}
-              aria-label="Getting started guide"
-              title="Getting started guide"
-            >
-              <Lightbulb className="w-3.5 h-3.5" />
-            </button>
-            <AnimatePresence>
-              {showGuide && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowGuide(false)} />
-                  <motion.div
-                    initial={{ opacity: 0, y: -4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    transition={{ duration: 0.12 }}
-                    className="fixed left-2 right-2 top-20 sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl sm:w-[90vw] sm:max-w-[700px] max-h-[80vh] overflow-y-auto p-5"
-                  >
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="p-1.5 rounded-lg bg-amber-400/10">
-                        <Lightbulb className="w-4 h-4 text-amber-400" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-semibold">Getting Started</h4>
-                        <p className="text-[11px] text-muted-foreground">Your quick-start guide</p>
-                      </div>
-                      <button onClick={() => setShowGuide(false)} className="ml-auto p-1 rounded hover:bg-muted/50" aria-label="Close guide">
-                        <X className="w-3.5 h-3.5 text-muted-foreground" />
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {[
-                        { step: "1", title: "Create a Campaign", desc: "Write your email content, choose a subject line, and save as draft." },
-                        { step: "2", title: "Segment Your Audience", desc: "Target specific contacts by tags or status (leads, clients, etc.)." },
-                        { step: "3", title: "Send & Track", desc: "Send your campaign and monitor open rates, click-through, and delivery stats." },
-                        { step: "4", title: "Build Lead Forms", desc: "Create custom forms with fields like name, email, phone, and dropdowns." },
-                        { step: "5", title: "Share Form Links", desc: "Get a public URL or embed code to place forms on any website." },
-                        { step: "6", title: "Auto-Add to CRM", desc: "Form submissions automatically create contacts in your CRM." },
-                      ].map((item) => (
-                        <div key={item.step} className="flex gap-2.5 p-2 rounded-xl hover:bg-muted/30 transition-colors">
-                          <div className="w-5 h-5 rounded-full bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">
-                            {item.step}
-                          </div>
-                          <div>
-                            <p className="text-xs font-medium">{item.title}</p>
-                            <p className="text-[10px] text-muted-foreground leading-relaxed">{item.desc}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </motion.div>
-                </>
-              )}
-            </AnimatePresence>
-          </div>
+          <MarketingGuide
+            isOpen={showGuide}
+            onToggle={toggleGuide}
+            onTabChange={handleTabChange}
+          />
         }
         rightSlot={
           <button
@@ -343,6 +313,8 @@ export default function MarketingPage() {
           </button>
         }
       />
+
+      <MarketingAiSearchBar businessId={businessId} />
 
       {!connectionsLoading && (
         <div className="space-y-3">
@@ -363,8 +335,6 @@ export default function MarketingPage() {
           />
         </div>
       )}
-
-      <MarketingAiSearchBar businessId={businessId} />
 
       <AnimatePresence>
         {marketingAi.panelOpen && (
@@ -397,25 +367,41 @@ export default function MarketingPage() {
             transition={{ type: "spring", bounce: 0.15, duration: 0.35 }}
           >
             {activeTab === "campaigns" && (
-              <CampaignsPanel
-                businessId={businessId}
-                campaigns={campaigns}
-                setCampaigns={setCampaigns}
-                availableTags={availableTags}
-                onCampaignCreated={handleCampaignCreated}
-                onCampaignSent={handleCampaignSent}
-                onViewContact={handleViewContact}
-                onAiWrite={handleAiWrite}
-              />
+              <div className="space-y-4">
+                <CampaignActionQueue
+                  campaigns={campaigns}
+                  onEdit={handleEditCampaign}
+                  onSend={handleSendCampaign}
+                  onAiWrite={handleAiWrite}
+                />
+                <CampaignsPanel
+                  businessId={businessId}
+                  campaigns={campaigns}
+                  setCampaigns={setCampaigns}
+                  availableTags={availableTags}
+                  onCampaignCreated={handleCampaignCreated}
+                  onCampaignSent={handleCampaignSent}
+                  onViewContact={handleViewContact}
+                  onAiWrite={handleAiWrite}
+                />
+              </div>
             )}
             {activeTab === "forms" && (
-              <LeadFormsPanel
-                businessId={businessId}
-                forms={forms}
-                setForms={setForms}
-                onViewContact={handleViewContact}
-                onAiOptimize={handleAiOptimizeForm}
-              />
+              <div className="space-y-4">
+                <FormOptimizationQueue
+                  forms={forms}
+                  onAiOptimize={handleAiOptimizeForm}
+                  onEdit={handleEditForm}
+                  onToggle={handleToggleForm}
+                />
+                <LeadFormsPanel
+                  businessId={businessId}
+                  forms={forms}
+                  setForms={setForms}
+                  onViewContact={handleViewContact}
+                  onAiOptimize={handleAiOptimizeForm}
+                />
+              </div>
             )}
             {activeTab === "insights" && (
               <div className="space-y-4">
