@@ -7,11 +7,9 @@ import {
   MapPin,
 } from "lucide-react";
 import type { InvoiceTemplateData } from "./template-types";
+import { formatCurrencyShort } from "@/lib/currency";
 
-function fmt(amount: number, currency: string) {
-  const sym = currency === "TTD" ? "TT$" : currency === "USD" ? "$" : `${currency} `;
-  return `${sym}${amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
-}
+const fmt = (amount: number, currency: string) => formatCurrencyShort(amount, currency);
 
 function hexToRgb(hex: string) {
   const r = parseInt(hex.slice(1, 3), 16);
