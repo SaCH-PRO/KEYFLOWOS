@@ -239,8 +239,8 @@ export class CommerceService {
     if (!invoice) {
       throw new Error('Invoice not found');
     }
-    if (invoice.status === 'PAID') {
-      throw new Error('Cannot delete a paid invoice');
+    if (invoice.status === 'PAID' || invoice.status === 'PARTIALLY_PAID') {
+      throw new Error('Cannot delete a paid or partially paid invoice');
     }
     const result = await this.prisma.client.invoice.update({
       where: { id: invoiceId },
@@ -288,7 +288,7 @@ export class CommerceService {
     if (!invoice) return null;
 
     if (requireShareable) {
-      const shareableStatuses = ['SENT', 'PAID', 'OVERDUE'];
+      const shareableStatuses = ['SENT', 'PAID', 'OVERDUE', 'PARTIALLY_PAID'];
       if (!shareableStatuses.includes(invoice.status)) {
         return null;
       }
@@ -806,6 +806,117 @@ export class CommerceService {
     return invoice;
   }
 
+  // ========== PARTIAL PAYMENTS ==========
+
+  async recordPayment(invoiceId: string, businessId: string, input: {
+    amount: number;
+    method: string;
+    reference?: string;
+    notes?: string;
+  }) {
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { id: invoiceId, businessId, deletedAt: null },
+      include: { payments: true },
+    });
+    if (!invoice) {
+      throw new Error('Invoice not found');
+    }
+    if (invoice.status === 'PAID' || invoice.status === 'VOID') {
+      throw new Error(`Cannot record payment on a ${invoice.status} invoice`);
+    }
+    if (input.amount <= 0) {
+      throw new Error('Payment amount must be positive');
+    }
+
+    const existingPaid = invoice.payments
+      .filter((p: any) => p.status === 'SUCCESSFUL')
+      .reduce((sum: number, p: any) => sum + p.amount, 0);
+    const remaining = Number(invoice.total) - existingPaid;
+    const paymentAmount = Math.min(input.amount, remaining);
+
+    const payment = await this.prisma.client.payment.create({
+      data: {
+        amount: paymentAmount,
+        currency: invoice.currency,
+        status: 'SUCCESSFUL',
+        provider: input.method,
+        providerPaymentId: `manual_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        businessId,
+        invoiceId,
+      },
+    });
+
+    const newPaidTotal = existingPaid + paymentAmount;
+    const newStatus = newPaidTotal >= Number(invoice.total) ? 'PAID' : 'PARTIALLY_PAID';
+
+    const updatedInvoice = await this.prisma.client.invoice.update({
+      where: { id: invoiceId },
+      data: {
+        status: newStatus,
+        ...(newStatus === 'PAID' ? { paidAt: new Date() } : {}),
+      },
+      include: { payments: true, contact: true, items: true },
+    });
+
+    if (newStatus === 'PAID') {
+      this.events.emit('invoice.paid', {
+        invoice: updatedInvoice,
+        businessId,
+        eventName: 'invoice.paid',
+      } as any);
+    }
+
+    if (invoice.contactId) {
+      await this.crm.logContactEvent({
+        businessId,
+        contactId: invoice.contactId,
+        type: 'invoice.payment_recorded',
+        data: {
+          invoiceId,
+          amount: paymentAmount,
+          method: input.method,
+          reference: input.reference,
+          totalPaid: newPaidTotal,
+          invoiceTotal: invoice.total,
+          newStatus,
+        },
+        actorType: 'USER',
+        source: 'commerce',
+      });
+    }
+
+    this.statsCache.invalidateCache(businessId);
+
+    return {
+      payment,
+      invoice: updatedInvoice,
+      paidAmount: newPaidTotal,
+      remaining: Math.max(0, Number(invoice.total) - newPaidTotal),
+    };
+  }
+
+  async listPayments(invoiceId: string, businessId: string) {
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { id: invoiceId, businessId, deletedAt: null },
+    });
+    if (!invoice) {
+      throw new Error('Invoice not found');
+    }
+    const payments = await this.prisma.client.payment.findMany({
+      where: { invoiceId },
+      orderBy: { createdAt: 'desc' },
+    });
+    const paidAmount = payments
+      .filter((p: any) => p.status === 'SUCCESSFUL')
+      .reduce((sum: number, p: any) => sum + p.amount, 0);
+    return {
+      payments,
+      paidAmount,
+      remaining: Math.max(0, Number(invoice.total) - paidAmount),
+      invoiceTotal: invoice.total,
+    };
+  }
+
   // ========== UPDATE INVOICE ==========
 
   async updateInvoice(input: {
@@ -826,8 +937,8 @@ export class CommerceService {
     if (!invoice) {
       throw new Error('Invoice not found');
     }
-    if (invoice.status === 'PAID') {
-      throw new Error('Cannot edit a paid invoice');
+    if (invoice.status === 'PAID' || invoice.status === 'PARTIALLY_PAID') {
+      throw new Error('Cannot edit a paid or partially paid invoice');
     }
 
     const updateData: any = {};
@@ -897,5 +1008,29 @@ export class CommerceService {
     });
     this.statsCache.invalidateCache(input.businessId);
     return result;
+  }
+
+  async getCampaignRevenue(businessId: string, campaignId: string) {
+    const invoices = await this.prisma.client.invoice.findMany({
+      where: {
+        businessId,
+        campaignId,
+        deletedAt: null,
+        status: { in: ['PAID', 'PARTIALLY_PAID', 'SENT', 'OVERDUE'] },
+      },
+      select: { id: true, total: true, status: true, currency: true },
+    });
+    const totalRevenue = invoices
+      .filter((i: any) => i.status === 'PAID')
+      .reduce((sum: number, i: any) => sum + i.total, 0);
+    const pipelineRevenue = invoices
+      .filter((i: any) => i.status !== 'PAID')
+      .reduce((sum: number, i: any) => sum + i.total, 0);
+    return {
+      totalRevenue,
+      pipelineRevenue,
+      invoiceCount: invoices.length,
+      currency: invoices[0]?.currency || 'TTD',
+    };
   }
 }

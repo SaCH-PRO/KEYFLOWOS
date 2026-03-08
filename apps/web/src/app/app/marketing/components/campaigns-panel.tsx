@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useMemo, useRef } from "react";
+import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Mail,
@@ -17,13 +17,22 @@ import {
   Sparkles,
   Loader2,
   Copy,
+  Clock,
+  XCircle,
+  Calendar,
+  ShieldOff,
+  UserX,
 } from "lucide-react";
+import { EmailEditor } from "./email-editor";
 import {
   EmailCampaign,
   createCampaign,
   updateCampaign,
   deleteCampaign,
   sendCampaign,
+  scheduleCampaign,
+  cancelScheduleCampaign,
+  fetchSuppressionCount,
 } from "@/lib/client";
 import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "sonner";
@@ -74,6 +83,9 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
   const [editingCampaign, setEditingCampaign] = useState<EmailCampaign | null>(null);
   const [campaignForm, setCampaignForm] = useState({ name: "", subject: "", body: "", segmentType: "all", tags: [] as string[], status: "" });
   const [confirmSendId, setConfirmSendId] = useState<string | null>(null);
+  const [scheduleMode, setScheduleMode] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState("");
+  const [scheduling, setScheduling] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [expandedCampaign, setExpandedCampaign] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -82,8 +94,17 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
   const [sending, setSending] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+  const [suppressionCount, setSuppressionCount] = useState(0);
+  const [lastSendSuppressed, setLastSendSuppressed] = useState<Record<string, number>>({});
   const initialFormRef = useRef({ name: "", subject: "", body: "", segmentType: "all", tags: [] as string[], status: "" });
-  const operationInFlight = saving || sending || !!deletingId;
+  const operationInFlight = saving || sending || scheduling || !!deletingId;
+
+  useEffect(() => {
+    if (!businessId) return;
+    fetchSuppressionCount(businessId).then(res => {
+      if (res.data != null) setSuppressionCount(res.data);
+    });
+  }, [businessId]);
 
   const isDirty = useCallback(() => {
     const init = initialFormRef.current;
@@ -203,9 +224,18 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
     try {
       const res = await sendCampaign(businessId, id);
       if (res.data) {
-        setCampaigns(prev => prev.map(c => c.id === id ? res.data! : c));
-        onCampaignSent?.(res.data);
-        toast.success(`Campaign sent to ${res.data.totalRecipients ?? 0} recipients`);
+        const { sent, suppressed, warning } = res.data as any;
+        setLastSendSuppressed(prev => ({ ...prev, [id]: suppressed }));
+        setCampaigns(prev => prev.map(c => c.id === id ? { ...c, status: "SENT", sentAt: new Date().toISOString(), totalRecipients: sent, sentCount: sent } : c));
+        const campaign = campaigns.find(c => c.id === id);
+        if (campaign) onCampaignSent?.({ ...campaign, status: "SENT", totalRecipients: sent, sentCount: sent });
+        const msg = suppressed > 0
+          ? `Campaign sent to ${sent} recipients (${suppressed} suppressed)`
+          : `Campaign sent to ${sent} recipients`;
+        toast.success(msg);
+        if (warning) {
+          toast.info(warning);
+        }
       }
     } catch {
       toast.error("Failed to send campaign");
@@ -213,7 +243,7 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
       setSending(false);
     }
     setConfirmSendId(null);
-  }, [businessId, setCampaigns, onCampaignSent]);
+  }, [businessId, campaigns, setCampaigns, onCampaignSent]);
 
   const handleDuplicateCampaign = useCallback(async (campaign: EmailCampaign) => {
     if (!businessId) return;
@@ -236,6 +266,38 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
       toast.error("Failed to duplicate campaign");
     }
   }, [businessId, setCampaigns, onCampaignCreated]);
+
+  const handleScheduleCampaign = useCallback(async (id: string) => {
+    if (!businessId || !scheduleDate) return;
+    setScheduling(true);
+    try {
+      const res = await scheduleCampaign(businessId, id, new Date(scheduleDate).toISOString());
+      if (res.data) {
+        setCampaigns(prev => prev.map(c => c.id === id ? res.data! : c));
+        toast.success("Campaign scheduled");
+      }
+    } catch {
+      toast.error("Failed to schedule campaign");
+    } finally {
+      setScheduling(false);
+      setConfirmSendId(null);
+      setScheduleMode(false);
+      setScheduleDate("");
+    }
+  }, [businessId, scheduleDate, setCampaigns]);
+
+  const handleCancelSchedule = useCallback(async (id: string) => {
+    if (!businessId) return;
+    try {
+      const res = await cancelScheduleCampaign(businessId, id);
+      if (res.data) {
+        setCampaigns(prev => prev.map(c => c.id === id ? res.data! : c));
+        toast.success("Schedule cancelled");
+      }
+    } catch {
+      toast.error("Failed to cancel schedule");
+    }
+  }, [businessId, setCampaigns]);
 
   const toggleTag = useCallback((tag: string) => {
     setCampaignForm(prev => ({
@@ -299,13 +361,24 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
                       </span>
                     </div>
                     <p className="text-xs text-muted-foreground truncate">{campaign.subject}</p>
-                    <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground flex-wrap">
                       <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {campaign.totalRecipients} recipients</span>
                       {campaign.status === "SENT" && (
                         <>
                           <span className="flex items-center gap-1"><Send className="w-3 h-3" /> {campaign.sentCount} sent</span>
                           <span className="flex items-center gap-1"><MailOpen className="w-3 h-3" /> {campaign.openCount} opened</span>
+                          {(lastSendSuppressed[campaign.id] ?? 0) > 0 && (
+                            <span className="flex items-center gap-1 text-amber-400">
+                              <ShieldOff className="w-3 h-3" /> {lastSendSuppressed[campaign.id]} suppressed
+                            </span>
+                          )}
                         </>
+                      )}
+                      {campaign.status === "SCHEDULED" && campaign.scheduledAt && (
+                        <span className="flex items-center gap-1 text-amber-400">
+                          <Clock className="w-3 h-3" />
+                          {new Date(campaign.scheduledAt).toLocaleString()}
+                        </span>
                       )}
                     </div>
                   </div>
@@ -324,6 +397,11 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
                           <Send className="w-4 h-4" />
                         </button>
                       </>
+                    )}
+                    {campaign.status === "SCHEDULED" && (
+                      <button onClick={() => handleCancelSchedule(campaign.id)} disabled={operationInFlight} className="p-1.5 rounded-lg text-muted-foreground hover:text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-40" aria-label="Cancel schedule" title="Cancel Schedule">
+                        <XCircle className="w-4 h-4" />
+                      </button>
                     )}
                     {campaign.status === "SENT" && (
                       <button onClick={() => setExpandedCampaign(expandedCampaign === campaign.id ? null : campaign.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors" aria-label="Toggle stats">
@@ -344,12 +422,13 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
                 {expandedCampaign === campaign.id && campaign.status === "SENT" && (
                   <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
                     <div className="px-4 pb-4 pt-2 border-t border-border/20">
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                         {[
                           { label: "Recipients", value: campaign.totalRecipients, icon: Users, color: "#6366f1" },
                           { label: "Sent", value: campaign.sentCount, icon: Send, color: "#3b82f6" },
                           { label: "Opened", value: campaign.openCount, icon: MailOpen, color: "#22c55e" },
                           { label: "Clicked", value: campaign.clickCount, icon: MousePointerClick, color: "#f59e0b" },
+                          { label: "Unsubscribed", value: suppressionCount, icon: UserX, color: "#ef4444" },
                         ].map(stat => (
                           <div key={stat.label} className="bg-muted/30 rounded-lg p-3 text-center">
                             <stat.icon className="w-4 h-4 mx-auto mb-1" style={{ color: stat.color }} />
@@ -397,12 +476,10 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
                 </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground block mb-1">Body</label>
-                  <textarea
+                  <EmailEditor
                     value={campaignForm.body}
-                    onChange={e => setCampaignForm(p => ({ ...p, body: e.target.value }))}
-                    rows={6}
+                    onChange={(html) => setCampaignForm(p => ({ ...p, body: html }))}
                     placeholder="Write your email content here..."
-                    className="w-full bg-muted/30 border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))] resize-none"
                   />
                 </div>
                 <div>
@@ -503,22 +580,60 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
       <AnimatePresence>
         {confirmSendId && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !sending && setConfirmSendId(null)} />
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !sending && !scheduling && (() => { setConfirmSendId(null); setScheduleMode(false); setScheduleDate(""); })()} />
             <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="relative kf-card border border-border rounded-2xl p-6 max-w-sm w-full">
               <div className="text-center">
-                <Send className="w-10 h-10 mx-auto mb-3" style={{ color: "hsl(var(--kf-accent1))" }} />
-                <h3 className="text-lg font-semibold mb-2">Send Campaign?</h3>
+                {scheduleMode ? (
+                  <Calendar className="w-10 h-10 mx-auto mb-3 text-amber-400" />
+                ) : (
+                  <Send className="w-10 h-10 mx-auto mb-3" style={{ color: "hsl(var(--kf-accent1))" }} />
+                )}
+                <h3 className="text-lg font-semibold mb-2">{scheduleMode ? "Schedule Campaign" : "Send Campaign?"}</h3>
                 <p className="text-sm text-muted-foreground mb-4">
-                  This will send the email to all matching recipients. This action cannot be undone.
+                  {scheduleMode
+                    ? "Choose a date and time to send this campaign."
+                    : "This will send the email to all matching recipients. This action cannot be undone."}
                 </p>
-                <div className="flex gap-2">
-                  <button onClick={() => handleSendCampaign(confirmSendId)} disabled={sending} className="kf-btn-primary px-4 py-2 rounded-xl text-sm font-medium flex-1 disabled:opacity-40 flex items-center justify-center gap-2">
-                    {sending && <Loader2 className="w-4 h-4 animate-spin" />}
-                    Yes, Send Now
-                  </button>
-                  <button onClick={() => setConfirmSendId(null)} disabled={sending} className="px-4 py-2 rounded-xl text-sm text-muted-foreground hover:bg-muted/50 flex-1">
-                    Cancel
-                  </button>
+                {scheduleMode && (
+                  <div className="mb-4">
+                    <input
+                      type="datetime-local"
+                      value={scheduleDate}
+                      onChange={e => setScheduleDate(e.target.value)}
+                      min={new Date(Date.now() + 60000).toISOString().slice(0, 16)}
+                      className="w-full bg-muted/30 border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]"
+                    />
+                  </div>
+                )}
+                <div className="flex flex-col gap-2">
+                  {scheduleMode ? (
+                    <div className="flex gap-2">
+                      <button onClick={() => handleScheduleCampaign(confirmSendId)} disabled={scheduling || !scheduleDate} className="kf-btn-primary px-4 py-2 rounded-xl text-sm font-medium flex-1 disabled:opacity-40 flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600">
+                        {scheduling && <Loader2 className="w-4 h-4 animate-spin" />}
+                        <Clock className="w-4 h-4" />
+                        Schedule
+                      </button>
+                      <button onClick={() => { setScheduleMode(false); setScheduleDate(""); }} disabled={scheduling} className="px-4 py-2 rounded-xl text-sm text-muted-foreground hover:bg-muted/50 flex-1">
+                        Back
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex gap-2">
+                        <button onClick={() => handleSendCampaign(confirmSendId)} disabled={sending} className="kf-btn-primary px-4 py-2 rounded-xl text-sm font-medium flex-1 disabled:opacity-40 flex items-center justify-center gap-2">
+                          {sending && <Loader2 className="w-4 h-4 animate-spin" />}
+                          Send Now
+                        </button>
+                        <button onClick={() => setScheduleMode(true)} disabled={sending} className="px-4 py-2 rounded-xl text-sm font-medium flex-1 border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 transition-colors flex items-center justify-center gap-2">
+                          <Clock className="w-4 h-4" />
+                          Schedule
+                        </button>
+                      </div>
+                      <button onClick={() => { setConfirmSendId(null); setScheduleMode(false); setScheduleDate(""); }} disabled={sending} className="px-4 py-2 rounded-xl text-sm text-muted-foreground hover:bg-muted/50">
+                        Cancel
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </motion.div>

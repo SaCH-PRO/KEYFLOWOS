@@ -79,10 +79,12 @@ type NextAction = {
   trigger: string;
 };
 
-type AiStub = {
-  id: string;
-  title: string;
-  detail: string;
+type AiNextAction = {
+  type: 'follow_up' | 'send_quote' | 'payment_reminder' | 'add_note';
+  contactId: string;
+  contactName: string;
+  reason: string;
+  priority: 'high' | 'medium' | 'low';
 };
 
 type FlowHighlightsPayload = {
@@ -94,7 +96,7 @@ type FlowHighlightsPayload = {
   segments: SegmentInsight[];
   timeline: TimelineEntry[];
   nextActions: NextAction[];
-  aiNextActions: AiStub[];
+  aiNextActions: AiNextAction[];
 };
 
 @Injectable()
@@ -655,13 +657,7 @@ export class CrmStatsService {
       segments,
       timeline,
       nextActions: this.buildNextActions(contacts),
-      aiNextActions: [
-        {
-          id: 'ai-next-actions-stub',
-          title: 'AI insights coming soon',
-          detail: 'This placeholder will be replaced once the Flow listeners and AI module are wired.',
-        },
-      ],
+      aiNextActions: [],
     };
     this.setCache(cacheKey, flowResult);
     return flowResult;

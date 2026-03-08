@@ -53,7 +53,7 @@ export default function ContactsPage() {
     contacts, loadContacts,
     activeListId, setActiveListId, setActiveListContactIds,
     setListsCount,
-    flowIntelligence, flowDataLoading, revenueData,
+    flowIntelligence, flowDataLoading, revenueData, aiNextActions,
     setStatusFilter,
     nextActions, autopilotActions, autopilotPaused,
     setAutopilotPaused,
@@ -507,6 +507,7 @@ export default function ContactsPage() {
                 loading={flowDataLoading}
                 businessId={businessId ?? undefined}
                 revenueData={revenueData}
+                aiNextActions={aiNextActions}
                 onComplete={handleCompleteNextAction}
                 onViewContact={handleViewEngageContact}
                 onDoAction={handleDoAction}

@@ -484,6 +484,43 @@ export class CommerceController {
     return { success: true };
   }
 
+  // ========== PARTIAL PAYMENTS ==========
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/invoices/:invoiceId/payments')
+  listPayments(
+    @Param('businessId') businessId: string,
+    @Param('invoiceId') invoiceId: string,
+  ) {
+    return this.commerce.listPayments(invoiceId, businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/invoices/:invoiceId/payments')
+  recordPayment(
+    @Param('businessId') businessId: string,
+    @Param('invoiceId') invoiceId: string,
+    @Body() body: {
+      amount: number;
+      method: string;
+      reference?: string;
+      notes?: string;
+    },
+  ) {
+    return this.commerce.recordPayment(invoiceId, businessId, body);
+  }
+
+  // ========== CAMPAIGN REVENUE ==========
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/campaigns/:campaignId/revenue')
+  getCampaignRevenue(
+    @Param('businessId') businessId: string,
+    @Param('campaignId') campaignId: string,
+  ) {
+    return this.commerce.getCampaignRevenue(businessId, campaignId);
+  }
+
   // ========== RECURRING INVOICES ==========
 
   @UseGuards(AuthGuard, BusinessGuard)

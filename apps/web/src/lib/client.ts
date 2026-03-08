@@ -202,6 +202,18 @@ export type InvoiceItem = {
   productId?: string | null;
 };
 
+export type PaymentRecord = {
+  id: string;
+  amount: number;
+  currency: string;
+  status: string;
+  provider: string;
+  providerPaymentId: string;
+  createdAt: string;
+  businessId: string;
+  invoiceId: string;
+};
+
 export type Invoice = {
   id: string;
   invoiceNumber?: string | null;
@@ -221,6 +233,7 @@ export type Invoice = {
   contactId?: string | null;
   contact?: { firstName?: string | null; lastName?: string | null; email?: string | null } | null;
   items?: InvoiceItem[];
+  payments?: PaymentRecord[];
 };
 
 type ApiResult<T> = { data: T | null; error: string | null };
@@ -406,11 +419,15 @@ const nextActionSchema = z.object({
   trigger: z.string(),
 });
 
-const aiStubSchema = z.object({
-  id: z.string(),
-  title: z.string(),
-  detail: z.string(),
+const aiNextActionSchema = z.object({
+  type: z.enum(["follow_up", "send_quote", "payment_reminder", "add_note"]),
+  contactId: z.string(),
+  contactName: z.string(),
+  reason: z.string(),
+  priority: z.enum(["high", "medium", "low"]),
 });
+
+export type AiNextAction = z.infer<typeof aiNextActionSchema>;
 
 const flowHighlightsSchema = z.object({
   highlights: z.object({
@@ -421,7 +438,7 @@ const flowHighlightsSchema = z.object({
   segments: z.array(segmentInsightSchema),
   timeline: z.array(timelineEntrySchema),
   nextActions: z.array(nextActionSchema),
-  aiNextActions: z.array(aiStubSchema),
+  aiNextActions: z.array(aiNextActionSchema),
 });
 
 export type FlowHighlights = z.infer<typeof flowHighlightsSchema>;
@@ -1144,6 +1161,22 @@ export async function markInvoicePaid(invoiceId: string) {
     path: `/commerce/invoices/${encodeURIComponent(invoiceId)}/paid`,
     body: {},
   });
+}
+
+export async function recordInvoicePayment(businessId: string, invoiceId: string, input: {
+  amount: number;
+  method: string;
+  reference?: string;
+  notes?: string;
+}): Promise<ApiResult<{ payment: PaymentRecord; invoice: Invoice; paidAmount: number; remaining: number }>> {
+  return apiPost({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(invoiceId)}/payments`,
+    body: input,
+  });
+}
+
+export async function listInvoicePayments(businessId: string, invoiceId: string): Promise<ApiResult<{ payments: PaymentRecord[]; paidAmount: number; remaining: number; invoiceTotal: number }>> {
+  return apiGet(`/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(invoiceId)}/payments`);
 }
 
 export async function createInvoice(input: {
@@ -2462,6 +2495,16 @@ export async function fetchFlowIntelligence(businessId?: string, opts?: { signal
   );
 }
 
+export async function fetchAiNextActions(businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<AiNextAction[]>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(bid)}/ai-next-actions`,
+    z.array(aiNextActionSchema),
+    [],
+    { signal: opts?.signal },
+  );
+}
+
 export async function fetchNextActions(businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<CrmNextAction[]>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiGet(
@@ -3110,8 +3153,21 @@ export async function updateCampaign(businessId: string, id: string, data: Parti
 export async function deleteCampaign(businessId: string, id: string): Promise<ApiResult<void>> {
   return apiDelete<void>(`/businesses/${encodeURIComponent(businessId)}/campaigns/${id}`);
 }
-export async function sendCampaign(businessId: string, id: string): Promise<ApiResult<EmailCampaign>> {
-  return apiPost<EmailCampaign>({ path: `/businesses/${encodeURIComponent(businessId)}/campaigns/${id}/send`, body: {} });
+export interface SendCampaignResult {
+  sent: number;
+  suppressed: number;
+}
+export async function sendCampaign(businessId: string, id: string): Promise<ApiResult<SendCampaignResult>> {
+  return apiPost<SendCampaignResult>({ path: `/businesses/${encodeURIComponent(businessId)}/campaigns/${id}/send`, body: {} });
+}
+export async function scheduleCampaign(businessId: string, id: string, scheduledAt: string): Promise<ApiResult<EmailCampaign>> {
+  return apiPost<EmailCampaign>({ path: `/businesses/${encodeURIComponent(businessId)}/campaigns/${id}/schedule`, body: { scheduledAt } });
+}
+export async function cancelScheduleCampaign(businessId: string, id: string): Promise<ApiResult<EmailCampaign>> {
+  return apiPost<EmailCampaign>({ path: `/businesses/${encodeURIComponent(businessId)}/campaigns/${id}/cancel-schedule`, body: {} });
+}
+export async function fetchSuppressionCount(businessId: string): Promise<ApiResult<number>> {
+  return apiGetSimple<number>(`/businesses/${encodeURIComponent(businessId)}/suppression-count`);
 }
 
 // ---

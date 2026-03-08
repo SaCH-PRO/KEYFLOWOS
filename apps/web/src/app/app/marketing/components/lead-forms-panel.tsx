@@ -19,6 +19,9 @@ import {
   Code,
   Sparkles,
   Loader2,
+  ArrowUp,
+  ArrowDown,
+  EyeOff,
 } from "lucide-react";
 import {
   LeadForm,
@@ -31,7 +34,7 @@ import {
 import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "sonner";
 
-const FIELD_TYPES = ["text", "email", "phone", "select", "textarea"];
+const FIELD_TYPES = ["text", "email", "phone", "select", "textarea", "number", "date", "checkbox", "radio", "url", "hidden"];
 
 const FORM_FILTER_PILLS = [
   { key: "all", label: "All" },
@@ -39,7 +42,7 @@ const FORM_FILTER_PILLS = [
   { key: "inactive", label: "Inactive" },
 ];
 
-type FormField = { name: string; type: string; label: string; required: boolean };
+type FormField = { name: string; type: string; label: string; required: boolean; options?: string[]; condition?: { field: string; value: string } };
 
 interface LeadFormsPanelProps {
   businessId: string | null;
@@ -231,6 +234,16 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
       ...prev,
       fields: prev.fields.map((f, i) => i === index ? { ...f, ...updates } : f),
     }));
+  }, []);
+
+  const moveField = useCallback((index: number, direction: "up" | "down") => {
+    setFormBuilder(prev => {
+      const fields = [...prev.fields];
+      const targetIndex = direction === "up" ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= fields.length) return prev;
+      [fields[index], fields[targetIndex]] = [fields[targetIndex], fields[index]];
+      return { ...prev, fields };
+    });
   }, []);
 
   return (
@@ -431,6 +444,14 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
                     {formBuilder.fields.map((field, i) => (
                       <div key={i} className="bg-muted/20 border border-border/40 rounded-lg p-3 space-y-2">
                         <div className="flex items-center gap-2">
+                          <div className="flex flex-col gap-0.5">
+                            <button onClick={() => moveField(i, "up")} disabled={i === 0} className="p-0.5 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-20" aria-label="Move up">
+                              <ArrowUp className="w-3 h-3" />
+                            </button>
+                            <button onClick={() => moveField(i, "down")} disabled={i === formBuilder.fields.length - 1} className="p-0.5 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-20" aria-label="Move down">
+                              <ArrowDown className="w-3 h-3" />
+                            </button>
+                          </div>
                           <input
                             value={field.label}
                             onChange={e => updateField(i, { label: e.target.value })}
@@ -439,7 +460,7 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
                           />
                           <select
                             value={field.type}
-                            onChange={e => updateField(i, { type: e.target.value })}
+                            onChange={e => updateField(i, { type: e.target.value, ...(e.target.value !== "select" && e.target.value !== "radio" ? { options: undefined } : {}) })}
                             className="bg-muted/30 border border-border/40 rounded px-2 py-1.5 text-xs focus:outline-none"
                           >
                             {FIELD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
@@ -456,6 +477,55 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
+                        {(field.type === "select" || field.type === "radio") && (
+                          <div>
+                            <label className="text-[10px] text-muted-foreground block mb-1">Options (comma-separated)</label>
+                            <input
+                              value={(field.options || []).join(", ")}
+                              onChange={e => updateField(i, { options: e.target.value.split(",").map(o => o.trim()).filter(Boolean) })}
+                              placeholder="e.g. Option A, Option B, Option C"
+                              className="w-full bg-transparent border border-border/40 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-[hsl(var(--kf-accent1))]"
+                            />
+                          </div>
+                        )}
+                        {field.type === "checkbox" && (
+                          <p className="text-[10px] text-muted-foreground flex items-center gap-1"><Check className="w-3 h-3" /> Renders as a toggle/checkbox with label</p>
+                        )}
+                        {field.type === "hidden" && (
+                          <p className="text-[10px] text-muted-foreground flex items-center gap-1"><EyeOff className="w-3 h-3" /> Hidden field — captures UTM params or pre-set values automatically</p>
+                        )}
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => updateField(i, { condition: field.condition ? undefined : { field: "", value: "" } })}
+                            className={`text-[10px] font-medium px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${
+                              field.condition ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "bg-muted/30 text-muted-foreground"
+                            }`}
+                          >
+                            <Eye className="w-3 h-3" /> {field.condition ? "Conditional: On" : "Conditional"}
+                          </button>
+                        </div>
+                        {field.condition && (
+                          <div className="flex items-center gap-2 text-[10px]">
+                            <span className="text-muted-foreground whitespace-nowrap">Show when</span>
+                            <select
+                              value={field.condition.field}
+                              onChange={e => updateField(i, { condition: { ...field.condition!, field: e.target.value } })}
+                              className="bg-muted/30 border border-border/40 rounded px-1.5 py-1 text-[10px] focus:outline-none flex-1"
+                            >
+                              <option value="">Select field...</option>
+                              {formBuilder.fields.filter((_, fi) => fi !== i).map(f => (
+                                <option key={f.label} value={f.label.toLowerCase().replace(/\s+/g, "_")}>{f.label || "(unnamed)"}</option>
+                              ))}
+                            </select>
+                            <span className="text-muted-foreground">=</span>
+                            <input
+                              value={field.condition.value}
+                              onChange={e => updateField(i, { condition: { ...field.condition!, value: e.target.value } })}
+                              placeholder="value"
+                              className="bg-transparent border border-border/40 rounded px-1.5 py-1 text-[10px] focus:outline-none flex-1 focus:border-[hsl(var(--kf-accent1))]"
+                            />
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

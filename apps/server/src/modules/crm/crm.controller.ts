@@ -666,6 +666,13 @@ export class CrmController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(30, 60_000)
+  @Get('businesses/:businessId/ai-next-actions')
+  getAiNextActions(@Param('businessId') businessId: string) {
+    return this.actions.getAiNextActions(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/next-actions/:actionId/complete')
   completeNextAction(
     @Param('businessId') businessId: string,

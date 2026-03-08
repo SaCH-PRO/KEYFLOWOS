@@ -25,6 +25,8 @@ import {
   ArrowUpDown,
   Link,
   Files,
+  DollarSign,
+  CreditCard,
 } from "lucide-react";
 import {
   createProduct,
@@ -33,9 +35,12 @@ import {
   markInvoicePaid,
   updateInvoiceStatus,
   sendQuoteEmail,
+  recordInvoicePayment,
+  listInvoicePayments,
   Product,
   Invoice,
   Contact,
+  PaymentRecord,
 } from "@/lib/client";
 import { apiDelete } from "@/lib/api";
 import { useModuleEmit } from "@/hooks/use-module-events";
@@ -148,9 +153,13 @@ export default function InvoicesPanel({
   const [sendingEmail, setSendingEmail] = useState(false);
   const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
   const [actionLoading, setActionLoading] = useState<Record<string, string>>({});
+  const [paymentModal, setPaymentModal] = useState<{ invoice: Invoice } | null>(null);
+  const [paymentForm, setPaymentForm] = useState({ amount: "", method: "Cash", reference: "", notes: "" });
+  const [recordingPayment, setRecordingPayment] = useState(false);
+  const [paymentHistory, setPaymentHistory] = useState<Record<string, PaymentRecord[]>>({});
 
   const statusCounts = useMemo(() => {
-    const counts: Record<string, number> = { ALL: invoices.length, DRAFT: 0, SENT: 0, PAID: 0, OVERDUE: 0, VOID: 0 };
+    const counts: Record<string, number> = { ALL: invoices.length, DRAFT: 0, SENT: 0, PAID: 0, PARTIALLY_PAID: 0, OVERDUE: 0, VOID: 0 };
     for (const inv of invoices) {
       if (inv.status && counts[inv.status] !== undefined) counts[inv.status]++;
     }
@@ -428,6 +437,53 @@ export default function InvoicesPanel({
       }
     } finally {
       setActionLoading((prev) => { const next = { ...prev }; delete next[invoiceId]; return next; });
+    }
+  }
+
+  function openPaymentModal(inv: Invoice) {
+    const paidAmount = (inv.payments ?? [])
+      .filter((p) => p.status === "SUCCESSFUL")
+      .reduce((sum, p) => sum + p.amount, 0);
+    const remaining = Math.max(0, Number(inv.total) - paidAmount);
+    setPaymentForm({ amount: remaining.toFixed(2), method: "Cash", reference: "", notes: "" });
+    setPaymentModal({ invoice: inv });
+    if (businessId && !paymentHistory[inv.id]) {
+      listInvoicePayments(businessId, inv.id).then((res) => {
+        if (res.data) {
+          setPaymentHistory((prev) => ({ ...prev, [inv.id]: res.data!.payments }));
+        }
+      });
+    }
+  }
+
+  async function handleRecordPayment() {
+    if (!businessId || !paymentModal || recordingPayment) return;
+    const amount = parseFloat(paymentForm.amount);
+    if (isNaN(amount) || amount <= 0) {
+      toast.error("Enter a valid payment amount");
+      return;
+    }
+    setRecordingPayment(true);
+    try {
+      const { data, error } = await recordInvoicePayment(businessId, paymentModal.invoice.id, {
+        amount,
+        method: paymentForm.method,
+        reference: paymentForm.reference || undefined,
+        notes: paymentForm.notes || undefined,
+      });
+      if (!error && data) {
+        setInvoices((prev) => prev.map((i) => (i.id === paymentModal.invoice.id ? { ...data.invoice, payments: data.invoice.payments } : i)));
+        setPaymentHistory((prev) => ({ ...prev, [paymentModal.invoice.id]: [data.payment, ...(prev[paymentModal.invoice.id] ?? [])] }));
+        toast.success(data.invoice.status === "PAID" ? "Invoice fully paid!" : `Payment of ${formatAmount(amount, paymentModal.invoice.currency)} recorded`);
+        setPaymentModal(null);
+        if (data.invoice.status === "PAID") {
+          emitEvent("commerce:invoice_paid", "commerce", { invoiceId: paymentModal.invoice.id, total: data.invoice.total });
+        }
+      } else {
+        toast.error(error ?? "Failed to record payment");
+      }
+    } finally {
+      setRecordingPayment(false);
     }
   }
 
@@ -766,12 +822,17 @@ export default function InvoicesPanel({
                     {actionLoading[inv.id] === "send" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send
                   </button>
                 )}
+                {(inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID") && (
+                  <button onClick={() => openPaymentModal(inv)} className="px-1.5 py-0.5 rounded-lg bg-amber-500/15 text-amber-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]} title="Record Payment">
+                    <DollarSign className="w-3.5 h-3.5" /> Payment
+                  </button>
+                )}
                 {(inv.status === "DRAFT" || inv.status === "SENT") && (
                   <button onClick={() => handleMarkPaid(inv.id, inv)} className="px-1.5 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]}>
                     {actionLoading[inv.id] === "paid" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Paid
                   </button>
                 )}
-                {(inv.status === "DRAFT" || inv.status === "SENT" || inv.status === "OVERDUE") && (
+                {(inv.status === "DRAFT" || inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID") && (
                   <button onClick={() => handleVoidInvoice(inv.id)} className="p-1 rounded-lg hover:bg-slate-500/20 transition-colors disabled:opacity-50" title="Void invoice" disabled={!!actionLoading[inv.id]}>
                     {actionLoading[inv.id] === "void" ? <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin" /> : <Ban className="w-3.5 h-3.5 text-slate-400" />}
                   </button>
@@ -808,12 +869,17 @@ export default function InvoicesPanel({
                     {actionLoading[inv.id] === "send" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send
                   </button>
                 )}
+                {(inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID") && (
+                  <button onClick={() => openPaymentModal(inv)} className="px-1.5 py-0.5 rounded-lg bg-amber-500/15 text-amber-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]} title="Record Payment">
+                    <DollarSign className="w-3.5 h-3.5" /> Pay
+                  </button>
+                )}
                 {(inv.status === "DRAFT" || inv.status === "SENT") && (
                   <button onClick={() => handleMarkPaid(inv.id, inv)} className="px-1.5 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]}>
                     {actionLoading[inv.id] === "paid" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Paid
                   </button>
                 )}
-                {(inv.status === "DRAFT" || inv.status === "SENT" || inv.status === "OVERDUE") && (
+                {(inv.status === "DRAFT" || inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID") && (
                   <button onClick={() => handleVoidInvoice(inv.id)} className="p-1 rounded-lg hover:bg-slate-500/20 disabled:opacity-50" title="Void" disabled={!!actionLoading[inv.id]}>
                     {actionLoading[inv.id] === "void" ? <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin" /> : <Ban className="w-3.5 h-3.5 text-slate-400" />}
                   </button>
@@ -824,9 +890,24 @@ export default function InvoicesPanel({
               </>
             );
 
+            const paidAmount = (inv.payments ?? []).filter((p) => p.status === "SUCCESSFUL").reduce((sum, p) => sum + p.amount, 0);
+            const paymentPercent = Number(inv.total) > 0 ? Math.round((paidAmount / Number(inv.total)) * 100) : 0;
+
+            const paymentProgressBar = (inv.status === "PARTIALLY_PAID" || (paidAmount > 0 && inv.status !== "PAID")) ? (
+              <div className="mt-1.5">
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-[9px] text-muted-foreground/50">Paid: {formatAmount(paidAmount, inv.currency)}</span>
+                  <span className="text-[9px] text-muted-foreground/50">{paymentPercent}%</span>
+                </div>
+                <div className="h-1 w-full rounded-full bg-border/30 overflow-hidden">
+                  <div className="h-full rounded-full bg-amber-400 transition-all duration-300" style={{ width: `${paymentPercent}%` }} />
+                </div>
+              </div>
+            ) : null;
+
             return (
+              <div key={inv.id}>
               <BillingCard
-                key={inv.id}
                 type="invoice"
                 number={inv.invoiceNumber ?? inv.id.slice(0, 8)}
                 status={inv.status}
@@ -840,6 +921,8 @@ export default function InvoicesPanel({
                 mobileActions={cardMobileActions}
                 onClick={() => setSelectedInvoice(inv)}
               />
+              {paymentProgressBar}
+              </div>
             );
           })}
         </div>
@@ -897,7 +980,7 @@ export default function InvoicesPanel({
                       </button>
                     )}
                   </div>
-                  {(selectedInvoice.status === "DRAFT" || selectedInvoice.status === "SENT" || selectedInvoice.status === "OVERDUE") && (
+                  {(selectedInvoice.status === "DRAFT" || selectedInvoice.status === "SENT" || selectedInvoice.status === "OVERDUE" || selectedInvoice.status === "PARTIALLY_PAID") && (
                     <button onClick={() => handleVoidInvoice(selectedInvoice.id)} disabled={!!actionLoading[selectedInvoice.id]} className="p-2 rounded-lg hover:bg-red-500/10 transition-colors" title="Void invoice">
                       {actionLoading[selectedInvoice.id] === "void" ? <Loader2 className="w-4 h-4 animate-spin text-slate-500" /> : <Ban className="w-4 h-4 text-slate-500" />}
                     </button>
@@ -913,15 +996,15 @@ export default function InvoicesPanel({
                     </Button>
                   </div>
                 )}
-                {selectedInvoice.status === "SENT" && (
-                  <Button size="sm" className="gap-1.5 w-full bg-emerald-600 hover:bg-emerald-700" onClick={() => { handleMarkPaid(selectedInvoice.id, selectedInvoice); setSelectedInvoice(null); }} disabled={!!actionLoading[selectedInvoice.id]}>
-                    {actionLoading[selectedInvoice.id] === "paid" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Mark Paid
-                  </Button>
-                )}
-                {selectedInvoice.status === "OVERDUE" && (
-                  <Button size="sm" className="gap-1.5 w-full bg-emerald-600 hover:bg-emerald-700" onClick={() => { handleMarkPaid(selectedInvoice.id, selectedInvoice); setSelectedInvoice(null); }} disabled={!!actionLoading[selectedInvoice.id]}>
-                    {actionLoading[selectedInvoice.id] === "paid" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Mark Paid
-                  </Button>
+                {(selectedInvoice.status === "SENT" || selectedInvoice.status === "OVERDUE" || selectedInvoice.status === "PARTIALLY_PAID") && (
+                  <div className="flex gap-2">
+                    <Button size="sm" className="gap-1.5 flex-1 bg-amber-600 hover:bg-amber-700" onClick={() => { openPaymentModal(selectedInvoice); setSelectedInvoice(null); }}>
+                      <DollarSign className="w-3.5 h-3.5" /> Record Payment
+                    </Button>
+                    <Button size="sm" className="gap-1.5 flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => { handleMarkPaid(selectedInvoice.id, selectedInvoice); setSelectedInvoice(null); }} disabled={!!actionLoading[selectedInvoice.id]}>
+                      {actionLoading[selectedInvoice.id] === "paid" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Mark Paid
+                    </Button>
+                  </div>
                 )}
               </>
             }
@@ -983,6 +1066,138 @@ export default function InvoicesPanel({
           </motion.div>
         )}
       </AnimatePresence>
+      {paymentModal && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={(e) => e.target === e.currentTarget && setPaymentModal(null)}
+        >
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.95, opacity: 0 }}
+            className="w-full max-w-md bg-card rounded-2xl border border-border shadow-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto"
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <CreditCard className="w-5 h-5 text-amber-400" /> Record Payment
+              </h3>
+              <button onClick={() => setPaymentModal(null)} className="p-1.5 rounded-lg hover:bg-muted">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="rounded-xl border border-border/40 bg-white/[0.02] p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Invoice</span>
+                <span className="text-sm font-mono font-medium">{paymentModal.invoice.invoiceNumber ?? paymentModal.invoice.id.slice(0, 8)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Total</span>
+                <span className="text-sm font-semibold">{formatAmount(paymentModal.invoice.total, paymentModal.invoice.currency)}</span>
+              </div>
+              {(() => {
+                const paid = (paymentModal.invoice.payments ?? []).filter((p) => p.status === "SUCCESSFUL").reduce((s, p) => s + p.amount, 0);
+                const rem = Math.max(0, Number(paymentModal.invoice.total) - paid);
+                const pct = Number(paymentModal.invoice.total) > 0 ? Math.round((paid / Number(paymentModal.invoice.total)) * 100) : 0;
+                return (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">Already Paid</span>
+                      <span className="text-sm font-medium text-emerald-400">{formatAmount(paid, paymentModal.invoice.currency)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">Remaining</span>
+                      <span className="text-sm font-bold text-amber-400">{formatAmount(rem, paymentModal.invoice.currency)}</span>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-border/30 overflow-hidden">
+                      <div className="h-full rounded-full bg-emerald-400 transition-all duration-300" style={{ width: `${pct}%` }} />
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+
+            <div>
+              <label className="text-xs text-muted-foreground mb-1.5 block">Amount</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                placeholder="Payment amount"
+                value={paymentForm.amount}
+                onChange={(e) => setPaymentForm((f) => ({ ...f, amount: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1.5 block">Payment Method</label>
+              <select
+                className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                value={paymentForm.method}
+                onChange={(e) => setPaymentForm((f) => ({ ...f, method: e.target.value }))}
+              >
+                <option value="Cash">Cash</option>
+                <option value="Bank Transfer">Bank Transfer</option>
+                <option value="WiPay">WiPay</option>
+                <option value="PayPal">PayPal</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1.5 block">Reference Number (optional)</label>
+              <input
+                type="text"
+                className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                placeholder="Transaction reference"
+                value={paymentForm.reference}
+                onChange={(e) => setPaymentForm((f) => ({ ...f, reference: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1.5 block">Notes (optional)</label>
+              <input
+                type="text"
+                className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                placeholder="Payment notes"
+                value={paymentForm.notes}
+                onChange={(e) => setPaymentForm((f) => ({ ...f, notes: e.target.value }))}
+              />
+            </div>
+
+            {paymentHistory[paymentModal.invoice.id]?.length > 0 && (
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 mb-2">Payment History</p>
+                <div className="space-y-1.5 max-h-[120px] overflow-y-auto">
+                  {paymentHistory[paymentModal.invoice.id].map((p) => (
+                    <div key={p.id} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg bg-white/[0.02] border border-border/20">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <CheckCircle className="w-3 h-3 text-emerald-400 shrink-0" />
+                        <span className="text-[11px] truncate">{p.provider}</span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[11px] font-medium">{formatAmount(p.amount, p.currency)}</span>
+                        <span className="text-[10px] text-muted-foreground/40">{new Date(p.createdAt).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setPaymentModal(null)}>Cancel</Button>
+              <Button onClick={handleRecordPayment} disabled={recordingPayment} className="gap-2 bg-amber-600 hover:bg-amber-700">
+                {recordingPayment ? <Loader2 className="w-4 h-4 animate-spin" /> : <DollarSign className="w-4 h-4" />}
+                {recordingPayment ? "Recording..." : "Record Payment"}
+              </Button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+
       <ConfirmDialog
         open={confirmState.open}
         title="Delete?"

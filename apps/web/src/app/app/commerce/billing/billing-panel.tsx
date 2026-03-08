@@ -79,7 +79,7 @@ const PaymentFollowUpQueue = React.memo(function PaymentFollowUpQueue({
 
   const actionableInvoices = useMemo(() => {
     return invoices
-      .filter((inv) => inv.status === "OVERDUE" || inv.status === "SENT")
+      .filter((inv) => inv.status === "OVERDUE" || inv.status === "SENT" || inv.status === "PARTIALLY_PAID")
       .sort((a, b) => {
         if (a.status === "OVERDUE" && b.status !== "OVERDUE") return -1;
         if (b.status === "OVERDUE" && a.status !== "OVERDUE") return 1;
@@ -585,7 +585,7 @@ export function BillingPanel({
   const totalOverdueAmount = agingBuckets.slice(1).reduce((s, b) => s + b.amount, 0);
 
   const hasActionItems = useMemo(() => {
-    const hasFollowUps = invoices.some((inv) => inv.status === "OVERDUE" || inv.status === "SENT");
+    const hasFollowUps = invoices.some((inv) => inv.status === "OVERDUE" || inv.status === "SENT" || inv.status === "PARTIALLY_PAID");
     const hasPendingQuotes = quotes.some((q) => q.status === "DRAFT" || q.status === "SENT" || q.status === "ACCEPTED");
     return hasFollowUps || hasPendingQuotes;
   }, [invoices, quotes]);
