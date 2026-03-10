@@ -85,7 +85,12 @@ export class EmailMarketingService {
   }
 
   private get hmacSecret(): string {
-    return process.env.GOOGLE_STATE_SECRET || process.env.SUPABASE_JWT_SECRET || 'keyflowos-unsubscribe-secret';
+    const secret = process.env.GOOGLE_STATE_SECRET || process.env.SUPABASE_JWT_SECRET;
+    if (!secret) {
+      this.logger.error('HMAC secret not configured — set GOOGLE_STATE_SECRET or SUPABASE_JWT_SECRET environment variable');
+      throw new Error('Server misconfiguration: unsubscribe token secret is not set');
+    }
+    return secret;
   }
 
   private signPayload(payload: string): string {
@@ -167,118 +172,148 @@ export class EmailMarketingService {
   }
 
   async sendCampaign(businessId: string, id: string) {
-    const campaign = await this.prisma.client.emailCampaign.findFirst({
-      where: { id, businessId, deletedAt: null },
-    });
-
-    if (!campaign) {
-      throw new Error('Campaign not found');
-    }
-
-    const filter = campaign.segmentFilter as any;
-    const contactWhere: any = { businessId, deletedAt: null, email: { not: null } };
-
-    if (filter) {
-      if (filter.tags && filter.tags.length > 0) {
-        contactWhere.tags = { hasSome: filter.tags };
-      }
-      if (filter.status) {
-        contactWhere.status = filter.status;
-      }
-    }
-
-    const allContacts = await this.prisma.client.contact.findMany({
-      where: contactWhere,
-      select: { id: true, email: true, doNotContact: true, marketingOptIn: true },
-    });
-
-    const suppressed = allContacts.filter(
-      (c) => c.doNotContact === true || c.marketingOptIn === false,
-    );
-    const contacts = allContacts.filter(
-      (c) => c.doNotContact !== true && c.marketingOptIn !== false,
-    );
-
-    const recipientData = contacts
-      .filter((c) => c.email)
-      .map((c) => ({
-        campaignId: id,
-        contactId: c.id,
-        email: c.email!,
-        status: 'SENT',
-        sentAt: new Date(),
+    const claimed = await this.prisma.client.emailCampaign.updateMany({
+      where: {
+        id,
         businessId,
-      }));
+        deletedAt: null,
+        status: { in: ['DRAFT', 'SCHEDULED'] },
+      },
+      data: { status: 'SENDING' },
+    });
 
-    if (recipientData.length > 0) {
-      await this.prisma.client.emailCampaignContact.createMany({
-        data: recipientData,
-        skipDuplicates: true,
+    if (claimed.count === 0) {
+      const existing = await this.prisma.client.emailCampaign.findFirst({
+        where: { id, businessId, deletedAt: null },
+        select: { status: true },
       });
+      if (!existing) throw new Error('Campaign not found');
+      if (existing.status === 'SENDING') throw new Error('Campaign is already being sent');
+      if (existing.status === 'SENT') throw new Error('Campaign has already been sent');
+      throw new Error(`Campaign cannot be sent (status: ${existing.status})`);
     }
 
-    let gmailDelivered = 0;
-    let gmailFailed = 0;
-    let gmailConnected = false;
+    try {
+      const campaign = await this.prisma.client.emailCampaign.findFirst({
+        where: { id, businessId, deletedAt: null },
+      });
 
-    if (this.gmail && recipientData.length > 0) {
-      try {
-        const business = await this.prisma.client.business.findUnique({
-          where: { id: businessId },
-          select: { gmailEmail: true, gmailAccessToken: true },
+      if (!campaign) {
+        throw new Error('Campaign not found');
+      }
+
+      const filter = campaign.segmentFilter as any;
+      const contactWhere: any = { businessId, deletedAt: null, email: { not: null } };
+
+      if (filter) {
+        if (filter.tags && Array.isArray(filter.tags) && filter.tags.length > 0) {
+          contactWhere.tags = { hasSome: filter.tags };
+        }
+        if (filter.status && typeof filter.status === 'string') {
+          contactWhere.status = filter.status;
+        }
+      }
+
+      const allContacts = await this.prisma.client.contact.findMany({
+        where: contactWhere,
+        select: { id: true, email: true, doNotContact: true, marketingOptIn: true },
+      });
+
+      const suppressed = allContacts.filter(
+        (c) => c.doNotContact === true || c.marketingOptIn === false,
+      );
+      const contacts = allContacts.filter(
+        (c) => c.doNotContact !== true && c.marketingOptIn !== false,
+      );
+
+      const recipientData = contacts
+        .filter((c) => c.email)
+        .map((c) => ({
+          campaignId: id,
+          contactId: c.id,
+          email: c.email!,
+          status: 'SENT',
+          sentAt: new Date(),
+          businessId,
+        }));
+
+      if (recipientData.length > 0) {
+        await this.prisma.client.emailCampaignContact.createMany({
+          data: recipientData,
+          skipDuplicates: true,
         });
-        gmailConnected = !!(business?.gmailEmail && business?.gmailAccessToken);
+      }
 
-        if (gmailConnected) {
-          for (const recipient of recipientData) {
-            try {
-              const footer = this.buildUnsubscribeFooter(recipient.contactId, businessId, id);
-              const htmlBody = campaign.body + footer;
-              await this.gmail.sendEmail({
-                businessId,
-                to: recipient.email,
-                subject: campaign.subject,
-                htmlBody,
-              });
-              gmailDelivered++;
-              await new Promise((r) => setTimeout(r, 200));
-            } catch (err) {
-              gmailFailed++;
-              this.logger.warn(`Failed to send email to ${recipient.email}: ${err}`);
-              await this.prisma.client.emailCampaignContact.updateMany({
-                where: { campaignId: id, contactId: recipient.contactId },
-                data: { status: 'BOUNCED' },
-              });
+      let gmailDelivered = 0;
+      let gmailFailed = 0;
+      let gmailConnected = false;
+
+      if (this.gmail && recipientData.length > 0) {
+        try {
+          const business = await this.prisma.client.business.findUnique({
+            where: { id: businessId },
+            select: { gmailEmail: true, gmailAccessToken: true },
+          });
+          gmailConnected = !!(business?.gmailEmail && business?.gmailAccessToken);
+
+          if (gmailConnected) {
+            for (const recipient of recipientData) {
+              try {
+                const footer = this.buildUnsubscribeFooter(recipient.contactId, businessId, id);
+                const htmlBody = campaign.body + footer;
+                await this.gmail.sendEmail({
+                  businessId,
+                  to: recipient.email,
+                  subject: campaign.subject,
+                  htmlBody,
+                });
+                gmailDelivered++;
+                await new Promise((r) => setTimeout(r, 200));
+              } catch (err) {
+                gmailFailed++;
+                this.logger.warn(`Failed to send email to ${recipient.email}: ${err}`);
+                await this.prisma.client.emailCampaignContact.updateMany({
+                  where: { campaignId: id, contactId: recipient.contactId },
+                  data: { status: 'BOUNCED' },
+                });
+              }
             }
           }
+        } catch (err) {
+          this.logger.warn(`Gmail check failed: ${err}`);
         }
-      } catch (err) {
-        this.logger.warn(`Gmail check failed: ${err}`);
       }
+
+      const updatedCampaign = await this.prisma.client.emailCampaign.update({
+        where: { id, businessId },
+        data: {
+          status: 'SENT',
+          sentAt: new Date(),
+          totalRecipients: recipientData.length,
+          sentCount: recipientData.length,
+        },
+      });
+      this.events.emit('campaign.sent', { campaign: updatedCampaign, businessId, recipientCount: recipientData.length } as CampaignSentPayload);
+
+      const warning = !gmailConnected && recipientData.length > 0
+        ? 'Campaign recorded but emails not delivered. Connect Gmail to send real emails.'
+        : undefined;
+
+      return {
+        sent: recipientData.length,
+        suppressed: suppressed.length,
+        gmailDelivered,
+        gmailFailed,
+        warning,
+      };
+    } catch (err) {
+      this.logger.error(`sendCampaign failed for ${id}, reverting to DRAFT`, err);
+      await this.prisma.client.emailCampaign.updateMany({
+        where: { id, status: 'SENDING' },
+        data: { status: 'DRAFT' },
+      }).catch(() => {});
+      throw err;
     }
-
-    const updatedCampaign = await this.prisma.client.emailCampaign.update({
-      where: { id, businessId },
-      data: {
-        status: 'SENT',
-        sentAt: new Date(),
-        totalRecipients: recipientData.length,
-        sentCount: recipientData.length,
-      },
-    });
-    this.events.emit('campaign.sent', { campaign: updatedCampaign, businessId, recipientCount: recipientData.length } as CampaignSentPayload);
-
-    const warning = !gmailConnected && recipientData.length > 0
-      ? 'Campaign recorded but emails not delivered. Connect Gmail to send real emails.'
-      : undefined;
-
-    return {
-      sent: recipientData.length,
-      suppressed: suppressed.length,
-      gmailDelivered,
-      gmailFailed,
-      warning,
-    };
   }
 
   async scheduleCampaign(businessId: string, id: string, scheduledAt: string) {

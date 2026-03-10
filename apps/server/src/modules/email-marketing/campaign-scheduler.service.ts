@@ -32,24 +32,16 @@ export class CampaignSchedulerService implements OnModuleInit, OnModuleDestroy {
           scheduledAt: { lte: new Date() },
           deletedAt: null,
         },
+        select: { id: true, businessId: true, name: true },
       });
 
       for (const campaign of dueCampaigns) {
         this.logger.log(`Executing scheduled campaign ${campaign.id} (${campaign.name})`);
         try {
-          await this.prisma.client.emailCampaign.update({
-            where: { id: campaign.id },
-            data: { status: 'SENDING' },
-          });
-
           await this.emailMarketing.sendCampaign(campaign.businessId, campaign.id);
           this.logger.log(`Scheduled campaign ${campaign.id} sent successfully`);
         } catch (err) {
           this.logger.error(`Failed to send scheduled campaign ${campaign.id}`, err);
-          await this.prisma.client.emailCampaign.update({
-            where: { id: campaign.id },
-            data: { status: 'DRAFT' },
-          }).catch(() => {});
         }
       }
     } catch (err) {

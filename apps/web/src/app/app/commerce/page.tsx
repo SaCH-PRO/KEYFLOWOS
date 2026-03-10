@@ -357,6 +357,7 @@ export default function CommercePage() {
       />
 
       <CommerceAiSearchBar
+        currency={businessCurrency}
         onExecuteCommand={handleCommerceCommand}
         onSelectResult={(result) => {
           if (result.type === "product") {

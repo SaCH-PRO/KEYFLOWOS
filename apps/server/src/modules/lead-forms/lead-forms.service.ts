@@ -111,49 +111,66 @@ export class LeadFormsService {
       }
     }
 
-    let contactId: string | null = null;
     const email = data.email || data.Email;
     const firstName = data.firstName || data.first_name || data.name || data.Name;
     const lastName = data.lastName || data.last_name;
     const phone = data.phone || data.Phone;
 
-    if (email) {
-      const normalizedEmail = email.toLowerCase().trim();
-      const existing = await this.prisma.client.contact.findFirst({
-        where: { businessId: form.businessId, emailNormalized: normalizedEmail, deletedAt: null },
+    const result = await this.prisma.client.$transaction(async (tx) => {
+      let contactId: string | null = null;
+
+      if (email) {
+        const normalizedEmail = email.toLowerCase().trim();
+        try {
+          const existing = await tx.contact.findFirst({
+            where: { businessId: form.businessId, emailNormalized: normalizedEmail, deletedAt: null },
+          });
+
+          if (existing) {
+            contactId = existing.id;
+          } else {
+            const contact = await tx.contact.create({
+              data: {
+                businessId: form.businessId,
+                email,
+                emailNormalized: normalizedEmail,
+                firstName: firstName ?? null,
+                lastName: lastName ?? null,
+                phone: phone ?? null,
+                source: 'LEAD_FORM',
+                sourceDetail: form.name,
+                status: 'LEAD',
+              },
+            });
+            contactId = contact.id;
+          }
+        } catch (err: any) {
+          if (err?.code === 'P2002') {
+            const existing = await tx.contact.findFirst({
+              where: { businessId: form.businessId, emailNormalized: email.toLowerCase().trim(), deletedAt: null },
+            });
+            contactId = existing?.id ?? null;
+          } else {
+            throw err;
+          }
+        }
+      }
+
+      const submission = await tx.leadFormSubmission.create({
+        data: {
+          formId,
+          businessId: form.businessId,
+          data,
+          contactId,
+          source: source ?? 'web',
+          ipAddress: ipAddress ?? null,
+        },
       });
 
-      if (existing) {
-        contactId = existing.id;
-      } else {
-        const contact = await this.prisma.client.contact.create({
-          data: {
-            businessId: form.businessId,
-            email,
-            emailNormalized: normalizedEmail,
-            firstName: firstName ?? null,
-            lastName: lastName ?? null,
-            phone: phone ?? null,
-            source: 'LEAD_FORM',
-            sourceDetail: form.name,
-            status: 'LEAD',
-          },
-        });
-        contactId = contact.id;
-      }
-    }
-
-    const submission = await this.prisma.client.leadFormSubmission.create({
-      data: {
-        formId,
-        businessId: form.businessId,
-        data,
-        contactId,
-        source: source ?? 'web',
-        ipAddress: ipAddress ?? null,
-      },
+      return { submission, contactId };
     });
-    this.events.emit('lead_form.submitted', { submission, form, businessId: form.businessId, contactId } as LeadFormSubmittedPayload);
+
+    this.events.emit('lead_form.submitted', { submission: result.submission, form, businessId: form.businessId, contactId: result.contactId } as LeadFormSubmittedPayload);
 
     const settings = form.settings as any;
     return {

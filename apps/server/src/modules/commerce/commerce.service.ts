@@ -159,6 +159,22 @@ export class CommerceService {
     });
   }
 
+  private validateTaxAndDiscount(taxRate?: number, discountValue?: number, discountType?: string) {
+    if (taxRate !== undefined && taxRate !== null) {
+      if (taxRate < 0 || taxRate > 100) {
+        throw new Error('Tax rate must be between 0 and 100');
+      }
+    }
+    if (discountValue !== undefined && discountValue !== null) {
+      if (discountValue < 0) {
+        throw new Error('Discount value must be non-negative');
+      }
+      if (discountType === 'PERCENT' && discountValue > 100) {
+        throw new Error('Percentage discount cannot exceed 100%');
+      }
+    }
+  }
+
   async createInvoice(input: {
     businessId: string;
     contactId?: string;
@@ -170,6 +186,7 @@ export class CommerceService {
     discountValue?: number;
     notes?: string;
   }) {
+    this.validateTaxAndDiscount(input.taxRate, input.discountValue, input.discountType);
     const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
     const taxRate = input.taxRate ?? 0;
     const taxAmount = (subtotal * taxRate) / 100;
@@ -578,6 +595,7 @@ export class CommerceService {
     discountValue?: number;
     notes?: string;
   }) {
+    this.validateTaxAndDiscount(input.taxRate, input.discountValue, input.discountType);
     const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
     const taxRate = input.taxRate ?? 0;
     const taxAmount = subtotal * taxRate / 100;
@@ -647,6 +665,7 @@ export class CommerceService {
     if (!quote) {
       throw new Error('Quote not found');
     }
+    this.validateTaxAndDiscount(input.taxRate, input.discountValue, input.discountType);
     if (quote.status === 'ACCEPTED' && quote.invoiceId) {
       throw new Error('Cannot edit a quote that has been converted to an invoice');
     }
@@ -743,6 +762,7 @@ export class CommerceService {
       throw new Error('Quote has already been converted to an invoice');
     }
 
+    this.validateTaxAndDiscount(input.taxRate, input.discountValue, input.discountType);
     const subtotal = quote.items.reduce((sum, item) => sum + item.total, 0);
     const taxRate = input.taxRate ?? 0;
     const taxAmount = (subtotal * taxRate) / 100;
@@ -937,6 +957,7 @@ export class CommerceService {
     if (!invoice) {
       throw new Error('Invoice not found');
     }
+    this.validateTaxAndDiscount(input.taxRate, input.discountValue ?? undefined, input.discountType ?? undefined);
     if (invoice.status === 'PAID' || invoice.status === 'PARTIALLY_PAID') {
       throw new Error('Cannot edit a paid or partially paid invoice');
     }

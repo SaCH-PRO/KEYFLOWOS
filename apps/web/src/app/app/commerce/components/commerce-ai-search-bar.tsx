@@ -37,6 +37,7 @@ interface CommerceAiSearchBarProps {
   onExecuteCommand?: (command: CommerceCommand) => void;
   onSelectResult?: (result: { id: string; type: string }) => void;
   onApplyFilters?: (filters: Record<string, unknown>) => void;
+  currency?: string;
 }
 
 const EXAMPLE_QUERIES = [
@@ -120,7 +121,7 @@ const STATUS_COLORS: Record<string, string> = {
   INACTIVE: "bg-muted text-muted-foreground",
 };
 
-export function CommerceAiSearchBar({ onExecuteCommand, onSelectResult, onApplyFilters }: CommerceAiSearchBarProps) {
+export function CommerceAiSearchBar({ onExecuteCommand, onSelectResult, onApplyFilters, currency: businessCurrency }: CommerceAiSearchBarProps) {
   const [query, setQuery] = useState("");
   const [commandResult, setCommandResult] = useState<CommerceCommandResult | null>(null);
   const [searchData, setSearchData] = useState<CommerceNlSearchResult | null>(null);
@@ -283,7 +284,7 @@ export function CommerceAiSearchBar({ onExecuteCommand, onSelectResult, onApplyF
 
   const formatCurrency = (amount?: number) => {
     if (amount == null) return "";
-    return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0 }).format(amount);
+    return new Intl.NumberFormat("en-TT", { style: "currency", currency: businessCurrency || "TTD", minimumFractionDigits: 0 }).format(amount);
   };
 
   const ActionIcon = commandResult ? (ACTION_ICONS[commandResult.action ?? ""] ?? Zap) : Zap;
