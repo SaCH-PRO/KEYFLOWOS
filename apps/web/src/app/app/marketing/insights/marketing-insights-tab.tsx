@@ -15,6 +15,14 @@ import {
   ArrowRight,
   Filter,
   DollarSign,
+  Share2,
+  FileText,
+  Calendar,
+  Facebook,
+  Instagram,
+  Linkedin,
+  Twitter,
+  Music2,
 } from "lucide-react";
 import {
   LineChart,
@@ -30,12 +38,13 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import type { EmailCampaign, LeadForm, LeadFormSubmission } from "@/lib/client";
+import type { EmailCampaign, LeadForm, LeadFormSubmission, SocialPost } from "@/lib/client";
 
 interface MarketingInsightsTabProps {
   campaigns: EmailCampaign[];
   forms: LeadForm[];
   submissions: Record<string, LeadFormSubmission[]>;
+  socialPosts?: SocialPost[];
 }
 
 const stagger = {
@@ -149,7 +158,23 @@ function LeadToRevenueFunnel({
   );
 }
 
-function MarketingInsightsTabInner({ campaigns, forms, submissions }: MarketingInsightsTabProps) {
+const PLATFORM_ICONS: Record<string, React.ElementType> = {
+  FACEBOOK: Facebook,
+  INSTAGRAM: Instagram,
+  LINKEDIN: Linkedin,
+  TWITTER: Twitter,
+  TIKTOK: Music2,
+};
+
+const PLATFORM_COLORS: Record<string, string> = {
+  FACEBOOK: "#1877F2",
+  INSTAGRAM: "#E4405F",
+  LINKEDIN: "#0A66C2",
+  TWITTER: "#1DA1F2",
+  TIKTOK: "#00F2EA",
+};
+
+function MarketingInsightsTabInner({ campaigns, forms, submissions, socialPosts = [] }: MarketingInsightsTabProps) {
   const sentCampaigns = useMemo(
     () => campaigns.filter((c) => c.status === "SENT").sort(
       (a, b) => new Date(a.sentAt ?? a.createdAt).getTime() - new Date(b.sentAt ?? b.createdAt).getTime()
@@ -268,6 +293,41 @@ function MarketingInsightsTabInner({ campaigns, forms, submissions }: MarketingI
     [totalSent, totalOpens]
   );
 
+  const socialStats = useMemo(() => {
+    const total = socialPosts.length;
+    if (total === 0) return null;
+
+    const posted = socialPosts.filter((p) => p.status === "POSTED").length;
+    const scheduled = socialPosts.filter((p) => p.status === "SCHEDULED").length;
+    const draft = socialPosts.filter((p) => p.status === "DRAFT").length;
+
+    const dates = socialPosts.map((p) => new Date(p.postedAt || p.publishedAt || p.scheduledAt || p.scheduledFor || p.createdAt));
+    const sorted = [...dates].sort((a, b) => a.getTime() - b.getTime());
+    const rangeMs = sorted.length > 1 ? sorted[sorted.length - 1].getTime() - sorted[0].getTime() : 0;
+    const rangeWeeks = Math.max(1, rangeMs / (7 * 24 * 60 * 60 * 1000));
+    const postsPerWeek = (total / rangeWeeks).toFixed(1);
+
+    const platformCounts: Record<string, number> = {};
+    socialPosts.forEach((p) => {
+      if (p.channelIds && p.channelIds.length > 0) {
+        p.channelIds.forEach((ch) => {
+          const platform = ch.toUpperCase();
+          platformCounts[platform] = (platformCounts[platform] ?? 0) + 1;
+        });
+      }
+      if (p.publishResults && Array.isArray(p.publishResults)) {
+        p.publishResults.forEach((r: Record<string, unknown>) => {
+          const platform = String(r.platform ?? "").toUpperCase();
+          if (platform) {
+            platformCounts[platform] = (platformCounts[platform] ?? 0) + 1;
+          }
+        });
+      }
+    });
+
+    return { total, posted, scheduled, draft, postsPerWeek, platformCounts };
+  }, [socialPosts]);
+
   const kpiCards = [
     {
       label: "Campaigns Sent",
@@ -297,6 +357,24 @@ function MarketingInsightsTabInner({ campaigns, forms, submissions }: MarketingI
       color: "from-amber-500 to-orange-600",
       bg: "from-amber-500/15 to-amber-600/5",
     },
+    ...(socialStats
+      ? [
+          {
+            label: "Social Posts",
+            value: socialStats.total,
+            icon: Share2,
+            color: "from-blue-500 to-indigo-600",
+            bg: "from-blue-500/15 to-indigo-600/5",
+          },
+          {
+            label: "Posts / Week",
+            value: socialStats.postsPerWeek,
+            icon: Calendar,
+            color: "from-violet-500 to-purple-600",
+            bg: "from-violet-500/15 to-purple-600/5",
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -306,7 +384,7 @@ function MarketingInsightsTabInner({ campaigns, forms, submissions }: MarketingI
       animate="visible"
       className="space-y-5"
     >
-      <motion.div variants={stagger.item} className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <motion.div variants={stagger.item} className={`grid grid-cols-2 ${socialStats ? 'lg:grid-cols-6' : 'lg:grid-cols-4'} gap-3`}>
         {kpiCards.map((card) => (
           <div
             key={card.label}
@@ -505,6 +583,84 @@ function MarketingInsightsTabInner({ campaigns, forms, submissions }: MarketingI
           )}
         </motion.div>
       </div>
+
+      {socialStats && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <motion.div variants={stagger.item} className="kf-card p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <Share2 className="w-4 h-4 text-blue-400" />
+              <h3 className="text-sm font-semibold">Social Post Status</h3>
+            </div>
+            <div className="space-y-3">
+              {[
+                { label: "Published", count: socialStats.posted, color: "#22c55e", pct: Math.round((socialStats.posted / socialStats.total) * 100) },
+                { label: "Scheduled", count: socialStats.scheduled, color: "#3b82f6", pct: Math.round((socialStats.scheduled / socialStats.total) * 100) },
+                { label: "Draft", count: socialStats.draft, color: "#94a3b8", pct: Math.round((socialStats.draft / socialStats.total) * 100) },
+              ].map((s) => (
+                <div key={s.label} className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">{s.label}</span>
+                    <span className="font-medium">{s.count} ({s.pct}%)</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-border/20 overflow-hidden">
+                    <motion.div
+                      initial={{ width: 0 }}
+                      animate={{ width: `${s.pct}%` }}
+                      transition={{ duration: 0.8, ease: "easeOut" }}
+                      className="h-full rounded-full"
+                      style={{ background: s.color }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+
+          <motion.div variants={stagger.item} className="kf-card p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <FileText className="w-4 h-4 text-violet-400" />
+              <h3 className="text-sm font-semibold">Platform Breakdown</h3>
+            </div>
+            {Object.keys(socialStats.platformCounts).length > 0 ? (
+              <div className="space-y-3">
+                {Object.entries(socialStats.platformCounts)
+                  .sort(([, a], [, b]) => b - a)
+                  .map(([platform, count]) => {
+                    const Icon = PLATFORM_ICONS[platform] || Share2;
+                    const color = PLATFORM_COLORS[platform] || "#6b7280";
+                    const pct = Math.round((count / socialStats.total) * 100);
+                    return (
+                      <div key={platform} className="space-y-1.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-1.5">
+                            <Icon className="w-3.5 h-3.5" style={{ color }} />
+                            <span className="text-muted-foreground">
+                              {platform.charAt(0) + platform.slice(1).toLowerCase()}
+                            </span>
+                          </div>
+                          <span className="font-medium">{count} posts</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-border/20 overflow-hidden">
+                          <motion.div
+                            initial={{ width: 0 }}
+                            animate={{ width: `${pct}%` }}
+                            transition={{ duration: 0.8, ease: "easeOut" }}
+                            className="h-full rounded-full"
+                            style={{ background: color }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            ) : (
+              <div className="h-32 flex items-center justify-center text-xs text-muted-foreground">
+                Publish posts to see platform distribution
+              </div>
+            )}
+          </motion.div>
+        </div>
+      )}
 
       <motion.div variants={stagger.item} className="kf-card p-4 space-y-3">
         <div className="flex items-center gap-2">

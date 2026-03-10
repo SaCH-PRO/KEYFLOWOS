@@ -88,6 +88,43 @@ const GUIDE_SECTIONS: GuideSection[] = [
     ],
   },
   {
+    id: "social",
+    tab: "social",
+    label: "Social Media",
+    icon: Share2,
+    color: "hsl(210 90% 55%)",
+    steps: [
+      {
+        id: "connect-channels",
+        title: "Connect Channels",
+        desc: "Link your social media accounts — Facebook, Instagram, Twitter, LinkedIn, and TikTok.",
+        icon: Share2,
+        color: "hsl(210 90% 55%)",
+      },
+      {
+        id: "compose-posts",
+        title: "Compose Posts",
+        desc: "Create and schedule social media posts with text, images, and multi-platform publishing.",
+        icon: PenTool,
+        color: "hsl(var(--kf-accent1))",
+      },
+      {
+        id: "content-calendar",
+        title: "Content Calendar",
+        desc: "Plan your social content visually on a calendar to maintain consistent posting schedules.",
+        icon: ClipboardList,
+        color: "hsl(270 70% 60%)",
+      },
+      {
+        id: "social-analytics",
+        title: "Social Analytics",
+        desc: "Track post performance, engagement rates, and audience growth across all connected platforms.",
+        icon: BarChart3,
+        color: "hsl(142 76% 36%)",
+      },
+    ],
+  },
+  {
     id: "lead-forms",
     tab: "forms",
     label: "Lead Capture",
@@ -213,7 +250,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
       {
         id: "keyboard-shortcuts",
         title: "Keyboard Shortcuts",
-        desc: "Navigate faster with shortcuts — N for new item, F to focus search, 1/2/3 for tabs, Shift+A for AI Hub.",
+        desc: "Navigate faster with shortcuts — N for new item, F to focus search, 1/2/3/4 for tabs, Shift+A for AI Hub.",
         icon: Keyboard,
         color: "hsl(0 72% 51%)",
       },

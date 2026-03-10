@@ -17,7 +17,7 @@ export default function MarketingError({ error, reset }: { error: Error & { dige
         <div>
           <h2 className="text-lg font-semibold text-foreground mb-1">Marketing Error</h2>
           <p className="text-sm text-muted-foreground">
-            Something went wrong loading Marketing. Your campaigns are safe.
+            Something went wrong loading Marketing. Your campaigns, social posts, and forms are safe.
           </p>
         </div>
         <div className="flex gap-3 justify-center">
