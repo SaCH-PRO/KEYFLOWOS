@@ -50,6 +50,8 @@ interface LeadFormsPanelProps {
   setForms: React.Dispatch<React.SetStateAction<LeadForm[]>>;
   onViewContact?: (contactId: string) => void;
   onAiOptimize?: () => void;
+  searchQuery?: string;
+  onSearchChange?: (q: string) => void;
 }
 
 export const LeadFormsPanel = React.memo(function LeadFormsPanel({
@@ -58,6 +60,8 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
   setForms,
   onViewContact,
   onAiOptimize,
+  searchQuery: externalSearch,
+  onSearchChange: externalSearchChange,
 }: LeadFormsPanelProps) {
   const [showFormModal, setShowFormModal] = useState(false);
   const [editingForm, setEditingForm] = useState<LeadForm | null>(null);
@@ -73,8 +77,11 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+  const [localSearch, setLocalSearch] = useState("");
   const initialFormRef = useRef({ name: "", description: "", fields: defaultFields, thankYouMessage: "Thank you for your submission!", redirectUrl: "" });
   const operationInFlight = saving || !!deletingId || !!togglingId;
+  const searchQuery = externalSearch ?? localSearch;
+  const setSearchQuery = externalSearchChange ?? setLocalSearch;
 
   const isDirty = useCallback(() => {
     const init = initialFormRef.current;
@@ -99,6 +106,10 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
     let base = forms;
     if (statusFilter === "active") base = forms.filter(f => f.isActive);
     else if (statusFilter === "inactive") base = forms.filter(f => !f.isActive);
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      base = base.filter(f => f.name.toLowerCase().includes(q) || (f.description || "").toLowerCase().includes(q));
+    }
     const sorted = [...base];
     switch (sortBy) {
       case "name":
@@ -111,7 +122,7 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
         sorted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     }
     return sorted;
-  }, [forms, statusFilter, sortBy]);
+  }, [forms, statusFilter, sortBy, searchQuery]);
 
   const openNewForm = useCallback(() => {
     setEditingForm(null);
@@ -250,6 +261,18 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
     <>
       <div className="space-y-4">
         <button data-marketing-new-form onClick={openNewForm} className="hidden" aria-hidden="true" tabIndex={-1} />
+        {forms.map(f => (
+          <button key={`trigger-${f.id}`} data-form-edit={f.id} onClick={() => openEditForm(f)} className="hidden" aria-hidden="true" tabIndex={-1} />
+        ))}
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search forms..."
+            className="flex-1 bg-muted/30 border border-border/40 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[hsl(var(--kf-accent1))] placeholder:text-muted-foreground/50"
+          />
+        </div>
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-1.5">
             {FORM_FILTER_PILLS.map(pill => (

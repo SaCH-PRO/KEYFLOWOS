@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import React, { useState, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Mail,
@@ -21,7 +21,6 @@ import {
   XCircle,
   Calendar,
   ShieldOff,
-  UserX,
 } from "lucide-react";
 import { EmailEditor } from "./email-editor";
 import {
@@ -32,7 +31,6 @@ import {
   sendCampaign,
   scheduleCampaign,
   cancelScheduleCampaign,
-  fetchSuppressionCount,
 } from "@/lib/client";
 import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "sonner";
@@ -67,6 +65,12 @@ interface CampaignsPanelProps {
   onCampaignSent?: (campaign: EmailCampaign) => void;
   onViewContact?: (contactId: string) => void;
   onAiWrite?: () => void;
+  searchQuery?: string;
+  onSearchChange?: (q: string) => void;
+}
+
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
 }
 
 export const CampaignsPanel = React.memo(function CampaignsPanel({
@@ -78,6 +82,8 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
   onCampaignSent,
   onViewContact,
   onAiWrite,
+  searchQuery: externalSearch,
+  onSearchChange: externalSearchChange,
 }: CampaignsPanelProps) {
   const [showCampaignModal, setShowCampaignModal] = useState(false);
   const [editingCampaign, setEditingCampaign] = useState<EmailCampaign | null>(null);
@@ -94,17 +100,12 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
   const [sending, setSending] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
-  const [suppressionCount, setSuppressionCount] = useState(0);
+  const [localSearch, setLocalSearch] = useState("");
   const [lastSendSuppressed, setLastSendSuppressed] = useState<Record<string, number>>({});
   const initialFormRef = useRef({ name: "", subject: "", body: "", segmentType: "all", tags: [] as string[], status: "" });
   const operationInFlight = saving || sending || scheduling || !!deletingId;
-
-  useEffect(() => {
-    if (!businessId) return;
-    fetchSuppressionCount(businessId).then(res => {
-      if (res.data != null) setSuppressionCount(res.data);
-    });
-  }, [businessId]);
+  const searchQuery = externalSearch ?? localSearch;
+  const setSearchQuery = externalSearchChange ?? setLocalSearch;
 
   const isDirty = useCallback(() => {
     const init = initialFormRef.current;
@@ -127,7 +128,11 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
   }, [isDirty]);
 
   const filtered = useMemo(() => {
-    const base = statusFilter === "all" ? campaigns : campaigns.filter(c => c.status === statusFilter.toUpperCase());
+    let base = statusFilter === "all" ? campaigns : campaigns.filter(c => c.status === statusFilter.toUpperCase());
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      base = base.filter(c => c.name.toLowerCase().includes(q) || c.subject.toLowerCase().includes(q));
+    }
     const sorted = [...base];
     switch (sortBy) {
       case "name":
@@ -147,7 +152,7 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
         sorted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     }
     return sorted;
-  }, [campaigns, statusFilter, sortBy]);
+  }, [campaigns, statusFilter, sortBy, searchQuery]);
 
   const openNewCampaign = useCallback(() => {
     setEditingCampaign(null);
@@ -310,6 +315,21 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
     <>
       <div className="space-y-4">
         <button data-marketing-new-campaign onClick={openNewCampaign} className="hidden" aria-hidden="true" tabIndex={-1} />
+        {campaigns.map(c => (
+          <span key={`trigger-${c.id}`} className="hidden" aria-hidden="true">
+            <button data-campaign-edit={c.id} onClick={() => openEditCampaign(c)} tabIndex={-1} />
+            <button data-campaign-send={c.id} onClick={() => setConfirmSendId(c.id)} tabIndex={-1} />
+          </span>
+        ))}
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search campaigns..."
+            className="flex-1 bg-muted/30 border border-border/40 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[hsl(var(--kf-accent1))] placeholder:text-muted-foreground/50"
+          />
+        </div>
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-1.5">
             {FILTER_PILLS.map(pill => (
@@ -361,6 +381,9 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
                       </span>
                     </div>
                     <p className="text-xs text-muted-foreground truncate">{campaign.subject}</p>
+                    {campaign.body && (
+                      <p className="text-[11px] text-muted-foreground/50 truncate mt-0.5">{stripHtml(campaign.body).slice(0, 80)}{stripHtml(campaign.body).length > 80 ? "..." : ""}</p>
+                    )}
                     <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground flex-wrap">
                       <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {campaign.totalRecipients} recipients</span>
                       {campaign.status === "SENT" && (
@@ -422,13 +445,12 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
                 {expandedCampaign === campaign.id && campaign.status === "SENT" && (
                   <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
                     <div className="px-4 pb-4 pt-2 border-t border-border/20">
-                      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         {[
                           { label: "Recipients", value: campaign.totalRecipients, icon: Users, color: "#6366f1" },
                           { label: "Sent", value: campaign.sentCount, icon: Send, color: "#3b82f6" },
                           { label: "Opened", value: campaign.openCount, icon: MailOpen, color: "#22c55e" },
                           { label: "Clicked", value: campaign.clickCount, icon: MousePointerClick, color: "#f59e0b" },
-                          { label: "Unsubscribed", value: suppressionCount, icon: UserX, color: "#ef4444" },
                         ].map(stat => (
                           <div key={stat.label} className="bg-muted/30 rounded-lg p-3 text-center">
                             <stat.icon className="w-4 h-4 mx-auto mb-1" style={{ color: stat.color }} />

@@ -44,8 +44,7 @@ export const CampaignActionQueue = React.memo(function CampaignActionQueue({
         c.status === "DRAFT" &&
         c.name?.trim() &&
         c.subject?.trim() &&
-        c.body?.trim() &&
-        c.totalRecipients > 0
+        c.body?.trim()
     );
 
     const needsContent = campaigns.filter(
