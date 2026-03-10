@@ -33,6 +33,10 @@ export type ModuleEventType =
   | "marketing:lead_captured"
   | "marketing:view_contact"
   | "marketing:create_campaign_for_segment"
+  | "store:status_changed"
+  | "store:hours_updated"
+  | "store:item_added"
+  | "store:config_updated"
   | "module:tab_changed"
   | "module:view_changed";
 
