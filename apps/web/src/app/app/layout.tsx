@@ -50,7 +50,6 @@ const navGroups = [
     label: "GROW",
     items: [
       { label: "Marketing", href: "/app/marketing", icon: Megaphone },
-      { label: "Social", href: "/app/social", icon: MessageCircle },
       { label: "Marketplace", href: "/app/marketplace", icon: Globe },
       { label: "Store", href: "/app/store", icon: Store },
     ],
@@ -363,7 +362,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                         { label: "New Contact", desc: "Add a lead or client", icon: Users, href: "/app/crm/pipeline" },
                         { label: "New Invoice", desc: "Bill a customer", icon: Receipt, href: "/app/commerce" },
                         { label: "New Booking", desc: "Schedule an appointment", icon: Calendar, href: "/app/bookings" },
-                        { label: "New Post", desc: "Publish to social", icon: MessageCircle, href: "/app/social" },
+                        { label: "New Post", desc: "Publish to social", icon: MessageCircle, href: "/app/marketing?tab=social" },
                         { label: "New Expense", desc: "Track a purchase", icon: Receipt, href: "/app/expenses" },
                         { label: "New Project", desc: "Organize your work", icon: FolderKanban, href: "/app/projects" },
                         { label: "New Playbook", desc: "Automate a workflow", icon: Zap, href: "/app/projects?tab=automations" },

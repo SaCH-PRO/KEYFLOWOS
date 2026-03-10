@@ -27,12 +27,12 @@ export const MarketingSkeleton = React.memo(function MarketingSkeleton() {
       </div>
 
       <div className="flex gap-1">
-        {Array.from({ length: 3 }).map((_, i) => (
+        {Array.from({ length: 4 }).map((_, i) => (
           <div
             key={i}
             className="h-10 rounded-t-xl bg-white/[0.04] border-x border-t border-transparent"
             style={{
-              width: i === 0 ? "120px" : i === 1 ? "110px" : "100px",
+              width: i === 0 ? "120px" : i === 1 ? "100px" : i === 2 ? "110px" : "100px",
               animation: `pulse 1.5s ease-in-out ${i * 0.1}s infinite`,
             }}
           />
