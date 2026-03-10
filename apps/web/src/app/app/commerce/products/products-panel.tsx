@@ -711,14 +711,17 @@ export const ProductsPanel = React.memo(function ProductsPanel({
                         )}
                       </div>
                       {onAiPricing && (
-                        <button
+                        <div
+                          role="button"
+                          tabIndex={0}
                           onClick={(e) => { e.stopPropagation(); onAiPricing(product); }}
-                          className="p-1.5 rounded-lg bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); onAiPricing(product); } }}
+                          className="p-1.5 rounded-lg bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition-colors opacity-0 group-hover:opacity-100 shrink-0 cursor-pointer"
                           title="AI Pricing Advisor"
                           aria-label="AI Pricing Advisor"
                         >
                           <Sparkles className="w-3.5 h-3.5" />
-                        </button>
+                        </div>
                       )}
                     </motion.button>
                   );
