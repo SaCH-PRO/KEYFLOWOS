@@ -51,7 +51,8 @@ export function useConnections() {
 
       const cal = calRes.status === "fulfilled" ? calRes.value : null;
       const gmail = gmailRes.status === "fulfilled" ? gmailRes.value : null;
-      const social = socialRes.status === "fulfilled" ? (socialRes.value as SocialConnection[]) : [];
+      const socialRaw = socialRes.status === "fulfilled" ? socialRes.value : [];
+      const social: SocialConnection[] = Array.isArray(socialRaw) ? socialRaw : Array.isArray((socialRaw as any)?.data) ? (socialRaw as any).data : [];
 
       const data: ConnectionsState = {
         calendarConnected: !!(cal as any)?.connected,
