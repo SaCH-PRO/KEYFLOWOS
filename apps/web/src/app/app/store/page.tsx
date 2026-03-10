@@ -1,9 +1,17 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertCircle, Send, Lightbulb, X } from "lucide-react";
-import { MissionsButton } from "@/components/ui/missions-button";
+import {
+  Store,
+  BarChart3,
+  Palette,
+  ShoppingBag,
+  Clock,
+  Settings2,
+  Send,
+  AlertCircle,
+} from "lucide-react";
 import {
   Service,
   StaffMember,
@@ -22,7 +30,20 @@ import {
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { onProductsChanged, hasProductChangedSinceLastFetch, markProductsFetched } from "@/lib/product-sync";
-import { StoreHeader } from "./components/store-header";
+import { toast } from "sonner";
+import { PageHeader } from "@/components/ui/page-header";
+import { TabNav } from "@/components/ui/tab-nav";
+import { ContactPickerDrawer } from "@/components/contacts";
+import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
+import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
+import { useSearchParams } from "next/navigation";
+import { useModuleEmit } from "@/hooks/use-module-events";
+import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
+import { useStoreAiHub } from "./hooks/use-store-ai-hub";
+import { renderStoreToolResult } from "./components/store-tool-results";
+import { StoreGuide } from "./components/store-guide";
+import { StoreSkeleton } from "./components/store-skeleton";
+import { StoreHeaderActions } from "./components/store-header-actions";
 import { StoreSettings } from "./components/store-settings";
 import { HoursEditor, DEFAULT_HOURS, type BusinessHoursMap } from "./components/hours-editor";
 import { CatalogManager } from "./components/catalog-manager";
@@ -30,22 +51,40 @@ import { StorefrontPreview } from "./components/storefront-preview";
 import { AppearanceCustomizer } from "./components/appearance-customizer";
 import { MerchandisingPanel } from "./components/merchandising-panel";
 import { StoreAnalyticsDashboard } from "./components/store-analytics";
-import { ContactPickerDrawer } from "@/components/contacts";
-import { StoreBanner } from "./components/store-banner";
-import { StoreTabs } from "./components/store-tabs";
-import { StoreLoading } from "./components/store-loading";
 import { KpiCards } from "./components/kpi-cards";
 import { SocialProofPanel } from "./components/social-proof-panel";
-import type { Banner, DriftedItem, TabKey } from "./components/store-types";
+import type { DriftedItem } from "./components/store-types";
+
+type StoreTab = "overview" | "customize" | "products" | "hours" | "settings";
+
+const TABS: { key: StoreTab; label: string; icon: React.ElementType }[] = [
+  { key: "overview", label: "Overview", icon: BarChart3 },
+  { key: "customize", label: "Customize", icon: Palette },
+  { key: "products", label: "Products", icon: ShoppingBag },
+  { key: "hours", label: "Hours", icon: Clock },
+  { key: "settings", label: "Settings", icon: Settings2 },
+];
+
+const TAB_KEYS = TABS.map((t) => t.key);
+
+const slideVariants = {
+  enter: (dir: number) => ({ x: dir > 0 ? 60 : -60, opacity: 0 }),
+  center: { x: 0, opacity: 1 },
+  exit: (dir: number) => ({ x: dir > 0 ? -60 : 60, opacity: 0 }),
+};
 
 export default function StorePage() {
+  const searchParams = useSearchParams();
+  const emitEvent = useModuleEmit();
+  const storeAi = useStoreAiHub();
+
   const [businessId, setBusinessId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<StoreTab>("overview");
+  const [loading, setLoading] = useState(true);
+
   const [services, setServices] = useState<Service[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [commerceProducts, setCommerceProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [banner, setBanner] = useState<Banner | null>(null);
-
   const [businessData, setBusinessData] = useState<{
     name?: string;
     slug?: string | null;
@@ -63,7 +102,6 @@ export default function StorePage() {
 
   const [storeSlug, setStoreSlug] = useState("");
   const [slugSaving, setSlugSaving] = useState(false);
-  const [activeView, setActiveView] = useState<TabKey>("overview");
   const [processingItems, setProcessingItems] = useState<Set<string>>(new Set());
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const [storeEnabled, setStoreEnabled] = useState(true);
@@ -71,8 +109,8 @@ export default function StorePage() {
   const [hoursSaving, setHoursSaving] = useState(false);
   const [driftedItems, setDriftedItems] = useState<DriftedItem[]>([]);
   const [showContactPicker, setShowContactPicker] = useState(false);
-  const [syncing, setSyncing] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   const [storefrontConfig, setStorefrontConfig] = useState<StorefrontConfig>({
     hero: {},
@@ -83,6 +121,18 @@ export default function StorePage() {
     seo: {},
   });
   const [configSaving, setConfigSaving] = useState(false);
+
+  const directionRef = useRef<number>(0);
+  const initialTabSet = useRef(false);
+
+  useEffect(() => {
+    if (initialTabSet.current) return;
+    const tabParam = searchParams.get("tab");
+    if (tabParam && TAB_KEYS.includes(tabParam as StoreTab)) {
+      setActiveTab(tabParam as StoreTab);
+      initialTabSet.current = true;
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     const initWorkspace = async () => {
@@ -147,6 +197,7 @@ export default function StorePage() {
       if (configRes.data) setStorefrontConfig(configRes.data);
     } catch (e) {
       console.error("Failed to load store data:", e);
+      toast.error("Failed to load store data");
     } finally {
       setLoading(false);
     }
@@ -166,27 +217,59 @@ export default function StorePage() {
     const unsub = onProductsChanged(() => {
       void loadData();
     });
-
     const handleFocus = () => {
-      if (hasProductChangedSinceLastFetch()) {
-        void loadData();
-      }
+      if (hasProductChangedSinceLastFetch()) void loadData();
     };
     window.addEventListener("focus", handleFocus);
-
     const handleVisibility = () => {
-      if (document.visibilityState === "visible" && hasProductChangedSinceLastFetch()) {
-        void loadData();
-      }
+      if (document.visibilityState === "visible" && hasProductChangedSinceLastFetch()) void loadData();
     };
     document.addEventListener("visibilitychange", handleVisibility);
-
     return () => {
       unsub();
       window.removeEventListener("focus", handleFocus);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [loadData]);
+
+  const handleTabChange = useCallback((key: string) => {
+    const newIndex = TAB_KEYS.indexOf(key as StoreTab);
+    const oldIndex = TAB_KEYS.indexOf(activeTab);
+    directionRef.current = newIndex > oldIndex ? 1 : -1;
+    setActiveTab(key as StoreTab);
+    emitEvent("module:tab_changed", "store", { tab: key });
+    const url = new URL(window.location.href);
+    if (key === "overview") {
+      url.searchParams.delete("tab");
+    } else {
+      url.searchParams.set("tab", key);
+    }
+    window.history.replaceState({}, "", url.toString());
+  }, [activeTab, emitEvent]);
+
+  const { swipeHandlers } = useSwipeTabs({
+    tabs: TAB_KEYS,
+    activeTab,
+    onTabChange: handleTabChange,
+  });
+
+  useEffect(() => {
+    if (businessId) {
+      storeAi.updateStoreContext({
+        businessId,
+        activeView: activeTab,
+        itemCount: activeTab === "products" ? commerceProducts.length : services.length,
+        products: commerceProducts,
+        services,
+        testimonials: (storefrontConfig.socialProof as any)?.testimonials ?? [],
+        storeEnabled,
+        hasHeroImage: !!(storefrontConfig.hero as any)?.imageUrl,
+        hasLogo: !!businessData?.logoUrl,
+        hoursConfigured: Object.values(businessHours).some((h: any) => h?.enabled),
+        storeName: businessData?.name,
+      });
+    }
+  }, [businessId, activeTab, commerceProducts.length, services.length, storeEnabled, businessData, storefrontConfig, businessHours]);
 
   function getPublicBookingUrl() {
     const domain = typeof window !== "undefined" ? window.location.origin : "";
@@ -201,9 +284,9 @@ export default function StorePage() {
     setStoreSlug(slug);
     const res = await updateBusiness({ businessId, slug });
     if (res.error) {
-      setBanner({ text: `Failed to save URL: ${res.error}`, type: "error" });
+      toast.error(`Failed to save URL: ${res.error}`);
     } else {
-      setBanner({ text: "Public booking URL saved!", type: "success" });
+      toast.success("Public booking URL saved!");
       setBusinessData((prev) => (prev ? { ...prev, slug } : prev));
     }
     setSlugSaving(false);
@@ -214,14 +297,16 @@ export default function StorePage() {
     const newValue = !storeEnabled;
     const res = await updateBusiness({ businessId, storeEnabled: newValue } as any);
     if (res.error) {
-      setBanner({ text: `Failed to update store status: ${res.error}`, type: "error" });
+      toast.error(`Failed to update store status: ${res.error}`);
     } else {
       setStoreEnabled(newValue);
       setBusinessData((prev) => (prev ? { ...prev, storeEnabled: newValue } : prev));
-      setBanner({
-        text: newValue ? "Store is now published!" : "Store is now unpublished.",
-        type: newValue ? "success" : "info",
-      });
+      emitEvent("store:status_changed", "store", { enabled: newValue });
+      if (newValue) {
+        toast.success("Store is now published!");
+      } else {
+        toast.info("Store is now unpublished.");
+      }
     }
   }
 
@@ -230,9 +315,10 @@ export default function StorePage() {
     setHoursSaving(true);
     const res = await updateBusiness({ businessId, businessHours } as any);
     if (res.error) {
-      setBanner({ text: `Failed to save hours: ${res.error}`, type: "error" });
+      toast.error(`Failed to save hours: ${res.error}`);
     } else {
-      setBanner({ text: "Business hours saved!", type: "success" });
+      toast.success("Business hours saved!");
+      emitEvent("store:hours_updated", "store", {});
     }
     setHoursSaving(false);
   }
@@ -248,7 +334,7 @@ export default function StorePage() {
       const res = await updateService(drift.serviceId, data, businessId);
       if (!res.error) synced++;
     }
-    setBanner({ text: `Synced ${synced} item${synced !== 1 ? "s" : ""} with Commerce prices.`, type: "success" });
+    toast.success(`Synced ${synced} item${synced !== 1 ? "s" : ""} with Commerce prices.`);
     setSyncing(false);
     await loadData();
   }
@@ -257,7 +343,7 @@ export default function StorePage() {
     if (!businessId) return;
     const existingService = services.find((s) => s.name === product.name);
     if (existingService) {
-      setBanner({ text: `A service named '${product.name}' already exists in your store.`, type: "warning" });
+      toast.warning(`A service named '${product.name}' already exists in your store.`);
       return;
     }
     setProcessingItems((prev) => new Set(prev).add(product.id));
@@ -270,9 +356,10 @@ export default function StorePage() {
         description: product.description ?? undefined,
       });
       if (res.error) {
-        setBanner({ text: `Failed to add: ${res.error}`, type: "error" });
+        toast.error(`Failed to add: ${res.error}`);
       } else {
-        setBanner({ text: `"${product.name}" added to store!`, type: "success" });
+        toast.success(`"${product.name}" added to store!`);
+        emitEvent("store:item_added", "store", { productName: product.name });
         await loadData();
       }
     } finally {
@@ -299,9 +386,9 @@ export default function StorePage() {
     try {
       const res = await deleteService(serviceId, businessId);
       if (res.error) {
-        setBanner({ text: `Failed to remove: ${res.error}`, type: "error" });
+        toast.error(`Failed to remove: ${res.error}`);
       } else {
-        setBanner({ text: "Removed from store.", type: "info" });
+        toast.info("Removed from store.");
         await loadData();
       }
     } finally {
@@ -350,14 +437,67 @@ export default function StorePage() {
     setConfigSaving(true);
     const res = await updateStorefrontConfig(businessId, storefrontConfig);
     if (res.error) {
-      setBanner({ text: "Failed to save storefront config", type: "error" });
+      toast.error("Failed to save storefront config");
     } else {
-      setBanner({ text: "Storefront saved!", type: "success" });
+      toast.success("Storefront saved!");
+      emitEvent("store:config_updated", "store", {});
     }
     setConfigSaving(false);
   }
 
-  if (!businessId && !loading) {
+  const handleAiAssistantAction = useCallback((actionKey: string) => {
+    if (actionKey.startsWith("switch_tab:")) {
+      const t = actionKey.split(":")[1];
+      handleTabChange(t);
+    } else if (actionKey.startsWith("tool:")) {
+      const toolId = actionKey.split(":")[1];
+      if (!storeAi.panelOpen) storeAi.setOpen(true);
+      storeAi.executeTool(toolId);
+    }
+  }, [handleTabChange, storeAi]);
+
+  const toggleGuide = useCallback(() => setShowGuide((prev) => !prev), []);
+
+  const storeShortcuts = useMemo<ShortcutGroup[]>(() => [
+    {
+      groupName: "Store Navigation",
+      shortcuts: [
+        { key: "1", description: "Overview tab", action: () => handleTabChange("overview") },
+        { key: "2", description: "Customize tab", action: () => handleTabChange("customize") },
+        { key: "3", description: "Products tab", action: () => handleTabChange("products") },
+        { key: "4", description: "Hours tab", action: () => handleTabChange("hours") },
+        { key: "5", description: "Settings tab", action: () => handleTabChange("settings") },
+        { key: "r", description: "Refresh data", action: () => { void loadData(); } },
+        { key: "g", description: "Toggle guide", action: toggleGuide },
+        { key: "a", shift: true, description: "Toggle AI Hub", action: () => storeAi.togglePanel() },
+        { key: "Escape", description: "Close panels", action: () => {
+          if (storeAi.hubMode === "tool-result") storeAi.clearToolResult();
+          else if (storeAi.panelOpen) storeAi.setOpen(false);
+          else { setShowGuide(false); setShowContactPicker(false); }
+        } },
+      ],
+    },
+  ], [handleTabChange, loadData, toggleGuide, storeAi.togglePanel, storeAi.panelOpen, storeAi.setOpen, storeAi.hubMode, storeAi.clearToolResult]);
+
+  useKeyboardShortcuts(storeShortcuts, !loading);
+
+  const storeServiceNames = new Set(services.map((s) => s.name));
+  const storeItemCount = services.filter((s) => commerceProducts.some((p) => p.name === s.name)).length;
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          icon={Store}
+          title="Store"
+          subtitle="Your public storefront"
+        />
+        <StoreSkeleton />
+      </div>
+    );
+  }
+
+  if (!businessId) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center space-y-3">
@@ -371,89 +511,37 @@ export default function StorePage() {
     );
   }
 
-  const storeServiceNames = new Set(services.map((s) => s.name));
-  const storeItemCount = services.filter((s) => commerceProducts.some((p) => p.name === s.name)).length;
-
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex-1 flex items-center gap-2">
-          <StoreHeader
-            storeEnabled={storeEnabled}
-            publicUrl={getPublicBookingUrl()}
-            onToggleEnabled={toggleStoreEnabled}
+    <div className="space-y-6" aria-label="Store">
+      <PageHeader
+        icon={Store}
+        title="Store"
+        subtitle={`${services.length} services · ${commerceProducts.length} products · ${storeEnabled ? "Live" : "Draft"}`}
+        titleExtra={
+          <StoreGuide
+            isOpen={showGuide}
+            onToggle={toggleGuide}
+            onTabChange={handleTabChange}
           />
-          <div className="relative">
+        }
+        rightSlot={
+          <div className="flex items-center gap-2">
+            <StoreHeaderActions
+              storeEnabled={storeEnabled}
+              publicUrl={getPublicBookingUrl()}
+              onToggleEnabled={toggleStoreEnabled}
+            />
             <button
-              onClick={() => setShowGuide(!showGuide)}
-              className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
-                showGuide
-                  ? "bg-amber-400 text-white shadow-md shadow-amber-400/40 scale-110"
-                  : "bg-amber-400/15 text-amber-400 hover:bg-amber-400/25 hover:shadow-sm hover:shadow-amber-400/20 hover:scale-105"
-              }`}
-              aria-label="Getting started guide"
-              title="Getting started guide"
+              onClick={() => setShowContactPicker(true)}
+              className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Broadcast"
             >
-              <Lightbulb className="w-3.5 h-3.5" />
+              <Send className="w-4 h-4" />
+              Broadcast
             </button>
-            <AnimatePresence>
-              {showGuide && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowGuide(false)} />
-                  <motion.div
-                    initial={{ opacity: 0, y: -4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    transition={{ duration: 0.12 }}
-                    className="fixed left-2 right-2 top-20 sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-2 z-50 kf-card border border-border shadow-2xl rounded-2xl sm:w-[90vw] sm:max-w-[700px] max-h-[80vh] overflow-y-auto p-5"
-                  >
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="p-1.5 rounded-lg bg-amber-400/10">
-                        <Lightbulb className="w-4 h-4 text-amber-400" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-semibold">Getting Started</h4>
-                        <p className="text-[11px] text-muted-foreground">Your quick-start guide</p>
-                      </div>
-                      <button onClick={() => setShowGuide(false)} className="ml-auto p-1 rounded hover:bg-muted/50">
-                        <X className="w-3.5 h-3.5 text-muted-foreground" />
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {[
-                        { step: "1", title: "Toggle Store Live", desc: "Use the ON/Live switch at the top to make your store visible to customers." },
-                        { step: "2", title: "Add Services & Products", desc: "Go to the Catalog tab to add your bookable services and products with prices." },
-                        { step: "3", title: "Customize Appearance", desc: "Choose a theme, set your brand colors, hero image, and layout style in the Appearance tab." },
-                        { step: "4", title: "Set Business Hours", desc: "Configure your operating hours so customers know when you're available." },
-                        { step: "5", title: "Share Your Link", desc: "Copy your public store URL and share it on WhatsApp, social media, or your website." },
-                        { step: "6", title: "Track Performance", desc: "Monitor page views, popular items, and conversion rates in the Analytics tab." },
-                      ].map((item) => (
-                        <div key={item.step} className="flex gap-2.5 p-2 rounded-xl hover:bg-muted/30 transition-colors">
-                          <div className="w-5 h-5 rounded-full bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">
-                            {item.step}
-                          </div>
-                          <div>
-                            <p className="text-xs font-medium">{item.title}</p>
-                            <p className="text-[10px] text-muted-foreground leading-relaxed">{item.desc}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </motion.div>
-                </>
-              )}
-            </AnimatePresence>
           </div>
-          <MissionsButton />
-        </div>
-        <button
-          onClick={() => setShowContactPicker(true)}
-          className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
-        >
-          <Send className="w-4 h-4" />
-          Broadcast
-        </button>
-      </div>
+        }
+      />
 
       {!storeEnabled && (
         <div
@@ -484,65 +572,67 @@ export default function StorePage() {
         </div>
       )}
 
-      <StoreBanner banner={banner} onDismiss={() => setBanner(null)} />
+      <AnimatePresence>
+        {storeAi.panelOpen && (
+          <AiCommandHub
+            ai={storeAi}
+            moduleName="Store"
+            onAction={handleAiAssistantAction}
+            toolResultRenderer={renderStoreToolResult}
+          />
+        )}
+      </AnimatePresence>
+      <AiHubTrigger ai={storeAi} moduleName="Store" />
 
-      {loading ? (
-        <StoreLoading />
-      ) : (
-        <div className="space-y-6">
-          <StoreTabs activeView={activeView} onViewChange={setActiveView} />
+      <TabNav
+        tabs={TABS}
+        activeTab={activeTab}
+        onTabChange={handleTabChange}
+        layoutId="store-tab-pill"
+      />
 
-          <AnimatePresence mode="wait">
-            {activeView === "overview" && (
-              <motion.div
-                key="overview"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="space-y-6"
-              >
+      <div {...swipeHandlers} className="touch-pan-y">
+        <AnimatePresence mode="wait" custom={directionRef.current}>
+          <motion.div
+            key={activeTab}
+            custom={directionRef.current}
+            variants={slideVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ type: "spring", bounce: 0.15, duration: 0.35 }}
+          >
+            {activeTab === "overview" && (
+              <div className="space-y-6">
                 <KpiCards
                   servicesCount={services.length}
                   commerceProductsCount={commerceProducts.length}
                   storeEnabled={storeEnabled}
                   driftedItemsCount={driftedItems.length}
                 />
-                <StoreAnalyticsDashboard businessId={businessId!} />
-              </motion.div>
+                <StoreAnalyticsDashboard businessId={businessId} />
+              </div>
             )}
 
-            {activeView === "customize" && (
-              <motion.div
-                key="customize"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-              >
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  <AppearanceCustomizer
-                    config={storefrontConfig}
-                    onConfigChange={handleConfigChange}
-                    onSave={handleSaveConfig}
-                    saving={configSaving}
-                  />
-                  <StorefrontPreview
-                    businessData={businessData}
-                    services={services}
-                    commerceProducts={commerceProducts}
-                    config={storefrontConfig}
-                  />
-                </div>
-              </motion.div>
+            {activeTab === "customize" && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <AppearanceCustomizer
+                  config={storefrontConfig}
+                  onConfigChange={handleConfigChange}
+                  onSave={handleSaveConfig}
+                  saving={configSaving}
+                />
+                <StorefrontPreview
+                  businessData={businessData}
+                  services={services}
+                  commerceProducts={commerceProducts}
+                  config={storefrontConfig}
+                />
+              </div>
             )}
 
-            {activeView === "products" && (
-              <motion.div
-                key="products"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="space-y-6"
-              >
+            {activeTab === "products" && (
+              <div className="space-y-6">
                 <CatalogManager
                   products={commerceProducts}
                   storeServiceNames={storeServiceNames}
@@ -564,35 +654,22 @@ export default function StorePage() {
                   onSave={handleSaveConfig}
                   saving={configSaving}
                 />
-              </motion.div>
+              </div>
             )}
 
-            {activeView === "hours" && (
-              <motion.div
-                key="hours"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-              >
-                <HoursEditor
-                  hours={businessHours}
-                  onChange={setBusinessHours}
-                  onSave={handleSaveHours}
-                  saving={hoursSaving}
-                />
-              </motion.div>
+            {activeTab === "hours" && (
+              <HoursEditor
+                hours={businessHours}
+                onChange={setBusinessHours}
+                onSave={handleSaveHours}
+                saving={hoursSaving}
+              />
             )}
 
-            {activeView === "settings" && (
-              <motion.div
-                key="settings"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="space-y-6"
-              >
+            {activeTab === "settings" && (
+              <div className="space-y-6">
                 <StoreSettings
-                  businessId={businessId!}
+                  businessId={businessId}
                   slug={storeSlug}
                   currentSlug={businessData?.slug ?? null}
                   publicUrl={getPublicBookingUrl()}
@@ -606,11 +683,12 @@ export default function StorePage() {
                   onConfigChange={handleConfigChange}
                   onSaveConfig={handleSaveConfig}
                 />
-              </motion.div>
+              </div>
             )}
-          </AnimatePresence>
-        </div>
-      )}
+          </motion.div>
+        </AnimatePresence>
+      </div>
+
       <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
     </div>
   );
