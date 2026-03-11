@@ -25,6 +25,7 @@ import {
   PieChart,
 } from "lucide-react";
 import { toast } from "sonner";
+import { moduleEvents } from "@/lib/module-events";
 
 const INDUSTRIES = [
   "E-commerce",
@@ -224,11 +225,13 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
         });
       }
 
+      const generatedAt = new Date().toISOString();
       setStrategy({
         summary: data?.executiveSummary ?? "Based on your business metrics, here is a tailored marketing strategy designed to maximize growth and ROI.",
         sections,
-        generatedAt: new Date().toISOString(),
+        generatedAt,
       });
+      moduleEvents.emit("marketing:strategy_generated", "marketing", { generatedAt, industry: metrics.industry });
       setExpandedSections(new Set([0, 1]));
       setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
     } catch {

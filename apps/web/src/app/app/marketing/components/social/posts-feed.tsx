@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { FileText, RefreshCw, LayoutGrid, List } from "lucide-react";
+import { RefreshCw, LayoutGrid, List } from "lucide-react";
 import type { SocialPost } from "@/lib/client";
 import { PostCard } from "./post-card";
+
+import { SocialEmptyState } from "../marketing-empty-states";
 
 type Props = {
   posts: SocialPost[];
@@ -12,6 +14,7 @@ type Props = {
   onPublish: (id: string) => void;
   onEdit: (post: SocialPost) => void;
   onDelete: (id: string) => void;
+  onNewPost?: () => void;
 };
 
 const container = {
@@ -41,7 +44,7 @@ function SkeletonCard() {
   );
 }
 
-export function PostsFeed({ posts, loading, onPublish, onEdit, onDelete }: Props) {
+export function PostsFeed({ posts, loading, onPublish, onEdit, onDelete, onNewPost }: Props) {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
   if (loading && posts.length === 0) {
@@ -58,13 +61,7 @@ export function PostsFeed({ posts, loading, onPublish, onEdit, onDelete }: Props
   }
 
   if (posts.length === 0) {
-    return (
-      <div className="p-8 text-center">
-        <FileText className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
-        <p className="text-lg font-medium mb-1">No posts yet</p>
-        <p className="text-muted-foreground">Create your first post to get started</p>
-      </div>
-    );
+    return <SocialEmptyState onAction={onNewPost} />;
   }
 
   return (

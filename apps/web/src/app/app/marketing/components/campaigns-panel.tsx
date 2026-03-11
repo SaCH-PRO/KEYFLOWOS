@@ -3,7 +3,6 @@
 import React, { useState, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Mail,
   Plus,
   Trash2,
   Pencil,
@@ -32,8 +31,10 @@ import {
   scheduleCampaign,
   cancelScheduleCampaign,
 } from "@/lib/client";
-import { EmptyState } from "@/components/ui/empty-state";
+import { CampaignsEmptyState } from "./marketing-empty-states";
+import { MarketingBulkBar } from "./marketing-bulk-bar";
 import { toast } from "sonner";
+import { moduleEvents } from "@/lib/module-events";
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: "#94a3b8",
@@ -102,8 +103,10 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const [localSearch, setLocalSearch] = useState("");
   const [lastSendSuppressed, setLastSendSuppressed] = useState<Record<string, number>>({});
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkLoading, setBulkLoading] = useState(false);
   const initialFormRef = useRef({ name: "", subject: "", body: "", segmentType: "all", tags: [] as string[], status: "" });
-  const operationInFlight = saving || sending || scheduling || !!deletingId;
+  const operationInFlight = saving || sending || scheduling || !!deletingId || bulkLoading;
   const searchQuery = externalSearch ?? localSearch;
   const setSearchQuery = externalSearchChange ?? setLocalSearch;
 
@@ -215,6 +218,7 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
     try {
       await deleteCampaign(businessId, id);
       setCampaigns(prev => prev.filter(c => c.id !== id));
+      moduleEvents.emit("marketing:campaign_deleted", "marketing", { campaignId: id });
       toast.success("Campaign deleted");
     } catch {
       toast.error("Failed to delete campaign");
@@ -279,6 +283,7 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
       const res = await scheduleCampaign(businessId, id, new Date(scheduleDate).toISOString());
       if (res.data) {
         setCampaigns(prev => prev.map(c => c.id === id ? res.data! : c));
+        moduleEvents.emit("marketing:campaign_scheduled", "marketing", { campaignId: id, scheduledAt: scheduleDate });
         toast.success("Campaign scheduled");
       }
     } catch {
@@ -310,6 +315,62 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
       tags: prev.tags.includes(tag) ? prev.tags.filter(t => t !== tag) : [...prev.tags, tag],
     }));
   }, []);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const selectAll = useCallback(() => {
+    setSelectedIds(new Set(filtered.map(c => c.id)));
+  }, [filtered]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
+  const handleBulkDelete = useCallback(async () => {
+    if (!businessId || selectedIds.size === 0) return;
+    setBulkLoading(true);
+    const ids = Array.from(selectedIds);
+    let deleted = 0;
+    for (const id of ids) {
+      try {
+        await deleteCampaign(businessId, id);
+        deleted++;
+      } catch {}
+    }
+    setCampaigns(prev => prev.filter(c => !selectedIds.has(c.id)));
+    ids.forEach(id => moduleEvents.emit("marketing:campaign_deleted", "marketing", { campaignId: id }));
+    setSelectedIds(new Set());
+    setBulkLoading(false);
+    toast.success(`${deleted} campaign${deleted > 1 ? "s" : ""} deleted`);
+  }, [businessId, selectedIds, setCampaigns]);
+
+  const handleBulkSend = useCallback(async () => {
+    if (!businessId || selectedIds.size === 0) return;
+    setBulkLoading(true);
+    const draftIds = Array.from(selectedIds).filter(id => campaigns.find(c => c.id === id)?.status === "DRAFT");
+    let sent = 0;
+    for (const id of draftIds) {
+      try {
+        const res = await sendCampaign(businessId, id);
+        if (res.data) {
+          const { sent: sentCount } = res.data as any;
+          setCampaigns(prev => prev.map(c => c.id === id ? { ...c, status: "SENT", sentAt: new Date().toISOString(), totalRecipients: sentCount, sentCount } : c));
+          sent++;
+        }
+      } catch {}
+    }
+    setSelectedIds(new Set());
+    setBulkLoading(false);
+    if (sent > 0) toast.success(`${sent} campaign${sent > 1 ? "s" : ""} sent`);
+    else toast.info("No draft campaigns to send");
+  }, [businessId, selectedIds, campaigns, setCampaigns]);
 
   return (
     <>
@@ -357,19 +418,36 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
           </select>
         </div>
         <p className="text-[11px] text-muted-foreground">{filtered.length} campaigns</p>
+        <AnimatePresence>
+          {selectedIds.size > 0 && (
+            <MarketingBulkBar
+              selectedCount={selectedIds.size}
+              totalCount={filtered.length}
+              mode="campaigns"
+              onSelectAll={selectAll}
+              onClearSelection={clearSelection}
+              onBulkDelete={handleBulkDelete}
+              onBulkSend={handleBulkSend}
+              loading={bulkLoading}
+            />
+          )}
+        </AnimatePresence>
         {campaigns.length === 0 ? (
-          <EmptyState
-            icon={Mail}
-            title="No campaigns yet"
-            description="Create your first email campaign to start reaching your contacts."
-            actionLabel="New Campaign"
-            onAction={openNewCampaign}
-          />
+          <CampaignsEmptyState onAction={openNewCampaign} />
         ) : (
           filtered.map(campaign => (
             <motion.div key={campaign.id} layout className="kf-card border border-border/40 rounded-xl overflow-hidden" style={{ borderLeft: `3px solid ${ACCENT_COLORS[campaign.status] || ACCENT_COLORS.DRAFT}` }}>
               <div className="p-4">
                 <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-center gap-2 shrink-0 pt-0.5">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(campaign.id)}
+                      onChange={() => toggleSelect(campaign.id)}
+                      className="w-3.5 h-3.5 rounded border-border/60 accent-[hsl(var(--kf-accent1))] cursor-pointer"
+                      aria-label={`Select ${campaign.name}`}
+                    />
+                  </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-3 mb-1">
                       <h3 className="text-sm font-semibold truncate">{campaign.name}</h3>

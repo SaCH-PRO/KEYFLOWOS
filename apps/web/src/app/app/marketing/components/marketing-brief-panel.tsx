@@ -22,6 +22,7 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { toast } from "sonner";
+import { moduleEvents } from "@/lib/module-events";
 
 interface BriefData {
   businessName: string;
@@ -267,6 +268,7 @@ export function MarketingBriefPanel({ businessId, isOpen, onClose }: MarketingBr
         return;
       }
       setSubmitted(true);
+      moduleEvents.emit("marketing:brief_submitted", "marketing", { businessName: brief.businessName, deliverables: brief.deliverables });
       if (data?.method === "gmail") {
         toast.success("Marketing brief sent to keyflowos.tt@gmail.com");
       } else {

@@ -15,7 +15,6 @@ import {
   FileText,
   ToggleLeft,
   ToggleRight,
-  ClipboardList,
   Code,
   Sparkles,
   Loader2,
@@ -31,8 +30,10 @@ import {
   deleteLeadForm,
   fetchLeadFormSubmissions,
 } from "@/lib/client";
-import { EmptyState } from "@/components/ui/empty-state";
+import { FormsEmptyState } from "./marketing-empty-states";
+import { MarketingBulkBar } from "./marketing-bulk-bar";
 import { toast } from "sonner";
+import { moduleEvents } from "@/lib/module-events";
 
 const FIELD_TYPES = ["text", "email", "phone", "select", "textarea", "number", "date", "checkbox", "radio", "url", "hidden"];
 
@@ -78,8 +79,10 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const [localSearch, setLocalSearch] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkLoading, setBulkLoading] = useState(false);
   const initialFormRef = useRef({ name: "", description: "", fields: defaultFields, thankYouMessage: "Thank you for your submission!", redirectUrl: "" });
-  const operationInFlight = saving || !!deletingId || !!togglingId;
+  const operationInFlight = saving || !!deletingId || !!togglingId || bulkLoading;
   const searchQuery = externalSearch ?? localSearch;
   const setSearchQuery = externalSearchChange ?? setLocalSearch;
 
@@ -166,6 +169,7 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
         const res = await createLeadForm(businessId, data);
         if (res.data) {
           setForms(prev => [res.data!, ...prev]);
+          moduleEvents.emit("marketing:form_created", "marketing", { formId: res.data.id, name: res.data.name });
           toast.success("Form created");
         }
       }
@@ -199,6 +203,7 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
     try {
       await deleteLeadForm(businessId, id);
       setForms(prev => prev.filter(f => f.id !== id));
+      moduleEvents.emit("marketing:form_deleted", "marketing", { formId: id });
       toast.success("Form deleted");
     } catch {
       toast.error("Failed to delete form");
@@ -257,6 +262,81 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
     });
   }, []);
 
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const selectAll = useCallback(() => {
+    setSelectedIds(new Set(filtered.map(f => f.id)));
+  }, [filtered]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
+  const handleBulkDelete = useCallback(async () => {
+    if (!businessId || selectedIds.size === 0) return;
+    setBulkLoading(true);
+    const ids = Array.from(selectedIds);
+    let deleted = 0;
+    for (const id of ids) {
+      try {
+        await deleteLeadForm(businessId, id);
+        deleted++;
+      } catch {}
+    }
+    setForms(prev => prev.filter(f => !selectedIds.has(f.id)));
+    ids.forEach(id => moduleEvents.emit("marketing:form_deleted", "marketing", { formId: id }));
+    setSelectedIds(new Set());
+    setBulkLoading(false);
+    toast.success(`${deleted} form${deleted > 1 ? "s" : ""} deleted`);
+  }, [businessId, selectedIds, setForms]);
+
+  const handleBulkActivate = useCallback(async () => {
+    if (!businessId || selectedIds.size === 0) return;
+    setBulkLoading(true);
+    const ids = Array.from(selectedIds).filter(id => !forms.find(f => f.id === id)?.isActive);
+    let count = 0;
+    for (const id of ids) {
+      try {
+        const res = await updateLeadForm(businessId, id, { isActive: true });
+        if (res.data) {
+          setForms(prev => prev.map(f => f.id === id ? res.data! : f));
+          count++;
+        }
+      } catch {}
+    }
+    setSelectedIds(new Set());
+    setBulkLoading(false);
+    if (count > 0) toast.success(`${count} form${count > 1 ? "s" : ""} activated`);
+    else toast.info("No inactive forms to activate");
+  }, [businessId, selectedIds, forms, setForms]);
+
+  const handleBulkDeactivate = useCallback(async () => {
+    if (!businessId || selectedIds.size === 0) return;
+    setBulkLoading(true);
+    const ids = Array.from(selectedIds).filter(id => forms.find(f => f.id === id)?.isActive);
+    let count = 0;
+    for (const id of ids) {
+      try {
+        const res = await updateLeadForm(businessId, id, { isActive: false });
+        if (res.data) {
+          setForms(prev => prev.map(f => f.id === id ? res.data! : f));
+          count++;
+        }
+      } catch {}
+    }
+    setSelectedIds(new Set());
+    setBulkLoading(false);
+    if (count > 0) toast.success(`${count} form${count > 1 ? "s" : ""} deactivated`);
+    else toast.info("No active forms to deactivate");
+  }, [businessId, selectedIds, forms, setForms]);
+
   return (
     <>
       <div className="space-y-4">
@@ -299,19 +379,37 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
           </select>
         </div>
         <p className="text-[11px] text-muted-foreground">{filtered.length} forms</p>
+        <AnimatePresence>
+          {selectedIds.size > 0 && (
+            <MarketingBulkBar
+              selectedCount={selectedIds.size}
+              totalCount={filtered.length}
+              mode="forms"
+              onSelectAll={selectAll}
+              onClearSelection={clearSelection}
+              onBulkDelete={handleBulkDelete}
+              onBulkActivate={handleBulkActivate}
+              onBulkDeactivate={handleBulkDeactivate}
+              loading={bulkLoading}
+            />
+          )}
+        </AnimatePresence>
         {forms.length === 0 ? (
-          <EmptyState
-            icon={ClipboardList}
-            title="No lead forms yet"
-            description="Create a lead capture form to grow your contact list."
-            actionLabel="New Form"
-            onAction={openNewForm}
-          />
+          <FormsEmptyState onAction={openNewForm} />
         ) : (
           filtered.map(form => (
             <motion.div key={form.id} layout className="kf-card border border-border/40 rounded-xl overflow-hidden" style={{ borderLeft: `3px solid ${form.isActive ? "#22c55e" : "#94a3b8"}` }}>
               <div className="p-4">
                 <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-center gap-2 shrink-0 pt-0.5">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(form.id)}
+                      onChange={() => toggleSelect(form.id)}
+                      className="w-3.5 h-3.5 rounded border-border/60 accent-[hsl(var(--kf-accent1))] cursor-pointer"
+                      aria-label={`Select ${form.name}`}
+                    />
+                  </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-3 mb-1">
                       <h3 className="text-sm font-semibold truncate">{form.name}</h3>

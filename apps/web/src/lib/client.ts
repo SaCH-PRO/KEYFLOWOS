@@ -3170,6 +3170,19 @@ export async function fetchSuppressionCount(businessId: string): Promise<ApiResu
   return apiGetSimple<number>(`/businesses/${encodeURIComponent(businessId)}/suppression-count`);
 }
 
+export interface MarketingStats {
+  totalCampaigns: number;
+  sentCount: number;
+  avgOpenRate: number;
+  avgClickRate: number;
+  totalLeads: number;
+  formConversionRate: number;
+  activeFormsCount: number;
+}
+export async function fetchMarketingStats(businessId: string): Promise<ApiResult<MarketingStats>> {
+  return apiGetSimple<MarketingStats>(`/businesses/${encodeURIComponent(businessId)}/marketing/stats`);
+}
+
 // ---
 // LEAD FORMS
 // ---

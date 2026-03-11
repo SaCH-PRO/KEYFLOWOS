@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Get, Inject, Param, Post, UseGuards } from '@nestjs/common';
 import { MarketingAiService } from './marketing-ai.service';
+import { MarketingStrategyService } from './marketing-strategy.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CrmRateLimitGuard, CrmRateLimit } from '../crm/guards/rate-limit.guard';
@@ -11,6 +12,7 @@ import { checkAiRateLimit } from '../crm/ai-rate-limit.util';
 export class MarketingAiController {
   constructor(
     @Inject(MarketingAiService) private readonly marketingAi: MarketingAiService,
+    @Inject(MarketingStrategyService) private readonly marketingStrategy: MarketingStrategyService,
   ) {}
 
   @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
@@ -145,7 +147,7 @@ export class MarketingAiController {
       throw new BadRequestException('industry must be 200 characters or less');
     }
     checkAiRateLimit(businessId);
-    return this.marketingAi.generateMarketingStrategy(businessId, body);
+    return this.marketingStrategy.generateMarketingStrategy(businessId, body);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -153,7 +155,7 @@ export class MarketingAiController {
   getBusinessSnapshot(
     @Param('businessId') businessId: string,
   ) {
-    return this.marketingAi.getBusinessSnapshot(businessId);
+    return this.marketingStrategy.getBusinessSnapshot(businessId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -166,6 +168,6 @@ export class MarketingAiController {
     if (!body || Object.keys(body).length === 0) {
       throw new BadRequestException('Brief data is required');
     }
-    return this.marketingAi.submitMarketingBrief(businessId, body);
+    return this.marketingStrategy.submitMarketingBrief(businessId, body);
   }
 }

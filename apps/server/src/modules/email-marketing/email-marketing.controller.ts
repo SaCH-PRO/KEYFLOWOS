@@ -113,6 +113,12 @@ export class EmailMarketingController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/marketing/stats')
+  getMarketingStats(@Param('businessId') businessId: string) {
+    return this.emailMarketing.getMarketingStats(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/suppression-count')
   getSuppressionCount(@Param('businessId') businessId: string) {
     return this.emailMarketing.getSuppressionCount(businessId);
