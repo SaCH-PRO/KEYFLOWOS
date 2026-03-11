@@ -8,12 +8,18 @@ import { GmailService } from '../commerce/gmail.service';
 @Injectable()
 export class EmailMarketingService {
   private readonly logger = new Logger(EmailMarketingService.name);
+  private readonly statsCache = new Map<string, { data: any; expiresAt: number }>();
+  private readonly STATS_TTL = 5 * 60 * 1000;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Optional() @Inject(GmailService) private readonly gmail: GmailService | null,
   ) {}
+
+  private invalidateStatsCache(businessId: string) {
+    this.statsCache.delete(`stats:${businessId}`);
+  }
 
   async listCampaigns(businessId: string) {
     return this.prisma.client.emailCampaign.findMany({
@@ -53,6 +59,7 @@ export class EmailMarketingService {
       },
     });
     this.events.emit('campaign.created', { campaign, businessId: input.businessId } as CampaignCreatedPayload);
+    this.invalidateStatsCache(input.businessId);
     return campaign;
   }
 
@@ -78,10 +85,12 @@ export class EmailMarketingService {
   }
 
   async deleteCampaign(businessId: string, id: string) {
-    return this.prisma.client.emailCampaign.update({
+    const result = await this.prisma.client.emailCampaign.update({
       where: { id, businessId },
       data: { deletedAt: new Date() },
     });
+    this.invalidateStatsCache(businessId);
+    return result;
   }
 
   private get hmacSecret(): string {
@@ -294,6 +303,7 @@ export class EmailMarketingService {
         },
       });
       this.events.emit('campaign.sent', { campaign: updatedCampaign, businessId, recipientCount: recipientData.length } as CampaignSentPayload);
+      this.invalidateStatsCache(businessId);
 
       const warning = !gmailConnected && recipientData.length > 0
         ? 'Campaign recorded but emails not delivered. Connect Gmail to send real emails.'
@@ -330,13 +340,15 @@ export class EmailMarketingService {
       throw new Error('Scheduled date must be in the future');
     }
 
-    return this.prisma.client.emailCampaign.update({
+    const result = await this.prisma.client.emailCampaign.update({
       where: { id, businessId },
       data: {
         status: 'SCHEDULED',
         scheduledAt: scheduleDate,
       },
     });
+    this.invalidateStatsCache(businessId);
+    return result;
   }
 
   async cancelSchedule(businessId: string, id: string) {
@@ -377,5 +389,65 @@ export class EmailMarketingService {
     }
 
     return campaign;
+  }
+
+  async getMarketingStats(businessId: string) {
+    const cacheKey = `stats:${businessId}`;
+    const cached = this.statsCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.data;
+    }
+
+    const [campaigns, forms, totalLeads] = await Promise.all([
+      this.prisma.client.emailCampaign.findMany({
+        where: { businessId, deletedAt: null },
+        select: {
+          id: true,
+          status: true,
+          sentCount: true,
+          openCount: true,
+          clickCount: true,
+        },
+      }),
+      this.prisma.client.leadForm.findMany({
+        where: { businessId, deletedAt: null },
+        select: {
+          id: true,
+          isActive: true,
+          _count: { select: { submissions: true } },
+        },
+      }),
+      this.prisma.client.leadFormSubmission.count({
+        where: { businessId },
+      }),
+    ]);
+
+    const totalCampaigns = campaigns.length;
+    const sentCampaigns = campaigns.filter((c) => c.status === 'SENT');
+    const sentCount = sentCampaigns.reduce((sum, c) => sum + (c.sentCount ?? 0), 0);
+
+    const totalOpens = sentCampaigns.reduce((sum, c) => sum + (c.openCount ?? 0), 0);
+    const totalClicks = sentCampaigns.reduce((sum, c) => sum + (c.clickCount ?? 0), 0);
+    const avgOpenRate = sentCount > 0 ? Math.round((totalOpens / sentCount) * 10000) / 100 : 0;
+    const avgClickRate = sentCount > 0 ? Math.round((totalClicks / sentCount) * 10000) / 100 : 0;
+
+    const activeFormsCount = forms.filter((f) => f.isActive).length;
+    const totalFormSubmissions = forms.reduce((sum, f) => sum + f._count.submissions, 0);
+    const formConversionRate = totalLeads > 0 && totalFormSubmissions > 0
+      ? Math.round((totalFormSubmissions / totalLeads) * 10000) / 100
+      : 0;
+
+    const stats = {
+      totalCampaigns,
+      sentCount,
+      avgOpenRate,
+      avgClickRate,
+      totalLeads,
+      formConversionRate,
+      activeFormsCount,
+    };
+
+    this.statsCache.set(cacheKey, { data: stats, expiresAt: Date.now() + this.STATS_TTL });
+    return stats;
   }
 }

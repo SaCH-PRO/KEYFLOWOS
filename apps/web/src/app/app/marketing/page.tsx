@@ -10,30 +10,20 @@ import {
   MessageSquare,
   Sparkles,
   FileText,
+  Send,
+  MailOpen,
+  Users,
 } from "lucide-react";
-import {
-  fetchCampaigns,
-  fetchLeadForms,
-  fetchContacts,
-  fetchLeadFormSubmissions,
-  fetchPosts,
-  EmailCampaign,
-  LeadForm,
-  LeadFormSubmission,
-  SocialPost,
-} from "@/lib/client";
-import { getStoredBusinessId } from "@/lib/workspace";
-import { toast } from "sonner";
-import { getGmailAuthUrl } from "@/lib/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { useConnections } from "@/hooks/use-connections";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useModuleEmit, useModuleEvent } from "@/hooks/use-module-events";
+import { useSearchParams } from "next/navigation";
+import { useModuleEvent } from "@/hooks/use-module-events";
 import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
 import { useMarketingAiHub } from "./hooks/use-marketing-ai-hub";
+import { useMarketing } from "./hooks/use-marketing";
 import { renderMarketingToolResult } from "./components/marketing-tool-results";
 import { MarketingAiSearchBar } from "./components/marketing-ai-search-bar";
 import { MarketingSkeleton } from "./components/marketing-skeleton";
@@ -47,6 +37,7 @@ import { SocialTabContent } from "./components/social-tab-content";
 import { ConnectionsDropdown } from "./components/connections-dropdown";
 import { StrategyPanel } from "./components/strategy-panel";
 import { MarketingBriefPanel } from "./components/marketing-brief-panel";
+import type { EmailCampaign, LeadForm } from "@/lib/client";
 
 type MarketingTab = "social" | "campaigns" | "forms" | "insights";
 
@@ -66,16 +57,17 @@ const slideVariants = {
 };
 
 export default function MarketingPage() {
-  const router = useRouter();
   const searchParams = useSearchParams();
-  const emitEvent = useModuleEmit();
+  const mk = useMarketing();
   const marketingAi = useMarketingAiHub();
-  const [businessId, setBusinessId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<MarketingTab>("social");
-  const [loading, setLoading] = useState(true);
   const { gmailConnected, gmailEmail, socialConnections, loading: connectionsLoading } = useConnections();
-  const [socialPosts, setSocialPosts] = useState<SocialPost[]>([]);
+
+  const [activeTab, setActiveTab] = useState<MarketingTab>("social");
+  const [showGuide, setShowGuide] = useState(false);
+  const [showStrategy, setShowStrategy] = useState(false);
+  const [showBrief, setShowBrief] = useState(false);
   const initialTabSet = useRef(false);
+  const directionRef = useRef<number>(0);
 
   useEffect(() => {
     if (initialTabSet.current) return;
@@ -86,81 +78,30 @@ export default function MarketingPage() {
     }
   }, [searchParams]);
 
-  const [campaigns, setCampaigns] = useState<EmailCampaign[]>([]);
-  const [forms, setForms] = useState<LeadForm[]>([]);
-  const [submissions, setSubmissions] = useState<Record<string, LeadFormSubmission[]>>({});
-  const [availableTags, setAvailableTags] = useState<string[]>([]);
-  const [showGuide, setShowGuide] = useState(false);
-  const [showStrategy, setShowStrategy] = useState(false);
-  const [showBrief, setShowBrief] = useState(false);
-
-  const directionRef = useRef<number>(0);
-
-  const handleGmailConnect = useCallback(async () => {
-    if (!businessId) return;
-    const res = await getGmailAuthUrl(businessId);
-    if (res?.data?.url) window.location.href = res.data.url;
-  }, [businessId]);
-
   useEffect(() => {
-    const bid = getStoredBusinessId();
-    if (bid) setBusinessId(bid);
-  }, []);
-
-  const loadData = useCallback(async () => {
-    if (!businessId) { setLoading(false); return; }
-    setLoading(true);
-    try {
-      const [campaignsRes, formsRes, contactsRes, postsRes] = await Promise.all([
-        fetchCampaigns(businessId),
-        fetchLeadForms(businessId),
-        fetchContacts(businessId, { take: 200 }),
-        fetchPosts(businessId),
-      ]);
-      if (campaignsRes.data) setCampaigns(campaignsRes.data);
-      if (postsRes.data) setSocialPosts(postsRes.data);
-      if (formsRes.data) {
-        setForms(formsRes.data);
-        const subsMap: Record<string, LeadFormSubmission[]> = {};
-        await Promise.all(
-          formsRes.data.map(async (f) => {
-            try {
-              const subRes = await fetchLeadFormSubmissions(businessId, f.id);
-              if (subRes.data) subsMap[f.id] = subRes.data;
-            } catch {
-              toast.error(`Failed to load submissions for form "${f.name}"`);
-            }
-          })
-        );
-        setSubmissions(subsMap);
-      }
-      if (contactsRes.data?.contacts) {
-        const tags = new Set<string>();
-        contactsRes.data.contacts.forEach(c => c.tags?.forEach(t => tags.add(t)));
-        setAvailableTags(Array.from(tags));
-      }
-    } catch {
-      toast.error("Failed to load marketing data");
+    if (mk.businessId) {
+      marketingAi.updateMarketingContext({
+        businessId: mk.businessId,
+        activeView: activeTab,
+        itemCount: activeTab === "campaigns" ? mk.campaigns.length : activeTab === "social" ? mk.socialPosts.length : mk.forms.length,
+        campaigns: mk.campaigns,
+        forms: mk.forms,
+        socialPosts: mk.socialPosts,
+        crossModuleSignals: mk.crossModuleSignals,
+      });
     }
-    setLoading(false);
-  }, [businessId]);
-
-  useEffect(() => { void loadData(); }, [loadData]);
+  }, [mk.businessId, activeTab, mk.dataVersion, mk.campaigns, mk.forms, mk.socialPosts, mk.crossModuleSignals, marketingAi.updateMarketingContext]);
 
   const handleTabChange = useCallback((key: string) => {
     const newIndex = TAB_KEYS.indexOf(key as MarketingTab);
     const oldIndex = TAB_KEYS.indexOf(activeTab);
     directionRef.current = newIndex > oldIndex ? 1 : -1;
     setActiveTab(key as MarketingTab);
-    emitEvent("module:tab_changed", "marketing", { tab: key });
     const url = new URL(window.location.href);
-    if (key === "social") {
-      url.searchParams.delete("tab");
-    } else {
-      url.searchParams.set("tab", key);
-    }
+    if (key === "social") url.searchParams.delete("tab");
+    else url.searchParams.set("tab", key);
     window.history.replaceState({}, "", url.toString());
-  }, [activeTab, emitEvent]);
+  }, [activeTab]);
 
   const { swipeHandlers } = useSwipeTabs({
     tabs: TAB_KEYS,
@@ -168,113 +109,42 @@ export default function MarketingPage() {
     onTabChange: handleTabChange,
   });
 
-  const handleSocialPostsLoaded = useCallback((posts: SocialPost[]) => {
-    setSocialPosts(posts);
-  }, []);
-
-  useEffect(() => {
-    if (businessId) {
-      marketingAi.updateMarketingContext({
-        businessId,
-        activeView: activeTab,
-        itemCount: activeTab === "campaigns" ? campaigns.length : activeTab === "social" ? socialPosts.length : forms.length,
-        campaigns,
-        forms,
-      });
-    }
-  }, [businessId, activeTab, campaigns.length, forms.length, socialPosts.length, marketingAi.updateMarketingContext]);
-
-  useModuleEvent("marketing:create_campaign_for_segment", useCallback((event: any) => {
-    const { segmentTags, segmentStatus } = event.data ?? {};
+  useModuleEvent("marketing:create_campaign_for_segment", useCallback(() => {
     handleTabChange("campaigns");
-    const el = document.querySelector<HTMLButtonElement>('[data-marketing-new-campaign]');
+    const el = document.querySelector<HTMLButtonElement>("[data-marketing-new-campaign]");
     el?.click();
   }, [handleTabChange]));
 
-  const handleViewContact = useCallback((contactId: string) => {
-    emitEvent("marketing:view_contact", "marketing", { contactId });
-    router.push(`/app/crm/contacts/${contactId}`);
-  }, [emitEvent, router]);
-
-  const handleCampaignCreated = useCallback((campaign: EmailCampaign) => {
-    emitEvent("marketing:campaign_created", "marketing", { campaignId: campaign.id, name: campaign.name });
-  }, [emitEvent]);
-
-  const handleCampaignSent = useCallback((campaign: EmailCampaign) => {
-    emitEvent("marketing:campaign_sent", "marketing", { campaignId: campaign.id, name: campaign.name, recipientCount: campaign.totalRecipients });
-  }, [emitEvent]);
-
-  const handleAiWrite = useCallback(() => {
-    if (!marketingAi.panelOpen) marketingAi.setOpen(true);
-    marketingAi.executeTool("campaign-content-generator");
-  }, [marketingAi]);
-
-  const handleAiOptimizeForm = useCallback(() => {
-    if (!marketingAi.panelOpen) marketingAi.setOpen(true);
-    marketingAi.executeTool("lead-form-optimizer");
-  }, [marketingAi]);
-
-  const handleAiAnalyze = useCallback(() => {
-    if (!marketingAi.panelOpen) marketingAi.setOpen(true);
-    marketingAi.executeTool("campaign-performance");
-  }, [marketingAi]);
-
-  const handleAiAssistantAction = useCallback((actionKey: string) => {
-    if (actionKey.startsWith("filter_status:")) {
-      handleTabChange("campaigns");
-    } else if (actionKey.startsWith("switch_tab:")) {
-      const t = actionKey.split(":")[1];
-      handleTabChange(t);
-    } else if (actionKey.startsWith("tool:")) {
-      const toolId = actionKey.split(":")[1];
-      if (!marketingAi.panelOpen) marketingAi.setOpen(true);
-      marketingAi.executeTool(toolId);
-    }
-  }, [handleTabChange, marketingAi]);
-
   const handleNewItem = useCallback(() => {
-    if (activeTab === "campaigns") {
-      const el = document.querySelector<HTMLButtonElement>('[data-marketing-new-campaign]');
-      el?.click();
-    } else if (activeTab === "social") {
-      const el = document.querySelector<HTMLButtonElement>('[data-social-new-post]');
-      el?.click();
-    } else if (activeTab === "forms") {
-      const el = document.querySelector<HTMLButtonElement>('[data-marketing-new-form]');
-      el?.click();
-    }
+    if (activeTab === "campaigns") document.querySelector<HTMLButtonElement>("[data-marketing-new-campaign]")?.click();
+    else if (activeTab === "social") document.querySelector<HTMLButtonElement>("[data-social-new-post]")?.click();
+    else if (activeTab === "forms") document.querySelector<HTMLButtonElement>("[data-marketing-new-form]")?.click();
   }, [activeTab]);
 
   const handleEditCampaign = useCallback((campaign: EmailCampaign) => {
-    const el = document.querySelector<HTMLButtonElement>(`[data-campaign-edit="${campaign.id}"]`);
-    el?.click();
+    document.querySelector<HTMLButtonElement>(`[data-campaign-edit="${campaign.id}"]`)?.click();
   }, []);
 
   const handleSendCampaign = useCallback((id: string) => {
-    const el = document.querySelector<HTMLButtonElement>(`[data-campaign-send="${id}"]`);
-    el?.click();
+    document.querySelector<HTMLButtonElement>(`[data-campaign-send="${id}"]`)?.click();
   }, []);
 
   const handleEditForm = useCallback((form: LeadForm) => {
-    const el = document.querySelector<HTMLButtonElement>(`[data-form-edit="${form.id}"]`);
-    el?.click();
+    document.querySelector<HTMLButtonElement>(`[data-form-edit="${form.id}"]`)?.click();
   }, []);
 
-  const handleToggleForm = useCallback(async (form: LeadForm) => {
-    const { updateLeadForm: updateFormApi } = await import("@/lib/client");
-    if (!businessId) return;
-    try {
-      const res = await updateFormApi(businessId, form.id, { isActive: !form.isActive });
-      if (res.data) {
-        setForms(prev => prev.map(f => f.id === form.id ? res.data! : f));
-        toast.success(res.data.isActive ? "Form activated" : "Form deactivated");
-      }
-    } catch {
-      toast.error("Failed to toggle form status");
-    }
-  }, [businessId]);
+  const handleAiAction = useCallback((toolId: string) => {
+    if (!marketingAi.panelOpen) marketingAi.setOpen(true);
+    marketingAi.executeTool(toolId);
+  }, [marketingAi]);
 
-  const toggleGuide = useCallback(() => setShowGuide(prev => !prev), []);
+  const handleAiAssistantAction = useCallback((actionKey: string) => {
+    if (actionKey.startsWith("filter_status:")) handleTabChange("campaigns");
+    else if (actionKey.startsWith("switch_tab:")) handleTabChange(actionKey.split(":")[1]);
+    else if (actionKey.startsWith("tool:")) handleAiAction(actionKey.split(":")[1]);
+  }, [handleTabChange, handleAiAction]);
+
+  const toggleGuide = useCallback(() => setShowGuide((prev) => !prev), []);
 
   const marketingShortcuts = useMemo<ShortcutGroup[]>(() => [
     {
@@ -284,31 +154,32 @@ export default function MarketingPage() {
         { key: "2", description: "Campaigns tab", action: () => handleTabChange("campaigns") },
         { key: "3", description: "Lead Forms tab", action: () => handleTabChange("forms") },
         { key: "4", description: "Insights tab", action: () => handleTabChange("insights") },
-        { key: "n", description: "New campaign/form", action: handleNewItem },
-        { key: "r", description: "Refresh data", action: () => { void loadData(); } },
-        { key: "f", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('[data-marketing-ai-search]'); el?.focus(); } },
+        { key: "n", description: "New item", action: handleNewItem },
+        { key: "r", description: "Refresh data", action: () => { void mk.loadData(); } },
+        { key: "f", description: "Focus search", action: () => document.querySelector<HTMLInputElement>("[data-marketing-ai-search]")?.focus() },
         { key: "g", description: "Toggle guide", action: toggleGuide },
+        { key: "b", description: "Marketing brief", action: () => setShowBrief(true) },
+        { key: "s", shift: true, description: "AI Strategy", action: () => setShowStrategy(true) },
         { key: "a", shift: true, description: "Toggle AI Hub", action: () => marketingAi.togglePanel() },
         { key: "Escape", description: "Close panels", action: () => {
           if (marketingAi.hubMode === "tool-result") marketingAi.clearToolResult();
           else if (marketingAi.panelOpen) marketingAi.setOpen(false);
+          else if (showStrategy) setShowStrategy(false);
+          else if (showBrief) setShowBrief(false);
           else setShowGuide(false);
         } },
       ],
     },
-  ], [handleTabChange, handleNewItem, loadData, toggleGuide, marketingAi.togglePanel, marketingAi.panelOpen, marketingAi.setOpen, marketingAi.hubMode, marketingAi.clearToolResult]);
+  ], [handleTabChange, handleNewItem, mk.loadData, toggleGuide, marketingAi.togglePanel, marketingAi.panelOpen, marketingAi.setOpen, marketingAi.hubMode, marketingAi.clearToolResult, showStrategy, showBrief]);
 
-  useKeyboardShortcuts(marketingShortcuts, !loading);
+  useKeyboardShortcuts(marketingShortcuts, !mk.loading);
 
-  if (loading) {
+  if (mk.loading) {
+    const resolvedTab = (searchParams.get("tab") as MarketingTab) || "social";
     return (
       <div className="space-y-6">
-        <PageHeader
-          icon={Megaphone}
-          title="Marketing"
-          subtitle="Campaigns, lead forms & insights"
-        />
-        <MarketingSkeleton />
+        <PageHeader icon={Megaphone} title="Marketing" subtitle="Campaigns, lead forms & insights" />
+        <MarketingSkeleton activeTab={TAB_KEYS.includes(resolvedTab) ? resolvedTab : "social"} />
       </div>
     );
   }
@@ -318,15 +189,11 @@ export default function MarketingPage() {
       <PageHeader
         icon={Megaphone}
         title="Marketing"
-        subtitle={`${campaigns.length} campaigns · ${socialPosts.length} posts · ${forms.length} lead forms`}
+        subtitle={`${mk.stats.totalCampaigns} campaigns · ${mk.stats.totalPosts} posts · ${mk.forms.length} lead forms`}
         actionLabel={activeTab === "social" ? "New Post" : activeTab === "campaigns" ? "New Campaign" : activeTab === "forms" ? "New Form" : undefined}
         onAction={activeTab === "insights" ? undefined : handleNewItem}
         titleExtra={
-          <MarketingGuide
-            isOpen={showGuide}
-            onToggle={toggleGuide}
-            onTabChange={handleTabChange}
-          />
+          <MarketingGuide isOpen={showGuide} onToggle={toggleGuide} onTabChange={handleTabChange} />
         }
         rightSlot={
           <div className="flex items-center gap-2">
@@ -348,33 +215,72 @@ export default function MarketingPage() {
               gmailConnected={gmailConnected}
               gmailEmail={gmailEmail}
               socialConnections={socialConnections}
-              onGmailConnect={handleGmailConnect}
+              onGmailConnect={mk.handleGmailConnect}
               loading={connectionsLoading}
             />
           </div>
         }
       />
 
-      <MarketingAiSearchBar businessId={businessId} />
+      <MarketingAiSearchBar businessId={mk.businessId} />
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {[
+          {
+            label: "Total Campaigns",
+            value: mk.stats.totalCampaigns,
+            icon: Send,
+            gradient: "from-[hsl(var(--kf-accent1)/0.15)] to-[hsl(var(--kf-accent1)/0.05)]",
+            iconBg: "from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent1))]",
+          },
+          {
+            label: "Avg Open Rate",
+            value: `${mk.stats.avgOpenRate.toFixed(1)}%`,
+            icon: MailOpen,
+            gradient: "from-emerald-500/15 to-emerald-600/5",
+            iconBg: "from-emerald-500 to-green-600",
+          },
+          {
+            label: "Leads Captured",
+            value: mk.stats.totalLeads,
+            icon: Users,
+            gradient: "from-amber-500/15 to-amber-600/5",
+            iconBg: "from-amber-500 to-orange-600",
+          },
+          {
+            label: "Active Forms",
+            value: mk.stats.activeForms,
+            icon: ClipboardList,
+            gradient: "from-[hsl(var(--kf-accent2)/0.15)] to-[hsl(var(--kf-accent2)/0.05)]",
+            iconBg: "from-[hsl(var(--kf-accent2))] to-[hsl(var(--kf-accent2))]",
+          },
+        ].map((card) => (
+          <motion.div
+            key={card.label}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35 }}
+            className={`rounded-2xl border border-border/60 bg-card/80 backdrop-blur-sm bg-gradient-to-br ${card.gradient} p-4 flex items-start gap-3`}
+          >
+            <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${card.iconBg} flex items-center justify-center shrink-0`}>
+              <card.icon className="w-4 h-4 text-white" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">{card.label}</p>
+              <p className="text-xl font-bold truncate">{card.value}</p>
+            </div>
+          </motion.div>
+        ))}
+      </div>
 
       <AnimatePresence>
         {marketingAi.panelOpen && (
-          <AiCommandHub
-            ai={marketingAi}
-            moduleName="Marketing"
-            onAction={handleAiAssistantAction}
-            toolResultRenderer={renderMarketingToolResult}
-          />
+          <AiCommandHub ai={marketingAi} moduleName="Marketing" onAction={handleAiAssistantAction} toolResultRenderer={renderMarketingToolResult} />
         )}
       </AnimatePresence>
       <AiHubTrigger ai={marketingAi} moduleName="Marketing" />
 
-      <TabNav
-        tabs={TABS}
-        activeTab={activeTab}
-        onTabChange={handleTabChange}
-        layoutId="marketing-tab-pill"
-      />
+      <TabNav tabs={TABS} activeTab={activeTab} onTabChange={handleTabChange} layoutId="marketing-tab-pill" />
 
       <div {...swipeHandlers} className="touch-pan-y">
         <AnimatePresence mode="wait" custom={directionRef.current}>
@@ -389,44 +295,31 @@ export default function MarketingPage() {
           >
             {activeTab === "campaigns" && (
               <div className="space-y-4">
-                <CampaignActionQueue
-                  campaigns={campaigns}
-                  onEdit={handleEditCampaign}
-                  onSend={handleSendCampaign}
-                  onAiWrite={handleAiWrite}
-                />
+                <CampaignActionQueue campaigns={mk.campaigns} onEdit={handleEditCampaign} onSend={handleSendCampaign} onAiWrite={() => handleAiAction("campaign-content-generator")} />
                 <CampaignsPanel
-                  businessId={businessId}
-                  campaigns={campaigns}
-                  setCampaigns={setCampaigns}
-                  availableTags={availableTags}
-                  onCampaignCreated={handleCampaignCreated}
-                  onCampaignSent={handleCampaignSent}
-                  onViewContact={handleViewContact}
-                  onAiWrite={handleAiWrite}
+                  businessId={mk.businessId}
+                  campaigns={mk.campaigns}
+                  setCampaigns={mk.setCampaigns}
+                  availableTags={mk.availableTags}
+                  onCampaignCreated={mk.handleCampaignCreated}
+                  onCampaignSent={mk.handleCampaignSent}
+                  onViewContact={mk.handleViewContact}
+                  onAiWrite={() => handleAiAction("campaign-content-generator")}
                 />
               </div>
             )}
             {activeTab === "social" && (
-              <SocialTabContent
-                businessId={businessId}
-                onPostsLoaded={handleSocialPostsLoaded}
-              />
+              <SocialTabContent businessId={mk.businessId} onPostsLoaded={mk.handleSocialPostsLoaded} />
             )}
             {activeTab === "forms" && (
               <div className="space-y-4">
-                <FormOptimizationQueue
-                  forms={forms}
-                  onAiOptimize={handleAiOptimizeForm}
-                  onEdit={handleEditForm}
-                  onToggle={handleToggleForm}
-                />
+                <FormOptimizationQueue forms={mk.forms} onAiOptimize={() => handleAiAction("lead-form-optimizer")} onEdit={handleEditForm} onToggle={mk.handleToggleForm} />
                 <LeadFormsPanel
-                  businessId={businessId}
-                  forms={forms}
-                  setForms={setForms}
-                  onViewContact={handleViewContact}
-                  onAiOptimize={handleAiOptimizeForm}
+                  businessId={mk.businessId}
+                  forms={mk.forms}
+                  setForms={mk.setForms}
+                  onViewContact={mk.handleViewContact}
+                  onAiOptimize={() => handleAiAction("lead-form-optimizer")}
                 />
               </div>
             )}
@@ -434,7 +327,7 @@ export default function MarketingPage() {
               <div className="space-y-4">
                 <div className="flex items-center justify-end">
                   <button
-                    onClick={handleAiAnalyze}
+                    onClick={() => handleAiAction("campaign-performance")}
                     className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/20 transition-colors"
                     aria-label="AI Analyze"
                   >
@@ -442,29 +335,15 @@ export default function MarketingPage() {
                     AI Analyze
                   </button>
                 </div>
-                <MarketingInsightsTab
-                  campaigns={campaigns}
-                  forms={forms}
-                  submissions={submissions}
-                  socialPosts={socialPosts}
-                />
+                <MarketingInsightsTab campaigns={mk.campaigns} forms={mk.forms} submissions={mk.submissions} socialPosts={mk.socialPosts} stats={mk.stats} />
               </div>
             )}
           </motion.div>
         </AnimatePresence>
       </div>
 
-      <StrategyPanel
-        businessId={businessId}
-        isOpen={showStrategy}
-        onClose={() => setShowStrategy(false)}
-      />
-
-      <MarketingBriefPanel
-        businessId={businessId}
-        isOpen={showBrief}
-        onClose={() => setShowBrief(false)}
-      />
+      <StrategyPanel businessId={mk.businessId} isOpen={showStrategy} onClose={() => setShowStrategy(false)} />
+      <MarketingBriefPanel businessId={mk.businessId} isOpen={showBrief} onClose={() => setShowBrief(false)} />
     </div>
   );
 }

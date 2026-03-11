@@ -39,12 +39,14 @@ import {
   Legend,
 } from "recharts";
 import type { EmailCampaign, LeadForm, LeadFormSubmission, SocialPost } from "@/lib/client";
+import type { MarketingStats } from "../hooks/use-marketing";
 
 interface MarketingInsightsTabProps {
   campaigns: EmailCampaign[];
   forms: LeadForm[];
   submissions: Record<string, LeadFormSubmission[]>;
   socialPosts?: SocialPost[];
+  stats?: MarketingStats;
 }
 
 const stagger = {
@@ -174,7 +176,7 @@ const PLATFORM_COLORS: Record<string, string> = {
   TIKTOK: "#00F2EA",
 };
 
-function MarketingInsightsTabInner({ campaigns, forms, submissions, socialPosts = [] }: MarketingInsightsTabProps) {
+function MarketingInsightsTabInner({ campaigns, forms, submissions, socialPosts = [], stats: parentStats }: MarketingInsightsTabProps) {
   const sentCampaigns = useMemo(
     () => campaigns.filter((c) => c.status === "SENT").sort(
       (a, b) => new Date(a.sentAt ?? a.createdAt).getTime() - new Date(b.sentAt ?? b.createdAt).getTime()
@@ -273,8 +275,8 @@ function MarketingInsightsTabInner({ campaigns, forms, submissions, socialPosts 
   }, [campaigns]);
 
   const totalSent = useMemo(
-    () => campaigns.reduce((sum, c) => sum + c.sentCount, 0),
-    [campaigns]
+    () => parentStats?.sentCampaigns ?? campaigns.reduce((sum, c) => sum + c.sentCount, 0),
+    [campaigns, parentStats]
   );
   const totalOpens = useMemo(
     () => campaigns.reduce((sum, c) => sum + c.openCount, 0),
@@ -285,12 +287,12 @@ function MarketingInsightsTabInner({ campaigns, forms, submissions, socialPosts 
     [campaigns]
   );
   const totalSubmissions = useMemo(
-    () => forms.reduce((sum, f) => sum + (f._count?.submissions ?? 0), 0),
-    [forms]
+    () => parentStats?.totalLeads ?? forms.reduce((sum, f) => sum + (f._count?.submissions ?? 0), 0),
+    [forms, parentStats]
   );
   const avgOpenRate = useMemo(
-    () => totalSent > 0 ? Math.round((totalOpens / totalSent) * 100) : 0,
-    [totalSent, totalOpens]
+    () => parentStats?.avgOpenRate ?? (totalSent > 0 ? Math.round((totalOpens / totalSent) * 100) : 0),
+    [totalSent, totalOpens, parentStats]
   );
 
   const socialStats = useMemo(() => {

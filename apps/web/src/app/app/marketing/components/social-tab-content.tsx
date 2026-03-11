@@ -22,6 +22,7 @@ import {
   fetchSocialConnections,
 } from "@/lib/client";
 import { toast } from "sonner";
+import { moduleEvents } from "@/lib/module-events";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PostComposer, type ComposerSubmitData } from "./social/post-composer";
 import { PostsFeed } from "./social/posts-feed";
@@ -109,7 +110,10 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
           businessId ?? undefined,
         );
         if (pubError) toast.error(pubError);
-        else toast.success("Post published");
+        else {
+          moduleEvents.emit("marketing:social_post_published", "marketing", { postId: post.id });
+          toast.success("Post published");
+        }
         const published = pubData ? ((pubData as any).post || pubData) : post;
         setPosts((prev) => {
           const updated = [published, ...prev];
@@ -117,6 +121,7 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
           return updated;
         });
       } else {
+        moduleEvents.emit("marketing:social_post_created", "marketing", { postId: post.id });
         setPosts((prev) => {
           const updated = [post, ...prev];
           onPostsLoaded?.(updated);
@@ -157,7 +162,10 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
           businessId ?? undefined,
         );
         if (pubError) toast.error(pubError);
-        else toast.success("Post published");
+        else {
+          moduleEvents.emit("marketing:social_post_published", "marketing", { postId: updated.id });
+          toast.success("Post published");
+        }
         const published = pubData ? ((pubData as any).post || pubData) : updated;
         setPosts((prev) => {
           const newPosts = prev.map((p) => (p.id === editingPost.id ? published : p));
@@ -190,6 +198,7 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
         onPostsLoaded?.(newPosts);
         return newPosts;
       });
+      moduleEvents.emit("marketing:social_post_published", "marketing", { postId });
       toast.success("Post published");
     }
   }
@@ -390,6 +399,10 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
             onPublish={handlePublish}
             onEdit={handleEditStart}
             onDelete={handleDelete}
+            onNewPost={() => {
+              setShowComposer(true);
+              setEditingPost(null);
+            }}
           />
         </>
       )}
