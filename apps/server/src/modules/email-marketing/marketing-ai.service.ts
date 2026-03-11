@@ -636,4 +636,148 @@ Respond in valid JSON:
       };
     }
   }
+
+  async generateMarketingStrategy(businessId: string, metrics: {
+    industry: string;
+    monthlyRevenue?: string;
+    targetAudience?: string;
+    currentChannels?: string[];
+    budget?: string;
+    goals?: string[];
+    competitiveLandscape?: string;
+    businessStage?: string;
+  }) {
+    const start = Date.now();
+    const context = await this.buildMarketingContext(businessId);
+
+    const metricsContext = [
+      `Industry: ${this.sanitizeAiInput(metrics.industry, 200)}`,
+      metrics.monthlyRevenue ? `Monthly Revenue: ${this.sanitizeAiInput(metrics.monthlyRevenue, 100)}` : null,
+      metrics.targetAudience ? `Target Audience: ${this.sanitizeAiInput(metrics.targetAudience, 300)}` : null,
+      metrics.currentChannels?.length ? `Current Channels: ${metrics.currentChannels.map(c => this.sanitizeAiInput(c, 50)).join(', ')}` : null,
+      metrics.budget ? `Marketing Budget: ${this.sanitizeAiInput(metrics.budget, 100)}` : null,
+      metrics.goals?.length ? `Goals: ${metrics.goals.map(g => this.sanitizeAiInput(g, 100)).join(', ')}` : null,
+      metrics.competitiveLandscape ? `Competitive Landscape: ${this.sanitizeAiInput(metrics.competitiveLandscape, 300)}` : null,
+      metrics.businessStage ? `Business Stage: ${this.sanitizeAiInput(metrics.businessStage, 100)}` : null,
+    ].filter(Boolean).join('\n');
+
+    const prompt = `You are a senior marketing strategist AI for a Caribbean service business (TTD currency, Trinidad & Tobago).
+Generate a comprehensive, actionable marketing strategy based on the business metrics and existing marketing data provided.
+
+Business Metrics:
+${metricsContext}
+
+Existing Marketing Data:
+${context}
+
+Create a detailed marketing strategy covering short-term quick wins and long-term growth initiatives.
+Consider Caribbean market dynamics, local consumer behavior, and regional business practices.
+Be specific with numbers, timelines, and actionable steps.
+
+Respond in valid JSON:
+{
+  "executiveSummary": "2-3 sentence overview of the recommended strategy",
+  "shortTermPlan": {
+    "timeframe": "0-3 months",
+    "actions": [
+      {
+        "title": "Action title",
+        "description": "Detailed description of what to do",
+        "timeline": "Week 1-2",
+        "expectedOutcome": "What result to expect",
+        "priority": "high|medium|low",
+        "estimatedCost": "TTD amount or Free"
+      }
+    ]
+  },
+  "longTermPlan": {
+    "timeframe": "3-12 months",
+    "actions": [
+      {
+        "title": "Action title",
+        "description": "Detailed description",
+        "timeline": "Month 3-6",
+        "expectedOutcome": "Expected result",
+        "priority": "high|medium|low",
+        "estimatedCost": "TTD amount range"
+      }
+    ]
+  },
+  "channelStrategy": [
+    {
+      "channel": "Channel name",
+      "priority": "primary|secondary|experimental",
+      "currentStatus": "active|inactive|underutilized",
+      "recommendations": ["Specific recommendation 1", "Specific recommendation 2"],
+      "expectedROI": "Expected return description",
+      "budgetAllocation": "Percentage of total budget"
+    }
+  ],
+  "budgetModel": {
+    "totalRecommendedBudget": "TTD amount per month",
+    "allocation": [
+      { "category": "Category name", "percentage": 30, "amount": "TTD amount", "justification": "Why this allocation" }
+    ],
+    "expectedROI": "Overall expected return on marketing investment",
+    "breakEvenTimeline": "When to expect positive ROI"
+  },
+  "kpiTargets": [
+    {
+      "metric": "KPI name",
+      "currentValue": "Current value or N/A",
+      "target30Days": "30-day target",
+      "target90Days": "90-day target",
+      "target12Months": "12-month target",
+      "measurementMethod": "How to track this"
+    }
+  ],
+  "financialProjections": {
+    "month1": { "investment": "TTD", "expectedRevenue": "TTD", "netImpact": "TTD" },
+    "month3": { "investment": "TTD", "expectedRevenue": "TTD", "netImpact": "TTD" },
+    "month6": { "investment": "TTD", "expectedRevenue": "TTD", "netImpact": "TTD" },
+    "month12": { "investment": "TTD", "expectedRevenue": "TTD", "netImpact": "TTD" }
+  },
+  "competitiveAdvantages": [
+    { "advantage": "What sets you apart", "howToLeverage": "How to use this in marketing" }
+  ],
+  "risks": [
+    { "risk": "Potential risk", "mitigation": "How to mitigate", "likelihood": "high|medium|low" }
+  ]
+}`;
+
+    const result = await this.aiUsage.callAi({
+      businessId,
+      feature: 'marketing_strategy_generation',
+      messages: [
+        { role: 'system', content: prompt },
+        { role: 'user', content: `Generate a comprehensive marketing strategy for my ${this.sanitizeAiInput(metrics.industry, 100)} business.` },
+      ],
+      maxTokens: 4000,
+      temperature: 0.5,
+    });
+
+    const duration = Date.now() - start;
+    if (duration > 2000) this.logger.warn(`Marketing strategy generation took ${duration}ms`);
+
+    try {
+      return JSON.parse(result.content);
+    } catch {
+      return {
+        executiveSummary: result.content,
+        shortTermPlan: { timeframe: '0-3 months', actions: [] },
+        longTermPlan: { timeframe: '3-12 months', actions: [] },
+        channelStrategy: [],
+        budgetModel: { totalRecommendedBudget: 'N/A', allocation: [], expectedROI: 'N/A', breakEvenTimeline: 'N/A' },
+        kpiTargets: [],
+        financialProjections: {
+          month1: { investment: 'N/A', expectedRevenue: 'N/A', netImpact: 'N/A' },
+          month3: { investment: 'N/A', expectedRevenue: 'N/A', netImpact: 'N/A' },
+          month6: { investment: 'N/A', expectedRevenue: 'N/A', netImpact: 'N/A' },
+          month12: { investment: 'N/A', expectedRevenue: 'N/A', netImpact: 'N/A' },
+        },
+        competitiveAdvantages: [],
+        risks: [],
+      };
+    }
+  }
 }

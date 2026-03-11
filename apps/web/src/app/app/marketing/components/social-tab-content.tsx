@@ -9,7 +9,6 @@ import {
   X,
   LayoutGrid,
   CalendarDays,
-  Link2,
   RefreshCw,
   Plus,
 } from "lucide-react";
@@ -27,9 +26,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PostComposer, type ComposerSubmitData } from "./social/post-composer";
 import { PostsFeed } from "./social/posts-feed";
 import { ContentCalendar } from "./social/content-calendar";
-import { ChannelsPanel } from "./social/channels-panel";
-
-type SocialView = "posts" | "calendar" | "channels";
+type SocialView = "posts" | "calendar";
 
 const STATUS_FILTERS = ["ALL", "DRAFT", "SCHEDULED", "POSTED"] as const;
 
@@ -230,7 +227,6 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
   const SUB_VIEWS: { key: SocialView; label: string; icon: React.ElementType }[] = [
     { key: "posts", label: "Posts", icon: LayoutGrid },
     { key: "calendar", label: "Calendar", icon: CalendarDays },
-    { key: "channels", label: "Channels", icon: Link2 },
   ];
 
   return (
@@ -401,8 +397,6 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
       {subView === "calendar" && (
         <ContentCalendar posts={posts} onSelectPost={handleCalendarSelect} />
       )}
-
-      {subView === "channels" && <ChannelsPanel />}
 
       <ConfirmDialog
         open={confirmState.open}

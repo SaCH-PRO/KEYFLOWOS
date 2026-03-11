@@ -3282,6 +3282,13 @@ export async function marketingAiFormOptimizer(query: string, businessId: string
   });
 }
 
+export async function generateMarketingStrategy(businessId: string, metrics: Record<string, unknown>): Promise<ApiResult<Record<string, unknown>>> {
+  return apiPost<Record<string, unknown>>({
+    path: `/marketing/businesses/${encodeURIComponent(businessId)}/marketing/ai-strategy`,
+    body: metrics,
+  });
+}
+
 // ---
 // BUSINESS TEMPLATES
 // ---
