@@ -12,7 +12,7 @@ import {
   RefreshCw,
   Plus,
 } from "lucide-react";
-import type { SocialPost, SocialConnection } from "@/lib/client";
+import type { SocialPost, SocialConnection, Booking, Service, StaffMember } from "@/lib/client";
 import {
   fetchPosts,
   createPost,
@@ -20,6 +20,10 @@ import {
   deletePost,
   publishPost,
   fetchSocialConnections,
+  fetchBookings,
+  fetchServices,
+  fetchStaff,
+  createBooking,
 } from "@/lib/client";
 import { toast } from "sonner";
 import { moduleEvents } from "@/lib/module-events";
@@ -39,6 +43,9 @@ interface SocialTabContentProps {
 export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContentProps) {
   const [posts, setPosts] = useState<SocialPost[]>([]);
   const [connections, setConnections] = useState<SocialConnection[]>([]);
+  const [calBookings, setCalBookings] = useState<Booking[]>([]);
+  const [calServices, setCalServices] = useState<Service[]>([]);
+  const [calStaff, setCalStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [subView, setSubView] = useState<SocialView>("posts");
   const [showComposer, setShowComposer] = useState(false);
@@ -75,10 +82,23 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
     if (data) setConnections(data);
   }, [businessId]);
 
+  const loadCalendarData = useCallback(async () => {
+    if (!businessId) return;
+    const [bRes, sRes, stRes] = await Promise.all([
+      fetchBookings(businessId),
+      fetchServices(businessId),
+      fetchStaff(businessId),
+    ]);
+    if (bRes.data) setCalBookings(bRes.data);
+    if (sRes.data) setCalServices(sRes.data);
+    if (stRes.data) setCalStaff(stRes.data);
+  }, [businessId]);
+
   useEffect(() => {
     void loadPosts();
     void loadConnections();
-  }, [loadPosts, loadConnections]);
+    void loadCalendarData();
+  }, [loadPosts, loadConnections, loadCalendarData]);
 
   const filteredPosts = posts.filter((p) => {
     if (statusFilter !== "ALL" && p.status !== statusFilter) return false;
@@ -231,6 +251,28 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
     setEditingPost(post);
     setShowComposer(false);
     setSubView("posts");
+  }
+
+  async function handleCalendarBooking(data: { date: string; time: string; serviceId: string; staffId: string }) {
+    if (!businessId) return;
+    const selectedService = calServices.find((s) => s.id === data.serviceId);
+    const startTime = new Date(`${data.date}T${data.time}`).toISOString();
+    const endTime = selectedService
+      ? new Date(new Date(`${data.date}T${data.time}`).getTime() + (selectedService.durationMins ?? selectedService.duration ?? 60) * 60 * 1000).toISOString()
+      : new Date(new Date(`${data.date}T${data.time}`).getTime() + 60 * 60 * 1000).toISOString();
+    const { data: result, error } = await createBooking({
+      businessId,
+      serviceId: data.serviceId,
+      staffId: data.staffId,
+      startTime,
+      endTime,
+    });
+    if (error) { toast.error(error); return; }
+    if (result) {
+      toast.success("Booking created");
+      moduleEvents.emit("booking:created", "bookings", { booking: result });
+      void loadCalendarData();
+    }
   }
 
   const SUB_VIEWS: { key: SocialView; label: string; icon: React.ElementType }[] = [
@@ -408,7 +450,15 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
       )}
 
       {subView === "calendar" && (
-        <ContentCalendar posts={posts} onSelectPost={handleCalendarSelect} />
+        <ContentCalendar
+          posts={posts}
+          bookings={calBookings}
+          services={calServices}
+          staff={calStaff}
+          onSelectPost={handleCalendarSelect}
+          onSelectBooking={() => {}}
+          onCreateBooking={handleCalendarBooking}
+        />
       )}
 
       <ConfirmDialog
