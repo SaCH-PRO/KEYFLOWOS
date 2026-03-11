@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { apiGet, apiPost, API_BASE } from "@/lib/api";
 import { formatPrice } from "@/lib/format";
-import { Loader2, CheckCircle2, Globe, Star, MessageCircle, Shield, Award, Flame } from "lucide-react";
+import { Loader2, CheckCircle2, Globe, Star, MessageCircle, Shield, Award, Flame, Sparkles } from "lucide-react";
 import { ItemDetailModal } from "./components/item-detail-modal";
 import { trackStoreEvent, StorefrontConfig } from "@/lib/client";
 
@@ -322,9 +322,17 @@ export default function PublicBookingPage() {
   if (loading) {
     return (
       <main className="min-h-screen bg-[#0a0a0f] text-white flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="w-8 h-8 animate-spin" style={{ color: primaryColor }} />
-          <p className="text-sm text-white/40">Loading...</p>
+        <div className="flex flex-col items-center gap-4 animate-pulse">
+          <div
+            className="w-14 h-14 rounded-2xl flex items-center justify-center"
+            style={{ background: `linear-gradient(135deg, ${primaryColor}20, ${primaryColor}08)` }}
+          >
+            <Loader2 className="w-7 h-7 animate-spin" style={{ color: primaryColor }} />
+          </div>
+          <div className="space-y-2 text-center">
+            <div className="h-3 w-32 bg-white/[0.06] rounded-full mx-auto" />
+            <div className="h-2 w-24 bg-white/[0.04] rounded-full mx-auto" />
+          </div>
         </div>
       </main>
     );
@@ -347,43 +355,141 @@ export default function PublicBookingPage() {
   }
 
   if (success) {
+    const isOrder = bookingResults.length > 0 && bookingResults[0].bookingId.startsWith("order-");
     return (
-      <main className="min-h-screen bg-[#0a0a0f] text-white flex items-center justify-center px-4">
-        <div className="max-w-md w-full rounded-3xl border border-emerald-500/30 bg-emerald-500/5 backdrop-blur-xl p-10 text-center space-y-5">
-          <div className="w-20 h-20 rounded-2xl bg-emerald-500/10 flex items-center justify-center mx-auto">
-            <CheckCircle2 className="w-10 h-10 text-emerald-400" />
+      <main className="min-h-screen bg-[#0a0a0f] text-white flex items-center justify-center px-4 relative overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none">
+          {Array.from({ length: 40 }).map((_, i) => {
+            const colors = [primaryColor, secondaryColor, "#f59e0b", "#10b981", "#8b5cf6", "#ec4899"];
+            const color = colors[i % colors.length];
+            const left = Math.random() * 100;
+            const delay = Math.random() * 2;
+            const duration = 2.5 + Math.random() * 2;
+            const size = 4 + Math.random() * 8;
+            const shape = i % 3 === 0 ? "rounded-full" : i % 3 === 1 ? "rounded-sm" : "";
+            return (
+              <div
+                key={i}
+                className={`absolute ${shape}`}
+                style={{
+                  left: `${left}%`,
+                  top: "-10px",
+                  width: `${size}px`,
+                  height: `${size}px`,
+                  backgroundColor: color,
+                  opacity: 0.8,
+                  animation: `confettiFall ${duration}s ease-in ${delay}s both`,
+                }}
+              />
+            );
+          })}
+        </div>
+
+        <div
+          className="absolute inset-0 pointer-events-none opacity-15"
+          style={{
+            background: `radial-gradient(circle at 50% 40%, ${primaryColor}30 0%, transparent 50%)`,
+          }}
+        />
+
+        <div
+          className="relative max-w-md w-full rounded-3xl border border-emerald-500/20 backdrop-blur-xl p-10 text-center space-y-6"
+          style={{
+            background: "linear-gradient(135deg, rgba(16,185,129,0.06) 0%, rgba(16,185,129,0.02) 100%)",
+            animation: "successPop 600ms cubic-bezier(0.16,1,0.3,1)",
+          }}
+        >
+          <div
+            className="w-20 h-20 rounded-2xl bg-emerald-500/10 flex items-center justify-center mx-auto relative"
+            style={{ animation: "checkBounce 800ms cubic-bezier(0.16,1,0.3,1) 200ms both" }}
+          >
+            <div
+              className="absolute inset-0 rounded-2xl opacity-30 blur-xl"
+              style={{ backgroundColor: "#10b981" }}
+            />
+            <CheckCircle2 className="w-10 h-10 text-emerald-400 relative" />
           </div>
-          <h1 className="text-2xl font-semibold text-emerald-400">
-            {bookingResults.length > 0 && bookingResults[0].bookingId.startsWith("order-")
-              ? "Order Placed!"
-              : "Booking Confirmed!"}
-          </h1>
-          <p className="text-sm text-white/60">
-            Your {serviceItemsInCart.length > 0 ? "appointment" : "order"} with{" "}
-            <span className="font-medium text-white">{business?.name}</span> has been confirmed.
-          </p>
-          {bookingResults.map((br, idx) =>
-            !br.bookingId.startsWith("order-") ? (
-              <div key={idx} className="text-xs text-white/40">
-                Booking Reference:{" "}
-                <code className="font-mono text-emerald-400">{br.bookingId.slice(-8).toUpperCase()}</code>
-              </div>
-            ) : null
-          )}
-          {bookingResults.some((br) => br.invoiceId) && (
+
+          <div style={{ animation: "fadeUp 500ms ease-out 300ms both" }}>
+            <h1 className="text-2xl font-bold text-emerald-400 mb-2">
+              {isOrder ? "Order Placed!" : "Booking Confirmed!"}
+            </h1>
+            <p className="text-sm text-white/50 leading-relaxed">
+              Your {serviceItemsInCart.length > 0 ? "appointment" : "order"} with{" "}
+              <span className="font-semibold text-white/80">{business?.name}</span> has been confirmed.
+            </p>
+          </div>
+
+          <div className="space-y-3" style={{ animation: "fadeUp 500ms ease-out 450ms both" }}>
+            {bookingResults.map((br, idx) =>
+              !br.bookingId.startsWith("order-") ? (
+                <div
+                  key={idx}
+                  className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-3 inline-flex items-center gap-2 mx-auto"
+                >
+                  <span className="text-[11px] text-white/40">Reference:</span>
+                  <code
+                    className="font-mono text-sm font-bold tracking-wider"
+                    style={{ color: primaryColor }}
+                  >
+                    {br.bookingId.slice(-8).toUpperCase()}
+                  </code>
+                </div>
+              ) : null
+            )}
+          </div>
+
+          <div className="flex flex-col gap-3 pt-2" style={{ animation: "fadeUp 500ms ease-out 600ms both" }}>
+            {bookingResults.some((br) => br.invoiceId) && (
+              <button
+                onClick={() => {
+                  const inv = bookingResults.find((br) => br.invoiceId);
+                  if (inv?.invoiceId) window.open(`${API_BASE}/commerce/invoices/${inv.invoiceId}/receipt`, "_blank");
+                }}
+                aria-label="View invoice"
+                className="w-full py-3.5 rounded-2xl font-semibold text-sm text-white transition-all duration-300 hover:scale-[1.015] active:scale-[0.98]"
+                style={{ backgroundColor: primaryColor, boxShadow: `0 8px 32px ${primaryColor}30` }}
+              >
+                View Invoice
+              </button>
+            )}
             <button
               onClick={() => {
-                const inv = bookingResults.find((br) => br.invoiceId);
-                if (inv?.invoiceId) window.open(`${API_BASE}/commerce/invoices/${inv.invoiceId}/receipt`, "_blank");
+                setSuccess(false);
+                setCheckoutMode(false);
+                setBookingResults([]);
               }}
-              aria-label="View invoice"
-              className="px-6 py-3 rounded-xl font-medium text-sm text-white transition-all hover:scale-[1.02]"
-              style={{ backgroundColor: primaryColor }}
+              className="w-full py-3 rounded-2xl border border-white/[0.06] text-sm font-medium text-white/50 hover:text-white/80 hover:bg-white/[0.03] transition-all duration-200"
             >
-              View Invoice
+              Continue Shopping
             </button>
-          )}
+          </div>
+
+          <div className="flex items-center justify-center gap-1.5 text-[10px] text-white/20">
+            <Star className="w-3 h-3" />
+            <span>Thank you for your business</span>
+          </div>
         </div>
+
+        <style jsx>{`
+          @keyframes confettiFall {
+            0% { transform: translateY(0) rotate(0deg) scale(1); opacity: 0.9; }
+            100% { transform: translateY(100vh) rotate(720deg) scale(0.3); opacity: 0; }
+          }
+          @keyframes successPop {
+            0% { transform: scale(0.8); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+          }
+          @keyframes checkBounce {
+            0% { transform: scale(0) rotate(-45deg); }
+            60% { transform: scale(1.2) rotate(5deg); }
+            100% { transform: scale(1) rotate(0deg); }
+          }
+          @keyframes fadeUp {
+            0% { transform: translateY(12px); opacity: 0; }
+            100% { transform: translateY(0); opacity: 1; }
+          }
+        `}</style>
       </main>
     );
   }
@@ -408,22 +514,26 @@ export default function PublicBookingPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#0a0a0f] text-white">
-      {storefrontConfig?.hero?.coverImageUrl && (
-        <div className="w-full h-48 md:h-64 overflow-hidden">
-          <img src={storefrontConfig.hero.coverImageUrl} alt="" className="w-full h-full object-cover" />
-        </div>
-      )}
+    <main className="min-h-screen bg-[#0a0a0f] text-white relative">
+      <BusinessHero
+        business={business!}
+        primaryColor={primaryColor}
+        secondaryColor={secondaryColor}
+        config={storefrontConfig}
+        catalogCount={catalogItems.length}
+      />
 
-      <BusinessHero business={business!} primaryColor={primaryColor} secondaryColor={secondaryColor} config={storefrontConfig} />
-
-      <div className="max-w-4xl mx-auto px-4 pb-24 space-y-6">
+      <div className="max-w-4xl mx-auto px-4 pb-32 space-y-8">
         {storefrontConfig?.promotions?.bannerEnabled && storefrontConfig.promotions.bannerText && (
-          <div className="rounded-2xl px-4 py-3 text-center text-sm font-medium"
-            style={{ backgroundColor: `${storefrontConfig.promotions.bannerColor || '#f59e0b'}20`,
-                     color: storefrontConfig.promotions.bannerColor || '#f59e0b',
-                     border: `1px solid ${storefrontConfig.promotions.bannerColor || '#f59e0b'}30` }}>
-            <Flame className="w-4 h-4 inline mr-2" />
+          <div
+            className="rounded-2xl px-5 py-3.5 text-center text-sm font-medium flex items-center justify-center gap-2 backdrop-blur-sm"
+            style={{
+              backgroundColor: `${storefrontConfig.promotions.bannerColor || '#f59e0b'}12`,
+              color: storefrontConfig.promotions.bannerColor || '#f59e0b',
+              border: `1px solid ${storefrontConfig.promotions.bannerColor || '#f59e0b'}25`,
+            }}
+          >
+            <Flame className="w-4 h-4 animate-pulse" />
             {storefrontConfig.promotions.bannerText}
           </div>
         )}
@@ -442,22 +552,35 @@ export default function PublicBookingPage() {
         />
 
         {storefrontConfig?.socialProof?.testimonials && storefrontConfig.socialProof.testimonials.length > 0 && (
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-white/80 flex items-center gap-2">
-              <MessageCircle className="w-5 h-5" style={{ color: primaryColor }} />
-              What Our Clients Say
-            </h3>
+          <div className="space-y-5 pt-4">
+            <div className="flex items-center gap-3">
+              <div
+                className="w-8 h-8 rounded-xl flex items-center justify-center"
+                style={{ background: `${primaryColor}15` }}
+              >
+                <MessageCircle className="w-4 h-4" style={{ color: primaryColor }} />
+              </div>
+              <h3 className="text-lg font-semibold text-white/80">What Our Clients Say</h3>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {storefrontConfig.socialProof.testimonials.map(t => (
-                <div key={t.id} className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 space-y-3">
+              {storefrontConfig.socialProof.testimonials.map((t, idx) => (
+                <div
+                  key={t.id}
+                  className="group rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5 space-y-3 hover:border-white/[0.14] hover:bg-white/[0.04] transition-all duration-300"
+                  style={{ animationDelay: `${idx * 100}ms` }}
+                >
                   <div className="flex gap-1">
                     {Array.from({ length: 5 }).map((_, i) => (
-                      <Star key={i} className="w-4 h-4" fill={i < t.rating ? '#f59e0b' : 'transparent'}
-                            color={i < t.rating ? '#f59e0b' : '#ffffff30'} />
+                      <Star
+                        key={i}
+                        className="w-4 h-4 transition-transform group-hover:scale-110"
+                        fill={i < t.rating ? '#f59e0b' : 'transparent'}
+                        color={i < t.rating ? '#f59e0b' : '#ffffff20'}
+                      />
                     ))}
                   </div>
-                  <p className="text-sm text-white/60 italic">&ldquo;{t.text}&rdquo;</p>
-                  <p className="text-xs text-white/40 font-medium">&mdash; {t.name}</p>
+                  <p className="text-sm text-white/55 italic leading-relaxed">&ldquo;{t.text}&rdquo;</p>
+                  <p className="text-xs text-white/35 font-medium">&mdash; {t.name}</p>
                 </div>
               ))}
             </div>
@@ -465,13 +588,20 @@ export default function PublicBookingPage() {
         )}
 
         {storefrontConfig?.socialProof?.guaranteeText && (
-          <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4 flex items-center gap-3 text-sm">
-            <Shield className="w-5 h-5 text-emerald-400 flex-shrink-0" />
-            <span className="text-white/60">{storefrontConfig.socialProof.guaranteeText}</span>
+          <div className="rounded-2xl border border-emerald-500/15 bg-emerald-500/[0.04] p-4 flex items-center gap-3 text-sm backdrop-blur-sm">
+            <div className="w-8 h-8 rounded-xl bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+              <Shield className="w-4 h-4 text-emerald-400" />
+            </div>
+            <span className="text-white/55">{storefrontConfig.socialProof.guaranteeText}</span>
           </div>
         )}
+      </div>
 
-        <div className="text-center text-xs text-white/20 pt-4">
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+        <div
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[11px] text-white/25 bg-[#0a0a0f]/80 backdrop-blur-xl border border-white/[0.06] shadow-lg pointer-events-auto hover:text-white/40 transition-colors"
+        >
+          <Sparkles className="w-3 h-3" style={{ color: `${primaryColor}60` }} />
           Powered by <span style={{ color: primaryColor }} className="font-semibold">KeyFlowOS</span>
         </div>
       </div>
