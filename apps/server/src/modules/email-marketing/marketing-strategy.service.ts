@@ -86,7 +86,7 @@ export class MarketingStrategyService {
       }),
       this.db.product.findMany({
         where: { businessId, deletedAt: null },
-        select: { id: true, name: true, price: true, currency: true, category: true, status: true },
+        select: { id: true, name: true, price: true, currency: true, category: true, isActive: true },
         orderBy: { createdAt: 'desc' },
         take: 50,
       }),
@@ -104,7 +104,7 @@ export class MarketingStrategyService {
       }),
       this.db.socialPost.findMany({
         where: { businessId, deletedAt: null },
-        select: { id: true, status: true, platforms: true, createdAt: true },
+        select: { id: true, status: true, channelIds: true, createdAt: true },
         orderBy: { createdAt: 'desc' },
         take: 50,
       }),
@@ -178,7 +178,7 @@ export class MarketingStrategyService {
       });
       parts.push(`  Categories: ${JSON.stringify(categoryCounts)}`);
       parts.push(`  Price range: ${Math.min(...products.map(p => Number(p.price) || 0))} - ${Math.max(...products.map(p => Number(p.price) || 0))} ${products[0]?.currency ?? 'TTD'}`);
-      parts.push(`  Active: ${products.filter(p => p.status === 'ACTIVE').length}, Draft: ${products.filter(p => p.status === 'DRAFT').length}`);
+      parts.push(`  Active: ${products.filter(p => p.isActive).length}, Inactive: ${products.filter(p => !p.isActive).length}`);
     }
 
     if (invoices.length > 0) {
@@ -222,8 +222,8 @@ export class MarketingStrategyService {
       const platformCounts: Record<string, number> = {};
       socialPosts.forEach((p) => {
         postStatusCounts[p.status] = (postStatusCounts[p.status] || 0) + 1;
-        if (p.platforms && Array.isArray(p.platforms)) {
-          (p.platforms as string[]).forEach((pl) => {
+        if (p.channelIds && Array.isArray(p.channelIds)) {
+          (p.channelIds as string[]).forEach((pl) => {
             platformCounts[pl] = (platformCounts[pl] || 0) + 1;
           });
         }
