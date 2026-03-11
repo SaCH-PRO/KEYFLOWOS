@@ -24,6 +24,7 @@ import {
   fetchServices,
   fetchStaff,
   createBooking,
+  syncBookingToCalendar,
 } from "@/lib/client";
 import { toast } from "sonner";
 import { moduleEvents } from "@/lib/module-events";
@@ -267,11 +268,14 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
       startTime,
       endTime,
     });
-    if (error) { toast.error(error); return; }
+    if (error) { toast.error(error); throw new Error(error); }
     if (result) {
       toast.success("Booking created");
       moduleEvents.emit("booking:created", "bookings", { booking: result });
       void loadCalendarData();
+      syncBookingToCalendar(result.id, businessId).then(({ error: syncErr }) => {
+        if (syncErr) toast.info("Booking created — connect Google Calendar in Settings to sync");
+      });
     }
   }
 

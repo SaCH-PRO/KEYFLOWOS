@@ -341,13 +341,16 @@ export class CalendarService {
       return null;
     }
 
-    const contactName = booking.contact.displayName || 
-      [booking.contact.firstName, booking.contact.lastName].filter(Boolean).join(' ') || 
-      booking.contact.email || 'Client';
+    const contactName = booking.contact
+      ? (booking.contact.displayName || 
+          [booking.contact.firstName, booking.contact.lastName].filter(Boolean).join(' ') || 
+          booking.contact.email || 'Client')
+      : 'Walk-in Client';
+    const serviceName = booking.service?.name ?? 'Service';
     
     const event: CalendarEvent = {
-      summary: `${booking.service.name} - ${contactName}`,
-      description: `Booking for ${contactName}\nService: ${booking.service.name}\nStaff: ${booking.staff.name}\nStatus: ${booking.status}`,
+      summary: `${serviceName} - ${contactName}`,
+      description: `Booking for ${contactName}\nService: ${serviceName}\nStaff: ${booking.staff?.name ?? 'Unassigned'}\nStatus: ${booking.status}`,
       start: {
         dateTime: booking.startTime.toISOString(),
         timeZone: booking.business.timezone || 'America/Port_of_Spain',
@@ -356,7 +359,7 @@ export class CalendarService {
         dateTime: booking.endTime.toISOString(),
         timeZone: booking.business.timezone || 'America/Port_of_Spain',
       },
-      attendees: booking.contact.email ? [{ email: booking.contact.email, displayName: contactName }] : undefined,
+      attendees: booking.contact?.email ? [{ email: booking.contact.email, displayName: contactName }] : undefined,
     };
 
     if (booking.calendarEventId) {
