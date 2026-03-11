@@ -86,6 +86,7 @@ export default function BookingsPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [prefillDate, setPrefillDate] = useState<string | undefined>(undefined);
   const [prefillTime, setPrefillTime] = useState<string | undefined>(undefined);
+  const [bookingSaving, setBookingSaving] = useState(false);
 
   const [calendarConnected, setCalendarConnected] = useState(false);
   const [calendarEmail, setCalendarEmail] = useState<string | null>(null);
@@ -220,44 +221,49 @@ export default function BookingsPage() {
   async function handleCreateBooking(data: { date: string; time: string; serviceId: string; staffId: string; contactId: string }) {
     if (!businessId) return;
     setFormError(null);
-    if (!data.date || !data.time) { setFormError("Date and time are required"); return; }
+    if (!data.date || !data.time) { setFormError("Please pick a date and time"); return; }
     if (!data.serviceId) { setFormError("Please select a service"); return; }
     if (!data.staffId) { setFormError("Please select a staff member"); return; }
-    const selectedService = services.find((s) => s.id === data.serviceId);
-    const startTime = new Date(`${data.date}T${data.time}`).toISOString();
-    const endTime = selectedService
-      ? new Date(new Date(`${data.date}T${data.time}`).getTime() + (selectedService.durationMins ?? 60) * 60 * 1000).toISOString()
-      : startTime;
-    const { data: result, error } = await createBooking({
-      businessId,
-      serviceId: data.serviceId,
-      staffId: data.staffId,
-      contactId: data.contactId || undefined,
-      startTime,
-      endTime,
-    });
-    if (error) { setFormError(error); return; }
-    if (result) {
-      await loadData();
-      setShowCreateBooking(false);
-      setPrefillDate(undefined);
-      setPrefillTime(undefined);
-      setFormError(null);
-      moduleEvents.emit("booking:created", "bookings", { booking: result });
-      if (calendarConnected && result.id) {
-        try {
-          const syncRes = await syncBookingToCalendar(result.id, businessId);
-          if (syncRes.data?.success) {
-            setBanner({ text: "Booking created & synced to Google Calendar!", type: "success" });
-          } else {
+    setBookingSaving(true);
+    try {
+      const selectedService = services.find((s) => s.id === data.serviceId);
+      const startTime = new Date(`${data.date}T${data.time}`).toISOString();
+      const endTime = selectedService
+        ? new Date(new Date(`${data.date}T${data.time}`).getTime() + (selectedService.durationMins ?? 60) * 60 * 1000).toISOString()
+        : startTime;
+      const { data: result, error } = await createBooking({
+        businessId,
+        serviceId: data.serviceId,
+        staffId: data.staffId,
+        contactId: data.contactId || undefined,
+        startTime,
+        endTime,
+      });
+      if (error) { setFormError(error); return; }
+      if (result) {
+        await loadData();
+        setShowCreateBooking(false);
+        setPrefillDate(undefined);
+        setPrefillTime(undefined);
+        setFormError(null);
+        moduleEvents.emit("booking:created", "bookings", { booking: result });
+        if (calendarConnected && result.id) {
+          try {
+            const syncRes = await syncBookingToCalendar(result.id, businessId);
+            if (syncRes.data?.success) {
+              setBanner({ text: "Booking created & synced to Google Calendar!", type: "success" });
+            } else {
+              setBanner({ text: "Booking created! (Calendar sync failed)", type: "info" });
+            }
+          } catch {
             setBanner({ text: "Booking created! (Calendar sync failed)", type: "info" });
           }
-        } catch {
-          setBanner({ text: "Booking created! (Calendar sync failed)", type: "info" });
+        } else {
+          setBanner({ text: "Booking created successfully!", type: "success" });
         }
-      } else {
-        setBanner({ text: "Booking created successfully!", type: "success" });
       }
+    } finally {
+      setBookingSaving(false);
     }
   }
 
@@ -494,6 +500,7 @@ export default function BookingsPage() {
                     formError={formError}
                     defaultDate={prefillDate}
                     defaultTime={prefillTime}
+                    saving={bookingSaving}
                   />
                 )}
               </AnimatePresence>
