@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import {
   Search,
   Clock,
@@ -9,6 +9,14 @@ import {
   ChevronDown,
   ChevronUp,
   Sparkles,
+  Package,
+  ShoppingBag,
+  Wrench,
+  Gift,
+  X,
+  SlidersHorizontal,
+  Star,
+  TrendingUp,
 } from "lucide-react";
 import { formatPrice } from "@/lib/format";
 import type { CatalogItem, FilterTab, SortOption } from "./types";
@@ -29,11 +37,18 @@ type Props = {
   config?: StorefrontConfig | null;
 };
 
-const catalogBadgeConfig: Record<string, { label: string; bg: string; text: string }> = {
-  popular: { label: "Popular", bg: "bg-amber-500/20", text: "text-amber-400" },
-  new: { label: "New", bg: "bg-emerald-500/20", text: "text-emerald-400" },
-  best_seller: { label: "Best Seller", bg: "bg-violet-500/20", text: "text-violet-400" },
-  limited: { label: "Limited", bg: "bg-red-500/20", text: "text-red-400" },
+const catalogBadgeConfig: Record<string, { label: string; icon: typeof Star; gradient: string }> = {
+  popular: { label: "Popular", icon: TrendingUp, gradient: "from-amber-500/30 to-orange-500/30" },
+  new: { label: "New", icon: Sparkles, gradient: "from-emerald-500/30 to-teal-500/30" },
+  best_seller: { label: "Best Seller", icon: Star, gradient: "from-violet-500/30 to-purple-500/30" },
+  limited: { label: "Limited", icon: Clock, gradient: "from-red-500/30 to-rose-500/30" },
+};
+
+const filterIcons: Record<string, typeof Package> = {
+  all: ShoppingBag,
+  service: Wrench,
+  product: Package,
+  package: Gift,
 };
 
 export function CatalogGrid({
@@ -52,6 +67,8 @@ export function CatalogGrid({
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
   const [sortOption, setSortOption] = useState<SortOption>("default");
   const [sortOpen, setSortOpen] = useState(false);
+  const [searchFocused, setSearchFocused] = useState(false);
+  const sortRef = useRef<HTMLDivElement>(null);
 
   const theme = (config?.appearance?.theme ?? "default") as ThemeKey;
   const cardStylePref = config?.appearance?.cardStyle ?? "grid";
@@ -64,7 +81,24 @@ export function CatalogGrid({
   const hasProducts = catalogItems.some((i) => i.itemType === "product");
   const hasPackages = catalogItems.some((i) => i.itemType === "package");
 
-  const sortedCatalog = (() => {
+  const tabCounts = useMemo(() => ({
+    all: catalogItems.length,
+    service: catalogItems.filter((i) => i.itemType === "service").length,
+    product: catalogItems.filter((i) => i.itemType === "product").length,
+    package: catalogItems.filter((i) => i.itemType === "package").length,
+  }), [catalogItems]);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (sortRef.current && !sortRef.current.contains(e.target as Node)) {
+        setSortOpen(false);
+      }
+    }
+    if (sortOpen) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [sortOpen]);
+
+  const sortedCatalog = useMemo(() => {
     if (!featuredItemIds || featuredItemIds.length === 0) return catalogItems;
     const featuredSet = new Set(featuredItemIds);
     return [...catalogItems].sort((a, b) => {
@@ -72,9 +106,9 @@ export function CatalogGrid({
       const bF = featuredSet.has(b.id) ? 0 : 1;
       return aF - bF;
     });
-  })();
+  }, [catalogItems, featuredItemIds]);
 
-  const filteredItems = (() => {
+  const filteredItems = useMemo(() => {
     let items = activeTab === "all" ? sortedCatalog : sortedCatalog.filter((i) => i.itemType === activeTab);
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -87,92 +121,165 @@ export function CatalogGrid({
     else if (sortOption === "duration")
       items = [...items].sort((a, b) => (a.duration ?? 9999) - (b.duration ?? 9999));
     return items;
-  })();
+  }, [sortedCatalog, activeTab, searchQuery, sortOption]);
 
   if (catalogItems.length === 0) {
     return (
-      <div className={`${ts.cardRadius} border border-white/10 bg-white/[0.02] p-12 text-center space-y-4 ${ts.fontClass}`}>
-        <Sparkles className="w-10 h-10 text-white/20 mx-auto" />
-        <h2 className={`text-lg ${ts.headerWeight} text-white/60 ${ts.textStyle}`}>Coming Soon</h2>
-        <p className={`text-sm text-white/30 max-w-sm mx-auto ${ts.bodyWeight}`}>
-          This business is setting up their online store. Check back soon!
-        </p>
+      <div className={`${ts.cardRadius} border border-white/[0.06] bg-gradient-to-br from-white/[0.03] to-white/[0.01] backdrop-blur-xl p-16 text-center space-y-5 ${ts.fontClass}`}>
+        <div className="w-20 h-20 mx-auto rounded-2xl bg-gradient-to-br from-white/[0.06] to-white/[0.02] flex items-center justify-center">
+          <Sparkles className="w-10 h-10 text-white/20" />
+        </div>
+        <div className="space-y-2">
+          <h2 className={`text-xl ${ts.headerWeight} text-white/70 ${ts.textStyle}`}>Coming Soon</h2>
+          <p className={`text-sm text-white/35 max-w-sm mx-auto leading-relaxed ${ts.bodyWeight}`}>
+            This business is setting up their online store. Check back soon for services, products, and packages!
+          </p>
+        </div>
+        <div className="flex items-center justify-center gap-6 pt-2">
+          {["Services", "Products", "Packages"].map((label) => (
+            <div key={label} className="flex items-center gap-1.5 text-xs text-white/20">
+              <div className="w-1.5 h-1.5 rounded-full bg-white/15" />
+              {label}
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
+
+  const sortLabels: Record<SortOption, string> = {
+    default: "Default",
+    price_asc: "Price: Low → High",
+    price_desc: "Price: High → Low",
+    duration: "Duration",
+  };
 
   function renderGridCard(item: CatalogItem) {
     const inCart = isInCart(item.id, item.itemType);
     const badge = typeBadge(item.itemType, primaryColor, secondaryColor);
     const accentColor = item.itemType === "service" ? primaryColor : item.itemType === "product" ? secondaryColor : "#a78bfa";
+    const isFeatured = featuredItemIds?.includes(item.id);
+    const itemBadge = badges?.[item.id] ? catalogBadgeConfig[badges[item.id]] : null;
+
     return (
       <div
         key={`${item.id}_${item.itemType}`}
-        className={`${ts.cardRadius} border backdrop-blur transition-all group cursor-pointer ${ts.cardHoverTransform} ${ts.fontClass} ${
-          inCart ? "border-white/20 bg-white/[0.06]" : ""
-        }`}
+        className={`${ts.cardRadius} border backdrop-blur-xl transition-all duration-300 group cursor-pointer relative overflow-hidden ${ts.fontClass}`}
         style={{
-          background: inCart ? ts.cardBgHover : ts.cardBg,
-          border: inCart ? ts.cardBorderHover : ts.cardBorder,
-          boxShadow: ts.cardShadow,
+          background: inCart
+            ? `linear-gradient(135deg, ${accentColor}08, ${accentColor}04)`
+            : ts.cardBg,
+          border: inCart ? `1px solid ${accentColor}30` : ts.cardBorder,
+          boxShadow: inCart
+            ? `0 0 20px ${accentColor}10, ${ts.cardShadow}`
+            : ts.cardShadow,
+          transform: "translateZ(0)",
         }}
         onClick={() => onItemClick?.(item)}
+        onMouseEnter={(e) => {
+          const el = e.currentTarget;
+          el.style.transform = "translateY(-4px) translateZ(0)";
+          el.style.boxShadow = `0 12px 40px ${accentColor}15, 0 4px 12px rgba(0,0,0,0.3)`;
+          el.style.border = inCart ? `1px solid ${accentColor}50` : ts.cardBorderHover;
+        }}
+        onMouseLeave={(e) => {
+          const el = e.currentTarget;
+          el.style.transform = "translateZ(0)";
+          el.style.boxShadow = inCart ? `0 0 20px ${accentColor}10` : (ts.cardShadow || "none");
+          el.style.border = inCart ? `1px solid ${accentColor}30` : ts.cardBorder;
+        }}
       >
-        <div className="relative">
+        {isFeatured && (
+          <div
+            className="absolute top-0 left-0 right-0 h-[2px] z-10"
+            style={{ background: `linear-gradient(90deg, ${primaryColor}, ${secondaryColor})` }}
+          />
+        )}
+
+        <div className="relative overflow-hidden">
           {item.imageUrl ? (
-            <div className={`w-full ${ts.imageHeight} ${ts.cardRadius} overflow-hidden rounded-b-none`}>
-              <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+            <div className={`w-full ${ts.imageHeight} overflow-hidden`}
+              style={{ borderTopLeftRadius: "inherit", borderTopRightRadius: "inherit" }}>
+              <img
+                src={item.imageUrl}
+                alt={item.name}
+                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
             </div>
           ) : (
             <div
-              className={`w-full ${ts.imageHeight} rounded-t-inherit flex items-center justify-center text-4xl ${ts.headerWeight}`}
+              className={`w-full ${ts.imageHeight} flex items-center justify-center text-4xl ${ts.headerWeight} relative overflow-hidden`}
               style={{
-                background: theme === "bold"
-                  ? `linear-gradient(135deg, ${accentColor}${ts.accentOpacity}, ${accentColor}08)`
-                  : theme === "elegant"
-                  ? `linear-gradient(180deg, ${accentColor}${ts.accentOpacity}, transparent)`
-                  : theme === "minimal"
-                  ? `${accentColor}06`
-                  : `linear-gradient(135deg, ${accentColor}15, ${accentColor}08)`,
-                color: `${accentColor}40`,
+                background: `linear-gradient(135deg, ${accentColor}12, ${accentColor}04)`,
+                color: `${accentColor}50`,
                 borderTopLeftRadius: "inherit",
                 borderTopRightRadius: "inherit",
               }}
             >
-              {item.name.charAt(0).toUpperCase()}
+              <span className="relative z-10 transition-transform duration-300 group-hover:scale-110">
+                {item.name.charAt(0).toUpperCase()}
+              </span>
+              <div
+                className="absolute inset-0 opacity-30"
+                style={{
+                  background: `radial-gradient(circle at 30% 50%, ${accentColor}15, transparent 60%)`,
+                }}
+              />
             </div>
           )}
-          {badges?.[item.id] && catalogBadgeConfig[badges[item.id]] && (
+
+          {itemBadge && (
             <span
-              className={`absolute top-2 right-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${catalogBadgeConfig[badges[item.id]].bg} ${catalogBadgeConfig[badges[item.id]].text} backdrop-blur-sm`}
+              className={`absolute top-2.5 right-2.5 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold backdrop-blur-md bg-gradient-to-r ${itemBadge.gradient} border border-white/10 shadow-lg`}
+              style={{ color: "white" }}
             >
-              {catalogBadgeConfig[badges[item.id]].label}
+              <itemBadge.icon className="w-3 h-3" />
+              {itemBadge.label}
+            </span>
+          )}
+
+          {isFeatured && !itemBadge && (
+            <span className="absolute top-2.5 right-2.5 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold backdrop-blur-md bg-gradient-to-r from-amber-500/30 to-orange-500/30 border border-white/10 text-white shadow-lg">
+              <Star className="w-3 h-3" />
+              Featured
             </span>
           )}
         </div>
+
         <div className={`${ts.spacing === "relaxed" ? "p-5" : "p-4"} space-y-3`}>
           <div className="flex items-center gap-2">
             <span
-              className={`inline-flex items-center px-2 py-0.5 text-[10px] font-semibold ${ts.badgeRadius}`}
-              style={{ backgroundColor: `${badge.color}20`, color: badge.color }}
+              className={`inline-flex items-center px-2 py-0.5 text-[10px] font-semibold ${ts.badgeRadius} transition-colors duration-200`}
+              style={{ backgroundColor: `${badge.color}15`, color: badge.color }}
             >
               {badge.label}
             </span>
           </div>
-          <div className="flex items-start justify-between">
-            <h4 className={`${ts.nameSize} ${ts.headerWeight} text-white leading-tight pr-2 ${ts.textStyle}`}>{item.name}</h4>
+
+          <div className="flex items-start justify-between gap-2">
+            <h4 className={`${ts.nameSize} ${ts.headerWeight} text-white leading-tight ${ts.textStyle} group-hover:text-white transition-colors`}>
+              {item.name}
+            </h4>
             {showPrices && (
-              <div className={`${ts.nameSize} ${ts.priceWeight} whitespace-nowrap`} style={{ color: primaryColor }}>
+              <div
+                className={`text-base ${ts.priceWeight} whitespace-nowrap tabular-nums`}
+                style={{ color: primaryColor }}
+              >
                 {formatPrice(item.price, item.currency)}
               </div>
             )}
           </div>
+
           {item.description && (
-            <p className={`${ts.descSize} text-white/50 line-clamp-2 leading-relaxed ${ts.bodyWeight}`}>{item.description}</p>
+            <p className={`${ts.descSize} text-white/45 line-clamp-2 leading-relaxed ${ts.bodyWeight}`}>
+              {item.description}
+            </p>
           )}
+
           <div className="flex items-center justify-between pt-1">
             {showDuration && item.duration ? (
-              <span className={`flex items-center gap-1 ${ts.descSize} text-white/40`}>
+              <span className={`flex items-center gap-1.5 ${ts.descSize} text-white/35 bg-white/[0.04] px-2 py-1 rounded-lg`}>
                 <Clock className="w-3 h-3" /> {item.duration} min
               </span>
             ) : (
@@ -181,14 +288,14 @@ export function CatalogGrid({
             {inCart ? (
               <button
                 onClick={(e) => { e.stopPropagation(); removeFromCart(item.id, item.itemType); }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 ${ts.buttonRadius} text-xs font-medium transition-all text-emerald-400 bg-emerald-400/10 hover:bg-red-400/10 hover:text-red-400`}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 ${ts.buttonRadius} text-xs font-medium transition-all duration-200 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20`}
               >
-                <CheckCircle2 className="w-3.5 h-3.5" /> In Cart
+                <CheckCircle2 className="w-3.5 h-3.5" /> Added
               </button>
             ) : (
               <button
                 onClick={(e) => { e.stopPropagation(); addToCart(item); }}
-                className={btnStyles.className}
+                className={`${btnStyles.className} shadow-sm hover:shadow-md active:scale-95`}
                 style={btnStyles.style}
               >
                 <Plus className="w-3.5 h-3.5" /> Add
@@ -204,65 +311,93 @@ export function CatalogGrid({
     const inCart = isInCart(item.id, item.itemType);
     const badge = typeBadge(item.itemType, primaryColor, secondaryColor);
     const accentColor = item.itemType === "service" ? primaryColor : item.itemType === "product" ? secondaryColor : "#a78bfa";
+    const isFeatured = featuredItemIds?.includes(item.id);
+    const itemBadge = badges?.[item.id] ? catalogBadgeConfig[badges[item.id]] : null;
+
     return (
       <div
         key={`${item.id}_${item.itemType}`}
-        className={`${ts.cardRadius} border backdrop-blur transition-all group cursor-pointer ${ts.fontClass} flex gap-4 ${ts.spacing === "relaxed" ? "p-4" : "p-3"}`}
+        className={`${ts.cardRadius} border backdrop-blur-xl transition-all duration-300 group cursor-pointer ${ts.fontClass} flex gap-4 ${ts.spacing === "relaxed" ? "p-4" : "p-3"} relative overflow-hidden`}
         style={{
-          background: inCart ? ts.cardBgHover : ts.cardBg,
-          border: inCart ? ts.cardBorderHover : ts.cardBorder,
+          background: inCart
+            ? `linear-gradient(135deg, ${accentColor}08, ${accentColor}04)`
+            : ts.cardBg,
+          border: inCart ? `1px solid ${accentColor}30` : ts.cardBorder,
           boxShadow: ts.cardShadow,
         }}
         onClick={() => onItemClick?.(item)}
+        onMouseEnter={(e) => {
+          const el = e.currentTarget;
+          el.style.transform = "translateX(4px)";
+          el.style.boxShadow = `0 4px 20px ${accentColor}10`;
+          el.style.border = ts.cardBorderHover;
+        }}
+        onMouseLeave={(e) => {
+          const el = e.currentTarget;
+          el.style.transform = "translateX(0)";
+          el.style.boxShadow = ts.cardShadow || "none";
+          el.style.border = inCart ? `1px solid ${accentColor}30` : ts.cardBorder;
+        }}
       >
+        {isFeatured && (
+          <div
+            className="absolute top-0 left-0 bottom-0 w-[2px]"
+            style={{ background: `linear-gradient(180deg, ${primaryColor}, ${secondaryColor})` }}
+          />
+        )}
+
         {item.imageUrl ? (
-          <div className="w-24 h-24 flex-shrink-0 overflow-hidden" style={{ borderRadius: "inherit" }}>
-            <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+          <div className="w-24 h-24 flex-shrink-0 overflow-hidden relative" style={{ borderRadius: "inherit" }}>
+            <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
           </div>
         ) : (
           <div
-            className={`w-24 h-24 flex-shrink-0 flex items-center justify-center text-3xl ${ts.headerWeight}`}
+            className={`w-24 h-24 flex-shrink-0 flex items-center justify-center text-3xl ${ts.headerWeight} relative overflow-hidden`}
             style={{
-              background: theme === "bold"
-                ? `linear-gradient(135deg, ${accentColor}${ts.accentOpacity}, ${accentColor}08)`
-                : `linear-gradient(135deg, ${accentColor}15, ${accentColor}05)`,
-              color: `${accentColor}40`,
+              background: `linear-gradient(135deg, ${accentColor}12, ${accentColor}04)`,
+              color: `${accentColor}50`,
               borderRadius: "inherit",
             }}
           >
-            {item.name.charAt(0).toUpperCase()}
+            <span className="relative z-10 group-hover:scale-110 transition-transform duration-300">
+              {item.name.charAt(0).toUpperCase()}
+            </span>
           </div>
         )}
+
         <div className="flex-1 min-w-0 space-y-2">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 space-y-1">
-              <span
-                className={`inline-flex items-center px-2 py-0.5 text-[10px] font-semibold ${ts.badgeRadius}`}
-                style={{ backgroundColor: `${badge.color}20`, color: badge.color }}
-              >
-                {badge.label}
-              </span>
+              <div className="flex items-center gap-2">
+                <span
+                  className={`inline-flex items-center px-2 py-0.5 text-[10px] font-semibold ${ts.badgeRadius}`}
+                  style={{ backgroundColor: `${badge.color}15`, color: badge.color }}
+                >
+                  {badge.label}
+                </span>
+                {itemBadge && (
+                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gradient-to-r ${itemBadge.gradient} border border-white/10 text-white`}>
+                    <itemBadge.icon className="w-2.5 h-2.5" />
+                    {itemBadge.label}
+                  </span>
+                )}
+              </div>
               <h4 className={`${ts.nameSize} ${ts.headerWeight} text-white leading-tight ${ts.textStyle}`}>{item.name}</h4>
             </div>
             <div className="flex flex-col items-end gap-2 flex-shrink-0">
               {showPrices && (
-                <div className={`${ts.nameSize} ${ts.priceWeight} whitespace-nowrap`} style={{ color: primaryColor }}>
+                <div className={`text-base ${ts.priceWeight} whitespace-nowrap tabular-nums`} style={{ color: primaryColor }}>
                   {formatPrice(item.price, item.currency)}
                 </div>
-              )}
-              {badges?.[item.id] && catalogBadgeConfig[badges[item.id]] && (
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${catalogBadgeConfig[badges[item.id]].bg} ${catalogBadgeConfig[badges[item.id]].text}`}>
-                  {catalogBadgeConfig[badges[item.id]].label}
-                </span>
               )}
             </div>
           </div>
           {item.description && (
-            <p className={`${ts.descSize} text-white/50 line-clamp-2 leading-relaxed ${ts.bodyWeight}`}>{item.description}</p>
+            <p className={`${ts.descSize} text-white/45 line-clamp-2 leading-relaxed ${ts.bodyWeight}`}>{item.description}</p>
           )}
           <div className="flex items-center justify-between pt-0.5">
             {showDuration && item.duration ? (
-              <span className={`flex items-center gap-1 ${ts.descSize} text-white/40`}>
+              <span className={`flex items-center gap-1.5 ${ts.descSize} text-white/35 bg-white/[0.04] px-2 py-1 rounded-lg`}>
                 <Clock className="w-3 h-3" /> {item.duration} min
               </span>
             ) : (
@@ -271,14 +406,14 @@ export function CatalogGrid({
             {inCart ? (
               <button
                 onClick={(e) => { e.stopPropagation(); removeFromCart(item.id, item.itemType); }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 ${ts.buttonRadius} text-xs font-medium transition-all text-emerald-400 bg-emerald-400/10 hover:bg-red-400/10 hover:text-red-400`}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 ${ts.buttonRadius} text-xs font-medium transition-all duration-200 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20`}
               >
-                <CheckCircle2 className="w-3.5 h-3.5" /> In Cart
+                <CheckCircle2 className="w-3.5 h-3.5" /> Added
               </button>
             ) : (
               <button
                 onClick={(e) => { e.stopPropagation(); addToCart(item); }}
-                className={btnStyles.className}
+                className={`${btnStyles.className} shadow-sm hover:shadow-md active:scale-95`}
                 style={btnStyles.style}
               >
                 <Plus className="w-3.5 h-3.5" /> Add
@@ -290,44 +425,79 @@ export function CatalogGrid({
     );
   }
 
+  const tabs = [
+    ["all", "All"],
+    ...(hasServices ? [["service", "Services"]] : []),
+    ...(hasProducts ? [["product", "Products"]] : []),
+    ...(hasPackages ? [["package", "Packages"]] : []),
+  ] as [FilterTab, string][];
+
   return (
     <div className={`space-y-6 ${ts.fontClass}`}>
       <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
+        <div className="relative flex-1 group/search">
+          <Search
+            className={`absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors duration-200 ${
+              searchFocused ? "text-white/50" : "text-white/25"
+            }`}
+          />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
             placeholder="Search services, products..."
-            className={`w-full pl-10 pr-4 py-2.5 ${ts.searchRadius} border border-white/10 bg-white/[0.03] text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 transition-all`}
-            style={{ "--tw-ring-color": primaryColor } as React.CSSProperties}
+            className={`w-full pl-10 pr-10 py-2.5 ${ts.searchRadius} border bg-white/[0.03] text-sm text-white placeholder:text-white/25 focus:outline-none transition-all duration-200`}
+            style={{
+              borderColor: searchFocused ? `${primaryColor}50` : "rgba(255,255,255,0.08)",
+              boxShadow: searchFocused ? `0 0 0 3px ${primaryColor}15, 0 2px 12px ${primaryColor}10` : "none",
+            }}
           />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-3.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors"
+            >
+              <X className="w-3 h-3 text-white/50" />
+            </button>
+          )}
         </div>
-        <div className="relative">
+
+        <div className="relative" ref={sortRef}>
           <button
             onClick={() => setSortOpen(!sortOpen)}
-            className={`flex items-center gap-2 px-4 py-2.5 ${ts.searchRadius} border border-white/10 bg-white/[0.03] text-sm text-white/60 hover:border-white/20 transition-all`}
+            className={`flex items-center gap-2 px-4 py-2.5 ${ts.searchRadius} border text-sm transition-all duration-200 hover:bg-white/[0.04]`}
+            style={{
+              borderColor: sortOpen ? `${primaryColor}40` : "rgba(255,255,255,0.08)",
+              backgroundColor: sortOpen ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.02)",
+              color: sortOption !== "default" ? primaryColor : "rgba(255,255,255,0.5)",
+            }}
           >
-            Sort
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">{sortLabels[sortOption]}</span>
+            <span className="sm:hidden">Sort</span>
             {sortOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
           {sortOpen && (
-            <div className={`absolute right-0 top-full mt-1 w-48 ${ts.cardRadius} border border-white/10 bg-[#16161f] backdrop-blur-xl shadow-2xl z-30 overflow-hidden`}>
-              {([
-                ["default", "Default"],
-                ["price_asc", "Price: Low → High"],
-                ["price_desc", "Price: High → Low"],
-                ["duration", "Duration"],
-              ] as [SortOption, string][]).map(([val, label]) => (
+            <div
+              className={`absolute right-0 top-full mt-2 w-52 ${ts.cardRadius} border border-white/10 bg-[#16161f]/95 backdrop-blur-2xl shadow-2xl z-30 overflow-hidden`}
+              style={{ animation: "fadeSlideDown 0.15s ease-out" }}
+            >
+              {(Object.entries(sortLabels) as [SortOption, string][]).map(([val, label]) => (
                 <button
                   key={val}
                   onClick={() => { setSortOption(val); setSortOpen(false); }}
-                  className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
-                    sortOption === val ? "text-white bg-white/5" : "text-white/50 hover:text-white hover:bg-white/5"
+                  className={`w-full text-left px-4 py-2.5 text-sm transition-all duration-150 flex items-center justify-between ${
+                    sortOption === val
+                      ? "text-white bg-white/[0.06]"
+                      : "text-white/45 hover:text-white/70 hover:bg-white/[0.04]"
                   }`}
                 >
                   {label}
+                  {sortOption === val && (
+                    <CheckCircle2 className="w-3.5 h-3.5" style={{ color: primaryColor }} />
+                  )}
                 </button>
               ))}
             </div>
@@ -336,44 +506,101 @@ export function CatalogGrid({
       </div>
 
       <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
-        {(
-          [
-            ["all", "All"],
-            ...(hasServices ? [["service", "Services"]] : []),
-            ...(hasProducts ? [["product", "Products"]] : []),
-            ...(hasPackages ? [["package", "Packages"]] : []),
-          ] as [FilterTab, string][]
-        ).map(([tab, label]) => {
+        {tabs.map(([tab, label]) => {
+          const TabIcon = filterIcons[tab] || ShoppingBag;
+          const count = tabCounts[tab];
           const tabProps = getTabClasses(ts, activeTab === tab, primaryColor);
           return (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={tabProps.className}
+              className={`${tabProps.className} flex items-center gap-1.5 group/tab`}
               style={tabProps.style}
             >
+              <TabIcon className={`w-3.5 h-3.5 transition-transform duration-200 ${activeTab === tab ? "scale-110" : "group-hover/tab:scale-105"}`} />
               {label}
+              <span
+                className={`text-[10px] px-1.5 py-0.5 rounded-full transition-all duration-200 ${
+                  activeTab === tab ? "bg-white/15 text-white/90" : "bg-white/[0.06] text-white/30"
+                }`}
+              >
+                {count}
+              </span>
             </button>
           );
         })}
       </div>
 
+      {searchQuery && (
+        <div className="flex items-center gap-2 text-xs text-white/35">
+          <Search className="w-3 h-3" />
+          <span>
+            {filteredItems.length} result{filteredItems.length !== 1 ? "s" : ""} for &ldquo;{searchQuery}&rdquo;
+          </span>
+          {activeTab !== "all" && (
+            <span className="text-white/20">
+              in {tabs.find(([t]) => t === activeTab)?.[1]}
+            </span>
+          )}
+        </div>
+      )}
+
       {filteredItems.length > 0 ? (
         cardStylePref === "list" ? (
           <div className="space-y-3">
-            {filteredItems.map(renderListCard)}
+            {filteredItems.map((item) => (
+              <div key={`${item.id}_${item.itemType}`} className="animate-[fadeIn_0.3s_ease-out]">
+                {renderListCard(item)}
+              </div>
+            ))}
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-            {filteredItems.map(renderGridCard)}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5">
+            {filteredItems.map((item, idx) => (
+              <div
+                key={`${item.id}_${item.itemType}`}
+                className="animate-[fadeIn_0.3s_ease-out]"
+                style={{ animationDelay: `${idx * 50}ms`, animationFillMode: "backwards" }}
+              >
+                {renderGridCard(item)}
+              </div>
+            ))}
           </div>
         )
       ) : (
-        <div className={`${ts.cardRadius} border border-white/10 bg-white/[0.02] p-10 text-center space-y-3`}>
-          <Search className="w-8 h-8 text-white/20 mx-auto" />
-          <p className={`text-sm text-white/40 ${ts.bodyWeight}`}>No items match your search.</p>
+        <div className={`${ts.cardRadius} border border-white/[0.06] bg-gradient-to-br from-white/[0.03] to-white/[0.01] backdrop-blur-xl p-12 text-center space-y-4`}>
+          <div className="w-14 h-14 mx-auto rounded-xl bg-white/[0.05] flex items-center justify-center">
+            <Search className="w-7 h-7 text-white/20" />
+          </div>
+          <div className="space-y-1.5">
+            <p className={`text-sm ${ts.headerWeight} text-white/50`}>No items found</p>
+            <p className={`text-xs text-white/30 ${ts.bodyWeight}`}>
+              {searchQuery
+                ? `Try a different search term or browse all categories`
+                : `No items available in this category`}
+            </p>
+          </div>
+          {(searchQuery || activeTab !== "all") && (
+            <button
+              onClick={() => { setSearchQuery(""); setActiveTab("all"); }}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-medium text-white/50 bg-white/[0.05] hover:bg-white/[0.08] transition-all duration-200"
+            >
+              <X className="w-3 h-3" /> Clear filters
+            </button>
+          )}
         </div>
       )}
+
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes fadeSlideDown {
+          from { opacity: 0; transform: translateY(-4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
     </div>
   );
 }

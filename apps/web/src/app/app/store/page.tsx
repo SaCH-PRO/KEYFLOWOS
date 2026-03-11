@@ -12,6 +12,7 @@ import {
   Send,
   AlertCircle,
 } from "lucide-react";
+// Note: AlertCircle still used for unpublished banner
 import {
   Service,
   StaffMember,
@@ -51,9 +52,10 @@ import { StorefrontPreview } from "./components/storefront-preview";
 import { AppearanceCustomizer } from "./components/appearance-customizer";
 import { MerchandisingPanel } from "./components/merchandising-panel";
 import { StoreAnalyticsDashboard } from "./components/store-analytics";
-import { KpiCards } from "./components/kpi-cards";
+import { StoreCommandHero } from "./components/store-command-hero";
 import { SocialProofPanel } from "./components/social-proof-panel";
 import type { DriftedItem } from "./components/store-types";
+import { fetchStoreAnalytics, StoreAnalytics } from "@/lib/client";
 
 type StoreTab = "overview" | "customize" | "products" | "hours" | "settings";
 
@@ -111,6 +113,7 @@ export default function StorePage() {
   const [showContactPicker, setShowContactPicker] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [overviewAnalytics, setOverviewAnalytics] = useState<StoreAnalytics | null>(null);
 
   const [storefrontConfig, setStorefrontConfig] = useState<StorefrontConfig>({
     hero: {},
@@ -193,8 +196,12 @@ export default function StorePage() {
       }
       setDriftedItems(drifts);
 
-      const configRes = await fetchStorefrontConfig(businessId).catch(() => ({ data: null, error: null }));
+      const [configRes, analyticsRes] = await Promise.all([
+        fetchStorefrontConfig(businessId).catch(() => ({ data: null, error: null })),
+        fetchStoreAnalytics(businessId, 30).catch(() => ({ data: null, error: null })),
+      ]);
       if (configRes.data) setStorefrontConfig(configRes.data);
+      if (analyticsRes.data) setOverviewAnalytics(analyticsRes.data);
     } catch (e) {
       console.error("Failed to load store data:", e);
       toast.error("Failed to load store data");
@@ -553,25 +560,6 @@ export default function StorePage() {
         </div>
       )}
 
-      {driftedItems.length > 0 && (
-        <div
-          className="kf-card p-3 text-sm flex items-center gap-2"
-          style={{ borderColor: "hsl(30 90% 50% / 0.4)", background: "hsl(30 90% 50% / 0.1)", color: "hsl(30 90% 90%)" }}
-        >
-          <AlertCircle className="w-4 h-4 flex-shrink-0" />
-          <span>
-            {driftedItems.length} store item{driftedItems.length !== 1 ? "s have" : " has"} outdated prices compared to Commerce.
-          </span>
-          <button
-            onClick={syncDriftedItems}
-            disabled={syncing}
-            className="ml-auto kf-btn-secondary text-xs"
-          >
-            {syncing ? "Syncing..." : "Sync All"}
-          </button>
-        </div>
-      )}
-
       <AnimatePresence>
         {storeAi.panelOpen && (
           <AiCommandHub
@@ -604,11 +592,20 @@ export default function StorePage() {
           >
             {activeTab === "overview" && (
               <div className="space-y-6">
-                <KpiCards
-                  servicesCount={services.length}
-                  commerceProductsCount={commerceProducts.length}
+                <StoreCommandHero
                   storeEnabled={storeEnabled}
-                  driftedItemsCount={driftedItems.length}
+                  publicUrl={getPublicBookingUrl()}
+                  servicesCount={services.length}
+                  productsCount={commerceProducts.length}
+                  driftedCount={driftedItems.length}
+                  hasLogo={!!businessData?.logoUrl}
+                  hasHeroImage={!!(storefrontConfig.hero as any)?.imageUrl || !!(storefrontConfig.hero as any)?.coverImageUrl}
+                  hoursConfigured={Object.values(businessHours).some((h: any) => h?.enabled)}
+                  hasTestimonials={!!((storefrontConfig.socialProof as any)?.testimonials?.length)}
+                  hasSlug={!!businessData?.slug}
+                  analytics={overviewAnalytics}
+                  businessName={businessData?.name}
+                  onTabChange={handleTabChange}
                 />
                 <StoreAnalyticsDashboard businessId={businessId} />
               </div>
