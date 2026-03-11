@@ -37,6 +37,7 @@ import { SocialTabContent } from "./components/social-tab-content";
 import { ConnectionsDropdown } from "./components/connections-dropdown";
 import { StrategyPanel } from "./components/strategy-panel";
 import { MarketingBriefPanel } from "./components/marketing-brief-panel";
+import { MarketingLaunchpad } from "./components/marketing-launchpad";
 import type { EmailCampaign, LeadForm } from "@/lib/client";
 
 type MarketingTab = "social" | "campaigns" | "forms" | "insights";
@@ -223,6 +224,20 @@ export default function MarketingPage() {
       />
 
       <MarketingAiSearchBar businessId={mk.businessId} />
+
+      <MarketingLaunchpad
+        campaigns={mk.campaigns}
+        forms={mk.forms}
+        socialPosts={mk.socialPosts}
+        gmailConnected={gmailConnected}
+        onTabChange={handleTabChange}
+        onGmailConnect={mk.handleGmailConnect}
+        onShowStrategy={() => setShowStrategy(true)}
+        onOpenAiHub={() => marketingAi.togglePanel()}
+        onNewCampaign={() => document.querySelector<HTMLButtonElement>("[data-marketing-new-campaign]")?.click()}
+        onNewForm={() => document.querySelector<HTMLButtonElement>("[data-marketing-new-form]")?.click()}
+        onNewPost={() => document.querySelector<HTMLButtonElement>("[data-social-new-post]")?.click()}
+      />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
