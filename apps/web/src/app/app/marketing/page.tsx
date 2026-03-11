@@ -7,13 +7,8 @@ import {
   Mail,
   ClipboardList,
   BarChart3,
-  Send,
-  Facebook,
-  Instagram,
-  Linkedin,
-  Twitter,
-  Share2,
   MessageSquare,
+  Sparkles,
 } from "lucide-react";
 import {
   fetchCampaigns,
@@ -30,9 +25,7 @@ import { getStoredBusinessId } from "@/lib/workspace";
 import { toast } from "sonner";
 import { getGmailAuthUrl } from "@/lib/client";
 import { PageHeader } from "@/components/ui/page-header";
-import { ContactPickerDrawer } from "@/components/contacts";
 import { TabNav } from "@/components/ui/tab-nav";
-import { ConnectionBanner, ConnectionsSummary } from "@/components/ui/connection-banner";
 import { useConnections } from "@/hooks/use-connections";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
@@ -50,24 +43,19 @@ import { CampaignActionQueue } from "./components/campaign-action-queue";
 import { FormOptimizationQueue } from "./components/form-optimization-queue";
 import MarketingInsightsTab from "./insights/marketing-insights-tab";
 import { SocialTabContent } from "./components/social-tab-content";
+import { ConnectionsDropdown } from "./components/connections-dropdown";
+import { StrategyPanel } from "./components/strategy-panel";
 
-type MarketingTab = "campaigns" | "social" | "forms" | "insights";
+type MarketingTab = "social" | "campaigns" | "forms" | "insights";
 
 const TABS: { key: MarketingTab; label: string; icon: React.ElementType }[] = [
-  { key: "campaigns", label: "Campaigns", icon: Mail },
   { key: "social", label: "Social", icon: MessageSquare },
+  { key: "campaigns", label: "Campaigns", icon: Mail },
   { key: "forms", label: "Lead Forms", icon: ClipboardList },
   { key: "insights", label: "Insights", icon: BarChart3 },
 ];
 
 const TAB_KEYS = TABS.map((t) => t.key);
-
-const SOCIAL_PLATFORM_META: Record<string, { icon: React.ElementType; color: string }> = {
-  facebook: { icon: Facebook, color: "#1877F2" },
-  instagram: { icon: Instagram, color: "#E4405F" },
-  linkedin: { icon: Linkedin, color: "#0A66C2" },
-  twitter: { icon: Twitter, color: "#1DA1F2" },
-};
 
 const slideVariants = {
   enter: (dir: number) => ({ x: dir > 0 ? 60 : -60, opacity: 0 }),
@@ -81,7 +69,7 @@ export default function MarketingPage() {
   const emitEvent = useModuleEmit();
   const marketingAi = useMarketingAiHub();
   const [businessId, setBusinessId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<MarketingTab>("campaigns");
+  const [activeTab, setActiveTab] = useState<MarketingTab>("social");
   const [loading, setLoading] = useState(true);
   const { gmailConnected, gmailEmail, socialConnections, loading: connectionsLoading } = useConnections();
   const [socialPosts, setSocialPosts] = useState<SocialPost[]>([]);
@@ -100,8 +88,8 @@ export default function MarketingPage() {
   const [forms, setForms] = useState<LeadForm[]>([]);
   const [submissions, setSubmissions] = useState<Record<string, LeadFormSubmission[]>>({});
   const [availableTags, setAvailableTags] = useState<string[]>([]);
-  const [showContactPicker, setShowContactPicker] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
+  const [showStrategy, setShowStrategy] = useState(false);
 
   const directionRef = useRef<number>(0);
 
@@ -110,17 +98,6 @@ export default function MarketingPage() {
     const res = await getGmailAuthUrl(businessId);
     if (res?.data?.url) window.location.href = res.data.url;
   }, [businessId]);
-
-  const socialSummary = useMemo(() => ["facebook", "instagram", "linkedin", "twitter"].map((platform) => {
-    const conn = socialConnections.find((c) => c.platform.toLowerCase() === platform);
-    const meta = SOCIAL_PLATFORM_META[platform] || { icon: Share2, color: "#6366f1" };
-    return {
-      name: platform.charAt(0).toUpperCase() + platform.slice(1),
-      icon: meta.icon,
-      color: meta.color,
-      connected: conn?.status === "CONNECTED",
-    };
-  }), [socialConnections]);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -174,7 +151,7 @@ export default function MarketingPage() {
     setActiveTab(key as MarketingTab);
     emitEvent("module:tab_changed", "marketing", { tab: key });
     const url = new URL(window.location.href);
-    if (key === "campaigns") {
+    if (key === "social") {
       url.searchParams.delete("tab");
     } else {
       url.searchParams.set("tab", key);
@@ -300,8 +277,8 @@ export default function MarketingPage() {
     {
       groupName: "Marketing Navigation",
       shortcuts: [
-        { key: "1", description: "Campaigns tab", action: () => handleTabChange("campaigns") },
-        { key: "2", description: "Social tab", action: () => handleTabChange("social") },
+        { key: "1", description: "Social tab", action: () => handleTabChange("social") },
+        { key: "2", description: "Campaigns tab", action: () => handleTabChange("campaigns") },
         { key: "3", description: "Lead Forms tab", action: () => handleTabChange("forms") },
         { key: "4", description: "Insights tab", action: () => handleTabChange("insights") },
         { key: "n", description: "New campaign/form", action: handleNewItem },
@@ -312,7 +289,7 @@ export default function MarketingPage() {
         { key: "Escape", description: "Close panels", action: () => {
           if (marketingAi.hubMode === "tool-result") marketingAi.clearToolResult();
           else if (marketingAi.panelOpen) marketingAi.setOpen(false);
-          else { setShowGuide(false); setShowContactPicker(false); }
+          else setShowGuide(false);
         } },
       ],
     },
@@ -339,7 +316,7 @@ export default function MarketingPage() {
         icon={Megaphone}
         title="Marketing"
         subtitle={`${campaigns.length} campaigns · ${socialPosts.length} posts · ${forms.length} lead forms`}
-        actionLabel={activeTab === "campaigns" ? "New Campaign" : activeTab === "social" ? "New Post" : activeTab === "forms" ? "New Form" : undefined}
+        actionLabel={activeTab === "social" ? "New Post" : activeTab === "campaigns" ? "New Campaign" : activeTab === "forms" ? "New Form" : undefined}
         onAction={activeTab === "insights" ? undefined : handleNewItem}
         titleExtra={
           <MarketingGuide
@@ -349,38 +326,26 @@ export default function MarketingPage() {
           />
         }
         rightSlot={
-          <button
-            onClick={() => setShowContactPicker(true)}
-            className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
-            aria-label="Broadcast"
-          >
-            <Send className="w-4 h-4" />
-            Broadcast
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowStrategy(true)}
+              className="inline-flex items-center gap-1.5 text-sm px-3 py-2 rounded-xl bg-[hsl(var(--kf-accent1))]/10 hover:bg-[hsl(var(--kf-accent1))]/20 text-[hsl(var(--kf-accent1))] transition-colors"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span className="hidden sm:inline">AI Strategy</span>
+            </button>
+            <ConnectionsDropdown
+              gmailConnected={gmailConnected}
+              gmailEmail={gmailEmail}
+              socialConnections={socialConnections}
+              onGmailConnect={handleGmailConnect}
+              loading={connectionsLoading}
+            />
+          </div>
         }
       />
 
       <MarketingAiSearchBar businessId={businessId} />
-
-      {!connectionsLoading && (
-        <div className="space-y-3">
-          <ConnectionsSummary
-            connections={socialSummary}
-            onManage={() => router.push("/app/settings/connections")}
-          />
-          <ConnectionBanner
-            icon={Mail}
-            color="#EA4335"
-            title="Gmail"
-            description="Connect Gmail to send email campaigns directly from your business email."
-            connected={gmailConnected}
-            connectedDetail={gmailEmail ? `Sending as ${gmailEmail}` : "Gmail connected"}
-            onConnect={handleGmailConnect}
-            loading={connectionsLoading}
-            compact
-          />
-        </div>
-      )}
 
       <AnimatePresence>
         {marketingAi.panelOpen && (
@@ -479,7 +444,11 @@ export default function MarketingPage() {
         </AnimatePresence>
       </div>
 
-      <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
+      <StrategyPanel
+        businessId={businessId}
+        isOpen={showStrategy}
+        onClose={() => setShowStrategy(false)}
+      />
     </div>
   );
 }

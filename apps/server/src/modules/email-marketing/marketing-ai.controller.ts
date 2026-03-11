@@ -120,4 +120,31 @@ export class MarketingAiController {
     checkAiRateLimit(businessId);
     return this.marketingAi.leadFormOptimizer(businessId, body.query);
   }
+
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @RequireFeature('ai_tools')
+  @CrmRateLimit(5, 60_000)
+  @Post('businesses/:businessId/marketing/ai-strategy')
+  aiStrategy(
+    @Param('businessId') businessId: string,
+    @Body() body: {
+      industry: string;
+      monthlyRevenue?: string;
+      targetAudience?: string;
+      currentChannels?: string[];
+      budget?: string;
+      goals?: string[];
+      competitiveLandscape?: string;
+      businessStage?: string;
+    },
+  ) {
+    if (!body.industry || typeof body.industry !== 'string') {
+      throw new BadRequestException('industry is required');
+    }
+    if (body.industry.length > 200) {
+      throw new BadRequestException('industry must be 200 characters or less');
+    }
+    checkAiRateLimit(businessId);
+    return this.marketingAi.generateMarketingStrategy(businessId, body);
+  }
 }
