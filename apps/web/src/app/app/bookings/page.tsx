@@ -84,6 +84,8 @@ export default function BookingsPage() {
 
   const [showCreateBooking, setShowCreateBooking] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [prefillDate, setPrefillDate] = useState<string | undefined>(undefined);
+  const [prefillTime, setPrefillTime] = useState<string | undefined>(undefined);
 
   const [calendarConnected, setCalendarConnected] = useState(false);
   const [calendarEmail, setCalendarEmail] = useState<string | null>(null);
@@ -238,8 +240,24 @@ export default function BookingsPage() {
     if (result) {
       await loadData();
       setShowCreateBooking(false);
-      setBanner({ text: "Booking created successfully!", type: "success" });
+      setPrefillDate(undefined);
+      setPrefillTime(undefined);
+      setFormError(null);
       moduleEvents.emit("booking:created", "bookings", { booking: result });
+      if (calendarConnected && result.id) {
+        try {
+          const syncRes = await syncBookingToCalendar(result.id, businessId);
+          if (syncRes.data?.success) {
+            setBanner({ text: "Booking created & synced to Google Calendar!", type: "success" });
+          } else {
+            setBanner({ text: "Booking created! (Calendar sync failed)", type: "info" });
+          }
+        } catch {
+          setBanner({ text: "Booking created! (Calendar sync failed)", type: "info" });
+        }
+      } else {
+        setBanner({ text: "Booking created successfully!", type: "success" });
+      }
     }
   }
 
@@ -265,6 +283,12 @@ export default function BookingsPage() {
     else setBanner({ text: "Failed to sync booking.", type: "error" });
   }
 
+  const handleCalendarCreate = useCallback((prefill: { date: string; time?: string }) => {
+    setPrefillDate(prefill.date);
+    setPrefillTime(prefill.time);
+    setShowCreateBooking(true);
+  }, []);
+
   const handleViewContact = useCallback((contactId: string) => {
     moduleEvents.emit("booking:view_contact", "bookings", { contactId });
     router.push(`/app/crm?contact=${contactId}`);
@@ -277,7 +301,7 @@ export default function BookingsPage() {
       serviceName: booking.service?.name,
       servicePrice: booking.service?.price,
     });
-    router.push("/app/commerce?tab=billing&action=new-invoice");
+    router.push("/app/commerce?tab=invoices&action=new-invoice");
   }, [router]);
 
   if (!businessId && !loading) {
@@ -458,10 +482,27 @@ export default function BookingsPage() {
           transition={{ type: "spring", bounce: 0.15, duration: 0.35 }}
         >
           {tab === "calendar" && (
-            <CalendarView
-              bookings={bookings}
-              onSelectBooking={setSelectedBooking}
-            />
+            <div className="space-y-3">
+              <AnimatePresence>
+                {showCreateBooking && (
+                  <BookingForm
+                    services={services}
+                    staff={staff}
+                    contacts={contacts}
+                    onSubmit={handleCreateBooking}
+                    onCancel={() => { setShowCreateBooking(false); setPrefillDate(undefined); setPrefillTime(undefined); setFormError(null); }}
+                    formError={formError}
+                    defaultDate={prefillDate}
+                    defaultTime={prefillTime}
+                  />
+                )}
+              </AnimatePresence>
+              <CalendarView
+                bookings={bookings}
+                onSelectBooking={setSelectedBooking}
+                onCreateBooking={handleCalendarCreate}
+              />
+            </div>
           )}
           {tab === "products" && (
             <ProductsPanel
@@ -515,19 +556,6 @@ export default function BookingsPage() {
         onRemoveImage={productHook.removeImage}
         currency="TTD"
       />
-
-      <AnimatePresence>
-        {showCreateBooking && (
-          <BookingForm
-            services={services}
-            staff={staff}
-            contacts={contacts}
-            onSubmit={handleCreateBooking}
-            onCancel={() => setShowCreateBooking(false)}
-            formError={formError}
-          />
-        )}
-      </AnimatePresence>
 
       <AnimatePresence>
         {selectedBooking && (

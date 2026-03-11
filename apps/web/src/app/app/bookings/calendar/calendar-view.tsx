@@ -22,6 +22,7 @@ type ViewMode = "month" | "week" | "day";
 interface CalendarViewProps {
   bookings: Booking[];
   onSelectBooking: (booking: Booking) => void;
+  onCreateBooking?: (prefill: { date: string; time?: string }) => void;
 }
 
 function isSameDay(a: Date, b: Date) {
@@ -41,6 +42,7 @@ const VIEW_ICONS: Record<ViewMode, typeof CalendarDays> = {
 export default function CalendarView({
   bookings,
   onSelectBooking,
+  onCreateBooking,
 }: CalendarViewProps) {
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     if (typeof window !== "undefined" && window.innerWidth < 640) return "day";
@@ -101,8 +103,19 @@ export default function CalendarView({
       setSelectedDay(day);
       setCurrentDate(day);
       setViewMode("day");
+      const yyyy = day.getFullYear();
+      const mm = String(day.getMonth() + 1).padStart(2, "0");
+      const dd = String(day.getDate()).padStart(2, "0");
+      onCreateBooking?.({ date: `${yyyy}-${mm}-${dd}` });
     },
-    []
+    [onCreateBooking]
+  );
+
+  const handleSlotClick = useCallback(
+    (date: string, time: string) => {
+      onCreateBooking?.({ date, time });
+    },
+    [onCreateBooking]
   );
 
   const headerLabel = useMemo(() => {
@@ -243,6 +256,7 @@ export default function CalendarView({
               bookings={filteredBookings}
               currentDate={currentDate}
               onSelectBooking={onSelectBooking}
+              onSlotClick={handleSlotClick}
             />
           )}
           {viewMode === "day" && (
@@ -250,6 +264,7 @@ export default function CalendarView({
               bookings={filteredBookings}
               currentDate={currentDate}
               onSelectBooking={onSelectBooking}
+              onSlotClick={handleSlotClick}
             />
           )}
         </motion.div>

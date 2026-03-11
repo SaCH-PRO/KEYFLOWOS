@@ -19,6 +19,7 @@ interface WeekTimelineProps {
   bookings: Booking[];
   currentDate: Date;
   onSelectBooking: (booking: Booking) => void;
+  onSlotClick?: (date: string, time: string) => void;
 }
 
 function isSameDay(a: Date, b: Date) {
@@ -43,6 +44,7 @@ export default function WeekTimeline({
   bookings,
   currentDate,
   onSelectBooking,
+  onSlotClick,
 }: WeekTimelineProps) {
   const today = useMemo(() => new Date(), []);
   const weekDays = useMemo(() => getWeekDays(currentDate), [currentDate]);
@@ -124,7 +126,12 @@ export default function WeekTimeline({
                     key={`${key}-${hour}`}
                     className={`h-14 border-b border-l border-border/20 relative ${
                       isToday ? "bg-[hsl(var(--kf-accent1)/0.03)]" : ""
-                    }`}
+                    } ${hourBookings.length === 0 && onSlotClick ? "cursor-pointer hover:bg-muted/20 transition-colors" : ""}`}
+                    onClick={() => {
+                      if (hourBookings.length === 0 && onSlotClick) {
+                        onSlotClick(key, `${String(hour).padStart(2, "0")}:00`);
+                      }
+                    }}
                   >
                     {hourBookings.map((b) => {
                       const startMin = new Date(b.startTime).getMinutes();
