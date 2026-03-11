@@ -3289,6 +3289,17 @@ export async function generateMarketingStrategy(businessId: string, metrics: Rec
   });
 }
 
+export async function fetchBusinessSnapshot(businessId: string): Promise<ApiResult<Record<string, unknown>>> {
+  return apiGet<Record<string, unknown>>(`/marketing/businesses/${encodeURIComponent(businessId)}/marketing/business-snapshot`);
+}
+
+export async function submitMarketingBrief(businessId: string, brief: Record<string, unknown>): Promise<ApiResult<Record<string, unknown>>> {
+  return apiPost<Record<string, unknown>>({
+    path: `/marketing/businesses/${encodeURIComponent(businessId)}/marketing/submit-brief`,
+    body: brief,
+  });
+}
+
 // ---
 // BUSINESS TEMPLATES
 // ---

@@ -38,7 +38,17 @@ export class MarketingAiService {
   }
 
   private async buildMarketingContext(businessId: string): Promise<string> {
-    const [campaigns, forms, contacts] = await Promise.all([
+    const [business, campaigns, forms, contacts, products, invoices, bookings, socialPosts, services] = await Promise.all([
+      this.db.business.findUnique({
+        where: { id: businessId },
+        select: {
+          name: true, tagline: true, description: true, industry: true,
+          archetype: true, revenueModel: true, budgetRange: true,
+          city: true, country: true, website: true,
+          facebook: true, instagram: true, twitter: true, linkedin: true, tiktok: true,
+          currency: true,
+        },
+      }),
       this.db.emailCampaign.findMany({
         where: { businessId, deletedAt: null },
         select: {
@@ -65,11 +75,61 @@ export class MarketingAiService {
         orderBy: { createdAt: 'desc' },
         take: 100,
       }),
+      this.db.product.findMany({
+        where: { businessId, deletedAt: null },
+        select: { id: true, name: true, price: true, currency: true, category: true, status: true },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      }),
+      this.db.invoice.findMany({
+        where: { businessId, deletedAt: null },
+        select: { id: true, status: true, total: true, currency: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      }),
+      this.db.booking.findMany({
+        where: { businessId },
+        select: { id: true, status: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      }),
+      this.db.socialPost.findMany({
+        where: { businessId, deletedAt: null },
+        select: { id: true, status: true, platforms: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      }),
+      this.db.service.findMany({
+        where: { businessId },
+        select: { id: true, name: true, price: true, duration: true },
+        take: 30,
+      }),
     ]);
 
     const parts: string[] = [];
 
-    parts.push(`Email Campaigns (${campaigns.length}):`);
+    if (business) {
+      parts.push(`Business Profile:`);
+      parts.push(`  Name: ${business.name}`);
+      if (business.tagline) parts.push(`  Tagline: ${business.tagline}`);
+      if (business.description) parts.push(`  Description: ${business.description}`);
+      if (business.industry) parts.push(`  Industry: ${business.industry}`);
+      if (business.archetype) parts.push(`  Business Type: ${business.archetype}`);
+      if (business.revenueModel) parts.push(`  Revenue Model: ${business.revenueModel}`);
+      if (business.city || business.country) parts.push(`  Location: ${[business.city, business.country].filter(Boolean).join(', ')}`);
+      if (business.website) parts.push(`  Website: ${business.website}`);
+      parts.push(`  Currency: ${business.currency}`);
+      const socials = [
+        business.facebook && 'Facebook',
+        business.instagram && 'Instagram',
+        business.twitter && 'Twitter',
+        business.linkedin && 'LinkedIn',
+        business.tiktok && 'TikTok',
+      ].filter(Boolean);
+      if (socials.length) parts.push(`  Social Presence: ${socials.join(', ')}`);
+    }
+
+    parts.push(`\nEmail Campaigns (${campaigns.length}):`);
     campaigns.forEach((c) => {
       const openRate = c.sentCount && c.sentCount > 0 ? ((c.openCount ?? 0) / c.sentCount * 100).toFixed(1) : '0';
       const clickRate = c.sentCount && c.sentCount > 0 ? ((c.clickCount ?? 0) / c.sentCount * 100).toFixed(1) : '0';
@@ -99,7 +159,222 @@ export class MarketingAiService {
     parts.push(`  Source breakdown: ${JSON.stringify(sourceCounts)}`);
     parts.push(`  Top tags: ${Object.entries(tagCounts).sort(([, a], [, b]) => b - a).slice(0, 10).map(([t, c]) => `${t}(${c})`).join(', ') || 'None'}`);
 
+    if (products.length > 0) {
+      parts.push(`\nProducts/Services Catalog (${products.length}):`);
+      const categoryCounts: Record<string, number> = {};
+      let totalRevenuePotential = 0;
+      products.forEach((p) => {
+        categoryCounts[p.category ?? 'Uncategorized'] = (categoryCounts[p.category ?? 'Uncategorized'] || 0) + 1;
+        totalRevenuePotential += Number(p.price) || 0;
+      });
+      parts.push(`  Categories: ${JSON.stringify(categoryCounts)}`);
+      parts.push(`  Price range: ${Math.min(...products.map(p => Number(p.price) || 0))} - ${Math.max(...products.map(p => Number(p.price) || 0))} ${products[0]?.currency ?? 'TTD'}`);
+      parts.push(`  Active: ${products.filter(p => p.status === 'ACTIVE').length}, Draft: ${products.filter(p => p.status === 'DRAFT').length}`);
+    }
+
+    if (invoices.length > 0) {
+      parts.push(`\nInvoice History (${invoices.length}):`);
+      const invStatusCounts: Record<string, number> = {};
+      let totalRevenue = 0;
+      let paidCount = 0;
+      invoices.forEach((inv) => {
+        invStatusCounts[inv.status] = (invStatusCounts[inv.status] || 0) + 1;
+        if (inv.status === 'PAID') {
+          totalRevenue += Number(inv.total) || 0;
+          paidCount++;
+        }
+      });
+      parts.push(`  Status: ${JSON.stringify(invStatusCounts)}`);
+      parts.push(`  Total paid revenue: ${totalRevenue.toFixed(2)} ${invoices[0]?.currency ?? 'TTD'} (${paidCount} invoices)`);
+      const avgInvoice = paidCount > 0 ? (totalRevenue / paidCount).toFixed(2) : '0';
+      parts.push(`  Average invoice value: ${avgInvoice}`);
+    }
+
+    if (bookings.length > 0) {
+      parts.push(`\nBookings (${bookings.length}):`);
+      const bookingStatusCounts: Record<string, number> = {};
+      bookings.forEach((b) => {
+        bookingStatusCounts[b.status] = (bookingStatusCounts[b.status] || 0) + 1;
+      });
+      parts.push(`  Status: ${JSON.stringify(bookingStatusCounts)}`);
+    }
+
+    if (services.length > 0) {
+      const svcCurrency = business?.currency ?? 'TTD';
+      parts.push(`\nService Offerings (${services.length}):`);
+      services.forEach((s) => {
+        parts.push(`  - ${s.name} | ${s.price ? `${svcCurrency} ${s.price}` : 'No price'} | ${s.duration ? `${s.duration} min` : 'No duration'}`);
+      });
+    }
+
+    if (socialPosts.length > 0) {
+      parts.push(`\nSocial Posts (${socialPosts.length}):`);
+      const postStatusCounts: Record<string, number> = {};
+      const platformCounts: Record<string, number> = {};
+      socialPosts.forEach((p) => {
+        postStatusCounts[p.status] = (postStatusCounts[p.status] || 0) + 1;
+        if (p.platforms && Array.isArray(p.platforms)) {
+          (p.platforms as string[]).forEach((pl) => {
+            platformCounts[pl] = (platformCounts[pl] || 0) + 1;
+          });
+        }
+      });
+      parts.push(`  Post statuses: ${JSON.stringify(postStatusCounts)}`);
+      if (Object.keys(platformCounts).length) parts.push(`  Platforms used: ${JSON.stringify(platformCounts)}`);
+    }
+
     return parts.join('\n');
+  }
+
+  async getBusinessSnapshot(businessId: string) {
+    const [business, contactCount, productCount, invoiceStats, bookingCount, campaignCount, serviceCount] = await Promise.all([
+      this.db.business.findUnique({
+        where: { id: businessId },
+        select: {
+          name: true, tagline: true, description: true, industry: true,
+          archetype: true, revenueModel: true, budgetRange: true,
+          city: true, country: true, website: true, currency: true,
+          facebook: true, instagram: true, twitter: true, linkedin: true, tiktok: true,
+        },
+      }),
+      this.db.contact.count({ where: { businessId, deletedAt: null } }),
+      this.db.product.count({ where: { businessId, deletedAt: null } }),
+      this.db.invoice.aggregate({
+        where: { businessId, deletedAt: null, status: 'PAID' },
+        _sum: { total: true },
+        _count: true,
+      }),
+      this.db.booking.count({ where: { businessId } }),
+      this.db.emailCampaign.count({ where: { businessId, deletedAt: null } }),
+      this.db.service.count({ where: { businessId } }),
+    ]);
+
+    const socials: string[] = [];
+    if (business?.facebook) socials.push('Facebook');
+    if (business?.instagram) socials.push('Instagram');
+    if (business?.twitter) socials.push('Twitter');
+    if (business?.linkedin) socials.push('LinkedIn');
+    if (business?.tiktok) socials.push('TikTok');
+
+    return {
+      businessName: business?.name ?? '',
+      tagline: business?.tagline ?? '',
+      description: business?.description ?? '',
+      industry: business?.industry ?? '',
+      archetype: business?.archetype ?? '',
+      revenueModel: business?.revenueModel ?? '',
+      budgetRange: business?.budgetRange ?? '',
+      location: [business?.city, business?.country].filter(Boolean).join(', '),
+      website: business?.website ?? '',
+      currency: business?.currency ?? 'TTD',
+      socialPresence: socials,
+      totalContacts: contactCount,
+      totalProducts: productCount,
+      totalRevenue: Number(invoiceStats._sum?.total ?? 0),
+      paidInvoices: invoiceStats._count,
+      totalBookings: bookingCount,
+      totalCampaigns: campaignCount,
+      totalServices: serviceCount,
+    };
+  }
+
+  private escapeHtml(str: string): string {
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  async submitMarketingBrief(businessId: string, brief: Record<string, unknown>) {
+    const business = await this.db.business.findUnique({
+      where: { id: businessId },
+      select: { name: true, gmailEmail: true, gmailAccessToken: true, gmailRefreshToken: true },
+    });
+
+    const snapshot = await this.getBusinessSnapshot(businessId);
+
+    const briefFields: [string, unknown][] = Object.entries(brief).filter(([, v]) => v !== '' && v !== null && v !== undefined);
+
+    const rows = briefFields.map(([key, value]) => {
+      const label = this.escapeHtml(key.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()).trim());
+      const rawVal = Array.isArray(value) ? value.join(', ') : String(value);
+      const val = this.escapeHtml(rawVal);
+      return `<tr><td style="padding:8px 12px;border:1px solid #333;color:#aaa;font-weight:600;white-space:nowrap;vertical-align:top;">${label}</td><td style="padding:8px 12px;border:1px solid #333;">${val}</td></tr>`;
+    }).join('\n');
+
+    const snapshotRows = [
+      ['Business Name', snapshot.businessName],
+      ['Tagline', snapshot.tagline],
+      ['Industry', snapshot.industry],
+      ['Business Type', snapshot.archetype],
+      ['Revenue Model', snapshot.revenueModel],
+      ['Location', snapshot.location],
+      ['Website', snapshot.website],
+      ['Currency', snapshot.currency],
+      ['Social Presence', snapshot.socialPresence.join(', ') || 'None'],
+      ['Total Contacts', snapshot.totalContacts],
+      ['Total Products', snapshot.totalProducts],
+      ['Total Revenue', `${snapshot.totalRevenue.toFixed(2)} ${snapshot.currency}`],
+      ['Paid Invoices', snapshot.paidInvoices],
+      ['Total Bookings', snapshot.totalBookings],
+      ['Total Campaigns', snapshot.totalCampaigns],
+      ['Total Services', snapshot.totalServices],
+    ].map(([label, val]) => `<tr><td style="padding:8px 12px;border:1px solid #333;color:#aaa;font-weight:600;white-space:nowrap;vertical-align:top;">${label}</td><td style="padding:8px 12px;border:1px solid #333;">${val}</td></tr>`).join('\n');
+
+    const htmlBody = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="font-family:Arial,sans-serif;background:#111;color:#eee;padding:24px;">
+  <div style="max-width:700px;margin:0 auto;background:#1a1a1a;border-radius:12px;padding:32px;border:1px solid #333;">
+    <h1 style="color:#F97316;margin:0 0 4px;">Marketing Brief Submission</h1>
+    <p style="color:#888;margin:0 0 24px;">From: <strong>${snapshot.businessName || 'Unknown Business'}</strong></p>
+
+    <h2 style="color:#14B8A6;font-size:16px;margin:24px 0 8px;">Business Snapshot (Auto-Collected)</h2>
+    <table style="width:100%;border-collapse:collapse;font-size:14px;">
+      ${snapshotRows}
+    </table>
+
+    <h2 style="color:#F97316;font-size:16px;margin:24px 0 8px;">Marketing Brief Details</h2>
+    <table style="width:100%;border-collapse:collapse;font-size:14px;">
+      ${rows}
+    </table>
+
+    <p style="color:#666;font-size:12px;margin-top:24px;border-top:1px solid #333;padding-top:12px;">
+      Submitted via KEYFLOWOS on ${new Date().toLocaleDateString('en-TT', { dateStyle: 'full' })} at ${new Date().toLocaleTimeString('en-TT')}
+    </p>
+  </div>
+</body>
+</html>`;
+
+    const subject = `Marketing Brief: ${snapshot.businessName || 'New Submission'} — ${new Date().toLocaleDateString('en-TT')}`;
+    const targetEmail = 'keyflowos.tt@gmail.com';
+
+    if (business?.gmailAccessToken) {
+      try {
+        const { GmailService } = await import('../commerce/gmail.service');
+        const gmailService = new GmailService(this.prisma);
+        await gmailService.sendEmail({
+          businessId,
+          to: targetEmail,
+          subject,
+          htmlBody,
+        });
+        this.logger.log(`Marketing brief emailed for business ${businessId}`);
+        return { success: true, method: 'gmail', message: 'Marketing brief sent successfully via Gmail' };
+      } catch (err) {
+        this.logger.warn(`Gmail send failed for marketing brief: ${err}`);
+      }
+    }
+
+    this.logger.warn(`Marketing brief could not be emailed for business ${businessId} (Gmail not connected or send failed)`);
+    return {
+      success: false,
+      method: 'pending',
+      message: 'Gmail is not connected. Please connect Gmail in Settings to send your marketing brief to our team.',
+    };
   }
 
   async naturalLanguageSearch(businessId: string, query: string) {

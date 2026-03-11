@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Brain,
@@ -115,6 +115,31 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
   const [expandedSections, setExpandedSections] = useState<Set<number>>(new Set());
   const [copied, setCopied] = useState(false);
   const resultRef = useRef<HTMLDivElement>(null);
+  const [snapshot, setSnapshot] = useState<Record<string, unknown> | null>(null);
+  const snapshotLoaded = useRef(false);
+
+  useEffect(() => {
+    if (!isOpen || !businessId || snapshotLoaded.current) return;
+    snapshotLoaded.current = true;
+    (async () => {
+      try {
+        const { fetchBusinessSnapshot } = await import("@/lib/client");
+        const res = await fetchBusinessSnapshot(businessId);
+        if (res.data) {
+          const s = res.data as any;
+          setSnapshot(s);
+          setMetrics(prev => ({
+            ...prev,
+            industry: prev.industry || s.industry || "",
+            businessStage: prev.businessStage || (s.archetype === "LOCAL_SERVICE" ? "Growth" : ""),
+            monthlyRevenue: prev.monthlyRevenue || (s.totalRevenue > 0 ? `${s.currency} ${(s.totalRevenue / 12).toFixed(0)}/mo (est.)` : ""),
+          }));
+        }
+      } catch {
+        // silent
+      }
+    })();
+  }, [isOpen, businessId]);
 
   const toggleChannel = useCallback((channel: string) => {
     setMetrics(prev => ({
@@ -309,6 +334,28 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
           </div>
 
           <div className="p-4 space-y-5">
+            {snapshot && (
+              <div className="bg-muted/20 border border-border/30 rounded-xl p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <Sparkles className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
+                  <span className="text-xs font-medium text-[hsl(var(--kf-accent1))]">Business data loaded — strategy will use real evidence</span>
+                </div>
+                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 text-[11px]">
+                  {[
+                    ["Contacts", (snapshot as any).totalContacts],
+                    ["Products", (snapshot as any).totalProducts],
+                    ["Revenue", `${(snapshot as any).currency} ${Number((snapshot as any).totalRevenue || 0).toLocaleString()}`],
+                    ["Bookings", (snapshot as any).totalBookings],
+                    ["Campaigns", (snapshot as any).totalCampaigns],
+                  ].map(([label, val]) => (
+                    <div key={String(label)} className="bg-muted/30 rounded-lg p-1.5 text-center">
+                      <div className="font-semibold text-xs">{val}</div>
+                      <div className="text-muted-foreground text-[10px]">{label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="text-xs font-medium text-muted-foreground block mb-1.5">Industry *</label>
@@ -346,7 +393,7 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
                 <input
                   value={metrics.monthlyRevenue}
                   onChange={e => setMetrics(p => ({ ...p, monthlyRevenue: e.target.value }))}
-                  placeholder="e.g. $10,000"
+                  placeholder={`e.g. 10,000 ${(snapshot as any)?.currency || 'TTD'}`}
                   className="w-full bg-muted/30 border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]"
                 />
               </div>
@@ -359,7 +406,7 @@ export function StrategyPanel({ businessId, isOpen, onClose }: StrategyPanelProp
                 <input
                   value={metrics.budget}
                   onChange={e => setMetrics(p => ({ ...p, budget: e.target.value }))}
-                  placeholder="e.g. $2,000"
+                  placeholder={`e.g. 2,000 ${(snapshot as any)?.currency || 'TTD'}`}
                   className="w-full bg-muted/30 border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]"
                 />
               </div>
