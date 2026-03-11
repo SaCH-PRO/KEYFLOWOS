@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Inject, Param, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Inject, Param, Post, UseGuards } from '@nestjs/common';
 import { MarketingAiService } from './marketing-ai.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -146,5 +146,26 @@ export class MarketingAiController {
     }
     checkAiRateLimit(businessId);
     return this.marketingAi.generateMarketingStrategy(businessId, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/marketing/business-snapshot')
+  getBusinessSnapshot(
+    @Param('businessId') businessId: string,
+  ) {
+    return this.marketingAi.getBusinessSnapshot(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(3, 60_000)
+  @Post('businesses/:businessId/marketing/submit-brief')
+  submitMarketingBrief(
+    @Param('businessId') businessId: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    if (!body || Object.keys(body).length === 0) {
+      throw new BadRequestException('Brief data is required');
+    }
+    return this.marketingAi.submitMarketingBrief(businessId, body);
   }
 }

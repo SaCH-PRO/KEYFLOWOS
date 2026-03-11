@@ -650,7 +650,7 @@ export class CrmImportService {
           }
           phones.push(value);
         } else if (key === 'ORG') {
-          contact.company = value.split(';')[0] || null;
+          contact.companyName = value.split(';')[0] || null;
         } else if (key === 'TITLE') {
           contact.jobTitle = value || null;
         } else if (key === 'ADR') {

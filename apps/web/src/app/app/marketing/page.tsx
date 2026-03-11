@@ -9,6 +9,7 @@ import {
   BarChart3,
   MessageSquare,
   Sparkles,
+  FileText,
 } from "lucide-react";
 import {
   fetchCampaigns,
@@ -45,6 +46,7 @@ import MarketingInsightsTab from "./insights/marketing-insights-tab";
 import { SocialTabContent } from "./components/social-tab-content";
 import { ConnectionsDropdown } from "./components/connections-dropdown";
 import { StrategyPanel } from "./components/strategy-panel";
+import { MarketingBriefPanel } from "./components/marketing-brief-panel";
 
 type MarketingTab = "social" | "campaigns" | "forms" | "insights";
 
@@ -90,6 +92,7 @@ export default function MarketingPage() {
   const [availableTags, setAvailableTags] = useState<string[]>([]);
   const [showGuide, setShowGuide] = useState(false);
   const [showStrategy, setShowStrategy] = useState(false);
+  const [showBrief, setShowBrief] = useState(false);
 
   const directionRef = useRef<number>(0);
 
@@ -328,6 +331,13 @@ export default function MarketingPage() {
         rightSlot={
           <div className="flex items-center gap-2">
             <button
+              onClick={() => setShowBrief(true)}
+              className="inline-flex items-center gap-1.5 text-sm px-3 py-2 rounded-xl bg-[hsl(var(--kf-accent2))]/10 hover:bg-[hsl(var(--kf-accent2))]/20 text-[hsl(var(--kf-accent2))] transition-colors"
+            >
+              <FileText className="w-4 h-4" />
+              <span className="hidden sm:inline">Brief</span>
+            </button>
+            <button
               onClick={() => setShowStrategy(true)}
               className="inline-flex items-center gap-1.5 text-sm px-3 py-2 rounded-xl bg-[hsl(var(--kf-accent1))]/10 hover:bg-[hsl(var(--kf-accent1))]/20 text-[hsl(var(--kf-accent1))] transition-colors"
             >
@@ -448,6 +458,12 @@ export default function MarketingPage() {
         businessId={businessId}
         isOpen={showStrategy}
         onClose={() => setShowStrategy(false)}
+      />
+
+      <MarketingBriefPanel
+        businessId={businessId}
+        isOpen={showBrief}
+        onClose={() => setShowBrief(false)}
       />
     </div>
   );
