@@ -36,7 +36,6 @@ import { useSearchParams, useRouter } from "next/navigation";
 import type { Tab, StatusFilter } from "./components/bookings-types";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
-import { ContactPickerDrawer } from "@/components/contacts";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
@@ -44,7 +43,6 @@ import { useBookingsAiHub } from "./hooks/use-bookings-ai-hub";
 import { renderBookingsToolResult } from "./components/bookings-tool-results";
 import { BookingsSkeleton } from "./components/bookings-skeleton";
 import { moduleEvents } from "@/lib/module-events";
-import { Send } from "lucide-react";
 import CalendarView from "./calendar/calendar-view";
 import ServicesTab from "./services/services-tab";
 import BookingsInsightsTab from "./insights/bookings-insights-tab";
@@ -86,7 +84,6 @@ export default function BookingsPage() {
   const [banner, setBanner] = useState<{ text: string; type: "success" | "error" | "info" } | null>(null);
 
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
-  const [showContactPicker, setShowContactPicker] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
 
   const directionRef = useRef<number>(0);
@@ -371,13 +368,6 @@ export default function BookingsPage() {
         onAction={() => setShowCreateBooking(true)}
         rightSlot={
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowContactPicker(true)}
-              className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <Send className="w-4 h-4" />
-              <span className="hidden sm:inline">Broadcast</span>
-            </button>
             {calendarConnected ? (
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
@@ -507,7 +497,6 @@ export default function BookingsPage() {
         )}
       </AnimatePresence>
 
-      <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
 
       <AiCommandHub
         ai={ai}
