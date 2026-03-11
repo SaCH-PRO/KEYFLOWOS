@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Calendar,
-  Wrench,
+  Package,
   BarChart3,
   Plus,
   Link2,
@@ -19,11 +19,13 @@ import {
   StaffMember,
   Contact,
   BookingStats,
+  Product,
   createBooking,
   fetchBookings,
   fetchServices,
   fetchStaff,
   fetchContacts,
+  fetchProducts,
   getCalendarAuthUrl,
   getCalendarStatus,
   disconnectCalendar,
@@ -43,8 +45,10 @@ import { useBookingsAiHub } from "./hooks/use-bookings-ai-hub";
 import { renderBookingsToolResult } from "./components/bookings-tool-results";
 import { BookingsSkeleton } from "./components/bookings-skeleton";
 import { moduleEvents } from "@/lib/module-events";
+import { useProducts } from "../commerce/hooks/use-products";
+import { ProductsPanel } from "../commerce/products/products-panel";
+import { ProductFormModal } from "../commerce/products/product-form-modal";
 import CalendarView from "./calendar/calendar-view";
-import ServicesTab from "./services/services-tab";
 import BookingsInsightsTab from "./insights/bookings-insights-tab";
 import BookingForm from "./components/booking-form";
 import BookingDetailDrawer from "./components/booking-detail-drawer";
@@ -52,7 +56,7 @@ import BookingsAiSearchBar from "./components/bookings-ai-search-bar";
 
 const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
   { key: "calendar", label: "Calendar", icon: Calendar },
-  { key: "services", label: "Services", icon: Wrench },
+  { key: "products", label: "Products", icon: Package },
   { key: "insights", label: "Insights", icon: BarChart3 },
 ];
 
@@ -75,6 +79,9 @@ export default function BookingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [products, setProducts] = useState<Product[]>([]);
+  const [cachedImages, setCachedImages] = useState<Record<string, string>>({});
+
   const [showCreateBooking, setShowCreateBooking] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -91,6 +98,8 @@ export default function BookingsPage() {
   const tabKeys = useMemo(() => TABS.map((t) => t.key), []);
 
   const ai = useBookingsAiHub();
+
+  const productHook = useProducts(businessId, setProducts, cachedImages, setCachedImages);
 
   const handleTabChange = useCallback((key: string) => {
     const newIndex = tabKeys.indexOf(key as Tab);
@@ -111,7 +120,7 @@ export default function BookingsPage() {
       groupName: "Bookings",
       shortcuts: [
         { key: "1", action: () => handleTabChange("calendar"), description: "Calendar tab" },
-        { key: "2", action: () => handleTabChange("services"), description: "Services tab" },
+        { key: "2", action: () => handleTabChange("products"), description: "Products tab" },
         { key: "3", action: () => handleTabChange("insights"), description: "Insights tab" },
         { key: "n", action: () => setShowCreateBooking(true), description: "New booking" },
         { key: "r", action: () => void loadData(), description: "Refresh data" },
@@ -151,19 +160,21 @@ export default function BookingsPage() {
     if (!businessId) return;
     setLoading(true);
     try {
-      const [bookingsRes, servicesRes, staffRes, calendarRes, contactsRes, statsRes] = await Promise.all([
+      const [bookingsRes, servicesRes, staffRes, calendarRes, contactsRes, statsRes, productsRes] = await Promise.all([
         fetchBookings(businessId),
         fetchServices(businessId),
         fetchStaff(businessId),
         getCalendarStatus(businessId).catch(() => ({ data: null, error: null })),
         fetchContacts(businessId, { take: 200 }),
         fetchBookingStats(businessId).catch(() => ({ data: null, error: null })),
+        fetchProducts(businessId),
       ]);
       setBookings(bookingsRes.data ?? []);
       setServices(servicesRes.data ?? []);
       setStaff(staffRes.data ?? []);
       setContacts(contactsRes.data?.contacts ?? []);
       setStats(statsRes.data ?? null);
+      setProducts((productsRes.data ?? []).map((p) => ({ ...p, currency: p.currency ?? "TTD" } as Product)));
       setCalendarConnected((calendarRes.data as any)?.connected ?? false);
       setCalendarEmail((calendarRes.data as any)?.email ?? null);
       if (bookingsRes.error || servicesRes.error || staffRes.error) {
@@ -288,7 +299,7 @@ export default function BookingsPage() {
         <PageHeader
           icon={Calendar}
           title="Bookings"
-          subtitle="Schedule, manage services & staff"
+          subtitle="Schedule, manage products & staff"
         />
         <BookingsSkeleton />
       </div>
@@ -300,7 +311,7 @@ export default function BookingsPage() {
       <PageHeader
         icon={Calendar}
         title="Bookings"
-        subtitle="Schedule, manage services & staff"
+        subtitle="Schedule, manage products & staff"
         titleExtra={
           <div className="relative">
             <button
@@ -340,7 +351,7 @@ export default function BookingsPage() {
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {[
-                        { step: "1", title: "Add Services", desc: "Define your bookable services with duration, pricing, and descriptions." },
+                        { step: "1", title: "Add Products", desc: "Define your bookable services, products, and packages with pricing." },
                         { step: "2", title: "Add Staff", desc: "Add team members who can be assigned to bookings." },
                         { step: "3", title: "Share Booking Link", desc: "Your public storefront lets customers browse services and book online." },
                         { step: "4", title: "Manage Schedule", desc: "View bookings on the calendar, confirm or cancel appointments." },
@@ -452,14 +463,27 @@ export default function BookingsPage() {
               onSelectBooking={setSelectedBooking}
             />
           )}
-          {tab === "services" && (
-            <ServicesTab
-              businessId={businessId}
-              services={services}
-              staff={staff}
-              setServices={setServices}
-              setStaff={setStaff}
+          {tab === "products" && (
+            <ProductsPanel
+              products={products}
               loading={loading}
+              productSearch={productHook.productSearch}
+              setProductSearch={productHook.setProductSearch}
+              onEdit={productHook.openEditProduct}
+              onDelete={productHook.handleDeleteProduct}
+              onDuplicate={productHook.handleDuplicateProduct}
+              onToggleActive={productHook.handleToggleProductActive}
+              onInlineSave={productHook.handleInlineSave}
+              onAdd={productHook.openAddProduct}
+              setProducts={setProducts}
+              deleteConfirm={productHook.deleteConfirm}
+              setDeleteConfirm={productHook.setDeleteConfirm}
+              cachedImages={cachedImages}
+              businessId={businessId}
+              onBulkAction={() => void loadData()}
+              currency="TTD"
+              invoices={[]}
+              quotes={[]}
             />
           )}
           {tab === "insights" && (
@@ -471,6 +495,26 @@ export default function BookingsPage() {
           )}
         </motion.div>
       </AnimatePresence>
+
+      <ProductFormModal
+        open={productHook.showProductForm}
+        editingProductId={productHook.editingProductId}
+        productForm={productHook.productForm}
+        setProductForm={productHook.setProductForm}
+        formError={productHook.formError}
+        saving={productHook.saving}
+        imagePreview={productHook.imagePreview}
+        imageMode={productHook.imageMode}
+        setImageMode={productHook.setImageMode}
+        setImagePreview={productHook.setImagePreview}
+        fileInputRef={productHook.fileInputRef}
+        onClose={productHook.closeProductForm}
+        onSave={productHook.handleSaveProduct}
+        onSaveAndAddAnother={productHook.handleSaveAndAddAnother}
+        onFileSelect={productHook.handleFileSelect}
+        onRemoveImage={productHook.removeImage}
+        currency="TTD"
+      />
 
       <AnimatePresence>
         {showCreateBooking && (

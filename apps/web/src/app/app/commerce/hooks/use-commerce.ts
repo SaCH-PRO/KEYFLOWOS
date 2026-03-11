@@ -33,7 +33,7 @@ export function useCommerce() {
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
 
-  const [tab, setTab] = useState<Tab>("products" as Tab);
+  const [tab, setTab] = useState<Tab>("invoices" as Tab);
   const [products, setProducts] = useState<Product[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
@@ -73,11 +73,8 @@ export function useCommerce() {
     const urlContactId = params.get("contactId");
     const urlProductIds = params.get("productIds");
 
-    const validTabs: Tab[] = ["products", "billing", "insights"];
-    const validSegments = ["quotes", "invoices", "schedules"] as const;
+    const validTabs: Tab[] = ["quotes", "invoices", "schedules", "insights"];
     if (urlTab && validTabs.includes(urlTab as Tab)) setTab(urlTab as Tab);
-    const safeSegment = validSegments.includes(urlSegment as any) ? (urlSegment as "quotes" | "invoices") : null;
-    if (safeSegment) setActiveBillingSegment(safeSegment);
 
     if (urlContactId) {
       const items: InvoiceLineItem[] = urlProductIds
@@ -89,13 +86,14 @@ export function useCommerce() {
             unitPrice: "",
           }))
         : [];
+      const targetSeg = (urlSegment === "quotes" ? "quotes" : "invoices") as "quotes" | "invoices";
       setPendingPrefill({
         contactId: urlContactId,
         items: items.length > 0 ? items : undefined,
-        targetSegment: urlSegment ?? "invoices",
+        targetSegment: targetSeg,
         _token: Date.now(),
       });
-      if (urlTab !== "billing") setTab("billing");
+      setTab(targetSeg);
     }
 
     if (urlContactId || urlTab) {
@@ -174,20 +172,14 @@ export function useCommerce() {
   const handleToggleGuide = useCallback(() => setShowGuide((prev) => !prev), []);
   const handleTabChange = useCallback((t: string) => setTab(t as Tab), []);
 
-  const [activeBillingSegment, setActiveBillingSegment] = useState<"quotes" | "invoices" | "schedules">("invoices");
-
   const handleNewItem = useCallback(() => {
-    if (tab === "products") productHook.openAddProduct();
-    else if (tab === "billing") {
-      if (activeBillingSegment === "quotes") setTriggerNewQuote((n) => n + 1);
-      else if (activeBillingSegment === "schedules") setTriggerNewSchedule((n) => n + 1);
-      else setTriggerNewInvoice((n) => n + 1);
-    }
-  }, [tab, activeBillingSegment, productHook.openAddProduct]);
+    if (tab === "quotes") setTriggerNewQuote((n) => n + 1);
+    else if (tab === "schedules") setTriggerNewSchedule((n) => n + 1);
+    else if (tab === "invoices") setTriggerNewInvoice((n) => n + 1);
+  }, [tab]);
 
   const prefillForContact = useCallback((contactId: string, target: "quotes" | "invoices" = "invoices", items?: InvoiceLineItem[]) => {
-    setTab("billing");
-    setActiveBillingSegment(target);
+    setTab(target);
     setPendingPrefill({ contactId, items, targetSegment: target, _token: Date.now() });
   }, []);
 
@@ -226,9 +218,6 @@ export function useCommerce() {
     setTriggerNewInvoice,
     triggerNewSchedule,
     setTriggerNewSchedule,
-
-    activeBillingSegment,
-    setActiveBillingSegment,
 
     handleNewItem,
 

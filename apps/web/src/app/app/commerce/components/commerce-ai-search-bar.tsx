@@ -247,7 +247,7 @@ export function CommerceAiSearchBar({ onExecuteCommand, onSelectResult, onApplyF
         });
         break;
       case "switch_tab":
-        onExecuteCommand({ type: "switch_tab", tab: (params?.tab as string) ?? "products" });
+        onExecuteCommand({ type: "switch_tab", tab: (params?.tab as string) ?? "invoices" });
         break;
       case "filter_status":
         onExecuteCommand({ type: "filter_status", status: (params?.status as string) ?? "all" });

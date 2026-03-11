@@ -457,6 +457,8 @@ interface BillingPanelProps {
   triggerNewInvoice?: number;
   triggerNewSchedule?: number;
   defaultSegment?: BillingSegment;
+  activeSegment?: BillingSegment;
+  hideSegmentNav?: boolean;
   onSegmentChange?: (segment: BillingSegment) => void;
   prefillContactId?: string;
   prefillItems?: import("../components/commerce-types").InvoiceLineItem[];
@@ -487,6 +489,8 @@ export function BillingPanel({
   triggerNewInvoice = 0,
   triggerNewSchedule = 0,
   defaultSegment = "invoices",
+  activeSegment,
+  hideSegmentNav = false,
   onSegmentChange,
   prefillContactId,
   prefillItems,
@@ -507,6 +511,14 @@ export function BillingPanel({
   const prevSegmentRef = useRef(defaultSegment);
   const [serverStats, setServerStats] = useState<CommerceStats | null>(null);
   const [schedulesCount, setSchedulesCount] = useState(0);
+
+  useEffect(() => {
+    if (activeSegment && activeSegment !== segment) {
+      const order: BillingSegment[] = ["quotes", "invoices", "schedules"];
+      setSlideDir(order.indexOf(activeSegment) > order.indexOf(segment) ? 1 : -1);
+      setSegment(activeSegment);
+    }
+  }, [activeSegment]);
 
   useEffect(() => {
     if (!businessId) return;
@@ -758,112 +770,114 @@ export function BillingPanel({
         </div>
       )}
 
-      <div className="relative">
-        {slots?.renderHeaderExtra?.()}
-        <div
-          role="tablist"
-          aria-label="Billing sections"
-          onKeyDown={(e) => {
-            const keys: Record<string, number> = { ArrowRight: 1, ArrowLeft: -1 };
-            const dir = keys[e.key];
-            if (dir !== undefined) {
-              e.preventDefault();
-              const idx = SEGMENTS.findIndex(s => s.key === segment);
-              const next = idx + dir;
-              if (next >= 0 && next < SEGMENTS.length) handleSegmentChange(SEGMENTS[next].key);
-            } else if (e.key === "Home") {
-              e.preventDefault();
-              handleSegmentChange(SEGMENTS[0].key);
-            } else if (e.key === "End") {
-              e.preventDefault();
-              handleSegmentChange(SEGMENTS[SEGMENTS.length - 1].key);
-            }
-          }}
-          className="flex -mb-px"
-        >
-          {SEGMENTS.map((seg, i) => {
-            const isActive = segment === seg.key;
-            const count = segmentCounts[seg.key];
-            return (
-              <button
-                key={seg.key}
-                onClick={() => handleSegmentChange(seg.key)}
-                role="tab"
-                id={`billing-tab-${seg.key}`}
-                aria-selected={isActive}
-                aria-controls={`billing-tabpanel-${seg.key}`}
-                tabIndex={isActive ? 0 : -1}
-                style={{ zIndex: isActive ? 10 : SEGMENTS.length - i }}
-                className={`group relative flex-1 flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap
-                  transition-colors duration-200 outline-none
-                  focus-visible:ring-2 focus-visible:ring-[hsl(var(--kf-accent1)/0.5)] focus-visible:ring-offset-1 focus-visible:ring-offset-background
-                  px-3 sm:px-5 py-2.5 sm:py-3
-                  text-xs sm:text-sm font-semibold
-                  rounded-t-xl
-                  border-x border-t border-b-0
-                  ${isActive
-                    ? "bg-card/80 backdrop-blur-sm text-foreground border-border/40"
-                    : "bg-transparent text-muted-foreground/50 border-transparent hover:text-muted-foreground/80 hover:bg-white/[0.03]"
-                  }`}
-              >
-                {isActive && (
-                  <motion.div
-                    layoutId="billing-tab-bar"
-                    className="absolute inset-x-0 top-0 h-[2px] rounded-t-xl"
-                    style={{
-                      background: `linear-gradient(90deg, ${seg.accent}, ${seg.accent})`,
-                    }}
-                    transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
+      {!hideSegmentNav && (
+        <div className="relative">
+          {slots?.renderHeaderExtra?.()}
+          <div
+            role="tablist"
+            aria-label="Billing sections"
+            onKeyDown={(e) => {
+              const keys: Record<string, number> = { ArrowRight: 1, ArrowLeft: -1 };
+              const dir = keys[e.key];
+              if (dir !== undefined) {
+                e.preventDefault();
+                const idx = SEGMENTS.findIndex(s => s.key === segment);
+                const next = idx + dir;
+                if (next >= 0 && next < SEGMENTS.length) handleSegmentChange(SEGMENTS[next].key);
+              } else if (e.key === "Home") {
+                e.preventDefault();
+                handleSegmentChange(SEGMENTS[0].key);
+              } else if (e.key === "End") {
+                e.preventDefault();
+                handleSegmentChange(SEGMENTS[SEGMENTS.length - 1].key);
+              }
+            }}
+            className="flex -mb-px"
+          >
+            {SEGMENTS.map((seg, i) => {
+              const isActive = segment === seg.key;
+              const count = segmentCounts[seg.key];
+              return (
+                <button
+                  key={seg.key}
+                  onClick={() => handleSegmentChange(seg.key)}
+                  role="tab"
+                  id={`billing-tab-${seg.key}`}
+                  aria-selected={isActive}
+                  aria-controls={`billing-tabpanel-${seg.key}`}
+                  tabIndex={isActive ? 0 : -1}
+                  style={{ zIndex: isActive ? 10 : SEGMENTS.length - i }}
+                  className={`group relative flex-1 flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap
+                    transition-colors duration-200 outline-none
+                    focus-visible:ring-2 focus-visible:ring-[hsl(var(--kf-accent1)/0.5)] focus-visible:ring-offset-1 focus-visible:ring-offset-background
+                    px-3 sm:px-5 py-2.5 sm:py-3
+                    text-xs sm:text-sm font-semibold
+                    rounded-t-xl
+                    border-x border-t border-b-0
+                    ${isActive
+                      ? "bg-card/80 backdrop-blur-sm text-foreground border-border/40"
+                      : "bg-transparent text-muted-foreground/50 border-transparent hover:text-muted-foreground/80 hover:bg-white/[0.03]"
+                    }`}
+                >
+                  {isActive && (
+                    <motion.div
+                      layoutId="billing-tab-bar"
+                      className="absolute inset-x-0 top-0 h-[2px] rounded-t-xl"
+                      style={{
+                        background: `linear-gradient(90deg, ${seg.accent}, ${seg.accent})`,
+                      }}
+                      transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
+                    />
+                  )}
+                  {isActive && (
+                    <motion.div
+                      layoutId="billing-tab-bg"
+                      className="absolute inset-0 rounded-t-xl"
+                      style={{
+                        background: `linear-gradient(180deg, ${seg.accentMuted} 0%, transparent 100%)`,
+                      }}
+                      transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
+                    />
+                  )}
+                  <seg.icon
+                    className={`relative z-10 w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 transition-colors duration-200 ${
+                      !isActive ? "group-hover:text-muted-foreground/70" : ""
+                    }`}
+                    style={isActive ? { color: seg.accent } : undefined}
                   />
-                )}
-                {isActive && (
-                  <motion.div
-                    layoutId="billing-tab-bg"
-                    className="absolute inset-0 rounded-t-xl"
-                    style={{
-                      background: `linear-gradient(180deg, ${seg.accentMuted} 0%, transparent 100%)`,
-                    }}
-                    transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
-                  />
-                )}
-                <seg.icon
-                  className={`relative z-10 w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 transition-colors duration-200 ${
-                    !isActive ? "group-hover:text-muted-foreground/70" : ""
-                  }`}
-                  style={isActive ? { color: seg.accent } : undefined}
-                />
-                <span className="relative z-10">{seg.label}</span>
-                {count > 0 && (
-                  <span
-                    className="relative z-10 text-[10px] sm:text-xs tabular-nums rounded-full px-1.5 py-px min-w-[20px] text-center transition-colors duration-200"
-                    style={isActive
-                      ? { background: seg.accentMuted, color: seg.accent }
-                      : { background: "rgba(255,255,255,0.04)", color: "inherit" }
-                    }
-                  >
-                    {count}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
+                  <span className="relative z-10">{seg.label}</span>
+                  {count > 0 && (
+                    <span
+                      className="relative z-10 text-[10px] sm:text-xs tabular-nums rounded-full px-1.5 py-px min-w-[20px] text-center transition-colors duration-200"
+                      style={isActive
+                        ? { background: seg.accentMuted, color: seg.accent }
+                        : { background: "rgba(255,255,255,0.04)", color: "inherit" }
+                      }
+                    >
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
 
-        <div className="h-px bg-border/40" />
+          <div className="h-px bg-border/40" />
 
-        <div className="absolute bottom-0 left-0 right-0 h-px pointer-events-none" style={{ zIndex: 1 }}>
-          {segmentIndex >= 0 && (
-            <motion.div
-              className="absolute bottom-0 h-px bg-card/80"
-              animate={{
-                left: `${(segmentIndex / SEGMENTS.length) * 100}%`,
-                width: `${100 / SEGMENTS.length}%`,
-              }}
-              transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
-            />
-          )}
+          <div className="absolute bottom-0 left-0 right-0 h-px pointer-events-none" style={{ zIndex: 1 }}>
+            {segmentIndex >= 0 && (
+              <motion.div
+                className="absolute bottom-0 h-px bg-card/80"
+                animate={{
+                  left: `${(segmentIndex / SEGMENTS.length) * 100}%`,
+                  width: `${100 / SEGMENTS.length}%`,
+                }}
+                transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
+              />
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {slots?.renderInsightBanner?.()}
 
