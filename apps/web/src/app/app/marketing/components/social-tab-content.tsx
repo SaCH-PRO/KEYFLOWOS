@@ -109,7 +109,7 @@ export function SocialTabContent({ businessId, onPostsLoaded }: SocialTabContent
   async function handleCreate(data: ComposerSubmitData) {
     setSubmitting(true);
     const { data: post, error } = await createPost({
-      businessId,
+      businessId: businessId ?? undefined,
       content: data.content,
       scheduledFor: data.scheduledFor,
       channelIds: data.channelIds,

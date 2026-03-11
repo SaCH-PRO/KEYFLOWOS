@@ -719,10 +719,10 @@ export async function addContactTask(
 }
 
 export async function updateContactNote(noteId: string, data: { body?: string; source?: string }, businessId: string = DEFAULT_BUSINESS_ID) {
-  return apiPatch({
-    path: `/crm/businesses/${encodeURIComponent(businessId)}/notes/${encodeURIComponent(noteId)}`,
-    body: data,
-  });
+  return apiPatch(
+    `/crm/businesses/${encodeURIComponent(businessId)}/notes/${encodeURIComponent(noteId)}`,
+    data,
+  );
 }
 
 export async function deleteContactNote(noteId: string, businessId: string = DEFAULT_BUSINESS_ID) {
@@ -730,10 +730,10 @@ export async function deleteContactNote(noteId: string, businessId: string = DEF
 }
 
 export async function updateContactTask(taskId: string, data: { title?: string; dueDate?: string; priority?: string; remindAt?: string }, businessId: string = DEFAULT_BUSINESS_ID) {
-  return apiPatch({
-    path: `/crm/businesses/${encodeURIComponent(businessId)}/tasks/${encodeURIComponent(taskId)}`,
-    body: data,
-  });
+  return apiPatch(
+    `/crm/businesses/${encodeURIComponent(businessId)}/tasks/${encodeURIComponent(taskId)}`,
+    data,
+  );
 }
 
 export async function deleteContactTask(taskId: string, businessId: string = DEFAULT_BUSINESS_ID) {
@@ -3632,7 +3632,7 @@ export async function fetchAiGuidelines(
   businessId: string,
 ): Promise<ApiResult<{ guidelines: string[]; generatedAt: string | null }>> {
   const fallback = { guidelines: [] as string[], generatedAt: null as string | null };
-  return apiGetSimple(
+  return apiGet<{ guidelines: string[]; generatedAt: string | null }>(
     `/crm/businesses/${encodeURIComponent(businessId)}/ai-guidelines`,
     z.object({ guidelines: z.array(z.string()), generatedAt: z.string().nullable() }),
     fallback,
@@ -3983,9 +3983,9 @@ export type AiDataQualityResult = {
 
 export async function aiDataQualityScan(businessId?: string): Promise<ApiResult<AiDataQualityResult>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
-  return apiGet<AiDataQualityResult>({
-    path: `/crm/businesses/${encodeURIComponent(bid)}/ai-data-quality`,
-  });
+  return apiGet<AiDataQualityResult>(
+    `/crm/businesses/${encodeURIComponent(bid)}/ai-data-quality`,
+  );
 }
 
 export type AiDuplicatesResult = {
@@ -4000,9 +4000,9 @@ export type AiDuplicatesResult = {
 
 export async function aiFindDuplicates(businessId?: string): Promise<ApiResult<AiDuplicatesResult>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
-  return apiGet<AiDuplicatesResult>({
-    path: `/crm/businesses/${encodeURIComponent(bid)}/ai-duplicates`,
-  });
+  return apiGet<AiDuplicatesResult>(
+    `/crm/businesses/${encodeURIComponent(bid)}/ai-duplicates`,
+  );
 }
 
 export type AiReengagementResult = {
@@ -4023,9 +4023,9 @@ export type AiReengagementResult = {
 
 export async function aiReengagementSuggestions(businessId?: string): Promise<ApiResult<AiReengagementResult>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
-  return apiGet<AiReengagementResult>({
-    path: `/crm/businesses/${encodeURIComponent(bid)}/ai-reengagement`,
-  });
+  return apiGet<AiReengagementResult>(
+    `/crm/businesses/${encodeURIComponent(bid)}/ai-reengagement`,
+  );
 }
 
 export type AiRevenueOpportunitiesResult = {
@@ -4045,9 +4045,9 @@ export type AiRevenueOpportunitiesResult = {
 
 export async function aiRevenueOpportunities(businessId?: string): Promise<ApiResult<AiRevenueOpportunitiesResult>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
-  return apiGet<AiRevenueOpportunitiesResult>({
-    path: `/crm/businesses/${encodeURIComponent(bid)}/ai-revenue-opportunities`,
-  });
+  return apiGet<AiRevenueOpportunitiesResult>(
+    `/crm/businesses/${encodeURIComponent(bid)}/ai-revenue-opportunities`,
+  );
 }
 
 export type AiFollowUpDraftResult = {
