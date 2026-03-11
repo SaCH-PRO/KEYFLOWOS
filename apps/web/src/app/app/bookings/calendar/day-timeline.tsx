@@ -32,12 +32,14 @@ interface DayTimelineProps {
   bookings: Booking[];
   currentDate: Date;
   onSelectBooking: (booking: Booking) => void;
+  onSlotClick?: (date: string, time: string) => void;
 }
 
 export default function DayTimeline({
   bookings,
   currentDate,
   onSelectBooking,
+  onSlotClick,
 }: DayTimelineProps) {
   const dayBookings = useMemo(() => {
     const dateKey = currentDate.toISOString().split("T")[0];
@@ -64,6 +66,13 @@ export default function DayTimeline({
     return map;
   }, [dayBookings, hours]);
 
+  const dateStr = useMemo(() => {
+    const yyyy = currentDate.getFullYear();
+    const mm = String(currentDate.getMonth() + 1).padStart(2, "0");
+    const dd = String(currentDate.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  }, [currentDate]);
+
   const dateLabel = currentDate.toLocaleDateString("en-US", {
     weekday: "long",
     month: "long",
@@ -84,15 +93,7 @@ export default function DayTimeline({
         </span>
       </div>
 
-      {dayBookings.length === 0 ? (
-        <div className="kf-card p-8 text-center">
-          <CalendarDays className="w-10 h-10 mx-auto text-muted-foreground mb-2" />
-          <p className="text-sm text-muted-foreground">
-            No bookings scheduled for this day
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-0">
+      <div className="space-y-0">
           {hours.map((hour) => {
             const hBookings = bookingsByHour.get(hour) ?? [];
             const label =
@@ -112,7 +113,17 @@ export default function DayTimeline({
                     {label}
                   </span>
                 </div>
-                <div className="border-l border-border/30 pl-3 pb-2 space-y-2">
+                <div
+                  className={`border-l border-border/30 pl-3 pb-2 space-y-2 ${hBookings.length === 0 && onSlotClick ? "cursor-pointer hover:bg-muted/20 transition-colors rounded-r-lg" : ""}`}
+                  onClick={() => {
+                    if (hBookings.length === 0 && onSlotClick) {
+                      onSlotClick(dateStr, `${String(hour).padStart(2, "0")}:00`);
+                    }
+                  }}
+                  role={hBookings.length === 0 && onSlotClick ? "button" : undefined}
+                  aria-label={hBookings.length === 0 && onSlotClick ? `Book at ${label}` : undefined}
+                  title={hBookings.length === 0 && onSlotClick ? `Click to book at ${label}` : undefined}
+                >
                   {hBookings.map((b) => {
                     const durationMs =
                       new Date(b.endTime).getTime() -
@@ -190,7 +201,6 @@ export default function DayTimeline({
             );
           })}
         </div>
-      )}
     </div>
   );
 }

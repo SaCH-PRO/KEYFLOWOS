@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { motion } from "framer-motion";
 import {
   Plus,
@@ -25,14 +25,24 @@ interface BookingFormProps {
   }) => void;
   onCancel: () => void;
   formError: string | null;
+  defaultDate?: string;
+  defaultTime?: string;
 }
 
-export default function BookingForm({ services, staff, contacts, onSubmit, onCancel, formError }: BookingFormProps) {
-  const [bookingDate, setBookingDate] = useState("");
-  const [bookingTime, setBookingTime] = useState("");
+export default function BookingForm({ services, staff, contacts, onSubmit, onCancel, formError, defaultDate, defaultTime }: BookingFormProps) {
+  const [bookingDate, setBookingDate] = useState(defaultDate ?? "");
+  const [bookingTime, setBookingTime] = useState(defaultTime ?? "");
   const [bookingServiceId, setBookingServiceId] = useState("");
   const [bookingStaffId, setBookingStaffId] = useState("");
   const [bookingContactId, setBookingContactId] = useState("");
+
+  useEffect(() => {
+    setBookingDate(defaultDate ?? "");
+  }, [defaultDate]);
+
+  useEffect(() => {
+    setBookingTime(defaultTime ?? "");
+  }, [defaultTime]);
 
   const selectedService = useMemo(() => services.find((s) => s.id === bookingServiceId), [services, bookingServiceId]);
 
@@ -58,69 +68,70 @@ export default function BookingForm({ services, staff, contacts, onSubmit, onCan
       initial={{ opacity: 0, height: 0 }}
       animate={{ opacity: 1, height: "auto" }}
       exit={{ opacity: 0, height: 0 }}
+      transition={{ duration: 0.2 }}
     >
-      <div className="kf-card-accent p-5 space-y-4">
+      <div className="kf-card-accent p-3 sm:p-4 space-y-3 rounded-xl border border-border/50">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold flex items-center gap-2">
-            <Plus className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} /> Create New Booking
+          <h3 className="text-xs font-semibold flex items-center gap-1.5">
+            <Plus className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} /> New Booking
           </h3>
-          <button onClick={onCancel} className="p-1 rounded-lg hover:bg-muted/50">
-            <X className="w-4 h-4" />
+          <button onClick={onCancel} className="p-0.5 rounded-lg hover:bg-muted/50">
+            <X className="w-3.5 h-3.5 text-muted-foreground" />
           </button>
         </div>
 
         {formError && (
-          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-200">
             {formError}
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
           <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block font-medium">Date</label>
+            <label className="text-[10px] text-muted-foreground mb-1 block font-medium">Date</label>
             <input
               type="date"
               value={bookingDate}
               onChange={(e) => setBookingDate(e.target.value)}
-              className="kf-input w-full"
+              className="kf-input w-full text-xs h-8"
             />
           </div>
           <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block font-medium">Time</label>
+            <label className="text-[10px] text-muted-foreground mb-1 block font-medium">Time</label>
             <input
               type="time"
               value={bookingTime}
               onChange={(e) => setBookingTime(e.target.value)}
-              className="kf-input w-full"
+              className="kf-input w-full text-xs h-8"
             />
           </div>
           <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block font-medium">Service</label>
+            <label className="text-[10px] text-muted-foreground mb-1 block font-medium">Service</label>
             <select
               value={bookingServiceId}
               onChange={(e) => setBookingServiceId(e.target.value)}
-              className="kf-input w-full"
+              className="kf-input w-full text-xs h-8"
             >
-              <option value="">Select service...</option>
+              <option value="">Select...</option>
               {services.map((s) => (
-                <option key={s.id} value={s.id}>{s.name} — {s.durationMins}min • {s.currency} {s.price}</option>
+                <option key={s.id} value={s.id}>{s.name} — {s.durationMins}m</option>
               ))}
             </select>
           </div>
           <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block font-medium">Staff</label>
+            <label className="text-[10px] text-muted-foreground mb-1 block font-medium">Staff</label>
             <select
               value={bookingStaffId}
               onChange={(e) => setBookingStaffId(e.target.value)}
-              className="kf-input w-full"
+              className="kf-input w-full text-xs h-8"
             >
-              <option value="">Select staff...</option>
+              <option value="">Select...</option>
               {staff.map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
           </div>
-          <div className="md:col-span-2">
+          <div className="col-span-2 sm:col-span-1 lg:col-span-2">
             <ContactSelect
               value={bookingContactId}
               onChange={(id) => setBookingContactId(id)}
@@ -129,20 +140,25 @@ export default function BookingForm({ services, staff, contacts, onSubmit, onCan
             />
           </div>
         </div>
-        {selectedService && computedEndTime && (
-          <div className="flex items-center gap-3 text-xs text-muted-foreground kf-card rounded-xl p-3">
-            <Clock className="w-3.5 h-3.5" />
-            <span>Duration: {selectedService.durationMins} min</span>
-            <span>|</span>
-            <span>Ends at: {formatTime(computedEndTime)}</span>
-            <span>|</span>
-            <DollarSign className="w-3.5 h-3.5" />
-            <span>{selectedService.currency} {selectedService.price}</span>
+
+        <div className="flex items-center justify-between gap-3">
+          {selectedService && computedEndTime ? (
+            <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+              <Clock className="w-3 h-3" />
+              <span>{selectedService.durationMins}m</span>
+              <span className="opacity-40">·</span>
+              <span>Ends {formatTime(computedEndTime)}</span>
+              <span className="opacity-40">·</span>
+              <DollarSign className="w-3 h-3" />
+              <span>{selectedService.currency} {selectedService.price}</span>
+            </div>
+          ) : (
+            <div />
+          )}
+          <div className="flex gap-1.5 flex-shrink-0">
+            <button onClick={onCancel} className="kf-btn-secondary text-xs px-3 py-1.5">Cancel</button>
+            <button onClick={handleSubmit} className="kf-btn-primary text-xs px-3 py-1.5">Book</button>
           </div>
-        )}
-        <div className="flex gap-2 justify-end">
-          <button onClick={onCancel} className="kf-btn-secondary">Cancel</button>
-          <button onClick={handleSubmit} className="kf-btn-primary">Create Booking</button>
         </div>
       </div>
     </motion.div>
