@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronLeft,
@@ -12,6 +12,7 @@ import {
   X,
   CalendarCheck,
   Users,
+  Loader2,
 } from "lucide-react";
 import type { SocialPost, Booking, Service, StaffMember } from "@/lib/client";
 
@@ -32,7 +33,7 @@ type Props = {
   staff: StaffMember[];
   onSelectPost: (post: SocialPost) => void;
   onSelectBooking?: (booking: Booking) => void;
-  onCreateBooking?: (data: { date: string; time: string; serviceId: string; staffId: string }) => void;
+  onCreateBooking?: (data: { date: string; time: string; serviceId: string; staffId: string }) => Promise<void> | void;
 };
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -66,7 +67,7 @@ function formatTimeShort(d: Date) {
   return d.toLocaleTimeString("en-TT", { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
-function QuickBookingModal({
+function InlineBookingForm({
   date,
   time,
   services,
@@ -78,7 +79,7 @@ function QuickBookingModal({
   time: string;
   services: Service[];
   staff: StaffMember[];
-  onSubmit: (data: { date: string; time: string; serviceId: string; staffId: string }) => void;
+  onSubmit: (data: { date: string; time: string; serviceId: string; staffId: string }) => Promise<void> | void;
   onClose: () => void;
 }) {
   const [bookDate, setBookDate] = useState(date);
@@ -86,119 +87,143 @@ function QuickBookingModal({
   const [serviceId, setServiceId] = useState("");
   const [staffId, setStaffId] = useState("");
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const formRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setBookDate(date);
+    setBookTime(time);
+  }, [date, time]);
 
   const selectedService = useMemo(() => services.find((s) => s.id === serviceId), [services, serviceId]);
+  const durationMins = selectedService ? (selectedService.durationMins ?? selectedService.duration ?? 60) : null;
 
-  function handleSubmit() {
-    if (!bookDate || !bookTime) { setError("Date and time are required"); return; }
-    if (!serviceId) { setError("Please select a service"); return; }
-    if (!staffId) { setError("Please select a staff member"); return; }
+  const endTimeLabel = useMemo(() => {
+    if (!bookDate || !bookTime || !durationMins) return null;
+    const start = new Date(`${bookDate}T${bookTime}`);
+    if (isNaN(start.getTime())) return null;
+    const end = new Date(start.getTime() + durationMins * 60 * 1000);
+    return formatTimeShort(end);
+  }, [bookDate, bookTime, durationMins]);
+
+  const dateLabel = useMemo(() => {
+    if (!bookDate) return "";
+    const d = new Date(bookDate + "T12:00:00");
+    return d.toLocaleDateString("en-TT", { weekday: "short", month: "short", day: "numeric" });
+  }, [bookDate]);
+
+  async function handleSubmit() {
+    if (!bookDate || !bookTime) { setError("Date and time required"); return; }
+    if (!serviceId) { setError("Select a service"); return; }
+    if (!staffId) { setError("Select staff"); return; }
     setError("");
-    onSubmit({ date: bookDate, time: bookTime, serviceId, staffId });
+    setSubmitting(true);
+    try {
+      await onSubmit({ date: bookDate, time: bookTime, serviceId, staffId });
+      onClose();
+    } catch {
+      setError("Failed to create booking");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
     <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: "rgba(0,0,0,0.6)" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      ref={formRef}
+      initial={{ height: 0, opacity: 0 }}
+      animate={{ height: "auto", opacity: 1 }}
+      exit={{ height: 0, opacity: 0 }}
+      transition={{ duration: 0.2, ease: "easeOut" }}
+      className="overflow-hidden"
     >
-      <motion.div
-        initial={{ scale: 0.95, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.95, opacity: 0 }}
-        className="w-full max-w-md rounded-2xl border p-5 space-y-4"
-        style={{ background: "hsl(var(--kf-card))", borderColor: "hsl(var(--kf-border))" }}
-        onClick={(e) => e.stopPropagation()}
+      <div
+        className="rounded-xl border p-3 mb-3"
+        style={{ background: "hsl(var(--kf-card))", borderColor: "hsl(var(--kf-accent1) / 0.3)" }}
       >
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold flex items-center gap-2">
-            <CalendarCheck className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-            Quick Booking
-          </h3>
-          <button onClick={onClose} className="p-1 rounded-lg hover:bg-muted/50">
-            <X className="w-4 h-4" />
+        <div className="flex items-center justify-between mb-2.5">
+          <div className="flex items-center gap-2 text-xs font-semibold">
+            <CalendarCheck className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+            New Booking
+            {dateLabel && (
+              <span className="text-muted-foreground font-normal">{dateLabel}</span>
+            )}
+          </div>
+          <button onClick={onClose} className="p-0.5 rounded hover:bg-muted/50">
+            <X className="w-3.5 h-3.5 text-muted-foreground" />
           </button>
         </div>
 
         {error && (
-          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-200 mb-2.5">
             {error}
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block font-medium">Date</label>
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="w-[110px]">
+            <label className="text-[10px] text-muted-foreground mb-1 block">Date</label>
             <input
               type="date"
               value={bookDate}
               onChange={(e) => setBookDate(e.target.value)}
-              className="kf-input w-full text-sm"
+              className="kf-input w-full text-xs !py-1.5"
             />
           </div>
-          <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block font-medium">Time</label>
+          <div className="w-[90px]">
+            <label className="text-[10px] text-muted-foreground mb-1 block">Time</label>
             <input
               type="time"
               value={bookTime}
               onChange={(e) => setBookTime(e.target.value)}
-              className="kf-input w-full text-sm"
+              className="kf-input w-full text-xs !py-1.5"
             />
           </div>
-          <div className="col-span-2">
-            <label className="text-xs text-muted-foreground mb-1.5 block font-medium">Service</label>
+          <div className="flex-1 min-w-[140px]">
+            <label className="text-[10px] text-muted-foreground mb-1 block">Service</label>
             <select
               value={serviceId}
               onChange={(e) => setServiceId(e.target.value)}
-              className="kf-input w-full text-sm"
+              className="kf-input w-full text-xs !py-1.5"
             >
-              <option value="">Select service...</option>
+              <option value="">Select...</option>
               {services.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.name} — {s.durationMins ?? s.duration ?? 60}min
+                  {s.name} ({s.durationMins ?? s.duration ?? 60}m)
                 </option>
               ))}
             </select>
           </div>
-          <div className="col-span-2">
-            <label className="text-xs text-muted-foreground mb-1.5 block font-medium">Staff</label>
+          <div className="flex-1 min-w-[120px]">
+            <label className="text-[10px] text-muted-foreground mb-1 block">Staff</label>
             <select
               value={staffId}
               onChange={(e) => setStaffId(e.target.value)}
-              className="kf-input w-full text-sm"
+              className="kf-input w-full text-xs !py-1.5"
             >
-              <option value="">Select staff member...</option>
+              <option value="">Select...</option>
               {staff.map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
           </div>
-        </div>
-
-        {selectedService && bookDate && bookTime && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground rounded-xl p-3" style={{ background: "hsl(var(--kf-muted))" }}>
-            <Clock className="w-3.5 h-3.5 flex-shrink-0" />
-            <span>{selectedService.durationMins ?? selectedService.duration ?? 60} min</span>
-            <span className="text-muted-foreground/50">|</span>
-            <span>
-              Ends at {(() => {
-                const start = new Date(`${bookDate}T${bookTime}`);
-                const end = new Date(start.getTime() + (selectedService.durationMins ?? selectedService.duration ?? 60) * 60 * 1000);
-                return formatTimeShort(end);
-              })()}
-            </span>
+          <div className="flex items-center gap-2">
+            {endTimeLabel && durationMins && (
+              <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                {durationMins}m &rarr; {endTimeLabel}
+              </span>
+            )}
+            <button
+              onClick={handleSubmit}
+              disabled={submitting}
+              className="kf-btn-primary text-xs !py-1.5 !px-3 flex items-center gap-1.5 whitespace-nowrap"
+            >
+              {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+              Book
+            </button>
           </div>
-        )}
-
-        <div className="flex gap-2 justify-end pt-1">
-          <button onClick={onClose} className="kf-btn-secondary text-xs">Cancel</button>
-          <button onClick={handleSubmit} className="kf-btn-primary text-xs">Create Booking</button>
         </div>
-      </motion.div>
+      </div>
     </motion.div>
   );
 }
@@ -266,7 +291,7 @@ export function ContentCalendar({ posts, bookings, services, staff, onSelectPost
     if (typeof window !== "undefined" && window.innerWidth < 640) return "day";
     return "month";
   });
-  const [showBookingModal, setShowBookingModal] = useState(false);
+  const [showBookingForm, setShowBookingForm] = useState(false);
   const [bookingDefaults, setBookingDefaults] = useState({ date: "", time: "" });
   const [popoverEvent, setPopoverEvent] = useState<{ event: CalendarEvent; pos: { x: number; y: number } } | null>(null);
   const [filter, setFilter] = useState<"all" | "posts" | "bookings">("all");
@@ -357,10 +382,15 @@ export function ContentCalendar({ posts, bookings, services, staff, onSelectPost
     else setCurrentDate(new Date(currentDate.getTime() + 86400000));
   }
 
-  const handleCellClick = useCallback((dateStr: string, hour?: number) => {
+  const openBookingForm = useCallback((dateStr: string, hour?: number) => {
     const timeStr = hour !== undefined ? `${String(hour).padStart(2, "0")}:00` : "09:00";
     setBookingDefaults({ date: dateStr, time: timeStr });
-    setShowBookingModal(true);
+    setShowBookingForm(true);
+  }, []);
+
+  const handleDayClick = useCallback((dateStr: string) => {
+    setBookingDefaults({ date: dateStr, time: "09:00" });
+    setShowBookingForm(true);
   }, []);
 
   const handleEventClick = useCallback((event: CalendarEvent, e: React.MouseEvent) => {
@@ -376,9 +406,8 @@ export function ContentCalendar({ posts, bookings, services, staff, onSelectPost
     setPopoverEvent(null);
   }, [popoverEvent, onSelectPost, onSelectBooking]);
 
-  function handleBookingSubmit(data: { date: string; time: string; serviceId: string; staffId: string }) {
-    onCreateBooking?.(data);
-    setShowBookingModal(false);
+  async function handleBookingSubmit(data: { date: string; time: string; serviceId: string; staffId: string }) {
+    await onCreateBooking?.(data);
   }
 
   const dayDateStr = currentDate.toISOString().split("T")[0];
@@ -442,7 +471,7 @@ export function ContentCalendar({ posts, bookings, services, staff, onSelectPost
             <button
               onClick={() => {
                 setBookingDefaults({ date: todayStr, time: "09:00" });
-                setShowBookingModal(true);
+                setShowBookingForm(true);
               }}
               className="kf-btn-primary text-[10px] !px-2.5 !py-1.5 flex items-center gap-1"
             >
@@ -451,6 +480,19 @@ export function ContentCalendar({ posts, bookings, services, staff, onSelectPost
           )}
         </div>
       </div>
+
+      <AnimatePresence>
+        {showBookingForm && onCreateBooking && (
+          <InlineBookingForm
+            date={bookingDefaults.date}
+            time={bookingDefaults.time}
+            services={services}
+            staff={staff}
+            onSubmit={handleBookingSubmit}
+            onClose={() => setShowBookingForm(false)}
+          />
+        )}
+      </AnimatePresence>
 
       {view === "month" && (
         <div className="overflow-x-auto -mx-4 px-4 pb-1">
@@ -478,10 +520,7 @@ export function ContentCalendar({ posts, bookings, services, staff, onSelectPost
                     background: isToday ? "hsl(var(--kf-accent1) / 0.05)" : "hsl(var(--kf-card))",
                     ...(isToday ? { boxShadow: "inset 0 0 0 1px hsl(var(--kf-accent1) / 0.5)" } : {}),
                   }}
-                  onClick={() => {
-                    setCurrentDate(new Date(year, month, day));
-                    setView("day");
-                  }}
+                  onClick={() => handleDayClick(dateStr)}
                 >
                   <div className="flex items-center justify-between">
                     <span className={`text-[11px] font-medium ${isToday ? "text-[hsl(var(--kf-accent1))] font-bold" : "text-muted-foreground"}`}>
@@ -489,13 +528,12 @@ export function ContentCalendar({ posts, bookings, services, staff, onSelectPost
                     </span>
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       {onCreateBooking && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleCellClick(dateStr); }}
-                          className="w-4 h-4 rounded flex items-center justify-center hover:bg-muted/80"
-                          title="Quick booking"
+                        <span
+                          className="w-4 h-4 rounded flex items-center justify-center"
+                          title="New booking"
                         >
                           <Plus className="w-3 h-3 text-muted-foreground" />
-                        </button>
+                        </span>
                       )}
                     </div>
                   </div>
@@ -509,9 +547,7 @@ export function ContentCalendar({ posts, bookings, services, staff, onSelectPost
                           className={`w-full flex items-center gap-1 rounded-md px-1 py-0.5 text-[9px] ${sc.bg} border ${sc.border} ${sc.text} hover:brightness-125 transition-all truncate text-left`}
                         >
                           <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${sc.dot}`} />
-                          <span className="truncate">
-                            {ev.type === "booking" ? "📅 " : "📝 "}{ev.title.slice(0, 18)}
-                          </span>
+                          <span className="truncate">{ev.title.slice(0, 18)}</span>
                         </button>
                       );
                     })}
@@ -550,157 +586,127 @@ export function ContentCalendar({ posts, bookings, services, staff, onSelectPost
                   <div
                     key={ds}
                     className="p-2 text-center cursor-pointer hover:brightness-110 transition-all"
-                    style={{ background: isToday ? "hsl(var(--kf-accent1) / 0.1)" : "hsl(var(--kf-muted))" }}
-                    onClick={() => { setCurrentDate(d); setView("day"); }}
+                    style={{
+                      background: isToday ? "hsl(var(--kf-accent1) / 0.08)" : "hsl(var(--kf-muted))",
+                    }}
+                    onClick={() => handleDayClick(ds)}
                   >
-                    <div className={`text-[10px] uppercase tracking-wider font-medium ${isToday ? "text-[hsl(var(--kf-accent1))]" : "text-muted-foreground"}`}>
+                    <div className={`text-[10px] uppercase tracking-wider ${isToday ? "text-[hsl(var(--kf-accent1))] font-bold" : "text-muted-foreground"}`}>
                       {DAYS[d.getDay()]}
                     </div>
-                    <div className={`text-sm font-semibold ${isToday ? "text-[hsl(var(--kf-accent1))]" : ""}`}>
+                    <div className={`text-sm font-bold ${isToday ? "text-[hsl(var(--kf-accent1))]" : ""}`}>
                       {d.getDate()}
                     </div>
                     {dayEvCount > 0 && (
-                      <div className="text-[9px] text-muted-foreground mt-0.5">{dayEvCount} event{dayEvCount > 1 ? "s" : ""}</div>
+                      <span className="text-[9px] text-muted-foreground/70">{dayEvCount} event{dayEvCount > 1 ? "s" : ""}</span>
                     )}
                   </div>
                 );
               })}
-
-              {DAY_HOURS.map((hour) => (
-                <div key={`row-${hour}`} className="contents">
-                  <div className="p-1.5 text-[10px] text-muted-foreground text-right pr-2 flex items-start justify-end" style={{ background: "hsl(var(--kf-card))" }}>
-                    {formatHour(hour)}
-                  </div>
-                  {weekDays.map((d) => {
-                    const ds = d.toISOString().split("T")[0];
-                    const isToday = ds === todayStr;
-                    const hourEvents = (eventsByDate[ds] || []).filter((ev) => {
-                      const h = ev.time.getHours();
-                      return h === hour;
-                    });
-
-                    return (
-                      <div
-                        key={`${ds}-${hour}`}
-                        className="min-h-[44px] p-0.5 relative cursor-pointer group transition-colors hover:brightness-110"
-                        style={{ background: isToday ? "hsl(var(--kf-accent1) / 0.03)" : "hsl(var(--kf-card))" }}
-                        onClick={() => handleCellClick(ds, hour)}
-                      >
-                        {hourEvents.map((ev) => {
-                          const sc = getEventColor(ev.type, ev.status);
-                          return (
-                            <button
-                              key={ev.id}
-                              onClick={(e) => handleEventClick(ev, e)}
-                              className={`w-full flex items-center gap-1 rounded-md px-1 py-0.5 text-[9px] mb-0.5 ${sc.bg} border ${sc.border} ${sc.text} hover:brightness-125 transition-all truncate text-left`}
-                            >
-                              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${sc.dot}`} />
-                              <span className="truncate">{ev.title.slice(0, 12)}</span>
-                            </button>
-                          );
-                        })}
-                        {hourEvents.length === 0 && (
-                          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                            <Plus className="w-3 h-3 text-muted-foreground/20" />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              ))}
             </div>
+            {DAY_HOURS.map((hour) => (
+              <div key={hour} className="grid grid-cols-[60px_repeat(7,1fr)] gap-px" style={{ background: "hsl(var(--kf-border))" }}>
+                <div className="p-1.5 text-right text-[10px] text-muted-foreground" style={{ background: "hsl(var(--kf-background))" }}>
+                  {formatHour(hour)}
+                </div>
+                {weekDays.map((d) => {
+                  const ds = d.toISOString().split("T")[0];
+                  const hourEvents = (eventsByDate[ds] || []).filter((ev) => ev.time.getHours() === hour);
+                  return (
+                    <div
+                      key={`${ds}-${hour}`}
+                      className="min-h-[36px] p-0.5 relative cursor-pointer hover:brightness-110 transition-all"
+                      style={{ background: "hsl(var(--kf-card))" }}
+                      onClick={() => openBookingForm(ds, hour)}
+                    >
+                      {hourEvents.map((ev) => {
+                        const sc = getEventColor(ev.type, ev.status);
+                        return (
+                          <button
+                            key={ev.id}
+                            onClick={(e) => handleEventClick(ev, e)}
+                            className={`w-full flex items-center gap-1 rounded px-1 py-0.5 text-[9px] mb-0.5 ${sc.bg} border ${sc.border} ${sc.text} hover:brightness-125 transition-all truncate text-left`}
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${sc.dot}`} />
+                            <span className="truncate">{ev.title.slice(0, 14)}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
           </div>
         </div>
       )}
 
       {view === "day" && (
-        <div className="space-y-0">
-          <div className="rounded-xl border overflow-hidden" style={{ borderColor: "hsl(var(--kf-border))" }}>
-            {DAY_HOURS.map((hour) => {
-              const hourEvents = (eventsByDate[dayDateStr] || []).filter((ev) => ev.time.getHours() === hour);
-              const isCurrentHour = dayDateStr === todayStr && today.getHours() === hour;
+        <div className="rounded-xl border overflow-hidden" style={{ borderColor: "hsl(var(--kf-border))" }}>
+          {DAY_HOURS.map((hour) => {
+            const hourEvents = (eventsByDate[dayDateStr] || []).filter((ev) => ev.time.getHours() === hour);
+            const now = new Date();
+            const isCurrentHour = dayDateStr === todayStr && now.getHours() === hour;
 
-              return (
+            return (
+              <div
+                key={hour}
+                className="grid grid-cols-[60px_1fr] gap-px relative group cursor-pointer hover:brightness-110 transition-all"
+                style={{ background: "hsl(var(--kf-border))" }}
+                onClick={() => openBookingForm(dayDateStr, hour)}
+              >
+                <div className="p-2 text-right text-[10px] text-muted-foreground" style={{ background: "hsl(var(--kf-background))" }}>
+                  {formatHour(hour)}
+                </div>
                 <div
-                  key={hour}
-                  className="flex border-b last:border-b-0 cursor-pointer group transition-colors hover:brightness-110"
-                  style={{
-                    borderColor: "hsl(var(--kf-border) / 0.5)",
-                    background: isCurrentHour ? "hsl(var(--kf-accent1) / 0.05)" : "hsl(var(--kf-card))",
-                  }}
-                  onClick={() => handleCellClick(dayDateStr, hour)}
+                  className="min-h-[48px] p-1.5 relative"
+                  style={{ background: isCurrentHour ? "hsl(var(--kf-accent1) / 0.03)" : "hsl(var(--kf-card))" }}
                 >
-                  <div className="w-16 flex-shrink-0 p-2 text-[11px] text-muted-foreground text-right pr-3 border-r" style={{ borderColor: "hsl(var(--kf-border) / 0.5)" }}>
-                    {formatHour(hour)}
-                  </div>
-                  <div className="flex-1 min-h-[52px] p-1.5 relative">
-                    {isCurrentHour && (
-                      <div className="absolute left-0 right-0 h-px bg-[hsl(var(--kf-accent1))]" style={{ top: `${(today.getMinutes() / 60) * 100}%` }}>
-                        <div className="absolute -left-1 -top-1 w-2 h-2 rounded-full bg-[hsl(var(--kf-accent1))]" />
-                      </div>
-                    )}
-                    <div className="space-y-1">
-                      {hourEvents.map((ev) => {
-                        const sc = getEventColor(ev.type, ev.status);
-                        const duration = ev.endTime ? Math.round((ev.endTime.getTime() - ev.time.getTime()) / 60000) : null;
-                        return (
-                          <button
-                            key={ev.id}
-                            onClick={(e) => handleEventClick(ev, e)}
-                            className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs ${sc.bg} border ${sc.border} ${sc.text} hover:brightness-125 transition-all text-left`}
-                          >
-                            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${sc.dot}`} />
-                            <div className="flex-1 min-w-0">
-                              <div className="truncate font-medium">{ev.title}</div>
-                              <div className="text-[10px] opacity-70 flex items-center gap-1">
-                                {formatTimeShort(ev.time)}
-                                {ev.endTime && <span>– {formatTimeShort(ev.endTime)}</span>}
-                                {duration && <span>({duration}min)</span>}
-                              </div>
-                            </div>
-                            <span className={`px-1.5 py-0.5 rounded text-[9px] ${sc.bg} border ${sc.border}`}>
-                              {ev.type === "booking" ? "📅" : "📝"} {ev.status}
-                            </span>
-                          </button>
-                        );
-                      })}
+                  {isCurrentHour && (
+                    <div className="absolute left-0 right-0 h-[2px] bg-red-500/80 z-10 pointer-events-none" style={{ top: `${(now.getMinutes() / 60) * 100}%` }}>
+                      <div className="w-2 h-2 rounded-full bg-red-500 absolute -left-1 -top-[3px]" />
                     </div>
-                    {hourEvents.length === 0 && (
-                      <div className="flex items-center justify-center h-full opacity-0 group-hover:opacity-100 transition-opacity">
-                        <span className="text-[10px] text-muted-foreground/40 flex items-center gap-1">
-                          <Plus className="w-3 h-3" /> Click to add
-                        </span>
-                      </div>
-                    )}
+                  )}
+                  {hourEvents.length === 0 && (
+                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                      <span className="text-[10px] text-muted-foreground/40 flex items-center gap-1">
+                        <Plus className="w-3 h-3" /> Add booking
+                      </span>
+                    </div>
+                  )}
+                  <div className="space-y-1">
+                    {hourEvents.map((ev) => {
+                      const sc = getEventColor(ev.type, ev.status);
+                      return (
+                        <button
+                          key={ev.id}
+                          onClick={(e) => handleEventClick(ev, e)}
+                          className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs ${sc.bg} border ${sc.border} ${sc.text} hover:brightness-125 transition-all text-left`}
+                        >
+                          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${sc.dot}`} />
+                          <span className="truncate flex-1">{ev.title}</span>
+                          <span className="text-[10px] opacity-70 flex-shrink-0">
+                            {formatTimeShort(ev.time)}
+                            {ev.endTime && ` – ${formatTimeShort(ev.endTime)}`}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
-              );
-            })}
-          </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
-      <div className="flex items-center gap-4 text-[10px] text-muted-foreground pt-1">
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-400" /> Scheduled Post</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400" /> Published/Completed</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-teal-400" /> Confirmed Booking</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400" /> Pending Booking</span>
+      <div className="flex items-center gap-4 text-[10px] text-muted-foreground">
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-teal-400" /> Confirmed</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400" /> Pending</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-400" /> Scheduled</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400" /> Posted/Done</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-400" /> Draft</span>
       </div>
-
-      <AnimatePresence>
-        {showBookingModal && onCreateBooking && (
-          <QuickBookingModal
-            date={bookingDefaults.date}
-            time={bookingDefaults.time}
-            services={services}
-            staff={staff}
-            onSubmit={handleBookingSubmit}
-            onClose={() => setShowBookingModal(false)}
-          />
-        )}
-      </AnimatePresence>
 
       <AnimatePresence>
         {popoverEvent && (
