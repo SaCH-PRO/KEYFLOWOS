@@ -56,7 +56,7 @@ interface GuideSection {
 const GUIDE_SECTIONS: GuideSection[] = [
   {
     id: "products",
-    tab: "products",
+    tab: "invoices",
     label: "Products & Services",
     icon: Package,
     color: "hsl(var(--kf-accent1))",
@@ -93,7 +93,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
   },
   {
     id: "quotes",
-    tab: "billing",
+    tab: "quotes",
     label: "Quotations",
     icon: FileText,
     color: "hsl(200 80% 55%)",
@@ -130,7 +130,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
   },
   {
     id: "invoices",
-    tab: "billing",
+    tab: "invoices",
     label: "Invoices",
     icon: CreditCard,
     color: "hsl(142 76% 36%)",
@@ -167,7 +167,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
   },
   {
     id: "recurring",
-    tab: "billing",
+    tab: "schedules",
     label: "Recurring Billing",
     icon: RefreshCw,
     color: "hsl(var(--kf-accent2))",
@@ -197,7 +197,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
   },
   {
     id: "ai-intelligence",
-    tab: "products",
+    tab: "invoices",
     label: "AI Intelligence",
     icon: Brain,
     color: "hsl(270 70% 60%)",
