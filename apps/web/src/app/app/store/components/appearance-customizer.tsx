@@ -16,6 +16,7 @@ import {
   Check,
 } from "lucide-react";
 import type { StorefrontConfig } from "@/lib/client";
+import { getThemeStyles, type ThemeKey } from "@/lib/storefront-themes";
 
 type Props = {
   config: StorefrontConfig;
@@ -126,151 +127,156 @@ function Section({
   );
 }
 
-function ClassicMiniature() {
+type MiniProps = { p: string; s: string; a: string };
+
+function ClassicMiniature({ p, s, a }: MiniProps) {
   return (
     <div className="p-2 space-y-1.5">
-      <div className="h-5 rounded-lg" style={{ background: "radial-gradient(ellipse at 50% 0%, hsl(var(--kf-accent1)/0.15), transparent 80%)" }} />
+      <div className="h-5 rounded-lg" style={{ background: `radial-gradient(ellipse at 50% 0%, ${p}25, transparent 80%)` }} />
       <div className="flex items-center gap-1.5">
-        <div className="w-2.5 h-2.5 rounded-md" style={{ background: "hsl(var(--kf-accent1)/0.25)" }} />
+        <div className="w-2.5 h-2.5 rounded-md" style={{ background: `${p}40` }} />
         <div className="h-1 w-10 rounded-full" style={{ background: "rgba(255,255,255,0.2)" }} />
       </div>
       <div className="flex gap-1 px-0.5">
-        {[1, 2, 3].map((n) => (
+        {[p, s, a].map((c, n) => (
           <div key={n} className="flex-1 space-y-1">
-            <div className="h-1 rounded-full" style={{ background: "rgba(255,255,255,0.06)", width: n === 2 ? "70%" : "100%" }} />
+            <div className="h-1 rounded-full" style={{ background: `${c}12`, width: n === 1 ? "70%" : "100%" }} />
           </div>
         ))}
       </div>
       <div className="grid grid-cols-2 gap-1">
-        <div className="h-8 rounded-lg" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }} />
-        <div className="h-8 rounded-lg" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }} />
+        <div className="h-8 rounded-lg" style={{ background: `${p}06`, border: `1px solid ${p}15` }} />
+        <div className="h-8 rounded-lg" style={{ background: `${s}06`, border: `1px solid ${s}15` }} />
       </div>
       <div className="flex justify-end">
-        <div className="h-1 w-6 rounded-full" style={{ background: "hsl(var(--kf-accent1)/0.12)" }} />
+        <div className="h-1 w-6 rounded-full" style={{ background: `${p}20` }} />
       </div>
     </div>
   );
 }
 
-function MinimalMiniature() {
+function MinimalMiniature({ p, s, a }: MiniProps) {
   return (
     <div className="p-3 space-y-2.5">
       <div className="space-y-1.5">
         <div className="h-0.5 w-6 rounded-full" style={{ background: "rgba(255,255,255,0.1)" }} />
         <div className="h-0.5 w-14 rounded-full" style={{ background: "rgba(255,255,255,0.06)" }} />
       </div>
-      <div className="h-px" style={{ background: "rgba(255,255,255,0.03)" }} />
+      <div className="h-px" style={{ background: `${p}08` }} />
       <div className="flex gap-3 px-0.5 mb-1">
-        <div className="h-px flex-1" style={{ borderBottom: "1px solid rgba(255,255,255,0.15)" }} />
-        <div className="h-px flex-1" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }} />
+        <div className="h-px flex-1" style={{ borderBottom: `1px solid ${p}20` }} />
+        <div className="h-px flex-1" style={{ borderBottom: `1px solid ${a}10` }} />
       </div>
       <div className="grid grid-cols-2 gap-2.5">
         <div className="space-y-1.5">
-          <div className="h-10 rounded-sm" style={{ background: "rgba(255,255,255,0.01)", border: "1px solid rgba(255,255,255,0.03)" }} />
-          <div className="h-0.5 w-8" style={{ background: "rgba(255,255,255,0.06)" }} />
-          <div className="h-0.5 w-4" style={{ background: "rgba(255,255,255,0.04)" }} />
+          <div className="h-10 rounded-sm" style={{ background: `${p}04`, border: `1px solid ${p}08` }} />
+          <div className="h-0.5 w-8" style={{ background: `${p}12` }} />
+          <div className="h-0.5 w-4" style={{ background: `${a}08` }} />
         </div>
         <div className="space-y-1.5">
-          <div className="h-10 rounded-sm" style={{ background: "rgba(255,255,255,0.01)", border: "1px solid rgba(255,255,255,0.03)" }} />
-          <div className="h-0.5 w-6" style={{ background: "rgba(255,255,255,0.06)" }} />
-          <div className="h-0.5 w-3" style={{ background: "rgba(255,255,255,0.04)" }} />
+          <div className="h-10 rounded-sm" style={{ background: `${s}04`, border: `1px solid ${s}08` }} />
+          <div className="h-0.5 w-6" style={{ background: `${s}12` }} />
+          <div className="h-0.5 w-3" style={{ background: `${a}08` }} />
         </div>
       </div>
     </div>
   );
 }
 
-function BoldMiniature() {
+function BoldMiniature({ p, s, a }: MiniProps) {
   return (
     <div className="space-y-1">
-      <div className="h-6 relative overflow-hidden" style={{ background: "linear-gradient(160deg, hsl(var(--kf-accent1)/0.2), transparent 70%)" }}>
+      <div className="h-6 relative overflow-hidden" style={{ background: `linear-gradient(160deg, ${p}30, ${s}15 60%, ${a}0A)` }}>
         <div className="absolute bottom-1 left-2">
           <div className="h-1.5 w-8 rounded-sm" style={{ background: "rgba(255,255,255,0.3)" }} />
         </div>
       </div>
       <div className="px-2 pb-2 space-y-1">
         <div className="flex gap-1">
-          <div className="h-2.5 px-2 rounded-xl" style={{ background: "hsl(var(--kf-accent1)/0.2)", border: "1px solid hsl(var(--kf-accent1)/0.3)" }} />
-          <div className="h-2.5 px-2 rounded-xl" style={{ background: "rgba(255,255,255,0.04)" }} />
+          <div className="h-2.5 px-2 rounded-xl" style={{ background: `${p}30`, border: `1px solid ${p}50` }} />
+          <div className="h-2.5 px-2 rounded-xl" style={{ background: `${a}15` }} />
         </div>
         <div className="grid grid-cols-2 gap-1">
-          <div className="h-9 rounded-2xl" style={{ background: "rgba(255,255,255,0.06)", border: "2px solid rgba(255,255,255,0.1)" }} />
-          <div className="h-9 rounded-2xl" style={{ background: "rgba(255,255,255,0.06)", border: "2px solid rgba(255,255,255,0.1)" }} />
+          <div className="h-9 rounded-2xl" style={{ background: `${p}0C`, border: `2px solid ${p}25` }} />
+          <div className="h-9 rounded-2xl" style={{ background: `${a}0C`, border: `2px solid ${a}25` }} />
         </div>
-        <div className="h-1.5 w-10 rounded-sm" style={{ background: "rgba(255,255,255,0.08)" }} />
+        <div className="h-1.5 w-10 rounded-sm" style={{ background: `linear-gradient(to right, ${p}, ${s}, ${a})`, opacity: 0.4 }} />
       </div>
     </div>
   );
 }
 
-function ElegantMiniature() {
+function ElegantMiniature({ p, s, a }: MiniProps) {
   return (
     <div className="p-2.5 space-y-2">
       <div className="text-center space-y-1">
-        <div className="h-0.5 w-4 rounded-full mx-auto" style={{ background: "rgba(255,255,255,0.12)" }} />
+        <div className="h-0.5 w-4 rounded-full mx-auto" style={{ background: `${s}20` }} />
         <div className="h-0.5 w-10 rounded-full mx-auto" style={{ background: "rgba(255,255,255,0.06)" }} />
       </div>
       <div className="flex gap-2 justify-center">
-        {[1, 2, 3].map((n) => (
-          <div key={n} className="h-2 px-1.5 rounded-full" style={{ background: n === 1 ? "hsl(var(--kf-accent1)/0.12)" : "rgba(255,255,255,0.03)", border: `1px solid ${n === 1 ? "hsl(var(--kf-accent1)/0.2)" : "rgba(255,255,255,0.04)"}` }} />
+        {[p, s, a].map((c, n) => (
+          <div key={n} className="h-2 px-1.5 rounded-full" style={{ background: n === 0 ? `${c}18` : `${c}06`, border: `1px solid ${n === 0 ? `${c}30` : `${c}0A`}` }} />
         ))}
       </div>
       <div className="grid grid-cols-2 gap-1.5">
-        <div className="h-10 rounded-3xl" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", boxShadow: "0 2px 8px rgba(0,0,0,0.2)" }} />
-        <div className="h-10 rounded-3xl" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", boxShadow: "0 2px 8px rgba(0,0,0,0.2)" }} />
+        <div className="h-10 rounded-3xl" style={{ background: `${p}04`, border: `1px solid ${s}12`, boxShadow: `0 2px 8px ${p}10` }} />
+        <div className="h-10 rounded-3xl" style={{ background: `${s}04`, border: `1px solid ${s}12`, boxShadow: `0 2px 8px ${s}10` }} />
       </div>
     </div>
   );
 }
 
-function LuxeMiniature() {
+function LuxeMiniature({ p, s, a }: MiniProps) {
   return (
     <div className="space-y-0">
-      <div className="h-10 relative" style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.4))" }}>
+      <div className="h-10 relative" style={{ background: `linear-gradient(180deg, ${p}08, rgba(0,0,0,0.5))` }}>
         <div className="absolute bottom-1.5 left-2.5 space-y-0.5">
-          <div className="h-0.5 w-8" style={{ background: "rgba(255,255,255,0.25)", letterSpacing: "0.2em" }} />
-          <div className="h-0.5 w-5" style={{ background: "rgba(255,255,255,0.1)" }} />
+          <div className="h-0.5 w-8" style={{ background: "rgba(255,255,255,0.25)" }} />
+          <div className="h-0.5 w-5" style={{ background: `${s}18` }} />
+        </div>
+        <div className="absolute bottom-1 right-2">
+          <div className="w-1.5 h-1.5" style={{ background: `${a}20` }} />
         </div>
       </div>
       <div className="px-2.5 py-2 space-y-1.5">
         <div className="flex gap-2">
-          <div className="h-0.5 w-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.2)" }} />
-          <div className="h-0.5 w-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }} />
+          <div className="h-0.5 w-4" style={{ borderBottom: `1px solid ${p}30` }} />
+          <div className="h-0.5 w-4" style={{ borderBottom: `1px solid ${a}15` }} />
         </div>
         <div className="grid grid-cols-2 gap-1.5">
-          <div className="h-8" style={{ background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.06)" }} />
-          <div className="h-8" style={{ background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.06)" }} />
+          <div className="h-8" style={{ background: `${p}06`, border: `1px solid ${s}12` }} />
+          <div className="h-8" style={{ background: `${a}06`, border: `1px solid ${a}12` }} />
         </div>
       </div>
     </div>
   );
 }
 
-function FreshMiniature() {
+function FreshMiniature({ p, s, a }: MiniProps) {
   return (
     <div className="p-2 space-y-1.5">
       <div className="flex items-center gap-1.5">
-        <div className="w-3 h-3 rounded-full" style={{ background: "hsl(var(--kf-accent1)/0.15)" }} />
+        <div className="w-3 h-3 rounded-full" style={{ background: `${p}25` }} />
         <div className="h-1 w-8 rounded-full" style={{ background: "rgba(255,255,255,0.15)" }} />
         <div className="ml-auto flex gap-0.5">
-          <div className="w-1.5 h-1.5 rounded-full" style={{ background: "rgba(255,255,255,0.1)" }} />
-          <div className="w-1.5 h-1.5 rounded-full" style={{ background: "rgba(255,255,255,0.1)" }} />
+          <div className="w-1.5 h-1.5 rounded-full" style={{ background: `${s}20` }} />
+          <div className="w-1.5 h-1.5 rounded-full" style={{ background: `${a}20` }} />
         </div>
       </div>
-      <div className="h-4 rounded-full" style={{ background: "hsl(var(--kf-accent1)/0.06)", border: "1px solid hsl(var(--kf-accent1)/0.08)" }} />
+      <div className="h-4 rounded-full" style={{ background: `${p}08`, border: `1px solid ${p}12` }} />
       <div className="flex gap-1">
-        <div className="h-2 px-1 rounded-full" style={{ background: "hsl(var(--kf-accent1)/0.12)" }} />
-        <div className="h-2 px-1.5 rounded-full" style={{ background: "rgba(255,255,255,0.04)" }} />
+        <div className="h-2 px-1 rounded-full" style={{ background: `${p}18` }} />
+        <div className="h-2 px-1.5 rounded-full" style={{ background: `${s}0A` }} />
       </div>
       <div className="grid grid-cols-2 gap-1.5">
-        <div className="h-9 rounded-2xl" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }} />
-        <div className="h-9 rounded-2xl" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }} />
+        <div className="h-9 rounded-2xl" style={{ background: `${p}08`, border: `1px solid ${p}12`, boxShadow: `0 2px 8px ${p}10` }} />
+        <div className="h-9 rounded-2xl" style={{ background: `${s}08`, border: `1px solid ${s}12`, boxShadow: `0 2px 8px ${s}10` }} />
       </div>
     </div>
   );
 }
 
-const MINIATURES: Record<string, React.FC> = {
+const MINIATURES: Record<string, React.FC<MiniProps>> = {
   default: ClassicMiniature,
   minimal: MinimalMiniature,
   bold: BoldMiniature,
@@ -279,12 +285,16 @@ const MINIATURES: Record<string, React.FC> = {
   fresh: FreshMiniature,
 };
 
-function TemplatePreview({ template, selected, onClick }: {
+function TemplatePreview({ template, selected, onClick, primary, secondary, accent }: {
   template: typeof TEMPLATES[number];
   selected: boolean;
   onClick: () => void;
+  primary: string;
+  secondary: string;
+  accent: string;
 }) {
   const Mini = MINIATURES[template.key] ?? ClassicMiniature;
+  const ts = getThemeStyles(template.key as ThemeKey, primary, secondary, accent);
 
   return (
     <button
@@ -295,14 +305,14 @@ function TemplatePreview({ template, selected, onClick }: {
       className="rounded-xl text-left transition-all w-full group relative"
       style={{
         background: selected ? "hsl(var(--kf-accent1)/0.06)" : "hsl(var(--kf-card))",
-        border: selected ? "2px solid hsl(var(--kf-accent1)/0.4)" : "1px solid hsl(var(--kf-border)/0.4)",
+        border: selected ? `2px solid ${primary}66` : "1px solid hsl(var(--kf-border)/0.4)",
         padding: selected ? "5px" : "6px",
       }}
     >
       {selected && (
         <div
           className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full flex items-center justify-center z-10"
-          style={{ background: "hsl(var(--kf-accent1))" }}
+          style={{ background: primary }}
         >
           <Check className="w-2.5 h-2.5 text-white" />
         </div>
@@ -311,11 +321,12 @@ function TemplatePreview({ template, selected, onClick }: {
       <div
         className="rounded-lg overflow-hidden mb-2"
         style={{
-          background: template.key === "luxe" ? "#050508" : "#0a0a10",
+          backgroundColor: ts.pageBg,
+          backgroundImage: ts.pageGradient,
           border: "1px solid rgba(255,255,255,0.06)",
         }}
       >
-        <Mini />
+        <Mini p={primary} s={secondary} a={accent} />
       </div>
 
       <div className="px-1 pb-0.5">
@@ -371,6 +382,9 @@ export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, b
                 template={t}
                 selected={(appearance.theme ?? "default") === t.key}
                 onClick={() => onConfigChange("appearance", { theme: t.key })}
+                primary={currentPrimary || "#F97316"}
+                secondary={currentSecondary || "#14B8A6"}
+                accent={currentAccent || "#a78bfa"}
               />
             ))}
           </div>
