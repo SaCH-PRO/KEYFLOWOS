@@ -91,7 +91,7 @@ type Gateway = {
   currencies: string[];
 };
 
-type PaymentMethod = "wipay" | "paypal" | "bank_transfer" | "cash";
+type PaymentMethod = "wipay" | "paypal" | "google_pay" | "bank_transfer" | "cash";
 
 function ConfettiParticles() {
   const particles = useMemo(() => {
@@ -175,6 +175,8 @@ export default function PublicPaymentPage() {
   const [showConfetti, setShowConfetti] = useState(false);
   const [offlineConfirmed, setOfflineConfirmed] = useState(false);
 
+  const [googlePayAvailable, setGooglePayAvailable] = useState(false);
+
   const wipayStatus = searchParams.get("status");
   const wipayOrderId = searchParams.get("order_id");
   const paypalToken = searchParams.get("token");
@@ -251,6 +253,102 @@ export default function PublicPaymentPage() {
     loadInvoice();
   }, [invoiceId]);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.PaymentRequest) return;
+    const methods = [{
+      supportedMethods: "https://google.com/pay",
+      data: {
+        environment: "TEST",
+        apiVersion: 2,
+        apiVersionMinor: 0,
+        allowedPaymentMethods: [{
+          type: "CARD",
+          parameters: {
+            allowedAuthMethods: ["PAN_ONLY", "CRYPTOGRAM_3DS"],
+            allowedCardNetworks: ["VISA", "MASTERCARD", "AMEX"],
+          },
+          tokenizationSpecification: {
+            type: "PAYMENT_GATEWAY",
+            parameters: { gateway: "example", gatewayMerchantId: "exampleMerchantId" },
+          },
+        }],
+      },
+    }];
+    const details = { total: { label: "Check", amount: { currency: "USD", value: "0.01" } } };
+    try {
+      const req = new PaymentRequest(methods, details);
+      req.canMakePayment().then((can) => { if (can) setGooglePayAvailable(true); }).catch(() => {});
+    } catch { /* PaymentRequest not supported for Google Pay */ }
+  }, []);
+
+  const handleGooglePay = useCallback(async () => {
+    if (!invoice || !window.PaymentRequest) return;
+    setPaying(true);
+    setStep("processing");
+
+    const invTotal = String(invoice.total ?? 0);
+    const invCurrency = invoice.currency ?? "TTD";
+
+    try {
+      const methods = [{
+        supportedMethods: "https://google.com/pay",
+        data: {
+          environment: "TEST",
+          apiVersion: 2,
+          apiVersionMinor: 0,
+          merchantInfo: { merchantName: invoice.business?.name || "KeyFlowOS" },
+          allowedPaymentMethods: [{
+            type: "CARD",
+            parameters: {
+              allowedAuthMethods: ["PAN_ONLY", "CRYPTOGRAM_3DS"],
+              allowedCardNetworks: ["VISA", "MASTERCARD", "AMEX"],
+            },
+            tokenizationSpecification: {
+              type: "PAYMENT_GATEWAY",
+              parameters: { gateway: "example", gatewayMerchantId: "exampleMerchantId" },
+            },
+          }],
+          transactionInfo: {
+            totalPriceStatus: "FINAL",
+            totalPrice: invTotal,
+            currencyCode: invCurrency,
+            countryCode: "TT",
+          },
+        },
+      }];
+
+      const details = {
+        total: { label: invoice.business?.name || "Payment", amount: { currency: invCurrency, value: invTotal } },
+        displayItems: (invoice.items || []).map((item) => ({
+          label: item.description,
+          amount: { currency: invCurrency, value: String(item.total) },
+        })),
+      };
+
+      const request = new PaymentRequest(methods, details);
+      const response = await request.show();
+      await response.complete("success");
+
+      const res = await apiPost<{ success: boolean }>({
+        path: `/commerce/invoices/${encodeURIComponent(invoiceId)}/payment-intent`,
+        body: { method: "google_pay" },
+      });
+
+      if (res.data?.success) {
+        setOfflineConfirmed(true);
+      } else {
+        setError(res.error || "Payment could not be processed");
+      }
+    } catch (err: any) {
+      if (err?.name !== "AbortError") {
+        setError("Google Pay payment was cancelled or failed");
+      }
+    }
+
+    setPaying(false);
+    setStep("review");
+  }, [invoice, invoiceId]);
+
   const handleWipayPay = useCallback(async () => {
     if (!invoice) return;
     setPaying(true);
@@ -325,14 +423,16 @@ export default function PublicPaymentPage() {
 
     setError(null);
 
-    if (selectedMethod === "wipay") {
+    if (selectedMethod === "google_pay") {
+      await handleGooglePay();
+    } else if (selectedMethod === "wipay") {
       await handleWipayPay();
     } else if (selectedMethod === "paypal") {
       await handlePaypalPay();
     } else if (selectedMethod === "bank_transfer" || selectedMethod === "cash") {
       await handleOfflinePayment(selectedMethod);
     }
-  }, [selectedMethod, handleWipayPay, handlePaypalPay, handleOfflinePayment]);
+  }, [selectedMethod, handleGooglePay, handleWipayPay, handlePaypalPay, handleOfflinePayment]);
 
   const business = invoice?.business;
   const primaryColor = business?.primaryColor || "#F97316";
@@ -798,6 +898,27 @@ export default function PublicPaymentPage() {
                       </button>
                     )}
 
+                    {googlePayAvailable && (
+                      <button
+                        onClick={() => { setSelectedMethod("google_pay"); setError(null); }}
+                        className={`text-left p-4 rounded-xl border-2 transition-all ${
+                          selectedMethod === "google_pay"
+                            ? "bg-white/[0.06] scale-[1.02]"
+                            : "border-white/[0.06] hover:border-white/[0.12] hover:bg-white/[0.02]"
+                        }`}
+                        style={selectedMethod === "google_pay" ? { borderColor: primaryColor } : {}}
+                      >
+                        <div className="w-10 h-10 rounded-lg flex items-center justify-center mb-3 bg-white/[0.08]">
+                          <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none">
+                            <path d="M12.24 10.285V14.4h6.806c-.275 1.765-2.056 5.174-6.806 5.174-4.095 0-7.439-3.389-7.439-7.574s3.345-7.574 7.439-7.574c2.33 0 3.891.989 4.785 1.849l3.254-3.138C18.189 1.186 15.479 0 12.24 0c-6.635 0-12 5.365-12 12s5.365 12 12 12c6.926 0 11.52-4.869 11.52-11.726 0-.788-.085-1.39-.189-1.989H12.24z" fill="white"/>
+                          </svg>
+                        </div>
+                        <div className="font-medium text-sm mb-1">Google Pay</div>
+                        <div className="text-xs text-slate-500">Fast & secure checkout</div>
+                        <div className="text-[10px] text-slate-600 mt-2 font-medium">{currency}</div>
+                      </button>
+                    )}
+
                     <button
                       onClick={() => { setSelectedMethod("bank_transfer"); setError(null); }}
                       className={`text-left p-4 rounded-xl border-2 transition-all ${
@@ -955,6 +1076,14 @@ export default function PublicPaymentPage() {
                         <>
                           <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                           Processing...
+                        </>
+                      ) : selectedMethod === "google_pay" ? (
+                        <>
+                          <svg viewBox="0 0 24 24" className="w-4 h-4 mr-2" fill="none">
+                            <path d="M12.24 10.285V14.4h6.806c-.275 1.765-2.056 5.174-6.806 5.174-4.095 0-7.439-3.389-7.439-7.574s3.345-7.574 7.439-7.574c2.33 0 3.891.989 4.785 1.849l3.254-3.138C18.189 1.186 15.479 0 12.24 0c-6.635 0-12 5.365-12 12s5.365 12 12 12c6.926 0 11.52-4.869 11.52-11.726 0-.788-.085-1.39-.189-1.989H12.24z" fill="white"/>
+                          </svg>
+                          Pay {formatPrice(total, currency)} with Google Pay
+                          <ArrowRight className="w-4 h-4 ml-2" />
                         </>
                       ) : selectedMethod === "wipay" || selectedMethod === "paypal" ? (
                         <>
