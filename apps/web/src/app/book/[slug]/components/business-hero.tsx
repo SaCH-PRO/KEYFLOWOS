@@ -78,7 +78,7 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
               className="w-full h-full object-cover"
             />
           </div>
-          <div className="absolute inset-0 bg-gradient-to-b from-[#0a0a0f]/60 via-[#0a0a0f]/80 to-[#0a0a0f]" />
+          <div className="absolute inset-0" style={{ background: `linear-gradient(to bottom, ${ts.pageBg}99, ${ts.pageBg}cc 50%, ${ts.pageBg})` }} />
           <div
             className="absolute inset-0"
             style={{
@@ -138,8 +138,8 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
                   style={{ borderColor: `${primaryColor}30` }}
                 />
                 <div
-                  className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full border-2 border-[#0a0a0f] flex items-center justify-center"
-                  style={{ backgroundColor: openStatus.isOpen ? "#22c55e" : "#ef4444" }}
+                  className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full border-2 flex items-center justify-center"
+                  style={{ borderColor: ts.pageBg, backgroundColor: openStatus.isOpen ? "#22c55e" : "#ef4444" }}
                 >
                   <CheckCircle className="w-3.5 h-3.5 text-white" />
                 </div>

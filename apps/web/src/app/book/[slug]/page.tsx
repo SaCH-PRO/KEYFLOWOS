@@ -7,6 +7,7 @@ import { formatPrice } from "@/lib/format";
 import { Loader2, CheckCircle2, Globe, Star, MessageCircle, Shield, Award, Flame, Sparkles } from "lucide-react";
 import { ItemDetailModal } from "./components/item-detail-modal";
 import { trackStoreEvent, StorefrontConfig } from "@/lib/client";
+import { getThemeStyles, type ThemeKey } from "@/lib/storefront-themes";
 
 import type {
   Business,
@@ -47,6 +48,8 @@ export default function PublicBookingPage() {
   const primaryColor = (storefrontConfig?.appearance as any)?.primaryColor || business?.primaryColor || "#F97316";
   const secondaryColor = (storefrontConfig?.appearance as any)?.secondaryColor || business?.secondaryColor || "#14B8A6";
   const accentColor = (storefrontConfig?.appearance as any)?.accentColor || "#a78bfa";
+  const themeKey = ((storefrontConfig?.appearance as any)?.theme ?? "default") as ThemeKey;
+  const ts = getThemeStyles(themeKey, primaryColor, secondaryColor, accentColor);
 
   const updateCart = useCallback(
     (newCart: CartItem[]) => {
@@ -322,7 +325,7 @@ export default function PublicBookingPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-[#0a0a0f] text-white flex items-center justify-center">
+      <main className="min-h-screen text-white flex items-center justify-center" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
         <div className="flex flex-col items-center gap-4 animate-pulse">
           <div
             className="w-14 h-14 rounded-2xl flex items-center justify-center"
@@ -341,7 +344,7 @@ export default function PublicBookingPage() {
 
   if (error && !business) {
     return (
-      <main className="min-h-screen bg-[#0a0a0f] text-white flex items-center justify-center px-4">
+      <main className="min-h-screen text-white flex items-center justify-center px-4" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
         <div className="max-w-md w-full rounded-3xl border border-red-500/30 bg-red-500/5 backdrop-blur-xl p-10 text-center space-y-4">
           <div className="w-16 h-16 rounded-2xl bg-red-500/10 flex items-center justify-center mx-auto">
             <Globe className="w-8 h-8 text-red-400" />
@@ -358,7 +361,7 @@ export default function PublicBookingPage() {
   if (success) {
     const isOrder = bookingResults.length > 0 && bookingResults[0].bookingId.startsWith("order-");
     return (
-      <main className="min-h-screen bg-[#0a0a0f] text-white flex items-center justify-center px-4 relative overflow-hidden">
+      <main className="min-h-screen text-white flex items-center justify-center px-4 relative overflow-hidden" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
         <div className="absolute inset-0 pointer-events-none">
           {Array.from({ length: 40 }).map((_, i) => {
             const colors = [primaryColor, secondaryColor, accentColor, "#f59e0b", "#10b981", "#ec4899"];
@@ -497,7 +500,7 @@ export default function PublicBookingPage() {
 
   if (checkoutMode) {
     return (
-      <main className="min-h-screen bg-[#0a0a0f] text-white">
+      <main className="min-h-screen text-white" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
         <CheckoutFlow
           business={business!}
           cart={cart}
@@ -516,7 +519,7 @@ export default function PublicBookingPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#0a0a0f] text-white relative">
+    <main className="min-h-screen text-white relative" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
       <BusinessHero
         business={business!}
         primaryColor={primaryColor}
@@ -570,16 +573,16 @@ export default function PublicBookingPage() {
               {storefrontConfig.socialProof.testimonials.map((t, idx) => (
                 <div
                   key={t.id}
-                  className="group rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5 space-y-3 hover:border-white/[0.14] hover:bg-white/[0.04] transition-all duration-300"
-                  style={{ animationDelay: `${idx * 100}ms` }}
+                  className="group rounded-2xl p-5 space-y-3 transition-all duration-300"
+                  style={{ animationDelay: `${idx * 100}ms`, border: `1px solid ${primaryColor}12`, background: `${primaryColor}04` }}
                 >
                   <div className="flex gap-1">
                     {Array.from({ length: 5 }).map((_, i) => (
                       <Star
                         key={i}
                         className="w-4 h-4 transition-transform group-hover:scale-110"
-                        fill={i < t.rating ? '#f59e0b' : 'transparent'}
-                        color={i < t.rating ? '#f59e0b' : '#ffffff20'}
+                        fill={i < t.rating ? secondaryColor : 'transparent'}
+                        color={i < t.rating ? secondaryColor : '#ffffff20'}
                       />
                     ))}
                   </div>
@@ -592,9 +595,9 @@ export default function PublicBookingPage() {
         )}
 
         {storefrontConfig?.socialProof?.guaranteeText && (
-          <div className="rounded-2xl border border-emerald-500/15 bg-emerald-500/[0.04] p-4 flex items-center gap-3 text-sm backdrop-blur-sm">
-            <div className="w-8 h-8 rounded-xl bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
-              <Shield className="w-4 h-4 text-emerald-400" />
+          <div className="rounded-2xl p-4 flex items-center gap-3 text-sm backdrop-blur-sm" style={{ border: `1px solid ${accentColor}18`, background: `${accentColor}06` }}>
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: `${accentColor}15` }}>
+              <Shield className="w-4 h-4" style={{ color: accentColor }} />
             </div>
             <span className="text-white/55">{storefrontConfig.socialProof.guaranteeText}</span>
           </div>
@@ -603,7 +606,8 @@ export default function PublicBookingPage() {
 
       <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
         <div
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[11px] text-white/25 bg-[#0a0a0f]/80 backdrop-blur-xl border border-white/[0.06] shadow-lg pointer-events-auto hover:text-white/40 transition-colors"
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[11px] text-white/25 backdrop-blur-xl border border-white/[0.06] shadow-lg pointer-events-auto hover:text-white/40 transition-colors"
+          style={{ backgroundColor: `${ts.pageBg}cc` }}
         >
           <Sparkles className="w-3 h-3" style={{ color: `${primaryColor}60` }} />
           Powered by <span style={{ color: primaryColor }} className="font-semibold">KeyFlowOS</span>

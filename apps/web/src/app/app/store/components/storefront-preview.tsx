@@ -331,11 +331,11 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
             className="rounded-[1.8rem] overflow-hidden"
             style={{ border: "1px solid hsl(var(--kf-border) / 0.3)" }}
           >
-            <div className={`bg-[#0a0a0f] overflow-y-auto ${ts.fontClass}`} style={{ maxHeight: "600px" }}>
+            <div className={`overflow-y-auto ${ts.fontClass}`} style={{ maxHeight: "600px", backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
               {hero.coverImageUrl && (
                 <div className="w-full h-20 overflow-hidden relative">
                   <img src={hero.coverImageUrl} alt="" className="w-full h-full object-cover" />
-                  <div className="absolute inset-0 bg-gradient-to-b from-transparent to-[#0a0a0f]" />
+                  <div className="absolute inset-0" style={{ background: `linear-gradient(to bottom, transparent, ${ts.pageBg})` }} />
                 </div>
               )}
 

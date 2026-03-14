@@ -1,6 +1,8 @@
 export type ThemeKey = "default" | "minimal" | "bold" | "elegant" | "luxe" | "fresh";
 
 export interface ThemeStyles {
+  pageBg: string;
+  pageGradient: string;
   cardBg: string;
   cardBgHover: string;
   cardBorder: string;
@@ -51,6 +53,8 @@ export function getThemeStyles(theme: ThemeKey, primaryColor: string, secondaryC
 
     case "minimal":
       return {
+        pageBg: `#080808`,
+        pageGradient: `radial-gradient(ellipse at 50% 0%, ${primaryColor}08, transparent 50%), radial-gradient(ellipse at 100% 100%, ${secondaryColor}05, transparent 40%)`,
         cardBg: `${primaryColor}04`,
         cardBgHover: `${primaryColor}08`,
         cardBorder: `1px solid ${primaryColor}08`,
@@ -98,6 +102,8 @@ export function getThemeStyles(theme: ThemeKey, primaryColor: string, secondaryC
 
     case "bold":
       return {
+        pageBg: `#060608`,
+        pageGradient: `linear-gradient(160deg, ${primaryColor}12, transparent 40%), linear-gradient(340deg, ${secondaryColor}0A, transparent 40%), radial-gradient(ellipse at 50% 80%, ${accentColor}08, transparent 50%)`,
         cardBg: `${primaryColor}0C`,
         cardBgHover: `${primaryColor}18`,
         cardBorder: `2px solid ${primaryColor}25`,
@@ -145,6 +151,8 @@ export function getThemeStyles(theme: ThemeKey, primaryColor: string, secondaryC
 
     case "elegant":
       return {
+        pageBg: `#07070a`,
+        pageGradient: `radial-gradient(ellipse at 30% 0%, ${primaryColor}0A, transparent 45%), radial-gradient(ellipse at 70% 100%, ${secondaryColor}08, transparent 40%)`,
         cardBg: `${secondaryColor}06`,
         cardBgHover: `${secondaryColor}0C`,
         cardBorder: `1px solid ${secondaryColor}15`,
@@ -192,6 +200,8 @@ export function getThemeStyles(theme: ThemeKey, primaryColor: string, secondaryC
 
     case "luxe":
       return {
+        pageBg: `#040406`,
+        pageGradient: `linear-gradient(180deg, ${primaryColor}06, transparent 30%), linear-gradient(0deg, ${secondaryColor}04, transparent 30%)`,
         cardBg: `${primaryColor}06`,
         cardBgHover: `${primaryColor}0C`,
         cardBorder: `1px solid ${secondaryColor}12`,
@@ -239,6 +249,8 @@ export function getThemeStyles(theme: ThemeKey, primaryColor: string, secondaryC
 
     case "fresh":
       return {
+        pageBg: `#08080c`,
+        pageGradient: `radial-gradient(ellipse at 20% 20%, ${primaryColor}10, transparent 40%), radial-gradient(ellipse at 80% 60%, ${secondaryColor}0A, transparent 40%), radial-gradient(ellipse at 50% 100%, ${accentColor}08, transparent 35%)`,
         cardBg: `${primaryColor}08`,
         cardBgHover: `${primaryColor}12`,
         cardBorder: `1px solid ${primaryColor}10`,
@@ -286,6 +298,8 @@ export function getThemeStyles(theme: ThemeKey, primaryColor: string, secondaryC
 
     default:
       return {
+        pageBg: `#070710`,
+        pageGradient: `radial-gradient(ellipse at 50% 0%, ${primaryColor}0C, transparent 50%), radial-gradient(ellipse at 80% 100%, ${secondaryColor}08, transparent 40%)`,
         cardBg: `${primaryColor}06`,
         cardBgHover: `${primaryColor}0C`,
         cardBorder: `1px solid ${primaryColor}10`,
