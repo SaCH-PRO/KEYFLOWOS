@@ -12,7 +12,8 @@ import {
   AlertTriangle, CreditCard, Shield, Star, Brain,
   TrendingUp, BarChart3, Activity, ChevronDown, ChevronUp,
   Receipt, Lock, Users, Calendar, Globe, Megaphone,
-  FolderKanban, X, Eye, EyeOff,
+  FolderKanban, X, Eye, EyeOff, Wallet, Banknote,
+  Loader2, CheckCircle2, DollarSign, FileText,
 } from "lucide-react";
 
 interface BillingDashboard {
@@ -84,6 +85,36 @@ interface BillingDashboard {
   categories: Record<string, { label: string; icon: string }>;
 }
 
+interface SubscriptionPaymentRecord {
+  id: string;
+  amount: number;
+  currency: string;
+  method: string;
+  status: string;
+  reference: string | null;
+  notes: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  createdAt: string;
+  subscription: { plan: string; status: string };
+}
+
+const methodLabels: Record<string, string> = {
+  wipay: "Card (WiPay)",
+  paypal: "PayPal",
+  bank_transfer: "Bank Transfer",
+  cash: "Cash",
+  manual: "Manual",
+};
+
+const methodIcons: Record<string, typeof CreditCard> = {
+  wipay: CreditCard,
+  paypal: Wallet,
+  bank_transfer: Banknote,
+  cash: DollarSign,
+  manual: FileText,
+};
+
 const planDetails: Record<string, { icon: typeof Zap; color: string; gradient: string; glow: string; badge: string }> = {
   FREE: { icon: Zap, color: "text-gray-400", gradient: "from-gray-500/10 to-gray-600/10", glow: "shadow-gray-500/5", badge: "bg-gray-500/20 text-gray-300" },
   FLOW: { icon: Sparkles, color: "text-orange-400", gradient: "from-orange-500/15 to-teal-500/15", glow: "shadow-orange-500/10", badge: "bg-orange-500/20 text-orange-300" },
@@ -136,7 +167,7 @@ const fadeUp = {
   show: { opacity: 1, y: 0, transition: { duration: 0.25 } },
 };
 
-type BillingSubTab = "overview" | "usage" | "features" | "history";
+type BillingSubTab = "overview" | "usage" | "features" | "history" | "payments";
 
 export function BillingTab() {
   const [dashboard, setDashboard] = useState<BillingDashboard | null>(null);
@@ -151,6 +182,13 @@ export function BillingTab() {
   const [showMatrix, setShowMatrix] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
+  const [checkoutPlan, setCheckoutPlan] = useState<string | null>(null);
+  const [checkoutMethod, setCheckoutMethod] = useState<string>("manual");
+  const [checkoutRef, setCheckoutRef] = useState("");
+  const [checkoutNotes, setCheckoutNotes] = useState("");
+  const [checkoutProcessing, setCheckoutProcessing] = useState(false);
+  const [paymentHistory, setPaymentHistory] = useState<SubscriptionPaymentRecord[]>([]);
+  const [paymentsLoaded, setPaymentsLoaded] = useState(false);
 
   const businessId = getStoredBusinessId();
 
@@ -169,6 +207,45 @@ export function BillingTab() {
     const res = await fetchAiUsageHistory(businessId, 20, 0);
     if (res.data) setUsageHistory(res.data);
     setShowHistory(true);
+  };
+
+  const loadPayments = useCallback(async () => {
+    if (!businessId) return;
+    const res = await apiGet<SubscriptionPaymentRecord[]>(`/subscriptions/businesses/${businessId}/payments`);
+    if (res.data) setPaymentHistory(Array.isArray(res.data) ? res.data : []);
+    setPaymentsLoaded(true);
+  }, [businessId]);
+
+  const handleCheckoutPay = async () => {
+    if (!businessId || !checkoutPlan) return;
+    setCheckoutProcessing(true);
+    setMessage(null);
+
+    const res = await apiPost<unknown>({
+      path: `/subscriptions/businesses/${businessId}/record-payment`,
+      body: {
+        plan: checkoutPlan,
+        currency: selectedCurrency,
+        method: checkoutMethod,
+        reference: checkoutRef || undefined,
+        notes: checkoutNotes || undefined,
+      },
+    });
+
+    if (res.error) {
+      setMessage({ type: "error", text: res.error });
+      toast.error(res.error);
+    } else {
+      setMessage({ type: "success", text: `${checkoutPlan} plan activated!` });
+      toast.success(`${checkoutPlan} plan activated with ${methodLabels[checkoutMethod] || checkoutMethod} payment!`);
+      setCheckoutPlan(null);
+      setCheckoutMethod("manual");
+      setCheckoutRef("");
+      setCheckoutNotes("");
+      await loadAll();
+      await loadPayments();
+    }
+    setCheckoutProcessing(false);
   };
 
   const handleStartTrial = async (plan: string) => {
@@ -272,6 +349,7 @@ export function BillingTab() {
 
   const subTabs: { key: BillingSubTab; label: string; icon: typeof Receipt }[] = [
     { key: "overview", label: "Overview", icon: Receipt },
+    { key: "payments", label: "Payments", icon: CreditCard },
     { key: "usage", label: "Usage & Limits", icon: BarChart3 },
     { key: "features", label: "Feature Access", icon: Shield },
     { key: "history", label: "AI History", icon: Activity },
@@ -639,7 +717,7 @@ export function BillingTab() {
                                 <ArrowUpRight className="w-3 h-3" />
                               </button>
                               <button
-                                onClick={() => handleActivate(planId)}
+                                onClick={() => { setCheckoutPlan(planId); setCheckoutMethod("manual"); setCheckoutRef(""); setCheckoutNotes(""); }}
                                 disabled={upgrading}
                                 className="flex-1 flex items-center justify-center gap-1 py-2 rounded-xl border border-border/60 text-xs font-medium hover:bg-muted/20 disabled:opacity-50 transition-all"
                               >
@@ -973,8 +1051,221 @@ export function BillingTab() {
               </motion.div>
             </div>
           )}
+          {/* ========== PAYMENTS TAB ========== */}
+          {activeSubTab === "payments" && (
+            <div className="space-y-4">
+              <motion.div variants={fadeUp} className="rounded-2xl border border-border/40 p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="text-sm font-semibold flex items-center gap-2">
+                    <Receipt className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+                    Payment History
+                  </h4>
+                  {!paymentsLoaded ? (
+                    <button
+                      onClick={loadPayments}
+                      className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                    >
+                      Load payments <ArrowUpRight className="w-3 h-3" />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={loadPayments}
+                      className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Refresh
+                    </button>
+                  )}
+                </div>
+
+                {paymentsLoaded ? (
+                  paymentHistory.length > 0 ? (
+                    <div className="space-y-2">
+                      {paymentHistory.map((p) => {
+                        const MIcon = methodIcons[p.method] || FileText;
+                        return (
+                          <div key={p.id} className="flex items-center justify-between px-4 py-3 rounded-xl bg-muted/10 border border-border/20">
+                            <div className="flex items-center gap-3">
+                              <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-[hsl(var(--kf-accent1))]/10">
+                                <MIcon className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-medium">{p.subscription.plan} Plan</span>
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                                    p.status === "COMPLETED"
+                                      ? "bg-emerald-500/20 text-emerald-300"
+                                      : p.status === "PENDING"
+                                      ? "bg-amber-500/20 text-amber-300"
+                                      : "bg-red-500/20 text-red-300"
+                                  }`}>
+                                    {p.status}
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-muted-foreground flex items-center gap-2">
+                                  <span>{methodLabels[p.method] || p.method}</span>
+                                  {p.reference && <span>Ref: {p.reference}</span>}
+                                  <span>{new Date(p.createdAt).toLocaleDateString()}</span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-sm font-bold">
+                                {p.currency === "USD" ? "US" : "TT"}${p.amount.toFixed(2)}
+                              </span>
+                              {p.periodStart && p.periodEnd && (
+                                <p className="text-[10px] text-muted-foreground">
+                                  {new Date(p.periodStart).toLocaleDateString()} - {new Date(p.periodEnd).toLocaleDateString()}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8">
+                      <Receipt className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                      <p className="text-sm text-muted-foreground">No payments recorded yet</p>
+                      <p className="text-xs text-muted-foreground mt-1">Payments will appear here when you subscribe to a plan</p>
+                    </div>
+                  )
+                ) : (
+                  <div className="text-center py-8">
+                    <button
+                      onClick={loadPayments}
+                      className="text-sm flex items-center gap-1 mx-auto hover:opacity-80 transition-opacity"
+                      style={{ color: "hsl(var(--kf-accent1))" }}
+                    >
+                      <CreditCard className="w-4 h-4" /> Load Payment History
+                    </button>
+                  </div>
+                )}
+              </motion.div>
+            </div>
+          )}
         </motion.div>
       </AnimatePresence>
+
+      {/* ========== CHECKOUT MODAL ========== */}
+      <AnimatePresence>
+        {checkoutPlan && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ backgroundColor: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="w-full max-w-md rounded-2xl border border-border/60 bg-[hsl(var(--kf-surface))] p-6 shadow-2xl"
+            >
+              <div className="flex items-center justify-between mb-5">
+                <h3 className="text-lg font-bold flex items-center gap-2">
+                  <Wallet className="w-5 h-5" style={{ color: "hsl(var(--kf-accent1))" }} />
+                  Subscribe to {checkoutPlan}
+                </h3>
+                <button onClick={() => setCheckoutPlan(null)} className="text-muted-foreground hover:text-foreground transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="rounded-xl border border-border/40 bg-muted/10 p-4 mb-5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">{checkoutPlan} Plan</p>
+                    <p className="text-xs text-muted-foreground">Monthly subscription</p>
+                  </div>
+                  <p className="text-xl font-bold">
+                    {selectedCurrency === "TTD" ? "TT" : "US"}${planPricing[checkoutPlan]?.[selectedCurrency === "TTD" ? "ttd" : "usd"] || 0}/mo
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-3 mb-5">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Payment Method</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: "manual", label: "Manual Activation", icon: CheckCircle2, desc: "Activate immediately" },
+                    { id: "bank_transfer", label: "Bank Transfer", icon: Banknote, desc: "Send proof of payment" },
+                    { id: "cash", label: "Cash", icon: DollarSign, desc: "In-person payment" },
+                    { id: "wipay", label: "Card (WiPay)", icon: CreditCard, desc: "Coming soon", disabled: true },
+                  ].map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => !("disabled" in m && m.disabled) && setCheckoutMethod(m.id)}
+                      disabled={"disabled" in m && m.disabled}
+                      className={`relative p-3 rounded-xl border text-left transition-all ${
+                        checkoutMethod === m.id
+                          ? "border-[hsl(var(--kf-accent1))]/60 bg-[hsl(var(--kf-accent1))]/5"
+                          : "border-border/30 hover:border-border/60"
+                      } ${"disabled" in m && m.disabled ? "opacity-40 cursor-not-allowed" : ""}`}
+                    >
+                      <m.icon className="w-4 h-4 mb-1" style={checkoutMethod === m.id ? { color: "hsl(var(--kf-accent1))" } : {}} />
+                      <p className="text-xs font-medium">{m.label}</p>
+                      <p className="text-[10px] text-muted-foreground">{m.desc}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {(checkoutMethod === "bank_transfer" || checkoutMethod === "cash") && (
+                <div className="space-y-3 mb-5">
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Reference / Receipt #</label>
+                    <input
+                      value={checkoutRef}
+                      onChange={(e) => setCheckoutRef(e.target.value)}
+                      placeholder="e.g. TXN-12345"
+                      className="w-full px-3 py-2 rounded-xl bg-muted/20 border border-border/40 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:border-[hsl(var(--kf-accent1))]/60"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Notes</label>
+                    <textarea
+                      value={checkoutNotes}
+                      onChange={(e) => setCheckoutNotes(e.target.value)}
+                      placeholder="Optional payment notes..."
+                      rows={2}
+                      className="w-full px-3 py-2 rounded-xl bg-muted/20 border border-border/40 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:border-[hsl(var(--kf-accent1))]/60 resize-none"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setCheckoutPlan(null)}
+                  className="flex-1 py-2.5 rounded-xl border border-border/60 text-sm font-medium hover:bg-muted/20 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCheckoutPay}
+                  disabled={checkoutProcessing}
+                  className="flex-1 py-2.5 rounded-xl text-white text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+                  style={{ backgroundColor: "hsl(var(--kf-accent1))" }}
+                >
+                  {checkoutProcessing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4" />
+                      Activate {checkoutPlan}
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <ConfirmDialog
         open={confirmState.open}
         title="Cancel Subscription"

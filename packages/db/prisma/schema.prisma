@@ -537,9 +537,10 @@ model Invoice {
   contactId  String   @map("contact_id")
   contact    Contact  @relation(fields: [contactId], references: [id], onDelete: NoAction) // DATA INTEGRITY
 
-  items    InvoiceItem[]
-  payments Payment[]
-  booking  Booking?
+  items        InvoiceItem[]
+  payments     Payment[]
+  paymentLinks PaymentLink[]
+  booking      Booking?
   quote    Quote?    @relation(fields: [quoteId], references: [id], onUpdate: NoAction, onDelete: NoAction) // DATA INTEGRITY
   quoteId  String?   @unique @map("quote_id")
 
@@ -577,16 +578,35 @@ model Payment {
   amount            Float
   currency          String
   status            String   // PENDING, SUCCESSFUL, FAILED
-  provider          String   // "stripe", "wipay"
+  provider          String   // "wipay", "paypal", "cash", "bank_transfer", "card"
+  method            String?  @default("card") // card, cash, bank_transfer, paypal, wipay, check, other
   providerPaymentId String   @unique @map("provider_payment_id")
+  reference         String?
+  notes             String?
+  recordedBy        String?  @map("recorded_by")
   createdAt         DateTime @default(now()) @map("created_at")
 
-  businessId String  @map("business_id") // For easier indexing
+  businessId String  @map("business_id")
   invoiceId  String  @map("invoice_id")
-  invoice    Invoice @relation(fields: [invoiceId], references: [id], onDelete: NoAction) // DATA INTEGRITY
+  invoice    Invoice @relation(fields: [invoiceId], references: [id], onDelete: NoAction)
 
   @@index([businessId, invoiceId])
   @@map("payments")
+}
+
+model PaymentLink {
+  id        String   @id @default(cuid())
+  token     String   @unique @default(cuid())
+  invoiceId String   @map("invoice_id")
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  businessId String  @map("business_id")
+  active    Boolean  @default(true)
+  expiresAt DateTime? @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([token])
+  @@index([businessId])
+  @@map("payment_links")
 }
 
 // ---
@@ -945,8 +965,35 @@ model Subscription {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt      @map("updated_at")
 
+  payments  SubscriptionPayment[]
+
   @@index([businessId, status])
   @@map("subscriptions")
+}
+
+model SubscriptionPayment {
+  id             String   @id @default(cuid())
+  subscriptionId String   @map("subscription_id")
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  businessId     String   @map("business_id")
+
+  amount         Float
+  currency       String   @default("TTD")
+  method         String   // wipay, paypal, bank_transfer, cash, manual
+  status         String   @default("COMPLETED") // COMPLETED, PENDING, FAILED
+  reference      String?
+  notes          String?
+  gateway        String?
+  gatewayTxnId   String?  @map("gateway_txn_id")
+
+  periodStart    DateTime? @map("period_start")
+  periodEnd      DateTime? @map("period_end")
+
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([businessId])
+  @@index([subscriptionId])
+  @@map("subscription_payments")
 }
 
 model AiUsageLog {

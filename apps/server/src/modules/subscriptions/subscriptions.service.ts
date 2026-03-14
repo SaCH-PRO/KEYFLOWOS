@@ -263,6 +263,70 @@ export class SubscriptionsService {
     }
   }
 
+  async createCheckout(businessId: string, planId: string, currency: string, gateway: string) {
+    const plan = PLANS[planId];
+    if (!plan) throw new BadRequestException('Invalid plan');
+    if (planId === 'FREE') throw new BadRequestException('Free plan does not require payment');
+    if (!['wipay', 'paypal'].includes(gateway)) throw new BadRequestException('Invalid gateway');
+
+    const price = currency === 'USD' ? plan.priceUSD : plan.priceTTD;
+
+    return {
+      plan: planId,
+      planName: plan.name,
+      amount: price,
+      currency,
+      gateway,
+      description: `${plan.name} Plan - Monthly Subscription`,
+      checkoutReady: true,
+    };
+  }
+
+  async recordManualPayment(
+    businessId: string,
+    planId: string,
+    currency: string,
+    method: string,
+    reference?: string,
+    notes?: string,
+  ) {
+    const plan = PLANS[planId];
+    if (!plan) throw new BadRequestException('Invalid plan');
+
+    const sub = await this.activateSubscription(businessId, planId, currency, method);
+
+    await this.db.subscriptionPayment.create({
+      data: {
+        subscriptionId: sub.id,
+        businessId,
+        amount: sub.priceMonthly,
+        currency,
+        method,
+        status: 'COMPLETED',
+        reference: reference || null,
+        notes: notes || null,
+        periodStart: sub.currentPeriodStart,
+        periodEnd: sub.currentPeriodEnd,
+      },
+    });
+
+    this.logger.log(`Recorded manual ${method} payment for business ${businessId} on ${planId} plan`);
+    return sub;
+  }
+
+  async getPaymentHistory(businessId: string) {
+    return this.db.subscriptionPayment.findMany({
+      where: { businessId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      include: {
+        subscription: {
+          select: { plan: true, status: true },
+        },
+      },
+    });
+  }
+
   async getBillingDashboard(businessId: string) {
     const subInfo = await this.getActiveSubscription(businessId);
     const plan = PLANS[subInfo.plan] || PLANS.FREE;

@@ -67,4 +67,28 @@ export class SubscriptionsController {
   ) {
     return this.subs.checkLimit(businessId, resource);
   }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/checkout')
+  async createCheckout(
+    @Param('businessId') businessId: string,
+    @Body() body: { plan: string; currency: string; gateway: string },
+  ) {
+    return this.subs.createCheckout(businessId, body.plan, body.currency, body.gateway);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/record-payment')
+  async recordSubscriptionPayment(
+    @Param('businessId') businessId: string,
+    @Body() body: { plan: string; currency: string; method: string; reference?: string; notes?: string },
+  ) {
+    return this.subs.recordManualPayment(businessId, body.plan, body.currency, body.method, body.reference, body.notes);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/payments')
+  async getPaymentHistory(@Param('businessId') businessId: string) {
+    return this.subs.getPaymentHistory(businessId);
+  }
 }

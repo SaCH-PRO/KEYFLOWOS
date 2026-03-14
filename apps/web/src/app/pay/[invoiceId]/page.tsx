@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { Button, Card } from "@keyflow/ui";
 import { apiGet, apiPost, API_BASE } from "@/lib/api";
+import { formatPrice } from "@/lib/format";
 import {
   CheckCircle2,
   Loader2,
@@ -19,6 +20,16 @@ import {
   ArrowRight,
   Shield,
   ChevronLeft,
+  Landmark,
+  Banknote,
+  Copy,
+  Check,
+  RefreshCw,
+  Calendar,
+  Hash,
+  User,
+  Receipt,
+  Sparkles,
 } from "lucide-react";
 import { InvoiceTemplateRenderer } from "@/app/app/commerce/components/invoice-templates";
 import type { TemplateId, InvoiceTemplateData } from "@/app/app/commerce/components/invoice-templates";
@@ -40,6 +51,7 @@ type Business = {
   instagram: string | null;
   twitter: string | null;
   whatsapp: string | null;
+  metaData?: Record<string, unknown> | null;
 };
 
 type Invoice = {
@@ -79,6 +91,74 @@ type Gateway = {
   currencies: string[];
 };
 
+type PaymentMethod = "wipay" | "paypal" | "bank_transfer" | "cash";
+
+function ConfettiParticles() {
+  const particles = useMemo(() => {
+    const colors = ["#F97316", "#14B8A6", "#8B5CF6", "#EC4899", "#EAB308", "#3B82F6"];
+    return Array.from({ length: 40 }, (_, i) => ({
+      id: i,
+      left: `${Math.random() * 100}%`,
+      delay: `${Math.random() * 2}s`,
+      duration: `${2 + Math.random() * 3}s`,
+      color: colors[i % colors.length],
+      size: 4 + Math.random() * 6,
+      rotation: Math.random() * 360,
+    }));
+  }, []);
+
+  return (
+    <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
+      {particles.map((p) => (
+        <div
+          key={p.id}
+          className="absolute animate-confetti-fall"
+          style={{
+            left: p.left,
+            top: "-10px",
+            width: p.size,
+            height: p.size,
+            backgroundColor: p.color,
+            borderRadius: p.size > 7 ? "50%" : "1px",
+            animationDelay: p.delay,
+            animationDuration: p.duration,
+            transform: `rotate(${p.rotation}deg)`,
+          }}
+        />
+      ))}
+      <style>{`
+        @keyframes confetti-fall {
+          0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+          100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+        }
+        .animate-confetti-fall {
+          animation-name: confetti-fall;
+          animation-timing-function: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+          animation-fill-mode: forwards;
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <button
+      onClick={handleCopy}
+      className="ml-2 p-1 rounded hover:bg-white/10 transition-colors"
+      title="Copy"
+    >
+      {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
+    </button>
+  );
+}
+
 export default function PublicPaymentPage() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -90,8 +170,10 @@ export default function PublicPaymentPage() {
   const [paying, setPaying] = useState(false);
   const [paid, setPaid] = useState(false);
   const [gateways, setGateways] = useState<Gateway[]>([]);
-  const [selectedGateway, setSelectedGateway] = useState<string | null>(null);
+  const [selectedMethod, setSelectedMethod] = useState<PaymentMethod | null>(null);
   const [step, setStep] = useState<"review" | "gateway" | "processing">("review");
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [offlineConfirmed, setOfflineConfirmed] = useState(false);
 
   const wipayStatus = searchParams.get("status");
   const wipayOrderId = searchParams.get("order_id");
@@ -107,6 +189,7 @@ export default function PublicPaymentPage() {
         );
         if (res.data?.success) {
           setPaid(true);
+          setShowConfetti(true);
           const invoiceRes = await apiGet<Invoice>(`/commerce/invoices/${encodeURIComponent(invoiceId)}`);
           if (invoiceRes.data) setInvoice(invoiceRes.data);
         } else {
@@ -128,6 +211,7 @@ export default function PublicPaymentPage() {
         });
         if (res.data?.status === "COMPLETED") {
           setPaid(true);
+          setShowConfetti(true);
           const invoiceRes = await apiGet<Invoice>(`/commerce/invoices/${encodeURIComponent(invoiceId)}`);
           if (invoiceRes.data) setInvoice(invoiceRes.data);
         } else {
@@ -160,9 +244,6 @@ export default function PublicPaymentPage() {
       if (gatewayRes.data) {
         const gwList = Array.isArray(gatewayRes.data) ? gatewayRes.data : (gatewayRes.data as any).gateways || [];
         setGateways(gwList);
-        if (gwList.length === 1) {
-          setSelectedGateway(gwList[0].id);
-        }
       }
 
       setLoading(false);
@@ -185,7 +266,7 @@ export default function PublicPaymentPage() {
     if (res.error || !res.data?.redirectUrl) {
       setError(res.error || "Failed to initiate payment");
       setPaying(false);
-      setStep("gateway");
+      setStep("review");
       return;
     }
 
@@ -205,51 +286,97 @@ export default function PublicPaymentPage() {
     if (orderRes.error || !orderRes.data?.orderId) {
       setError(orderRes.error || "Failed to create PayPal order");
       setPaying(false);
-      setStep("gateway");
+      setStep("review");
       return;
     }
 
     const returnUrl = encodeURIComponent(window.location.origin + window.location.pathname);
-    const approvalUrl = `https://www.sandbox.paypal.com/checkoutnow?token=${orderRes.data.orderId}&return=${returnUrl}`;
+    const paypalClientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || "";
+    const isLive = paypalClientId.startsWith("A");
+    const paypalBase = isLive ? "https://www.paypal.com" : "https://www.sandbox.paypal.com";
+    const approvalUrl = `${paypalBase}/checkoutnow?token=${orderRes.data.orderId}&return=${returnUrl}`;
     window.location.href = approvalUrl;
   }, [invoice, invoiceId]);
 
+  const handleOfflinePayment = useCallback(async (method: "bank_transfer" | "cash") => {
+    if (!invoice) return;
+    setPaying(true);
+
+    const res = await apiPost<{ success: boolean }>({
+      path: `/commerce/invoices/${encodeURIComponent(invoiceId)}/payment-intent`,
+      body: { method },
+    });
+
+    setPaying(false);
+
+    if (res.error) {
+      setError(res.error);
+      return;
+    }
+
+    setOfflineConfirmed(true);
+  }, [invoice, invoiceId]);
+
   const handlePay = useCallback(async () => {
-    if (!selectedGateway) {
+    if (!selectedMethod) {
       setError("Please select a payment method");
       return;
     }
 
-    if (selectedGateway === "wipay") {
+    setError(null);
+
+    if (selectedMethod === "wipay") {
       await handleWipayPay();
-    } else if (selectedGateway === "paypal") {
+    } else if (selectedMethod === "paypal") {
       await handlePaypalPay();
-    } else {
-      setPaying(true);
-      const { data, error: payError } = await apiPost<Invoice>({
-        path: `/commerce/invoices/${encodeURIComponent(invoiceId)}/paid`,
-        body: {},
-      });
-      setPaying(false);
-      if (payError) {
-        setError(payError);
-      } else if (data) {
-        setInvoice(data);
-        setPaid(true);
-      }
+    } else if (selectedMethod === "bank_transfer" || selectedMethod === "cash") {
+      await handleOfflinePayment(selectedMethod);
     }
-  }, [selectedGateway, handleWipayPay, handlePaypalPay, invoiceId]);
+  }, [selectedMethod, handleWipayPay, handlePaypalPay, handleOfflinePayment]);
 
   const business = invoice?.business;
   const primaryColor = business?.primaryColor || "#F97316";
+  const secondaryColor = business?.secondaryColor || "#14B8A6";
   const logoUrl = business?.logoUrl ? `${API_BASE}${business.logoUrl}` : null;
+
+  const meta = (business?.metaData || {}) as Record<string, unknown>;
+  const bankName = (meta.bankName as string) || "";
+  const bankAccountNumber = (meta.bankAccountNumber as string) || "";
+  const bankRoutingNumber = (meta.bankRoutingNumber as string) || "";
+  const bankBranch = (meta.bankBranch as string) || "";
+  const hasBankDetails = !!(bankName || bankAccountNumber);
+
+  const subtotal = invoice?.subtotal ?? invoice?.total ?? 0;
+  const taxRate = invoice?.taxRate ?? 0;
+  const taxAmount = invoice?.taxAmount ?? 0;
+  const discountAmount = invoice?.discountAmount ?? 0;
+  const total = invoice?.total ?? 0;
+  const currency = invoice?.currency ?? "TTD";
+
+  const hasWipay = gateways.some((g) => g.id === "wipay");
+  const hasPaypal = gateways.some((g) => g.id === "paypal");
+  const wipayGateway = gateways.find((g) => g.id === "wipay");
+  const paypalGateway = gateways.find((g) => g.id === "paypal");
+
+  const glassCard = "backdrop-blur-xl bg-white/[0.04] border border-white/[0.08] rounded-2xl shadow-2xl";
+  const glassCardInner = "backdrop-blur-xl bg-white/[0.06] border border-white/[0.06] rounded-xl";
 
   if (loading) {
     return (
       <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white flex items-center justify-center">
         <div className="text-center space-y-4">
-          <Loader2 className="w-10 h-10 animate-spin mx-auto" style={{ color: primaryColor }} />
-          <p className="text-sm text-slate-400">Loading invoice...</p>
+          <div className="relative">
+            <div
+              className="w-16 h-16 rounded-2xl mx-auto flex items-center justify-center"
+              style={{ backgroundColor: `${primaryColor}15` }}
+            >
+              <Loader2 className="w-8 h-8 animate-spin" style={{ color: primaryColor }} />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-slate-300">Loading invoice...</p>
+            <p className="text-xs text-slate-500">Please wait a moment</p>
+          </div>
         </div>
       </main>
     );
@@ -258,200 +385,603 @@ export default function PublicPaymentPage() {
   if (error && !invoice) {
     return (
       <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white flex items-center justify-center px-4">
-        <Card className="max-w-md w-full bg-slate-900/80 border-red-500/40">
-          <div className="text-center p-6 space-y-3">
-            <AlertCircle className="w-12 h-12 text-red-400 mx-auto" />
+        <div className={`max-w-md w-full ${glassCard} p-8`}>
+          <div className="text-center space-y-4">
+            <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto">
+              <AlertCircle className="w-8 h-8 text-red-400" />
+            </div>
             <h1 className="text-xl font-semibold text-red-400">Invoice Not Found</h1>
             <p className="text-sm text-slate-400">This invoice link may be invalid or expired.</p>
+            <Button
+              onClick={() => window.location.reload()}
+              className="mt-4"
+              variant="outline"
+            >
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Try Again
+            </Button>
           </div>
-        </Card>
+        </div>
+        <footer className="fixed bottom-4 left-0 right-0 text-center text-xs text-slate-600">
+          Powered by <span className="font-semibold" style={{ color: primaryColor }}>KeyFlowOS</span>
+        </footer>
       </main>
     );
   }
 
-  const subtotal = invoice?.subtotal ?? invoice?.total ?? 0;
-  const taxRate = invoice?.taxRate ?? 0;
-  const taxAmount = invoice?.taxAmount ?? 0;
-  const discountAmount = invoice?.discountAmount ?? 0;
-  const total = invoice?.total ?? 0;
-
   if (paid && invoice) {
     return (
       <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white flex items-center justify-center px-4">
-        <Card className="max-w-md w-full bg-slate-900/80 border-emerald-500/40">
-          <div className="text-center p-6 space-y-4">
+        {showConfetti && <ConfettiParticles />}
+        <div className={`max-w-md w-full ${glassCard} overflow-hidden`}>
+          <div
+            className="h-1.5 w-full"
+            style={{ background: `linear-gradient(90deg, ${primaryColor}, ${secondaryColor})` }}
+          />
+          <div className="p-8 space-y-6">
             {business && (
-              <div className="mb-4">
+              <div className="text-center">
                 {logoUrl ? (
-                  <img src={logoUrl} alt={business.name} className="h-16 w-16 object-contain mx-auto rounded-xl" />
+                  <img src={logoUrl} alt={business.name} className="h-14 w-14 object-contain mx-auto rounded-xl" />
                 ) : (
                   <div
-                    className="h-16 w-16 rounded-xl flex items-center justify-center mx-auto text-white font-bold text-2xl"
+                    className="h-14 w-14 rounded-xl flex items-center justify-center mx-auto text-white font-bold text-xl"
                     style={{ backgroundColor: primaryColor }}
                   >
                     {business.name?.charAt(0) || "K"}
                   </div>
                 )}
-                <p className="text-lg font-semibold mt-2" style={{ color: primaryColor }}>
-                  {business.name}
-                </p>
+                <p className="text-sm font-medium mt-2 text-slate-300">{business.name}</p>
               </div>
             )}
-            <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto">
-              <CheckCircle2 className="w-8 h-8 text-emerald-400" />
+
+            <div className="text-center space-y-3">
+              <div className="relative w-20 h-20 mx-auto">
+                <div
+                  className="absolute inset-0 rounded-full animate-ping opacity-20"
+                  style={{ backgroundColor: "#10B981" }}
+                />
+                <div className="relative w-20 h-20 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                  <CheckCircle2 className="w-10 h-10 text-emerald-400" />
+                </div>
+              </div>
+              <h1 className="text-2xl font-bold text-emerald-400">Payment Complete!</h1>
             </div>
-            <h1 className="text-xl font-semibold text-emerald-400">Payment Complete!</h1>
-            <p className="text-sm text-slate-300">
-              Invoice #{invoice.invoiceNumber} has been paid.
+
+            <div className={`${glassCardInner} p-4 space-y-3`}>
+              <div className="flex items-center gap-2 mb-3">
+                <Receipt className="w-4 h-4 text-slate-400" />
+                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Receipt</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-400">Invoice</span>
+                <span className="font-medium">#{invoice.invoiceNumber}</span>
+              </div>
+              {invoice.contact && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-400">Client</span>
+                  <span className="font-medium">
+                    {[invoice.contact.firstName, invoice.contact.lastName].filter(Boolean).join(" ")}
+                  </span>
+                </div>
+              )}
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-400">Date</span>
+                <span className="font-medium">
+                  {new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                </span>
+              </div>
+              <div className="border-t border-white/[0.08] pt-3 mt-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400 text-sm">Total Paid</span>
+                  <span className="text-xl font-bold" style={{ color: primaryColor }}>
+                    {formatPrice(total, currency)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <p className="text-center text-xs text-slate-500">
+              A confirmation has been sent to your email
             </p>
-            <div className="text-2xl font-bold text-white">
-              {invoice.currency} {total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-            </div>
           </div>
-        </Card>
+        </div>
+        <footer className="fixed bottom-4 left-0 right-0 text-center text-xs text-slate-600">
+          Powered by <span className="font-semibold" style={{ color: primaryColor }}>KeyFlowOS</span>
+        </footer>
       </main>
     );
   }
 
-  const templateId = (business?.invoiceTemplate || "classic") as TemplateId;
-  const templateData: InvoiceTemplateData = {
-    type: "invoice",
-    number: invoice?.invoiceNumber ?? "",
-    status: invoice?.status ?? "DRAFT",
-    issueDate: invoice?.issueDate ?? null,
-    dueDate: invoice?.dueDate ?? null,
-    contact: invoice?.contact ?? null,
-    items: invoice?.items ?? [],
-    subtotal,
-    taxRate,
-    taxAmount,
-    discountType: invoice?.discountType,
-    discountValue: invoice?.discountValue,
-    discountAmount,
-    total,
-    currency: invoice?.currency ?? "TTD",
-    notes: invoice?.notes,
-    business: {
-      name: business?.name ?? "Invoice",
-      logoUrl,
-      address: business?.address,
-      city: business?.city,
-      country: business?.country,
-      phone: business?.phone,
-      email: business?.email,
-      website: business?.website,
-      primaryColor,
-      secondaryColor: business?.secondaryColor || "#14B8A6",
-    },
+  if (offlineConfirmed && invoice) {
+    return (
+      <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white flex items-center justify-center px-4">
+        <div className={`max-w-md w-full ${glassCard} overflow-hidden`}>
+          <div
+            className="h-1.5 w-full"
+            style={{ background: `linear-gradient(90deg, ${primaryColor}, ${secondaryColor})` }}
+          />
+          <div className="p-8 space-y-6">
+            {business && (
+              <div className="text-center">
+                {logoUrl ? (
+                  <img src={logoUrl} alt={business.name} className="h-14 w-14 object-contain mx-auto rounded-xl" />
+                ) : (
+                  <div
+                    className="h-14 w-14 rounded-xl flex items-center justify-center mx-auto text-white font-bold text-xl"
+                    style={{ backgroundColor: primaryColor }}
+                  >
+                    {business.name?.charAt(0) || "K"}
+                  </div>
+                )}
+                <p className="text-sm font-medium mt-2 text-slate-300">{business.name}</p>
+              </div>
+            )}
+            <div className="text-center space-y-3">
+              <div className="w-20 h-20 rounded-full bg-blue-500/20 flex items-center justify-center mx-auto">
+                <CheckCircle2 className="w-10 h-10 text-blue-400" />
+              </div>
+              <h1 className="text-xl font-bold text-blue-400">
+                {selectedMethod === "bank_transfer" ? "Bank Transfer Noted" : "Cash Payment Noted"}
+              </h1>
+              <p className="text-sm text-slate-400">
+                {selectedMethod === "bank_transfer"
+                  ? "Please complete the bank transfer using the details provided. The business has been notified of your intent to pay."
+                  : `Please arrange payment in person with ${business?.name || "the business"}. They have been notified.`}
+              </p>
+            </div>
+            <div className={`${glassCardInner} p-4`}>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-400">Invoice</span>
+                <span className="font-medium">#{invoice.invoiceNumber}</span>
+              </div>
+              <div className="flex justify-between text-sm mt-2">
+                <span className="text-slate-400">Amount Due</span>
+                <span className="font-bold" style={{ color: primaryColor }}>
+                  {formatPrice(total, currency)}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <footer className="fixed bottom-4 left-0 right-0 text-center text-xs text-slate-600">
+          Powered by <span className="font-semibold" style={{ color: primaryColor }}>KeyFlowOS</span>
+        </footer>
+      </main>
+    );
+  }
+
+  const formatDate = (d: string | null) => {
+    if (!d) return "—";
+    return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   };
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white px-4 py-8">
-      <div className="mx-auto max-w-2xl space-y-4">
-        <InvoiceTemplateRenderer templateId={templateId} data={templateData} />
+      <div className="mx-auto max-w-2xl space-y-6">
+
+        {business && (
+          <div className="text-center space-y-3 pt-4">
+            {logoUrl ? (
+              <img
+                src={logoUrl}
+                alt={business.name}
+                className="h-16 w-16 object-contain mx-auto rounded-2xl shadow-lg"
+                style={{ boxShadow: `0 0 30px ${primaryColor}30` }}
+              />
+            ) : (
+              <div
+                className="h-16 w-16 rounded-2xl flex items-center justify-center mx-auto text-white font-bold text-2xl shadow-lg"
+                style={{ backgroundColor: primaryColor, boxShadow: `0 0 30px ${primaryColor}30` }}
+              >
+                {business.name?.charAt(0) || "K"}
+              </div>
+            )}
+            <div>
+              <h1 className="text-xl font-bold" style={{ color: primaryColor }}>{business.name}</h1>
+              {(business.city || business.country) && (
+                <p className="text-xs text-slate-500 mt-0.5 flex items-center justify-center gap-1">
+                  <MapPin className="w-3 h-3" />
+                  {[business.city, business.country].filter(Boolean).join(", ")}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className={`${glassCard} overflow-hidden`}>
+          <div
+            className="h-1 w-full"
+            style={{ background: `linear-gradient(90deg, ${primaryColor}, ${secondaryColor})` }}
+          />
+          <div className="p-6 space-y-5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5" style={{ color: primaryColor }} />
+                <h2 className="font-semibold text-lg">Invoice Summary</h2>
+              </div>
+              <span
+                className="text-xs font-medium px-2.5 py-1 rounded-full"
+                style={{
+                  backgroundColor: invoice?.status === "PAID" ? "#10B98120" : `${primaryColor}20`,
+                  color: invoice?.status === "PAID" ? "#10B981" : primaryColor,
+                }}
+              >
+                {invoice?.status || "PENDING"}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className={`${glassCardInner} p-3`}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Hash className="w-3 h-3 text-slate-500" />
+                  <span className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">Invoice #</span>
+                </div>
+                <p className="text-sm font-semibold">{invoice?.invoiceNumber}</p>
+              </div>
+              <div className={`${glassCardInner} p-3`}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <User className="w-3 h-3 text-slate-500" />
+                  <span className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">Client</span>
+                </div>
+                <p className="text-sm font-semibold truncate">
+                  {invoice?.contact
+                    ? [invoice.contact.firstName, invoice.contact.lastName].filter(Boolean).join(" ") || "—"
+                    : "—"}
+                </p>
+              </div>
+              <div className={`${glassCardInner} p-3`}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Calendar className="w-3 h-3 text-slate-500" />
+                  <span className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">Issued</span>
+                </div>
+                <p className="text-sm font-semibold">{formatDate(invoice?.issueDate ?? null)}</p>
+              </div>
+              <div className={`${glassCardInner} p-3`}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Calendar className="w-3 h-3 text-slate-500" />
+                  <span className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">Due Date</span>
+                </div>
+                <p className="text-sm font-semibold">{formatDate(invoice?.dueDate ?? null)}</p>
+              </div>
+            </div>
+
+            {invoice?.items && invoice.items.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-white/[0.08]">
+                      <th className="text-left py-2 text-xs text-slate-500 font-medium">Item</th>
+                      <th className="text-center py-2 text-xs text-slate-500 font-medium w-16">Qty</th>
+                      <th className="text-right py-2 text-xs text-slate-500 font-medium w-24">Price</th>
+                      <th className="text-right py-2 text-xs text-slate-500 font-medium w-24">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {invoice.items.map((item) => (
+                      <tr key={item.id} className="border-b border-white/[0.04]">
+                        <td className="py-2.5 text-slate-200">{item.description}</td>
+                        <td className="py-2.5 text-center text-slate-400">{item.quantity}</td>
+                        <td className="py-2.5 text-right text-slate-400">{formatPrice(item.unitPrice, currency)}</td>
+                        <td className="py-2.5 text-right font-medium">{formatPrice(item.total, currency)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="space-y-2 pt-2 border-t border-white/[0.08]">
+              <div className="flex justify-between text-sm text-slate-400">
+                <span>Subtotal</span>
+                <span>{formatPrice(subtotal, currency)}</span>
+              </div>
+              {taxAmount > 0 && (
+                <div className="flex justify-between text-sm text-slate-400">
+                  <span>Tax{taxRate ? ` (${taxRate}%)` : ""}</span>
+                  <span>{formatPrice(taxAmount, currency)}</span>
+                </div>
+              )}
+              {discountAmount > 0 && (
+                <div className="flex justify-between text-sm text-emerald-400">
+                  <span>Discount</span>
+                  <span>-{formatPrice(discountAmount, currency)}</span>
+                </div>
+              )}
+              <div className="flex justify-between items-center pt-2 border-t border-white/[0.08]">
+                <span className="font-semibold text-base">Total</span>
+                <span className="text-2xl font-bold" style={{ color: primaryColor }}>
+                  {formatPrice(total, currency)}
+                </span>
+              </div>
+            </div>
+
+            {invoice?.notes && (
+              <div className={`${glassCardInner} p-3`}>
+                <p className="text-xs text-slate-500 mb-1 font-medium">Notes</p>
+                <p className="text-sm text-slate-300">{invoice.notes}</p>
+              </div>
+            )}
+          </div>
+        </div>
 
         {!paid && invoice?.status !== "PAID" && (
-          <Card className="bg-slate-900/80 border-border/60 overflow-hidden">
-            <div className="p-6 space-y-4">
+          <div className={`${glassCard} overflow-hidden`}>
+            <div className="p-6 space-y-5">
               <div className="flex items-center gap-2">
                 <Wallet className="w-5 h-5" style={{ color: primaryColor }} />
-                <h3 className="font-semibold text-lg">Payment Method</h3>
+                <h3 className="font-semibold text-lg">Choose Payment Method</h3>
               </div>
 
               {error && (
-                <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
-                  {error}
+                <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 flex items-start gap-3">
+                  <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">
+                    <p className="text-sm text-red-300">{error}</p>
+                    <button
+                      onClick={() => setError(null)}
+                      className="text-xs text-red-400/70 hover:text-red-300 mt-1 underline"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
                 </div>
               )}
 
               {step === "processing" ? (
-                <div className="text-center py-8 space-y-3">
-                  <Loader2 className="w-8 h-8 animate-spin mx-auto" style={{ color: primaryColor }} />
-                  <p className="text-sm text-slate-400">Redirecting to payment gateway...</p>
-                  <p className="text-xs text-slate-500">Please do not close this window</p>
+                <div className="text-center py-10 space-y-4">
+                  <div className="relative w-16 h-16 mx-auto">
+                    <div
+                      className="absolute inset-0 rounded-full animate-ping opacity-30"
+                      style={{ backgroundColor: primaryColor }}
+                    />
+                    <div
+                      className="relative w-16 h-16 rounded-full flex items-center justify-center"
+                      style={{ backgroundColor: `${primaryColor}15` }}
+                    >
+                      <Loader2 className="w-8 h-8 animate-spin" style={{ color: primaryColor }} />
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-slate-300">Redirecting to payment gateway...</p>
+                    <p className="text-xs text-slate-500 mt-1">Please do not close this window</p>
+                  </div>
                 </div>
               ) : (
                 <>
-                  {gateways.length > 0 ? (
-                    <div className="space-y-2">
-                      {gateways.map((gw) => (
-                        <button
-                          key={gw.id}
-                          onClick={() => { setSelectedGateway(gw.id); setError(null); }}
-                          className={`w-full flex items-center gap-4 p-4 rounded-xl border transition-all ${
-                            selectedGateway === gw.id
-                              ? "border-2 bg-white/5"
-                              : "border-border/40 hover:border-border/60 hover:bg-white/[0.02]"
-                          }`}
-                          style={selectedGateway === gw.id ? { borderColor: primaryColor } : {}}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {hasWipay && (
+                      <button
+                        onClick={() => { setSelectedMethod("wipay"); setError(null); }}
+                        className={`text-left p-4 rounded-xl border-2 transition-all ${
+                          selectedMethod === "wipay"
+                            ? "bg-white/[0.06] scale-[1.02]"
+                            : "border-white/[0.06] hover:border-white/[0.12] hover:bg-white/[0.02]"
+                        }`}
+                        style={selectedMethod === "wipay" ? { borderColor: primaryColor } : {}}
+                      >
+                        <div
+                          className="w-10 h-10 rounded-lg flex items-center justify-center mb-3"
+                          style={{ backgroundColor: `${primaryColor}15` }}
                         >
-                          <div
-                            className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
-                            style={{ backgroundColor: `${primaryColor}20` }}
-                          >
-                            {gw.id === "wipay" ? (
-                              <CreditCard className="w-5 h-5" style={{ color: primaryColor }} />
-                            ) : (
-                              <Wallet className="w-5 h-5" style={{ color: primaryColor }} />
-                            )}
-                          </div>
-                          <div className="flex-1 text-left">
-                            <div className="font-medium text-sm">
-                              {gw.id === "wipay" ? "Pay with Card (WiPay)" : `Pay with ${gw.name}`}
+                          <CreditCard className="w-5 h-5" style={{ color: primaryColor }} />
+                        </div>
+                        <div className="font-medium text-sm mb-1">Pay with Card</div>
+                        <div className="text-xs text-slate-500">Credit/Debit via WiPay</div>
+                        <div className="text-[10px] text-slate-600 mt-2 font-medium">
+                          {wipayGateway?.currencies.join(" · ") || "TTD · JMD · BBD"}
+                        </div>
+                      </button>
+                    )}
+
+                    {hasPaypal && (
+                      <button
+                        onClick={() => { setSelectedMethod("paypal"); setError(null); }}
+                        className={`text-left p-4 rounded-xl border-2 transition-all ${
+                          selectedMethod === "paypal"
+                            ? "bg-white/[0.06] scale-[1.02]"
+                            : "border-white/[0.06] hover:border-white/[0.12] hover:bg-white/[0.02]"
+                        }`}
+                        style={selectedMethod === "paypal" ? { borderColor: primaryColor } : {}}
+                      >
+                        <div
+                          className="w-10 h-10 rounded-lg flex items-center justify-center mb-3"
+                          style={{ backgroundColor: "#0070BA15" }}
+                        >
+                          <Wallet className="w-5 h-5" style={{ color: "#0070BA" }} />
+                        </div>
+                        <div className="font-medium text-sm mb-1">Pay with PayPal</div>
+                        <div className="text-xs text-slate-500">PayPal account or card</div>
+                        <div className="text-[10px] text-slate-600 mt-2 font-medium">
+                          {paypalGateway?.currencies.join(" · ") || "USD"}
+                        </div>
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => { setSelectedMethod("bank_transfer"); setError(null); }}
+                      className={`text-left p-4 rounded-xl border-2 transition-all ${
+                        selectedMethod === "bank_transfer"
+                          ? "bg-white/[0.06] scale-[1.02]"
+                          : "border-white/[0.06] hover:border-white/[0.12] hover:bg-white/[0.02]"
+                      }`}
+                      style={selectedMethod === "bank_transfer" ? { borderColor: primaryColor } : {}}
+                    >
+                      <div
+                        className="w-10 h-10 rounded-lg flex items-center justify-center mb-3"
+                        style={{ backgroundColor: "#8B5CF615" }}
+                      >
+                        <Landmark className="w-5 h-5" style={{ color: "#8B5CF6" }} />
+                      </div>
+                      <div className="font-medium text-sm mb-1">Bank Transfer</div>
+                      <div className="text-xs text-slate-500">Direct bank deposit</div>
+                      <div className="text-[10px] text-slate-600 mt-2 font-medium">{currency}</div>
+                    </button>
+
+                    <button
+                      onClick={() => { setSelectedMethod("cash"); setError(null); }}
+                      className={`text-left p-4 rounded-xl border-2 transition-all ${
+                        selectedMethod === "cash"
+                          ? "bg-white/[0.06] scale-[1.02]"
+                          : "border-white/[0.06] hover:border-white/[0.12] hover:bg-white/[0.02]"
+                      }`}
+                      style={selectedMethod === "cash" ? { borderColor: primaryColor } : {}}
+                    >
+                      <div
+                        className="w-10 h-10 rounded-lg flex items-center justify-center mb-3"
+                        style={{ backgroundColor: "#10B98115" }}
+                      >
+                        <Banknote className="w-5 h-5" style={{ color: "#10B981" }} />
+                      </div>
+                      <div className="font-medium text-sm mb-1">Cash / In-Person</div>
+                      <div className="text-xs text-slate-500">Pay in person</div>
+                      <div className="text-[10px] text-slate-600 mt-2 font-medium">Any currency</div>
+                    </button>
+                  </div>
+
+                  {selectedMethod === "bank_transfer" && (
+                    <div className={`${glassCardInner} p-4 space-y-3`}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <Landmark className="w-4 h-4" style={{ color: "#8B5CF6" }} />
+                        <span className="text-sm font-medium">Bank Transfer Details</span>
+                      </div>
+                      {hasBankDetails ? (
+                        <>
+                          {bankName && (
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="text-[10px] uppercase tracking-wider text-slate-500">Bank</p>
+                                <p className="text-sm font-medium">{bankName}</p>
+                              </div>
+                              <CopyButton text={bankName} />
                             </div>
-                            <div className="text-xs text-muted-foreground">
-                              {gw.id === "wipay"
-                                ? "Credit/Debit Card via WiPay"
-                                : "PayPal account or card"}
+                          )}
+                          {bankAccountNumber && (
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="text-[10px] uppercase tracking-wider text-slate-500">Account Number</p>
+                                <p className="text-sm font-medium font-mono">{bankAccountNumber}</p>
+                              </div>
+                              <CopyButton text={bankAccountNumber} />
+                            </div>
+                          )}
+                          {bankRoutingNumber && (
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="text-[10px] uppercase tracking-wider text-slate-500">Routing Number</p>
+                                <p className="text-sm font-medium font-mono">{bankRoutingNumber}</p>
+                              </div>
+                              <CopyButton text={bankRoutingNumber} />
+                            </div>
+                          )}
+                          {bankBranch && (
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="text-[10px] uppercase tracking-wider text-slate-500">Branch</p>
+                                <p className="text-sm font-medium">{bankBranch}</p>
+                              </div>
+                            </div>
+                          )}
+                          <div className="border-t border-white/[0.06] pt-3 mt-2">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="text-[10px] uppercase tracking-wider text-slate-500">Reference</p>
+                                <p className="text-sm font-medium font-mono" style={{ color: primaryColor }}>
+                                  {invoice?.invoiceNumber}
+                                </p>
+                              </div>
+                              <CopyButton text={invoice?.invoiceNumber || ""} />
                             </div>
                           </div>
-                          <div className="text-xs text-muted-foreground">
-                            {gw.currencies.join(", ")}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-6 space-y-2">
-                      <AlertCircle className="w-8 h-8 text-amber-400 mx-auto" />
-                      <p className="text-sm text-slate-400">No payment methods available yet</p>
-                      <p className="text-xs text-slate-500">Contact {business?.name || "the business"} for payment options</p>
+                          <p className="text-xs text-slate-500 mt-2">
+                            Please use the reference above when making your transfer, and send proof of payment to{" "}
+                            <span className="text-slate-300">{business?.email || "the business"}</span>.
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-sm text-slate-400">
+                          Contact {business?.name || "the business"} at{" "}
+                          <span className="text-slate-300">{business?.email || business?.phone || "their office"}</span>{" "}
+                          for bank transfer details.
+                        </p>
+                      )}
                     </div>
                   )}
 
-                  {gateways.length > 0 && (
+                  {selectedMethod === "cash" && (
+                    <div className={`${glassCardInner} p-4 space-y-3`}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <Banknote className="w-4 h-4 text-emerald-400" />
+                        <span className="text-sm font-medium">Cash / In-Person Payment</span>
+                      </div>
+                      <p className="text-sm text-slate-400">
+                        Cash will be collected in person. The business will be notified of your intent to pay.
+                      </p>
+                      {(business?.address || business?.city) && (
+                        <div className="flex items-start gap-2 mt-2">
+                          <MapPin className="w-4 h-4 text-slate-500 mt-0.5 flex-shrink-0" />
+                          <p className="text-sm text-slate-300">
+                            {[business.address, business.city, business.country].filter(Boolean).join(", ")}
+                          </p>
+                        </div>
+                      )}
+                      {business?.phone && (
+                        <div className="flex items-center gap-2">
+                          <Phone className="w-4 h-4 text-slate-500 flex-shrink-0" />
+                          <a href={`tel:${business.phone}`} className="text-sm text-slate-300 hover:underline">
+                            {business.phone}
+                          </a>
+                        </div>
+                      )}
+                      {business?.email && (
+                        <div className="flex items-center gap-2">
+                          <Mail className="w-4 h-4 text-slate-500 flex-shrink-0" />
+                          <a href={`mailto:${business.email}`} className="text-sm text-slate-300 hover:underline">
+                            {business.email}
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {selectedMethod && (
                     <Button
                       onClick={handlePay}
-                      className="w-full text-base py-5 font-semibold"
-                      disabled={paying || !selectedGateway}
-                      style={{ backgroundColor: selectedGateway ? primaryColor : undefined }}
+                      className="w-full text-base py-5 font-semibold transition-all hover:scale-[1.01] active:scale-[0.99]"
+                      disabled={paying}
+                      style={{ backgroundColor: primaryColor }}
                     >
                       {paying ? (
                         <>
                           <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                           Processing...
                         </>
-                      ) : (
+                      ) : selectedMethod === "wipay" || selectedMethod === "paypal" ? (
                         <>
                           <CreditCard className="w-4 h-4 mr-2" />
-                          Pay {invoice?.currency} {total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          Pay {formatPrice(total, currency)}
                           <ArrowRight className="w-4 h-4 ml-2" />
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-4 h-4 mr-2" />
+                          Confirm {selectedMethod === "bank_transfer" ? "Bank Transfer" : "Cash Payment"}
                         </>
                       )}
                     </Button>
                   )}
 
-                  <div className="flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
+                  <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-600">
                     <Shield className="w-3 h-3" />
                     <span>Secure payment processing</span>
                   </div>
                 </>
               )}
             </div>
-          </Card>
+          </div>
         )}
 
-        <div className="text-center text-xs text-muted-foreground pb-4">
+        <div className="text-center text-xs text-slate-600 pb-6">
           Powered by <span className="font-semibold" style={{ color: primaryColor }}>KeyFlowOS</span>
         </div>
       </div>

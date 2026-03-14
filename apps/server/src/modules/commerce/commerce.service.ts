@@ -1,4 +1,4 @@
-import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InvoicePaidPayload, InvoiceStatusPayload, ProductCreatedPayload, ProductUpdatedPayload, ProductDeactivatedPayload, QuoteCreatedPayload, QuoteSentPayload, QuoteConvertedPayload } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -860,7 +860,10 @@ export class CommerceService {
         currency: invoice.currency,
         status: 'SUCCESSFUL',
         provider: input.method,
+        method: input.method,
         providerPaymentId: `manual_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        reference: input.reference ?? null,
+        notes: input.notes ?? null,
         businessId,
         invoiceId,
       },
@@ -1053,5 +1056,102 @@ export class CommerceService {
       invoiceCount: invoices.length,
       currency: invoices[0]?.currency || 'TTD',
     };
+  }
+
+  async createPaymentLink(invoiceId: string, businessId: string, expiresInDays?: number) {
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { id: invoiceId, businessId, deletedAt: null },
+    });
+    if (!invoice) throw new Error('Invoice not found');
+    if (invoice.status === 'PAID' || invoice.status === 'VOID') {
+      throw new Error('Cannot create payment link for a paid or voided invoice');
+    }
+
+    const existing = await this.prisma.client.paymentLink.findFirst({
+      where: { invoiceId, businessId, active: true },
+    });
+    if (existing) return existing;
+
+    const expiresAt = expiresInDays
+      ? new Date(Date.now() + expiresInDays * 86400000)
+      : null;
+
+    return this.prisma.client.paymentLink.create({
+      data: { invoiceId, businessId, expiresAt },
+    });
+  }
+
+  async getPaymentLinkByToken(token: string) {
+    const link = await this.prisma.client.paymentLink.findUnique({
+      where: { token },
+      select: {
+        id: true,
+        token: true,
+        active: true,
+        expiresAt: true,
+        invoiceId: true,
+        invoice: {
+          select: {
+            id: true,
+            invoiceNumber: true,
+            total: true,
+            currency: true,
+            status: true,
+          },
+        },
+      },
+    });
+    if (!link || !link.active) return null;
+    if (link.expiresAt && link.expiresAt < new Date()) return null;
+    return link;
+  }
+
+  async listPaymentLinks(businessId: string) {
+    return this.prisma.client.paymentLink.findMany({
+      where: { businessId, active: true },
+      include: { invoice: { select: { id: true, invoiceNumber: true, total: true, currency: true, status: true, contact: { select: { firstName: true, lastName: true } } } } },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async deactivatePaymentLink(id: string, businessId: string) {
+    return this.prisma.client.paymentLink.updateMany({
+      where: { id, businessId },
+      data: { active: false },
+    });
+  }
+
+  async recordPublicPaymentIntent(invoiceId: string, method: string, amount?: number) {
+    const validMethods = ['bank_transfer', 'cash', 'check', 'other'];
+    if (!validMethods.includes(method)) {
+      throw new BadRequestException('Invalid offline payment method');
+    }
+
+    const invoice = await this.prisma.client.invoice.findUnique({
+      where: { id: invoiceId },
+      select: { id: true, status: true, total: true, businessId: true, invoiceNumber: true },
+    });
+
+    if (!invoice) throw new NotFoundException('Invoice not found');
+    if (invoice.status === 'PAID') throw new BadRequestException('Invoice is already paid');
+
+    await this.prisma.client.payment.create({
+      data: {
+        invoiceId,
+        amount: amount || 0,
+        method,
+        reference: `Intent: ${invoice.invoiceNumber}`,
+        notes: `Customer indicated ${method} payment via public payment page`,
+      },
+    });
+
+    if (method === 'bank_transfer' || method === 'cash') {
+      await this.prisma.client.invoice.update({
+        where: { id: invoiceId },
+        data: { status: 'PENDING' },
+      });
+    }
+
+    return { success: true, method, invoiceNumber: invoice.invoiceNumber };
   }
 }
