@@ -161,10 +161,11 @@ export function StoreCommandHero({
   const funnelSteps = useMemo(() => {
     if (!funnelData) return [];
     const maxVal = Math.max(funnelData.views, 1);
+    const brandColor = "hsl(var(--kf-accent1))";
     return [
-      { label: "Views", value: funnelData.views, icon: Eye, color: "hsl(220 70% 55%)", pct: 100 },
-      { label: "Add to Cart", value: funnelData.carts, icon: ShoppingCart, color: "hsl(280 70% 55%)", pct: Math.round((funnelData.carts / maxVal) * 100) },
-      { label: "Checkout", value: funnelData.starts, icon: CreditCard, color: "hsl(var(--kf-accent1))", pct: Math.round((funnelData.starts / maxVal) * 100) },
+      { label: "Views", value: funnelData.views, icon: Eye, color: brandColor, pct: 100 },
+      { label: "Add to Cart", value: funnelData.carts, icon: ShoppingCart, color: brandColor, pct: Math.round((funnelData.carts / maxVal) * 100) },
+      { label: "Checkout", value: funnelData.starts, icon: CreditCard, color: brandColor, pct: Math.round((funnelData.starts / maxVal) * 100) },
       { label: "Completed", value: funnelData.completed, icon: CheckCircle, color: "hsl(142 70% 50%)", pct: Math.round((funnelData.completed / maxVal) * 100) },
     ];
   }, [funnelData]);
@@ -177,11 +178,10 @@ export function StoreCommandHero({
           animate={{ opacity: 1, y: 0 }}
           className="lg:col-span-2 rounded-2xl overflow-hidden relative"
           style={{
-            background: "linear-gradient(135deg, hsl(var(--kf-accent1)/0.1), hsl(var(--kf-accent2)/0.06))",
-            border: "1px solid hsl(var(--kf-accent1)/0.15)",
+            background: "hsl(var(--kf-card))",
+            border: "1px solid hsl(var(--kf-border)/0.5)",
           }}
         >
-          <div className="absolute inset-0 opacity-[0.03]" style={{ background: "radial-gradient(ellipse at 20% 0%, hsl(var(--kf-accent1)), transparent 60%)" }} />
           <div className="relative p-5 space-y-4">
             <div className="flex items-start justify-between">
               <div className="space-y-1">
@@ -290,8 +290,8 @@ export function StoreCommandHero({
           transition={{ delay: 0.1 }}
           className="rounded-2xl p-5"
           style={{
-            background: "linear-gradient(135deg, hsl(var(--kf-accent2)/0.08), hsl(var(--kf-accent1)/0.04))",
-            border: "1px solid hsl(var(--kf-accent2)/0.15)",
+            background: "hsl(var(--kf-card))",
+            border: "1px solid hsl(var(--kf-border)/0.5)",
           }}
         >
           <ReadinessScore
@@ -312,33 +312,21 @@ export function StoreCommandHero({
             label: "Store Items",
             value: servicesCount,
             icon: ShoppingBag,
-            color: "hsl(var(--kf-accent1))",
-            bg: "hsl(var(--kf-accent1)/0.08)",
-            border: "hsl(var(--kf-accent1)/0.2)",
           },
           {
             label: "Products",
             value: productsCount,
             icon: ShoppingCart,
-            color: "hsl(var(--kf-accent2))",
-            bg: "hsl(var(--kf-accent2)/0.08)",
-            border: "hsl(var(--kf-accent2)/0.2)",
           },
           {
             label: "Total Bookings",
             value: analytics?.bookings?.total ?? 0,
             icon: CheckCircle,
-            color: "hsl(142 70% 50%)",
-            bg: "hsl(142 70% 50%/0.08)",
-            border: "hsl(142 70% 50%/0.2)",
           },
           {
             label: "Page Views",
             value: analytics?.storefrontEvents?.page_view ?? 0,
             icon: Eye,
-            color: "hsl(220 70% 55%)",
-            bg: "hsl(220 70% 55%/0.08)",
-            border: "hsl(220 70% 55%/0.2)",
           },
         ].map((kpi, idx) => {
           const Icon = kpi.icon;
@@ -348,17 +336,24 @@ export function StoreCommandHero({
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.15 + idx * 0.05 }}
-              className="rounded-xl p-4 relative overflow-hidden"
-              style={{ background: kpi.bg, border: `1px solid ${kpi.border}` }}
+              className="rounded-xl p-4"
+              style={{
+                background: "hsl(var(--kf-card))",
+                border: "1px solid hsl(var(--kf-border)/0.5)",
+              }}
             >
-              <div className="absolute inset-0 opacity-[0.04]" style={{ background: `radial-gradient(ellipse at 30% 0%, ${kpi.color}, transparent 60%)` }} />
-              <div className="relative">
-                <Icon className="w-4 h-4 mb-2" style={{ color: kpi.color }} />
-                <p className="text-xl font-bold" style={{ color: kpi.color }}>
-                  {typeof kpi.value === "number" ? kpi.value.toLocaleString() : kpi.value}
-                </p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">{kpi.label}</p>
+              <div className="flex items-center gap-2 mb-2">
+                <div
+                  className="w-7 h-7 rounded-lg flex items-center justify-center"
+                  style={{ background: "hsl(var(--kf-accent1)/0.1)" }}
+                >
+                  <Icon className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+                </div>
               </div>
+              <p className="text-xl font-bold text-foreground">
+                {typeof kpi.value === "number" ? kpi.value.toLocaleString() : kpi.value}
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">{kpi.label}</p>
             </motion.div>
           );
         })}
@@ -512,15 +507,18 @@ export function StoreCommandHero({
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4 }}
-          className="rounded-xl p-3 flex items-center gap-2 text-sm cursor-pointer hover:bg-[hsl(30_90%_50%/0.12)] transition-colors"
-          style={{ background: "hsl(30 90% 50%/0.08)", border: "1px solid hsl(30 90% 50%/0.2)" }}
+          className="rounded-xl p-3 flex items-center gap-2 text-sm cursor-pointer transition-colors"
+          style={{
+            background: "hsl(var(--kf-card))",
+            border: "1px solid hsl(var(--kf-border)/0.5)",
+          }}
           onClick={() => onTabChange("products")}
         >
-          <span className="w-2 h-2 rounded-full animate-pulse flex-shrink-0" style={{ background: "hsl(30 90% 55%)" }} />
-          <span style={{ color: "hsl(30 90% 80%)" }}>
+          <span className="w-2 h-2 rounded-full animate-pulse flex-shrink-0" style={{ background: "hsl(var(--kf-accent1))" }} />
+          <span className="text-muted-foreground">
             {driftedCount} item{driftedCount !== 1 ? "s have" : " has"} outdated pricing vs Commerce
           </span>
-          <ArrowRight className="w-3.5 h-3.5 ml-auto" style={{ color: "hsl(30 90% 60%)" }} />
+          <ArrowRight className="w-3.5 h-3.5 ml-auto text-muted-foreground" />
         </motion.div>
       )}
     </div>
