@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Globe,
   Copy,
@@ -17,6 +17,7 @@ import {
   TrendingUp,
   ShoppingBag,
   Link2,
+  ChevronDown,
 } from "lucide-react";
 import { StoreAnalytics } from "@/lib/client";
 
@@ -130,6 +131,7 @@ export function StoreCommandHero({
   onTabChange,
 }: StoreCommandHeroProps) {
   const [copied, setCopied] = useState(false);
+  const [funnelOpen, setFunnelOpen] = useState(false);
 
   function handleCopy() {
     if (!publicUrl) return;
@@ -369,48 +371,139 @@ export function StoreCommandHero({
           transition={{ delay: 0.3 }}
           className="rounded-2xl overflow-hidden"
           style={{
-            background: "linear-gradient(135deg, hsl(var(--kf-accent1)/0.06), hsl(var(--kf-accent2)/0.03))",
-            border: "1px solid hsl(var(--kf-accent1)/0.12)",
+            background: "hsl(var(--kf-card)/0.6)",
+            border: "1px solid hsl(var(--kf-border)/0.5)",
+            backdropFilter: "blur(12px)",
           }}
         >
-          <div
-            className="px-5 py-3 border-b flex items-center gap-2"
-            style={{ borderColor: "hsl(var(--kf-accent1)/0.1)", background: "linear-gradient(135deg, hsl(var(--kf-accent1)/0.04), transparent)" }}
+          <button
+            onClick={() => setFunnelOpen((prev) => !prev)}
+            className="w-full px-5 py-3.5 flex items-center justify-between transition-colors hover:bg-[hsl(var(--kf-muted)/0.15)]"
+            aria-expanded={funnelOpen}
+            aria-controls="conversion-funnel-panel"
           >
-            <TrendingUp className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-            <h3 className="text-sm font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>
-              Conversion Funnel
-            </h3>
-          </div>
-          <div className="p-5">
-            <div className="flex items-end gap-2">
-              {funnelSteps.map((step, i) => {
-                const Icon = step.icon;
-                const barHeight = Math.max(step.pct, 8);
-                return (
-                  <div key={step.label} className="flex-1 flex flex-col items-center gap-2">
-                    <span className="text-sm font-bold" style={{ color: step.color }}>
-                      {step.value.toLocaleString()}
-                    </span>
-                    <motion.div
-                      className="w-full rounded-t-lg"
-                      style={{ background: step.color, minHeight: "8px" }}
-                      initial={{ height: 0 }}
-                      animate={{ height: `${barHeight}px` }}
-                      transition={{ duration: 0.6, delay: 0.4 + i * 0.1, ease: "easeOut" }}
-                    />
-                    <div className="flex flex-col items-center gap-0.5">
-                      <Icon className="w-3.5 h-3.5" style={{ color: step.color }} />
-                      <span className="text-[10px] text-muted-foreground text-center">{step.label}</span>
-                    </div>
-                    {i < funnelSteps.length - 1 && (
-                      <ArrowRight className="w-3 h-3 text-muted-foreground/30 absolute" style={{ display: "none" }} />
-                    )}
-                  </div>
-                );
-              })}
+            <div className="flex items-center gap-2.5">
+              <div
+                className="w-7 h-7 rounded-lg flex items-center justify-center"
+                style={{ background: "hsl(var(--kf-accent1)/0.12)" }}
+              >
+                <TrendingUp className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+              </div>
+              <span className="text-sm font-semibold">Conversion Funnel</span>
             </div>
-          </div>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground hidden sm:block">
+                {funnelData.completed} / {funnelData.views} converted
+              </span>
+              <motion.div
+                animate={{ rotate: funnelOpen ? 180 : 0 }}
+                transition={{ duration: 0.2 }}
+              >
+                <ChevronDown className="w-4 h-4 text-muted-foreground" />
+              </motion.div>
+            </div>
+          </button>
+
+          <AnimatePresence initial={false}>
+            {funnelOpen && (
+              <motion.div
+                id="conversion-funnel-panel"
+                role="region"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.25, ease: "easeInOut" }}
+                className="overflow-hidden"
+              >
+                <div
+                  className="px-5 pb-5 pt-1"
+                  style={{ borderTop: "1px solid hsl(var(--kf-border)/0.3)" }}
+                >
+                  <div className="space-y-3 mt-3">
+                    {funnelSteps.map((step, i) => {
+                      const Icon = step.icon;
+                      const dropRate =
+                        i > 0 && funnelSteps[i - 1].value > 0
+                          ? Math.round(
+                              ((funnelSteps[i - 1].value - step.value) /
+                                funnelSteps[i - 1].value) *
+                                100
+                            )
+                          : null;
+                      return (
+                        <div key={step.label}>
+                          <div className="flex items-center gap-3">
+                            <div
+                              className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                              style={{ background: `${step.color}15` }}
+                            >
+                              <Icon className="w-4 h-4" style={{ color: step.color }} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-xs font-medium text-muted-foreground">
+                                  {step.label}
+                                </span>
+                                <div className="flex items-center gap-2">
+                                  {dropRate !== null && dropRate > 0 && (
+                                    <span className="text-[10px] text-muted-foreground/60">
+                                      −{dropRate}%
+                                    </span>
+                                  )}
+                                  <span
+                                    className="text-sm font-bold tabular-nums"
+                                    style={{ color: step.color }}
+                                  >
+                                    {step.value.toLocaleString()}
+                                  </span>
+                                </div>
+                              </div>
+                              <div
+                                className="h-1.5 rounded-full overflow-hidden"
+                                style={{ background: "hsl(var(--kf-muted)/0.2)" }}
+                              >
+                                <motion.div
+                                  className="h-full rounded-full"
+                                  style={{
+                                    background: `linear-gradient(90deg, ${step.color}, ${step.color}99)`,
+                                  }}
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${Math.max(step.pct, 2)}%` }}
+                                  transition={{
+                                    duration: 0.5,
+                                    delay: 0.1 + i * 0.08,
+                                    ease: "easeOut",
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                          {i < funnelSteps.length - 1 && (
+                            <div className="ml-4 pl-[1px] h-2 border-l border-dashed" style={{ borderColor: "hsl(var(--kf-border)/0.3)" }} />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {funnelData.views > 0 && (
+                    <div
+                      className="mt-4 pt-3 flex items-center justify-between text-xs"
+                      style={{ borderTop: "1px solid hsl(var(--kf-border)/0.2)" }}
+                    >
+                      <span className="text-muted-foreground">Overall conversion rate</span>
+                      <span
+                        className="font-bold text-sm"
+                        style={{ color: "hsl(142 70% 50%)" }}
+                      >
+                        {((funnelData.completed / funnelData.views) * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
       )}
 
