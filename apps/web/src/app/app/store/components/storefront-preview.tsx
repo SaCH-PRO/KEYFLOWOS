@@ -69,8 +69,8 @@ function TypeBadge({ type, primaryColor, secondaryColor, radius }: { type: strin
 }
 
 export function StorefrontPreview({ businessData, services, commerceProducts, config }: Props) {
-  const pc = businessData?.primaryColor || "#F97316";
-  const sc = businessData?.secondaryColor || "#14B8A6";
+  const pc = (config?.appearance as any)?.primaryColor || businessData?.primaryColor || "#F97316";
+  const sc = (config?.appearance as any)?.secondaryColor || businessData?.secondaryColor || "#14B8A6";
 
   const hero = config?.hero ?? {};
   const appearance = config?.appearance ?? {};

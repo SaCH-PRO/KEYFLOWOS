@@ -1,4 +1,4 @@
-export type ThemeKey = "default" | "minimal" | "bold" | "elegant";
+export type ThemeKey = "default" | "minimal" | "bold" | "elegant" | "luxe" | "fresh";
 
 export interface ThemeStyles {
   cardBg: string;
@@ -131,6 +131,72 @@ export function getThemeStyles(theme: ThemeKey, primaryColor: string, secondaryC
         nameSizeSm: "text-[10px]",
         descSize: "text-xs",
         footerStyle: "font-serif italic tracking-wide",
+      };
+
+    case "luxe":
+      return {
+        cardBg: "rgba(255,255,255,0.02)",
+        cardBgHover: "rgba(255,255,255,0.04)",
+        cardBorder: `1px solid ${secondaryColor}15`,
+        cardBorderHover: `1px solid ${secondaryColor}35`,
+        cardRadius: "rounded-3xl",
+        headerWeight: "font-light",
+        bodyWeight: "font-light",
+        textStyle: "tracking-[0.15em] uppercase",
+        fontClass: "font-serif",
+        heroGlow: false,
+        heroGlowIntensity: 0.04,
+        heroOverlay: `linear-gradient(180deg, rgba(0,0,0,0.4), transparent 50%, rgba(0,0,0,0.6))`,
+        badgeRadius: "rounded-full",
+        imageHeight: "h-52",
+        imageHeightSm: "h-24",
+        accentOpacity: "08",
+        buttonRadius: "rounded-full",
+        buttonStyle: "outline",
+        searchRadius: "rounded-full",
+        tabStyle: "underline",
+        spacing: "relaxed",
+        cardShadow: `0 8px 32px rgba(0,0,0,0.3)`,
+        cardHoverTransform: "hover:-translate-y-1",
+        sectionDivider: `1px solid ${secondaryColor}10`,
+        priceWeight: "font-light",
+        nameSize: "text-base",
+        nameSizeSm: "text-xs",
+        descSize: "text-sm",
+        footerStyle: "font-serif tracking-[0.2em] uppercase text-[10px]",
+      };
+
+    case "fresh":
+      return {
+        cardBg: "rgba(255,255,255,0.04)",
+        cardBgHover: "rgba(255,255,255,0.07)",
+        cardBorder: "1px solid rgba(255,255,255,0.08)",
+        cardBorderHover: `1px solid ${primaryColor}40`,
+        cardRadius: "rounded-2xl",
+        headerWeight: "font-semibold",
+        bodyWeight: "font-normal",
+        textStyle: "",
+        fontClass: "",
+        heroGlow: true,
+        heroGlowIntensity: 0.08,
+        heroOverlay: `linear-gradient(135deg, ${primaryColor}08, ${secondaryColor}05)`,
+        badgeRadius: "rounded-lg",
+        imageHeight: "h-44",
+        imageHeightSm: "h-20",
+        accentOpacity: "12",
+        buttonRadius: "rounded-2xl",
+        buttonStyle: "filled",
+        searchRadius: "rounded-2xl",
+        tabStyle: "pill",
+        spacing: "normal",
+        cardShadow: `0 2px 12px rgba(0,0,0,0.15)`,
+        cardHoverTransform: "hover:scale-[1.01] hover:-translate-y-0.5",
+        sectionDivider: "1px solid rgba(255,255,255,0.05)",
+        priceWeight: "font-semibold",
+        nameSize: "text-sm",
+        nameSizeSm: "text-[11px]",
+        descSize: "text-xs",
+        footerStyle: "font-medium",
       };
 
     default:
