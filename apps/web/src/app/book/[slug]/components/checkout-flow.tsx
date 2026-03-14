@@ -30,6 +30,7 @@ type Props = {
   staff: Staff[];
   primaryColor: string;
   secondaryColor: string;
+  accentColor: string;
   cartTotal: number;
   cartCurrency: string;
   onBack: () => void;
@@ -56,6 +57,7 @@ export function CheckoutFlow({
   staff,
   primaryColor,
   secondaryColor,
+  accentColor,
   cartTotal,
   cartCurrency,
   onBack,
@@ -219,7 +221,7 @@ export function CheckoutFlow({
               </div>
 
               {cart.map((item, idx) => {
-                const badge = typeBadge(item.itemType, primaryColor, secondaryColor);
+                const badge = typeBadge(item.itemType, primaryColor, secondaryColor, accentColor);
                 return (
                   <div
                     key={`${item.id}_${item.itemType}`}

@@ -21,13 +21,14 @@ import {
 import { formatPrice } from "@/lib/format";
 import type { CatalogItem, FilterTab, SortOption } from "./types";
 import { typeBadge } from "./utils";
-import { getThemeStyles, getTabClasses, getButtonStyles, type ThemeKey } from "@/lib/storefront-themes";
+import { getThemeStyles, getTabClasses, getButtonStyles, getItemAccent, type ThemeKey } from "@/lib/storefront-themes";
 import type { StorefrontConfig } from "@/lib/client";
 
 type Props = {
   catalogItems: CatalogItem[];
   primaryColor: string;
   secondaryColor: string;
+  accentColor: string;
   isInCart: (itemId: string, itemType: string) => boolean;
   addToCart: (item: CatalogItem) => void;
   removeFromCart: (itemId: string, itemType: string) => void;
@@ -55,6 +56,7 @@ export function CatalogGrid({
   catalogItems,
   primaryColor,
   secondaryColor,
+  accentColor,
   isInCart,
   addToCart,
   removeFromCart,
@@ -74,7 +76,7 @@ export function CatalogGrid({
   const cardStylePref = config?.appearance?.cardStyle ?? "grid";
   const showPrices = config?.appearance?.showPrices ?? true;
   const showDuration = config?.appearance?.showDuration ?? true;
-  const ts = getThemeStyles(theme, primaryColor, secondaryColor);
+  const ts = getThemeStyles(theme, primaryColor, secondaryColor, accentColor);
   const btnStyles = getButtonStyles(ts, primaryColor);
 
   const hasServices = catalogItems.some((i) => i.itemType === "service");
@@ -156,8 +158,9 @@ export function CatalogGrid({
 
   function renderGridCard(item: CatalogItem) {
     const inCart = isInCart(item.id, item.itemType);
-    const badge = typeBadge(item.itemType, primaryColor, secondaryColor);
-    const accentColor = item.itemType === "service" ? primaryColor : item.itemType === "product" ? secondaryColor : "#a78bfa";
+    const badge = typeBadge(item.itemType, primaryColor, secondaryColor, accentColor);
+    const ia = getItemAccent(ts, item.itemType);
+    const itemColor = ia.color;
     const isFeatured = featuredItemIds?.includes(item.id);
     const itemBadge = badges?.[item.id] ? catalogBadgeConfig[badges[item.id]] : null;
 
@@ -167,11 +170,11 @@ export function CatalogGrid({
         className={`${ts.cardRadius} border backdrop-blur-xl transition-all duration-300 group cursor-pointer relative overflow-hidden ${ts.fontClass}`}
         style={{
           background: inCart
-            ? `linear-gradient(135deg, ${accentColor}08, ${accentColor}04)`
+            ? `linear-gradient(135deg, ${itemColor}08, ${itemColor}04)`
             : ts.cardBg,
-          border: inCart ? `1px solid ${accentColor}30` : ts.cardBorder,
+          border: inCart ? `1px solid ${itemColor}30` : ts.cardBorder,
           boxShadow: inCart
-            ? `0 0 20px ${accentColor}10, ${ts.cardShadow}`
+            ? `0 0 20px ${itemColor}10, ${ts.cardShadow}`
             : ts.cardShadow,
           transform: "translateZ(0)",
         }}
@@ -179,14 +182,14 @@ export function CatalogGrid({
         onMouseEnter={(e) => {
           const el = e.currentTarget;
           el.style.transform = "translateY(-4px) translateZ(0)";
-          el.style.boxShadow = `0 12px 40px ${accentColor}15, 0 4px 12px rgba(0,0,0,0.3)`;
-          el.style.border = inCart ? `1px solid ${accentColor}50` : ts.cardBorderHover;
+          el.style.boxShadow = `0 12px 40px ${itemColor}15, 0 4px 12px rgba(0,0,0,0.3)`;
+          el.style.border = inCart ? `1px solid ${itemColor}50` : ts.cardBorderHover;
         }}
         onMouseLeave={(e) => {
           const el = e.currentTarget;
           el.style.transform = "translateZ(0)";
-          el.style.boxShadow = inCart ? `0 0 20px ${accentColor}10` : (ts.cardShadow || "none");
-          el.style.border = inCart ? `1px solid ${accentColor}30` : ts.cardBorder;
+          el.style.boxShadow = inCart ? `0 0 20px ${itemColor}10` : (ts.cardShadow || "none");
+          el.style.border = inCart ? `1px solid ${itemColor}30` : ts.cardBorder;
         }}
       >
         {isFeatured && (
@@ -211,8 +214,8 @@ export function CatalogGrid({
             <div
               className={`w-full ${ts.imageHeight} flex items-center justify-center text-4xl ${ts.headerWeight} relative overflow-hidden`}
               style={{
-                background: `linear-gradient(135deg, ${accentColor}12, ${accentColor}04)`,
-                color: `${accentColor}50`,
+                background: ia.bg,
+                color: `${itemColor}50`,
                 borderTopLeftRadius: "inherit",
                 borderTopRightRadius: "inherit",
               }}
@@ -223,7 +226,7 @@ export function CatalogGrid({
               <div
                 className="absolute inset-0 opacity-30"
                 style={{
-                  background: `radial-gradient(circle at 30% 50%, ${accentColor}15, transparent 60%)`,
+                  background: `radial-gradient(circle at 30% 50%, ${itemColor}15, transparent 60%)`,
                 }}
               />
             </div>
@@ -264,7 +267,7 @@ export function CatalogGrid({
             {showPrices && (
               <div
                 className={`text-base ${ts.priceWeight} whitespace-nowrap tabular-nums`}
-                style={{ color: primaryColor }}
+                style={{ color: itemColor }}
               >
                 {formatPrice(item.price, item.currency)}
               </div>
@@ -309,8 +312,9 @@ export function CatalogGrid({
 
   function renderListCard(item: CatalogItem) {
     const inCart = isInCart(item.id, item.itemType);
-    const badge = typeBadge(item.itemType, primaryColor, secondaryColor);
-    const accentColor = item.itemType === "service" ? primaryColor : item.itemType === "product" ? secondaryColor : "#a78bfa";
+    const badge = typeBadge(item.itemType, primaryColor, secondaryColor, accentColor);
+    const ia = getItemAccent(ts, item.itemType);
+    const itemColor = ia.color;
     const isFeatured = featuredItemIds?.includes(item.id);
     const itemBadge = badges?.[item.id] ? catalogBadgeConfig[badges[item.id]] : null;
 
@@ -320,23 +324,23 @@ export function CatalogGrid({
         className={`${ts.cardRadius} border backdrop-blur-xl transition-all duration-300 group cursor-pointer ${ts.fontClass} flex gap-4 ${ts.spacing === "relaxed" ? "p-4" : "p-3"} relative overflow-hidden`}
         style={{
           background: inCart
-            ? `linear-gradient(135deg, ${accentColor}08, ${accentColor}04)`
+            ? `linear-gradient(135deg, ${itemColor}08, ${itemColor}04)`
             : ts.cardBg,
-          border: inCart ? `1px solid ${accentColor}30` : ts.cardBorder,
+          border: inCart ? `1px solid ${itemColor}30` : ts.cardBorder,
           boxShadow: ts.cardShadow,
         }}
         onClick={() => onItemClick?.(item)}
         onMouseEnter={(e) => {
           const el = e.currentTarget;
           el.style.transform = "translateX(4px)";
-          el.style.boxShadow = `0 4px 20px ${accentColor}10`;
+          el.style.boxShadow = `0 4px 20px ${itemColor}10`;
           el.style.border = ts.cardBorderHover;
         }}
         onMouseLeave={(e) => {
           const el = e.currentTarget;
           el.style.transform = "translateX(0)";
           el.style.boxShadow = ts.cardShadow || "none";
-          el.style.border = inCart ? `1px solid ${accentColor}30` : ts.cardBorder;
+          el.style.border = inCart ? `1px solid ${itemColor}30` : ts.cardBorder;
         }}
       >
         {isFeatured && (
@@ -354,8 +358,8 @@ export function CatalogGrid({
           <div
             className={`w-24 h-24 flex-shrink-0 flex items-center justify-center text-3xl ${ts.headerWeight} relative overflow-hidden`}
             style={{
-              background: `linear-gradient(135deg, ${accentColor}12, ${accentColor}04)`,
-              color: `${accentColor}50`,
+              background: ia.bg,
+              color: `${itemColor}50`,
               borderRadius: "inherit",
             }}
           >
@@ -386,7 +390,7 @@ export function CatalogGrid({
             </div>
             <div className="flex flex-col items-end gap-2 flex-shrink-0">
               {showPrices && (
-                <div className={`text-base ${ts.priceWeight} whitespace-nowrap tabular-nums`} style={{ color: primaryColor }}>
+                <div className={`text-base ${ts.priceWeight} whitespace-nowrap tabular-nums`} style={{ color: itemColor }}>
                   {formatPrice(item.price, item.currency)}
                 </div>
               )}
@@ -448,9 +452,10 @@ export function CatalogGrid({
             onFocus={() => setSearchFocused(true)}
             onBlur={() => setSearchFocused(false)}
             placeholder="Search services, products..."
-            className={`w-full pl-10 pr-10 py-2.5 ${ts.searchRadius} border bg-white/[0.03] text-sm text-white placeholder:text-white/25 focus:outline-none transition-all duration-200`}
+            className={`w-full pl-10 pr-10 py-2.5 ${ts.searchRadius} border text-sm text-white placeholder:text-white/25 focus:outline-none transition-all duration-200`}
             style={{
-              borderColor: searchFocused ? `${primaryColor}50` : "rgba(255,255,255,0.08)",
+              background: ts.searchBg,
+              borderColor: searchFocused ? `${primaryColor}50` : ts.searchBorder,
               boxShadow: searchFocused ? `0 0 0 3px ${primaryColor}15, 0 2px 12px ${primaryColor}10` : "none",
             }}
           />

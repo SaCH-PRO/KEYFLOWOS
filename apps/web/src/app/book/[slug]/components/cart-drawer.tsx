@@ -24,6 +24,7 @@ type Props = {
   cartCurrency: string;
   primaryColor: string;
   secondaryColor: string;
+  accentColor: string;
   onClose: () => void;
   onOpen: () => void;
   onUpdateQuantity: (itemId: string, itemType: string, delta: number) => void;
@@ -39,6 +40,7 @@ export function CartDrawer({
   cartCurrency,
   primaryColor,
   secondaryColor,
+  accentColor,
   onClose,
   onOpen,
   onUpdateQuantity,
@@ -161,7 +163,7 @@ export function CartDrawer({
 
             <div className="relative flex-1 overflow-y-auto p-4 space-y-2.5" style={{ scrollbarWidth: "thin" }}>
               {cart.map((item, idx) => {
-                const badge = typeBadge(item.itemType, primaryColor, secondaryColor);
+                const badge = typeBadge(item.itemType, primaryColor, secondaryColor, accentColor);
                 const key = `${item.id}_${item.itemType}`;
                 const isRemoving = removingItem === key;
                 return (

@@ -51,11 +51,11 @@ type PreviewItem = {
   itemType: "service" | "product" | "package";
 };
 
-function TypeBadge({ type, primaryColor, secondaryColor, radius }: { type: string; primaryColor: string; secondaryColor: string; radius: string }) {
+function TypeBadge({ type, primaryColor, secondaryColor, accentColor, radius }: { type: string; primaryColor: string; secondaryColor: string; accentColor: string; radius: string }) {
   const cfg: Record<string, { icon: ReactNode; label: string; color: string }> = {
     service: { icon: <Briefcase className="w-2 h-2" />, label: "Service", color: primaryColor },
     product: { icon: <ShoppingBag className="w-2 h-2" />, label: "Product", color: secondaryColor },
-    package: { icon: <Package className="w-2 h-2" />, label: "Package", color: "#a78bfa" },
+    package: { icon: <Package className="w-2 h-2" />, label: "Package", color: accentColor },
   };
   const c = cfg[type] || cfg.service;
   return (
@@ -71,6 +71,7 @@ function TypeBadge({ type, primaryColor, secondaryColor, radius }: { type: strin
 export function StorefrontPreview({ businessData, services, commerceProducts, config }: Props) {
   const pc = (config?.appearance as any)?.primaryColor || businessData?.primaryColor || "#F97316";
   const sc = (config?.appearance as any)?.secondaryColor || businessData?.secondaryColor || "#14B8A6";
+  const ac = (config?.appearance as any)?.accentColor || "#a78bfa";
 
   const hero = config?.hero ?? {};
   const appearance = config?.appearance ?? {};
@@ -79,7 +80,7 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
   const showPrices = appearance.showPrices ?? true;
   const showDuration = appearance.showDuration ?? true;
 
-  const ts = getThemeStyles(theme, pc, sc);
+  const ts = getThemeStyles(theme, pc, sc, ac);
 
   const storeNames = new Set(services.map((s) => s.name));
   const allItems: PreviewItem[] = [
@@ -193,7 +194,8 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
   }
 
   function renderGridItem(item: PreviewItem) {
-    const accentColor = item.itemType === "service" ? pc : item.itemType === "product" ? sc : "#a78bfa";
+    const itemAccent = item.itemType === "service" ? ts.serviceAccent : item.itemType === "product" ? ts.productAccent : ts.packageAccent;
+    const itemBg = item.itemType === "service" ? ts.serviceBg : item.itemType === "product" ? ts.productBg : ts.packageBg;
     return (
       <div
         key={item.id}
@@ -210,22 +212,18 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
           <div
             className={`w-full ${ts.imageHeightSm} flex items-center justify-center text-lg ${ts.headerWeight} ${ts.fontClass}`}
             style={{
-              background: theme === "bold"
-                ? `linear-gradient(135deg, ${accentColor}${ts.accentOpacity}, ${accentColor}08)`
-                : theme === "elegant"
-                ? `linear-gradient(180deg, ${accentColor}${ts.accentOpacity}, transparent)`
-                : `linear-gradient(135deg, ${accentColor}${ts.accentOpacity}, ${accentColor}05)`,
-              color: `${accentColor}50`,
+              background: itemBg,
+              color: `${itemAccent}50`,
             }}
           >
             {item.name.charAt(0).toUpperCase()}
           </div>
         )}
         <div className={`p-2 space-y-1 ${ts.spacing === "relaxed" ? "p-3" : "p-2"}`}>
-          <TypeBadge type={item.itemType} primaryColor={pc} secondaryColor={sc} radius={ts.badgeRadius} />
+          <TypeBadge type={item.itemType} primaryColor={pc} secondaryColor={sc} accentColor={ac} radius={ts.badgeRadius} />
           <h4 className={`${ts.nameSizeSm} ${ts.headerWeight} text-white leading-tight truncate ${ts.textStyle} ${ts.fontClass}`}>{item.name}</h4>
           {showPrices && (
-            <span className={`text-[10px] ${ts.priceWeight} block`} style={{ color: accentColor }}>
+            <span className={`text-[10px] ${ts.priceWeight} block`} style={{ color: itemAccent }}>
               {formatPrice(item.price, item.currency)}
             </span>
           )}
@@ -247,7 +245,8 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
   }
 
   function renderListItem(item: PreviewItem) {
-    const accentColor = item.itemType === "service" ? pc : item.itemType === "product" ? sc : "#a78bfa";
+    const itemAccent = item.itemType === "service" ? ts.serviceAccent : item.itemType === "product" ? ts.productAccent : ts.packageAccent;
+    const itemBg = item.itemType === "service" ? ts.serviceBg : item.itemType === "product" ? ts.productBg : ts.packageBg;
     return (
       <div
         key={item.id}
@@ -264,8 +263,8 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
           <div
             className={`w-12 h-12 ${ts.cardRadius} flex items-center justify-center text-sm flex-shrink-0 ${ts.headerWeight} ${ts.fontClass}`}
             style={{
-              background: `linear-gradient(135deg, ${accentColor}${ts.accentOpacity}, ${accentColor}05)`,
-              color: `${accentColor}50`,
+              background: itemBg,
+              color: `${itemAccent}50`,
             }}
           >
             {item.name.charAt(0).toUpperCase()}
@@ -274,12 +273,12 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
         <div className="flex-1 min-w-0 space-y-0.5">
           <div className="flex items-start justify-between gap-1">
             <div className="min-w-0">
-              <TypeBadge type={item.itemType} primaryColor={pc} secondaryColor={sc} radius={ts.badgeRadius} />
+              <TypeBadge type={item.itemType} primaryColor={pc} secondaryColor={sc} accentColor={ac} radius={ts.badgeRadius} />
               <h4 className={`${ts.nameSizeSm} ${ts.headerWeight} text-white leading-tight truncate mt-0.5 ${ts.textStyle} ${ts.fontClass}`}>{item.name}</h4>
             </div>
             <div className="flex flex-col items-end gap-1 flex-shrink-0">
               {showPrices && (
-                <span className={`text-[10px] ${ts.priceWeight} whitespace-nowrap`} style={{ color: accentColor }}>
+                <span className={`text-[10px] ${ts.priceWeight} whitespace-nowrap`} style={{ color: itemAccent }}>
                   {formatPrice(item.price, item.currency)}
                 </span>
               )}
@@ -345,8 +344,8 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
                   <div
                     className="absolute inset-0 rounded-2xl"
                     style={{
-                      background: ts.heroOverlay !== "none" ? ts.heroOverlay : `radial-gradient(ellipse at 50% 0%, ${pc}, transparent 70%)`,
-                      opacity: ts.heroGlowIntensity,
+                      background: ts.heroBg,
+                      opacity: ts.heroGlowIntensity || 0.15,
                     }}
                   />
                   <div className="relative">
@@ -444,7 +443,10 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
                       <div className="flex-1" />
                       <div className="relative">
                         <Search className="absolute left-1.5 top-1/2 -translate-y-1/2 w-2.5 h-2.5 text-white/25" />
-                        <div className={`border border-white/8 bg-white/[0.02] pl-5 pr-2 py-0.5 text-[8px] text-white/20 w-16 ${ts.searchRadius}`}>
+                        <div
+                          className={`pl-5 pr-2 py-0.5 text-[8px] text-white/20 w-16 ${ts.searchRadius}`}
+                          style={{ background: ts.searchBg, border: `1px solid ${ts.searchBorder}` }}
+                        >
                           Search
                         </div>
                       </div>
@@ -464,11 +466,11 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
 
                 {hero.ctaLabel && (
                   <div
-                    className={`text-center py-2 px-4 text-[10px] text-white flex items-center justify-center gap-1.5 ${ts.headerWeight} ${ts.buttonRadius}`}
+                    className={`text-center py-2 px-4 text-[10px] flex items-center justify-center gap-1.5 ${ts.headerWeight} ${ts.buttonRadius}`}
                     style={{
-                      background: theme === "bold" ? `linear-gradient(135deg, ${pc}, ${sc})` : `${pc}20`,
-                      border: theme === "bold" ? "none" : `1px solid ${pc}30`,
-                      color: theme === "bold" ? "white" : pc,
+                      background: ts.ctaBg,
+                      border: ts.ctaBorder,
+                      color: ts.ctaText,
                     }}
                   >
                     {hero.ctaLabel}
@@ -477,7 +479,7 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
                 )}
 
                 <div className={`text-center text-[8px] text-white/15 pb-1 ${ts.footerStyle}`}>
-                  Powered by <span style={{ color: `${pc}60` }}>KeyFlowOS</span>
+                  Powered by <span style={{ color: ts.footerAccent }}>KeyFlowOS</span>
                 </div>
               </div>
             </div>

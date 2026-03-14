@@ -9,6 +9,7 @@ type Props = {
   item: CatalogItem;
   primaryColor: string;
   secondaryColor: string;
+  accentColor: string;
   isInCart: boolean;
   addToCart: (item: CatalogItem) => void;
   removeFromCart: (itemId: string, itemType: string) => void;
@@ -44,6 +45,7 @@ export function ItemDetailModal({
   item,
   primaryColor,
   secondaryColor,
+  accentColor: brandAccent,
   isInCart,
   addToCart,
   removeFromCart,
@@ -53,7 +55,7 @@ export function ItemDetailModal({
   onSelectItem,
   badges,
 }: Props) {
-  const accentColor = item.itemType === "service" ? primaryColor : item.itemType === "product" ? secondaryColor : "#a78bfa";
+  const itemAccent = item.itemType === "service" ? primaryColor : item.itemType === "product" ? secondaryColor : brandAccent;
   const badgeKey = badges?.[item.id];
   const badge = badgeKey ? badgeConfig[badgeKey] : null;
 
@@ -82,7 +84,7 @@ export function ItemDetailModal({
             <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
           </div>
         ) : (
-          <ModalPlaceholder name={item.name} color={accentColor} />
+          <ModalPlaceholder name={item.name} color={itemAccent} />
         )}
 
         <div className="p-5 sm:p-6 space-y-5">
@@ -162,7 +164,7 @@ export function ItemDetailModal({
               <h3 className="text-sm font-semibold text-white/60">You might also like</h3>
               <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
                 {relatedItems.slice(0, 4).map((ri) => {
-                  const riAccent = ri.itemType === "service" ? primaryColor : ri.itemType === "product" ? secondaryColor : "#a78bfa";
+                  const riAccent = ri.itemType === "service" ? primaryColor : ri.itemType === "product" ? secondaryColor : brandAccent;
                   return (
                     <button
                       key={`${ri.id}_${ri.itemType}`}

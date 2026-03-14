@@ -333,6 +333,7 @@ export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, b
 
   const currentPrimary = (appearance as any).primaryColor || businessData?.primaryColor || "";
   const currentSecondary = (appearance as any).secondaryColor || businessData?.secondaryColor || "";
+  const currentAccent = (appearance as any).accentColor || "";
 
   return (
     <div className="space-y-4">
@@ -393,9 +394,9 @@ export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, b
             </div>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Primary Color</label>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Primary</label>
               <div className="flex items-center gap-2">
                 <input
                   type="color"
@@ -407,13 +408,13 @@ export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, b
                   type="text"
                   value={currentPrimary || ""}
                   onChange={(e) => onConfigChange("appearance", { primaryColor: e.target.value })}
-                  placeholder="From settings"
+                  placeholder="Auto"
                   className="kf-input flex-1 min-w-0 text-xs"
                 />
               </div>
             </div>
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Secondary Color</label>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Secondary</label>
               <div className="flex items-center gap-2">
                 <input
                   type="color"
@@ -425,18 +426,34 @@ export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, b
                   type="text"
                   value={currentSecondary || ""}
                   onChange={(e) => onConfigChange("appearance", { secondaryColor: e.target.value })}
-                  placeholder="From settings"
+                  placeholder="Auto"
+                  className="kf-input flex-1 min-w-0 text-xs"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Accent</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={currentAccent || "#a78bfa"}
+                  onChange={(e) => onConfigChange("appearance", { accentColor: e.target.value })}
+                  className="w-8 h-8 rounded-lg cursor-pointer border-0 bg-transparent flex-shrink-0"
+                />
+                <input
+                  type="text"
+                  value={currentAccent || ""}
+                  onChange={(e) => onConfigChange("appearance", { accentColor: e.target.value })}
+                  placeholder="#a78bfa"
                   className="kf-input flex-1 min-w-0 text-xs"
                 />
               </div>
             </div>
           </div>
 
-          {(!currentPrimary && businessData?.primaryColor) && (
-            <p className="text-[10px] text-muted-foreground">
-              Using brand colors from your business settings. Override above to customize for your store.
-            </p>
-          )}
+          <p className="text-[10px] text-muted-foreground">
+            Your brand colors are used throughout the storefront. Primary for services, secondary for products, accent for packages.
+          </p>
         </div>
       </Section>
 
