@@ -9,7 +9,6 @@ import {
   ShoppingBag,
   Clock,
   Settings2,
-  Send,
   AlertCircle,
 } from "lucide-react";
 // Note: AlertCircle still used for unpublished banner
@@ -34,7 +33,6 @@ import { onProductsChanged, hasProductChangedSinceLastFetch, markProductsFetched
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
-import { ContactPickerDrawer } from "@/components/contacts";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useSearchParams } from "next/navigation";
@@ -61,10 +59,10 @@ type StoreTab = "overview" | "customize" | "products" | "hours" | "settings";
 
 const TABS: { key: StoreTab; label: string; icon: React.ElementType }[] = [
   { key: "overview", label: "Overview", icon: BarChart3 },
-  { key: "customize", label: "Customize", icon: Palette },
   { key: "products", label: "Products", icon: ShoppingBag },
   { key: "hours", label: "Hours", icon: Clock },
   { key: "settings", label: "Settings", icon: Settings2 },
+  { key: "customize", label: "Customize", icon: Palette },
 ];
 
 const TAB_KEYS = TABS.map((t) => t.key);
@@ -110,7 +108,6 @@ export default function StorePage() {
   const [businessHours, setBusinessHours] = useState<BusinessHoursMap>(DEFAULT_HOURS);
   const [hoursSaving, setHoursSaving] = useState(false);
   const [driftedItems, setDriftedItems] = useState<DriftedItem[]>([]);
-  const [showContactPicker, setShowContactPicker] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [overviewAnalytics, setOverviewAnalytics] = useState<StoreAnalytics | null>(null);
@@ -470,17 +467,17 @@ export default function StorePage() {
       groupName: "Store Navigation",
       shortcuts: [
         { key: "1", description: "Overview tab", action: () => handleTabChange("overview") },
-        { key: "2", description: "Customize tab", action: () => handleTabChange("customize") },
-        { key: "3", description: "Products tab", action: () => handleTabChange("products") },
-        { key: "4", description: "Hours tab", action: () => handleTabChange("hours") },
-        { key: "5", description: "Settings tab", action: () => handleTabChange("settings") },
+        { key: "2", description: "Products tab", action: () => handleTabChange("products") },
+        { key: "3", description: "Hours tab", action: () => handleTabChange("hours") },
+        { key: "4", description: "Settings tab", action: () => handleTabChange("settings") },
+        { key: "5", description: "Customize tab", action: () => handleTabChange("customize") },
         { key: "r", description: "Refresh data", action: () => { void loadData(); } },
         { key: "g", description: "Toggle guide", action: toggleGuide },
         { key: "a", shift: true, description: "Toggle AI Hub", action: () => storeAi.togglePanel() },
         { key: "Escape", description: "Close panels", action: () => {
           if (storeAi.hubMode === "tool-result") storeAi.clearToolResult();
           else if (storeAi.panelOpen) storeAi.setOpen(false);
-          else { setShowGuide(false); setShowContactPicker(false); }
+          else setShowGuide(false);
         } },
       ],
     },
@@ -539,12 +536,15 @@ export default function StorePage() {
               onToggleEnabled={toggleStoreEnabled}
             />
             <button
-              onClick={() => setShowContactPicker(true)}
-              className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
-              aria-label="Broadcast"
+              onClick={() => handleTabChange("customize")}
+              className="inline-flex items-center justify-center w-9 h-9 rounded-xl transition-colors"
+              style={{
+                background: activeTab === "customize" ? "hsl(var(--kf-accent1)/0.15)" : "hsl(var(--kf-muted)/0.3)",
+                border: activeTab === "customize" ? "1px solid hsl(var(--kf-accent1)/0.3)" : "1px solid hsl(var(--kf-border)/0.5)",
+              }}
+              aria-label="Customize store"
             >
-              <Send className="w-4 h-4" />
-              Broadcast
+              <Palette className="w-4 h-4" style={{ color: activeTab === "customize" ? "hsl(var(--kf-accent1))" : undefined }} />
             </button>
           </div>
         }
@@ -618,6 +618,7 @@ export default function StorePage() {
                   onConfigChange={handleConfigChange}
                   onSave={handleSaveConfig}
                   saving={configSaving}
+                  businessData={businessData}
                 />
                 <StorefrontPreview
                   businessData={businessData}
@@ -686,7 +687,6 @@ export default function StorePage() {
         </AnimatePresence>
       </div>
 
-      <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
     </div>
   );
 }

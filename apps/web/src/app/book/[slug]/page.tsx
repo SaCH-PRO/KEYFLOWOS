@@ -44,8 +44,8 @@ export default function PublicBookingPage() {
   const [selectedItem, setSelectedItem] = useState<CatalogItem | null>(null);
   const [storefrontConfig, setStorefrontConfig] = useState<StorefrontConfig | null>(null);
 
-  const primaryColor = business?.primaryColor || "#F97316";
-  const secondaryColor = business?.secondaryColor || "#14B8A6";
+  const primaryColor = (storefrontConfig?.appearance as any)?.primaryColor || business?.primaryColor || "#F97316";
+  const secondaryColor = (storefrontConfig?.appearance as any)?.secondaryColor || business?.secondaryColor || "#14B8A6";
 
   const updateCart = useCallback(
     (newCart: CartItem[]) => {
