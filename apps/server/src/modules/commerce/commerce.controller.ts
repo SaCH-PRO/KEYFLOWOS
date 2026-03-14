@@ -599,4 +599,44 @@ export class CommerceController {
   ) {
     return this.recurringInvoices.toggleActive(businessId, id);
   }
+
+  // ========== PAYMENT LINKS ==========
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/invoices/:invoiceId/payment-link')
+  createPaymentLink(
+    @Param('businessId') businessId: string,
+    @Param('invoiceId') invoiceId: string,
+    @Body() body: { expiresInDays?: number },
+  ) {
+    return this.commerce.createPaymentLink(invoiceId, businessId, body.expiresInDays);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/payment-links')
+  listPaymentLinks(@Param('businessId') businessId: string) {
+    return this.commerce.listPaymentLinks(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/payment-links/:id')
+  deactivatePaymentLink(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+  ) {
+    return this.commerce.deactivatePaymentLink(id, businessId);
+  }
+
+  @Get('payment-links/:token')
+  getPaymentLinkByToken(@Param('token') token: string) {
+    return this.commerce.getPaymentLinkByToken(token);
+  }
+
+  @Post('invoices/:invoiceId/payment-intent')
+  recordPublicPaymentIntent(
+    @Param('invoiceId') invoiceId: string,
+    @Body() body: { method: string; amount?: number },
+  ) {
+    return this.commerce.recordPublicPaymentIntent(invoiceId, body.method, body.amount);
+  }
 }
