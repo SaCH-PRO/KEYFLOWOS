@@ -1122,7 +1122,7 @@ export class CommerceService {
   }
 
   async recordPublicPaymentIntent(invoiceId: string, method: string, amount?: number) {
-    const validMethods = ['bank_transfer', 'cash', 'check', 'other'];
+    const validMethods = ['bank_transfer', 'cash', 'check', 'other', 'google_pay'];
     if (!validMethods.includes(method)) {
       throw new BadRequestException('Invalid offline payment method');
     }

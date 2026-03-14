@@ -3,6 +3,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeColorsProvider } from "@/lib/theme-context";
 import { RegisterSW } from "@/components/register-sw";
+import { PWAInstallPrompt } from "@/components/pwa-install-prompt";
 import { Toaster } from "sonner";
 
 export const metadata: Metadata = {
@@ -55,6 +56,7 @@ export default function RootLayout({
         <ThemeProvider>
           <ThemeColorsProvider>
             <RegisterSW />
+            <PWAInstallPrompt />
             <Toaster
               theme="dark"
               position="top-right"
