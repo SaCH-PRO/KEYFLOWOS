@@ -50,11 +50,11 @@ export function saveCart(slug: string, cart: CartItem[]) {
   } catch {}
 }
 
-export function typeBadge(itemType: "service" | "product" | "package", primaryColor: string, secondaryColor: string) {
+export function typeBadge(itemType: "service" | "product" | "package", primaryColor: string, secondaryColor: string, accentColor?: string) {
   const cfg = {
     service: { label: "Service", icon: "\u{1F6E0}", color: primaryColor },
     product: { label: "Product", icon: "\u{1F4E6}", color: secondaryColor },
-    package: { label: "Package", icon: "\u{1F381}", color: "#a78bfa" },
+    package: { label: "Package", icon: "\u{1F381}", color: accentColor || "#a78bfa" },
   }[itemType];
   return { label: `${cfg.icon} ${cfg.label}`, color: cfg.color };
 }

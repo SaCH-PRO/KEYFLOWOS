@@ -46,6 +46,7 @@ export default function PublicBookingPage() {
 
   const primaryColor = (storefrontConfig?.appearance as any)?.primaryColor || business?.primaryColor || "#F97316";
   const secondaryColor = (storefrontConfig?.appearance as any)?.secondaryColor || business?.secondaryColor || "#14B8A6";
+  const accentColor = (storefrontConfig?.appearance as any)?.accentColor || "#a78bfa";
 
   const updateCart = useCallback(
     (newCart: CartItem[]) => {
@@ -360,7 +361,7 @@ export default function PublicBookingPage() {
       <main className="min-h-screen bg-[#0a0a0f] text-white flex items-center justify-center px-4 relative overflow-hidden">
         <div className="absolute inset-0 pointer-events-none">
           {Array.from({ length: 40 }).map((_, i) => {
-            const colors = [primaryColor, secondaryColor, "#f59e0b", "#10b981", "#8b5cf6", "#ec4899"];
+            const colors = [primaryColor, secondaryColor, accentColor, "#f59e0b", "#10b981", "#ec4899"];
             const color = colors[i % colors.length];
             const left = Math.random() * 100;
             const delay = Math.random() * 2;
@@ -503,6 +504,7 @@ export default function PublicBookingPage() {
           staff={staff}
           primaryColor={primaryColor}
           secondaryColor={secondaryColor}
+          accentColor={accentColor}
           cartTotal={cartTotal}
           cartCurrency={cartCurrency}
           onBack={() => setCheckoutMode(false)}
@@ -519,6 +521,7 @@ export default function PublicBookingPage() {
         business={business!}
         primaryColor={primaryColor}
         secondaryColor={secondaryColor}
+        accentColor={accentColor}
         config={storefrontConfig}
         catalogCount={catalogItems.length}
       />
@@ -542,6 +545,7 @@ export default function PublicBookingPage() {
           catalogItems={catalogItems}
           primaryColor={primaryColor}
           secondaryColor={secondaryColor}
+          accentColor={accentColor}
           isInCart={isInCart}
           addToCart={addToCart}
           removeFromCart={removeFromCart}
@@ -611,6 +615,7 @@ export default function PublicBookingPage() {
           item={selectedItem}
           primaryColor={primaryColor}
           secondaryColor={secondaryColor}
+          accentColor={accentColor}
           isInCart={isInCart(selectedItem.id, selectedItem.itemType)}
           addToCart={addToCart}
           removeFromCart={removeFromCart}
@@ -630,6 +635,7 @@ export default function PublicBookingPage() {
         cartCurrency={cartCurrency}
         primaryColor={primaryColor}
         secondaryColor={secondaryColor}
+        accentColor={accentColor}
         onClose={() => setCartOpen(false)}
         onOpen={() => setCartOpen(true)}
         onUpdateQuantity={updateQuantity}

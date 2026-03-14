@@ -10,6 +10,7 @@ type Props = {
   business: Business;
   primaryColor: string;
   secondaryColor: string;
+  accentColor: string;
   config?: StorefrontConfig | null;
   catalogCount?: number;
 };
@@ -31,9 +32,9 @@ function getOpenStatus(hours?: BusinessHours | null): { isOpen: boolean; label: 
   return { isOpen: false, label: "Closed Now" };
 }
 
-export function BusinessHero({ business, primaryColor, secondaryColor, config, catalogCount }: Props) {
+export function BusinessHero({ business, primaryColor, secondaryColor, accentColor, config, catalogCount }: Props) {
   const theme = (config?.appearance?.theme ?? "default") as ThemeKey;
-  const ts = getThemeStyles(theme, primaryColor, secondaryColor);
+  const ts = getThemeStyles(theme, primaryColor, secondaryColor, accentColor);
   const hero = config?.hero ?? {};
   const headline = hero.headline || business.name;
   const subheadline = hero.subheadline || business.tagline || "Book your appointment online";
@@ -92,24 +93,18 @@ export function BusinessHero({ business, primaryColor, secondaryColor, config, c
           <div
             className="absolute inset-0"
             style={{
-              background: ts.heroOverlay !== "none"
-                ? ts.heroOverlay
-                : `radial-gradient(ellipse at 30% -20%, ${primaryColor}25, transparent 60%), radial-gradient(ellipse at 70% 120%, ${secondaryColor}18, transparent 55%)`,
-              opacity: ts.heroGlowIntensity + 0.1,
+              background: ts.heroBg,
+              opacity: ts.heroGlowIntensity + 0.15,
             }}
           />
           <div
             className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[600px] rounded-full blur-[120px]"
-            style={{ background: `${primaryColor}08` }}
+            style={{ background: `${primaryColor}0C` }}
           />
-          {theme === "bold" && (
-            <div
-              className="absolute inset-0"
-              style={{
-                background: `linear-gradient(135deg, ${primaryColor}10, ${secondaryColor}06)`,
-              }}
-            />
-          )}
+          <div
+            className="absolute bottom-0 right-0 w-[400px] h-[400px] rounded-full blur-[100px]"
+            style={{ background: `${secondaryColor}08` }}
+          />
         </div>
       )}
 
@@ -265,7 +260,7 @@ export function BusinessHero({ business, primaryColor, secondaryColor, config, c
       <div
         className="absolute bottom-0 left-0 right-0 h-px"
         style={{
-          background: `linear-gradient(to right, transparent, ${primaryColor}20, ${secondaryColor}15, transparent)`,
+          background: ts.heroAccentBar,
         }}
       />
     </div>
