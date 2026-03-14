@@ -45,6 +45,7 @@ function ReadinessScore({
   hasSlug,
   servicesCount,
   productsCount,
+  onTabChange,
 }: {
   hasLogo: boolean;
   hasHeroImage: boolean;
@@ -53,14 +54,17 @@ function ReadinessScore({
   hasSlug: boolean;
   servicesCount: number;
   productsCount: number;
+  onTabChange: (tab: string) => void;
 }) {
+  const [open, setOpen] = useState(false);
+
   const checks = [
-    { label: "Custom URL", done: hasSlug, tab: "settings" },
-    { label: "Logo uploaded", done: hasLogo, tab: "customize" },
-    { label: "Cover image", done: hasHeroImage, tab: "customize" },
-    { label: "Business hours", done: hoursConfigured, tab: "hours" },
-    { label: "Products listed", done: servicesCount > 0 || productsCount > 0, tab: "products" },
-    { label: "Testimonials", done: hasTestimonials, tab: "settings" },
+    { label: "Custom URL", hint: "Set a memorable slug for your store", done: hasSlug, tab: "settings" },
+    { label: "Logo uploaded", hint: "Add your brand logo in Customize", done: hasLogo, tab: "customize" },
+    { label: "Cover image", hint: "Upload a hero image for your storefront", done: hasHeroImage, tab: "customize" },
+    { label: "Business hours", hint: "Set your operating hours", done: hoursConfigured, tab: "hours" },
+    { label: "Products listed", hint: "Add services or products to your catalog", done: servicesCount > 0 || productsCount > 0, tab: "products" },
+    { label: "Testimonials", hint: "Add social proof from your clients", done: hasTestimonials, tab: "settings" },
   ];
 
   const completed = checks.filter((c) => c.done).length;
@@ -76,41 +80,91 @@ function ReadinessScore({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Sparkles className="w-4 h-4" style={{ color }} />
-          <span className="text-sm font-semibold">Storefront Readiness</span>
-        </div>
-        <span className="text-sm font-bold" style={{ color }}>
-          {pct}%
-        </span>
-      </div>
-      <div className="h-2 rounded-full overflow-hidden" style={{ background: "hsl(var(--kf-muted)/0.3)" }}>
-        <motion.div
-          className="h-full rounded-full"
-          style={{ background: color }}
-          initial={{ width: 0 }}
-          animate={{ width: `${pct}%` }}
-          transition={{ duration: 0.8, ease: "easeOut" }}
-        />
-      </div>
-      <div className="grid grid-cols-2 gap-1.5">
-        {checks.map((check) => (
-          <div
-            key={check.label}
-            className="flex items-center gap-1.5 text-[11px]"
-          >
-            {check.done ? (
-              <CheckCircle2 className="w-3 h-3 text-emerald-400 flex-shrink-0" />
-            ) : (
-              <div className="w-3 h-3 rounded-full border border-muted-foreground/30 flex-shrink-0" />
-            )}
-            <span className={check.done ? "text-muted-foreground" : "text-muted-foreground/60"}>
-              {check.label}
-            </span>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className="w-full text-left space-y-3"
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4" style={{ color }} />
+            <span className="text-sm font-semibold">Storefront Readiness</span>
           </div>
-        ))}
-      </div>
+          <div className="flex items-center gap-2">
+            <span
+              className="text-[11px] font-semibold px-2 py-0.5 rounded-full"
+              style={{ background: `${color}18`, color }}
+            >
+              {completed}/{total}
+            </span>
+            <motion.div
+              animate={{ rotate: open ? 180 : 0 }}
+              transition={{ duration: 0.2 }}
+            >
+              <ChevronDown className="w-4 h-4 text-muted-foreground" />
+            </motion.div>
+          </div>
+        </div>
+        <div className="h-2 rounded-full overflow-hidden" style={{ background: "hsl(var(--kf-muted)/0.3)" }}>
+          <motion.div
+            className="h-full rounded-full"
+            style={{ background: color }}
+            initial={{ width: 0 }}
+            animate={{ width: `${pct}%` }}
+            transition={{ duration: 0.8, ease: "easeOut" }}
+          />
+        </div>
+      </button>
+
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div
+              className="pt-1 space-y-1"
+              style={{ borderTop: "1px solid hsl(var(--kf-border)/0.3)" }}
+            >
+              {checks.map((check) => (
+                <button
+                  key={check.label}
+                  type="button"
+                  onClick={() => onTabChange(check.tab)}
+                  className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors hover:bg-[hsl(var(--kf-muted)/0.15)] group"
+                >
+                  {check.done ? (
+                    <CheckCircle2 className="w-4 h-4 flex-shrink-0" style={{ color: "hsl(142 70% 50%)" }} />
+                  ) : (
+                    <div
+                      className="w-4 h-4 rounded-full flex-shrink-0"
+                      style={{ border: "1.5px solid hsl(var(--kf-muted-foreground)/0.3)" }}
+                    />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <span
+                      className="text-xs font-medium block"
+                      style={{ color: check.done ? "hsl(var(--kf-muted-foreground))" : "hsl(var(--kf-foreground))" }}
+                    >
+                      {check.label}
+                    </span>
+                    {!check.done && (
+                      <span className="text-[10px] text-muted-foreground/60 block">{check.hint}</span>
+                    )}
+                  </div>
+                  {!check.done && (
+                    <ArrowRight className="w-3 h-3 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors flex-shrink-0" />
+                  )}
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -302,6 +356,7 @@ export function StoreCommandHero({
             hasSlug={hasSlug}
             servicesCount={servicesCount}
             productsCount={productsCount}
+            onTabChange={onTabChange}
           />
         </motion.div>
       </div>
