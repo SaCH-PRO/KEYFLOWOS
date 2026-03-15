@@ -3078,6 +3078,116 @@ export async function trackStoreEvent(businessId: string, type: string, itemId?:
   }).catch(() => {});
 }
 
+export interface ConversionFunnelStage {
+  stage: string;
+  count: number;
+  dropOff: number;
+  conversionRate: number;
+}
+
+export interface ConversionFunnel {
+  thisWeek: {
+    funnel: ConversionFunnelStage[];
+    totalVisitors: number;
+    totalCompleted: number;
+    overallConversionRate: number;
+  };
+  lastWeek: {
+    funnel: ConversionFunnelStage[];
+    totalVisitors: number;
+    totalCompleted: number;
+    overallConversionRate: number;
+  };
+  weekOverWeekChange: number;
+  perProduct: { itemId: string; views: number; cartAdds: number; conversionRate: number }[];
+  summary: string;
+}
+
+export interface ProductHealthAudit {
+  score: number;
+  totalItems: number;
+  issues: {
+    type: string;
+    severity: string;
+    itemId?: string;
+    itemName?: string;
+    message: string;
+    fix?: { action: string; target: string };
+  }[];
+  issueCount?: { critical: number; high: number; medium: number; low: number };
+  summary: string;
+}
+
+export interface SeoHealthReport {
+  score: number;
+  grade: string;
+  checks: {
+    category: string;
+    status: string;
+    message: string;
+    fix?: { action: string; target: string };
+  }[];
+  passCount: number;
+  warnCount: number;
+  failCount: number;
+  summary: string;
+}
+
+export interface ConversionSuggestion {
+  id: string;
+  priority: string;
+  category: string;
+  title: string;
+  message: string;
+  fix?: { action: string; target: string };
+  impact: string;
+}
+
+export interface ConversionSuggestionsResponse {
+  suggestions: ConversionSuggestion[];
+  metrics: {
+    conversionRate: number;
+    weekOverWeekChange: number;
+    healthScore: number;
+    seoScore: number;
+    totalVisitors: number;
+    totalCompletions: number;
+  };
+}
+
+export interface AiConversionAdvice {
+  recommendations: { title: string; description: string; priority: string; category: string }[];
+  dataSnapshot: { conversionRate: number; healthScore: number; seoScore: number };
+  usage?: { creditsUsed: number };
+  error?: string;
+}
+
+export async function fetchConversionFunnel(businessId: string): Promise<ApiResult<ConversionFunnel>> {
+  return apiGetSimple<ConversionFunnel>(`/site/businesses/${encodeURIComponent(businessId)}/conversion-funnel`);
+}
+
+export async function fetchProductHealth(businessId: string): Promise<ApiResult<ProductHealthAudit>> {
+  return apiGetSimple<ProductHealthAudit>(`/site/businesses/${encodeURIComponent(businessId)}/product-health`);
+}
+
+export async function fetchSeoHealth(businessId: string): Promise<ApiResult<SeoHealthReport>> {
+  return apiGetSimple<SeoHealthReport>(`/site/businesses/${encodeURIComponent(businessId)}/seo-health`);
+}
+
+export async function fetchConversionSuggestions(businessId: string): Promise<ApiResult<ConversionSuggestionsResponse>> {
+  return apiGetSimple<ConversionSuggestionsResponse>(`/site/businesses/${encodeURIComponent(businessId)}/conversion-suggestions`);
+}
+
+export async function fetchAiConversionAdvice(businessId: string): Promise<ApiResult<AiConversionAdvice>> {
+  const res = await fetch(`${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/conversion-advice`, {
+    method: 'POST',
+    headers: { ...await getAuthHeaders(), 'Content-Type': 'application/json' },
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) return { data: null, error: data?.message || 'Failed to get AI advice' };
+  return { data, error: null };
+}
+
 // ---
 // EXPENSE TRACKING
 // ---
