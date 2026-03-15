@@ -27,6 +27,7 @@ interface DataTableProps<T> {
   onRowClick?: (row: T) => void;
   pageSize?: number;
   emptyMessage?: string;
+  emptyState?: React.ReactNode;
   headerExtra?: React.ReactNode;
 }
 
@@ -42,6 +43,7 @@ export function DataTable<T extends Record<string, unknown>>({
   onRowClick,
   pageSize = 25,
   emptyMessage = "No data found",
+  emptyState,
   headerExtra,
 }: DataTableProps<T>) {
   const [search, setSearch] = useState("");
@@ -256,10 +258,10 @@ export function DataTable<T extends Record<string, unknown>>({
               <tr>
                 <td
                   colSpan={visibleColumns.length + (selectable ? 1 : 0)}
-                  className="px-3 py-8 text-center kf-text-body"
-                  style={{ color: "hsl(var(--kf-muted-foreground))" }}
+                  className={emptyState ? "p-0" : "px-3 py-8 text-center kf-text-body"}
+                  style={emptyState ? undefined : { color: "hsl(var(--kf-muted-foreground))" }}
                 >
-                  {emptyMessage}
+                  {emptyState || emptyMessage}
                 </td>
               </tr>
             ) : (

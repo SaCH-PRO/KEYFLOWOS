@@ -12,6 +12,7 @@ import {
   ChevronDown,
   X,
   MessageCircle,
+  Lightbulb,
 } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 import type { Booking, StatusFilter } from "./bookings-types";
@@ -114,25 +115,59 @@ export default function BookingList({
 
       <div className="space-y-3">
         {loading && filteredBookings.length === 0 ? (
-          <div className="kf-card p-8 text-center">
-            <RefreshCw className="w-8 h-8 animate-spin mx-auto text-muted-foreground mb-3" />
-            <p className="text-muted-foreground">Loading bookings...</p>
+          <div className="space-y-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="kf-card rounded-2xl p-4 flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.3)" }} />
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 w-2/5 rounded animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.3)" }} />
+                  <div className="h-3 w-3/5 rounded animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.2)" }} />
+                </div>
+                <div className="h-6 w-16 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.2)" }} />
+              </div>
+            ))}
           </div>
         ) : filteredBookings.length === 0 ? (
-          <div className="kf-card p-8 text-center">
-            <Calendar className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
-            <p className="text-lg font-medium mb-1">No bookings yet</p>
-            <p className="text-muted-foreground mb-4">
-              {searchQuery || statusFilter !== "ALL" ? "No bookings match your filters." : "Create your first booking to get started."}
+          <div className="kf-card p-12 text-center">
+            <div
+              className="w-14 h-14 rounded-xl flex items-center justify-center mx-auto mb-4"
+              style={{ background: "hsl(var(--kf-accent1) / 0.1)" }}
+            >
+              <Calendar className="w-7 h-7" style={{ color: "hsl(var(--kf-accent1) / 0.6)" }} />
+            </div>
+            <h3 className="text-lg font-semibold mb-1">
+              {searchQuery || statusFilter !== "ALL" ? "No matching bookings" : "No bookings yet"}
+            </h3>
+            <p className="text-sm text-muted-foreground mb-4 max-w-sm mx-auto">
+              {searchQuery || statusFilter !== "ALL"
+                ? "Try adjusting your search or filters."
+                : "Create your first booking to start managing your schedule."}
             </p>
             {!searchQuery && statusFilter === "ALL" && (
-              <button
-                onClick={onCreateNew}
-                className="kf-btn-primary inline-flex items-center gap-2"
-              >
-                <Plus className="w-4 h-4" />
-                New Booking
-              </button>
+              <>
+                <button
+                  onClick={onCreateNew}
+                  className="kf-btn-primary min-h-[44px] px-5 py-2.5 rounded-xl text-sm font-medium inline-flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  New Booking
+                </button>
+                <div
+                  className="mt-6 mx-auto max-w-xs flex items-start gap-2 text-left px-4 py-3 kf-radius-md"
+                  style={{
+                    background: "hsl(var(--kf-warning) / 0.06)",
+                    border: "1px solid hsl(var(--kf-warning) / 0.12)",
+                  }}
+                >
+                  <Lightbulb
+                    className="w-3.5 h-3.5 mt-0.5 flex-shrink-0"
+                    style={{ color: "hsl(var(--kf-warning))" }}
+                  />
+                  <p className="kf-text-caption text-muted-foreground">
+                    Set up your services in the Catalog tab first to enable online booking.
+                  </p>
+                </div>
+              </>
             )}
           </div>
         ) : (

@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, MoreHorizontal, Calendar,
-  Trash2, FolderKanban, ChevronDown, ChevronRight,
+  Trash2, FolderKanban, ChevronDown, ChevronRight, Lightbulb,
 } from "lucide-react";
 import {
   fetchProjects, createProject, updateProject, deleteProject,
@@ -123,8 +123,19 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
   if (loading) {
     return (
       <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
-        {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="rounded-2xl border border-border/60 bg-slate-950/70 p-4 h-48 animate-pulse" />
+        {STATUS_COLUMNS.map((col) => (
+          <div key={col.key} className="rounded-2xl border border-border/40 p-4 space-y-3" style={{ background: "hsl(var(--kf-muted) / 0.05)" }}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="h-4 w-24 rounded animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.2)" }} />
+              <div className="h-5 w-6 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.15)" }} />
+            </div>
+            {Array.from({ length: col.key === "ACTIVE" ? 3 : col.key === "IN_PROGRESS" ? 2 : 1 }).map((_, i) => (
+              <div key={i} className="rounded-xl border border-border/20 p-3 space-y-2" style={{ background: "hsl(var(--kf-muted) / 0.08)" }}>
+                <div className="h-4 w-3/4 rounded animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.2)" }} />
+                <div className="h-3 w-1/2 rounded animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.12)" }} />
+              </div>
+            ))}
+          </div>
         ))}
       </div>
     );
@@ -202,6 +213,39 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
         )}
       </AnimatePresence>
 
+      {projects.length === 0 ? (
+        <div className="kf-card rounded-xl p-12 text-center">
+          <div
+            className="w-14 h-14 rounded-xl flex items-center justify-center mx-auto mb-4"
+            style={{ background: "hsl(var(--kf-accent2) / 0.1)" }}
+          >
+            <FolderKanban className="w-7 h-7" style={{ color: "hsl(var(--kf-accent2) / 0.6)" }} />
+          </div>
+          <h3 className="text-lg font-semibold mb-1">No projects yet</h3>
+          <p className="text-sm text-muted-foreground mb-4 max-w-sm mx-auto">
+            Create your first project to organize tasks, track progress, and stay on top of your work.
+          </p>
+          <button
+            onClick={() => setShowNewProject(true)}
+            className="kf-btn-primary min-h-[44px] px-5 py-2.5 rounded-xl text-sm font-medium inline-flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            New Project
+          </button>
+          <div
+            className="mt-6 mx-auto max-w-xs flex items-start gap-2 text-left px-4 py-3 kf-radius-md"
+            style={{
+              background: "hsl(var(--kf-warning) / 0.06)",
+              border: "1px solid hsl(var(--kf-warning) / 0.12)",
+            }}
+          >
+            <Lightbulb className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-warning))" }} />
+            <p className="kf-text-caption text-muted-foreground">
+              Projects move across Active, In Progress, Completed, and On Hold columns as you work.
+            </p>
+          </div>
+        </div>
+      ) : (
       <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
         {projectsByStatus.map((column) => (
           <div key={column.key} className="space-y-3">
@@ -339,6 +383,7 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
           </div>
         ))}
       </div>
+      )}
     </div>
   );
 }

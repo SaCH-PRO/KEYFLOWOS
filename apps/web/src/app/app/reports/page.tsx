@@ -270,10 +270,31 @@ export default function ReportsPage() {
           </div>
         )}
         {loading && !report ? (
-          <div className="flex flex-col items-center justify-center py-20 gap-4">
-            <Loader2 className="w-8 h-8 animate-spin text-[hsl(var(--kf-accent1))]" />
-            <div className="text-sm text-muted-foreground">Generating your {REPORT_TABS.find(t => t.id === activeTab)?.label} report...</div>
-            <div className="text-xs text-muted-foreground/60">AI is analyzing your business data</div>
+          <div className="space-y-6">
+            <div className="flex items-center gap-3 py-4">
+              <Loader2 className="w-5 h-5 animate-spin" style={{ color: "hsl(var(--kf-accent1))" }} />
+              <div>
+                <p className="text-sm font-medium">Generating your {REPORT_TABS.find(t => t.id === activeTab)?.label} report...</p>
+                <p className="kf-text-caption text-muted-foreground">AI is analyzing your business data</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="rounded-xl border border-border/40 p-4 space-y-3" style={{ background: "hsl(var(--kf-muted) / 0.04)" }}>
+                  <div className="h-3 w-20 rounded animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.2)" }} />
+                  <div className="h-7 w-32 rounded animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.15)" }} />
+                  <div className="h-3 w-24 rounded animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.1)" }} />
+                </div>
+              ))}
+            </div>
+            <div className="rounded-xl border border-border/40 p-6" style={{ background: "hsl(var(--kf-muted) / 0.04)" }}>
+              <div className="h-4 w-32 mb-4 rounded animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.2)" }} />
+              <div className="flex items-end gap-2 h-40">
+                {[75, 45, 90, 60, 35, 80, 55, 70].map((h, i) => (
+                  <div key={i} className="flex-1 rounded animate-pulse" style={{ height: `${h}%`, background: "hsl(var(--kf-muted) / 0.12)" }} />
+                ))}
+              </div>
+            </div>
           </div>
         ) : report ? (
           <AnimatePresence mode="wait">
@@ -304,9 +325,25 @@ export default function ReportsPage() {
             </motion.div>
           </AnimatePresence>
         ) : (
-          <div className="text-center py-20 text-muted-foreground">
-            <BarChart3 className="w-12 h-12 mx-auto mb-4 opacity-30" />
-            <p className="text-sm">Select a report type and date range to get started</p>
+          <div className="kf-card rounded-xl p-12 text-center">
+            <div
+              className="w-14 h-14 rounded-xl flex items-center justify-center mx-auto mb-4"
+              style={{ background: "hsl(var(--kf-accent1) / 0.1)" }}
+            >
+              <BarChart3 className="w-7 h-7" style={{ color: "hsl(var(--kf-accent1) / 0.6)" }} />
+            </div>
+            <h3 className="text-lg font-semibold mb-1">No report generated</h3>
+            <p className="text-sm text-muted-foreground mb-4 max-w-sm mx-auto">
+              Select a report type and date range, then hit Refresh to generate AI-powered insights.
+            </p>
+            <button
+              onClick={() => generateReport()}
+              disabled={generating}
+              className="kf-btn-primary min-h-[44px] px-5 py-2.5 rounded-xl text-sm font-medium inline-flex items-center gap-2"
+            >
+              {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+              Generate Report
+            </button>
           </div>
         )}
       </div>
