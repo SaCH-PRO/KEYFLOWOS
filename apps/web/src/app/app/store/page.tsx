@@ -62,6 +62,7 @@ export default function StorePage() {
   }, [s.businessId, activeTab, s.commerceProducts.length, s.services.length, s.storeEnabled, s.businessData, s.storefrontConfig, s.businessHours]);
 
   const handleTabChange = useCallback((key: string) => {
+    if (!TAB_KEYS.includes(key as TabKey)) return;
     dirRef.current = TAB_KEYS.indexOf(key as TabKey) > TAB_KEYS.indexOf(activeTab) ? 1 : -1;
     setActiveTab(key as TabKey);
     s.emitEvent("module:tab_changed", "store", { tab: key });
