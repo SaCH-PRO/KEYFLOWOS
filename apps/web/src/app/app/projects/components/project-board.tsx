@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Plus, MoreHorizontal, CheckCircle2, Circle, Calendar,
+  Plus, MoreHorizontal, Calendar,
   Trash2, FolderKanban, ChevronDown, ChevronRight,
 } from "lucide-react";
 import {
@@ -12,6 +12,7 @@ import {
   Project, ProjectTask,
 } from "@/lib/client";
 import { ExplainerButton } from "./explainer-button";
+import { TaskList } from "./task-list";
 
 const STATUS_COLUMNS = [
   { key: "ACTIVE", label: "Active", color: "hsl(var(--kf-accent2))" },
@@ -31,7 +32,6 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectColor, setNewProjectColor] = useState(PROJECT_COLORS[0]);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
-  const [newTaskInputs, setNewTaskInputs] = useState<Record<string, string>>({});
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
 
   const loadProjects = useCallback(async () => {
@@ -71,10 +71,8 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
     setMenuOpen(null);
   };
 
-  const handleAddTask = async (projectId: string) => {
-    if (!businessId) return;
-    const title = newTaskInputs[projectId]?.trim();
-    if (!title) return;
+  const handleAddTask = async (projectId: string, title: string) => {
+    if (!businessId || !title) return;
     const res = await createProjectTask(businessId, projectId, { title });
     if (res.data) {
       setProjects((prev) =>
@@ -83,7 +81,6 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
         ),
       );
     }
-    setNewTaskInputs((prev) => ({ ...prev, [projectId]: "" }));
   };
 
   const handleToggleTask = async (projectId: string, task: ProjectTask) => {
@@ -307,55 +304,13 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
                               exit={{ height: 0, opacity: 0 }}
                               className="overflow-hidden"
                             >
-                              <div className="mt-3 ml-6 space-y-1">
-                                {project.tasks?.map((task) => (
-                                  <div
-                                    key={task.id}
-                                    className="flex items-center gap-2 group py-1"
-                                  >
-                                    <button
-                                      onClick={() => handleToggleTask(project.id, task)}
-                                      className="flex-shrink-0 transition-colors"
-                                      style={{ color: task.isCompleted ? "#22c55e" : "hsl(var(--muted-foreground))" }}
-                                    >
-                                      {task.isCompleted ? (
-                                        <CheckCircle2 className="w-4 h-4" />
-                                      ) : (
-                                        <Circle className="w-4 h-4" />
-                                      )}
-                                    </button>
-                                    <span
-                                      className={`text-xs flex-1 ${task.isCompleted ? "line-through text-muted-foreground" : ""}`}
-                                    >
-                                      {task.title}
-                                    </span>
-                                    <button
-                                      onClick={() => handleDeleteTask(project.id, task.id)}
-                                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 transition-opacity"
-                                    >
-                                      <Trash2 className="w-3 h-3" />
-                                    </button>
-                                  </div>
-                                ))}
-
-                                <div className="flex items-center gap-2 mt-2">
-                                  <input
-                                    placeholder="Add task..."
-                                    value={newTaskInputs[project.id] || ""}
-                                    onChange={(e) =>
-                                      setNewTaskInputs((prev) => ({ ...prev, [project.id]: e.target.value }))
-                                    }
-                                    onKeyDown={(e) => e.key === "Enter" && handleAddTask(project.id)}
-                                    className="flex-1 bg-transparent border-b border-border/40 text-xs py-1 focus:outline-none focus:border-[hsl(var(--kf-accent1))]"
-                                  />
-                                  <button
-                                    onClick={() => handleAddTask(project.id)}
-                                    className="text-muted-foreground hover:text-white"
-                                  >
-                                    <Plus className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              </div>
+                              <TaskList
+                                tasks={project.tasks ?? []}
+                                projectId={project.id}
+                                onToggleTask={handleToggleTask}
+                                onDeleteTask={handleDeleteTask}
+                                onAddTask={handleAddTask}
+                              />
                             </motion.div>
                           )}
                         </AnimatePresence>

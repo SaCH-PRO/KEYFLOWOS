@@ -5052,8 +5052,8 @@ export type CrossModuleWorkflow = {
   category: string;
   triggerEvent: string;
   enabled: boolean;
-  config: Record<string, any>;
-  configSchema: { key: string; label: string; type: string; default: any }[];
+  config: Record<string, string | number | boolean | null>;
+  configSchema: { key: string; label: string; type: string; default: string | number | boolean | null }[];
   lastRunAt: string | null;
   runCount: number;
 };
