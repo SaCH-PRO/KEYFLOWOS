@@ -75,7 +75,7 @@ export function TabNav({ tabs, activeTab, onTabChange, layoutId = "tab-underline
                 transition-colors duration-150 outline-none
                 focus-visible:ring-2 focus-visible:ring-[hsl(var(--kf-accent1)/0.4)] focus-visible:ring-inset
                 px-3 py-2
-                text-[13px] font-medium
+                kf-text-body font-medium
                 ${isActive
                   ? "text-foreground"
                   : "text-muted-foreground hover:text-foreground"
@@ -101,7 +101,7 @@ export function TabNav({ tabs, activeTab, onTabChange, layoutId = "tab-underline
               <span>{t.label}</span>
               {t.count !== undefined && (
                 <span
-                  className={`text-[10px] tabular-nums rounded-full px-1.5 py-px ${
+                  className={`kf-text-micro tabular-nums rounded-full px-1.5 py-px ${
                     isActive
                       ? "bg-[hsl(var(--kf-accent1)/0.1)] text-[hsl(var(--kf-accent1))]"
                       : "opacity-50"
