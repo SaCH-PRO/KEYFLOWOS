@@ -114,10 +114,18 @@ interface EditableProduct {
   included: boolean;
 }
 
+interface ConciergeActionLocal {
+  id: string;
+  label: string;
+  type: "confirm" | "customize" | "skip" | "navigate";
+  href?: string;
+}
+
 interface ChatMsg {
   role: "assistant" | "user";
   content: string;
   quickReplies?: string[];
+  actions?: ConciergeActionLocal[];
 }
 
 const STEPS = [
@@ -125,6 +133,21 @@ const STEPS = [
   { label: "Your First Offering", number: 2 },
   { label: "Go Live", number: 3 },
 ];
+
+const STEP_KEY_MAP: Record<string, number> = {
+  products: 1,
+  hours: 1,
+  storefront: 2,
+  payments: 2,
+};
+
+function getPublicPageUrl(businessId: string, businessType?: "Services" | "Products" | "Mixed"): string {
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  if (businessType === "Products") {
+    return `${origin}/store/${businessId}`;
+  }
+  return `${origin}/book/${businessId}`;
+}
 
 function StepIndicator({ current }: { current: number }) {
   return (
@@ -218,12 +241,14 @@ function HelpDrawer({
       }));
       const res = await sendConciergeChat(businessId, msg, history);
       if (res.data) {
+        const responseActions = res.data!.actions as ConciergeActionLocal[] | undefined;
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant",
             content: res.data!.content,
             quickReplies: res.data!.quickReplies,
+            actions: responseActions,
           },
         ]);
       }
@@ -313,23 +338,57 @@ function HelpDrawer({
                       {m.content}
                     </div>
                   </div>
-                  {m.quickReplies && m.quickReplies.length > 0 && i === messages.length - 1 && !sending && (
-                    <div className="flex flex-wrap gap-1.5 pl-1">
-                      {m.quickReplies.map((reply) => (
-                        <button
-                          key={reply}
-                          onClick={() => handleSend(reply)}
-                          className="px-2.5 py-1 text-[11px] font-medium rounded-full transition-all hover:scale-[1.02]"
-                          style={{
-                            background: "hsl(var(--kf-accent1) / 0.08)",
-                            border: "1px solid hsl(var(--kf-accent1) / 0.2)",
-                            color: "hsl(var(--kf-accent1))",
-                          }}
-                        >
-                          {reply}
-                        </button>
-                      ))}
-                    </div>
+                  {i === messages.length - 1 && !sending && (
+                    <>
+                      {m.actions && m.actions.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pl-1">
+                          {m.actions.map((action) => (
+                            <button
+                              key={action.id}
+                              onClick={() => {
+                                if (action.type === "navigate" && action.href) {
+                                  window.location.href = action.href;
+                                } else {
+                                  handleSend(action.label);
+                                }
+                              }}
+                              className="px-3 py-1.5 text-[11px] font-semibold rounded-lg transition-all hover:scale-[1.02]"
+                              style={{
+                                background: action.type === "confirm"
+                                  ? "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))"
+                                  : "hsl(var(--kf-muted) / 0.2)",
+                                border: action.type === "confirm"
+                                  ? "none"
+                                  : "1px solid hsl(var(--kf-border) / 0.3)",
+                                color: action.type === "confirm"
+                                  ? "hsl(var(--kf-foreground))"
+                                  : "hsl(var(--kf-accent1))",
+                              }}
+                            >
+                              {action.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {m.quickReplies && m.quickReplies.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pl-1">
+                          {m.quickReplies.map((reply) => (
+                            <button
+                              key={reply}
+                              onClick={() => handleSend(reply)}
+                              className="px-2.5 py-1 text-[11px] font-medium rounded-full transition-all hover:scale-[1.02]"
+                              style={{
+                                background: "hsl(var(--kf-accent1) / 0.08)",
+                                border: "1px solid hsl(var(--kf-accent1) / 0.2)",
+                                color: "hsl(var(--kf-accent1))",
+                              }}
+                            >
+                              {reply}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               ))}
@@ -406,7 +465,8 @@ export default function OnboardingPage() {
       setBusinessId(bid);
 
       const queryStep = searchParams.get("step");
-      const requestedStep = queryStep ? parseInt(queryStep, 10) : null;
+      const numericStep = queryStep ? parseInt(queryStep, 10) : NaN;
+      const requestedStep = !isNaN(numericStep) ? numericStep : (queryStep && queryStep in STEP_KEY_MAP ? STEP_KEY_MAP[queryStep] : null);
 
       try {
         const stateRes = await fetchConciergeState(bid);
@@ -420,8 +480,8 @@ export default function OnboardingPage() {
               );
             }
             if (stateRes.data.setupStatus.products) {
-              const origin = typeof window !== "undefined" ? window.location.origin : "";
-              setPublicUrl(`${origin}/book/${bid}`);
+              const tmpl = TEMPLATES.find((t) => t.id === stateRes.data!.templateId);
+              setPublicUrl(getPublicPageUrl(bid, tmpl?.businessType));
               setStep(requestedStep !== null && requestedStep >= 0 && requestedStep <= 2 ? requestedStep : 2);
             } else {
               setStep(requestedStep !== null && requestedStep >= 0 && requestedStep <= 1 ? requestedStep : 1);
@@ -535,8 +595,8 @@ export default function OnboardingPage() {
         },
       });
 
-      const origin = typeof window !== "undefined" ? window.location.origin : "";
-      setPublicUrl(`${origin}/book/${businessId}`);
+      const tmpl = TEMPLATES.find((t) => t.id === selectedTemplate);
+      setPublicUrl(getPublicPageUrl(businessId, tmpl?.businessType));
       setStep(2);
     } catch (err) {
       console.error("Configure error:", err);
