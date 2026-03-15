@@ -134,6 +134,10 @@ model Business {
   crmSequences      CrmSequence[]
   crossModuleWorkflows CrossModuleWorkflow[]
   scheduledAgentJobs   ScheduledAgentJob[]
+  customerNotificationLogs CustomerNotificationLog[]
+
+  // Customer notification preferences (JSON: { booking_confirmed: true, ... })
+  notificationPreferences Json? @default("{}") @map("notification_preferences")
 
   // Gmail Integration for sending quotes/invoices
   gmailEmail        String?   @map("gmail_email")
@@ -983,6 +987,26 @@ model Notification {
 
   @@index([businessId, read, createdAt])
   @@map("notifications")
+}
+
+model CustomerNotificationLog {
+  id             String   @id @default(cuid())
+  businessId     String   @map("business_id")
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  contactId      String?  @map("contact_id")
+  type           String
+  recipientEmail String   @map("recipient_email")
+  recipientName  String?  @map("recipient_name")
+  subject        String
+  status         String   @default("QUEUED")
+  messageId      String?  @map("message_id")
+  error          String?
+  sentAt         DateTime? @map("sent_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, createdAt])
+  @@index([businessId, type])
+  @@map("customer_notification_logs")
 }
 
 // ---

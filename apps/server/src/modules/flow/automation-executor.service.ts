@@ -3,6 +3,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ActivityService } from './activity.service';
 import { CrmService } from '../crm/crm.service';
+import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import {
   BookingCreatedPayload,
   BookingConfirmedPayload,
@@ -21,6 +22,7 @@ export class AutomationExecutorService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(ActivityService) private readonly activity: ActivityService,
     @Inject(CrmService) private readonly crm: CrmService,
+    @Inject(TransactionalEmailService) private readonly transactionalEmail: TransactionalEmailService,
   ) {}
 
   private async executePlaybooks(businessId: string, triggerEvent: string, context: Record<string, any>) {
@@ -123,7 +125,30 @@ export class AutomationExecutorService {
       }
       case 'send_email':
       case 'SEND_EMAIL': {
-        this.logger.log(`[ACTION] Email action queued: "${action.subject || 'Notification'}" for contact ${context.contactId}`);
+        if (context.contactId) {
+          try {
+            const contact = await this.crm.contactDetail({ businessId, contactId: context.contactId });
+            const c = contact.contact;
+            if (c?.email) {
+              const recipientName = [c.firstName, c.lastName].filter(Boolean).join(' ') || 'Customer';
+              await this.transactionalEmail.send({
+                businessId,
+                type: action.notificationType || 'invoice_sent',
+                recipientEmail: c.email,
+                recipientName,
+                contactId: context.contactId,
+                templateData: {
+                  subject: action.subject,
+                  ...context,
+                  ...(action.templateData ?? {}),
+                },
+              });
+              this.logger.log(`Email sent to ${c.email} for playbook "${playbookName}"`);
+            }
+          } catch (e) {
+            this.logger.warn(`Failed to send email for playbook "${playbookName}": ${(e as Error).message}`);
+          }
+        }
         break;
       }
       case 'send_whatsapp':
