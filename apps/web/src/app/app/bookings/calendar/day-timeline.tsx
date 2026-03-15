@@ -226,7 +226,7 @@ export default function DayTimeline({
                                   e.stopPropagation();
                                   onSmartAction?.(b, cta.action);
                                 }}
-                                className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium flex items-center gap-1 transition-colors shrink-0"
+                                className="px-2.5 min-h-[44px] rounded-lg text-[11px] font-medium flex items-center gap-1 transition-colors shrink-0"
                                 style={{
                                   background: `${cta.style.replace(")", " / 0.1)")} `,
                                   color: cta.style,

@@ -82,7 +82,7 @@ export default function BookingsAiSearchBar({ businessId, onResults }: BookingsA
         />
         <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
           {query && (
-            <button onClick={clearSearch} className="p-1 rounded hover:bg-muted/50 transition-colors">
+            <button onClick={clearSearch} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded hover:bg-muted/50 transition-colors">
               <X className="w-3.5 h-3.5 text-muted-foreground" />
             </button>
           )}

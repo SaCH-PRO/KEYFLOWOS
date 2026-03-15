@@ -106,6 +106,7 @@ export default function ContactsPage() {
     const googleSuccess = searchParams.get("google_success");
     const googleError = searchParams.get("google_error");
     const imported = searchParams.get("imported");
+    const action = searchParams.get("action");
     if (googleSuccess) {
       googleHandled.current = true;
       toast.success(`Google Contacts imported successfully${imported ? ` (${imported} contacts)` : ""}`);
@@ -120,8 +121,12 @@ export default function ContactsPage() {
         : "Something went wrong with Google import";
       toast.error(`Google import failed: ${msg}`);
       router.replace("/app/crm/pipeline");
+    } else if (action === "new") {
+      googleHandled.current = true;
+      state.setShowAddMenu(true);
+      router.replace("/app/crm/pipeline");
     }
-  }, [searchParams, router, loadContacts, loadFlowData]);
+  }, [searchParams, router, loadContacts, loadFlowData, state.setShowAddMenu]);
 
   const confirmStateRef = useRef(confirmState);
   confirmStateRef.current = confirmState;

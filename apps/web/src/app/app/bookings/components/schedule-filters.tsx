@@ -52,7 +52,7 @@ export default function ScheduleFilters({
       <div className="flex items-center gap-2">
         <button
           onClick={() => setOpen(!open)}
-          className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
+          className={`inline-flex items-center gap-1.5 px-2.5 min-h-[44px] rounded-lg text-xs font-medium transition-colors border ${
             open || activeCount > 0
               ? "border-[hsl(var(--kf-accent1)/0.4)] text-foreground"
               : "border-border/40 text-muted-foreground hover:text-foreground hover:border-border/70"
