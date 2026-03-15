@@ -4,8 +4,9 @@ import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, MoreHorizontal, Calendar,
-  Trash2, FolderKanban, ChevronDown, ChevronRight, Lightbulb,
+  Trash2, FolderKanban, ChevronDown, ChevronRight,
 } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   fetchProjects, createProject, updateProject, deleteProject,
   createProjectTask, updateProjectTask, deleteProjectTask,
@@ -214,37 +215,14 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
       </AnimatePresence>
 
       {projects.length === 0 ? (
-        <div className="kf-card rounded-xl p-12 text-center">
-          <div
-            className="w-14 h-14 rounded-xl flex items-center justify-center mx-auto mb-4"
-            style={{ background: "hsl(var(--kf-accent2) / 0.1)" }}
-          >
-            <FolderKanban className="w-7 h-7" style={{ color: "hsl(var(--kf-accent2) / 0.6)" }} />
-          </div>
-          <h3 className="text-lg font-semibold mb-1">No projects yet</h3>
-          <p className="text-sm text-muted-foreground mb-4 max-w-sm mx-auto">
-            Create your first project to organize tasks, track progress, and stay on top of your work.
-          </p>
-          <button
-            onClick={() => setShowNewProject(true)}
-            className="kf-btn-primary min-h-[44px] px-5 py-2.5 rounded-xl text-sm font-medium inline-flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            New Project
-          </button>
-          <div
-            className="mt-6 mx-auto max-w-xs flex items-start gap-2 text-left px-4 py-3 kf-radius-md"
-            style={{
-              background: "hsl(var(--kf-warning) / 0.06)",
-              border: "1px solid hsl(var(--kf-warning) / 0.12)",
-            }}
-          >
-            <Lightbulb className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-warning))" }} />
-            <p className="kf-text-caption text-muted-foreground">
-              Projects move across Active, In Progress, Completed, and On Hold columns as you work.
-            </p>
-          </div>
-        </div>
+        <EmptyState
+          icon={FolderKanban}
+          title="No projects yet"
+          description="Create your first project to organize tasks, track progress, and stay on top of your work."
+          actionLabel="New Project"
+          onAction={() => setShowNewProject(true)}
+          tip="Projects move across Active, In Progress, Completed, and On Hold columns as you work."
+        />
       ) : (
       <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
         {projectsByStatus.map((column) => (

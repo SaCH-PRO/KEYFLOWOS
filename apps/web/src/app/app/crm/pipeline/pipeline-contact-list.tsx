@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Plus, Users, RefreshCw, AlertTriangle } from "lucide-react";
+import { Plus, Users, RefreshCw, AlertTriangle, Lightbulb } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import { ContactCard, ContactCardData } from "@/components/contacts";
 import type { QuickActionType } from "@/components/contacts";
 import type { ListTab } from "./pipeline-toolbar";
@@ -177,11 +178,17 @@ function PipelineContactListInner({
 
   if (loading && contacts.length === 0) {
     return (
-      <div className="rounded-2xl border border-border/50 bg-card p-10 text-center">
-        <div className="w-10 h-10 rounded-xl bg-white/[0.03] flex items-center justify-center mx-auto mb-3">
-          <RefreshCw className="w-5 h-5 animate-spin text-muted-foreground/50" />
-        </div>
-        <p className="text-xs font-medium text-muted-foreground/70">Loading contacts...</p>
+      <div className="space-y-3">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="rounded-2xl border border-border/40 p-4 flex items-center gap-3" style={{ background: "hsl(var(--kf-muted) / 0.05)" }}>
+            <div className="w-10 h-10 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.2)" }} />
+            <div className="flex-1 space-y-2">
+              <div className="h-4 w-2/5 rounded animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.2)" }} />
+              <div className="h-3 w-3/5 rounded animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.12)" }} />
+            </div>
+            <div className="h-6 w-14 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.15)" }} />
+          </div>
+        ))}
       </div>
     );
   }
@@ -209,30 +216,20 @@ function PipelineContactListInner({
 
   if (contacts.length === 0) {
     return (
-      <div className="rounded-2xl border border-border/50 bg-card p-10 text-center">
-        <div className="w-10 h-10 rounded-xl bg-white/[0.03] flex items-center justify-center mx-auto mb-3">
-          <Users className="w-5 h-5 text-muted-foreground/40" />
-        </div>
-        <p className="text-sm font-semibold tracking-tight mb-1">
-          {activeListTab === "pinned" ? "No pinned contacts" : activeListTab === "recent" ? "No recent contacts" : "No contacts yet"}
-        </p>
-        <p className="text-xs text-muted-foreground/60 mb-4">
-          {activeListTab === "pinned"
+      <EmptyState
+        icon={Users}
+        title={activeListTab === "pinned" ? "No pinned contacts" : activeListTab === "recent" ? "No recent contacts" : "No contacts yet"}
+        description={
+          activeListTab === "pinned"
             ? "Pin your most important contacts for quick access"
             : activeListTab === "recent"
             ? "Your recently viewed contacts will appear here"
-            : "Add your first contact to get started"}
-        </p>
-        {activeListTab === "all" && (
-          <button
-            onClick={onAddContact}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium rounded-lg bg-gradient-to-r from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Add Contact
-          </button>
-        )}
-      </div>
+            : "Add your first contact to get started"
+        }
+        actionLabel={activeListTab === "all" ? "Add Contact" : undefined}
+        onAction={activeListTab === "all" ? onAddContact : undefined}
+        tip={activeListTab === "all" ? "Contacts are the heart of your CRM — add clients, leads, and partners to track relationships and activity." : undefined}
+      />
     );
   }
 

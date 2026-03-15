@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { Store } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import { VendorAnalytics } from "@/lib/client";
 import { formatCurrency, formatDate } from "./expense-utils";
 
@@ -15,7 +16,14 @@ export function ExpenseVendorsTab({ vendors }: ExpenseVendorsTabProps) {
       <div className="kf-card rounded-xl overflow-hidden">
         <div className="p-4 border-b border-border/40"><h3 className="text-sm font-semibold flex items-center gap-2"><Store className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />Vendor Analytics</h3></div>
         {vendors.length === 0 ? (
-          <div className="p-8 text-center text-sm text-muted-foreground">No vendor data yet. Add vendors to your expenses to see analytics.</div>
+          <div className="py-4">
+            <EmptyState
+              icon={Store}
+              title="No vendor data yet"
+              description="Add vendors to your expenses to see spending breakdowns and payment history."
+              tip="Track which vendors you spend the most with to negotiate better rates."
+            />
+          </div>
         ) : (
           <div className="divide-y divide-border/30">
             <div className="hidden md:grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-2 text-xs text-muted-foreground uppercase tracking-wider">

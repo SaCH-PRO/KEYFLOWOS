@@ -12,8 +12,8 @@ import {
   ChevronDown,
   X,
   MessageCircle,
-  Lightbulb,
 } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 import type { Booking, StatusFilter } from "./bookings-types";
 import { STATUS_STYLE, formatTime, formatDate, contactName } from "./bookings-types";
@@ -128,48 +128,18 @@ export default function BookingList({
             ))}
           </div>
         ) : filteredBookings.length === 0 ? (
-          <div className="kf-card p-12 text-center">
-            <div
-              className="w-14 h-14 rounded-xl flex items-center justify-center mx-auto mb-4"
-              style={{ background: "hsl(var(--kf-accent1) / 0.1)" }}
-            >
-              <Calendar className="w-7 h-7" style={{ color: "hsl(var(--kf-accent1) / 0.6)" }} />
-            </div>
-            <h3 className="text-lg font-semibold mb-1">
-              {searchQuery || statusFilter !== "ALL" ? "No matching bookings" : "No bookings yet"}
-            </h3>
-            <p className="text-sm text-muted-foreground mb-4 max-w-sm mx-auto">
-              {searchQuery || statusFilter !== "ALL"
+          <EmptyState
+            icon={Calendar}
+            title={searchQuery || statusFilter !== "ALL" ? "No matching bookings" : "No bookings yet"}
+            description={
+              searchQuery || statusFilter !== "ALL"
                 ? "Try adjusting your search or filters."
-                : "Create your first booking to start managing your schedule."}
-            </p>
-            {!searchQuery && statusFilter === "ALL" && (
-              <>
-                <button
-                  onClick={onCreateNew}
-                  className="kf-btn-primary min-h-[44px] px-5 py-2.5 rounded-xl text-sm font-medium inline-flex items-center gap-2"
-                >
-                  <Plus className="w-4 h-4" />
-                  New Booking
-                </button>
-                <div
-                  className="mt-6 mx-auto max-w-xs flex items-start gap-2 text-left px-4 py-3 kf-radius-md"
-                  style={{
-                    background: "hsl(var(--kf-warning) / 0.06)",
-                    border: "1px solid hsl(var(--kf-warning) / 0.12)",
-                  }}
-                >
-                  <Lightbulb
-                    className="w-3.5 h-3.5 mt-0.5 flex-shrink-0"
-                    style={{ color: "hsl(var(--kf-warning))" }}
-                  />
-                  <p className="kf-text-caption text-muted-foreground">
-                    Set up your services in the Catalog tab first to enable online booking.
-                  </p>
-                </div>
-              </>
-            )}
-          </div>
+                : "Create your first booking to start managing your schedule."
+            }
+            actionLabel={!searchQuery && statusFilter === "ALL" ? "New Booking" : undefined}
+            onAction={!searchQuery && statusFilter === "ALL" ? onCreateNew : undefined}
+            tip={!searchQuery && statusFilter === "ALL" ? "Set up your services in the Catalog tab first to enable online booking." : undefined}
+          />
         ) : (
           filteredBookings.map((b, index) => (
             <motion.button

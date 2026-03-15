@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/ui/page-header";
+import { EmptyState } from "@/components/ui/empty-state";
 import { TabNav } from "@/components/ui/tab-nav";
 import { ContactPickerDrawer } from "@/components/contacts";
 import { fetchReport, GeneratedReport } from "@/lib/client";
@@ -325,26 +326,15 @@ export default function ReportsPage() {
             </motion.div>
           </AnimatePresence>
         ) : (
-          <div className="kf-card rounded-xl p-12 text-center">
-            <div
-              className="w-14 h-14 rounded-xl flex items-center justify-center mx-auto mb-4"
-              style={{ background: "hsl(var(--kf-accent1) / 0.1)" }}
-            >
-              <BarChart3 className="w-7 h-7" style={{ color: "hsl(var(--kf-accent1) / 0.6)" }} />
-            </div>
-            <h3 className="text-lg font-semibold mb-1">No report generated</h3>
-            <p className="text-sm text-muted-foreground mb-4 max-w-sm mx-auto">
-              Select a report type and date range, then hit Refresh to generate AI-powered insights.
-            </p>
-            <button
-              onClick={() => generateReport()}
-              disabled={generating}
-              className="kf-btn-primary min-h-[44px] px-5 py-2.5 rounded-xl text-sm font-medium inline-flex items-center gap-2"
-            >
-              {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-              Generate Report
-            </button>
-          </div>
+          <EmptyState
+            icon={BarChart3}
+            title="No report generated"
+            description="Select a report type and date range, then hit Refresh to generate AI-powered insights."
+            actionLabel="Generate Report"
+            actionIcon={RefreshCw}
+            onAction={() => generateReport()}
+            tip="Executive reports give you a high-level snapshot — try it first to see your business overview."
+          />
         )}
       </div>
 
