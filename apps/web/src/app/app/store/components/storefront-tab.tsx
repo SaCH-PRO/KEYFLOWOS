@@ -1,10 +1,13 @@
 "use client";
 
-import { AlertCircle } from "lucide-react";
+import { motion } from "framer-motion";
+import { AlertCircle, X } from "lucide-react";
+import { useState } from "react";
 import { StoreSettings } from "./store-settings";
 import { AppearanceCustomizer } from "./appearance-customizer";
 import { StorefrontPreview } from "./storefront-preview";
 import { SocialProofPanel } from "./social-proof-panel";
+import { ReadinessChecklist } from "./readiness-checklist";
 import type { Service, Product, StorefrontConfig } from "@/lib/client";
 
 type Props = {
@@ -30,6 +33,10 @@ type Props = {
   } | null;
   services: Service[];
   commerceProducts: Product[];
+  hasHeroImage: boolean;
+  hoursConfigured: boolean;
+  hasTestimonials: boolean;
+  onTabChange: (tab: string) => void;
 };
 
 export function StorefrontTab({
@@ -48,18 +55,49 @@ export function StorefrontTab({
   businessData,
   services,
   commerceProducts,
+  hasHeroImage,
+  hoursConfigured,
+  hasTestimonials,
+  onTabChange,
 }: Props) {
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+
   return (
     <div className="space-y-6">
-      {!storeEnabled && (
-        <div
-          className="kf-card p-3 text-sm flex items-center gap-2"
-          style={{ borderColor: "hsl(40 90% 50% / 0.4)", background: "hsl(40 90% 50% / 0.1)", color: "hsl(40 90% 90%)" }}
+      {!storeEnabled && !bannerDismissed && (
+        <motion.div
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -4 }}
+          className="flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-xs"
+          style={{
+            background: "hsl(var(--kf-warning) / 0.08)",
+            border: "1px solid hsl(var(--kf-warning) / 0.25)",
+            color: "hsl(var(--kf-warning))",
+          }}
         >
-          <AlertCircle className="w-4 h-4" />
-          Your store is currently unpublished. Customers cannot see your booking page.
-        </div>
+          <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "hsl(var(--kf-warning))" }} />
+          <span className="flex-1">Your store is unpublished. Toggle it live from the header to make it visible.</span>
+          <button
+            onClick={() => setBannerDismissed(true)}
+            aria-label="Dismiss unpublished warning"
+            className="p-0.5 rounded-md hover:bg-[hsl(40_90%_50%/0.15)] transition-colors flex-shrink-0"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </motion.div>
       )}
+
+      <ReadinessChecklist
+        hasLogo={!!businessData?.logoUrl}
+        hasHeroImage={hasHeroImage}
+        hoursConfigured={hoursConfigured}
+        hasTestimonials={hasTestimonials}
+        hasSlug={!!businessData?.slug}
+        servicesCount={services.length}
+        productsCount={commerceProducts.length}
+        onTabChange={onTabChange}
+      />
 
       <StoreSettings
         businessId={businessId}
