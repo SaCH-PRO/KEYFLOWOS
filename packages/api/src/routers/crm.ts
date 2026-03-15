@@ -98,6 +98,7 @@ export const crmRouter = router({
         lastName: z.string().optional(),
         email: z.string().email().optional(),
         phone: z.string().optional(),
+        companyName: z.string().optional(),
         status: z.string().optional(),
         source: z.string().optional(),
         tags: z.array(z.string()).optional(),
@@ -113,6 +114,7 @@ export const crmRouter = router({
           lastName: input.lastName ?? null,
           email: input.email ?? null,
           phone: input.phone ?? null,
+          companyName: input.companyName ?? null,
           status: input.status ?? undefined,
           source: input.source ?? null,
           tags: input.tags ?? [],
@@ -129,6 +131,7 @@ export const crmRouter = router({
         lastName: z.string().optional(),
         email: z.string().email().optional(),
         phone: z.string().optional(),
+        companyName: z.string().optional(),
         status: z.string().optional(),
         source: z.string().optional(),
         tags: z.array(z.string()).optional(),
@@ -137,12 +140,13 @@ export const crmRouter = router({
     .mutation(async ({ input, ctx }) => {
       await assertBusinessAccess(ctx, input.businessId);
       return ctx.db.contact.update({
-        where: { id: input.contactId },
+        where: { id: input.contactId, businessId: input.businessId },
         data: {
           firstName: input.firstName ?? undefined,
           lastName: input.lastName ?? undefined,
           email: input.email ?? undefined,
           phone: input.phone ?? undefined,
+          companyName: input.companyName ?? undefined,
           status: input.status ?? undefined,
           source: input.source ?? undefined,
           tags: input.tags ?? undefined,
@@ -154,7 +158,7 @@ export const crmRouter = router({
     .mutation(async ({ input, ctx }) => {
       await assertBusinessAccess(ctx, input.businessId);
       return ctx.db.contact.update({
-        where: { id: input.contactId },
+        where: { id: input.contactId, businessId: input.businessId },
         data: { deletedAt: new Date() },
       });
     }),
