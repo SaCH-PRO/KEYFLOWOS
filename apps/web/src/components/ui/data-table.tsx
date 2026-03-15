@@ -1,7 +1,21 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { Search, ArrowUpDown, ArrowUp, ArrowDown, Columns3, ChevronLeft, ChevronRight } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+const MOBILE_BP = 640;
+function useIsMobileTable() {
+  const [m, setM] = useState(false);
+  useEffect(() => {
+    const mql = window.matchMedia(`(max-width: ${MOBILE_BP - 1}px)`);
+    setM(mql.matches);
+    const h = (e: MediaQueryListEvent) => setM(e.matches);
+    mql.addEventListener("change", h);
+    return () => mql.removeEventListener("change", h);
+  }, []);
+  return m;
+}
 
 type SortDirection = "asc" | "desc" | null;
 
@@ -46,6 +60,7 @@ export function DataTable<T extends Record<string, unknown>>({
   emptyState,
   headerExtra,
 }: DataTableProps<T>) {
+  const isMobile = useIsMobileTable();
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDirection>(null);
@@ -161,12 +176,12 @@ export function DataTable<T extends Record<string, unknown>>({
           <div className="relative ml-auto">
             <button
               onClick={() => setColMenuOpen(!colMenuOpen)}
-              className="w-7 h-7 kf-radius-sm flex items-center justify-center transition-colors"
+              className="min-w-[44px] min-h-[44px] kf-radius-sm flex items-center justify-center transition-colors"
               style={{ color: "hsl(var(--kf-muted-foreground))" }}
               aria-label="Toggle columns"
               aria-expanded={colMenuOpen}
             >
-              <Columns3 className="w-3.5 h-3.5" />
+              <Columns3 className="w-4 h-4" />
             </button>
             {colMenuOpen && (
               <div
@@ -205,105 +220,165 @@ export function DataTable<T extends Record<string, unknown>>({
         </div>
       )}
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-left" style={{ borderCollapse: "collapse" }}>
-          <thead>
-            <tr
-              className="border-b"
-              style={{ borderColor: "hsl(var(--kf-border))" }}
-            >
-              {selectable && (
-                <th className="w-10 px-3 py-2">
-                  <input
-                    type="checkbox"
-                    checked={pageData.length > 0 && pageData.every((r) => selectedKeys?.has(r[keyField] as string | number))}
-                    onChange={toggleAll}
-                    className="rounded"
-                  />
-                </th>
-              )}
-              {visibleColumns.map((col) => (
-                <th
-                  key={col.key}
-                  className="px-3 py-2 kf-text-micro font-semibold uppercase tracking-wider whitespace-nowrap"
+      {isMobile ? (
+        <div className="divide-y" style={{ borderColor: "hsl(var(--kf-border) / 0.5)" }}>
+          {pageData.length === 0 ? (
+            <div className={emptyState ? "p-0" : "px-3 py-8 text-center kf-text-body"} style={emptyState ? undefined : { color: "hsl(var(--kf-muted-foreground))" }}>
+              {typeof emptyState === "function" ? emptyState() : emptyState || emptyMessage}
+            </div>
+          ) : (
+            pageData.map((row) => {
+              const rowKey = row[keyField] as string | number;
+              const isSelected = selectedKeys?.has(rowKey);
+              return (
+                <div
+                  key={rowKey}
+                  onClick={() => onRowClick?.(row)}
+                  className={cn("px-3 py-3 transition-colors", onRowClick && "cursor-pointer active:bg-muted/30")}
                   style={{
-                    color: "hsl(var(--kf-muted-foreground))",
-                    width: col.width,
+                    background: isSelected ? "hsl(var(--kf-accent1) / 0.05)" : undefined,
                   }}
                 >
-                  {col.sortable !== false ? (
-                    <button
-                      onClick={() => handleSort(col.key)}
-                      className="inline-flex items-center gap-1 transition-colors"
-                      style={{ color: sortKey === col.key ? "hsl(var(--kf-foreground))" : undefined }}
-                    >
-                      {col.header}
-                      {sortKey === col.key && sortDir === "asc" ? (
-                        <ArrowUp className="w-3 h-3" />
-                      ) : sortKey === col.key && sortDir === "desc" ? (
-                        <ArrowDown className="w-3 h-3" />
-                      ) : (
-                        <ArrowUpDown className="w-3 h-3 opacity-40" />
-                      )}
-                    </button>
-                  ) : (
-                    col.header
-                  )}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {pageData.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={visibleColumns.length + (selectable ? 1 : 0)}
-                  className={emptyState ? "p-0" : "px-3 py-8 text-center kf-text-body"}
-                  style={emptyState ? undefined : { color: "hsl(var(--kf-muted-foreground))" }}
-                >
-                  {typeof emptyState === "function" ? emptyState() : emptyState || emptyMessage}
-                </td>
-              </tr>
-            ) : (
-              pageData.map((row) => {
-                const rowKey = row[keyField] as string | number;
-                const isSelected = selectedKeys?.has(rowKey);
-                return (
-                  <tr
-                    key={rowKey}
-                    onClick={() => onRowClick?.(row)}
-                    className={`border-b transition-colors ${onRowClick ? "cursor-pointer" : ""}`}
-                    style={{
-                      borderColor: "hsl(var(--kf-border) / 0.5)",
-                      background: isSelected ? "hsl(var(--kf-accent1) / 0.05)" : undefined,
-                    }}
-                  >
+                  <div className="flex items-start gap-2">
                     {selectable && (
-                      <td className="w-10 px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                      <div className="pt-0.5" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={isSelected ?? false}
                           onChange={() => toggleRow(rowKey)}
                           className="rounded"
                         />
-                      </td>
+                      </div>
                     )}
-                    {visibleColumns.map((col) => (
-                      <td
-                        key={col.key}
-                        className="px-3 py-2 kf-text-body"
-                        style={{ color: "hsl(var(--kf-foreground))" }}
+                    <div className="flex-1 min-w-0 space-y-1.5">
+                      {visibleColumns.map((col, idx) => {
+                        const content = col.render ? col.render(row) : String(row[col.key] ?? "");
+                        if (idx === 0) {
+                          return (
+                            <div key={col.key} className="kf-text-body font-medium" style={{ color: "hsl(var(--kf-foreground))" }}>
+                              {content}
+                            </div>
+                          );
+                        }
+                        return (
+                          <div key={col.key} className="flex items-center justify-between gap-2">
+                            <span className="kf-text-micro font-medium uppercase tracking-wider" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+                              {col.header}
+                            </span>
+                            <span className="kf-text-caption text-right" style={{ color: "hsl(var(--kf-foreground))" }}>
+                              {content}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left" style={{ borderCollapse: "collapse" }}>
+            <thead>
+              <tr
+                className="border-b"
+                style={{ borderColor: "hsl(var(--kf-border))" }}
+              >
+                {selectable && (
+                  <th className="w-10 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={pageData.length > 0 && pageData.every((r) => selectedKeys?.has(r[keyField] as string | number))}
+                      onChange={toggleAll}
+                      className="rounded"
+                    />
+                  </th>
+                )}
+                {visibleColumns.map((col) => (
+                  <th
+                    key={col.key}
+                    className="px-3 py-2 kf-text-micro font-semibold uppercase tracking-wider whitespace-nowrap"
+                    style={{
+                      color: "hsl(var(--kf-muted-foreground))",
+                      width: col.width,
+                    }}
+                  >
+                    {col.sortable !== false ? (
+                      <button
+                        onClick={() => handleSort(col.key)}
+                        className="inline-flex items-center gap-1 transition-colors"
+                        style={{ color: sortKey === col.key ? "hsl(var(--kf-foreground))" : undefined }}
                       >
-                        {col.render ? col.render(row) : String(row[col.key] ?? "")}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+                        {col.header}
+                        {sortKey === col.key && sortDir === "asc" ? (
+                          <ArrowUp className="w-3 h-3" />
+                        ) : sortKey === col.key && sortDir === "desc" ? (
+                          <ArrowDown className="w-3 h-3" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 opacity-40" />
+                        )}
+                      </button>
+                    ) : (
+                      col.header
+                    )}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {pageData.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={visibleColumns.length + (selectable ? 1 : 0)}
+                    className={emptyState ? "p-0" : "px-3 py-8 text-center kf-text-body"}
+                    style={emptyState ? undefined : { color: "hsl(var(--kf-muted-foreground))" }}
+                  >
+                    {typeof emptyState === "function" ? emptyState() : emptyState || emptyMessage}
+                  </td>
+                </tr>
+              ) : (
+                pageData.map((row) => {
+                  const rowKey = row[keyField] as string | number;
+                  const isSelected = selectedKeys?.has(rowKey);
+                  return (
+                    <tr
+                      key={rowKey}
+                      onClick={() => onRowClick?.(row)}
+                      className={cn("border-b transition-colors", onRowClick && "cursor-pointer")}
+                      style={{
+                        borderColor: "hsl(var(--kf-border) / 0.5)",
+                        background: isSelected ? "hsl(var(--kf-accent1) / 0.05)" : undefined,
+                      }}
+                    >
+                      {selectable && (
+                        <td className="w-10 px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected ?? false}
+                            onChange={() => toggleRow(rowKey)}
+                            className="rounded"
+                          />
+                        </td>
+                      )}
+                      {visibleColumns.map((col) => (
+                        <td
+                          key={col.key}
+                          className="px-3 py-2 kf-text-body"
+                          style={{ color: "hsl(var(--kf-foreground))" }}
+                        >
+                          {col.render ? col.render(row) : String(row[col.key] ?? "")}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {totalPages > 1 && (
         <div
@@ -320,7 +395,7 @@ export function DataTable<T extends Record<string, unknown>>({
             <button
               onClick={() => setPage((p) => Math.max(0, p - 1))}
               disabled={page === 0}
-              className="w-7 h-7 kf-radius-sm flex items-center justify-center disabled:opacity-30"
+              className="min-w-[44px] min-h-[44px] kf-radius-sm flex items-center justify-center disabled:opacity-30"
               style={{ color: "hsl(var(--kf-muted-foreground))" }}
             >
               <ChevronLeft className="w-4 h-4" />
@@ -334,7 +409,7 @@ export function DataTable<T extends Record<string, unknown>>({
             <button
               onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
               disabled={page >= totalPages - 1}
-              className="w-7 h-7 kf-radius-sm flex items-center justify-center disabled:opacity-30"
+              className="min-w-[44px] min-h-[44px] kf-radius-sm flex items-center justify-center disabled:opacity-30"
               style={{ color: "hsl(var(--kf-muted-foreground))" }}
             >
               <ChevronRight className="w-4 h-4" />

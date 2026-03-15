@@ -373,7 +373,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <button 
                   onClick={() => { setNotifOpen((v) => !v); }}
                   className={cn(
-                    "relative p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors",
+                    "relative min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors",
                     unreadCount > 0 && "kf-notif-pulse"
                   )}
                   aria-label="Notifications"
@@ -576,7 +576,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       )}
 
       <nav aria-label="Mobile navigation" className="md:hidden fixed bottom-0 left-0 right-0 border-t border-border bg-card/95 backdrop-blur-xl z-50" style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
-        <div className="flex items-center justify-around px-1" style={{ height: "52px" }}>
+        <div className="flex items-center justify-around px-1" style={{ height: "56px" }}>
           {mobileBottomNav.map((item) => {
             const Icon = item.icon;
             if (item.href === "#more") {
@@ -584,10 +584,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <button
                   key="more"
                   onClick={() => setMobileDrawerOpen(true)}
-                  className="flex flex-col items-center justify-center min-w-[48px] py-1 transition-all text-muted-foreground active:scale-95"
+                  className="flex flex-col items-center justify-center min-w-[56px] min-h-[44px] py-1 transition-all text-muted-foreground active:scale-95"
                   aria-label="More navigation options"
                 >
-                  <Icon className="w-[18px] h-[18px]" />
+                  <Icon className="w-[20px] h-[20px]" />
                   <span className="text-[10px] mt-0.5">{item.label}</span>
                 </button>
               );
@@ -598,12 +598,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  "flex flex-col items-center justify-center min-w-[48px] py-1 transition-all active:scale-95",
+                  "flex flex-col items-center justify-center min-w-[56px] min-h-[44px] py-1 transition-all active:scale-95",
                   active ? "" : "text-muted-foreground"
                 )}
                 style={active ? { color: "hsl(var(--kf-accent1))" } : undefined}
               >
-                <Icon className="w-[18px] h-[18px]" />
+                <Icon className="w-[20px] h-[20px]" />
                 <span className="text-[10px] mt-0.5">{item.label}</span>
               </Link>
             );
