@@ -1,9 +1,50 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { AlertCircle, Clock, Check, X, CheckCircle2, Sparkles, Loader2, HeartPulse, MessageCircle, TrendingUp, TrendingDown, Package, Send, Award, Clock3, ShieldAlert, FileWarning, Bell } from "lucide-react";
+import { AlertCircle, Clock, Check, X, CheckCircle2, Sparkles, Loader2, HeartPulse, MessageCircle, TrendingUp, TrendingDown, Package, Send, Award, Clock3, ShieldAlert, FileWarning, Bell, MoreHorizontal } from "lucide-react";
 import type { PriorityItem, AutopilotTask, MomentumRecommendation, NudgeItem, FinancialAlert } from "./types";
 import { formatTTD } from "./types";
+
+function OverflowMenu({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative flex-shrink-0">
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen((p) => !p); }}
+        className="w-7 h-7 flex items-center justify-center kf-radius-sm text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
+        title="More actions"
+      >
+        <MoreHorizontal className="w-3.5 h-3.5" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div
+            className="absolute right-0 top-full mt-1 z-50 py-1 kf-radius-md shadow-lg min-w-[120px]"
+            style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border) / 0.4)" }}
+            onClick={() => setOpen(false)}
+          >
+            {children}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function OverflowAction({ label, onClick, color, disabled }: { label: string; onClick: () => void; color?: string; disabled?: boolean }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      disabled={disabled}
+      className="w-full text-left px-3 py-2 text-xs font-medium hover:bg-muted/20 transition-colors disabled:opacity-40"
+      style={color ? { color } : undefined}
+    >
+      {label}
+    </button>
+  );
+}
 
 export function PriorityRow({ priority, onDismiss }: { priority: PriorityItem; onDismiss?: () => void }) {
   const urgencyColors: Record<string, { border: string; text: string }> = {
@@ -15,7 +56,7 @@ export function PriorityRow({ priority, onDismiss }: { priority: PriorityItem; o
   const colors = urgencyColors[priority.urgency] || urgencyColors.low;
 
   return (
-    <div className="flex items-center gap-3 p-3 kf-radius-md border transition-all hover:bg-muted/10 group" style={{ borderColor: colors.border }}>
+    <div className="flex items-center gap-3 p-3 kf-radius-md border transition-all hover:bg-muted/10" style={{ borderColor: colors.border }}>
       <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: colors.text }} />
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">{priority.title}</p>
@@ -27,13 +68,17 @@ export function PriorityRow({ priority, onDismiss }: { priority: PriorityItem; o
       {priority.amount != null && (
         <span className="text-xs font-semibold flex-shrink-0" style={{ color: colors.text }}>{formatTTD(priority.amount)}</span>
       )}
-      <Link href={priority.actionHref} className="text-xs font-medium px-3 py-1.5 kf-radius-sm transition-all hover:scale-105 flex-shrink-0 text-white" style={{ backgroundColor: colors.text }}>
+      <Link
+        href={priority.actionHref}
+        className="text-xs font-medium min-h-[44px] min-w-[44px] px-3 kf-radius-sm transition-all hover:scale-105 flex-shrink-0 flex items-center justify-center"
+        style={{ backgroundColor: colors.text, color: "hsl(var(--kf-foreground))" }}
+      >
         {priority.actionLabel}
       </Link>
       {onDismiss && (
-        <button onClick={onDismiss} className="p-1.5 kf-radius-sm text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors flex-shrink-0 opacity-0 group-hover:opacity-100" title="Dismiss">
-          <X className="w-3 h-3" />
-        </button>
+        <OverflowMenu>
+          <OverflowAction label="Dismiss" onClick={onDismiss} />
+        </OverflowMenu>
       )}
     </div>
   );
@@ -48,14 +93,16 @@ export function TaskRow({ task, index, onComplete, onApprove, onDeny, onDismiss,
   onDismiss: () => void;
   completing: boolean;
 }) {
+  const isApproval = task.requiresApproval && task.status === "AWAITING_APPROVAL";
+
   return (
-    <div className="flex items-center gap-3 p-3 kf-radius-md border border-border group transition-all hover:bg-muted/10">
+    <div className="flex items-center gap-3 p-3 kf-radius-md border border-border transition-all hover:bg-muted/10">
       <div
-        className={task.priority === "HIGH"
-          ? "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-          : "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 bg-muted text-muted-foreground"
+        className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+        style={task.priority === "HIGH"
+          ? { backgroundColor: "hsl(var(--kf-accent1) / 0.2)", color: "hsl(var(--kf-accent1))" }
+          : { backgroundColor: "hsl(var(--kf-muted) / 0.3)" }
         }
-        style={task.priority === "HIGH" ? { backgroundColor: "hsl(var(--kf-accent1) / 0.2)", color: "hsl(var(--kf-accent1))" } : undefined}
       >
         {index + 1}
       </div>
@@ -70,27 +117,32 @@ export function TaskRow({ task, index, onComplete, onApprove, onDeny, onDismiss,
           )}
         </div>
       </div>
-      <div className="flex items-center gap-1.5 flex-shrink-0">
-        {task.requiresApproval && task.status === "AWAITING_APPROVAL" ? (
-          <>
-            <button onClick={onDeny} disabled={completing} className="p-1.5 kf-radius-sm transition-colors disabled:opacity-50 hover:bg-muted/30" style={{ color: "hsl(var(--kf-error))" }} title="Deny">
-              <X className="w-4 h-4" />
-            </button>
-            <button onClick={onApprove} disabled={completing} className="p-1.5 kf-radius-sm transition-colors disabled:opacity-50 hover:bg-muted/30" style={{ color: "hsl(var(--kf-success))" }} title="Approve">
-              <Check className="w-4 h-4" />
-            </button>
-          </>
-        ) : (
-          <>
-            <button onClick={onDismiss} disabled={completing} className="p-1.5 kf-radius-sm transition-colors disabled:opacity-50 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground" title="Dismiss">
-              <X className="w-3.5 h-3.5" />
-            </button>
-            <button onClick={onComplete} disabled={completing} className="p-1.5 kf-radius-sm transition-colors disabled:opacity-50 opacity-0 group-hover:opacity-100" style={{ color: "hsl(var(--kf-success))" }} title="Mark as done">
-              {completing ? <Clock className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-            </button>
-          </>
+      {isApproval ? (
+        <button
+          onClick={onApprove}
+          disabled={completing}
+          className="text-xs font-medium min-h-[44px] min-w-[44px] px-3 kf-radius-sm transition-all hover:scale-105 flex-shrink-0 flex items-center justify-center"
+          style={{ backgroundColor: "hsl(var(--kf-success))", color: "hsl(var(--kf-foreground))" }}
+        >
+          {completing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Approve"}
+        </button>
+      ) : (
+        <button
+          onClick={onComplete}
+          disabled={completing}
+          className="min-h-[44px] min-w-[44px] flex items-center justify-center kf-radius-sm transition-colors disabled:opacity-50"
+          style={{ color: "hsl(var(--kf-success))" }}
+          title="Mark as done"
+        >
+          {completing ? <Clock className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
+        </button>
+      )}
+      <OverflowMenu>
+        {isApproval && (
+          <OverflowAction label="Deny" onClick={onDeny} color="hsl(var(--kf-error))" disabled={completing} />
         )}
-      </div>
+        <OverflowAction label="Dismiss" onClick={onDismiss} disabled={completing} />
+      </OverflowMenu>
     </div>
   );
 }
@@ -125,17 +177,18 @@ export function MomentumRow({ rec, onAction, onSnooze, onDismiss, loading }: {
           {contactName}{rec.momentumScore != null && ` · Score: ${rec.momentumScore}`}
         </p>
       </div>
-      <div className="flex items-center gap-1 flex-shrink-0">
-        <button onClick={onAction} disabled={loading} className="text-[10px] font-medium px-3 py-1.5 kf-radius-sm transition-all hover:scale-105 text-white" style={{ backgroundColor: "hsl(var(--kf-accent2))" }}>
-          {loading ? <Loader2 className="w-3 h-3 animate-spin inline" /> : "Act"}
-        </button>
-        <button onClick={onSnooze} disabled={loading} className="text-[10px] font-medium px-2 py-1.5 kf-radius-sm text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-all" title="Snooze 7 days">
-          <Clock3 className="w-3 h-3" />
-        </button>
-        <button onClick={onDismiss} disabled={loading} className="text-[10px] font-medium px-2 py-1.5 kf-radius-sm text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-all" title="Dismiss">
-          <X className="w-3 h-3" />
-        </button>
-      </div>
+      <button
+        onClick={onAction}
+        disabled={loading}
+        className="text-xs font-medium min-h-[44px] min-w-[44px] px-3 kf-radius-sm transition-all hover:scale-105 flex-shrink-0 flex items-center justify-center"
+        style={{ backgroundColor: "hsl(var(--kf-accent2))", color: "hsl(var(--kf-foreground))" }}
+      >
+        {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Act"}
+      </button>
+      <OverflowMenu>
+        <OverflowAction label="Snooze 7 days" onClick={onSnooze} disabled={loading} />
+        <OverflowAction label="Dismiss" onClick={onDismiss} disabled={loading} />
+      </OverflowMenu>
     </div>
   );
 }
@@ -152,13 +205,17 @@ export function NudgeRow({ nudge, onSnooze, dismissing }: {
         <p className="text-sm font-medium truncate">{nudge.title}</p>
         <p className="kf-text-caption text-muted-foreground truncate">{nudge.body}</p>
       </div>
-      <Link href={nudge.ctaHref} className="text-xs font-medium px-3 py-1.5 kf-radius-sm text-white transition-all hover:scale-105 flex-shrink-0" style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}>
+      <Link
+        href={nudge.ctaHref}
+        className="text-xs font-medium min-h-[44px] min-w-[44px] px-3 kf-radius-sm transition-all hover:scale-105 flex-shrink-0 flex items-center justify-center"
+        style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))", color: "hsl(var(--kf-foreground))" }}
+      >
         {nudge.ctaLabel}
       </Link>
       {nudge.snoozable && (
-        <button onClick={onSnooze} disabled={dismissing} className="text-xs text-muted-foreground hover:text-foreground px-2 py-1.5 kf-radius-sm hover:bg-muted/30 transition-all flex-shrink-0">
-          {dismissing ? "..." : "Later"}
-        </button>
+        <OverflowMenu>
+          <OverflowAction label={dismissing ? "..." : "Snooze"} onClick={onSnooze} disabled={dismissing} />
+        </OverflowMenu>
       )}
     </div>
   );
@@ -181,9 +238,9 @@ export function AlertRow({ alert, onDismiss }: { alert: FinancialAlert; onDismis
         {alert.message}
       </Link>
       {onDismiss && (
-        <button onClick={onDismiss} className="p-1.5 kf-radius-sm text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors flex-shrink-0" title="Dismiss">
-          <X className="w-3 h-3" />
-        </button>
+        <OverflowMenu>
+          <OverflowAction label="Dismiss" onClick={onDismiss} />
+        </OverflowMenu>
       )}
     </div>
   );
