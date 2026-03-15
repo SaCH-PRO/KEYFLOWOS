@@ -1,9 +1,8 @@
 "use client";
 
 import { CatalogManager } from "./catalog-manager";
-import { MerchandisingPanel } from "./merchandising-panel";
 import { HoursEditor, type BusinessHoursMap } from "./hours-editor";
-import type { Product, Service, StorefrontConfig } from "@/lib/client";
+import type { Product, Service } from "@/lib/client";
 
 type Props = {
   commerceProducts: Product[];
@@ -17,10 +16,6 @@ type Props = {
   onConfirmRemoveChange: (id: string | null) => void;
   onDeleteFromStore: (serviceId: string, productName?: string) => void;
   services: Service[];
-  storefrontConfig: StorefrontConfig;
-  onConfigChange: (section: string, updates: Record<string, any>) => void;
-  onSaveConfig: () => Promise<void>;
-  configSaving: boolean;
   businessHours: BusinessHoursMap;
   onHoursChange: (hours: BusinessHoursMap) => void;
   onSaveHours: () => Promise<void>;
@@ -39,10 +34,6 @@ export function ProductsHoursTab({
   onConfirmRemoveChange,
   onDeleteFromStore,
   services,
-  storefrontConfig,
-  onConfigChange,
-  onSaveConfig,
-  configSaving,
   businessHours,
   onHoursChange,
   onSaveHours,
@@ -62,15 +53,6 @@ export function ProductsHoursTab({
         onConfirmRemoveChange={onConfirmRemoveChange}
         onDeleteFromStore={onDeleteFromStore}
         services={services.map((s) => ({ id: s.id, name: s.name }))}
-      />
-
-      <MerchandisingPanel
-        config={storefrontConfig}
-        products={commerceProducts}
-        services={services}
-        onConfigChange={onConfigChange}
-        onSave={onSaveConfig}
-        saving={configSaving}
       />
 
       <HoursEditor

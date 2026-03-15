@@ -3,19 +3,31 @@
 import { useCallback, useMemo } from "react";
 import { useModuleAi, type ModuleContext, type AiSuggestion, type AiTool } from "@/hooks/use-module-ai";
 
+type StoreCustomData = {
+  products?: unknown[];
+  services?: unknown[];
+  testimonials?: unknown[];
+  storeEnabled?: boolean;
+  hasHeroImage?: boolean;
+  hasLogo?: boolean;
+  hoursConfigured?: boolean;
+  storeName?: string;
+};
+
 async function generateStoreSuggestions(context: ModuleContext): Promise<AiSuggestion[]> {
   const { businessId, activeView, customData } = context;
   if (!businessId) return [];
 
   const suggestions: AiSuggestion[] = [];
+  const data = (customData ?? {}) as StoreCustomData;
 
-  const products = (customData?.products as any[]) ?? [];
-  const services = (customData?.services as any[]) ?? [];
-  const testimonials = (customData?.testimonials as any[]) ?? [];
-  const storeEnabled = (customData?.storeEnabled as boolean) ?? false;
-  const hasHeroImage = (customData?.hasHeroImage as boolean) ?? false;
-  const hasLogo = (customData?.hasLogo as boolean) ?? false;
-  const hoursConfigured = (customData?.hoursConfigured as boolean) ?? false;
+  const products = (data.products ?? []) as Record<string, unknown>[];
+  const services = (data.services ?? []) as Record<string, unknown>[];
+  const testimonials = (data.testimonials ?? []) as unknown[];
+  const storeEnabled = data.storeEnabled ?? false;
+  const hasHeroImage = data.hasHeroImage ?? false;
+  const hasLogo = data.hasLogo ?? false;
+  const hoursConfigured = data.hoursConfigured ?? false;
 
   if (!storeEnabled) {
     suggestions.push({
@@ -149,16 +161,17 @@ function buildStoreTools(): AiTool[] {
       requiresSelection: false,
       creditCost: 2,
       execute: async (ctx) => {
-        const products = (ctx.customData?.products as any[]) ?? [];
-        const services = (ctx.customData?.services as any[]) ?? [];
-        const testimonials = (ctx.customData?.testimonials as any[]) ?? [];
-        const storeEnabled = (ctx.customData?.storeEnabled as boolean) ?? false;
-        const hasHeroImage = (ctx.customData?.hasHeroImage as boolean) ?? false;
+        const d = (ctx.customData ?? {}) as StoreCustomData;
+        const products = (d.products ?? []) as Record<string, unknown>[];
+        const services = (d.services ?? []) as Record<string, unknown>[];
+        const testimonials = (d.testimonials ?? []) as unknown[];
+        const storeEnabled = d.storeEnabled ?? false;
+        const hasHeroImage = d.hasHeroImage ?? false;
 
         const totalItems = products.length + services.length;
         const score = Math.min(100, (storeEnabled ? 20 : 0) + Math.min(30, totalItems * 5) + (hasHeroImage ? 15 : 0) + Math.min(20, testimonials.length * 7) + 15);
 
-        const recommendations: any[] = [];
+        const recommendations: { title: string; description: string; priority: string; expectedImpact?: string }[] = [];
         if (!storeEnabled) recommendations.push({ title: "Enable Your Store", description: "Your store is offline. Toggle it live to start receiving visitors.", priority: "high", expectedImpact: "Critical — no traffic while offline" });
         if (totalItems === 0) recommendations.push({ title: "Add Catalog Items", description: "Add at least 3-5 products or services to give visitors a reason to stay.", priority: "high", expectedImpact: "High — empty stores have near-zero conversions" });
         if (totalItems > 0 && totalItems < 3) recommendations.push({ title: "Expand Your Catalog", description: `You have ${totalItems} item${totalItems > 1 ? "s" : ""}. Aim for at least 5 to look established.`, priority: "medium", expectedImpact: "Medium — more options increase average order value" });
@@ -183,8 +196,9 @@ function buildStoreTools(): AiTool[] {
       requiresSelection: false,
       creditCost: 1,
       execute: async (ctx) => {
-        const products = (ctx.customData?.products as any[]) ?? [];
-        const storeName = (ctx.customData?.storeName as string) || "Your Store";
+        const d2 = (ctx.customData ?? {}) as StoreCustomData;
+        const products = (d2.products ?? []) as Record<string, unknown>[];
+        const storeName = d2.storeName || "Your Store";
 
         const tips: string[] = [
           "Include your primary service keyword in the store title and description.",
@@ -194,11 +208,11 @@ function buildStoreTools(): AiTool[] {
           "Add a clear call-to-action on your storefront hero section.",
         ];
 
-        const issues: any[] = [];
-        if (products.some((p: any) => !p.description || p.description.length < 20)) {
+        const issues: { field: string; issue: string; suggestion: string; impact: string }[] = [];
+        if (products.some((p) => !p.description || (p.description as string).length < 20)) {
           issues.push({ field: "Product Descriptions", issue: "Some products have missing or very short descriptions.", suggestion: "Write at least 2-3 sentences describing each product's benefits.", impact: "high" });
         }
-        if (products.some((p: any) => !p.imageUrl)) {
+        if (products.some((p) => !p.imageUrl)) {
           issues.push({ field: "Product Images", issue: "Some products are missing images.", suggestion: "Add high-quality images to every product for better engagement and SEO.", impact: "high" });
         }
         issues.push({ field: "Store Title", issue: `Ensure "${storeName}" includes a relevant keyword.`, suggestion: "Example: 'KeyFlow Studio — Premium Design Services'", impact: "medium" });
@@ -219,8 +233,9 @@ function buildStoreTools(): AiTool[] {
       requiresSelection: false,
       creditCost: 2,
       execute: async (ctx) => {
-        const products = (ctx.customData?.products as any[]) ?? [];
-        const pricedProducts = products.filter((p: any) => p.price && p.price > 0);
+        const d3 = (ctx.customData ?? {}) as StoreCustomData;
+        const products = (d3.products ?? []) as Record<string, unknown>[];
+        const pricedProducts = products.filter((p) => p.price && (p.price as number) > 0);
 
         if (pricedProducts.length === 0) {
           return {
@@ -229,16 +244,16 @@ function buildStoreTools(): AiTool[] {
           };
         }
 
-        const prices = pricedProducts.map((p: any) => p.price);
-        const avgPrice = prices.reduce((a: number, b: number) => a + b, 0) / prices.length;
+        const prices = pricedProducts.map((p) => p.price as number);
+        const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
         const minPrice = Math.min(...prices);
         const maxPrice = Math.max(...prices);
 
-        const recommendations: any[] = [];
+        const recommendations: { title: string; description: string; priority: string; expectedImpact?: string }[] = [];
         if (maxPrice / minPrice > 10) {
           recommendations.push({ title: "Wide Price Range", description: `Your prices span from $${minPrice.toFixed(2)} to $${maxPrice.toFixed(2)}. Consider creating distinct tiers or bundles.`, priority: "medium", expectedImpact: "Clearer value positioning" });
         }
-        const freeItems = products.filter((p: any) => !p.price || p.price === 0);
+        const freeItems = products.filter((p) => !p.price || (p.price as number) === 0);
         if (freeItems.length > 0) {
           recommendations.push({ title: "Free Items Detected", description: `${freeItems.length} item${freeItems.length > 1 ? "s have" : " has"} no price. Consider adding a price or marking as 'Contact for pricing'.`, priority: "medium", expectedImpact: "Potential lost revenue" });
         }
@@ -264,12 +279,13 @@ function buildStoreTools(): AiTool[] {
       requiresSelection: false,
       creditCost: 2,
       execute: async (ctx) => {
-        const products = (ctx.customData?.products as any[]) ?? [];
-        const services = (ctx.customData?.services as any[]) ?? [];
-        const testimonials = (ctx.customData?.testimonials as any[]) ?? [];
-        const storeEnabled = (ctx.customData?.storeEnabled as boolean) ?? false;
-        const hasHeroImage = (ctx.customData?.hasHeroImage as boolean) ?? false;
-        const hoursConfigured = (ctx.customData?.hoursConfigured as boolean) ?? false;
+        const d4 = (ctx.customData ?? {}) as StoreCustomData;
+        const products = (d4.products ?? []) as Record<string, unknown>[];
+        const services = (d4.services ?? []) as Record<string, unknown>[];
+        const testimonials = (d4.testimonials ?? []) as unknown[];
+        const storeEnabled = d4.storeEnabled ?? false;
+        const hasHeroImage = d4.hasHeroImage ?? false;
+        const hoursConfigured = d4.hoursConfigured ?? false;
 
         const checks = [
           { label: "Store is live", passed: storeEnabled },
@@ -277,13 +293,13 @@ function buildStoreTools(): AiTool[] {
           { label: "Has catalog items", passed: products.length + services.length > 0 },
           { label: "Social proof (3+ testimonials)", passed: testimonials.length >= 3 },
           { label: "Business hours configured", passed: hoursConfigured },
-          { label: "Multiple product categories", passed: new Set(products.map((p: any) => p.category).filter(Boolean)).size > 1 },
+          { label: "Multiple product categories", passed: new Set(products.map((p) => p.category as string).filter(Boolean)).size > 1 },
         ];
 
         const passedCount = checks.filter((c) => c.passed).length;
         const conversionScore = Math.round((passedCount / checks.length) * 100);
 
-        const frictionPoints: any[] = [];
+        const frictionPoints: { area: string; issue: string; suggestion: string; impact: string }[] = [];
         checks.filter((c) => !c.passed).forEach((c) => {
           frictionPoints.push({ area: c.label, issue: `Not configured: ${c.label}`, suggestion: `Complete this step to improve your conversion score.`, impact: "medium" });
         });
