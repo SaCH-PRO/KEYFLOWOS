@@ -240,19 +240,16 @@ export default function PaymentsTab({
 
   const viewCounts = useMemo(() => {
     const now = new Date();
+    const isOverdue = (i: Invoice) =>
+      i.status === "OVERDUE" ||
+      ((i.status === "SENT" || i.status === "PARTIALLY_PAID") && i.dueDate && new Date(i.dueDate) < now);
     return {
       all: invoices.length,
       received: invoices.filter((i) => i.status === "PAID").length,
       pending: invoices.filter(
-        (i) => i.status === "DRAFT" || i.status === "SENT" || i.status === "PARTIALLY_PAID"
+        (i) => (i.status === "DRAFT" || i.status === "SENT" || i.status === "PARTIALLY_PAID") && !isOverdue(i)
       ).length,
-      overdue: invoices.filter(
-        (i) =>
-          i.status === "OVERDUE" ||
-          ((i.status === "SENT" || i.status === "PARTIALLY_PAID") &&
-            i.dueDate &&
-            new Date(i.dueDate) < now)
-      ).length,
+      overdue: invoices.filter((i) => isOverdue(i)).length,
     };
   }, [invoices]);
 
