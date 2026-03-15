@@ -59,12 +59,12 @@ function ReadinessChecklist({
   const [open, setOpen] = useState(false);
 
   const checks = [
-    { label: "Custom URL", hint: "Set a memorable slug for your store", done: hasSlug, tab: "settings" },
-    { label: "Logo uploaded", hint: "Add your brand logo in Customize", done: hasLogo, tab: "customize" },
-    { label: "Cover image", hint: "Upload a hero image for your storefront", done: hasHeroImage, tab: "customize" },
-    { label: "Business hours", hint: "Set your operating hours", done: hoursConfigured, tab: "hours" },
+    { label: "Custom URL", hint: "Set a memorable slug for your store", done: hasSlug, tab: "storefront" },
+    { label: "Logo uploaded", hint: "Add your brand logo in Storefront", done: hasLogo, tab: "storefront" },
+    { label: "Cover image", hint: "Upload a hero image for your storefront", done: hasHeroImage, tab: "storefront" },
+    { label: "Business hours", hint: "Set your operating hours", done: hoursConfigured, tab: "products" },
     { label: "Products listed", hint: "Add services or products to your catalog", done: servicesCount > 0 || productsCount > 0, tab: "products" },
-    { label: "Testimonials", hint: "Add social proof from your clients", done: hasTestimonials, tab: "settings" },
+    { label: "Testimonials", hint: "Add social proof from your clients", done: hasTestimonials, tab: "storefront" },
   ];
 
   const completed = checks.filter((c) => c.done).length;

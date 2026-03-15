@@ -154,7 +154,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
     }
   }
 
-  if (activeView === "campaigns" && suggestions.filter((s) => s.actionKey?.includes("campaign")).length === 0) {
+  if ((activeView === "campaigns" || activeView === "create") && suggestions.filter((s) => s.actionKey?.includes("campaign")).length === 0) {
     suggestions.push({
       id: `content-tip-${Date.now()}`,
       type: "tip",
@@ -166,7 +166,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
     });
   }
 
-  if (activeView === "forms" && suggestions.filter((s) => s.actionKey?.includes("form")).length === 0) {
+  if ((activeView === "forms" || activeView === "audiences") && suggestions.filter((s) => s.actionKey?.includes("form")).length === 0) {
     suggestions.push({
       id: `form-optimize-${Date.now()}`,
       type: "tip",
@@ -178,7 +178,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
     });
   }
 
-  if (activeView === "insights") {
+  if (activeView === "insights" || activeView === "performance") {
     suggestions.push({
       id: `performance-tip-${Date.now()}`,
       type: "insight",
@@ -190,7 +190,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
     });
   }
 
-  if (activeView === "social") {
+  if (activeView === "social" || activeView === "create") {
     suggestions.push({
       id: `social-advisor-${Date.now()}`,
       type: "tip",

@@ -556,7 +556,7 @@ export function ConversionInsightsPanel({ businessId, onTabChange }: Props) {
   }, [businessId]);
 
   const handleFix = useCallback((action: string, target: string) => {
-    const validTabs = ["overview", "products", "hours", "settings", "customize"];
+    const validTabs = ["storefront", "products", "performance"];
     if (action === "navigate" && validTabs.includes(target)) {
       onTabChange(target);
     } else if (action === "edit_product") {

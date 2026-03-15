@@ -391,8 +391,8 @@ export default function BookingsPage() {
         }
         rightSlot={
           <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => handleTabChange("catalog")}
+            <a
+              href="/app/settings/connections"
               className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] transition-colors"
               style={{
                 background: calendarConnected ? "hsl(var(--kf-success) / 0.08)" : "hsl(var(--muted) / 0.3)",
@@ -400,11 +400,11 @@ export default function BookingsPage() {
                 borderWidth: 1,
                 borderColor: calendarConnected ? "hsl(var(--kf-success) / 0.2)" : "hsl(var(--border))",
               }}
-              title={calendarConnected ? `Calendar connected: ${calendarEmail ?? ""}` : "Calendar not connected"}
+              title={calendarConnected ? `Calendar connected: ${calendarEmail ?? ""}` : "Connect calendar in Settings"}
             >
               <Link2 className="w-3 h-3" />
               {calendarConnected && <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-success))" }} />}
-            </button>
+            </a>
             <button
               onClick={() => ai.executeTool("bookings-nl-search")}
               className="p-1.5 rounded-lg hover:bg-muted/30 transition-colors"

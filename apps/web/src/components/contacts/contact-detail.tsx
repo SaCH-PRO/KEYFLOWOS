@@ -118,6 +118,8 @@ interface ContactDetailProps {
   onRefreshConversationContext?: () => Promise<void>;
   relatedContacts?: Array<{ id: string; firstName?: string | null; lastName?: string | null; email?: string | null; status?: string | null; jobTitle?: string | null }>;
   onSelectRelatedContact?: (contactId: string) => void;
+  invoices?: Array<{ id: string; status: string; total?: number | null; currency?: string | null; dueDate?: string | null; issueDate?: string | null; createdAt?: string; paidAt?: string | null }>;
+  bookings?: Array<{ id: string; startTime: string; endTime: string; status: string; service?: { name: string; price: number } | null; contact?: { firstName?: string | null } | null }>;
 }
 
 export function ContactDetail({
@@ -151,6 +153,8 @@ export function ContactDetail({
   onRefreshConversationContext,
   relatedContacts,
   onSelectRelatedContact,
+  invoices,
+  bookings,
 }: ContactDetailProps) {
   const [activeTab, setActiveTab] = useState<string>("activity");
   const [confirmState, setConfirmState] = useState<{ open: boolean; action: () => void }>({
@@ -315,6 +319,8 @@ export function ContactDetail({
             aiInsightLoading={aiInsightLoading}
             onGenerateAiInsight={onGenerateAiInsight}
             onRefreshConversationContext={onRefreshConversationContext}
+            invoices={invoices}
+            bookings={bookings}
           />
         </div>
 

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { Suspense, useRef } from "react";
-import { MessageSquare, ListTodo, History, AlertCircle, Loader2, Activity } from "lucide-react";
+import { MessageSquare, ListTodo, History, AlertCircle, Loader2, Activity, Route } from "lucide-react";
 import type { ContactDetailData, ContactEvent, ContactNote, ContactTask } from "./contact-detail";
 import type { HealthMetricsData, JourneyMilestoneData, ConversationContextData, AiInsightData } from "./tab-constants";
 
@@ -9,6 +9,7 @@ const NotesTabPanel = React.lazy(() => import("./notes-tab-panel").then(m => ({ 
 const TasksTabPanel = React.lazy(() => import("./tasks-tab-panel").then(m => ({ default: m.TasksTabPanel })));
 const TimelineTabPanel = React.lazy(() => import("./timeline-tab-panel").then(m => ({ default: m.TimelineTabPanel })));
 const ActivityTimeline = React.lazy(() => import("./activity-timeline").then(m => ({ default: m.ActivityTimeline })));
+const ContactJourneyTimeline = React.lazy(() => import("./contact-journey-timeline").then(m => ({ default: m.ContactJourneyTimeline })));
 
 class TabErrorBoundary extends React.Component<
   { children: React.ReactNode; resetKey: string },
@@ -37,6 +38,26 @@ class TabErrorBoundary extends React.Component<
   }
 }
 
+interface InvoiceSummary {
+  id: string;
+  status: string;
+  total?: number | null;
+  currency?: string | null;
+  dueDate?: string | null;
+  issueDate?: string | null;
+  createdAt?: string;
+  paidAt?: string | null;
+}
+
+interface BookingSummary {
+  id: string;
+  startTime: string;
+  endTime: string;
+  status: string;
+  service?: { name: string; price: number } | null;
+  contact?: { firstName?: string | null } | null;
+}
+
 interface ContactDetailTabsProps {
   contact: ContactDetailData;
   events: ContactEvent[];
@@ -58,6 +79,8 @@ interface ContactDetailTabsProps {
   aiInsightLoading?: boolean;
   onGenerateAiInsight?: () => Promise<void>;
   onRefreshConversationContext?: () => Promise<void>;
+  invoices?: InvoiceSummary[];
+  bookings?: BookingSummary[];
 }
 
 export function ContactDetailTabs({
@@ -68,6 +91,7 @@ export function ContactDetailTabs({
   healthMetrics, journeyMilestones = [],
   conversationContext, aiInsight, aiInsightLoading,
   onGenerateAiInsight, onRefreshConversationContext,
+  invoices = [], bookings = [],
 }: ContactDetailTabsProps) {
   const activatedTabs = useRef(new Set<string>(["activity"]));
   if (!activatedTabs.current.has(activeTab)) {
@@ -79,6 +103,7 @@ export function ContactDetailTabs({
       <div className="flex border-b border-border overflow-x-auto shrink-0" role="tablist">
         {[
           { key: "activity", label: "Activity", icon: Activity, count: events.length + notes.length + tasks.length },
+          { key: "journey", label: "Journey", icon: Route },
           { key: "notes", label: "Notes", icon: MessageSquare, count: notes.length },
           { key: "tasks", label: "Tasks", icon: ListTodo, count: tasks.filter((t) => t.status !== "DONE").length },
           { key: "timeline", label: "Timeline", icon: History },
@@ -109,6 +134,13 @@ export function ContactDetailTabs({
             <div className={`space-y-3 pt-3 pb-6 ${activeTab === "activity" ? "" : "hidden"}`}>
               <TabErrorBoundary resetKey="activity">
                 <ActivityTimeline contact={contact} events={events} notes={notes} tasks={tasks} />
+              </TabErrorBoundary>
+            </div>
+          )}
+          {activatedTabs.current.has("journey") && (
+            <div className={`space-y-3 pt-3 pb-6 ${activeTab === "journey" ? "" : "hidden"}`}>
+              <TabErrorBoundary resetKey="journey">
+                <ContactJourneyTimeline contact={contact} events={events} invoices={invoices} bookings={bookings} />
               </TabErrorBoundary>
             </div>
           )}

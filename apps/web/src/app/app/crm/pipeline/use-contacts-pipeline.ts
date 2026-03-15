@@ -147,6 +147,8 @@ export function useContactsPipeline() {
     onRefreshConversationContext: detail.handleRefreshConversationContext,
     relatedContacts,
     onSelectRelatedContact: selectContact,
+    invoices: detail.detailInvoices,
+    bookings: detail.detailBookings,
   }), [
     detail.selectedContact, detail.detailEvents, detail.detailNotes, detail.detailTasks,
     detail.detailLoading, detailError, handleRetryDetail, isPinned, detail.contactName, detail.healthMetrics,
@@ -156,6 +158,7 @@ export function useContactsPipeline() {
     actions.handleUpdateNote, actions.handleUpdateTask, actions.handleUpdateStatus,
     actions.handleEditContact, handleDeleteForPanel, actions.handleLogEvent, actions.handleLogCommunication,
     detail.handleGenerateAiInsight, detail.handleRefreshConversationContext,
+    detail.detailInvoices, detail.detailBookings,
   ]);
 
   const selectedContactsForBroadcast = useMemo(

@@ -32,7 +32,6 @@ import {
   updateQuoteStatus,
   deleteQuote,
   convertQuoteToInvoice,
-  getGmailAuthUrl,
   sendQuoteEmail,
   disconnectGmail,
   Product,
@@ -158,7 +157,6 @@ export default function QuotesPanel({
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailForm, setEmailForm] = useState({ email: "", message: "" });
   const [sendingEmail, setSendingEmail] = useState(false);
-  const [loadingGmail, setLoadingGmail] = useState(false);
   const [convertForm, setConvertForm] = useState({
     taxRate: "12.5",
     discountType: "PERCENT" as "PERCENT" | "FIXED",
@@ -1206,32 +1204,13 @@ export default function QuotesPanel({
                       Connect your Gmail account to send quotes directly from your email address.
                     </p>
                   </div>
-                  <button
-                    onClick={async () => {
-                      setLoadingGmail(true);
-                      try {
-                        const res = await getGmailAuthUrl(businessId ?? undefined);
-                        if (res.data?.url) {
-                          window.location.href = res.data.url;
-                        }
-                      } catch {
-                        toast.error("Failed to get Gmail authorization URL");
-                      } finally {
-                        setLoadingGmail(false);
-                      }
-                    }}
-                    disabled={loadingGmail}
-                    className="w-full rounded-xl bg-primary text-primary-foreground py-3 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 flex items-center justify-center gap-2"
+                  <a
+                    href="/app/settings/connections"
+                    className="w-full rounded-xl bg-primary text-primary-foreground py-3 text-sm font-medium hover:bg-primary/90 flex items-center justify-center gap-2"
                   >
-                    {loadingGmail ? (
-                      "Connecting..."
-                    ) : (
-                      <>
-                        <Mail className="w-4 h-4" />
-                        Connect Gmail Account
-                      </>
-                    )}
-                  </button>
+                    <Mail className="w-4 h-4" />
+                    Connect Gmail in Settings
+                  </a>
                   <button
                     onClick={() => {
                       setShowEmailModal(false);
