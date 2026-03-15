@@ -4,22 +4,26 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   CreditCard,
-  BarChart3,
-  LayoutDashboard,
+  FileText,
+  DollarSign,
+  RefreshCw,
   Plus,
   Search,
   Sparkles,
-  DollarSign,
   Terminal,
   Lightbulb,
   Zap,
   BookOpen,
+  Clock,
+  AlertTriangle,
+  Settings,
+  ArrowRight,
 } from "lucide-react";
 import { toast } from "sonner";
+import Link from "next/link";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { AiCommandHub } from "@/components/ai/ai-command-hub";
-
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { useCommerceShell } from "./hooks/use-commerce-shell";
@@ -27,26 +31,26 @@ import { useBillingWorkspace } from "./hooks/use-billing-workspace";
 import { useCommerceOverview } from "./hooks/use-commerce-overview";
 import { useCommerceCopilot } from "./hooks/use-commerce-copilot";
 import { useCommerceComposer } from "./hooks/use-commerce-composer";
-import { BillingPanel } from "./billing/billing-panel";
-import { CommerceInsightsTab } from "./insights/commerce-insights-tab";
-import { CommerceOverviewTab } from "./components/commerce-overview-tab";
 import { useCommerceAiHub, type CopilotMode } from "./hooks/use-commerce-ai-hub";
-import { SmartChecklist, SearchableHelpDrawer } from "./components/contextual-onboarding";
-import { CollectionsScoringPanel } from "./components/collections-scoring-panel";
-import { ChurnRiskPanel } from "./components/churn-risk-panel";
-import { RevenueJourneyPanel } from "./components/revenue-journey-panel";
+import { SearchableHelpDrawer } from "./components/contextual-onboarding";
 import { renderCommerceToolResult } from "./components/commerce-tool-results";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useModuleEmit, useModuleEvent } from "@/hooks/use-module-events";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { useRouter } from "next/navigation";
 import { commerceAiExecute } from "@/lib/client";
+import { formatCurrencyCompact } from "@/lib/currency";
 import type { BillingSlots } from "./utils/commerce-slots";
+import InvoicesPanel from "./invoices/invoices-panel";
+import QuotesPanel from "./quotes/quotes-panel";
+import RecurringPanel from "./recurring/recurring-panel";
+import PaymentsTab from "./payments/payments-tab";
 
 const TABS = [
-  { key: "overview", label: "Overview", icon: LayoutDashboard },
-  { key: "billing", label: "Billing", icon: CreditCard },
-  { key: "catalog", label: "Catalog & Intelligence", icon: BarChart3 },
+  { key: "invoices", label: "Invoices", icon: FileText },
+  { key: "quotes", label: "Quotes", icon: CreditCard },
+  { key: "payments", label: "Payments", icon: DollarSign },
+  { key: "recurring", label: "Recurring", icon: RefreshCw },
 ];
 
 export default function CommercePage() {
@@ -56,8 +60,6 @@ export default function CommercePage() {
   const composer = useCommerceComposer({
     tab: overview.tab,
     setTab: overview.setTab,
-    activeBillingSegment: billing.activeBillingSegment,
-    setActiveBillingSegment: billing.setActiveBillingSegment,
     setTriggerNewQuote: billing.setTriggerNewQuote,
     setTriggerNewInvoice: billing.setTriggerNewInvoice,
     setTriggerNewSchedule: billing.setTriggerNewSchedule,
@@ -65,11 +67,9 @@ export default function CommercePage() {
   const copilot = useCommerceCopilot({
     businessId: shell.businessId,
     tab: overview.tab,
-    billingSegment: billing.activeBillingSegment,
     invoiceCount: shell.invoices.length,
     quoteCount: shell.quotes.length,
     handleTabChange: overview.handleTabChange,
-    setBillingSegment: billing.setActiveBillingSegment,
     prefillForContact: billing.prefillForContact,
   });
 
@@ -82,7 +82,6 @@ export default function CommercePage() {
   const { tab } = overview;
   const { commerceAi } = copilot;
   const { businessId, businessCurrency } = shell;
-  const { activeBillingSegment: billingSegment } = billing;
   const { invoices, quotes } = shell;
 
   const handleTabChange = useCallback((t: string) => {
@@ -103,155 +102,120 @@ export default function CommercePage() {
     const { contactId, items } = event.data ?? {};
     if (contactId) {
       billing.prefillForContact(contactId, "quotes", items);
+      handleTabChange("quotes");
       toast.success("Opening quote builder for contact...");
     }
-  }, [billing.prefillForContact]));
+  }, [billing.prefillForContact, handleTabChange]));
 
   useModuleEvent("commerce:create_invoice_for_contact", useCallback((event: any) => {
     const { contactId, items } = event.data ?? {};
     if (contactId) {
       billing.prefillForContact(contactId, "invoices", items);
+      handleTabChange("invoices");
       toast.success("Opening invoice builder for contact...");
     }
-  }, [billing.prefillForContact]));
+  }, [billing.prefillForContact, handleTabChange]));
 
   useEffect(() => {
-    if (billing.pendingPrefill?.targetSegment && tab === "billing") {
-      billing.setActiveBillingSegment(billing.pendingPrefill.targetSegment === "quotes" ? "quotes" : "invoices");
+    if (billing.pendingPrefill?.targetSegment) {
+      const target = billing.pendingPrefill.targetSegment === "quotes" ? "quotes" : "invoices";
+      if (tab !== target) handleTabChange(target);
     }
-  }, [billing.pendingPrefill, tab]);
+  }, [billing.pendingPrefill]);
 
   useEffect(() => {
     if (businessId) {
       commerceAi.updateCommerceContext({
         businessId,
-        activeView: tab === "billing" ? billingSegment : tab,
+        activeView: tab,
         itemCount: invoices.length + quotes.length,
       });
     }
-  }, [businessId, tab, billingSegment, invoices.length, quotes.length, commerceAi.updateCommerceContext]);
+  }, [businessId, tab, invoices.length, quotes.length, commerceAi.updateCommerceContext]);
 
   const handleAiAssistantAction = useCallback((actionKey: string) => {
     if (actionKey.startsWith("filter_status:")) {
-      handleTabChange("billing");
-      billing.setActiveBillingSegment("invoices");
+      handleTabChange("invoices");
       toast.success(`Filtering by ${actionKey.split(":")[1]}`);
     } else if (actionKey.startsWith("switch_tab:")) {
       const t = actionKey.split(":")[1];
-      if (t === "quotes" || t === "invoices" || t === "schedules" || t === "recurring" || t === "collections") {
-        handleTabChange("billing");
-        billing.setActiveBillingSegment(t === "recurring" ? "schedules" : t as "quotes" | "invoices" | "schedules" | "collections");
-      } else {
-        handleTabChange(t === "insights" ? "catalog" : t);
-      }
+      if (t === "quotes") handleTabChange("quotes");
+      else if (t === "invoices") handleTabChange("invoices");
+      else if (t === "schedules" || t === "recurring") handleTabChange("recurring");
+      else if (t === "payments" || t === "collections") handleTabChange("payments");
+      else if (t === "insights" || t === "catalog") handleTabChange("payments");
+      else handleTabChange(t);
     } else if (actionKey.startsWith("send_reminders:")) {
-      handleTabChange("billing");
-      billing.setActiveBillingSegment("invoices");
+      handleTabChange("invoices");
       toast.success("Opening invoices for reminders...");
     } else if (actionKey.startsWith("tool:")) {
       const toolId = actionKey.split(":")[1];
       if (!commerceAi.panelOpen) commerceAi.setOpen(true);
       commerceAi.executeTool(toolId);
     }
-  }, [handleTabChange, commerceAi, billing.setActiveBillingSegment]);
+  }, [handleTabChange, commerceAi]);
 
   const handleWrappedTabChange = useCallback((t: string) => {
     handleTabChange(t);
     emitEvent("module:tab_changed", "commerce", { tab: t });
   }, [handleTabChange, emitEvent]);
 
-  const handleOverviewNavigate = useCallback((navTab: string, segment?: string) => {
-    handleTabChange(navTab);
-    if (navTab === "billing" && segment) {
-      billing.setActiveBillingSegment(segment as "quotes" | "invoices" | "schedules");
-    }
-  }, [handleTabChange]);
+  const financialSummary = useMemo(() => {
+    const now = new Date();
+    const thisMonth = now.getMonth();
+    const thisYear = now.getFullYear();
+    let outstanding = 0;
+    let overdue = 0;
+    let collectedThisMonth = 0;
 
-  const commerceShortcuts = useMemo<ShortcutGroup[]>(() => {
-    const shortcuts: ShortcutGroup[] = [
-      {
-        groupName: "Commerce Navigation",
-        shortcuts: [
-          { key: "n", description: "New item", action: () => composer.handleNewItem() },
-          { key: "f", description: "Focus search", action: () => { if (!commerceAi.panelOpen) commerceAi.setOpen(true); } },
-          { key: "/", description: "Focus search", action: () => { if (!commerceAi.panelOpen) commerceAi.setOpen(true); } },
-          { key: "1", description: "Overview tab", action: () => handleTabChange("overview") },
-          { key: "2", description: "Billing tab", action: () => handleTabChange("billing") },
-          { key: "3", description: "Catalog tab", action: () => handleTabChange("catalog") },
-          { key: "r", description: "Refresh data", action: () => { shell.refreshProducts(); } },
-          { key: "a", shift: true, description: "Toggle AI Copilot", action: () => commerceAi.togglePanel() },
-          { key: "?", description: "Help", action: () => setHelpOpen(true) },
-          { key: "Escape", description: "Close panels", action: () => { if (commerceAi.hubMode === "tool-result") commerceAi.clearToolResult(); else if (commerceAi.panelOpen) commerceAi.setOpen(false); } },
-        ],
-      },
-    ];
-    if (tab === "billing") {
-      shortcuts.push({
-        groupName: "Billing Segments",
-        shortcuts: [
-          { key: "i", description: "Invoices segment", action: () => billing.setActiveBillingSegment("invoices") },
-          { key: "q", description: "Quotes segment", action: () => billing.setActiveBillingSegment("quotes") },
-          { key: "s", description: "Recurring segment", action: () => billing.setActiveBillingSegment("schedules") },
-          { key: "c", description: "Collections segment", action: () => billing.setActiveBillingSegment("collections") },
-        ],
-      });
+    for (const inv of invoices) {
+      const amount = Number(inv.total ?? 0);
+      if (inv.status === "PAID") {
+        const paidDate = inv.paidAt ? new Date(inv.paidAt) : null;
+        if (paidDate && paidDate.getMonth() === thisMonth && paidDate.getFullYear() === thisYear) {
+          collectedThisMonth += amount;
+        }
+      } else if (inv.status === "OVERDUE") {
+        outstanding += amount;
+        overdue += amount;
+      } else if (inv.status === "SENT" || inv.status === "PARTIALLY_PAID") {
+        outstanding += amount;
+        if (inv.dueDate && new Date(inv.dueDate) < now) {
+          overdue += amount;
+        }
+      } else if (inv.status === "DRAFT") {
+        outstanding += amount;
+      }
     }
-    return shortcuts;
-  }, [composer.handleNewItem, handleTabChange, shell.refreshProducts, commerceAi.togglePanel, commerceAi.panelOpen, commerceAi.setOpen, commerceAi.hubMode, commerceAi.clearToolResult, tab, billing.setActiveBillingSegment]);
+
+    return { outstanding, overdue, collectedThisMonth };
+  }, [invoices]);
+
+  const commerceShortcuts = useMemo<ShortcutGroup[]>(() => [
+    {
+      groupName: "Commerce Navigation",
+      shortcuts: [
+        { key: "n", description: "New item", action: () => composer.handleNewItem() },
+        { key: "f", description: "Focus search", action: () => { if (!commerceAi.panelOpen) commerceAi.setOpen(true); } },
+        { key: "/", description: "Focus search", action: () => { if (!commerceAi.panelOpen) commerceAi.setOpen(true); } },
+        { key: "1", description: "Invoices tab", action: () => handleTabChange("invoices") },
+        { key: "2", description: "Quotes tab", action: () => handleTabChange("quotes") },
+        { key: "3", description: "Payments tab", action: () => handleTabChange("payments") },
+        { key: "4", description: "Recurring tab", action: () => handleTabChange("recurring") },
+        { key: "r", description: "Refresh data", action: () => { shell.refreshProducts(); } },
+        { key: "a", shift: true, description: "Toggle AI Copilot", action: () => commerceAi.togglePanel() },
+        { key: "?", description: "Help", action: () => setHelpOpen(true) },
+        { key: "Escape", description: "Close panels", action: () => { if (commerceAi.hubMode === "tool-result") commerceAi.clearToolResult(); else if (commerceAi.panelOpen) commerceAi.setOpen(false); } },
+      ],
+    },
+  ], [composer.handleNewItem, handleTabChange, shell.refreshProducts, commerceAi.togglePanel, commerceAi.panelOpen, commerceAi.setOpen, commerceAi.hubMode, commerceAi.clearToolResult]);
 
   useKeyboardShortcuts(commerceShortcuts, !shell.workspaceLoading);
 
-  const customerBadgeMap = useMemo(() => {
-    const map = new Map<string, { type: string; label: string; color: string; bgColor: string; borderColor: string; description: string }>();
-    const contactIds = new Set<string>();
-    for (const inv of invoices) { if (inv.contactId) contactIds.add(inv.contactId); }
-    for (const q of quotes) { if (q.contactId) contactIds.add(q.contactId); }
-    for (const cid of contactIds) {
-      const contactInvoices = invoices.filter((inv) => inv.contactId === cid);
-      if (contactInvoices.length === 0) {
-        map.set(cid, { type: "new_client", label: "New Client", color: "text-blue-400", bgColor: "bg-blue-500/10", borderColor: "border-blue-500/25", description: "No invoice history" });
-        continue;
-      }
-      if (contactInvoices.length <= 2) {
-        map.set(cid, { type: "new_client", label: "New Client", color: "text-blue-400", bgColor: "bg-blue-500/10", borderColor: "border-blue-500/25", description: `${contactInvoices.length} invoice${contactInvoices.length > 1 ? "s" : ""}` });
-        continue;
-      }
-      const paid = contactInvoices.filter((inv) => inv.status === "PAID");
-      const overdue = contactInvoices.filter((inv) => inv.status === "OVERDUE");
-      const totalRev = paid.reduce((s, inv) => s + Number(inv.total ?? 0), 0);
-      const overdueAmt = overdue.reduce((s, inv) => s + Number(inv.total ?? 0), 0);
-      const payRate = paid.length / contactInvoices.length;
-      if (overdue.length >= 2 || overdueAmt > totalRev * 0.5) {
-        map.set(cid, { type: "at_risk", label: "At Risk", color: "text-red-400", bgColor: "bg-red-500/10", borderColor: "border-red-500/25", description: `${overdue.length} overdue` });
-      } else if (payRate < 0.5 && contactInvoices.length > 3) {
-        map.set(cid, { type: "slow_payer", label: "Slow Payer", color: "text-amber-400", bgColor: "bg-amber-500/10", borderColor: "border-amber-500/25", description: `${Math.round(payRate * 100)}% payment rate` });
-      } else if (totalRev > 10000 || paid.length >= 10) {
-        map.set(cid, { type: "high_value", label: "High Value", color: "text-purple-400", bgColor: "bg-purple-500/10", borderColor: "border-purple-500/25", description: `${paid.length} paid invoices` });
-      } else if (payRate >= 0.7) {
-        map.set(cid, { type: "healthy", label: "Healthy", color: "text-emerald-400", bgColor: "bg-emerald-500/10", borderColor: "border-emerald-500/25", description: `${Math.round(payRate * 100)}% on-time` });
-      } else if (overdue.length >= 1) {
-        map.set(cid, { type: "slow_payer", label: "Slow Payer", color: "text-amber-400", bgColor: "bg-amber-500/10", borderColor: "border-amber-500/25", description: `${overdue.length} overdue` });
-      } else {
-        map.set(cid, { type: "healthy", label: "Healthy", color: "text-emerald-400", bgColor: "bg-emerald-500/10", borderColor: "border-emerald-500/25", description: "Good payment history" });
-      }
-    }
-    return map;
-  }, [invoices, quotes]);
-
   const renderTimelineBadge = useCallback((item: { contactId?: string | null }) => {
     if (!item.contactId) return null;
-    const badge = customerBadgeMap.get(item.contactId);
-    if (!badge) return null;
-    const ICONS: Record<string, string> = { healthy: "🟢", slow_payer: "🟡", high_value: "🟣", at_risk: "🔴", new_client: "🔵" };
-    return (
-      <span
-        className={`inline-flex items-center gap-1 rounded-full border font-medium px-1.5 py-0.5 text-[10px] ${badge.bgColor} ${badge.color} ${badge.borderColor}`}
-        title={badge.description}
-      >
-        {badge.label}
-      </span>
-    );
-  }, [customerBadgeMap]);
+    return null;
+  }, []);
 
   const billingSlots = useMemo<BillingSlots>(() => ({
     renderHeaderExtra: () => (
@@ -286,6 +250,14 @@ export default function CommercePage() {
               <span className="text-[10px] text-muted-foreground/50">collected</span>
             </div>
             <div className="flex items-center gap-1">
+              <Link
+                href="/app/settings/business"
+                className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-white/[0.06] transition-colors"
+                aria-label="Billing Settings"
+                title="Billing Settings"
+              >
+                <Settings className="w-3.5 h-3.5 text-muted-foreground/60" />
+              </Link>
               <button
                 onClick={() => setHelpOpen(true)}
                 className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-white/[0.06] transition-colors"
@@ -293,14 +265,6 @@ export default function CommercePage() {
                 title="Help (?)"
               >
                 <BookOpen className="w-3.5 h-3.5 text-muted-foreground/60" />
-              </button>
-              <button
-                onClick={() => commerceAi.togglePanel()}
-                className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-white/[0.06] transition-colors"
-                aria-label="Search & commands"
-                title="Search & commands (/ or F)"
-              >
-                <Search className="w-3.5 h-3.5 text-muted-foreground/60" />
               </button>
               <button
                 onClick={() => commerceAi.togglePanel()}
@@ -367,73 +331,106 @@ export default function CommercePage() {
 
       <div {...swipeHandlers} className="touch-pan-y">
         <AnimatePresence mode="wait" custom={slideDirection}>
-          {tab === "overview" && (
-            <motion.div key="overview" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
+          {tab === "invoices" && (
+            <motion.div key="invoices" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
               <div className="space-y-4">
-                <SmartChecklist
-                  productCount={shell.products.length}
-                  invoiceCount={shell.invoices.length}
-                  quoteCount={shell.quotes.length}
-                  onNavigate={handleOverviewNavigate}
-                />
-                <CommerceOverviewTab
-                  businessId={businessId}
-                  invoices={shell.invoices}
-                  quotes={shell.quotes}
-                  currency={businessCurrency}
-                  loading={shell.loading}
-                  onNavigate={handleOverviewNavigate}
-                  onNewItem={composer.handleNewItem}
-                />
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  <CollectionsScoringPanel businessId={businessId} />
-                  <ChurnRiskPanel businessId={businessId} />
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="rounded-xl border border-border/50 bg-card p-3 flex items-center gap-2.5">
+                    <div className="p-1.5 rounded-lg bg-amber-500/10 shrink-0">
+                      <Clock className="w-3.5 h-3.5 text-amber-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Outstanding</span>
+                      <span className="text-sm font-bold text-amber-400">{formatCurrencyCompact(financialSummary.outstanding, businessCurrency)}</span>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-border/50 bg-card p-3 flex items-center gap-2.5">
+                    <div className="p-1.5 rounded-lg bg-red-500/10 shrink-0">
+                      <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Overdue</span>
+                      <span className="text-sm font-bold text-red-400">{formatCurrencyCompact(financialSummary.overdue, businessCurrency)}</span>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-border/50 bg-card p-3 flex items-center gap-2.5">
+                    <div className="p-1.5 rounded-lg bg-emerald-500/10 shrink-0">
+                      <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">This Month</span>
+                      <span className="text-sm font-bold text-emerald-400">{formatCurrencyCompact(financialSummary.collectedThisMonth, businessCurrency)}</span>
+                    </div>
+                  </div>
                 </div>
-                <RevenueJourneyPanel businessId={businessId} />
+                <InvoicesPanel
+                  invoices={shell.invoices}
+                  contacts={shell.contacts}
+                  products={shell.products}
+                  businessId={businessId}
+                  loading={shell.loading}
+                  triggerNew={billing.triggerNewInvoice}
+                  setProducts={shell.setProducts}
+                  setInvoices={shell.setInvoices}
+                  gmailStatus={shell.integrations.gmailStatus}
+                  currency={businessCurrency}
+                  prefillContactId={billing.pendingPrefill?.contactId}
+                  prefillItems={billing.pendingPrefill?.items}
+                  prefillToken={billing.pendingPrefill?._token}
+                  onPrefillApplied={billing.clearPrefill}
+                  renderTimelineBadge={renderTimelineBadge}
+                  onViewContact={copilot.handleViewContact}
+                  onViewClientIntel={copilot.handleViewClientIntel}
+                  onAiDraftReminder={copilot.handleAiDraftReminder}
+                />
               </div>
             </motion.div>
           )}
-          {tab === "billing" && (
-            <motion.div key="billing" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
-              <BillingPanel
-                businessId={businessId}
+          {tab === "quotes" && (
+            <motion.div key="quotes" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
+              <QuotesPanel
+                quotes={shell.quotes}
                 contacts={shell.contacts}
                 products={shell.products}
-                quotes={shell.quotes}
-                invoices={shell.invoices}
+                businessId={businessId}
                 loading={shell.loading}
                 gmailStatus={shell.integrations.gmailStatus}
-                currency={businessCurrency}
                 setProducts={shell.setProducts}
                 setQuotes={shell.setQuotes}
                 setInvoices={shell.setInvoices}
-                triggerNewQuote={billing.triggerNewQuote}
-                triggerNewInvoice={billing.triggerNewInvoice}
-                triggerNewSchedule={billing.triggerNewSchedule}
-                activeSegment={billingSegment}
-                defaultSegment={billingSegment}
-                onSegmentChange={(seg) => billing.setActiveBillingSegment(seg)}
-                prefillContactId={billing.pendingPrefill?.contactId}
-                prefillItems={billing.pendingPrefill?.items}
+                triggerNew={billing.triggerNewQuote}
+                onSwitchToInvoices={() => handleTabChange("invoices")}
+                currency={businessCurrency}
+                prefillContactId={tab === "quotes" ? billing.pendingPrefill?.contactId : undefined}
+                prefillItems={tab === "quotes" ? billing.pendingPrefill?.items : undefined}
                 prefillToken={billing.pendingPrefill?._token}
                 onPrefillApplied={billing.clearPrefill}
-                slots={billingSlots}
+                renderTimelineBadge={renderTimelineBadge}
                 onViewContact={copilot.handleViewContact}
                 onViewClientIntel={copilot.handleViewClientIntel}
-                onAiRecoveryPlan={copilot.handleAiRecoveryPlan}
-                onAiForecast={copilot.handleAiForecast}
-                onAiDraftReminder={copilot.handleAiDraftReminder}
               />
             </motion.div>
           )}
-          {tab === "catalog" && (
-            <motion.div key="catalog" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
-              <CommerceInsightsTab
-                businessId={businessId}
+          {tab === "payments" && (
+            <motion.div key="payments" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
+              <PaymentsTab
                 invoices={shell.invoices}
-                quotes={shell.quotes}
                 currency={businessCurrency}
-                loading={shell.loading}
+                businessId={businessId}
+                contacts={shell.contacts}
+                setInvoices={shell.setInvoices}
+                onNavigateToInvoices={() => handleTabChange("invoices")}
+              />
+            </motion.div>
+          )}
+          {tab === "recurring" && (
+            <motion.div key="recurring" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
+              <RecurringPanel
+                businessId={businessId}
+                contacts={shell.contacts}
+                products={shell.products}
+                triggerNew={billing.triggerNewSchedule}
+                currency={businessCurrency}
               />
             </motion.div>
           )}
@@ -443,7 +440,7 @@ export default function CommercePage() {
       <SearchableHelpDrawer
         isOpen={helpOpen}
         onClose={() => setHelpOpen(false)}
-        onNavigate={handleOverviewNavigate}
+        onNavigate={(navTab: string) => handleTabChange(navTab)}
       />
     </div>
   );

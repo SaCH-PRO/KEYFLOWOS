@@ -6,7 +6,7 @@ import type { Invoice } from "@/lib/client";
 import { formatCurrencyCompact } from "@/lib/currency";
 
 export function useCommerceOverview(invoices: Invoice[], businessCurrency: string) {
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>("invoices");
 
   const handleTabChange = useCallback((t: string) => setTab(t as Tab), []);
 
