@@ -38,6 +38,7 @@ import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-s
 import { useSearchParams } from "next/navigation";
 import { useModuleEmit } from "@/hooks/use-module-events";
 import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
+import { WorkspaceError } from "@/components/ui/workspace-error";
 import { useStoreAiHub } from "./hooks/use-store-ai-hub";
 import { renderStoreToolResult } from "./components/store-tool-results";
 import { StoreGuide } from "./components/store-guide";
@@ -502,17 +503,7 @@ export default function StorePage() {
   }
 
   if (!businessId) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center space-y-3">
-          <AlertCircle className="w-12 h-12 mx-auto" style={{ color: "hsl(var(--kf-accent1) / 0.6)" }} />
-          <p className="text-lg font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>
-            We could not find your workspace. Please sign in again.
-          </p>
-          <p className="text-muted-foreground">Try logging in again to create your workspace.</p>
-        </div>
-      </div>
-    );
+    return <WorkspaceError />;
   }
 
   return (

@@ -134,7 +134,7 @@ const HeroStats = React.memo(function HeroStats({
       sub: `${stats.overdueAmount > 0 ? formatCurrencyCompact(stats.overdueAmount, currency) + " overdue" : "No overdue"}`,
       icon: Clock,
       accentVar: "--kf-accent2",
-      sparkColor: "#f59e0b",
+      sparkColor: "hsl(var(--kf-warning))",
       trend: stats.overdueAmount > 0 ? "down" as const : null,
       trendLabel: stats.overdueAmount > 0 ? `${formatCurrencyCompact(stats.overdueAmount, currency)} overdue` : undefined,
     },
@@ -253,10 +253,10 @@ const InvoiceStatusBreakdown = React.memo(function InvoiceStatusBreakdown({
 }) {
   const statuses = ["DRAFT", "SENT", "PAID", "OVERDUE"] as const;
   const statusColors: Record<string, string> = {
-    DRAFT: "#94a3b8",
-    SENT: "#3b82f6",
-    PAID: "#10b981",
-    OVERDUE: "#ef4444",
+    DRAFT: "hsl(var(--kf-neutral))",
+    SENT: "hsl(var(--kf-info))",
+    PAID: "hsl(var(--kf-success))",
+    OVERDUE: "hsl(var(--kf-error))",
   };
   const totalAmount = statuses.reduce((sum, s) => sum + (breakdown[s]?.total ?? 0), 0);
 
@@ -303,9 +303,9 @@ const QuoteFunnel = React.memo(function QuoteFunnel({
   breakdown: Record<string, number>;
 }) {
   const stages = [
-    { key: "DRAFT", label: "Draft", color: "#94a3b8" },
-    { key: "SENT", label: "Sent", color: "#3b82f6" },
-    { key: "ACCEPTED", label: "Accepted", color: "#10b981" },
+    { key: "DRAFT", label: "Draft", color: "hsl(var(--kf-neutral))" },
+    { key: "SENT", label: "Sent", color: "hsl(var(--kf-info))" },
+    { key: "ACCEPTED", label: "Accepted", color: "hsl(var(--kf-success))" },
   ] as const;
   const maxCount = Math.max(...stages.map((s) => breakdown[s.key] ?? 0), 1);
 
@@ -355,7 +355,7 @@ const TopProductsChart = React.memo(function TopProductsChart({
   }
 
   const data = topProducts.slice(0, 5);
-  const colors = ["hsl(142 76% 36%)", "hsl(var(--kf-accent1))", "hsl(var(--kf-accent2))", "#f59e0b", "#3b82f6"];
+  const colors = ["hsl(var(--kf-success))", "hsl(var(--kf-accent1))", "hsl(var(--kf-accent2))", "hsl(var(--kf-warning))", "hsl(var(--kf-info))"];
 
   return (
     <ResponsiveContainer width="100%" height={160}>

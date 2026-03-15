@@ -45,6 +45,16 @@
     --kf-elevation-1: 0 1px 2px 0 rgb(0 0 0 / 0.03);
     --kf-elevation-2: 0 2px 8px -2px rgb(0 0 0 / 0.06);
     --kf-elevation-3: 0 8px 24px -4px rgb(0 0 0 / 0.08);
+
+    --kf-success: 142 76% 36%;
+    --kf-success-foreground: 0 0% 100%;
+    --kf-warning: 38 92% 50%;
+    --kf-warning-foreground: 0 0% 100%;
+    --kf-error: 0 84% 60%;
+    --kf-error-foreground: 0 0% 100%;
+    --kf-info: 217 91% 60%;
+    --kf-info-foreground: 0 0% 100%;
+    --kf-neutral: 215 16% 47%;
   }
 
   .dark {
@@ -84,6 +94,16 @@
     --kf-elevation-1: 0 1px 2px 0 rgb(0 0 0 / 0.3);
     --kf-elevation-2: 0 2px 8px -2px rgb(0 0 0 / 0.4);
     --kf-elevation-3: 0 8px 24px -4px rgb(0 0 0 / 0.5);
+
+    --kf-success: 142 71% 45%;
+    --kf-success-foreground: 0 0% 100%;
+    --kf-warning: 38 92% 50%;
+    --kf-warning-foreground: 0 0% 100%;
+    --kf-error: 0 62% 50%;
+    --kf-error-foreground: 0 0% 100%;
+    --kf-info: 217 91% 60%;
+    --kf-info-foreground: 0 0% 100%;
+    --kf-neutral: 215 14% 55%;
   }
 
   * {
@@ -256,6 +276,21 @@
   .kf-badge-muted {
     background: hsl(var(--kf-muted));
     color: hsl(var(--kf-muted-foreground));
+  }
+
+  .kf-badge-success {
+    background: hsl(var(--kf-success) / 0.1);
+    color: hsl(var(--kf-success));
+  }
+
+  .kf-badge-warning {
+    background: hsl(var(--kf-warning) / 0.1);
+    color: hsl(var(--kf-warning));
+  }
+
+  .kf-badge-error {
+    background: hsl(var(--kf-error) / 0.1);
+    color: hsl(var(--kf-error));
   }
   
   .kf-stat-card {
