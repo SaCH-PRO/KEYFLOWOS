@@ -1,8 +1,10 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import {
   BookingCreatedPayload,
   BookingConfirmedPayload,
+  BookingCancelledPayload,
+  BookingRescheduledPayload,
   ContactCreatedPayload,
   ContactDeletedPayload,
   ContactImportedPayload,
@@ -17,17 +19,28 @@ import {
 import { BookingsService } from '../bookings/bookings.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { FinancialCopilotService } from '../commerce/financial-copilot.service';
+import { TransactionalEmailService } from '../notifications/transactional-email.service';
 
 @Injectable()
-export class FlowListener {
+export class FlowListener implements OnModuleInit {
   private readonly logger = new Logger(FlowListener.name);
+  private reminderInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     @Inject(BookingsService) private readonly bookingsService: BookingsService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(FinancialCopilotService) private readonly financialCopilot: FinancialCopilotService,
+    @Inject(TransactionalEmailService) private readonly transactionalEmail: TransactionalEmailService,
   ) {
     this.logger.log(`FlowListener created, prisma=${!!this.prisma}`);
+  }
+
+  onModuleInit() {
+    this.reminderInterval = setInterval(() => {
+      this.handleBookingReminders().catch((e) =>
+        this.logger.error(`Booking reminder cron failed: ${(e as Error).message}`),
+      );
+    }, 60 * 60 * 1000);
   }
 
   private async createNotification(input: {
@@ -302,5 +315,142 @@ export class FlowListener {
     if (full) return full;
     if (contact.email) return contact.email;
     return 'Unknown';
+  }
+
+  private async sendCustomerNotification(
+    businessId: string,
+    type: 'booking_confirmed' | 'booking_reminder' | 'booking_rescheduled' | 'booking_cancelled' | 'invoice_sent' | 'payment_receipt',
+    contact: { id?: string; firstName?: string | null; lastName?: string | null; email?: string | null } | undefined,
+    templateData: Record<string, any>,
+    dedupeKey?: string,
+  ) {
+    if (!contact?.email) return;
+    const name = [contact.firstName, contact.lastName].filter(Boolean).join(' ') || 'Customer';
+    try {
+      await this.transactionalEmail.send({
+        businessId,
+        type,
+        recipientEmail: contact.email,
+        recipientName: name,
+        contactId: contact.id,
+        templateData,
+        dedupeKey,
+      });
+    } catch (e) {
+      this.logger.error(`Failed to send ${type} notification: ${(e as Error).message}`);
+    }
+  }
+
+  @OnEvent('booking.confirmed')
+  async handleBookingConfirmedCustomerNotif(payload: BookingConfirmedPayload) {
+    const booking = payload.booking;
+    const service = await this.prisma.client.service.findUnique({ where: { id: booking.serviceId } }).catch(() => null);
+    const staff = booking.staffId
+      ? await this.prisma.client.staffMember.findUnique({ where: { id: booking.staffId } }).catch(() => null)
+      : null;
+    await this.sendCustomerNotification(payload.businessId, 'booking_confirmed', payload.contact as any, {
+      serviceName: service?.name ?? 'Appointment',
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      staffName: staff?.name,
+      bookingId: booking.id,
+    });
+  }
+
+  @OnEvent('booking.cancelled')
+  async handleBookingCancelledCustomerNotif(payload: BookingCancelledPayload) {
+    const booking = payload.booking;
+    const service = await this.prisma.client.service.findUnique({ where: { id: booking.serviceId } }).catch(() => null);
+    await this.sendCustomerNotification(payload.businessId, 'booking_cancelled', payload.contact as any, {
+      serviceName: service?.name ?? 'Appointment',
+      startTime: booking.startTime,
+    });
+  }
+
+  @OnEvent('booking.rescheduled')
+  async handleBookingRescheduledCustomerNotif(payload: BookingRescheduledPayload) {
+    const booking = payload.booking;
+    const service = await this.prisma.client.service.findUnique({ where: { id: booking.serviceId } }).catch(() => null);
+    const staff = booking.staffId
+      ? await this.prisma.client.staffMember.findUnique({ where: { id: booking.staffId } }).catch(() => null)
+      : null;
+    await this.sendCustomerNotification(payload.businessId, 'booking_rescheduled', payload.contact as any, {
+      serviceName: service?.name ?? 'Appointment',
+      newStartTime: booking.startTime,
+      newEndTime: booking.endTime,
+      previousStartTime: payload.previousStartTime,
+      staffName: staff?.name,
+    });
+  }
+
+  @OnEvent('invoice.sent')
+  async handleInvoiceSentCustomerNotif(payload: InvoiceStatusPayload) {
+    const inv = payload.invoice;
+    await this.sendCustomerNotification(payload.businessId, 'invoice_sent', inv.contact as any, {
+      invoiceNumber: (inv as any).invoiceNumber ?? inv.id.slice(-6).toUpperCase(),
+      total: inv.total,
+      currency: inv.currency,
+      dueDate: (inv as any).dueDate,
+      items: (inv as any).items,
+    });
+  }
+
+  @OnEvent('invoice.paid')
+  async handleInvoicePaidCustomerNotif(payload: InvoicePaidPayload) {
+    const inv = payload.invoice;
+    await this.sendCustomerNotification(payload.businessId, 'payment_receipt', inv.contact as any, {
+      invoiceNumber: (inv as any).invoiceNumber ?? inv.id.slice(-6).toUpperCase(),
+      total: inv.total,
+      currency: inv.currency,
+      paidAt: inv.paidAt ?? new Date(),
+    });
+  }
+
+  async handleBookingReminders() {
+    try {
+      const now = new Date();
+      const reminderWindowStart = new Date(now.getTime() + 23 * 60 * 60 * 1000);
+      const reminderWindowEnd = new Date(now.getTime() + 25 * 60 * 60 * 1000);
+
+      const upcomingBookings = await this.prisma.client.booking.findMany({
+        where: {
+          status: { in: ['CONFIRMED', 'PENDING'] },
+          deletedAt: null,
+          startTime: { gte: reminderWindowStart, lt: reminderWindowEnd },
+        },
+        include: {
+          contact: { select: { id: true, firstName: true, lastName: true, email: true } },
+          service: { select: { name: true } },
+          staff: { select: { name: true } },
+        },
+      });
+
+      for (const booking of upcomingBookings) {
+        const dedupeKey = `reminder_${booking.id}`;
+        const alreadySent = await (this.prisma.client as any).customerNotificationLog.findFirst({
+          where: {
+            businessId: booking.businessId,
+            type: 'booking_reminder',
+            messageId: dedupeKey,
+            status: { in: ['SENT', 'QUEUED'] },
+          },
+        });
+        if (alreadySent) continue;
+
+        await this.sendCustomerNotification(booking.businessId, 'booking_reminder', booking.contact as any, {
+          serviceName: booking.service?.name ?? 'Appointment',
+          startTime: booking.startTime,
+          endTime: booking.endTime,
+          staffName: booking.staff?.name,
+          bookingId: booking.id,
+        }, dedupeKey);
+      }
+
+      if (upcomingBookings.length > 0) {
+        this.logger.log(`Processed ${upcomingBookings.length} booking reminders`);
+      }
+    } catch (e) {
+      this.logger.error(`Booking reminder cron failed: ${(e as Error).message}`);
+    }
   }
 }

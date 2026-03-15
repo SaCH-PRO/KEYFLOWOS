@@ -8,9 +8,10 @@ import { CrossModuleAgentService } from './cross-module-agent.service';
 import { BookingsModule } from '../bookings/bookings.module';
 import { CrmModule } from '../crm/crm.module';
 import { CommerceModule } from '../commerce/commerce.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [BookingsModule, forwardRef(() => CrmModule), forwardRef(() => CommerceModule)],
+  imports: [BookingsModule, forwardRef(() => CrmModule), forwardRef(() => CommerceModule), NotificationsModule],
   controllers: [FlowController],
   providers: [FlowListener, FlowService, ActivityService, AutomationExecutorService, CrossModuleAgentService],
   exports: [FlowService, ActivityService, CrossModuleAgentService],
