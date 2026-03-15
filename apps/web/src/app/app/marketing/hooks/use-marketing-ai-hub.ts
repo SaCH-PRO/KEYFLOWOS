@@ -74,8 +74,8 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
       title: "Scheduled Campaigns",
       description: `${scheduledCampaigns.length} campaign${scheduledCampaigns.length > 1 ? "s are" : " is"} scheduled to send. Review timing for optimal engagement.`,
       priority: "low",
-      actionLabel: "View campaigns",
-      actionKey: "switch_tab:campaigns",
+      actionLabel: "View calendar",
+      actionKey: "switch_tab:calendar",
     });
   }
 
@@ -89,7 +89,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
         description: `${inactiveForms.length} form${inactiveForms.length > 1 ? "s are" : " is"} currently inactive. Activate or optimize them to capture more leads.`,
         priority: "medium",
         actionLabel: "View forms",
-        actionKey: "switch_tab:forms",
+        actionKey: "switch_tab:audience",
       });
     }
   }
@@ -102,8 +102,8 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
       title: "Unpublished Social Posts",
       description: `${draftPosts.length} social post${draftPosts.length > 1 ? "s are" : " is"} still in draft. Publish or schedule them to maintain consistent content.`,
       priority: "medium",
-      actionLabel: "View social",
-      actionKey: "switch_tab:social",
+      actionLabel: "View posts",
+      actionKey: "switch_tab:create",
     });
   }
 
@@ -115,7 +115,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
       description: "You have fewer than 5 social posts. Consistent posting helps build audience engagement and brand awareness.",
       priority: "low",
       actionLabel: "Create post",
-      actionKey: "switch_tab:social",
+      actionKey: "switch_tab:create",
     });
   }
 
@@ -129,7 +129,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
         description: `${signal.data?.count ?? "Multiple"} contacts were just imported. Create a welcome campaign to engage them right away.`,
         priority: "high",
         actionLabel: "Create campaign",
-        actionKey: "switch_tab:campaigns",
+        actionKey: "switch_tab:create",
       });
     } else if (signal.type === "invoice_paid") {
       suggestions.push({
@@ -166,7 +166,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
     });
   }
 
-  if ((activeView === "forms" || activeView === "audiences") && suggestions.filter((s) => s.actionKey?.includes("form")).length === 0) {
+  if ((activeView === "forms" || activeView === "audiences" || activeView === "audience") && suggestions.filter((s) => s.actionKey?.includes("form")).length === 0) {
     suggestions.push({
       id: `form-optimize-${Date.now()}`,
       type: "tip",

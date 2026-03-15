@@ -5,11 +5,11 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Megaphone,
   Mail,
-  ClipboardList,
   BarChart3,
   PenSquare,
   Users,
   Search,
+  CalendarDays,
 } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
@@ -29,17 +29,27 @@ import { CampaignActionQueue } from "./components/campaign-action-queue";
 import { FormOptimizationQueue } from "./components/form-optimization-queue";
 import MarketingInsightsTab from "./insights/marketing-insights-tab";
 import { SocialTabContent } from "./components/social-tab-content";
+import { MarketingCalendarTab } from "./components/marketing-calendar-tab";
 import type { EmailCampaign, LeadForm } from "@/lib/client";
 
-type MarketingTab = "create" | "audiences" | "performance";
+type MarketingTab = "create" | "calendar" | "audience" | "performance";
 
 const TABS: { key: MarketingTab; label: string; icon: React.ElementType }[] = [
   { key: "create", label: "Create & Schedule", icon: PenSquare },
-  { key: "audiences", label: "Audiences & Forms", icon: Users },
+  { key: "calendar", label: "Calendar", icon: CalendarDays },
+  { key: "audience", label: "Audiences & Forms", icon: Users },
   { key: "performance", label: "Performance", icon: BarChart3 },
 ];
 
 const TAB_KEYS = TABS.map((t) => t.key);
+
+const LEGACY_TAB_MAP: Record<string, MarketingTab> = {
+  audiences: "audience",
+  social: "create",
+  campaigns: "create",
+  forms: "audience",
+  insights: "performance",
+};
 
 const slideVariants = {
   enter: (dir: number) => ({ x: dir > 0 ? 60 : -60, opacity: 0 }),
@@ -60,9 +70,12 @@ export default function MarketingPage() {
   useEffect(() => {
     if (initialTabSet.current) return;
     const tabParam = searchParams.get("tab");
-    if (tabParam && TAB_KEYS.includes(tabParam as MarketingTab)) {
-      setActiveTab(tabParam as MarketingTab);
-      initialTabSet.current = true;
+    if (tabParam) {
+      const mapped = LEGACY_TAB_MAP[tabParam] || tabParam;
+      if (TAB_KEYS.includes(mapped as MarketingTab)) {
+        setActiveTab(mapped as MarketingTab);
+        initialTabSet.current = true;
+      }
     }
   }, [searchParams]);
 
@@ -71,7 +84,7 @@ export default function MarketingPage() {
       marketingAi.updateMarketingContext({
         businessId: mk.businessId,
         activeView: activeTab,
-        itemCount: activeTab === "create" ? mk.campaigns.length + mk.socialPosts.length : activeTab === "audiences" ? mk.forms.length : mk.campaigns.length,
+        itemCount: activeTab === "create" ? mk.campaigns.length + mk.socialPosts.length : activeTab === "audience" ? mk.forms.length : mk.campaigns.length,
         campaigns: mk.campaigns,
         forms: mk.forms,
         socialPosts: mk.socialPosts,
@@ -81,13 +94,14 @@ export default function MarketingPage() {
   }, [mk.businessId, activeTab, mk.dataVersion, mk.campaigns, mk.forms, mk.socialPosts, mk.crossModuleSignals, marketingAi.updateMarketingContext]);
 
   const handleTabChange = useCallback((key: string) => {
-    const newIndex = TAB_KEYS.indexOf(key as MarketingTab);
+    const resolved = LEGACY_TAB_MAP[key] || key;
+    const newIndex = TAB_KEYS.indexOf(resolved as MarketingTab);
     const oldIndex = TAB_KEYS.indexOf(activeTab);
     directionRef.current = newIndex > oldIndex ? 1 : -1;
-    setActiveTab(key as MarketingTab);
+    setActiveTab(resolved as MarketingTab);
     const url = new URL(window.location.href);
-    if (key === "create") url.searchParams.delete("tab");
-    else url.searchParams.set("tab", key);
+    if (resolved === "create") url.searchParams.delete("tab");
+    else url.searchParams.set("tab", resolved);
     window.history.replaceState({}, "", url.toString());
   }, [activeTab]);
 
@@ -100,7 +114,7 @@ export default function MarketingPage() {
 
   const handleNewItem = useCallback(() => {
     if (activeTab === "create") document.querySelector<HTMLButtonElement>("[data-marketing-new-campaign]")?.click();
-    else if (activeTab === "audiences") document.querySelector<HTMLButtonElement>("[data-marketing-new-form]")?.click();
+    else if (activeTab === "audience") document.querySelector<HTMLButtonElement>("[data-marketing-new-form]")?.click();
   }, [activeTab]);
 
   const handleEditCampaign = useCallback((campaign: EmailCampaign) => {
@@ -125,8 +139,9 @@ export default function MarketingPage() {
       groupName: "Marketing",
       shortcuts: [
         { key: "1", description: "Create & Schedule", action: () => handleTabChange("create") },
-        { key: "2", description: "Audiences & Forms", action: () => handleTabChange("audiences") },
-        { key: "3", description: "Performance", action: () => handleTabChange("performance") },
+        { key: "2", description: "Calendar", action: () => handleTabChange("calendar") },
+        { key: "3", description: "Audiences & Forms", action: () => handleTabChange("audience") },
+        { key: "4", description: "Performance", action: () => handleTabChange("performance") },
         { key: "n", description: "New item", action: handleNewItem },
         { key: "r", description: "Refresh", action: () => { void mk.loadData(); } },
         { key: "a", shift: true, description: "AI Hub", action: () => marketingAi.togglePanel() },
@@ -149,7 +164,7 @@ export default function MarketingPage() {
     );
   }
 
-  const actionLabel = activeTab === "create" ? "New Campaign" : activeTab === "audiences" ? "New Form" : undefined;
+  const actionLabel = activeTab === "create" ? "New Campaign" : activeTab === "audience" ? "New Form" : undefined;
 
   return (
     <div className="space-y-6" aria-label="Marketing">
@@ -166,6 +181,7 @@ export default function MarketingPage() {
             description="Create campaigns, capture leads, and grow your audience."
             steps={[
               { title: "Create & Schedule", description: "Build email campaigns, compose social posts, and schedule content from one surface." },
+              { title: "Calendar", description: "View all scheduled campaigns and posts on a unified content calendar." },
               { title: "Audiences & Forms", description: "Manage lead forms and audience segments for targeted outreach." },
               { title: "Performance", description: "Track campaign performance, open rates, leads, and conversion funnels." },
             ]}
@@ -214,7 +230,10 @@ export default function MarketingPage() {
                 </div>
               </div>
             )}
-            {activeTab === "audiences" && (
+            {activeTab === "calendar" && (
+              <MarketingCalendarTab campaigns={mk.campaigns} socialPosts={mk.socialPosts} onTabChange={handleTabChange} />
+            )}
+            {activeTab === "audience" && (
               <div className="space-y-4">
                 <FormOptimizationQueue forms={mk.forms} onAiOptimize={() => handleAiAction("lead-form-optimizer")} onEdit={handleEditForm} onToggle={mk.handleToggleForm} />
                 <LeadFormsPanel businessId={mk.businessId} forms={mk.forms} setForms={mk.setForms} onViewContact={mk.handleViewContact} onAiOptimize={() => handleAiAction("lead-form-optimizer")} />
