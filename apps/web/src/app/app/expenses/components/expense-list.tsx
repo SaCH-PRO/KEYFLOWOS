@@ -3,8 +3,9 @@
 import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Pencil, Trash2, ArrowUpDown, Repeat, FileText, Lightbulb,
+  Pencil, Trash2, ArrowUpDown, Repeat, FileText,
 } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Expense, ExpenseCategory, PAYMENT_METHODS } from "@/lib/client";
 import { formatCurrency, formatDate } from "./expense-utils";
 
@@ -70,33 +71,12 @@ export function ExpenseList({
 
       {filteredExpenses.length === 0 ? (
         expenses.length === 0 ? (
-          <div className="py-12 text-center">
-            <div
-              className="w-14 h-14 rounded-xl flex items-center justify-center mx-auto mb-4"
-              style={{ background: "hsl(var(--kf-error) / 0.1)" }}
-            >
-              <FileText className="w-7 h-7" style={{ color: "hsl(var(--kf-error) / 0.6)" }} />
-            </div>
-            <h3 className="text-lg font-semibold mb-1">No expenses recorded</h3>
-            <p className="text-sm text-muted-foreground mb-4 max-w-sm mx-auto">
-              Track your business expenses to understand spending patterns and maximize deductions.
-            </p>
-            <div
-              className="mx-auto max-w-xs flex items-start gap-2 text-left px-4 py-3 kf-radius-md"
-              style={{
-                background: "hsl(var(--kf-warning) / 0.06)",
-                border: "1px solid hsl(var(--kf-warning) / 0.12)",
-              }}
-            >
-              <Lightbulb
-                className="w-3.5 h-3.5 mt-0.5 flex-shrink-0"
-                style={{ color: "hsl(var(--kf-warning))" }}
-              />
-              <p className="kf-text-caption text-muted-foreground">
-                Categorize expenses to see spending breakdowns in your Analytics tab.
-              </p>
-            </div>
-          </div>
+          <EmptyState
+            icon={FileText}
+            title="No expenses recorded"
+            description="Track your business expenses to understand spending patterns and maximize deductions."
+            tip="Categorize expenses to see spending breakdowns in your Analytics tab."
+          />
         ) : (
           <div className="p-8 text-center text-sm text-muted-foreground">No expenses match the selected filters.</div>
         )

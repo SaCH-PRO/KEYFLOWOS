@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, Trash2, Target, AlertTriangle, X } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "sonner";
 import { ExpenseBudget, ExpenseCategory, upsertExpenseBudget, deleteExpenseBudget } from "@/lib/client";
 import { formatCurrency } from "./expense-utils";
@@ -47,11 +48,14 @@ export function ExpenseBudgetsTab({ businessId, budgets, categories, onReload }:
           <button onClick={() => setShowBudgetModal(true)} className="kf-btn-primary px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5"><Plus className="w-3.5 h-3.5" /> Set Budget</button>
         </div>
         {budgets.length === 0 ? (
-          <div className="kf-card rounded-xl p-8 text-center">
-            <Target className="w-10 h-10 mx-auto mb-3 text-muted-foreground/40" />
-            <p className="text-sm text-muted-foreground mb-1">No budgets set yet</p>
-            <p className="text-xs text-muted-foreground/60">Set spending limits per category to stay on track.</p>
-          </div>
+          <EmptyState
+            icon={Target}
+            title="No budgets set yet"
+            description="Set spending limits per category to stay on track and get alerts before overspending."
+            actionLabel="Set Budget"
+            onAction={() => setShowBudgetModal(true)}
+            tip="Budgets reset monthly. You'll get a warning when spending reaches your alert threshold."
+          />
         ) : (
           <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
             {budgets.map(b => (
