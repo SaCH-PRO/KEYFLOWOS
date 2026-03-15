@@ -9,6 +9,8 @@ import {
   PenSquare,
   Users,
   CalendarDays,
+  Search,
+  X,
 } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
@@ -67,6 +69,8 @@ export default function MarketingPage() {
 
   const [activeTab, setActiveTab] = useState<MarketingTab>("create");
   const [createMode, setCreateMode] = useState<CreateMode>("email");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showSearch, setShowSearch] = useState(false);
   const initialTabSet = useRef(false);
   const directionRef = useRef<number>(0);
 
@@ -122,9 +126,16 @@ export default function MarketingPage() {
   }, [handleTabChange]));
 
   const handleNewItem = useCallback(() => {
-    if (activeTab === "create") document.querySelector<HTMLButtonElement>("[data-marketing-new-campaign]")?.click();
-    else if (activeTab === "audience") document.querySelector<HTMLButtonElement>("[data-marketing-new-form]")?.click();
-  }, [activeTab]);
+    if (activeTab === "create") {
+      if (createMode === "social") {
+        document.querySelector<HTMLButtonElement>("[data-social-new-post]")?.click();
+      } else {
+        document.querySelector<HTMLButtonElement>("[data-marketing-new-campaign]")?.click();
+      }
+    } else if (activeTab === "audience") {
+      document.querySelector<HTMLButtonElement>("[data-marketing-new-form]")?.click();
+    }
+  }, [activeTab, createMode]);
 
   const handleEditCampaign = useCallback((campaign: EmailCampaign) => {
     document.querySelector<HTMLButtonElement>(`[data-campaign-edit="${campaign.id}"]`)?.click();
@@ -153,14 +164,16 @@ export default function MarketingPage() {
         { key: "4", description: "Performance", action: () => handleTabChange("performance") },
         { key: "n", description: "New item", action: handleNewItem },
         { key: "r", description: "Refresh", action: () => { void mk.loadData(); } },
+        { key: "/", description: "Search", action: () => setShowSearch(true) },
         { key: "a", shift: true, description: "AI Hub", action: () => marketingAi.togglePanel() },
         { key: "Escape", description: "Close panels", action: () => {
-          if (marketingAi.hubMode === "tool-result") marketingAi.clearToolResult();
+          if (showSearch) { setShowSearch(false); setSearchQuery(""); }
+          else if (marketingAi.hubMode === "tool-result") marketingAi.clearToolResult();
           else if (marketingAi.panelOpen) marketingAi.setOpen(false);
         } },
       ],
     },
-  ], [handleTabChange, handleNewItem, mk.loadData, marketingAi]);
+  ], [handleTabChange, handleNewItem, mk.loadData, marketingAi, showSearch]);
 
   useKeyboardShortcuts(shortcuts, !mk.loading);
 
@@ -200,6 +213,26 @@ export default function MarketingPage() {
         }
         rightSlot={
           <div className="flex items-center gap-1.5">
+            {showSearch ? (
+              <div className="flex items-center gap-1 bg-muted/30 border border-border/30 rounded-md px-2 py-1">
+                <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                <input
+                  autoFocus
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search marketing..."
+                  className="bg-transparent text-xs w-36 focus:outline-none placeholder:text-muted-foreground/50"
+                />
+                <button onClick={() => { setShowSearch(false); setSearchQuery(""); }} className="p-0.5 hover:text-foreground text-muted-foreground">
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ) : (
+              <button onClick={() => setShowSearch(true)} className="p-2 rounded-lg hover:bg-muted/50 transition-colors" aria-label="Search marketing">
+                <Search className="w-4 h-4 text-muted-foreground" />
+              </button>
+            )}
             <AiHubTrigger ai={marketingAi} moduleName="Marketing" />
           </div>
         }
