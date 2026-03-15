@@ -1,0 +1,822 @@
+I explored the current Bookings module and the core problem is the same pattern seen in the other modules: it is feature-capable, but over-surfaces too many modes at once. The current shell exposes Calendar, Products, and Insights as equal top-level tabs, while also adding AI search, AI hub, guide popup, calendar connection state, banners, booking form, product modal, and booking drawer in the same screen tree . That makes it feel busy before the user has even done the main job: schedule, confirm, and manage appointments.
+
+There is a solid base here:
+
+* the module already supports booking creation, status changes, Google Calendar sync, CRM handoff, and invoice handoff 
+* the calendar supports month, week, and day views, slot-click creation, and search by client/service/staff 
+* AI already supports schedule optimization, no-show prediction, revenue insights, and natural-language search 
+
+So the right move is not to add more functionality. It is to reorganize the module into a calmer operating system for appointment-based work.
+
+## Core redesign direction
+
+Bookings should become a **service operations workspace**, not a mixed page of calendar, products, analytics, education, and AI controls.
+
+It should answer four questions clearly:
+
+1. What is happening today?
+2. What needs attention next?
+3. How do I create or adjust a booking quickly?
+4. How is booking activity affecting revenue and utilization?
+
+---
+
+## 1. New information architecture
+
+The current IA makes users think in internal objects:
+
+* Calendar
+* Products
+* Insights 
+
+That is not the best workflow model.
+
+### Recommended structure
+
+Use 3 primary surfaces:
+
+**A. Schedule**
+The daily operating workspace:
+
+* today / upcoming bookings
+* calendar
+* confirmation queue
+* quick create
+* reschedule / cancel / mark complete
+
+**B. Catalog & Capacity**
+The admin workspace:
+
+* services
+* staff
+* availability
+* booking link / storefront
+* calendar integrations
+
+**C. Performance**
+The intelligence workspace:
+
+* utilization
+* no-show risk
+* revenue
+* completion rate
+* service mix
+* peak hours
+
+This is cleaner than putting Products beside Calendar as a peer. Products are support infrastructure for bookings, not a primary scheduling destination.
+
+---
+
+## 2. Declutter the shell
+
+Right now the page includes:
+
+* page header
+* guide toggle
+* new booking CTA
+* calendar connect/disconnect
+* banner
+* AI search bar
+* tab nav
+* error strip
+* create booking form
+* page content
+* product modal
+* booking detail drawer
+* AI hub trigger and panel 
+
+That is too much persistent chrome.
+
+### New shell rules
+
+Header should contain only:
+
+* module title
+* one primary CTA
+* one compact status indicator
+* one overflow menu
+
+### Proposed header
+
+**Bookings**
+“Appointments, schedule, and service operations”
+
+Right side:
+
+* `+ New`
+* compact connection badge
+* search icon
+* AI icon
+* help icon
+
+Move these out of the main page:
+
+* guide popup → Help drawer
+* banners → toast system
+* AI hub trigger → inside command/search area
+* connect/disconnect text button → compact integration panel
+
+---
+
+## 3. Replace popup clutter with a single overlay system
+
+Current overlays and transient panels include:
+
+* getting started popup
+* booking form
+* booking detail drawer
+* product form modal
+* AI hub panel 
+
+This is workable, but visually fragmented.
+
+### Better overlay policy
+
+Use only 3 overlay types:
+
+**Quick sheet**
+
+* confirm booking
+* cancel booking
+* sync calendar
+* mark completed
+
+**Builder side sheet**
+
+* create booking
+* edit booking
+* add service
+* add staff
+
+**Inspector panel**
+
+* booking details
+* client details
+* service details
+* notes/history
+
+### Hard rule
+
+No full-page modal for simple work.
+No “guide” popup floating over working UI.
+No parallel modal plus drawer plus AI panel competition.
+
+---
+
+## 4. Redesign the module around one primary workflow
+
+The existing screen puts the create form above the calendar when active, which interrupts the workspace rather than assisting it .
+
+### Better model
+
+Use a persistent 3-pane schedule layout:
+
+**Left rail**
+
+* Today
+* Upcoming
+* Pending confirmation
+* No-show risk
+* Calendar
+* Staff
+* Services
+* Performance
+
+**Center pane**
+
+* schedule view or work queue
+
+**Right inspector**
+
+* selected booking details
+* actions
+* contact context
+* payment/invoice link
+* notes/history
+
+This would reduce page hopping and make the module feel modern immediately.
+
+---
+
+## 5. Simplify calendar controls
+
+The calendar is actually strong. It already supports:
+
+* month / week / day modes
+* date navigation
+* Today shortcut
+* search
+* slot-click creation
+* responsive fallback from week to day on small screens 
+
+The issue is not missing capability. It is command density.
+
+### Recommended improvements
+
+Keep:
+
+* month / week / day
+* previous / next
+* Today
+* inline search
+
+Add:
+
+* staff filter
+* status filter
+* service filter
+* compact density toggle
+
+Remove visible clutter by collapsing all non-core filters into a single filter drawer.
+
+### Best-practice calendar behavior
+
+* default to **day view on mobile**, **day/week hybrid on desktop**
+* show a **today agenda strip** above the calendar
+* allow **drag-to-reschedule**
+* allow **drag duration adjustment**
+* allow **multi-staff color grouping**
+* show **availability gaps** visually
+
+These are standard expectations in modern scheduling tools and would make the module feel much more premium.
+
+---
+
+## 6. Create a proper “Today” operating dashboard
+
+The current insights layer calculates meaningful data such as:
+
+* week count
+* completion rate
+* revenue
+* top services
+* peak hours
+* status breakdown
+* upcoming count 
+
+But this intelligence should not live only in a separate Insights destination.
+
+### Add a Today dashboard at the top of Schedule
+
+Show:
+
+* today’s bookings
+* pending confirmations
+* next appointment
+* no-show risks
+* available gaps
+* completed today
+* expected revenue today
+
+This is more useful than large decorative KPI cards alone.
+
+### Recommended Today layout
+
+Top strip:
+
+* Today
+* Pending
+* Confirmed
+* Completed
+* Expected revenue
+
+Priority lane:
+
+* unconfirmed bookings
+* double-booking risk
+* overbooked staff
+* high no-show probability
+
+Action queue:
+
+* confirm
+* remind
+* reschedule
+* create invoice
+* view contact
+
+---
+
+## 7. Rebuild cards with one visual grammar
+
+The booking views currently use several card/block styles and multiple status color mappings across day and week components  . Functionally fine, but visually easy to fragment.
+
+### Standardize to 4 card types
+
+**Booking row**
+
+* customer
+* service
+* staff
+* time
+* status
+* one smart action
+
+**Priority card**
+
+* issue
+* reason
+* one primary CTA
+
+**Metric card**
+
+* one KPI
+* one small trend
+* one drill-in link
+
+**Inspector section**
+
+* compact labeled blocks for details
+
+### Smart CTA logic
+
+Each booking should show one context-driven action:
+
+* Pending → `Confirm`
+* Confirmed → `Check in`
+* Completed → `Invoice`
+* Cancelled → `Rebook`
+
+Everything else goes in overflow.
+
+That alone would declutter the rows dramatically.
+
+---
+
+## 8. Booking detail should become a real workspace
+
+Right now a selected booking opens in a drawer . That is the right instinct, but it should be richer and more structured.
+
+### Proposed booking inspector
+
+Sections:
+
+1. Header
+
+   * client
+   * service
+   * time
+   * status
+   * smart CTA
+
+2. Operational details
+
+   * assigned staff
+   * duration
+   * notes
+   * source
+   * booking channel
+
+3. Customer context
+
+   * past bookings
+   * no-show history
+   * outstanding invoice
+   * contact quick actions
+
+4. Revenue context
+
+   * service price
+   * upsell suggestions
+   * invoice status
+   * package/subscription link
+
+5. Activity timeline
+
+   * created
+   * confirmed
+   * rescheduled
+   * cancelled
+   * invoiced
+
+### Important improvement
+
+The inspector should support:
+
+* reschedule
+* reassign staff
+* mark no-show
+* collect payment / create invoice
+* send reminder
+* view CRM contact
+
+This aligns well with the current cross-module hooks to CRM and Commerce .
+
+---
+
+## 9. Products should not dominate Bookings
+
+The current Bookings page loads products and mounts the Commerce `ProductsPanel` directly inside a Bookings tab, plus the Commerce product modal . This works technically, but it makes the module feel mixed-purpose.
+
+### Recommendation
+
+Rename “Products” to **Services & Capacity** and scope it to booking behavior.
+
+Subsections:
+
+* Services
+* Staff
+* Availability
+* Booking page
+* Integrations
+
+If you still want shared product infrastructure under the hood, keep it.
+But the user-facing language inside Bookings should be booking-native:
+
+* service
+* package
+* duration
+* capacity
+* staff assignment
+* add-on
+* booking rules
+
+That reduces cognitive dissonance.
+
+---
+
+## 10. Make service management booking-specific
+
+### Service cards should show
+
+* service name
+* duration
+* price
+* assigned staff count
+* active/inactive
+* last booked
+* bookings this month
+
+### Best-practice innovations
+
+Add:
+
+* buffer time before/after
+* prep / cleanup duration
+* staff skill requirements
+* online bookable toggle
+* deposit required toggle
+* cancellation window
+* max concurrent capacity
+* suggested add-ons
+
+This turns services from simple sellable products into true booking objects.
+
+---
+
+## 11. Add capacity and availability as first-class concepts
+
+This is the biggest missing product opportunity.
+
+The current module loads staff and services, but the visible shell is still centered mostly on bookings themselves .
+
+### Add a Capacity layer
+
+Users should be able to see:
+
+* available slots by staff
+* utilization by day/week
+* overbooked periods
+* empty periods
+* blocked times
+* recurring availability templates
+
+### Innovations
+
+* AI-suggested gap filling
+* best slot recommendation
+* auto-offer nearby alternatives when rescheduling
+* “high-demand slot” badges
+* staff load balancing
+* smart overbooking recommendations for low no-show segments
+
+This is where Bookings can move from calendar UI to operational intelligence.
+
+---
+
+## 12. AI should be one embedded copilot
+
+The AI hooks are already useful:
+
+* schedule optimizer
+* no-show predictor
+* revenue insights
+* natural-language booking search 
+
+The problem is surface sprawl. AI search bar + AI hub + suggestions + trigger is too much.
+
+### Recommendation
+
+Unify into one **Bookings Copilot**
+
+Visible entry points:
+
+* one command/search bar
+* one “Ask AI” action inside the inspector
+
+Behind the scenes it can still run the same tools.
+
+### Best uses of AI here
+
+* find bookings with natural language
+* predict no-shows
+* suggest schedule optimization
+* identify best times for certain services
+* recommend reminder timing
+* detect cancellation patterns
+* propose staffing changes
+* surface rebooking opportunities
+
+AI should feel assistive, not like a second app on top of the module.
+
+---
+
+## 13. Fix onboarding by teaching in place
+
+The current guide popup is helpful but too prominent and too large for daily operation .
+
+### Replace with:
+
+* contextual empty states
+* a first-run checklist
+* inline “next best step”
+* searchable help drawer
+
+### Example
+
+If there are no services:
+“Add your first service to start taking bookings.”
+
+If no staff:
+“Assign at least one staff member to make services bookable.”
+
+If no calendar connection:
+“Connect Google Calendar to prevent clashes.”
+
+That is cleaner than a floating guide card.
+
+---
+
+## 14. Make booking creation faster and smarter
+
+The current create flow validates:
+
+* date/time
+* service
+* staff
+  and calculates the end time from service duration, then optionally syncs to Google Calendar after creation 
+
+That logic is good. The UX can be much better.
+
+### New create-booking side sheet
+
+Step order:
+
+1. choose customer
+2. choose service
+3. suggested staff + suggested slots
+4. confirm details
+5. optional extras: notes, invoice, reminder
+
+### Best-practice additions
+
+* slot recommendations based on staff availability
+* conflict prevention
+* travel/buffer awareness
+* repeat booking option
+* package/session plan option
+* deposit collection option
+* “create and invoice” or “create and remind” shortcut
+
+This makes creation faster while also more operationally useful.
+
+---
+
+## 15. Improve status handling
+
+The current module already supports status changes and emits events for confirmed and cancelled states .
+
+### Recommended booking lifecycle
+
+Use a clearer state model:
+
+* Draft
+* Pending confirmation
+* Confirmed
+* Checked in
+* Completed
+* No-show
+* Cancelled
+* Rescheduled
+
+### Why this matters
+
+It improves:
+
+* reporting
+* reminders
+* no-show analysis
+* staff utilization
+* revenue attribution
+* customer journey tracking
+
+“No-show” especially should not be hidden inside cancellation logic if you want AI and reporting to be meaningful.
+
+---
+
+## 16. Tighten CRM and Commerce integration
+
+The module already supports:
+
+* viewing the related contact in CRM
+* creating an invoice in Commerce from a booking 
+
+That is strong. It should be more visible.
+
+### Every booking should optionally connect to:
+
+* customer profile
+* booking history
+* invoice/payment status
+* notes/preferences
+* package/subscription balance
+
+### Innovations
+
+* auto-suggest invoice after completion
+* flag unpaid frequent customers
+* prefill follow-up tasks in CRM
+* create post-appointment sequence
+* service-specific retention reminders
+* package usage tracking
+
+That would make Bookings part of a full operating journey rather than a standalone scheduler.
+
+---
+
+## 17. Mobile redesign
+
+The calendar already adapts to day view on small screens . Good start.
+
+### Mobile improvements
+
+* default to Today agenda, not full calendar grid
+* use bottom sheet for booking create/edit
+* full-screen booking detail
+* quick-swipe actions on rows:
+
+  * confirm
+  * complete
+  * message
+  * reschedule
+* filters in one bottom sheet
+* sticky bottom action bar
+
+Mobile booking management should feel like a task queue first, calendar second.
+
+---
+
+## 18. Analytics should become decision support, not a separate report page
+
+The current insights compute:
+
+* completion rate
+* revenue
+* top services
+* peak hours
+* upcoming volume
+* status mix 
+
+These are useful, but they should lead to action.
+
+### Reframe Performance tab around decisions
+
+Show:
+
+* best-performing services
+* underutilized staff/time blocks
+* cancellation hotspots
+* no-show patterns
+* rebooking opportunities
+* capacity-demand mismatch
+* average lead time from booking to appointment
+
+### Innovations
+
+* booking conversion funnel
+* reminder effectiveness
+* reschedule rate
+* repeat customer rate
+* average revenue per staff-hour
+* revenue per service-hour
+* forecasted occupancy
+
+That is more strategic than just charts.
+
+---
+
+## 19. Performance and code architecture cleanup
+
+The page component currently owns a lot:
+
+* workspace boot
+* data loading
+* tabs
+* forms
+* banners
+* booking selection
+* calendar sync
+* AI context
+* product state
+* keyboard shortcuts 
+
+That is a maintainability smell.
+
+### Refactor into:
+
+* `useBookingsShell`
+* `useScheduleWorkspace`
+* `useBookingComposer`
+* `useBookingInspector`
+* `useCapacityWorkspace`
+* `useBookingsPerformance`
+* `useBookingsCopilot`
+
+This will make the UI calmer because ownership becomes clearer.
+
+---
+
+## 20. Concrete decluttering rules
+
+Apply these rules across Bookings:
+
+* maximum 1 primary CTA per area
+* maximum 5 visible toolbar actions
+* all non-core filters inside one filter drawer
+* only one AI entry point per screen zone
+* only one inspector open at a time
+* no guide popup layered over active work
+* no products modal inside the main schedule experience
+* use toast notifications instead of persistent banners when possible
+* no card should contain more than 3 actions
+* use one shared status badge system across all calendar/list views
+
+---
+
+## Recommended phased rollout
+
+### Phase 1
+
+* simplify shell
+* move guide to Help
+* convert banners to toasts
+* unify AI entry points
+* rename Products to Services & Capacity
+* make booking creation a side sheet
+
+### Phase 2
+
+* build 3-pane Schedule workspace
+* strengthen booking inspector
+* add Today dashboard
+* add smarter row CTAs
+* improve mobile queue view
+
+### Phase 3
+
+* add availability/capacity intelligence
+* add drag rescheduling
+* add no-show and gap-fill automation
+* improve CRM/Commerce coupling
+* add booking lifecycle upgrades including no-show
+
+### Phase 4
+
+* predictive scheduling
+* dynamic slot suggestions
+* automated reminder cadence
+* retention/rebooking intelligence
+* staff load balancing recommendations
+
+## Final recommendation
+
+The best end-state is this:
+
+**Bookings should feel like a calm service operations console, not a crowded calendar page with extra tabs.**
+
+That means:
+
+* Schedule as the primary workspace
+* Services/capacity as support infrastructure
+* Performance as decision support
+* one inspector
+* one creation flow
+* one AI copilot
+* fewer popups
+* fewer visible controls
+* stronger CRM and Commerce continuity
+
+The module already has the bones for that   .
+
+I can turn this into a **screen-by-screen redesign spec for Bookings** next, with exact layouts for:
+Overview, Schedule, Booking detail, Service setup, Capacity, Performance, and mobile flows.
