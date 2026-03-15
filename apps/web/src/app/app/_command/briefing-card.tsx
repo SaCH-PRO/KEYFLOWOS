@@ -19,7 +19,9 @@ export function BriefingCard({ businessId, initialFinancialPulse, initialCampaig
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
-    setExpanded(!localStorage.getItem(STORAGE_KEY));
+    const seen = localStorage.getItem(STORAGE_KEY);
+    setExpanded(!seen);
+    if (!seen) localStorage.setItem(STORAGE_KEY, "1");
   }, []);
 
   const [briefing, setBriefing] = useState<AiBriefing | null>(null);
