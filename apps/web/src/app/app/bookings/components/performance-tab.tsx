@@ -453,7 +453,7 @@ export default function PerformanceTab({
                       </div>
                     </div>
                     <div className="text-right shrink-0">
-                      <span className="text-xs font-bold" style={{ color: risk.riskLevel === "HIGH" ? "hsl(var(--kf-error))" : risk.riskLevel === "MEDIUM" ? "hsl(var(--kf-warning))" : "hsl(var(--kf-success))" }}>{risk.riskScore}%</span>
+                      <span className="text-xs font-bold" style={{ color: risk.riskLevel === "HIGH" ? "hsl(var(--kf-error))" : risk.riskLevel === "MEDIUM" ? "hsl(var(--kf-warning))" : "hsl(var(--kf-success))" }}>{Math.round(risk.riskScore * 100)}%</span>
                       <p className="text-[9px] text-muted-foreground">{risk.riskLevel} risk</p>
                     </div>
                   </div>

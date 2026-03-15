@@ -22,6 +22,7 @@ interface TodayStripProps {
   staff: { id: string; name: string }[];
   onSelectBooking: (booking: Booking) => void;
   onConfirmBooking: (bookingId: string) => void;
+  onSendReminder?: (bookingId: string) => void;
   onViewStaffLoad?: (staffId: string) => void;
 }
 
@@ -32,6 +33,7 @@ export default function TodayStrip({
   staff,
   onSelectBooking,
   onConfirmBooking,
+  onSendReminder,
   onViewStaffLoad,
 }: TodayStripProps) {
   const today = useMemo(() => new Date(), []);
@@ -240,7 +242,11 @@ export default function TodayStrip({
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            onConfirmBooking(booking.id);
+                            if (onSendReminder) {
+                              onSendReminder(booking.id);
+                            } else {
+                              onSelectBooking(booking);
+                            }
                           }}
                           className="px-2.5 py-1 rounded-lg text-[11px] font-medium shrink-0 transition-colors"
                           style={{
