@@ -165,6 +165,11 @@ export class LeadFormSubmittedPayload {
   contactId!: string | null;
 }
 
+export class ExpenseCreatedPayload {
+  expense!: { id: string; businessId: string; amount: number; description: string; categoryId?: string | null };
+  businessId!: string;
+}
+
 // Master event map for reference and typing
 export interface KeyFlowEventMap {
   'contact.created': ContactCreatedPayload;
@@ -194,4 +199,5 @@ export interface KeyFlowEventMap {
   'campaign.briefing_generated': CampaignBriefingGeneratedPayload;
   'lead_form.created': LeadFormCreatedPayload;
   'lead_form.submitted': LeadFormSubmittedPayload;
+  'expense.created': ExpenseCreatedPayload;
 }

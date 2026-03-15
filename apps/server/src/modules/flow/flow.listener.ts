@@ -12,9 +12,11 @@ import {
   InvoiceStatusPayload,
   SequenceStepDuePayload,
   SequenceStepFailedPayload,
+  ExpenseCreatedPayload,
 } from '../../core/event-bus/events.types';
 import { BookingsService } from '../bookings/bookings.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { FinancialCopilotService } from '../commerce/financial-copilot.service';
 
 @Injectable()
 export class FlowListener {
@@ -23,6 +25,7 @@ export class FlowListener {
   constructor(
     @Inject(BookingsService) private readonly bookingsService: BookingsService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(FinancialCopilotService) private readonly financialCopilot: FinancialCopilotService,
   ) {
     this.logger.log(`FlowListener created, prisma=${!!this.prisma}`);
   }
@@ -241,6 +244,51 @@ export class FlowListener {
         retryCount: payload.retryCount,
       },
     }).catch((e) => this.logger.error('Failed to create step_failed notification', e));
+  }
+
+  @OnEvent('invoice.paid')
+  async handleInvoicePaidFinancial(payload: InvoicePaidPayload) {
+    try {
+      const milestone = await this.financialCopilot.checkRevenueMilestoneOnPayment(
+        payload.businessId,
+        payload.invoice.total,
+      );
+      if (milestone) {
+        await this.createNotification({
+          businessId: payload.businessId,
+          type: 'financial.milestone',
+          title: milestone.title,
+          body: milestone.message,
+          data: { amount: milestone.amount, type: milestone.type },
+        });
+      }
+    } catch (e) {
+      this.logger.error('Failed to check revenue milestone', (e as Error).stack);
+    }
+  }
+
+  @OnEvent('expense.created')
+  async handleExpenseCreated(payload: ExpenseCreatedPayload) {
+    this.logger.debug(`Flow observed expense.created`, payload as any);
+
+    try {
+      const alert = await this.financialCopilot.checkExpenseAnomaly(
+        payload.businessId,
+        payload.expense.amount,
+        payload.expense.categoryId ?? undefined,
+      );
+      if (alert) {
+        await this.createNotification({
+          businessId: payload.businessId,
+          type: 'financial.expense_spike',
+          title: alert.title,
+          body: alert.message,
+          data: { amount: alert.amount, percentChange: alert.percentChange, type: alert.type },
+        });
+      }
+    } catch (e) {
+      this.logger.error('Failed to check expense anomaly', (e as Error).stack);
+    }
   }
 
   private formatContactName(contact: {

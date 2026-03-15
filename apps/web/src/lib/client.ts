@@ -5155,4 +5155,88 @@ export async function markConciergeComplete(businessId: string): Promise<ApiResu
   });
 }
 
+export interface FinancialAlert {
+  id: string;
+  type: string;
+  severity: 'CRITICAL' | 'WARNING' | 'INFO';
+  title: string;
+  message: string;
+  amount?: number;
+  percentChange?: number;
+  action?: string;
+  createdAt: string;
+}
+
+export interface FinancialPulse {
+  cashPosition: number;
+  weeklyRevenue: number;
+  lastWeekRevenue: number;
+  weeklyRevenueChange: number;
+  monthlyRevenue: number;
+  monthlyExpenses: number;
+  netIncome: number;
+  outstandingReceivables: number;
+  overdueReceivables: number;
+  overdueCount: number;
+  alerts: FinancialAlert[];
+  topUnpaidInvoices: Array<{
+    id: string;
+    invoiceNumber: string;
+    total: number;
+    daysOverdue: number;
+    contactName: string;
+    priority: 'high' | 'medium' | 'low';
+  }>;
+  cashFlowForecast: Array<{
+    period: string;
+    projected: number;
+    label: string;
+  }>;
+}
+
+export interface DetailedCashFlowForecast {
+  currentBalance: number;
+  projections: Array<{ days: number; label: string; projected: number; confidence: string }>;
+  recurringRevenue: number;
+  recurringExpenses: number;
+  outstandingReceivables: number;
+  avgPaymentDays: number;
+  risks: string[];
+  opportunities: string[];
+  collectionPriority: Array<{ invoiceNumber: string; total: number; daysOverdue: number; contactName: string }>;
+}
+
+export interface WeeklyBriefingResponse {
+  summary: string;
+  lastWeekRevenue: number;
+  lastWeekExpenses: number;
+  lastWeekNet: number;
+  outstandingReceivables: number;
+  cashPosition: number;
+  highlights: string[];
+  concerns: string[];
+  recommendation: string;
+  outlook: string;
+}
+
+export async function fetchFinancialPulse(businessId?: string): Promise<ApiResult<FinancialPulse>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGetSimple<FinancialPulse>(`/commerce/businesses/${encodeURIComponent(bid)}/financial-pulse`);
+}
+
+export async function fetchFinancialAlerts(businessId?: string): Promise<ApiResult<{ alerts: FinancialAlert[] }>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGetSimple<{ alerts: FinancialAlert[] }>(`/commerce/businesses/${encodeURIComponent(bid)}/financial-alerts`);
+}
+
+export async function fetchDetailedCashFlowForecast(businessId?: string): Promise<ApiResult<DetailedCashFlowForecast>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGetSimple<DetailedCashFlowForecast>(`/commerce/businesses/${encodeURIComponent(bid)}/cash-flow-forecast`);
+}
+
+export async function generateWeeklyBriefing(businessId?: string): Promise<ApiResult<WeeklyBriefingResponse>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<WeeklyBriefingResponse>({ path: `/commerce/businesses/${encodeURIComponent(bid)}/weekly-briefing`, body: {} });
+}
+
 export { DEFAULT_BUSINESS_ID };
