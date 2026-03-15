@@ -149,7 +149,12 @@ export default function BookingsPage() {
       setBanner({ text: "Failed to connect Google Calendar. Please try again.", type: "error" });
       window.history.replaceState({}, "", "/app/bookings");
     }
-  }, [searchParams]);
+    const actionParam = searchParams?.get("action");
+    if (actionParam === "share" && businessSlug) {
+      setShareModalOpen(true);
+      window.history.replaceState({}, "", "/app/bookings");
+    }
+  }, [searchParams, businessSlug]);
 
   useEffect(() => {
     const initWorkspace = async () => {
@@ -398,7 +403,7 @@ export default function BookingsPage() {
         }
         rightSlot={
           <div className="flex items-center gap-1.5">
-            {businessSlug && (
+            {businessSlug && services.length > 0 && (
               <button
                 onClick={() => setShareModalOpen(true)}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 kf-radius-sm kf-text-micro font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
