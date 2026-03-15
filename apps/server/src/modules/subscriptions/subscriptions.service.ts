@@ -452,11 +452,11 @@ export class SubscriptionsService {
     const subscriptionCost = subInfo.subscription?.priceMonthly ?? 0;
     const totalMonthlyCost = subscriptionCost + overageCost;
 
-    const breakdown = [
-      { item: `${plan.name} Plan (${currency === 'USD' ? 'US' : 'TT'}$${subscriptionCost}/mo)`, amount: subscriptionCost, type: 'subscription' as const },
+    const breakdown: { item: string; amount: number; type: 'subscription' | 'overage' }[] = [
+      { item: `${plan.name} Plan (${currency === 'USD' ? 'US' : 'TT'}$${subscriptionCost}/mo)`, amount: subscriptionCost, type: 'subscription' },
     ];
     if (overageCost > 0) {
-      breakdown.push({ item: `AI Overage (${overageCredits} extra credits)`, amount: overageCost, type: 'overage' as const });
+      breakdown.push({ item: `AI Overage (${overageCredits} extra credits)`, amount: overageCost, type: 'overage' });
     }
 
     const aiUsageByFeature = aiByFeature.map(f => ({

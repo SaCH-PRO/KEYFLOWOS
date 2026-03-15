@@ -13,11 +13,15 @@ class PrismaMock implements Partial<PrismaService> {
         return post;
       }),
       findFirst: vi.fn(({ where }: any) => this.posts.find((p) => p.id === where.id && p.businessId === where.businessId && p.deletedAt === null) || null),
+      findUnique: vi.fn(({ where }: any) => this.posts.find((p) => p.id === where.id) || null),
       update: vi.fn(({ where, data }: any) => {
         const post = this.posts.find((p) => p.id === where.id);
         Object.assign(post, data);
         return post;
       }),
+    },
+    socialConnection: {
+      findMany: vi.fn(() => []),
     },
   };
 }
@@ -27,13 +31,13 @@ describe('SocialService', () => {
     const prisma = new PrismaMock() as unknown as PrismaService;
     const emit = vi.fn();
     const events = { emit } as unknown as EventEmitter2;
-    const service = new SocialService(prisma, events);
+    const service = new SocialService(prisma, events, { publishToChannels: vi.fn() } as any);
 
     const draft = await service.createDraft('biz_1', 'Hello', []);
     expect(draft.status).toBe('DRAFT');
 
     const published = await service.publishPost('biz_1', draft.id);
-    expect(published.status).toBe('POSTED');
+    expect('status' in published && published.status).toBe('POSTED');
     expect(emit).toHaveBeenCalledWith(
       'post.published',
       expect.objectContaining({ businessId: 'biz_1', post: expect.objectContaining({ id: draft.id }) }),

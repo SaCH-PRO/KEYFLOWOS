@@ -578,6 +578,7 @@ export class CommerceService {
             phone: true,
             email: true,
             website: true,
+            primaryColor: true,
           },
         },
       },
@@ -1129,7 +1130,7 @@ export class CommerceService {
 
     const invoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
-      select: { id: true, status: true, total: true, businessId: true, invoiceNumber: true },
+      select: { id: true, status: true, total: true, businessId: true, invoiceNumber: true, currency: true },
     });
 
     if (!invoice) throw new NotFoundException('Invoice not found');
@@ -1138,7 +1139,12 @@ export class CommerceService {
     await this.prisma.client.payment.create({
       data: {
         invoiceId,
+        businessId: invoice.businessId,
         amount: amount || 0,
+        currency: invoice.currency || 'TTD',
+        status: 'PENDING',
+        provider: method || 'cash',
+        providerPaymentId: `manual_${invoiceId}_${Date.now()}`,
         method,
         reference: `Intent: ${invoice.invoiceNumber}`,
         notes: `Customer indicated ${method} payment via public payment page`,

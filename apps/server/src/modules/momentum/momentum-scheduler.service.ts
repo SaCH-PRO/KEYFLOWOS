@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ClientMomentumService } from './client-momentum.service';
 
@@ -12,8 +12,8 @@ export class MomentumSchedulerService implements OnModuleInit, OnModuleDestroy {
   private readonly sweepTracker = new Map<string, string>();
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly momentumService: ClientMomentumService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(ClientMomentumService) private readonly momentumService: ClientMomentumService,
   ) {}
 
   onModuleInit() {

@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { FinancialCopilotService } from './financial-copilot.service';
 
@@ -12,8 +12,8 @@ export class FinancialBriefingSchedulerService implements OnModuleInit, OnModule
   private intervalRef: ReturnType<typeof setInterval> | null = null;
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly financialCopilot: FinancialCopilotService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(FinancialCopilotService) private readonly financialCopilot: FinancialCopilotService,
   ) {}
 
   onModuleInit() {

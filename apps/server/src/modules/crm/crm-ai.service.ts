@@ -1261,11 +1261,13 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
 
         case 'toggle_favorite': {
           if (!contactId) return { success: false, message: 'No contact specified', data: null };
-          const contact = await this.db.contact.findFirst({ where: contactWhereWithId(businessId, contactId), select: { isFavorite: true } });
+          const contact = await this.db.contact.findFirst({ where: contactWhereWithId(businessId, contactId), select: { tags: true } });
           if (!contact) return { success: false, message: 'Contact not found', data: null };
-          const newVal = !contact.isFavorite;
-          await this.db.contact.updateMany({ where: { id: contactId, businessId }, data: { isFavorite: newVal } });
-          return { success: true, message: newVal ? 'Contact starred' : 'Contact unstarred', data: { isFavorite: newVal } };
+          const tags = contact.tags ?? [];
+          const isFavorite = tags.includes('favorite');
+          const newTags = isFavorite ? tags.filter((t: string) => t !== 'favorite') : [...tags, 'favorite'];
+          await this.db.contact.updateMany({ where: { id: contactId, businessId }, data: { tags: newTags } });
+          return { success: true, message: !isFavorite ? 'Contact starred' : 'Contact unstarred', data: { isFavorite: !isFavorite } };
         }
 
         case 'log_communication': {
@@ -1274,7 +1276,7 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
           const notes = (params?.notes as string) ?? '';
           const outcome = (params?.outcome as string) ?? 'completed';
           await this.db.contactEvent.create({
-            data: { contactId, type: `${channel}.logged`, data: { channel, outcome, notes } },
+            data: { contactId, businessId, type: `${channel}.logged`, data: { channel, outcome, notes } },
           });
           await this.db.contact.updateMany({ where: { id: contactId, businessId }, data: { lastInteractionAt: new Date() } });
           return { success: true, message: `${channel} logged`, data: { channel, outcome } };
