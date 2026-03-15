@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useCallback, useRef, useState } from "react";
+import { type ReactNode, useEffect, useCallback, useRef, useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   FileText,
@@ -19,6 +19,11 @@ import {
   Brain,
   Sparkles,
   Send,
+  Shield,
+  DollarSign,
+  TrendingUp,
+  AlertTriangle,
+  Activity,
 } from "lucide-react";
 import { formatAmount, getContactInitials } from "../utils/commerce-utils";
 import {
@@ -86,6 +91,7 @@ interface BillingDetailModalProps {
   onViewClientIntel?: (contactId: string) => void;
   onSelectProduct?: (productId: string) => void;
   onAiDraftReminder?: (invoiceId: string) => void;
+  allInvoices?: Array<{ id: string; contactId?: string | null; status?: string; total?: number; invoiceNumber?: string | null; createdAt?: string | Date | null; dueDate?: string | null }>;
 }
 
 const STATUS_ORDER_QUOTE = ["DRAFT", "SENT", "ACCEPTED", "REJECTED"];
@@ -172,6 +178,7 @@ export function BillingDetailModal({
   onViewClientIntel,
   onSelectProduct,
   onAiDraftReminder,
+  allInvoices = [],
 }: BillingDetailModalProps) {
   const theme = BILLING_DOC_THEME[type];
   const panelRef = useRef<HTMLDivElement>(null);
@@ -455,6 +462,65 @@ export function BillingDetailModal({
                 </div>
               </div>
             )}
+
+            {contactId && allInvoices.length > 0 && (() => {
+              const cInvs = allInvoices.filter((inv) => inv.contactId === contactId);
+              if (cInvs.length === 0) return null;
+              const paid = cInvs.filter((i) => i.status === "PAID");
+              const overdue = cInvs.filter((i) => i.status === "OVERDUE");
+              const sent = cInvs.filter((i) => i.status === "SENT");
+              const totalRev = paid.reduce((s, i) => s + Number(i.total ?? 0), 0);
+              const outBal = [...overdue, ...sent].reduce((s, i) => s + Number(i.total ?? 0), 0);
+              const payRate = cInvs.length > 0 ? Math.round((paid.length / cInvs.length) * 100) : 0;
+              let cadence = "Monthly";
+              if (overdue.length > 0) cadence = "Weekly";
+              else if (outBal > totalRev * 0.3) cadence = "Bi-weekly";
+              else if (payRate >= 90) cadence = "Quarterly";
+              return (
+                <div className="rounded-2xl border border-border/30 bg-white/[0.02] p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Activity className="w-3.5 h-3.5" style={{ color: theme.accentColor }} />
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">Client Intelligence</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded-lg bg-white/[0.03] border border-border/20 p-2">
+                      <div className="flex items-center gap-1 mb-0.5">
+                        <Shield className="w-2.5 h-2.5 text-muted-foreground/50" />
+                        <span className="text-[10px] text-muted-foreground/50">Reliability</span>
+                      </div>
+                      <span className={`text-sm font-bold ${payRate >= 80 ? "text-emerald-400" : payRate >= 50 ? "text-amber-400" : "text-red-400"}`}>{payRate}%</span>
+                    </div>
+                    <div className="rounded-lg bg-white/[0.03] border border-border/20 p-2">
+                      <div className="flex items-center gap-1 mb-0.5">
+                        <DollarSign className="w-2.5 h-2.5 text-muted-foreground/50" />
+                        <span className="text-[10px] text-muted-foreground/50">Outstanding</span>
+                      </div>
+                      <span className={`text-sm font-bold ${outBal > 0 ? "text-amber-400" : "text-emerald-400"}`}>{formatAmount(outBal, currency)}</span>
+                    </div>
+                    <div className="rounded-lg bg-white/[0.03] border border-border/20 p-2">
+                      <div className="flex items-center gap-1 mb-0.5">
+                        <TrendingUp className="w-2.5 h-2.5 text-muted-foreground/50" />
+                        <span className="text-[10px] text-muted-foreground/50">Lifetime</span>
+                      </div>
+                      <span className="text-sm font-bold text-emerald-400">{formatAmount(totalRev, currency)}</span>
+                    </div>
+                    <div className="rounded-lg bg-white/[0.03] border border-border/20 p-2">
+                      <div className="flex items-center gap-1 mb-0.5">
+                        <Calendar className="w-2.5 h-2.5 text-muted-foreground/50" />
+                        <span className="text-[10px] text-muted-foreground/50">Follow-up</span>
+                      </div>
+                      <span className="text-sm font-bold" style={{ color: theme.accentColor }}>{cadence}</span>
+                    </div>
+                  </div>
+                  {overdue.length > 0 && (
+                    <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-red-500/5 border border-red-500/15">
+                      <AlertTriangle className="w-3 h-3 text-red-400" />
+                      <span className="text-[10px] text-red-400 font-medium">{overdue.length} overdue invoice{overdue.length > 1 ? "s" : ""}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             <div className="grid grid-cols-2 gap-3">
               <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-border/40">

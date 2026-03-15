@@ -4639,11 +4639,11 @@ export async function commerceAiAnalyze(businessId?: string): Promise<ApiResult<
   });
 }
 
-export async function commerceAiInvoiceReminder(invoiceId: string, businessId?: string): Promise<ApiResult<CommerceInvoiceReminder>> {
+export async function commerceAiInvoiceReminder(invoiceId: string, businessId?: string, tone?: string): Promise<ApiResult<CommerceInvoiceReminder>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<CommerceInvoiceReminder>({
     path: `/commerce/businesses/${encodeURIComponent(bid)}/invoices/${encodeURIComponent(invoiceId)}/ai-reminder`,
-    body: {},
+    body: tone ? { tone } : {},
   });
 }
 

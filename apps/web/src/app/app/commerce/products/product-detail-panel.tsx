@@ -27,6 +27,9 @@ import {
   Briefcase,
   ShoppingBag,
   Save,
+  AlertTriangle,
+  Activity,
+  Sparkles,
 } from "lucide-react";
 import type { Product } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
@@ -48,6 +51,7 @@ interface ProductDetailPanelProps {
   invoiceCount?: number;
   quoteCount?: number;
   totalRevenue?: number;
+  onAiPricing?: (product: Product) => void;
 }
 
 const CATEGORY_CARDS: { value: "SERVICE" | "PRODUCT" | "PACKAGE"; label: string; icon: typeof Package; desc: string; color: string }[] = [
@@ -95,6 +99,7 @@ export const ProductDetailPanel = React.memo(function ProductDetailPanel({
   invoiceCount = 0,
   quoteCount = 0,
   totalRevenue = 0,
+  onAiPricing,
 }: ProductDetailPanelProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [imgError, setImgError] = useState(false);
@@ -441,6 +446,52 @@ export const ProductDetailPanel = React.memo(function ProductDetailPanel({
                   <StatCard icon={FileText} label="Invoices" value={invoiceCount} accent="text-blue-400" />
                   <StatCard icon={ShoppingCart} label="Quotes" value={quoteCount} accent="text-amber-400" />
                 </div>
+
+                {(() => {
+                  const healthIssues: string[] = [];
+                  let score = 100;
+                  if (!product.description || product.description.length < 10) { healthIssues.push("Missing or short description"); score -= 20; }
+                  if (!product.sku) { healthIssues.push("No SKU assigned"); score -= 10; }
+                  if (!product.imageUrl && !cachedImage) { healthIssues.push("No product image"); score -= 15; }
+                  if (invoiceCount === 0 && quoteCount === 0) { healthIssues.push("No sales activity"); score -= 25; }
+                  const price = Number(product.price ?? 0);
+                  if (price === 0) { healthIssues.push("Price is zero"); score -= 30; }
+                  const rawCreatedAt = (product as Record<string, unknown>)["createdAt"];
+                  const daysSinceCreated = rawCreatedAt ? Math.floor((Date.now() - new Date(rawCreatedAt as string).getTime()) / (1000 * 60 * 60 * 24)) : 0;
+                  if (daysSinceCreated > 180 && invoiceCount === 0) { healthIssues.push("Stale — no sales in 6+ months"); score -= 20; }
+                  score = Math.max(0, score);
+                  const scoreColor = score >= 80 ? "text-emerald-400" : score >= 50 ? "text-amber-400" : "text-red-400";
+                  return (
+                    <div className="pt-2 border-t border-border/20 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <Activity className="w-3 h-3 text-[hsl(var(--kf-accent1))]" />
+                          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">Product Health</span>
+                        </div>
+                        <span className={`text-sm font-bold ${scoreColor}`}>{score}/100</span>
+                      </div>
+                      {healthIssues.length > 0 && (
+                        <div className="space-y-1">
+                          {healthIssues.map((issue, i) => (
+                            <div key={i} className="flex items-center gap-1.5 text-[10px]">
+                              <AlertTriangle className="w-2.5 h-2.5 text-amber-400 shrink-0" />
+                              <span className="text-muted-foreground/60">{issue}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {onAiPricing && (
+                        <button
+                          onClick={() => onAiPricing(product)}
+                          className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border border-purple-500/25 bg-purple-500/5 hover:bg-purple-500/10 text-[10px] font-medium text-purple-300 transition-colors"
+                        >
+                          <Sparkles className="w-3 h-3" />
+                          AI Pricing Advisor
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </div>

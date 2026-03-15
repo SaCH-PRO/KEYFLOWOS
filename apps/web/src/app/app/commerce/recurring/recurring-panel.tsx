@@ -17,6 +17,11 @@ import {
   User,
   Clock,
   Minus,
+  DollarSign,
+  TrendingUp,
+  AlertTriangle,
+  CheckCircle,
+  Sparkles,
 } from "lucide-react";
 import {
   fetchRecurringInvoices,
@@ -239,7 +244,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
     const res = await toggleRecurringInvoice(businessId, id);
     if (res.data) {
       setRecurring((prev) => prev.map((r) => (r.id === id ? res.data! : r)));
-      emitEvent("billing:schedule_toggled", "commerce", { scheduleId: id, active: res.data.active });
+      emitEvent("billing:schedule_toggled", "commerce", { scheduleId: id, active: res.data.isActive });
     }
   }
 
@@ -489,8 +494,51 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
                 </div>
               </div>
 
-              {rec.lineItems && rec.lineItems.length > 0 && (
-                <div className="mt-3 pt-3 border-t border-border/30">
+              <div className="mt-3 pt-3 border-t border-border/30 space-y-2.5">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                  <div className="rounded-lg bg-white/[0.03] border border-border/20 p-2">
+                    <div className="flex items-center gap-1 mb-0.5">
+                      <DollarSign className="w-2.5 h-2.5 text-emerald-400" />
+                      <span className="text-[10px] text-muted-foreground/50">Revenue to Date</span>
+                    </div>
+                    <span className="text-sm font-bold text-emerald-400">
+                      {rec.currency} {(Number(rec.total) * rec.runCount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="rounded-lg bg-white/[0.03] border border-border/20 p-2">
+                    <div className="flex items-center gap-1 mb-0.5">
+                      <TrendingUp className="w-2.5 h-2.5 text-blue-400" />
+                      <span className="text-[10px] text-muted-foreground/50">Forecasted (12mo)</span>
+                    </div>
+                    <span className="text-sm font-bold text-blue-400">
+                      {rec.currency} {(() => {
+                        const total = Number(rec.total);
+                        const freqMultiplier: Record<string, number> = { WEEKLY: 52, BIWEEKLY: 26, MONTHLY: 12, QUARTERLY: 4, YEARLY: 1 };
+                        return (total * (freqMultiplier[rec.frequency] ?? 12)).toLocaleString(undefined, { minimumFractionDigits: 2 });
+                      })()}
+                    </span>
+                  </div>
+                  <div className="rounded-lg bg-white/[0.03] border border-border/20 p-2">
+                    <div className="flex items-center gap-1 mb-0.5">
+                      {rec.isActive ? <CheckCircle className="w-2.5 h-2.5 text-emerald-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-amber-400" />}
+                      <span className="text-[10px] text-muted-foreground/50">Status</span>
+                    </div>
+                    <span className={`text-sm font-bold ${rec.isActive ? "text-emerald-400" : "text-amber-400"}`}>
+                      {rec.isActive ? "Running" : "Paused"}
+                    </span>
+                  </div>
+                  <div className="rounded-lg bg-white/[0.03] border border-border/20 p-2">
+                    <div className="flex items-center gap-1 mb-0.5">
+                      <Sparkles className="w-2.5 h-2.5 text-purple-400" />
+                      <span className="text-[10px] text-muted-foreground/50">Last Run</span>
+                    </div>
+                    <span className="text-sm font-bold text-muted-foreground/70">
+                      {rec.lastRunDate ? new Date(rec.lastRunDate as string).toLocaleDateString() : rec.runCount > 0 ? "Completed" : "Pending"}
+                    </span>
+                  </div>
+                </div>
+
+                {rec.lineItems && rec.lineItems.length > 0 && (
                   <div className="flex flex-wrap gap-2">
                     {rec.lineItems.map((item, idx) => (
                       <span key={idx} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-muted/30 border border-border/30 text-xs">
@@ -498,8 +546,8 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
                       </span>
                     ))}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </motion.div>
           ))}
         </div>

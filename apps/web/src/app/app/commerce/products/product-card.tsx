@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { motion } from "framer-motion";
-import { Clock, Package, Layers, Zap, Sparkles } from "lucide-react";
+import { Clock, Package, Layers, Zap, Sparkles, AlertTriangle } from "lucide-react";
 import type { Product } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
 import { PRODUCT_CATEGORY_CONFIG } from "../components/commerce-types";
@@ -15,6 +15,8 @@ interface ProductCardProps {
   cachedImage?: string;
   currency?: string;
   onAiPricing?: (product: Product) => void;
+  invoiceCount?: number;
+  quoteCount?: number;
 }
 
 export const ProductCard = React.memo(function ProductCard({
@@ -23,6 +25,8 @@ export const ProductCard = React.memo(function ProductCard({
   cachedImage,
   currency = "TTD",
   onAiPricing,
+  invoiceCount = 0,
+  quoteCount = 0,
 }: ProductCardProps) {
   const [imgError, setImgError] = useState(false);
   const config = PRODUCT_CATEGORY_CONFIG[product.category as keyof typeof PRODUCT_CATEGORY_CONFIG] ?? PRODUCT_CATEGORY_CONFIG.SERVICE;
@@ -78,6 +82,17 @@ export const ProductCard = React.memo(function ProductCard({
               Off
             </span>
           )}
+          {!isInactive && invoiceCount === 0 && quoteCount === 0 && (() => {
+            const rawCreatedAt = (product as Record<string, unknown>)["createdAt"];
+            const daysSince = rawCreatedAt ? Math.floor((Date.now() - new Date(rawCreatedAt as string).getTime()) / (1000 * 60 * 60 * 24)) : 0;
+            if (daysSince > 90) return (
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/20 text-amber-400 border border-amber-500/25 backdrop-blur-md">
+                <AlertTriangle className="w-2 h-2" />
+                Stale
+              </span>
+            );
+            return null;
+          })()}
           {onAiPricing && (
             <div
               role="button"
