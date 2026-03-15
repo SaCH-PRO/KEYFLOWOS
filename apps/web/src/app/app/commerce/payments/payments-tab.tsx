@@ -14,8 +14,11 @@ import {
   ChevronDown,
   Search,
   X,
+  Settings,
+  ArrowRight,
 } from "lucide-react";
 import { toast } from "sonner";
+import Link from "next/link";
 import type { Invoice, Contact } from "@/lib/client";
 import { markInvoicePaid, updateInvoiceStatus } from "@/lib/client";
 import { formatCurrency, formatCurrencyCompact } from "@/lib/currency";
@@ -603,6 +606,22 @@ export default function PaymentsTab({
           </div>
         )}
       </div>
+
+      <Link
+        href="/app/settings/business"
+        className="flex items-center justify-between p-3 rounded-xl border border-border/40 bg-muted/5 hover:bg-muted/10 transition-colors group"
+      >
+        <div className="flex items-center gap-2.5">
+          <div className="p-1.5 rounded-lg bg-muted/20">
+            <Settings className="w-3.5 h-3.5 text-muted-foreground" />
+          </div>
+          <div>
+            <p className="text-xs font-medium">Payment Settings</p>
+            <p className="text-[10px] text-muted-foreground/60">Configure payment gateways, methods & preferences</p>
+          </div>
+        </div>
+        <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors" />
+      </Link>
     </motion.div>
   );
 }
