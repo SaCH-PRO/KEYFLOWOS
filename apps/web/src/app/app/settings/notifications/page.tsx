@@ -86,6 +86,8 @@ const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }>
   SENT: { bg: "hsl(var(--kf-success) / 0.1)", text: "hsl(var(--kf-success))", label: "Sent" },
   FAILED: { bg: "hsl(var(--kf-error) / 0.1)", text: "hsl(var(--kf-error))", label: "Failed" },
   QUEUED: { bg: "hsl(var(--kf-warning) / 0.1)", text: "hsl(var(--kf-warning))", label: "Queued" },
+  DRAINED: { bg: "hsl(var(--kf-success) / 0.1)", text: "hsl(var(--kf-success))", label: "Sent (Queued)" },
+  EXPIRED: { bg: "hsl(var(--kf-error) / 0.1)", text: "hsl(var(--kf-error))", label: "Expired" },
 };
 
 const TYPE_LABELS: Record<string, string> = {
@@ -325,8 +327,8 @@ export default function NotificationsSettingsPage() {
                               color: statusStyle.text,
                             }}
                           >
-                            {entry.status === "SENT" && <CheckCircle2 className="w-3 h-3" />}
-                            {entry.status === "FAILED" && <XCircle className="w-3 h-3" />}
+                            {(entry.status === "SENT" || entry.status === "DRAINED") && <CheckCircle2 className="w-3 h-3" />}
+                            {(entry.status === "FAILED" || entry.status === "EXPIRED") && <XCircle className="w-3 h-3" />}
                             {entry.status === "QUEUED" && <Clock className="w-3 h-3" />}
                             {statusStyle.label}
                           </span>
