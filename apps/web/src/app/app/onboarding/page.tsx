@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Scissors,
@@ -48,6 +48,7 @@ interface TemplateCard {
   id: string;
   label: string;
   description: string;
+  businessType: "Services" | "Products" | "Mixed";
   icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
   color: string;
 }
@@ -57,6 +58,7 @@ const TEMPLATES: TemplateCard[] = [
     id: "salon",
     label: "Salon & Beauty",
     description: "Hair, nails, makeup, spa services",
+    businessType: "Services",
     icon: Scissors,
     color: "--kf-accent1",
   },
@@ -64,6 +66,7 @@ const TEMPLATES: TemplateCard[] = [
     id: "fitness",
     label: "Fitness & Wellness",
     description: "Gym, yoga, personal training, classes",
+    businessType: "Services",
     icon: Dumbbell,
     color: "--kf-accent2",
   },
@@ -71,6 +74,7 @@ const TEMPLATES: TemplateCard[] = [
     id: "photography",
     label: "Photography & Media",
     description: "Photo shoots, events, video production",
+    businessType: "Services",
     icon: Camera,
     color: "--kf-info",
   },
@@ -78,6 +82,7 @@ const TEMPLATES: TemplateCard[] = [
     id: "consulting",
     label: "Consulting & Services",
     description: "Coaching, freelance, professional services",
+    businessType: "Services",
     icon: Briefcase,
     color: "--kf-warning",
   },
@@ -85,6 +90,7 @@ const TEMPLATES: TemplateCard[] = [
     id: "food",
     label: "Food & Beverage",
     description: "Restaurant, catering, bakery, meal prep",
+    businessType: "Mixed",
     icon: UtensilsCrossed,
     color: "--kf-error",
   },
@@ -92,6 +98,7 @@ const TEMPLATES: TemplateCard[] = [
     id: "retail",
     label: "Retail & E-commerce",
     description: "Shop, boutique, online store, handmade",
+    businessType: "Products",
     icon: ShoppingBag,
     color: "--kf-success",
   },
@@ -110,6 +117,7 @@ interface EditableProduct {
 interface ChatMsg {
   role: "assistant" | "user";
   content: string;
+  quickReplies?: string[];
 }
 
 const STEPS = [
@@ -186,6 +194,7 @@ function HelpDrawer({
       role: "assistant",
       content:
         "Hi! I'm your setup assistant. Ask me anything about getting your business online — pricing advice, what to offer first, or how KeyFlowOS works.",
+      quickReplies: ["What should I charge?", "Help me pick a business type", "How does the public page work?"],
     },
   ]);
   const [input, setInput] = useState("");
@@ -196,8 +205,8 @@ function HelpDrawer({
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSend = async () => {
-    const msg = input.trim();
+  const handleSend = async (text?: string) => {
+    const msg = text || input.trim();
     if (!msg || sending) return;
     setInput("");
     setMessages((prev) => [...prev, { role: "user", content: msg }]);
@@ -211,7 +220,11 @@ function HelpDrawer({
       if (res.data) {
         setMessages((prev) => [
           ...prev,
-          { role: "assistant", content: res.data!.content },
+          {
+            role: "assistant",
+            content: res.data!.content,
+            quickReplies: res.data!.quickReplies,
+          },
         ]);
       }
     } catch {
@@ -235,7 +248,7 @@ function HelpDrawer({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-40"
-            style={{ background: "hsl(0 0% 0% / 0.5)" }}
+            style={{ background: "hsl(var(--kf-background) / 0.6)" }}
             onClick={onClose}
           />
           <motion.div
@@ -258,7 +271,7 @@ function HelpDrawer({
                       "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
                   }}
                 >
-                  <Bot className="w-3.5 h-3.5 text-white" />
+                  <Bot className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-foreground))" }} />
                 </div>
                 <div>
                   <p className="text-sm font-semibold">Setup Assistant</p>
@@ -277,27 +290,47 @@ function HelpDrawer({
 
             <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
               {messages.map((m, i) => (
-                <div
-                  key={i}
-                  className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
-                >
+                <div key={i} className="space-y-2">
                   <div
-                    className={`max-w-[85%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${
-                      m.role === "user"
-                        ? "text-white"
-                        : "bg-muted/30 border border-border/40"
-                    }`}
-                    style={
-                      m.role === "user"
-                        ? {
-                            background:
-                              "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
-                          }
-                        : undefined
-                    }
+                    className="flex"
+                    style={{ justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}
                   >
-                    {m.content}
+                    <div
+                      className="max-w-[85%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed"
+                      style={
+                        m.role === "user"
+                          ? {
+                              background:
+                                "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
+                              color: "hsl(var(--kf-foreground))",
+                            }
+                          : {
+                              background: "hsl(var(--kf-muted) / 0.3)",
+                              border: "1px solid hsl(var(--kf-border) / 0.4)",
+                            }
+                      }
+                    >
+                      {m.content}
+                    </div>
                   </div>
+                  {m.quickReplies && m.quickReplies.length > 0 && i === messages.length - 1 && !sending && (
+                    <div className="flex flex-wrap gap-1.5 pl-1">
+                      {m.quickReplies.map((reply) => (
+                        <button
+                          key={reply}
+                          onClick={() => handleSend(reply)}
+                          className="px-2.5 py-1 text-[11px] font-medium rounded-full transition-all hover:scale-[1.02]"
+                          style={{
+                            background: "hsl(var(--kf-accent1) / 0.08)",
+                            border: "1px solid hsl(var(--kf-accent1) / 0.2)",
+                            color: "hsl(var(--kf-accent1))",
+                          }}
+                        >
+                          {reply}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
               {sending && (
@@ -331,10 +364,11 @@ function HelpDrawer({
                 <button
                   onClick={handleSend}
                   disabled={!input.trim() || sending}
-                  className="p-2 rounded-xl text-white disabled:opacity-30 transition-all"
+                  className="p-2 rounded-xl disabled:opacity-30 transition-all"
                   style={{
                     background:
                       "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
+                    color: "hsl(var(--kf-foreground))",
                   }}
                 >
                   <Send className="w-4 h-4" />
@@ -350,6 +384,7 @@ function HelpDrawer({
 
 export default function OnboardingPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [step, setStep] = useState(0);
@@ -370,6 +405,9 @@ export default function OnboardingPage() {
       }
       setBusinessId(bid);
 
+      const queryStep = searchParams.get("step");
+      const requestedStep = queryStep ? parseInt(queryStep, 10) : null;
+
       try {
         const stateRes = await fetchConciergeState(bid);
         if (stateRes.data) {
@@ -384,10 +422,12 @@ export default function OnboardingPage() {
             if (stateRes.data.setupStatus.products) {
               const origin = typeof window !== "undefined" ? window.location.origin : "";
               setPublicUrl(`${origin}/book/${bid}`);
-              setStep(2);
+              setStep(requestedStep !== null && requestedStep >= 0 && requestedStep <= 2 ? requestedStep : 2);
             } else {
-              setStep(1);
+              setStep(requestedStep !== null && requestedStep >= 0 && requestedStep <= 1 ? requestedStep : 1);
             }
+          } else if (requestedStep === 0 || requestedStep === null) {
+            setStep(0);
           }
         }
       } catch (err) {
@@ -396,7 +436,7 @@ export default function OnboardingPage() {
       setLoading(false);
     };
     void init();
-  }, []);
+  }, [searchParams]);
 
   const handleSelectTemplate = async (templateId: string) => {
     if (!businessId) return;
@@ -568,7 +608,7 @@ export default function OnboardingPage() {
                 "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
             }}
           >
-            <Rocket className="w-6 h-6 text-white" />
+            <Rocket className="w-6 h-6" style={{ color: "hsl(var(--kf-foreground))" }} />
           </div>
           <p className="text-sm text-muted-foreground">
             Preparing your setup...
@@ -645,19 +685,14 @@ export default function OnboardingPage() {
                     <button
                       key={t.id}
                       onClick={() => handleSelectTemplate(t.id)}
-                      className={`relative rounded-xl p-4 text-left transition-all hover:scale-[1.02] ${
-                        isSelected
-                          ? "ring-2"
-                          : "hover:bg-muted/20"
-                      }`}
+                      className="relative rounded-xl p-4 text-left transition-all hover:scale-[1.02]"
                       style={{
                         background: isSelected
                           ? "hsl(var(--kf-accent1) / 0.08)"
                           : "hsl(var(--kf-muted) / 0.15)",
-                        border: `1px solid ${isSelected ? "hsl(var(--kf-accent1) / 0.4)" : "hsl(var(--kf-border) / 0.3)"}`,
-                        ringColor: isSelected
-                          ? "hsl(var(--kf-accent1) / 0.5)"
-                          : undefined,
+                        border: isSelected
+                          ? "2px solid hsl(var(--kf-accent1) / 0.5)"
+                          : "1px solid hsl(var(--kf-border) / 0.3)",
                       }}
                     >
                       {isSelected && (
@@ -667,7 +702,7 @@ export default function OnboardingPage() {
                             background: "hsl(var(--kf-accent1))",
                           }}
                         >
-                          <Check className="w-3 h-3 text-white" />
+                          <Check className="w-3 h-3" style={{ color: "hsl(var(--kf-foreground))" }} />
                         </div>
                       )}
                       <div
@@ -679,9 +714,28 @@ export default function OnboardingPage() {
                           style={{ color: `hsl(var(${t.color}))` }}
                         />
                       </div>
-                      <p className="text-sm font-semibold mb-0.5">
-                        {t.label}
-                      </p>
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <p className="text-sm font-semibold">
+                          {t.label}
+                        </p>
+                        <span
+                          className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full uppercase tracking-wide"
+                          style={{
+                            background: t.businessType === "Services"
+                              ? "hsl(var(--kf-accent2) / 0.12)"
+                              : t.businessType === "Products"
+                                ? "hsl(var(--kf-accent1) / 0.12)"
+                                : "hsl(var(--kf-warning) / 0.12)",
+                            color: t.businessType === "Services"
+                              ? "hsl(var(--kf-accent2))"
+                              : t.businessType === "Products"
+                                ? "hsl(var(--kf-accent1))"
+                                : "hsl(var(--kf-warning))",
+                          }}
+                        >
+                          {t.businessType}
+                        </span>
+                      </div>
                       <p className="text-[11px] text-muted-foreground leading-snug">
                         {t.description}
                       </p>
@@ -723,14 +777,15 @@ export default function OnboardingPage() {
                 {products.map((product, i) => (
                   <div
                     key={i}
-                    className={`rounded-xl p-3 transition-all ${
-                      product.included ? "" : "opacity-50"
-                    }`}
+                    className="rounded-xl p-3 transition-all"
                     style={{
                       background: product.included
                         ? "hsl(var(--kf-muted) / 0.15)"
                         : "hsl(var(--kf-muted) / 0.08)",
-                      border: `1px solid ${product.included ? "hsl(var(--kf-border) / 0.3)" : "hsl(var(--kf-border) / 0.15)"}`,
+                      border: product.included
+                        ? "1px solid hsl(var(--kf-border) / 0.3)"
+                        : "1px solid hsl(var(--kf-border) / 0.15)",
+                      opacity: product.included ? 1 : 0.5,
                     }}
                   >
                     <div className="flex items-start gap-3">
@@ -747,7 +802,7 @@ export default function OnboardingPage() {
                         }}
                       >
                         {product.included && (
-                          <Check className="w-3 h-3 text-white" />
+                          <Check className="w-3 h-3" style={{ color: "hsl(var(--kf-foreground))" }} />
                         )}
                       </button>
 
@@ -763,7 +818,10 @@ export default function OnboardingPage() {
                           />
                           <button
                             onClick={() => handleRemoveProduct(i)}
-                            className="p-1 rounded text-muted-foreground/50 hover:text-red-400 transition-all"
+                            className="p-1 rounded text-muted-foreground/50 transition-all"
+                            style={{ ["--hover-color" as string]: "hsl(var(--kf-error))" }}
+                            onMouseEnter={(e) => (e.currentTarget.style.color = "hsl(var(--kf-error))")}
+                            onMouseLeave={(e) => (e.currentTarget.style.color = "")}
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -858,10 +916,11 @@ export default function OnboardingPage() {
                     products.filter((p) => p.included && p.name.trim()).length ===
                       0
                   }
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-40 transition-all hover:scale-[1.02]"
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-40 transition-all hover:scale-[1.02]"
                   style={{
                     background:
                       "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
+                    color: "hsl(var(--kf-foreground))",
                   }}
                 >
                   {configuring ? (
@@ -914,21 +973,49 @@ export default function OnboardingPage() {
 
               {publicUrl && (
                 <div
-                  className="rounded-xl p-4 mb-6"
+                  className="rounded-xl overflow-hidden mb-6"
                   style={{
-                    background: "hsl(var(--kf-muted) / 0.15)",
                     border: "1px solid hsl(var(--kf-border) / 0.3)",
                   }}
                 >
-                  <div className="flex items-center gap-2 mb-3">
-                    <Globe
-                      className="w-4 h-4"
-                      style={{ color: "hsl(var(--kf-accent1))" }}
+                  <div
+                    className="w-full h-48 relative"
+                    style={{
+                      background: "hsl(var(--kf-muted) / 0.1)",
+                    }}
+                  >
+                    <iframe
+                      src={publicUrl}
+                      className="w-full h-full pointer-events-none"
+                      title="Your public page preview"
+                      style={{ transform: "scale(0.5)", transformOrigin: "top left", width: "200%", height: "200%" }}
                     />
-                    <span className="text-xs font-medium">
-                      Your public link
-                    </span>
+                    <a
+                      href={publicUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="absolute bottom-2 right-2 flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all hover:scale-105"
+                      style={{
+                        background: "hsl(var(--kf-background) / 0.9)",
+                        border: "1px solid hsl(var(--kf-border) / 0.3)",
+                        color: "hsl(var(--kf-accent1))",
+                      }}
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      Open full page
+                    </a>
                   </div>
+
+                  <div className="p-4" style={{ background: "hsl(var(--kf-muted) / 0.15)" }}>
+                    <div className="flex items-center gap-2 mb-3">
+                      <Globe
+                        className="w-4 h-4"
+                        style={{ color: "hsl(var(--kf-accent1))" }}
+                      />
+                      <span className="text-xs font-medium">
+                        Your public link
+                      </span>
+                    </div>
                   <div
                     className="flex items-center gap-2 rounded-lg px-3 py-2 mb-4"
                     style={{
@@ -1005,6 +1092,7 @@ export default function OnboardingPage() {
                       Share
                     </button>
                   </div>
+                  </div>
                 </div>
               )}
 
@@ -1050,10 +1138,11 @@ export default function OnboardingPage() {
 
               <button
                 onClick={handleFinish}
-                className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold text-white transition-all hover:scale-[1.01]"
+                className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all hover:scale-[1.01]"
                 style={{
                   background:
                     "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
+                  color: "hsl(var(--kf-foreground))",
                 }}
               >
                 Go to Dashboard
