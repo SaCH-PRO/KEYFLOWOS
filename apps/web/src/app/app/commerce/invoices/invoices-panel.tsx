@@ -632,8 +632,8 @@ export default function InvoicesPanel({
           className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200 flex items-center justify-between"
         >
           <span>{invoiceError}</span>
-          <button onClick={() => setInvoiceError(null)} className="p-1 hover:bg-amber-500/20 rounded-lg transition-colors">
-            <X className="w-3.5 h-3.5" />
+          <button onClick={() => setInvoiceError(null)} className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-amber-500/20 rounded-lg transition-colors">
+            <X className="w-4 h-4" />
           </button>
         </motion.div>
       )}
@@ -653,10 +653,10 @@ export default function InvoicesPanel({
             {invoiceSearch && (
               <button
                 onClick={() => setInvoiceSearch("")}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-md hover:bg-muted/50 transition-colors"
+                className="absolute right-0 top-1/2 -translate-y-1/2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-md hover:bg-muted/50 transition-colors"
                 aria-label="Clear search"
               >
-                <X className="w-3 h-3 text-muted-foreground/40" />
+                <X className="w-3.5 h-3.5 text-muted-foreground/40" />
               </button>
             )}
           </div>
@@ -665,7 +665,7 @@ export default function InvoicesPanel({
             <select
               value={sortKey}
               onChange={(e) => setSortKey(e.target.value as BillingSortKey)}
-              className="appearance-none pl-7 pr-2 py-1.5 text-[11px] bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 text-muted-foreground cursor-pointer"
+              className="appearance-none pl-7 pr-2 min-h-[44px] text-[11px] bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 text-muted-foreground cursor-pointer"
               aria-label="Sort invoices"
             >
               {BILLING_SORT_OPTIONS.map((o) => (
@@ -675,7 +675,7 @@ export default function InvoicesPanel({
           </div>
           <button
             onClick={() => setShowInvoiceBuilder(true)}
-            className="inline-flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium rounded-lg bg-gradient-to-r from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all shrink-0"
+            className="inline-flex items-center gap-1.5 px-3 min-h-[44px] text-[11px] font-medium rounded-lg bg-gradient-to-r from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all shrink-0"
             aria-label="New Invoice"
           >
             <FileText className="w-3.5 h-3.5" />
@@ -683,23 +683,24 @@ export default function InvoicesPanel({
           </button>
         </div>
 
-        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none" role="group" aria-label="Filter by status">
+        <div className="flex items-center gap-1 overflow-x-auto scrollbar-none" role="group" aria-label="Filter by status">
           {INVOICE_STATUS_FILTERS.slice(0, 4).map((f) => {
             const count = statusCounts[f.value] ?? 0;
+            const isActive = invoiceStatusFilter === f.value;
             return (
               <button
                 key={f.value}
                 onClick={() => setInvoiceStatusFilter(f.value)}
-                className={`px-2.5 py-1 text-[11px] rounded-md transition-all inline-flex items-center gap-1.5 font-medium whitespace-nowrap shrink-0 ${
-                  invoiceStatusFilter === f.value
+                className={`px-2.5 min-h-[44px] text-[11px] rounded-md transition-all inline-flex items-center gap-1.5 font-medium whitespace-nowrap shrink-0 ${
+                  isActive
                     ? "bg-white/[0.08] border border-border/60 text-foreground"
                     : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.05]"
                 }`}
-                aria-pressed={invoiceStatusFilter === f.value}
+                aria-pressed={isActive}
               >
                 {f.label}
                 <span className={`text-[10px] font-mono px-1 py-0.5 rounded ${
-                  invoiceStatusFilter === f.value ? "bg-white/10" : "bg-white/[0.04] text-muted-foreground/50"
+                  isActive ? "bg-white/10" : "bg-white/[0.04] text-muted-foreground/50"
                 }`}>
                   {count}
                 </span>
@@ -710,7 +711,7 @@ export default function InvoicesPanel({
             <select
               value={INVOICE_STATUS_FILTERS.slice(4).some((f) => f.value === invoiceStatusFilter) ? invoiceStatusFilter : ""}
               onChange={(e) => { if (e.target.value) setInvoiceStatusFilter(e.target.value); }}
-              className={`appearance-none px-2 py-1 text-[11px] rounded-md font-medium shrink-0 cursor-pointer transition-all focus:outline-none ${
+              className={`appearance-none px-2 min-h-[44px] text-[11px] rounded-md font-medium shrink-0 cursor-pointer transition-all focus:outline-none ${
                 INVOICE_STATUS_FILTERS.slice(4).some((f) => f.value === invoiceStatusFilter)
                   ? "bg-white/[0.08] border border-border/60 text-foreground"
                   : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.05]"
@@ -831,7 +832,7 @@ export default function InvoicesPanel({
                     <button
                       onClick={handleSmartAction}
                       disabled={!!actionLoading[inv.id]}
-                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all disabled:opacity-50 ${smartCTA.bgColor} ${smartCTA.color} ${smartCTA.hoverBgColor}`}
+                      className={`inline-flex items-center gap-1 px-2.5 min-w-[44px] min-h-[44px] justify-center rounded-lg text-[11px] font-medium transition-all disabled:opacity-50 ${smartCTA.bgColor} ${smartCTA.color} ${smartCTA.hoverBgColor}`}
                     >
                       {actionLoading[inv.id] ? (
                         <Loader2 className="w-3 h-3 animate-spin" />

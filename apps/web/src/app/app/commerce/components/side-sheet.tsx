@@ -1,8 +1,21 @@
 "use client";
 
-import { useEffect, useRef, useCallback, type ReactNode } from "react";
+import { useEffect, useRef, useCallback, useState, type ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
+
+const MOBILE_BP = 640;
+function useIsMobile() {
+  const [m, setM] = useState(false);
+  useEffect(() => {
+    const mql = window.matchMedia(`(max-width: ${MOBILE_BP - 1}px)`);
+    setM(mql.matches);
+    const h = (e: MediaQueryListEvent) => setM(e.matches);
+    mql.addEventListener("change", h);
+    return () => mql.removeEventListener("change", h);
+  }, []);
+  return m;
+}
 
 interface SideSheetProps {
   open: boolean;
@@ -31,6 +44,7 @@ export function SideSheet({
   footer,
   width = "lg",
 }: SideSheetProps) {
+  const isMobile = useIsMobile();
   const panelRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const titleId = `sidesheet-title-${title.replace(/\s+/g, "-").toLowerCase()}`;
@@ -61,53 +75,108 @@ export function SideSheet({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
+          className={isMobile ? "fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-end" : "fixed inset-0 bg-black/50 backdrop-blur-sm z-50"}
           onClick={(e) => e.target === e.currentTarget && onClose()}
         >
-          <motion.div
-            initial={{ x: "100%" }}
-            animate={{ x: 0 }}
-            exit={{ x: "100%" }}
-            transition={{ type: "spring", damping: 28, stiffness: 300 }}
-            ref={panelRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={titleId}
-            tabIndex={-1}
-            className={`absolute right-0 top-0 bottom-0 w-full ${WIDTH_MAP[width]} bg-card border-l border-border/60 shadow-2xl flex flex-col outline-none`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-5 border-b border-border/40 shrink-0">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  {icon}
-                  <div>
-                    <h2 id={titleId} className="text-lg font-semibold">{title}</h2>
-                    {subtitle && (
-                      <p className="text-[11px] text-muted-foreground mt-0.5">{subtitle}</p>
-                    )}
+          {isMobile ? (
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 28, stiffness: 300 }}
+              ref={panelRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={titleId}
+              tabIndex={-1}
+              className="w-full bg-card rounded-t-2xl border-t border-border/60 shadow-2xl flex flex-col outline-none"
+              style={{ maxHeight: "90vh" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-center pt-2 pb-1 flex-shrink-0">
+                <div
+                  className="w-10 h-1 rounded-full"
+                  style={{ background: "hsl(var(--kf-muted-foreground) / 0.3)" }}
+                />
+              </div>
+
+              <div className="px-4 py-3 border-b border-border/40 shrink-0">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    {icon}
+                    <div>
+                      <h2 id={titleId} className="text-lg font-semibold">{title}</h2>
+                      {subtitle && (
+                        <p className="text-[11px] text-muted-foreground mt-0.5">{subtitle}</p>
+                      )}
+                    </div>
                   </div>
+                  <button
+                    onClick={onClose}
+                    aria-label="Close"
+                    className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-muted rounded-xl transition-colors"
+                  >
+                    <X className="w-5 h-5 text-muted-foreground" />
+                  </button>
                 </div>
-                <button
-                  onClick={onClose}
-                  aria-label="Close"
-                  className="p-2 hover:bg-muted rounded-xl transition-colors"
-                >
-                  <X className="w-5 h-5 text-muted-foreground" />
-                </button>
               </div>
-            </div>
 
-            <div className="flex-1 overflow-y-auto overscroll-contain p-5">
-              {children}
-            </div>
-
-            {footer && (
-              <div className="p-4 border-t border-border/40 shrink-0 bg-card">
-                {footer}
+              <div className="flex-1 overflow-y-auto overscroll-contain p-4">
+                {children}
               </div>
-            )}
-          </motion.div>
+
+              {footer && (
+                <div className="p-4 border-t border-border/40 shrink-0 bg-card pb-safe">
+                  {footer}
+                </div>
+              )}
+            </motion.div>
+          ) : (
+            <motion.div
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", damping: 28, stiffness: 300 }}
+              ref={panelRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={titleId}
+              tabIndex={-1}
+              className={`absolute right-0 top-0 bottom-0 w-full ${WIDTH_MAP[width]} bg-card border-l border-border/60 shadow-2xl flex flex-col outline-none`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-5 border-b border-border/40 shrink-0">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    {icon}
+                    <div>
+                      <h2 id={titleId} className="text-lg font-semibold">{title}</h2>
+                      {subtitle && (
+                        <p className="text-[11px] text-muted-foreground mt-0.5">{subtitle}</p>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={onClose}
+                    aria-label="Close"
+                    className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-muted rounded-xl transition-colors"
+                  >
+                    <X className="w-5 h-5 text-muted-foreground" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto overscroll-contain p-5">
+                {children}
+              </div>
+
+              {footer && (
+                <div className="p-4 border-t border-border/40 shrink-0 bg-card">
+                  {footer}
+                </div>
+              )}
+            </motion.div>
+          )}
         </motion.div>
       )}
     </AnimatePresence>
@@ -166,7 +235,7 @@ export function QuickSheet({
                 <button
                   onClick={onClose}
                   aria-label="Close"
-                  className="p-1 hover:bg-muted rounded-lg transition-colors"
+                  className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-muted rounded-lg transition-colors"
                 >
                   <X className="w-4 h-4 text-muted-foreground" />
                 </button>
