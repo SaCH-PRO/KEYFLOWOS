@@ -625,14 +625,18 @@ export default function OnboardingPage() {
     window.open(`https://wa.me/?text=${text}`, "_blank");
   };
 
-  const handleShareSocial = () => {
+  const handleShareSocial = async () => {
     if (!publicUrl) return;
     if (navigator.share) {
-      navigator.share({
-        title: "My Business on KeyFlowOS",
-        text: "Check out my business page!",
-        url: publicUrl,
-      });
+      try {
+        await navigator.share({
+          title: "My Business on KeyFlowOS",
+          text: "Check out my business page!",
+          url: publicUrl,
+        });
+      } catch {
+        window.open(`https://twitter.com/intent/tweet?url=${encodeURIComponent(publicUrl)}&text=${encodeURIComponent("Check out my business page!")}`, "_blank");
+      }
     } else {
       handleCopyLink();
     }
