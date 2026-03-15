@@ -297,7 +297,7 @@ export default function MarketingPage() {
               <div className="space-y-6">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <AudienceHealthSection businessId={mk.businessId} />
-                  <AudienceSegmentsPanel businessId={mk.businessId} availableTags={mk.availableTags} />
+                  <AudienceSegmentsPanel businessId={mk.businessId} />
                 </div>
                 <div className="space-y-4">
                   <FormOptimizationQueue forms={mk.forms} onAiOptimize={() => handleAiAction("lead-form-optimizer")} onEdit={handleEditForm} onToggle={mk.handleToggleForm} />

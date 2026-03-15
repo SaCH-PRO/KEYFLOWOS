@@ -12,10 +12,9 @@ interface ContactSegment {
 
 interface AudienceSegmentsPanelProps {
   businessId: string | null;
-  availableTags: string[];
 }
 
-export function AudienceSegmentsPanel({ businessId, availableTags }: AudienceSegmentsPanelProps) {
+export function AudienceSegmentsPanel({ businessId }: AudienceSegmentsPanelProps) {
   const router = useRouter();
   const [segments, setSegments] = useState<ContactSegment[]>([]);
   const [totalContacts, setTotalContacts] = useState(0);
