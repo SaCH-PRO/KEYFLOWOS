@@ -47,7 +47,7 @@ export default function BookingDetailDrawer({
       >
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-bold">Booking Details</h3>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted/50">
+          <button onClick={onClose} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted/50">
             <X className="w-5 h-5" />
           </button>
         </div>

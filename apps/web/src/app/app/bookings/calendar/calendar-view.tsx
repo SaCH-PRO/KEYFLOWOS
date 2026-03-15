@@ -175,7 +175,7 @@ export default function CalendarView({
                 <button
                   key={mode}
                   onClick={() => setViewMode(mode)}
-                  className={`px-2.5 py-1.5 text-xs font-medium flex items-center gap-1 transition-colors ${
+                  className={`px-2.5 min-h-[44px] text-xs font-medium flex items-center gap-1 transition-colors ${
                     viewMode === mode
                       ? "text-foreground"
                       : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
@@ -199,14 +199,14 @@ export default function CalendarView({
           <div className="flex items-center gap-1">
             <button
               onClick={navigatePrev}
-              className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors"
+              className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted/50 transition-colors"
               aria-label="Previous"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
             <button
               onClick={goToday}
-              className={`px-3 py-1 text-xs rounded-lg transition-colors ${
+              className={`px-3 min-h-[44px] text-xs rounded-lg transition-colors ${
                 isToday
                   ? "text-muted-foreground"
                   : "kf-btn-secondary"
@@ -217,7 +217,7 @@ export default function CalendarView({
             </button>
             <button
               onClick={navigateNext}
-              className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors"
+              className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted/50 transition-colors"
               aria-label="Next"
             >
               <ChevronRight className="w-4 h-4" />
