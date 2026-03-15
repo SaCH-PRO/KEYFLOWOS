@@ -31,6 +31,7 @@ import MarketingInsightsTab from "./insights/marketing-insights-tab";
 import { SocialTabContent } from "./components/social-tab-content";
 import { MarketingCalendarTab } from "./components/marketing-calendar-tab";
 import { AudienceHealthSection } from "./components/campaign-intelligence-cards";
+import { AudienceSegmentsPanel } from "./components/audience-segments-panel";
 import type { EmailCampaign, LeadForm } from "@/lib/client";
 
 type CreateMode = "email" | "social";
@@ -260,7 +261,10 @@ export default function MarketingPage() {
             )}
             {activeTab === "audience" && (
               <div className="space-y-6">
-                <AudienceHealthSection businessId={mk.businessId} />
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <AudienceHealthSection businessId={mk.businessId} />
+                  <AudienceSegmentsPanel businessId={mk.businessId} availableTags={mk.availableTags} />
+                </div>
                 <div className="space-y-4">
                   <FormOptimizationQueue forms={mk.forms} onAiOptimize={() => handleAiAction("lead-form-optimizer")} onEdit={handleEditForm} onToggle={mk.handleToggleForm} />
                   <LeadFormsPanel businessId={mk.businessId} forms={mk.forms} setForms={mk.setForms} onViewContact={mk.handleViewContact} onAiOptimize={() => handleAiAction("lead-form-optimizer")} />

@@ -10,6 +10,7 @@ import {
   marketingAiSubjectLines,
   marketingAiFormOptimizer,
 } from "@/lib/client";
+import type { EmailCampaign, LeadForm, SocialPost } from "@/lib/client";
 import type { CrossModuleSignal } from "./use-marketing";
 
 async function generateMarketingSuggestions(context: ModuleContext): Promise<AiSuggestion[]> {
@@ -18,9 +19,9 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
 
   const suggestions: AiSuggestion[] = [];
 
-  const campaigns = (customData?.campaigns as any[]) ?? [];
-  const forms = (customData?.forms as any[]) ?? [];
-  const socialPosts = (customData?.socialPosts as any[]) ?? [];
+  const campaigns = (customData?.campaigns as EmailCampaign[]) ?? [];
+  const forms = (customData?.forms as LeadForm[]) ?? [];
+  const socialPosts = (customData?.socialPosts as SocialPost[]) ?? [];
   const signals = (customData?.crossModuleSignals as CrossModuleSignal[]) ?? [];
 
   const draftCampaigns = campaigns.filter((c) => c.status === "DRAFT");
@@ -80,7 +81,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
   }
 
   if (forms.length > 0) {
-    const inactiveForms = forms.filter((f: any) => !f.isActive);
+    const inactiveForms = forms.filter((f) => !f.isActive);
     if (inactiveForms.length > 0) {
       suggestions.push({
         id: `inactive-forms-${Date.now()}`,
@@ -94,7 +95,7 @@ async function generateMarketingSuggestions(context: ModuleContext): Promise<AiS
     }
   }
 
-  const draftPosts = socialPosts.filter((p: any) => p.status === "DRAFT" || p.status === "draft");
+  const draftPosts = socialPosts.filter((p) => p.status === "DRAFT" || p.status === "draft");
   if (draftPosts.length > 0) {
     suggestions.push({
       id: `draft-posts-${Date.now()}`,
