@@ -415,6 +415,14 @@ export function ContactJourneyTimeline({ contact, events, notes = [], tasks = []
     ? "bg-[hsl(var(--kf-warning))]/10"
     : "bg-[hsl(var(--kf-error))]/10";
 
+  const engagementColor = summary.engagementLevel === "high"
+    ? "text-[hsl(var(--kf-success))]"
+    : summary.engagementLevel === "medium"
+    ? "text-[hsl(var(--kf-warning))]"
+    : "text-[hsl(var(--kf-error))]";
+
+  const engagementLabel = summary.engagementLevel === "high" ? "High" : summary.engagementLevel === "medium" ? "Medium" : "Low";
+
   return (
     <div className="space-y-3 px-1">
       <div className="flex items-center gap-2 flex-wrap">
@@ -480,6 +488,15 @@ export function ContactJourneyTimeline({ contact, events, notes = [], tasks = []
           </div>
           <div className={`text-sm font-semibold ${momentumColor}`}>
             {summary.momentum}/100
+          </div>
+        </div>
+        <div className="rounded-lg bg-muted/30 border border-border/50 p-2.5 col-span-2">
+          <div className="flex items-center gap-1.5 mb-1">
+            <Activity className="w-3 h-3 text-[hsl(var(--kf-accent1))]" />
+            <span className="text-[10px] text-muted-foreground">Engagement</span>
+          </div>
+          <div className={`text-sm font-semibold ${engagementColor}`}>
+            {engagementLabel}
           </div>
         </div>
       </div>

@@ -70,7 +70,10 @@ type AiInsight = {
 
 function toNum(val: unknown): number {
   if (typeof val === 'number') return val;
-  if (val && typeof val === 'object' && 'toNumber' in val) return (val as any).toNumber();
+  if (val !== null && val !== undefined && typeof val === 'object' && 'toNumber' in val) {
+    const decimal = val as { toNumber: () => number };
+    return decimal.toNumber();
+  }
   return Number(val ?? 0);
 }
 
