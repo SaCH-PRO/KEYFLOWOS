@@ -249,30 +249,30 @@ export default function CommercePage() {
               <span className="font-semibold text-xs text-emerald-400">{overview.revenuePulse}</span>
               <span className="text-[10px] text-muted-foreground/50">collected</span>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-0.5">
               <Link
                 href="/app/settings/business"
-                className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-white/[0.06] transition-colors"
+                className="min-w-[44px] min-h-[44px] rounded-lg flex items-center justify-center hover:bg-white/[0.06] transition-colors"
                 aria-label="Billing Settings"
                 title="Billing Settings"
               >
-                <Settings className="w-3.5 h-3.5 text-muted-foreground/60" />
+                <Settings className="w-4 h-4 text-muted-foreground/60" />
               </Link>
               <button
                 onClick={() => setHelpOpen(true)}
-                className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-white/[0.06] transition-colors"
+                className="min-w-[44px] min-h-[44px] rounded-lg flex items-center justify-center hover:bg-white/[0.06] transition-colors"
                 aria-label="Help"
                 title="Help (?)"
               >
-                <BookOpen className="w-3.5 h-3.5 text-muted-foreground/60" />
+                <BookOpen className="w-4 h-4 text-muted-foreground/60" />
               </button>
               <button
                 onClick={() => commerceAi.togglePanel()}
-                className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-white/[0.06] transition-colors"
+                className="min-w-[44px] min-h-[44px] rounded-lg flex items-center justify-center hover:bg-white/[0.06] transition-colors"
                 aria-label="AI Copilot"
                 title="AI Copilot (Shift+A)"
               >
-                <Sparkles className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]/60" />
+                <Sparkles className="w-4 h-4 text-[hsl(var(--kf-accent1))]/60" />
               </button>
             </div>
           </div>
@@ -334,7 +334,7 @@ export default function CommercePage() {
           {tab === "invoices" && (
             <motion.div key="invoices" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
               <div className="space-y-4">
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div className="rounded-xl border border-border/50 bg-card p-3 flex items-center gap-2.5">
                     <div className="p-1.5 rounded-lg bg-amber-500/10 shrink-0">
                       <Clock className="w-3.5 h-3.5 text-amber-400" />
