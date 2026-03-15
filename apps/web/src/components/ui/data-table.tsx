@@ -129,7 +129,7 @@ export function DataTable<T extends Record<string, unknown>>({
 
   return (
     <div className="kf-card kf-radius-lg overflow-hidden">
-      {(searchable || headerExtra) && (
+      {(searchable || headerExtra || columns.some((c) => c.hidden)) && (
         <div
           className="flex items-center gap-2 px-3 py-2 border-b"
           style={{ borderColor: "hsl(var(--kf-border))" }}
