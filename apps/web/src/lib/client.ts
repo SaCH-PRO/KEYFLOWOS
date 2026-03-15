@@ -1914,6 +1914,96 @@ export async function fetchBookingStats(businessId?: string) {
   );
 }
 
+export interface ScheduleHealth {
+  utilizationRate: number;
+  noShowRate: number;
+  noShowTrend: number;
+  avgRevenuePerSlot: number;
+  peakDay: string;
+  slowestDay: string;
+  weeklyUtilization: {
+    date: string;
+    dayOfWeek: string;
+    totalSlots: number;
+    bookedSlots: number;
+    utilizationRate: number;
+    emptySlots: number;
+  }[];
+  promotionSuggestions: {
+    date: string;
+    dayOfWeek: string;
+    emptySlots: number;
+    suggestion: string;
+    targetClientCount: number;
+  }[];
+  noShowRisks: {
+    bookingId: string;
+    contactId: string;
+    contactName: string;
+    riskScore: number;
+    riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+    factors: string[];
+  }[];
+  rebookingSuggestions: {
+    contactId: string;
+    contactName: string;
+    lastServiceName: string;
+    averageIntervalDays: number;
+    suggestedDate: string;
+    reason: string;
+  }[];
+  recommendations: string[];
+}
+
+const scheduleHealthSchema = z.object({
+  utilizationRate: z.number(),
+  noShowRate: z.number(),
+  noShowTrend: z.number(),
+  avgRevenuePerSlot: z.number(),
+  peakDay: z.string(),
+  slowestDay: z.string(),
+  weeklyUtilization: z.array(z.object({
+    date: z.string(),
+    dayOfWeek: z.string(),
+    totalSlots: z.number(),
+    bookedSlots: z.number(),
+    utilizationRate: z.number(),
+    emptySlots: z.number(),
+  })),
+  promotionSuggestions: z.array(z.object({
+    date: z.string(),
+    dayOfWeek: z.string(),
+    emptySlots: z.number(),
+    suggestion: z.string(),
+    targetClientCount: z.number(),
+  })),
+  noShowRisks: z.array(z.object({
+    bookingId: z.string(),
+    contactId: z.string(),
+    contactName: z.string(),
+    riskScore: z.number(),
+    riskLevel: z.enum(['LOW', 'MEDIUM', 'HIGH']),
+    factors: z.array(z.string()),
+  })),
+  rebookingSuggestions: z.array(z.object({
+    contactId: z.string(),
+    contactName: z.string(),
+    lastServiceName: z.string(),
+    averageIntervalDays: z.number(),
+    suggestedDate: z.string(),
+    reason: z.string(),
+  })),
+  recommendations: z.array(z.string()),
+});
+
+export async function fetchScheduleHealth(businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/bookings/businesses/${encodeURIComponent(bid)}/optimizer/schedule-health`,
+    scheduleHealthSchema,
+  );
+}
+
 export interface FlowPhase {
   name: string;
   count: number;

@@ -20,6 +20,7 @@ import {
   Contact,
   BookingStats,
   Product,
+  ScheduleHealth,
   createBooking,
   fetchBookings,
   fetchServices,
@@ -32,6 +33,7 @@ import {
   syncBookingToCalendar,
   updateBookingStatus,
   fetchBookingStats,
+  fetchScheduleHealth,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -77,6 +79,7 @@ export default function BookingsPage() {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [stats, setStats] = useState<BookingStats | null>(null);
+  const [scheduleHealth, setScheduleHealth] = useState<ScheduleHealth | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -164,7 +167,7 @@ export default function BookingsPage() {
     if (!businessId) return;
     setLoading(true);
     try {
-      const [bookingsRes, servicesRes, staffRes, calendarRes, contactsRes, statsRes, productsRes] = await Promise.all([
+      const [bookingsRes, servicesRes, staffRes, calendarRes, contactsRes, statsRes, productsRes, healthRes] = await Promise.all([
         fetchBookings(businessId),
         fetchServices(businessId),
         fetchStaff(businessId),
@@ -172,12 +175,14 @@ export default function BookingsPage() {
         fetchContacts(businessId, { take: 200 }),
         fetchBookingStats(businessId).catch(() => ({ data: null, error: null })),
         fetchProducts(businessId),
+        fetchScheduleHealth(businessId).catch(() => ({ data: null, error: null })),
       ]);
       setBookings(bookingsRes.data ?? []);
       setServices(servicesRes.data ?? []);
       setStaff(staffRes.data ?? []);
       setContacts(contactsRes.data?.contacts ?? []);
       setStats(statsRes.data ?? null);
+      setScheduleHealth(healthRes.data ?? null);
       setProducts((productsRes.data ?? []).map((p) => ({ ...p, currency: p.currency ?? "TTD" } as Product)));
       setCalendarConnected((calendarRes.data as any)?.connected ?? false);
       setCalendarEmail((calendarRes.data as any)?.email ?? null);
@@ -531,6 +536,7 @@ export default function BookingsPage() {
               bookings={bookings}
               services={services}
               stats={stats}
+              scheduleHealth={scheduleHealth}
             />
           )}
         </motion.div>

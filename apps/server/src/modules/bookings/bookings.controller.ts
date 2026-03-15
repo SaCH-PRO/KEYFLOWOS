@@ -2,6 +2,7 @@ import { Body, Controller, Get, Inject, Param, Patch, Post, UseGuards, Delete, Q
 import { Response } from 'express';
 import { BookingsService } from './bookings.service';
 import { CalendarService } from './calendar.service';
+import { BookingOptimizerService } from './booking-optimizer.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CreateBookingDto } from './dto/create-booking.dto';
@@ -13,6 +14,7 @@ export class BookingsController {
   constructor(
     @Inject(BookingsService) private readonly bookings: BookingsService,
     @Inject(CalendarService) private readonly calendar: CalendarService,
+    @Inject(BookingOptimizerService) private readonly optimizer: BookingOptimizerService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
@@ -269,5 +271,29 @@ export class BookingsController {
   ) {
     const eventId = await this.calendar.syncBookingToCalendar(bookingId, businessId);
     return { success: !!eventId, eventId };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/optimizer/schedule-health')
+  getScheduleHealth(@Param('businessId') businessId: string) {
+    return this.optimizer.getScheduleHealth(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/optimizer/no-show-risks')
+  getNoShowRisks(@Param('businessId') businessId: string) {
+    return this.optimizer.getNoShowRisks(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/optimizer/reminders')
+  getUpcomingReminders(@Param('businessId') businessId: string) {
+    return this.optimizer.getUpcomingReminders(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/optimizer/rebooking-suggestions')
+  getRebookingSuggestions(@Param('businessId') businessId: string) {
+    return this.optimizer.getRebookingSuggestions(businessId);
   }
 }

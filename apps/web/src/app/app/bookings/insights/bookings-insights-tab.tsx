@@ -11,6 +11,14 @@ import {
   DollarSign,
   Users,
   AlertCircle,
+  Activity,
+  ShieldAlert,
+  Lightbulb,
+  RefreshCw,
+  ArrowUpRight,
+  ArrowDownRight,
+  Minus,
+  Megaphone,
 } from "lucide-react";
 import { formatAmount } from "../../commerce/utils/commerce-utils";
 import {
@@ -24,12 +32,13 @@ import {
   Pie,
   Cell,
 } from "recharts";
-import type { Booking, Service, BookingStats } from "@/lib/client";
+import type { Booking, Service, BookingStats, ScheduleHealth } from "@/lib/client";
 
 interface BookingsInsightsTabProps {
   bookings: Booking[];
   services: Service[];
   stats: BookingStats | null;
+  scheduleHealth?: ScheduleHealth | null;
 }
 
 const stagger = {
@@ -66,7 +75,7 @@ const STATUS_LABELS: Record<string, string> = {
   CANCELLED: "Cancelled",
 };
 
-export default function BookingsInsightsTab({ bookings, services, stats }: BookingsInsightsTabProps) {
+export default function BookingsInsightsTab({ bookings, services, stats, scheduleHealth }: BookingsInsightsTabProps) {
   const dailyVolume = useMemo(() => {
     const map = new Map<string, number>();
     const now = new Date();
@@ -412,6 +421,232 @@ export default function BookingsInsightsTab({ bookings, services, stats }: Booki
           );
         })()}
       </motion.div>
+
+      {scheduleHealth && (
+        <>
+          <motion.div variants={stagger.item}>
+            <div className="flex items-center gap-2 mt-2 mb-3">
+              <Activity className="w-4 h-4 text-violet-400" />
+              <h3 className="text-base font-semibold">Schedule Health</h3>
+            </div>
+          </motion.div>
+
+          <motion.div variants={stagger.item} className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="rounded-2xl border border-border/60 bg-card/80 backdrop-blur-sm bg-gradient-to-br from-violet-500/15 to-violet-600/5 p-4 flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shrink-0">
+                <Activity className="w-4 h-4 text-white" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Utilization</p>
+                <p className="text-xl font-bold">{scheduleHealth.utilizationRate}%</p>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-border/60 bg-card/80 backdrop-blur-sm bg-gradient-to-br from-red-500/15 to-red-600/5 p-4 flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center shrink-0">
+                <ShieldAlert className="w-4 h-4 text-white" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Cancellation Rate</p>
+                <div className="flex items-center gap-1.5">
+                  <p className="text-xl font-bold">{scheduleHealth.noShowRate}%</p>
+                  {scheduleHealth.noShowTrend !== 0 && (
+                    <span className={`flex items-center text-[10px] ${scheduleHealth.noShowTrend > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                      {scheduleHealth.noShowTrend > 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                      {Math.abs(scheduleHealth.noShowTrend)}%
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-border/60 bg-card/80 backdrop-blur-sm bg-gradient-to-br from-emerald-500/15 to-emerald-600/5 p-4 flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shrink-0">
+                <DollarSign className="w-4 h-4 text-white" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Avg Revenue/Slot</p>
+                <p className="text-xl font-bold">{formatAmount(scheduleHealth.avgRevenuePerSlot)}</p>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-border/60 bg-card/80 backdrop-blur-sm bg-gradient-to-br from-blue-500/15 to-blue-600/5 p-4 flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shrink-0">
+                <TrendingUp className="w-4 h-4 text-white" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Peak Day</p>
+                <p className="text-xl font-bold truncate">{scheduleHealth.peakDay}</p>
+              </div>
+            </div>
+          </motion.div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+            <motion.div variants={stagger.item} className="lg:col-span-3 kf-card p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-violet-400" />
+                <h3 className="text-sm font-semibold">7-Day Utilization</h3>
+              </div>
+              <div className="h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={scheduleHealth.weeklyUtilization} barSize={24}>
+                    <XAxis
+                      dataKey="dayOfWeek"
+                      tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(v) => v.slice(0, 3)}
+                    />
+                    <YAxis
+                      tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                      axisLine={false}
+                      tickLine={false}
+                      domain={[0, 100]}
+                      tickFormatter={(v) => `${v}%`}
+                    />
+                    <Tooltip
+                      {...RECHARTS_TOOLTIP_STYLE}
+                      formatter={(value: number) => [`${value}%`, "Utilization"]}
+                    />
+                    <Bar dataKey="utilizationRate" radius={[6, 6, 0, 0]}>
+                      {scheduleHealth.weeklyUtilization.map((entry, i) => (
+                        <Cell
+                          key={i}
+                          fill={
+                            entry.utilizationRate >= 70
+                              ? "#10b981"
+                              : entry.utilizationRate >= 40
+                              ? "#f59e0b"
+                              : entry.totalSlots === 0
+                              ? "hsl(var(--border)/0.3)"
+                              : "#ef4444"
+                          }
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="flex items-center gap-4 justify-center text-[10px] text-muted-foreground">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                  <span>Good (70%+)</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2 h-2 rounded-full bg-amber-500" />
+                  <span>Fair (40-69%)</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2 h-2 rounded-full bg-red-500" />
+                  <span>Low (&lt;40%)</span>
+                </div>
+              </div>
+            </motion.div>
+
+            <motion.div variants={stagger.item} className="lg:col-span-2 kf-card p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Lightbulb className="w-4 h-4 text-amber-400" />
+                <h3 className="text-sm font-semibold">Recommendations</h3>
+              </div>
+              {scheduleHealth.recommendations.length > 0 ? (
+                <div className="space-y-2">
+                  {scheduleHealth.recommendations.map((rec, i) => (
+                    <div key={i} className="flex gap-2 p-2 rounded-lg bg-white/[0.02]">
+                      <div className="w-5 h-5 rounded-full bg-amber-400/15 text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
+                        <span className="text-[9px] font-bold">{i + 1}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">{rec}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground text-center py-4">No recommendations at this time</p>
+              )}
+            </motion.div>
+          </div>
+
+          {scheduleHealth.promotionSuggestions.length > 0 && (
+            <motion.div variants={stagger.item} className="kf-card p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Megaphone className="w-4 h-4 text-orange-400" />
+                <h3 className="text-sm font-semibold">Promotion Opportunities</h3>
+              </div>
+              <div className="space-y-2">
+                {scheduleHealth.promotionSuggestions.map((promo, i) => (
+                  <div key={i} className="flex items-center gap-3 p-3 rounded-xl bg-orange-500/5 border border-orange-500/20">
+                    <div className="w-8 h-8 rounded-lg bg-orange-500/15 flex items-center justify-center shrink-0">
+                      <CalendarDays className="w-4 h-4 text-orange-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium">{promo.dayOfWeek} — {promo.emptySlots} empty slots</p>
+                      <p className="text-[10px] text-muted-foreground">{promo.suggestion}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
+          {scheduleHealth.noShowRisks.length > 0 && (
+            <motion.div variants={stagger.item} className="kf-card p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4 text-red-400" />
+                <h3 className="text-sm font-semibold">No-Show Risk Alerts</h3>
+              </div>
+              <div className="space-y-1.5">
+                {scheduleHealth.noShowRisks.slice(0, 5).map((risk) => (
+                  <div key={risk.bookingId} className="flex items-center gap-3 p-2 rounded-lg bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
+                    <div className={`w-2 h-2 rounded-full shrink-0 ${
+                      risk.riskLevel === 'HIGH' ? 'bg-red-500' :
+                      risk.riskLevel === 'MEDIUM' ? 'bg-amber-500' : 'bg-emerald-500'
+                    }`} />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xs font-medium">{risk.contactName}</span>
+                      <div className="flex flex-wrap gap-1 mt-0.5">
+                        {risk.factors.map((f, i) => (
+                          <span key={i} className="text-[9px] px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-400">{f}</span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className={`text-xs font-bold ${
+                        risk.riskLevel === 'HIGH' ? 'text-red-400' :
+                        risk.riskLevel === 'MEDIUM' ? 'text-amber-400' : 'text-emerald-400'
+                      }`}>{risk.riskScore}%</span>
+                      <p className="text-[9px] text-muted-foreground">{risk.riskLevel} risk</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
+          {scheduleHealth.rebookingSuggestions.length > 0 && (
+            <motion.div variants={stagger.item} className="kf-card p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <RefreshCw className="w-4 h-4 text-blue-400" />
+                <h3 className="text-sm font-semibold">Rebooking Suggestions</h3>
+              </div>
+              <div className="space-y-1.5">
+                {scheduleHealth.rebookingSuggestions.map((sug, i) => (
+                  <div key={i} className="flex items-center gap-3 p-2 rounded-lg bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
+                    <div className="w-8 h-8 rounded-lg bg-blue-500/15 flex items-center justify-center shrink-0">
+                      <RefreshCw className="w-3.5 h-3.5 text-blue-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xs font-medium">{sug.contactName}</span>
+                      <p className="text-[10px] text-muted-foreground">{sug.lastServiceName} — {sug.reason}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className="text-[11px] font-medium block">
+                        {new Date(sug.suggestedDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      </span>
+                      <p className="text-[9px] text-muted-foreground">Suggested</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </>
+      )}
     </motion.div>
   );
 }
