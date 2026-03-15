@@ -7,7 +7,7 @@ export default function SocialPage() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace("/app/marketing?tab=create");
+    router.replace("/app/marketing?tab=social");
   }, [router]);
 
   return null;
