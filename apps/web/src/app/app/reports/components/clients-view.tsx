@@ -3,6 +3,7 @@
 import { Card } from "@keyflow/ui";
 import { Users, Calendar, DollarSign, Building2 } from "lucide-react";
 import { GeneratedReport } from "@/lib/client";
+import { EmptyState } from "@/components/ui/empty-state";
 import { formatCurrency } from "./report-types";
 import { MetricCard, DataTable, NarrativeSection, StatusBadge, ProgressBar } from "./shared-components";
 
@@ -72,7 +73,14 @@ export function ClientsView({ report }: { report: GeneratedReport }) {
             formatCurrency(c.total, m.currency),
             <ProgressBar key={c.name} value={c.total} max={m.revenue.topClients[0]?.total || 1} color="bg-blue-400" />,
           ])}
-          emptyText="No client revenue data for this period — try a wider date range"
+          emptyState={
+            <EmptyState
+              icon={Users}
+              title="No client revenue data"
+              description="No paid invoices found for this period. Try selecting a wider date range."
+              tip="Revenue per client is calculated from paid invoices linked to contacts."
+            />
+          }
         />
       </Card>
     </div>

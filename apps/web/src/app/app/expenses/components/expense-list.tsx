@@ -24,13 +24,14 @@ interface ExpenseListProps {
   onEdit: (exp: Expense) => void;
   onDelete: (expenseId: string) => void;
   onViewDetail: (exp: Expense) => void;
+  onAdd?: () => void;
 }
 
 export function ExpenseList({
   expenses, totalExpenses, categories,
   filterCategory, setFilterCategory, filterPayment, setFilterPayment,
   page, setPage, pageSize, setPageSize,
-  onEdit, onDelete, onViewDetail,
+  onEdit, onDelete, onViewDetail, onAdd,
 }: ExpenseListProps) {
   const [sortField, setSortField] = useState<"date" | "amount">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -75,6 +76,8 @@ export function ExpenseList({
             icon={FileText}
             title="No expenses recorded"
             description="Track your business expenses to understand spending patterns and maximize deductions."
+            actionLabel={onAdd ? "Add Expense" : undefined}
+            onAction={onAdd}
             tip="Categorize expenses to see spending breakdowns in your Analytics tab."
           />
         ) : (

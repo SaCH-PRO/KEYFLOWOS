@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { CheckCircle2, Circle, Trash2, Plus } from "lucide-react";
+import { CheckCircle2, Circle, Trash2, Plus, ListChecks } from "lucide-react";
 import { ProjectTask } from "@/lib/client";
 
 interface TaskListProps {
@@ -25,9 +25,13 @@ export function TaskList({ tasks, projectId, onToggleTask, onDeleteTask, onAddTa
   return (
     <div className="mt-3 ml-6 space-y-1">
       {tasks.length === 0 && (
-        <p className="text-xs text-muted-foreground py-2" style={{ color: "hsl(var(--kf-muted-foreground) / 0.6)" }}>
-          No tasks yet — add one below to start tracking progress.
-        </p>
+        <div className="flex items-center gap-3 py-3 px-3 rounded-lg" style={{ background: "hsl(var(--kf-muted) / 0.08)" }}>
+          <ListChecks className="w-5 h-5 flex-shrink-0" style={{ color: "hsl(var(--kf-accent2) / 0.5)" }} />
+          <div>
+            <p className="text-xs font-medium" style={{ color: "hsl(var(--kf-accent2))" }}>No tasks yet</p>
+            <p className="text-[10px] text-muted-foreground">Add your first task below to start tracking progress.</p>
+          </div>
+        </div>
       )}
       {tasks.map((task) => (
         <div key={task.id} className="flex items-center gap-2 group py-1">

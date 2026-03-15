@@ -1,8 +1,9 @@
 "use client";
 
 import { Card } from "@keyflow/ui";
-import { BarChart3, TrendingUp, PieChart, Wallet } from "lucide-react";
+import { BarChart3, TrendingUp, PieChart, Wallet, Store } from "lucide-react";
 import { GeneratedReport } from "@/lib/client";
+import { EmptyState } from "@/components/ui/empty-state";
 import { formatCurrency } from "./report-types";
 import { MetricCard, DataTable, NarrativeSection, ProgressBar } from "./shared-components";
 
@@ -46,7 +47,14 @@ export function ExpensesView({ report }: { report: GeneratedReport }) {
           <DataTable
             headers={["Vendor", "Total Spent"]}
             rows={m.expenses.topVendors.map(v => [v.vendor, formatCurrency(v.total, m.currency)])}
-            emptyText="No vendor data for this period — try a wider date range"
+            emptyState={
+              <EmptyState
+                icon={Store}
+                title="No vendor data"
+                description="No vendor expenses found for this period. Try selecting a wider date range."
+                tip="Assign vendors to expenses to track spending per supplier."
+              />
+            }
           />
         </Card>
       </div>
