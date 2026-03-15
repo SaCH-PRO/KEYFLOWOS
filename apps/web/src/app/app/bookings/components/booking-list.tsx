@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 import type { Booking, StatusFilter } from "./bookings-types";
-import { STATUS_COLORS, formatTime, formatDate, contactName } from "./bookings-types";
+import { STATUS_STYLE, formatTime, formatDate, contactName } from "./bookings-types";
 
 interface BookingListProps {
   filteredBookings: Booking[];
@@ -155,7 +155,7 @@ export default function BookingList({
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-sm truncate">{contactName(b)}</span>
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${STATUS_COLORS[b.status] ?? "bg-slate-500/20 text-slate-300"}`}>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-medium border" style={STATUS_STYLE[b.status] ?? { background: "hsl(var(--muted) / 0.2)", color: "hsl(var(--muted-foreground))" }}>
                         {b.status}
                       </span>
                     </div>

@@ -1,14 +1,27 @@
 "use client";
 
 import { useMemo } from "react";
+import {
+  CheckCircle2,
+  LogIn,
+  FileText,
+  RotateCcw,
+} from "lucide-react";
 import type { Booking } from "../components/bookings-types";
 import { contactName, formatTime } from "../components/bookings-types";
 
-const STATUS_BLOCK: Record<string, string> = {
-  PENDING: "bg-amber-500/20 border-amber-500/40 text-amber-300",
-  CONFIRMED: "bg-blue-500/20 border-blue-500/40 text-blue-300",
-  COMPLETED: "bg-emerald-500/20 border-emerald-500/40 text-emerald-300",
-  CANCELLED: "bg-red-500/20 border-red-500/40 text-red-300",
+const STATUS_BLOCK_STYLE: Record<string, React.CSSProperties> = {
+  PENDING: { background: "hsl(var(--kf-warning) / 0.2)", borderColor: "hsl(var(--kf-warning) / 0.4)", color: "hsl(var(--kf-warning))" },
+  CONFIRMED: { background: "hsl(var(--kf-info) / 0.2)", borderColor: "hsl(var(--kf-info) / 0.4)", color: "hsl(var(--kf-info))" },
+  COMPLETED: { background: "hsl(var(--kf-success) / 0.2)", borderColor: "hsl(var(--kf-success) / 0.4)", color: "hsl(var(--kf-success))" },
+  CANCELLED: { background: "hsl(var(--kf-error) / 0.2)", borderColor: "hsl(var(--kf-error) / 0.4)", color: "hsl(var(--kf-error))" },
+};
+
+const TIMELINE_CTA: Record<string, { icon: typeof CheckCircle2; action: string; color: string; title: string }> = {
+  PENDING: { icon: CheckCircle2, action: "CONFIRMED", color: "hsl(var(--kf-success))", title: "Confirm" },
+  CONFIRMED: { icon: LogIn, action: "COMPLETED", color: "hsl(var(--kf-accent2))", title: "Check in" },
+  COMPLETED: { icon: FileText, action: "INVOICE", color: "hsl(var(--kf-accent1))", title: "Invoice" },
+  CANCELLED: { icon: RotateCcw, action: "REBOOK", color: "hsl(var(--kf-info))", title: "Rebook" },
 };
 
 const START_HOUR = 8;
@@ -20,6 +33,7 @@ interface WeekTimelineProps {
   currentDate: Date;
   onSelectBooking: (booking: Booking) => void;
   onSlotClick?: (date: string, time: string) => void;
+  onSmartAction?: (booking: Booking, action: string) => void;
 }
 
 function isSameDay(a: Date, b: Date) {
@@ -45,6 +59,7 @@ export default function WeekTimeline({
   currentDate,
   onSelectBooking,
   onSlotClick,
+  onSmartAction,
 }: WeekTimelineProps) {
   const today = useMemo(() => new Date(), []);
   const weekDays = useMemo(() => getWeekDays(currentDate), [currentDate]);
@@ -148,28 +163,47 @@ export default function WeekTimeline({
                         200
                       );
 
+                      const cta = onSmartAction ? TIMELINE_CTA[b.status] : undefined;
+                      const CtaIcon = cta?.icon;
+
                       return (
-                        <button
+                        <div
                           key={b.id}
-                          onClick={() => onSelectBooking(b)}
-                          className={`absolute left-0.5 right-0.5 rounded-md border px-1 py-0.5 text-[9px] leading-tight truncate transition-opacity hover:opacity-80 z-10 ${
-                            STATUS_BLOCK[b.status] ??
-                            "bg-slate-500/20 border-slate-500/30 text-slate-300"
-                          }`}
+                          className="absolute left-0.5 right-0.5 rounded-md border px-1 py-0.5 text-[9px] leading-tight transition-opacity hover:opacity-80 z-10 group/block flex items-start gap-0.5"
                           style={{
                             top: `${topPercent}%`,
                             height: `${heightPercent}%`,
                             minHeight: "18px",
+                            ...(STATUS_BLOCK_STYLE[b.status] ?? { background: "hsl(var(--muted) / 0.2)", borderColor: "hsl(var(--border) / 0.3)", color: "hsl(var(--muted-foreground))" }),
                           }}
                           title={`${formatTime(b.startTime)} - ${contactName(b)} - ${b.service?.name ?? "Service"}`}
                         >
-                          <div className="font-medium truncate">
-                            {formatTime(b.startTime)}
-                          </div>
-                          <div className="truncate opacity-80">
-                            {b.service?.name ?? contactName(b)}
-                          </div>
-                        </button>
+                          <button
+                            onClick={() => onSelectBooking(b)}
+                            className="flex-1 min-w-0 text-left"
+                          >
+                            <div className="font-medium truncate">
+                              {formatTime(b.startTime)}
+                            </div>
+                            <div className="truncate opacity-80">
+                              {b.service?.name ?? contactName(b)}
+                            </div>
+                          </button>
+                          {cta && CtaIcon && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onSmartAction?.(b, cta.action);
+                              }}
+                              className="p-0.5 rounded shrink-0 opacity-0 group-hover/block:opacity-100 transition-opacity"
+                              style={{ color: cta.color }}
+                              title={cta.title}
+                              aria-label={`${cta.title} booking`}
+                            >
+                              <CtaIcon className="w-2.5 h-2.5" />
+                            </button>
+                          )}
+                        </div>
                       );
                     })}
                   </div>

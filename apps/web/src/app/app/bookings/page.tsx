@@ -7,6 +7,9 @@ import {
   Briefcase,
   BarChart3,
   X,
+  Search,
+  Sparkles,
+  Link2,
 } from "lucide-react";
 import {
   Booking,
@@ -386,6 +389,38 @@ export default function BookingsPage() {
             ]}
           />
         }
+        rightSlot={
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => handleTabChange("catalog")}
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] transition-colors"
+              style={{
+                background: calendarConnected ? "hsl(var(--kf-success) / 0.08)" : "hsl(var(--muted) / 0.3)",
+                color: calendarConnected ? "hsl(var(--kf-success))" : "hsl(var(--muted-foreground))",
+                borderWidth: 1,
+                borderColor: calendarConnected ? "hsl(var(--kf-success) / 0.2)" : "hsl(var(--border))",
+              }}
+              title={calendarConnected ? `Calendar connected: ${calendarEmail ?? ""}` : "Calendar not connected"}
+            >
+              <Link2 className="w-3 h-3" />
+              {calendarConnected && <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-success))" }} />}
+            </button>
+            <button
+              onClick={() => ai.executeTool("bookings-nl-search")}
+              className="p-1.5 rounded-lg hover:bg-muted/30 transition-colors"
+              title="Search bookings"
+            >
+              <Search className="w-3.5 h-3.5 text-muted-foreground" />
+            </button>
+            <button
+              onClick={() => ai.togglePanel()}
+              className="p-1.5 rounded-lg hover:bg-muted/30 transition-colors"
+              title="AI Hub (Shift+A)"
+            >
+              <Sparkles className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+            </button>
+          </div>
+        }
         actionLabel="New Booking"
         onAction={() => setShowCreateBooking(true)}
       />
@@ -438,6 +473,10 @@ export default function BookingsPage() {
                 staff={staff}
                 onSelectBooking={setSelectedBooking}
                 onConfirmBooking={(id) => void handleStatusChange(id, "CONFIRMED")}
+                onViewStaffLoad={(staffId) => {
+                  setStaffFilter(staffId);
+                  setBanner({ text: `Showing bookings for ${staff.find((s) => s.id === staffId)?.name ?? "staff"}`, type: "info" });
+                }}
               />
               <ScheduleFilters
                 services={services}

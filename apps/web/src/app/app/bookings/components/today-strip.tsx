@@ -22,6 +22,7 @@ interface TodayStripProps {
   staff: { id: string; name: string }[];
   onSelectBooking: (booking: Booking) => void;
   onConfirmBooking: (bookingId: string) => void;
+  onViewStaffLoad?: (staffId: string) => void;
 }
 
 export default function TodayStrip({
@@ -31,6 +32,7 @@ export default function TodayStrip({
   staff,
   onSelectBooking,
   onConfirmBooking,
+  onViewStaffLoad,
 }: TodayStripProps) {
   const today = useMemo(() => new Date(), []);
   const todayKey = today.toISOString().split("T")[0];
@@ -274,13 +276,25 @@ export default function TodayStrip({
                 {overbookedStaff.map((s) => (
                   <div
                     key={s.staffId}
-                    className="flex items-center gap-3 p-2 rounded-lg"
+                    className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/20 transition-colors"
                   >
                     <Users className="w-3.5 h-3.5 shrink-0" style={{ color: "hsl(var(--kf-accent1))" }} />
                     <span className="text-xs font-medium">{s.name}</span>
-                    <span className="text-[10px] text-muted-foreground">
+                    <span className="text-[10px] text-muted-foreground flex-1">
                       {s.bookingCount} bookings today
                     </span>
+                    <button
+                      onClick={() => onViewStaffLoad?.(s.staffId)}
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-medium shrink-0 transition-colors"
+                      style={{
+                        background: "hsl(var(--kf-accent1) / 0.1)",
+                        color: "hsl(var(--kf-accent1))",
+                        borderWidth: 1,
+                        borderColor: "hsl(var(--kf-accent1) / 0.25)",
+                      }}
+                    >
+                      View Load
+                    </button>
                   </div>
                 ))}
               </div>
