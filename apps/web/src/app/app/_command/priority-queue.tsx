@@ -23,6 +23,7 @@ interface PriorityQueueProps {
   onNudgeSnooze: (id: string) => Promise<void>;
   onDismissTask: (id: string) => void;
   onDismissAlert: (id: string) => void;
+  onDismissPriority: (id: string) => void;
   completingTask: string | null;
   momentumActionId: string | null;
   dismissingNudge: string | null;
@@ -49,7 +50,7 @@ export function PriorityQueue(props: PriorityQueueProps) {
 
     props.priorities.forEach((p) => {
       const target = p.urgency === "critical" || p.urgency === "high" ? now : p.urgency === "medium" ? today : week;
-      target.push(<PriorityRow key={`pri-${p.id}`} priority={p} />);
+      target.push(<PriorityRow key={`pri-${p.id}`} priority={p} onDismiss={() => props.onDismissPriority(p.id)} />);
     });
 
     props.nudges.forEach((n) => {

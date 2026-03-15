@@ -12,7 +12,6 @@ import {
   updateAutopilotTaskStatus,
   approveAutopilotTask,
   denyAutopilotTask,
-  fetchCriticalAlerts,
   fetchMomentumRecommendations,
   actionMomentumRecommendation,
   snoozeMomentumRecommendation,
@@ -28,7 +27,7 @@ import {
   FinancialPulse,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId, getUserDisplayName } from "@/lib/workspace";
-import type { AutopilotTask, CriticalAlert } from "./types";
+import type { AutopilotTask } from "./types";
 
 export function useCommandData() {
   const router = useRouter();
@@ -36,7 +35,6 @@ export function useCommandData() {
   const [cockpit, setCockpit] = useState<CockpitSummary | null>(null);
   const [gamification, setGamification] = useState<GamificationStats | null>(null);
   const [tasks, setTasks] = useState<AutopilotTask[]>([]);
-  const [alerts, setAlerts] = useState<CriticalAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [completingTask, setCompletingTask] = useState<string | null>(null);
@@ -64,11 +62,10 @@ export function useCommandData() {
       setLoading(true);
       setError(null);
       try {
-        const [cockpitResult, gamificationResult, tasksResult, alertsResult, momentumResult, briefingsResult, financialResult] = await Promise.all([
+        const [cockpitResult, gamificationResult, tasksResult, momentumResult, briefingsResult, financialResult] = await Promise.all([
           fetchCockpitSummary(businessId),
           fetchGamificationStats(businessId),
           fetchTodaysTasks(businessId),
-          fetchCriticalAlerts(businessId),
           fetchMomentumRecommendations(businessId, 5),
           fetchCampaignBriefings(businessId),
           fetchFinancialPulse(businessId),
@@ -76,7 +73,6 @@ export function useCommandData() {
         if (cockpitResult.data) setCockpit(cockpitResult.data as CockpitSummary);
         if (gamificationResult.data) setGamification(gamificationResult.data);
         if (tasksResult.data) setTasks(tasksResult.data as AutopilotTask[]);
-        if (alertsResult.data) setAlerts(alertsResult.data as CriticalAlert[]);
         if (momentumResult.data) setMomentumRecs(momentumResult.data);
         if (briefingsResult.data) setCampaignBriefings(briefingsResult.data);
         if (financialResult.data) setFinancialPulse(financialResult.data);
@@ -230,7 +226,6 @@ export function useCommandData() {
     momentum,
     priorities,
     tasks,
-    alerts,
     momentumRecs,
     nudges,
     financialAlerts,
@@ -249,5 +244,6 @@ export function useCommandData() {
     gamification,
     handleDismissTask: (id: string) => setTasks((prev) => prev.filter((t) => t.id !== id)),
     handleDismissAlert: (id: string) => setDismissedAlertIds((prev) => new Set(prev).add(id)),
+    handleDismissPriority: (id: string) => setCockpit((prev) => prev ? { ...prev, priorities: prev.priorities.filter((p) => p.id !== id) } : prev),
   };
 }
