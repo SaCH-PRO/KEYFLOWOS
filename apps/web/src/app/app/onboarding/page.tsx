@@ -40,6 +40,7 @@ import {
   markConciergeComplete,
   fetchConciergeTemplatePreview,
   updateBusiness,
+  createProduct,
   IndustryTemplatePreview,
 } from "@/lib/client";
 
@@ -381,6 +382,8 @@ export default function OnboardingPage() {
               );
             }
             if (stateRes.data.setupStatus.products) {
+              const origin = typeof window !== "undefined" ? window.location.origin : "";
+              setPublicUrl(`${origin}/book/${bid}`);
               setStep(2);
             } else {
               setStep(1);
@@ -406,6 +409,10 @@ export default function OnboardingPage() {
         businessId,
         businessIntent: template?.label || templateId,
         industry: template?.label || templateId,
+        metaData: {
+          conciergeTemplateId: templateId,
+          onboardingStep: 1,
+        },
       });
 
       const previewRes = await fetchConciergeTemplatePreview(businessId, templateId);
@@ -454,14 +461,43 @@ export default function OnboardingPage() {
     if (!businessId || !selectedTemplate || configuring) return;
     setConfiguring(true);
     try {
-      const res = await conciergeAutoConfigure(businessId, selectedTemplate);
-      if (res.data) {
-        await fetchConciergeState(businessId);
+      const includedProducts = products.filter(
+        (p) => p.included && p.name.trim()
+      );
 
-        const origin = typeof window !== "undefined" ? window.location.origin : "";
-        setPublicUrl(`${origin}/store/${businessId}`);
-        setStep(2);
+      for (const p of includedProducts) {
+        await createProduct({
+          businessId,
+          name: p.name,
+          price: p.price,
+          currency: p.currency || "TTD",
+          category: p.category || "SERVICE",
+          duration: p.duration || null,
+          description: p.description,
+          isActive: true,
+        });
       }
+
+      await conciergeAutoConfigure(businessId, selectedTemplate, {
+        createProducts: false,
+        setBusinessHours: true,
+        setPaymentMethods: true,
+        configureStorefront: true,
+      });
+
+      await updateBusiness({
+        businessId,
+        storeEnabled: true,
+        metaData: {
+          conciergeTemplateId: selectedTemplate,
+          onboardingStep: 2,
+          onboardingComplete: true,
+        },
+      });
+
+      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      setPublicUrl(`${origin}/book/${businessId}`);
+      setStep(2);
     } catch (err) {
       console.error("Configure error:", err);
     }
