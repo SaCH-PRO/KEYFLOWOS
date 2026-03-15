@@ -90,6 +90,50 @@ export function ListPageSkeleton() {
   );
 }
 
+export function SkeletonList({ rows = 5, cols = 4 }: { rows?: number; cols?: number }) {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div
+          key={i}
+          className="flex items-center gap-3 px-4 py-3 rounded-lg"
+          style={{ background: "hsl(var(--kf-muted) / 0.1)" }}
+        >
+          <Skeleton className="w-8 h-8 rounded-lg flex-shrink-0" />
+          <div className="flex-1 flex items-center gap-4">
+            {Array.from({ length: cols }).map((_, j) => (
+              <Skeleton
+                key={j}
+                className={`h-3.5 ${j === 0 ? "w-1/3" : j === cols - 1 ? "w-16" : "w-20"}`}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function CardListSkeleton({ rows = 4 }: { rows?: number }) {
+  return (
+    <div className="space-y-3">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div
+          key={i}
+          className="kf-card rounded-xl p-4 flex items-center gap-3"
+        >
+          <Skeleton className="w-10 h-10 rounded-xl flex-shrink-0" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-4 w-2/5" />
+            <Skeleton className="h-3 w-3/5" />
+          </div>
+          <Skeleton className="h-7 w-16 rounded-lg flex-shrink-0" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function KanbanSkeleton() {
   return (
     <div className="space-y-6 p-6">

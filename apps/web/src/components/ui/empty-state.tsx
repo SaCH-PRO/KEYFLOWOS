@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus } from "lucide-react";
+import { Plus, Lightbulb } from "lucide-react";
 
 interface EmptyStateProps {
   icon: React.ElementType;
@@ -9,6 +9,9 @@ interface EmptyStateProps {
   actionLabel?: string;
   actionIcon?: React.ElementType;
   onAction?: () => void;
+  secondaryActionLabel?: string;
+  onSecondaryAction?: () => void;
+  tip?: string;
 }
 
 export function EmptyState({
@@ -18,6 +21,9 @@ export function EmptyState({
   actionLabel,
   actionIcon: ActionIcon = Plus,
   onAction,
+  secondaryActionLabel,
+  onSecondaryAction,
+  tip,
 }: EmptyStateProps) {
   return (
     <div className="kf-card rounded-xl p-12 text-center">
@@ -28,14 +34,39 @@ export function EmptyState({
           {description}
         </p>
       )}
-      {actionLabel && onAction && (
-        <button
-          onClick={onAction}
-          className="kf-btn-primary px-4 py-2 rounded-xl text-sm font-medium inline-flex items-center gap-2"
+      <div className="flex items-center justify-center gap-3 flex-wrap">
+        {actionLabel && onAction && (
+          <button
+            onClick={onAction}
+            className="kf-btn-primary min-h-[44px] px-4 py-2 rounded-xl text-sm font-medium inline-flex items-center gap-2"
+          >
+            <ActionIcon className="w-4 h-4" />
+            {actionLabel}
+          </button>
+        )}
+        {secondaryActionLabel && onSecondaryAction && (
+          <button
+            onClick={onSecondaryAction}
+            className="kf-btn-secondary min-h-[44px] px-4 py-2 rounded-xl text-sm font-medium"
+          >
+            {secondaryActionLabel}
+          </button>
+        )}
+      </div>
+      {tip && (
+        <div
+          className="mt-6 mx-auto max-w-sm flex items-start gap-2 text-left px-4 py-3 kf-radius-md"
+          style={{
+            background: "hsl(var(--kf-warning) / 0.06)",
+            border: "1px solid hsl(var(--kf-warning) / 0.12)",
+          }}
         >
-          <ActionIcon className="w-4 h-4" />
-          {actionLabel}
-        </button>
+          <Lightbulb
+            className="w-3.5 h-3.5 mt-0.5 flex-shrink-0"
+            style={{ color: "hsl(var(--kf-warning))" }}
+          />
+          <p className="kf-text-caption text-muted-foreground">{tip}</p>
+        </div>
       )}
     </div>
   );
