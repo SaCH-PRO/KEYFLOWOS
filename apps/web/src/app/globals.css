@@ -511,3 +511,88 @@ html {
 .kf-dialog-enter {
   animation: dialog-enter 0.15s ease-out;
 }
+
+@layer utilities {
+  .kf-text-micro {
+    font-size: 0.625rem;
+    line-height: 1;
+  }
+
+  .kf-text-caption {
+    font-size: 0.75rem;
+    line-height: 1.25;
+  }
+
+  .kf-text-body {
+    font-size: 0.8125rem;
+    line-height: 1.5;
+  }
+
+  .kf-text-emphasis {
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+
+  .kf-text-heading {
+    font-size: 1rem;
+    line-height: 1.4;
+  }
+
+  .kf-text-title {
+    font-size: 1.125rem;
+    line-height: 1.35;
+  }
+
+  .kf-radius-sm {
+    border-radius: 6px;
+  }
+
+  .kf-radius-md {
+    border-radius: 8px;
+  }
+
+  .kf-radius-lg {
+    border-radius: 12px;
+  }
+}
+
+@layer components {
+  .kf-card-metric {
+    background: hsl(var(--kf-card));
+    border: 1px solid hsl(var(--kf-border));
+    border-radius: 12px;
+    padding: 1rem 1.25rem;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .kf-card-metric:hover {
+    border-color: hsl(var(--kf-border) / 1.5);
+    box-shadow: var(--kf-elevation-1);
+  }
+
+  .kf-card-action {
+    background: hsl(var(--kf-card));
+    border: 1px solid hsl(var(--kf-border));
+    border-radius: 12px;
+    padding: 1rem;
+    cursor: pointer;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .kf-card-action:hover {
+    border-color: hsl(var(--kf-accent1) / 0.2);
+    box-shadow: var(--kf-elevation-2);
+  }
+
+  .kf-card-list-row {
+    background: hsl(var(--kf-card));
+    border: 1px solid hsl(var(--kf-border));
+    border-radius: 8px;
+    padding: 0.625rem 0.875rem;
+    transition: border-color 0.12s ease;
+  }
+
+  .kf-card-list-row:hover {
+    border-color: hsl(var(--kf-accent1) / 0.15);
+  }
+}

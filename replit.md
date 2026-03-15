@@ -16,6 +16,10 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - Redesigned design system with a warm Caribbean color palette (orange `#F97316` primary, teal `#14B8A6` secondary), selective glassmorphism, clean elevation system, and PWA capabilities.
 - Compact UI elements, unified design language across modules, enhanced data tables with advanced features, and accessible design with ARIA compliance.
 - Product detail and form components emphasize inline editing, real-time previews, validation, and performance.
+- Standardized shared component library (`apps/web/src/components/ui/`): `StatusBadge`, `SideSheet`, `FilterBar`, `KfButton`, `DataTable`, `MetricCard`, `InspectorPanel`.
+- CSS type scale: `kf-text-micro` (10px), `kf-text-caption` (12px), `kf-text-body` (13px), `kf-text-emphasis` (14px), `kf-text-heading` (16px), `kf-text-title` (18px).
+- CSS radius: `kf-radius-sm` (6px), `kf-radius-md` (8px), `kf-radius-lg` (12px).
+- CSS card variants: `kf-card-metric`, `kf-card-action`, `kf-card-list-row`.
 
 **Technical Implementations & Features:**
 - **AI-Powered Automation:** Business Autopilot System for archetype inference, revenue model detection, task orchestration, and legal/compliance.
