@@ -140,7 +140,7 @@ export function ContactDetailTabs({
           {activatedTabs.current.has("journey") && (
             <div className={`space-y-3 pt-3 pb-6 ${activeTab === "journey" ? "" : "hidden"}`}>
               <TabErrorBoundary resetKey="journey">
-                <ContactJourneyTimeline contact={contact} events={events} invoices={invoices} bookings={bookings} />
+                <ContactJourneyTimeline contact={contact} events={events} notes={notes} tasks={tasks} invoices={invoices} bookings={bookings} />
               </TabErrorBoundary>
             </div>
           )}
