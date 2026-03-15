@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GmailService } from '../commerce/gmail.service';
 import {
@@ -37,14 +37,28 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   payment_receipt: true,
 };
 
+const QUEUE_DRAIN_INTERVAL_MS = 5 * 60 * 1000;
+const QUEUE_DRAIN_BATCH_SIZE = 20;
+const QUEUE_MAX_AGE_HOURS = 48;
+
 @Injectable()
-export class TransactionalEmailService {
+export class TransactionalEmailService implements OnModuleInit {
   private readonly logger = new Logger(TransactionalEmailService.name);
+  private drainInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(GmailService) private readonly gmail: GmailService,
   ) {}
+
+  onModuleInit() {
+    this.drainInterval = setInterval(() => {
+      this.drainQueue().catch((e) =>
+        this.logger.error(`Queue drain failed: ${(e as Error).message}`),
+      );
+    }, QUEUE_DRAIN_INTERVAL_MS);
+    this.logger.log('Notification queue drain scheduler started (5min interval)');
+  }
 
   private async getBusinessContext(businessId: string): Promise<TemplateContext & { id: string; preferences: NotificationPreferences } | null> {
     const business = await this.prisma.client.business.findUnique({
@@ -97,6 +111,7 @@ export class TransactionalEmailService {
     status: 'SENT' | 'FAILED' | 'QUEUED';
     messageId?: string;
     error?: string;
+    templateData?: Record<string, unknown>;
   }) {
     try {
       await this.prisma.client.customerNotificationLog.create({
@@ -110,6 +125,7 @@ export class TransactionalEmailService {
           status: params.status,
           messageId: params.messageId ?? null,
           error: params.error ?? null,
+          templateData: params.templateData ?? undefined,
           sentAt: params.status === 'SENT' ? new Date() : null,
         },
       });
@@ -150,6 +166,7 @@ export class TransactionalEmailService {
         subject: `Queued: ${params.type}`,
         status: 'QUEUED',
         messageId: params.dedupeKey,
+        templateData: params.templateData as Record<string, unknown>,
       });
       return { status: 'QUEUED' };
     }
@@ -315,5 +332,65 @@ export class TransactionalEmailService {
       orderBy: { createdAt: 'desc' },
       take: opts?.limit ?? 50,
     });
+  }
+
+  async drainQueue(): Promise<number> {
+    const cutoff = new Date(Date.now() - QUEUE_MAX_AGE_HOURS * 60 * 60 * 1000);
+
+    const queued = await this.prisma.client.customerNotificationLog.findMany({
+      where: {
+        status: 'QUEUED',
+        createdAt: { gte: cutoff },
+        templateData: { not: null },
+      },
+      orderBy: { createdAt: 'asc' },
+      take: QUEUE_DRAIN_BATCH_SIZE,
+    });
+
+    if (queued.length === 0) return 0;
+
+    let sent = 0;
+    for (const entry of queued) {
+      const gmailStatus = await this.gmail.getGmailStatus(entry.businessId);
+      if (!gmailStatus.connected) continue;
+
+      const notifType = entry.type as NotificationType;
+      const data = entry.templateData as Record<string, unknown>;
+      if (!data) continue;
+
+      try {
+        const result = await this.send({
+          businessId: entry.businessId,
+          type: notifType,
+          recipientEmail: entry.recipientEmail,
+          recipientName: entry.recipientName ?? 'Customer',
+          contactId: entry.contactId ?? undefined,
+          templateData: data,
+        });
+
+        if (result.status === 'SENT') {
+          await this.prisma.client.customerNotificationLog.update({
+            where: { id: entry.id },
+            data: { status: 'DRAINED', sentAt: new Date() },
+          });
+          sent++;
+        }
+      } catch (err) {
+        this.logger.error(`Queue drain failed for entry ${entry.id}: ${(err as Error).message}`);
+      }
+    }
+
+    await this.prisma.client.customerNotificationLog.updateMany({
+      where: {
+        status: 'QUEUED',
+        createdAt: { lt: cutoff },
+      },
+      data: { status: 'EXPIRED', error: 'Queued notification expired after 48 hours' },
+    });
+
+    if (sent > 0) {
+      this.logger.log(`Queue drain: sent ${sent}/${queued.length} queued notifications`);
+    }
+    return sent;
   }
 }

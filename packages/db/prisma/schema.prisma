@@ -1001,11 +1001,13 @@ model CustomerNotificationLog {
   status         String   @default("QUEUED")
   messageId      String?  @map("message_id")
   error          String?
+  templateData   Json?    @map("template_data")
   sentAt         DateTime? @map("sent_at")
   createdAt      DateTime @default(now()) @map("created_at")
 
   @@index([businessId, createdAt])
   @@index([businessId, type])
+  @@index([businessId, status])
   @@map("customer_notification_logs")
 }
 

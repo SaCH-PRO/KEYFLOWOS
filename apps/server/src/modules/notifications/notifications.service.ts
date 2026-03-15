@@ -6,7 +6,7 @@ export class NotificationsService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   private get notifModel() {
-    return (this.prisma.client as any).notification;
+    return this.prisma.client.notification;
   }
 
   async create(input: {
@@ -22,7 +22,7 @@ export class NotificationsService {
         type: input.type,
         title: input.title,
         body: input.body,
-        data: input.data as any,
+        data: input.data ?? undefined,
       },
     });
   }

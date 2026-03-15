@@ -39,7 +39,7 @@ export class AutomationExecutorService {
 
     for (const playbook of playbooks) {
       try {
-        const actionData = playbook.actionData as any;
+        const actionData = playbook.actionData;
         if (!actionData) continue;
 
         const actions = Array.isArray(actionData) ? actionData : [actionData];

@@ -50,20 +50,20 @@ export class FlowListener implements OnModuleInit {
     body?: string;
     data?: Record<string, unknown>;
   }) {
-    return (this.prisma.client as any).notification.create({
+    return this.prisma.client.notification.create({
       data: {
         businessId: input.businessId,
         type: input.type,
         title: input.title,
         body: input.body,
-        data: input.data as any,
+        data: input.data ?? undefined,
       },
     });
   }
 
   @OnEvent('invoice.paid')
   async handleInvoicePaid(payload: InvoicePaidPayload) {
-    this.logger.debug(`Flow observed invoice.paid`, payload as any);
+    this.logger.debug(`Flow observed invoice.paid for business=${payload.businessId}`);
 
     if (payload.invoice.bookingId) {
       await this.bookingsService.confirmBooking(payload.invoice.bookingId);
@@ -84,7 +84,7 @@ export class FlowListener implements OnModuleInit {
       businessId: payload.businessId,
       type: 'invoice.paid',
       title: 'Invoice Paid',
-      body: `Invoice ${(payload.invoice as any).invoiceNumber ?? payload.invoice.id.slice(-6).toUpperCase()} has been paid.`,
+      body: `Invoice ${payload.invoice.invoiceNumber ?? payload.invoice.id.slice(-6).toUpperCase()} has been paid.`,
       data: { invoiceId: payload.invoice.id, total: payload.invoice.total },
     }).catch((e) => this.logger.error('Failed to create notification', e));
   }
@@ -118,7 +118,7 @@ export class FlowListener implements OnModuleInit {
 
   @OnEvent('booking.confirmed')
   async handleBookingConfirmed(payload: BookingConfirmedPayload) {
-    this.logger.debug(`Flow observed booking.confirmed`, payload as any);
+    this.logger.debug(`Flow observed booking.confirmed for business=${payload.businessId}`);
 
     await this.createNotification({
       businessId: payload.businessId,
@@ -131,20 +131,20 @@ export class FlowListener implements OnModuleInit {
 
   @OnEvent('invoice.overdue')
   async handleInvoiceOverdue(payload: InvoiceStatusPayload) {
-    this.logger.debug(`Flow observed invoice.overdue`, payload as any);
+    this.logger.debug(`Flow observed invoice.overdue for business=${payload.businessId}`);
 
     await this.createNotification({
       businessId: payload.businessId,
       type: 'invoice.overdue',
       title: 'Invoice Overdue',
-      body: `Invoice ${(payload.invoice as any).invoiceNumber ?? payload.invoice.id.slice(-6).toUpperCase()} is overdue.`,
+      body: `Invoice ${payload.invoice.invoiceNumber ?? payload.invoice.id.slice(-6).toUpperCase()} is overdue.`,
       data: { invoiceId: payload.invoice.id },
     }).catch((e) => this.logger.error('Failed to create notification', e));
   }
 
   @OnEvent('contact.created')
   async handleContactCreated(payload: ContactCreatedPayload) {
-    this.logger.debug(`Flow observed contact.created`, payload as any);
+    this.logger.debug(`Flow observed contact.created for business=${payload.businessId}`);
 
     const contactName = this.formatContactName(payload.contact);
 
@@ -163,7 +163,7 @@ export class FlowListener implements OnModuleInit {
       return;
     }
 
-    this.logger.debug(`Flow observed contact.updated (status change)`, payload as any);
+    this.logger.debug(`Flow observed contact.updated (status change) for business=${payload.businessId}`);
 
     const contactName = this.formatContactName(payload.contact);
 
@@ -178,7 +178,7 @@ export class FlowListener implements OnModuleInit {
 
   @OnEvent('contact.merged')
   async handleContactMerged(payload: ContactMergedPayload) {
-    this.logger.debug(`Flow observed contact.merged`, payload as any);
+    this.logger.debug(`Flow observed contact.merged for business=${payload.businessId}`);
 
     const keptName = this.formatContactName(payload.contact);
 
@@ -193,7 +193,7 @@ export class FlowListener implements OnModuleInit {
 
   @OnEvent('contact.deleted')
   async handleContactDeleted(payload: ContactDeletedPayload) {
-    this.logger.debug(`Flow observed contact.deleted`, payload as any);
+    this.logger.debug(`Flow observed contact.deleted for business=${payload.businessId}`);
 
     const contactName = this.formatContactName(payload.contact);
 
@@ -208,7 +208,7 @@ export class FlowListener implements OnModuleInit {
 
   @OnEvent('contact.imported')
   async handleContactImported(payload: ContactImportedPayload) {
-    this.logger.debug(`Flow observed contact.imported`, payload as any);
+    this.logger.debug(`Flow observed contact.imported for business=${payload.businessId}`);
 
     await this.createNotification({
       businessId: payload.businessId,
@@ -221,7 +221,7 @@ export class FlowListener implements OnModuleInit {
 
   @OnEvent('sequence.step_due')
   async handleSequenceStepDue(payload: SequenceStepDuePayload) {
-    this.logger.debug(`Flow observed sequence.step_due`, payload as any);
+    this.logger.debug(`Flow observed sequence.step_due for business=${payload.businessId}`);
 
     await this.createNotification({
       businessId: payload.businessId,
@@ -239,7 +239,7 @@ export class FlowListener implements OnModuleInit {
 
   @OnEvent('sequence.step_failed')
   async handleSequenceStepFailed(payload: SequenceStepFailedPayload) {
-    this.logger.error(`Flow observed sequence.step_failed`, payload as any);
+    this.logger.error(`Flow observed sequence.step_failed for business=${payload.businessId}`);
 
     await this.createNotification({
       businessId: payload.businessId,
@@ -282,7 +282,7 @@ export class FlowListener implements OnModuleInit {
 
   @OnEvent('expense.created')
   async handleExpenseCreated(payload: ExpenseCreatedPayload) {
-    this.logger.debug(`Flow observed expense.created`, payload as any);
+    this.logger.debug(`Flow observed expense.created for business=${payload.businessId}`);
 
     try {
       const alert = await this.financialCopilot.checkExpenseAnomaly(
@@ -348,7 +348,7 @@ export class FlowListener implements OnModuleInit {
     const staff = booking.staffId
       ? await this.prisma.client.staffMember.findUnique({ where: { id: booking.staffId } }).catch(() => null)
       : null;
-    await this.sendCustomerNotification(payload.businessId, 'booking_confirmed', payload.contact as any, {
+    await this.sendCustomerNotification(payload.businessId, 'booking_confirmed', payload.contact, {
       serviceName: service?.name ?? 'Appointment',
       startTime: booking.startTime,
       endTime: booking.endTime,
@@ -361,7 +361,7 @@ export class FlowListener implements OnModuleInit {
   async handleBookingCancelledCustomerNotif(payload: BookingCancelledPayload) {
     const booking = payload.booking;
     const service = await this.prisma.client.service.findUnique({ where: { id: booking.serviceId } }).catch(() => null);
-    await this.sendCustomerNotification(payload.businessId, 'booking_cancelled', payload.contact as any, {
+    await this.sendCustomerNotification(payload.businessId, 'booking_cancelled', payload.contact, {
       serviceName: service?.name ?? 'Appointment',
       startTime: booking.startTime,
     });
@@ -374,7 +374,7 @@ export class FlowListener implements OnModuleInit {
     const staff = booking.staffId
       ? await this.prisma.client.staffMember.findUnique({ where: { id: booking.staffId } }).catch(() => null)
       : null;
-    await this.sendCustomerNotification(payload.businessId, 'booking_rescheduled', payload.contact as any, {
+    await this.sendCustomerNotification(payload.businessId, 'booking_rescheduled', payload.contact, {
       serviceName: service?.name ?? 'Appointment',
       newStartTime: booking.startTime,
       newEndTime: booking.endTime,
@@ -386,20 +386,20 @@ export class FlowListener implements OnModuleInit {
   @OnEvent('invoice.sent')
   async handleInvoiceSentCustomerNotif(payload: InvoiceStatusPayload) {
     const inv = payload.invoice;
-    await this.sendCustomerNotification(payload.businessId, 'invoice_sent', inv.contact as any, {
-      invoiceNumber: (inv as any).invoiceNumber ?? inv.id.slice(-6).toUpperCase(),
+    await this.sendCustomerNotification(payload.businessId, 'invoice_sent', inv.contact, {
+      invoiceNumber: inv.invoiceNumber ?? inv.id.slice(-6).toUpperCase(),
       total: inv.total,
       currency: inv.currency,
-      dueDate: (inv as any).dueDate,
-      items: (inv as any).items,
+      dueDate: inv.dueDate,
+      items: inv.items,
     });
   }
 
   @OnEvent('invoice.paid')
   async handleInvoicePaidCustomerNotif(payload: InvoicePaidPayload) {
     const inv = payload.invoice;
-    await this.sendCustomerNotification(payload.businessId, 'payment_receipt', inv.contact as any, {
-      invoiceNumber: (inv as any).invoiceNumber ?? inv.id.slice(-6).toUpperCase(),
+    await this.sendCustomerNotification(payload.businessId, 'payment_receipt', inv.contact, {
+      invoiceNumber: inv.invoiceNumber ?? inv.id.slice(-6).toUpperCase(),
       total: inv.total,
       currency: inv.currency,
       paidAt: inv.paidAt ?? new Date(),
@@ -437,7 +437,7 @@ export class FlowListener implements OnModuleInit {
         });
         if (alreadySent) continue;
 
-        await this.sendCustomerNotification(booking.businessId, 'booking_reminder', booking.contact as any, {
+        await this.sendCustomerNotification(booking.businessId, 'booking_reminder', booking.contact, {
           serviceName: booking.service?.name ?? 'Appointment',
           startTime: booking.startTime,
           endTime: booking.endTime,
