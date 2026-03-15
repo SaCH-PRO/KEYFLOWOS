@@ -49,7 +49,7 @@ export function WorkflowConfig({ businessId }: { businessId: string | null }) {
     setUpdating(null);
   }
 
-  async function handleConfigUpdate(wf: CrossModuleWorkflow, newConfig: Record<string, any>) {
+  async function handleConfigUpdate(wf: CrossModuleWorkflow, newConfig: Record<string, string | number | boolean | null>) {
     setUpdating(wf.key);
     const { error } = await updateCrossModuleWorkflow({
       businessId: businessId ?? undefined,
