@@ -10,6 +10,7 @@ import {
   Search,
   Sparkles,
   Share2,
+  Link2,
 } from "lucide-react";
 import {
   Booking,
@@ -429,6 +430,7 @@ export default function BookingsPage() {
               }}
               title={calendarConnected ? `Calendar connected: ${calendarEmail ?? ""}` : "Connect calendar in Settings"}
             >
+              <Link2 className="w-3 h-3" />
               {calendarConnected && <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-success))" }} />}
             </a>
             <button

@@ -52,14 +52,16 @@ export function ShareLinkModal({
       : url;
     window.open(
       `https://wa.me/?text=${encodeURIComponent(text)}`,
-      "_blank"
+      "_blank",
+      "noopener,noreferrer"
     );
   }, [url, description]);
 
   const shareFacebook = useCallback(() => {
     window.open(
       `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`,
-      "_blank"
+      "_blank",
+      "noopener,noreferrer"
     );
   }, [url]);
 
@@ -67,7 +69,8 @@ export function ShareLinkModal({
     const text = description || title;
     window.open(
       `https://twitter.com/intent/tweet?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`,
-      "_blank"
+      "_blank",
+      "noopener,noreferrer"
     );
   }, [url, title, description]);
 
