@@ -33,12 +33,12 @@ async function generateBookingsSuggestions(context: ModuleContext): Promise<AiSu
       });
     }
 
-    if (((stats as any).cancelledCount ?? 0) > 3) {
+    if ((stats.totalBookings ?? 0) > 10 && (stats.pendingCount ?? 0) > 0) {
       suggestions.push({
-        id: `cancellations-${Date.now()}`,
+        id: `noshow-risk-${Date.now()}`,
         type: "insight",
-        title: "Recent Cancellations",
-        description: `${(stats as any).cancelledCount ?? 0} cancellations detected. Use AI No-Show Predictor to identify at-risk bookings.`,
+        title: "No-Show Risk Analysis",
+        description: "Use AI No-Show Predictor to identify at-risk bookings and reduce cancellations.",
         priority: "medium",
         actionLabel: "Predict no-shows",
         actionKey: "tool:no-show-predictor",

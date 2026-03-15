@@ -173,8 +173,8 @@ export default function BookingsPage() {
       setContacts(contactsRes.data?.contacts ?? []);
       setStats(statsRes.data ?? null);
       setScheduleHealth(healthRes.data ?? null);
-      setCalendarConnected((calendarRes.data as any)?.connected ?? false);
-      setCalendarEmail((calendarRes.data as any)?.email ?? null);
+      setCalendarConnected(calendarRes.data?.connected ?? false);
+      setCalendarEmail(calendarRes.data?.email ?? null);
       if (bookingsRes.error || servicesRes.error || staffRes.error) {
         setError("Some data could not be loaded");
       }
@@ -396,12 +396,15 @@ export default function BookingsPage() {
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className={`kf-card rounded-xl px-4 py-2.5 text-sm flex items-center justify-between ${
-              banner.type === "success" ? "border-emerald-500/30 text-emerald-300" :
-              banner.type === "error" ? "border-red-500/30 text-red-300" :
-              "text-foreground"
-            }`}
-            style={{ borderColor: banner.type === "success" ? undefined : banner.type === "error" ? undefined : "hsl(var(--kf-accent1) / 0.3)" }}
+            className="kf-card rounded-xl px-4 py-2.5 text-sm flex items-center justify-between"
+            style={{
+              borderColor: banner.type === "success" ? "hsl(var(--kf-success) / 0.3)"
+                : banner.type === "error" ? "hsl(var(--kf-error) / 0.3)"
+                : "hsl(var(--kf-accent1) / 0.3)",
+              color: banner.type === "success" ? "hsl(var(--kf-success))"
+                : banner.type === "error" ? "hsl(var(--kf-error))"
+                : undefined,
+            }}
           >
             <span>{banner.text}</span>
             <button onClick={() => setBanner(null)} className="opacity-60 hover:opacity-100 ml-2"><X className="w-4 h-4" /></button>
@@ -431,6 +434,8 @@ export default function BookingsPage() {
               <TodayStrip
                 bookings={bookings}
                 stats={stats}
+                scheduleHealth={scheduleHealth}
+                staff={staff}
                 onSelectBooking={setSelectedBooking}
                 onConfirmBooking={(id) => void handleStatusChange(id, "CONFIRMED")}
               />

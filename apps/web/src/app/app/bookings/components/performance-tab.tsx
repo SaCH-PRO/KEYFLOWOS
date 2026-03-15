@@ -373,7 +373,7 @@ export default function PerformanceTab({
                     <BarChart data={scheduleHealth.weeklyUtilization} barSize={24}>
                       <XAxis dataKey="dayOfWeek" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} tickFormatter={(v) => v.slice(0, 3)} />
                       <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
-                      <Tooltip {...RECHARTS_TOOLTIP_STYLE} formatter={(value: any) => [`${value}%`, "Utilization"]} />
+                      <Tooltip {...RECHARTS_TOOLTIP_STYLE} formatter={((value: number | string) => [`${value}%`, "Utilization"]) as never} />
                       <Bar dataKey="utilizationRate" radius={[6, 6, 0, 0]}>
                         {scheduleHealth.weeklyUtilization.map((entry, i) => (
                           <Cell key={i} fill={entry.utilizationRate >= 70 ? "hsl(var(--kf-success))" : entry.utilizationRate >= 40 ? "hsl(var(--kf-warning))" : entry.totalSlots === 0 ? "hsl(var(--border)/0.3)" : "hsl(var(--kf-error))"} />
