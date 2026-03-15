@@ -240,41 +240,51 @@ export class TransactionalEmailService {
       return { status: 'FAILED' };
     }
 
-    try {
-      const result = await this.gmail.sendEmail({
-        businessId: params.businessId,
-        to: params.recipientEmail,
-        subject: rendered.subject,
-        htmlBody: rendered.html,
-      });
+    const MAX_RETRIES = 3;
+    let lastError: Error | null = null;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const result = await this.gmail.sendEmail({
+          businessId: params.businessId,
+          to: params.recipientEmail,
+          subject: rendered.subject,
+          htmlBody: rendered.html,
+        });
 
-      await this.logNotification({
-        businessId: params.businessId,
-        contactId: params.contactId,
-        type: params.type,
-        recipientEmail: params.recipientEmail,
-        recipientName: params.recipientName,
-        subject: rendered.subject,
-        status: 'SENT',
-        messageId: params.dedupeKey ?? result.messageId,
-      });
+        await this.logNotification({
+          businessId: params.businessId,
+          contactId: params.contactId,
+          type: params.type,
+          recipientEmail: params.recipientEmail,
+          recipientName: params.recipientName,
+          subject: rendered.subject,
+          status: 'SENT',
+          messageId: params.dedupeKey ?? result.messageId,
+        });
 
-      this.logger.log(`Sent ${params.type} to ${params.recipientEmail} for business ${params.businessId}`);
-      return { status: 'SENT', messageId: result.messageId };
-    } catch (err) {
-      this.logger.error(`Failed to send ${params.type} to ${params.recipientEmail}: ${(err as Error).message}`);
-      await this.logNotification({
-        businessId: params.businessId,
-        contactId: params.contactId,
-        type: params.type,
-        recipientEmail: params.recipientEmail,
-        recipientName: params.recipientName,
-        subject: rendered.subject,
-        status: 'FAILED',
-        error: (err as Error).message,
-      });
-      return { status: 'FAILED' };
+        this.logger.log(`Sent ${params.type} to ${params.recipientEmail} for business ${params.businessId}`);
+        return { status: 'SENT', messageId: result.messageId };
+      } catch (err) {
+        lastError = err as Error;
+        this.logger.warn(`Attempt ${attempt}/${MAX_RETRIES} failed for ${params.type} to ${params.recipientEmail}: ${lastError.message}`);
+        if (attempt < MAX_RETRIES) {
+          await new Promise((r) => setTimeout(r, attempt * 1000));
+        }
+      }
     }
+
+    this.logger.error(`All ${MAX_RETRIES} attempts failed for ${params.type} to ${params.recipientEmail}: ${lastError?.message}`);
+    await this.logNotification({
+      businessId: params.businessId,
+      contactId: params.contactId,
+      type: params.type,
+      recipientEmail: params.recipientEmail,
+      recipientName: params.recipientName,
+      subject: rendered.subject,
+      status: 'FAILED',
+      error: lastError?.message ?? 'Unknown error after retries',
+    });
+    return { status: 'FAILED' };
   }
 
   async getPreferences(businessId: string): Promise<NotificationPreferences> {
