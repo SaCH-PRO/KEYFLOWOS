@@ -8,7 +8,6 @@ import {
   BarChart3,
   PenSquare,
   Users,
-  Search,
   CalendarDays,
 } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
@@ -68,7 +67,6 @@ export default function MarketingPage() {
 
   const [activeTab, setActiveTab] = useState<MarketingTab>("create");
   const [createMode, setCreateMode] = useState<CreateMode>("email");
-  const [showSearch, setShowSearch] = useState(false);
   const initialTabSet = useRef(false);
   const directionRef = useRef<number>(0);
 
@@ -76,10 +74,16 @@ export default function MarketingPage() {
     if (initialTabSet.current) return;
     const tabParam = searchParams.get("tab");
     if (tabParam) {
-      const mapped = LEGACY_TAB_MAP[tabParam] || tabParam;
-      if (TAB_KEYS.includes(mapped as MarketingTab)) {
-        setActiveTab(mapped as MarketingTab);
+      if (tabParam === "social") {
+        setActiveTab("create");
+        setCreateMode("social");
         initialTabSet.current = true;
+      } else {
+        const mapped = LEGACY_TAB_MAP[tabParam] || tabParam;
+        if (TAB_KEYS.includes(mapped as MarketingTab)) {
+          setActiveTab(mapped as MarketingTab);
+          initialTabSet.current = true;
+        }
       }
     }
   }, [searchParams]);
@@ -196,9 +200,6 @@ export default function MarketingPage() {
         }
         rightSlot={
           <div className="flex items-center gap-1.5">
-            <button onClick={() => setShowSearch(!showSearch)} className="p-2 rounded-lg hover:bg-muted/50 transition-colors" aria-label="Search marketing">
-              <Search className="w-4 h-4 text-muted-foreground" />
-            </button>
             <AiHubTrigger ai={marketingAi} moduleName="Marketing" />
           </div>
         }
