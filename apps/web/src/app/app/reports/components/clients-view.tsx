@@ -63,19 +63,18 @@ export function ClientsView({ report }: { report: GeneratedReport }) {
         </Card>
       </div>
 
-      {m.revenue.topClients.length > 0 && (
-        <Card className="p-4 bg-slate-950/60 backdrop-blur border-border/60">
-          <h3 className="text-sm font-semibold mb-3">Highest-Value Clients</h3>
-          <DataTable
-            headers={["Client", "Revenue", "Share"]}
-            rows={m.revenue.topClients.map(c => [
-              c.name,
-              formatCurrency(c.total, m.currency),
-              <ProgressBar key={c.name} value={c.total} max={m.revenue.topClients[0]?.total || 1} color="bg-blue-400" />,
-            ])}
-          />
-        </Card>
-      )}
+      <Card className="p-4 bg-slate-950/60 backdrop-blur border-border/60">
+        <h3 className="text-sm font-semibold mb-3">Highest-Value Clients</h3>
+        <DataTable
+          headers={["Client", "Revenue", "Share"]}
+          rows={m.revenue.topClients.map(c => [
+            c.name,
+            formatCurrency(c.total, m.currency),
+            <ProgressBar key={c.name} value={c.total} max={m.revenue.topClients[0]?.total || 1} color="bg-blue-400" />,
+          ])}
+          emptyText="No client revenue data for this period — try a wider date range"
+        />
+      </Card>
     </div>
   );
 }

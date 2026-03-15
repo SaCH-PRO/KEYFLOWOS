@@ -179,6 +179,9 @@ export default function CatalogCapacityTab({
             icon={Briefcase}
             title="No services yet"
             description={loading ? "Loading services..." : "Add services from your Store to start accepting bookings."}
+            actionLabel={loading ? undefined : "Go to Store"}
+            actionIcon={Briefcase}
+            onAction={loading ? undefined : () => { window.location.href = "/app/store?tab=products"; }}
             tip={loading ? undefined : "Services define what your clients can book — set pricing, duration, and availability."}
           />
         ) : (
