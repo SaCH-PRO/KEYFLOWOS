@@ -146,6 +146,13 @@ export class CampaignSentPayload {
   recipientCount!: number;
 }
 
+export class CampaignBriefingGeneratedPayload {
+  briefingId!: string;
+  campaignId!: string;
+  businessId!: string;
+  performanceVsAvg!: string;
+}
+
 export class LeadFormCreatedPayload {
   form!: Record<string, any>;
   businessId!: string;
@@ -184,6 +191,7 @@ export interface KeyFlowEventMap {
   'quote.converted': QuoteConvertedPayload;
   'campaign.created': CampaignCreatedPayload;
   'campaign.sent': CampaignSentPayload;
+  'campaign.briefing_generated': CampaignBriefingGeneratedPayload;
   'lead_form.created': LeadFormCreatedPayload;
   'lead_form.submitted': LeadFormSubmittedPayload;
 }

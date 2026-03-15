@@ -3439,6 +3439,110 @@ export async function fetchMarketingStats(businessId: string): Promise<ApiResult
 }
 
 // ---
+// CAMPAIGN INTELLIGENCE
+// ---
+export interface CampaignBriefing {
+  id: string;
+  businessId: string;
+  campaignId: string;
+  deliveryRate: number | null;
+  openRate: number | null;
+  clickRate: number | null;
+  bounceRate: number | null;
+  historicalAvgOpenRate: number | null;
+  historicalAvgClickRate: number | null;
+  performanceVsAvg: string | null;
+  insights: string[] | null;
+  recommendations: string[] | null;
+  audienceHealth: Record<string, unknown> | null;
+  sendTimeAnalysis: Record<string, unknown> | null;
+  aiBriefing: string | null;
+  createdAt: string;
+  campaign?: {
+    id: string;
+    name: string;
+    subject: string;
+    sentAt: string | null;
+    status: string;
+    totalRecipients: number;
+  };
+}
+
+export interface PreSendWarning {
+  severity: 'error' | 'warning' | 'info';
+  category: string;
+  message: string;
+  detail?: string;
+  count?: number;
+}
+
+export interface PreSendValidationResult {
+  valid: boolean;
+  warnings: PreSendWarning[];
+  audienceSummary: {
+    totalTargeted: number;
+    withEmail: number;
+    withoutEmail: number;
+    suppressed: number;
+    inactive: number;
+    healthy: number;
+  };
+}
+
+export interface ContactHealthScore {
+  contactId: string;
+  contactName: string;
+  email: string | null;
+  category: 'healthy' | 'at-risk' | 'disengaged';
+  campaignsSent: number;
+  lastSentAt: string | null;
+  engagementScore: number;
+  recommendedAction: string;
+}
+
+export interface AudienceHealthSummary {
+  totalContacts: number;
+  healthy: number;
+  atRisk: number;
+  disengaged: number;
+  healthPercentage: number;
+  recommendations: string[];
+  contacts: ContactHealthScore[];
+}
+
+export interface SendTimeRecommendation {
+  dayOfWeek: string;
+  dayIndex: number;
+  timeSlot: string;
+  score: number;
+  campaignCount: number;
+  avgOpenRate: number;
+  recommendation: string;
+  segment?: string;
+}
+
+export interface SegmentSendTimeResult {
+  overall: SendTimeRecommendation[];
+  bySegment: Record<string, SendTimeRecommendation[]>;
+}
+
+export async function fetchCampaignBriefings(businessId: string): Promise<ApiResult<CampaignBriefing[]>> {
+  return apiGetSimple<CampaignBriefing[]>(`/businesses/${encodeURIComponent(businessId)}/campaign-intelligence/briefings`);
+}
+export async function fetchCampaignBriefing(businessId: string, campaignId: string): Promise<ApiResult<CampaignBriefing>> {
+  return apiGetSimple<CampaignBriefing>(`/businesses/${encodeURIComponent(businessId)}/campaign-intelligence/briefing/${encodeURIComponent(campaignId)}`);
+}
+export async function runPreSendValidation(businessId: string, campaignId: string): Promise<ApiResult<PreSendValidationResult>> {
+  return apiPost<PreSendValidationResult>({ path: `/businesses/${encodeURIComponent(businessId)}/campaign-intelligence/pre-send-validation/${encodeURIComponent(campaignId)}`, body: {} });
+}
+export async function fetchAudienceHealth(businessId: string): Promise<ApiResult<AudienceHealthSummary>> {
+  return apiGetSimple<AudienceHealthSummary>(`/businesses/${encodeURIComponent(businessId)}/campaign-intelligence/audience-health`);
+}
+export async function fetchSendTimeRecommendations(businessId: string): Promise<ApiResult<SegmentSendTimeResult>> {
+  return apiGetSimple<SegmentSendTimeResult>(`/businesses/${encodeURIComponent(businessId)}/campaign-intelligence/send-time-recommendations`);
+}
+
+// ---
 // LEAD FORMS
 // ---
 export interface LeadForm {
