@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS "customer_notification_logs" (
     "status" TEXT NOT NULL DEFAULT 'QUEUED',
     "message_id" TEXT,
     "error" TEXT,
+    "template_data" JSONB,
     "sent_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -24,6 +25,9 @@ CREATE INDEX IF NOT EXISTS "customer_notification_logs_business_id_created_at_id
 
 -- CreateIndex
 CREATE INDEX IF NOT EXISTS "customer_notification_logs_business_id_type_idx" ON "customer_notification_logs"("business_id", "type");
+
+-- CreateIndex
+CREATE INDEX IF NOT EXISTS "customer_notification_logs_business_id_status_idx" ON "customer_notification_logs"("business_id", "status");
 
 -- AddForeignKey
 ALTER TABLE "customer_notification_logs" ADD CONSTRAINT "customer_notification_logs_business_id_fkey" FOREIGN KEY ("business_id") REFERENCES "businesses"("id") ON DELETE CASCADE ON UPDATE CASCADE;
