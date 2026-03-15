@@ -14,6 +14,7 @@ import {
   MessageCircle,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
+import { CardListSkeleton } from "@/components/ui/skeleton";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 import type { Booking, StatusFilter } from "./bookings-types";
 import { STATUS_STYLE, formatTime, formatDate, contactName } from "./bookings-types";
@@ -115,18 +116,7 @@ export default function BookingList({
 
       <div className="space-y-3">
         {loading && filteredBookings.length === 0 ? (
-          <div className="space-y-3">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="kf-card rounded-2xl p-4 flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.3)" }} />
-                <div className="flex-1 space-y-2">
-                  <div className="h-4 w-2/5 rounded animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.3)" }} />
-                  <div className="h-3 w-3/5 rounded animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.2)" }} />
-                </div>
-                <div className="h-6 w-16 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.2)" }} />
-              </div>
-            ))}
-          </div>
+          <CardListSkeleton rows={4} />
         ) : filteredBookings.length === 0 ? (
           <EmptyState
             icon={Calendar}

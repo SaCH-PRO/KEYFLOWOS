@@ -45,7 +45,7 @@ export function PnlView({ report }: { report: GeneratedReport }) {
               e.count.toString(),
               formatCurrency(e.total, m.currency),
             ])}
-            emptyText="No expenses recorded"
+            emptyText="No expenses recorded for this period — try a wider date range"
           />
         </Card>
       </div>

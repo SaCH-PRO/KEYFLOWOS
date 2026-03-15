@@ -7,6 +7,7 @@ import {
   User,
   Mail,
 } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import type { StaffMember } from "./bookings-types";
 
 interface StaffPanelProps {
@@ -63,13 +64,12 @@ export default function StaffPanel({
       </div>
 
       {staff.length === 0 ? (
-        <div className="kf-card p-8 text-center">
-          <User className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
-          <p className="text-lg font-medium mb-1">No staff members</p>
-          <p className="text-muted-foreground">
-            {loading ? "Loading staff..." : "Add team members to assign them to bookings."}
-          </p>
-        </div>
+        <EmptyState
+          icon={User}
+          title="No staff members"
+          description={loading ? "Loading staff..." : "Add team members to assign them to bookings and manage availability."}
+          tip={loading ? undefined : "Staff members can be assigned to specific services and have their own schedules."}
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {staff.map((s, index) => (

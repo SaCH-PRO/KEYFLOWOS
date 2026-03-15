@@ -12,6 +12,7 @@ import {
   Link2,
   CalendarDays,
 } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import type { Service, StaffMember, Booking } from "./bookings-types";
 import { formatAmount } from "../../commerce/utils/commerce-utils";
 
@@ -174,13 +175,12 @@ export default function CatalogCapacityTab({
         </div>
 
         {services.length === 0 ? (
-          <div className="kf-card p-8 text-center">
-            <Briefcase className="w-10 h-10 mx-auto text-muted-foreground mb-3" />
-            <p className="text-sm font-medium mb-1">No services yet</p>
-            <p className="text-xs text-muted-foreground">
-              {loading ? "Loading..." : "Add services from your Store to start booking."}
-            </p>
-          </div>
+          <EmptyState
+            icon={Briefcase}
+            title="No services yet"
+            description={loading ? "Loading services..." : "Add services from your Store to start accepting bookings."}
+            tip={loading ? undefined : "Services define what your clients can book — set pricing, duration, and availability."}
+          />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {services.map((service) => {
