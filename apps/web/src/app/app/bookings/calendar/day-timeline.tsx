@@ -6,6 +6,10 @@ import {
   User,
   Briefcase,
   CalendarDays,
+  CheckCircle2,
+  LogIn,
+  FileText,
+  RotateCcw,
 } from "lucide-react";
 import type { Booking } from "../components/bookings-types";
 import { formatAmount } from "../../commerce/utils/commerce-utils";
@@ -33,13 +37,22 @@ interface DayTimelineProps {
   currentDate: Date;
   onSelectBooking: (booking: Booking) => void;
   onSlotClick?: (date: string, time: string) => void;
+  onSmartAction?: (booking: Booking, action: string) => void;
 }
+
+const SMART_CTA: Record<string, { label: string; icon: typeof CheckCircle2; action: string; style: string }> = {
+  PENDING: { label: "Confirm", icon: CheckCircle2, action: "CONFIRMED", style: "hsl(var(--kf-success))" },
+  CONFIRMED: { label: "Check in", icon: LogIn, action: "COMPLETED", style: "hsl(var(--kf-accent2))" },
+  COMPLETED: { label: "Invoice", icon: FileText, action: "INVOICE", style: "hsl(var(--kf-accent1))" },
+  CANCELLED: { label: "Rebook", icon: RotateCcw, action: "REBOOK", style: "hsl(var(--kf-info))" },
+};
 
 export default function DayTimeline({
   bookings,
   currentDate,
   onSelectBooking,
   onSlotClick,
+  onSmartAction,
 }: DayTimelineProps) {
   const dayBookings = useMemo(() => {
     const dateKey = currentDate.toISOString().split("T")[0];
@@ -177,21 +190,45 @@ export default function DayTimeline({
                               )}
                             </div>
                           </div>
-                          {b.service && (
-                            <div className="text-right flex-shrink-0">
-                              <div
-                                className="text-sm font-semibold"
-                                style={{
-                                  color: "hsl(var(--kf-accent1))",
-                                }}
-                              >
-                                {formatAmount(b.service.price)}
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {b.service && (
+                              <div className="text-right">
+                                <div
+                                  className="text-sm font-semibold"
+                                  style={{
+                                    color: "hsl(var(--kf-accent1))",
+                                  }}
+                                >
+                                  {formatAmount(b.service.price)}
+                                </div>
+                                <div className="text-[10px] text-muted-foreground">
+                                  {b.service.duration}m
+                                </div>
                               </div>
-                              <div className="text-[10px] text-muted-foreground">
-                                {b.service.duration}m
-                              </div>
-                            </div>
-                          )}
+                            )}
+                            {onSmartAction && SMART_CTA[b.status] && (() => {
+                              const cta = SMART_CTA[b.status];
+                              const CtaIcon = cta.icon;
+                              return (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onSmartAction(b, cta.action);
+                                  }}
+                                  className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium flex items-center gap-1 transition-colors shrink-0"
+                                  style={{
+                                    background: `${cta.style.replace(")", " / 0.1)")} `,
+                                    color: cta.style,
+                                    borderWidth: 1,
+                                    borderColor: `${cta.style.replace(")", " / 0.25)")}`,
+                                  }}
+                                >
+                                  <CtaIcon className="w-3 h-3" />
+                                  {cta.label}
+                                </button>
+                              );
+                            })()}
+                          </div>
                         </div>
                       </button>
                     );

@@ -33,19 +33,19 @@ async function generateBookingsSuggestions(context: ModuleContext): Promise<AiSu
       });
     }
 
-    if ((stats.cancelledCount ?? 0) > 3) {
+    if (((stats as any).cancelledCount ?? 0) > 3) {
       suggestions.push({
         id: `cancellations-${Date.now()}`,
         type: "insight",
         title: "Recent Cancellations",
-        description: `${stats.cancelledCount} cancellations detected. Use AI No-Show Predictor to identify at-risk bookings.`,
+        description: `${(stats as any).cancelledCount ?? 0} cancellations detected. Use AI No-Show Predictor to identify at-risk bookings.`,
         priority: "medium",
         actionLabel: "Predict no-shows",
         actionKey: "tool:no-show-predictor",
       });
     }
 
-    if (activeView === "calendar") {
+    if (activeView === "schedule") {
       suggestions.push({
         id: `optimize-schedule-${Date.now()}`,
         type: "tip",
@@ -57,7 +57,7 @@ async function generateBookingsSuggestions(context: ModuleContext): Promise<AiSu
       });
     }
 
-    if (activeView === "insights") {
+    if (activeView === "performance") {
       suggestions.push({
         id: `revenue-analysis-${Date.now()}`,
         type: "insight",
@@ -69,7 +69,7 @@ async function generateBookingsSuggestions(context: ModuleContext): Promise<AiSu
       });
     }
 
-    if (activeView === "services") {
+    if (activeView === "catalog") {
       suggestions.push({
         id: `pricing-review-${Date.now()}`,
         type: "tip",

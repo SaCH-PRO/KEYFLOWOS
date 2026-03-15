@@ -23,6 +23,7 @@ interface CalendarViewProps {
   bookings: Booking[];
   onSelectBooking: (booking: Booking) => void;
   onCreateBooking?: (prefill: { date: string; time?: string }) => void;
+  onSmartAction?: (booking: Booking, action: string) => void;
 }
 
 function isSameDay(a: Date, b: Date) {
@@ -43,6 +44,7 @@ export default function CalendarView({
   bookings,
   onSelectBooking,
   onCreateBooking,
+  onSmartAction,
 }: CalendarViewProps) {
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     if (typeof window !== "undefined" && window.innerWidth < 640) return "day";
@@ -265,6 +267,7 @@ export default function CalendarView({
               currentDate={currentDate}
               onSelectBooking={onSelectBooking}
               onSlotClick={handleSlotClick}
+              onSmartAction={onSmartAction}
             />
           )}
         </motion.div>
