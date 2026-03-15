@@ -9,8 +9,7 @@ interface EmptyStateProps {
   actionLabel?: string;
   actionIcon?: React.ElementType;
   onAction?: () => void;
-  secondaryActionLabel?: string;
-  onSecondaryAction?: () => void;
+  secondaryAction?: { label: string; onClick: () => void };
   tip?: string;
 }
 
@@ -21,8 +20,7 @@ export function EmptyState({
   actionLabel,
   actionIcon: ActionIcon = Plus,
   onAction,
-  secondaryActionLabel,
-  onSecondaryAction,
+  secondaryAction,
   tip,
 }: EmptyStateProps) {
   return (
@@ -44,12 +42,12 @@ export function EmptyState({
             {actionLabel}
           </button>
         )}
-        {secondaryActionLabel && onSecondaryAction && (
+        {secondaryAction && (
           <button
-            onClick={onSecondaryAction}
+            onClick={secondaryAction.onClick}
             className="kf-btn-secondary min-h-[44px] px-4 py-2 rounded-xl text-sm font-medium"
           >
-            {secondaryActionLabel}
+            {secondaryAction.label}
           </button>
         )}
       </div>
