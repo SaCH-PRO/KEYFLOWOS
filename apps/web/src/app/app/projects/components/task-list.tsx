@@ -24,6 +24,11 @@ export function TaskList({ tasks, projectId, onToggleTask, onDeleteTask, onAddTa
 
   return (
     <div className="mt-3 ml-6 space-y-1">
+      {tasks.length === 0 && (
+        <p className="text-xs text-muted-foreground py-2" style={{ color: "hsl(var(--kf-muted-foreground) / 0.6)" }}>
+          No tasks yet — add one below to start tracking progress.
+        </p>
+      )}
       {tasks.map((task) => (
         <div key={task.id} className="flex items-center gap-2 group py-1">
           <button
