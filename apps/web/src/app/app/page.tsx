@@ -50,7 +50,7 @@ export default function CommandPage() {
         </div>
       )}
 
-      <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 order-2 sm:order-1">
         <div>
           <h1 className="kf-text-title font-semibold tracking-tight">
             {d.greeting}
@@ -98,34 +98,38 @@ export default function CommandPage() {
         </div>
       </header>
 
-      <PriorityQueue
-        priorities={d.priorities}
-        tasks={d.tasks}
-        momentumRecs={d.momentumRecs}
-        nudges={d.nudges}
-        financialAlerts={d.financialAlerts}
-        completedToday={d.completedToday}
-        businessId={d.businessId}
-        onCompleteTask={d.handleCompleteTask}
-        onApproveTask={d.handleApproveTask}
-        onDenyTask={d.handleDenyTask}
-        onMomentumAction={d.handleMomentumAction}
-        onMomentumSnooze={d.handleMomentumSnooze}
-        onMomentumDismiss={d.handleMomentumDismiss}
-        onNudgeSnooze={d.handleNudgeSnooze}
-        onDismissTask={d.handleDismissTask}
-        onDismissAlert={d.handleDismissAlert}
-        onDismissPriority={d.handleDismissPriority}
-        completingTask={d.completingTask}
-        momentumActionId={d.momentumActionId}
-        dismissingNudge={d.dismissingNudge}
-      />
+      <div className="order-1 sm:order-2">
+        <PriorityQueue
+          priorities={d.priorities}
+          tasks={d.tasks}
+          momentumRecs={d.momentumRecs}
+          nudges={d.nudges}
+          financialAlerts={d.financialAlerts}
+          completedToday={d.completedToday}
+          businessId={d.businessId}
+          onCompleteTask={d.handleCompleteTask}
+          onApproveTask={d.handleApproveTask}
+          onDenyTask={d.handleDenyTask}
+          onMomentumAction={d.handleMomentumAction}
+          onMomentumSnooze={d.handleMomentumSnooze}
+          onMomentumDismiss={d.handleMomentumDismiss}
+          onNudgeSnooze={d.handleNudgeSnooze}
+          onDismissTask={d.handleDismissTask}
+          onDismissAlert={d.handleDismissAlert}
+          onDismissPriority={d.handleDismissPriority}
+          completingTask={d.completingTask}
+          momentumActionId={d.momentumActionId}
+          dismissingNudge={d.dismissingNudge}
+        />
+      </div>
 
-      <BriefingCard
-        businessId={d.businessId}
-        initialFinancialPulse={d.financialPulse}
-        initialCampaignBriefings={d.campaignBriefings}
-      />
+      <div className="order-3">
+        <BriefingCard
+          businessId={d.businessId}
+          initialFinancialPulse={d.financialPulse}
+          initialCampaignBriefings={d.campaignBriefings}
+        />
+      </div>
     </div>
   );
 }
