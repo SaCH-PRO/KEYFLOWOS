@@ -44,7 +44,7 @@ export default function CommandPage() {
             <span>{d.todayBookings} booking{d.todayBookings !== 1 ? "s" : ""}</span>
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <QuickActionBar />
           <SimulationDrawer businessId={d.businessId} />
           <ProgressDrawer gamification={d.gamification} momentum={d.momentum} />
