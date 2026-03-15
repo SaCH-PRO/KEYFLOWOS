@@ -361,9 +361,8 @@ export class BookingsService {
       // @ts-ignore
       eventName: 'booking.created',
     };
-    console.log(`[BOOKING] Emitting booking.created event for booking ${booking.id}, business ${booking.businessId}`);
+    this.logger.debug(`Emitting booking.created for booking=${booking.id} business=${booking.businessId}`);
     this.events.emit('booking.created', payload);
-    console.log(`[BOOKING] Event emitted, listeners count: ${this.events.listenerCount('booking.created')}`);
     if (booking.contactId) {
       await this.crm.logContactEvent({
         businessId: booking.businessId,
