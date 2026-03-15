@@ -78,7 +78,7 @@ export class FlowListener {
 
   @OnEvent('booking.created')
   async handleBookingCreated(payload: BookingCreatedPayload) {
-    this.logger.log(`[NOTIF] booking.created event received for business ${payload.businessId}`);
+    this.logger.debug(`booking.created received for business=${payload.businessId}`);
 
     const contactName = payload.contact
       ? [payload.contact.firstName, payload.contact.lastName].filter(Boolean).join(' ') || payload.contact.email || 'A customer'
@@ -97,7 +97,7 @@ export class FlowListener {
           startTime: payload.booking.startTime,
         },
       });
-      this.logger.log(`[NOTIF] Notification created for booking ${payload.booking.id}`);
+      this.logger.debug(`Notification created for booking=${payload.booking.id}`);
     } catch (e) {
       this.logger.error(`[NOTIF] Failed to create notification for booking ${payload.booking.id}`, (e as Error).stack);
     }

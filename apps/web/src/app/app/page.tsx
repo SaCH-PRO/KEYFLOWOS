@@ -6,6 +6,8 @@ import {
   Calendar,
   CheckCircle2,
   MoreHorizontal,
+  Share2,
+  ExternalLink,
 } from "lucide-react";
 import { DashboardSkeleton } from "@/components/ui/skeleton";
 import { formatTTD } from "./_command/types";
@@ -16,11 +18,27 @@ import { BriefingCard } from "./_command/briefing-card";
 import { PriorityQueue } from "./_command/priority-queue";
 import { SimulationDrawer } from "./_command/simulation-drawer";
 import { ProgressDrawer } from "./_command/progress-section";
+import { ShareLinkModal } from "@/components/ui/share-link-modal";
+import { getBusinessById, fetchServices } from "@/lib/client";
 
 export default function CommandPage() {
   const d = useCommandData();
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [businessSlug, setBusinessSlug] = useState<string | null>(null);
+  const [hasServices, setHasServices] = useState(false);
+
+  useEffect(() => {
+    if (!d.businessId) return;
+    Promise.all([
+      getBusinessById(d.businessId),
+      fetchServices(d.businessId),
+    ]).then(([bizRes, svcRes]) => {
+      if (bizRes.data?.slug) setBusinessSlug(bizRes.data.slug);
+      if (svcRes.data && svcRes.data.length > 0) setHasServices(true);
+    }).catch(() => {});
+  }, [d.businessId]);
 
   useEffect(() => {
     if (!moreOpen) return;
@@ -98,6 +116,46 @@ export default function CommandPage() {
         <QuickActionBar />
       </header>
 
+      {businessSlug && hasServices && (
+        <div
+          className="order-2 sm:order-1 kf-radius-lg p-4 flex items-center justify-between gap-3 cursor-pointer transition-all duration-200 hover:scale-[1.005]"
+          style={{
+            background: "hsl(var(--kf-accent2) / 0.06)",
+            border: "1px solid hsl(var(--kf-accent2) / 0.15)",
+          }}
+          onClick={() => setShareModalOpen(true)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setShareModalOpen(true); }}
+        >
+          <div className="flex items-center gap-3">
+            <div
+              className="w-9 h-9 kf-radius-md flex items-center justify-center flex-shrink-0"
+              style={{ background: "hsl(var(--kf-accent2) / 0.12)" }}
+            >
+              <Share2 className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
+            </div>
+            <div>
+              <p className="kf-text-body font-medium" style={{ color: "hsl(var(--foreground))" }}>
+                Share Booking Link
+              </p>
+              <p className="kf-text-micro" style={{ color: "hsl(var(--muted-foreground))" }}>
+                Let clients browse your services and book online
+              </p>
+            </div>
+          </div>
+          <ExternalLink className="w-4 h-4 flex-shrink-0" style={{ color: "hsl(var(--kf-accent2) / 0.6)" }} />
+        </div>
+      )}
+
+      <ShareLinkModal
+        open={shareModalOpen}
+        onClose={() => setShareModalOpen(false)}
+        url={typeof window !== "undefined" && businessSlug ? `${window.location.origin}/book/${businessSlug}` : ""}
+        title="Share Booking Link"
+        description="Clients can browse services and book directly from this link."
+      />
+
       <div className="order-1 sm:order-2">
         <PriorityQueue
           priorities={d.priorities}
@@ -140,7 +198,7 @@ function MetricPill({
   value,
   label,
 }: {
-  icon: React.ComponentType<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
   color: string;
   value: string;
   label: string;
