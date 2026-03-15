@@ -4973,4 +4973,186 @@ export async function updateCrossModuleWorkflow(input: {
   }
 }
 
+export interface ConciergeSetupStatus {
+  products: boolean;
+  businessHours: boolean;
+  payments: boolean;
+  storefront: boolean;
+  contacts: boolean;
+  profile: boolean;
+  completedCount: number;
+  totalSteps: number;
+  percentage: number;
+}
+
+export interface ConciergeAction {
+  id: string;
+  label: string;
+  type: 'confirm' | 'customize' | 'skip' | 'navigate';
+  href?: string;
+  data?: Record<string, unknown>;
+}
+
+export interface ConciergeMessage {
+  role: 'assistant' | 'user';
+  content: string;
+  quickReplies?: string[];
+  actions?: ConciergeAction[];
+  setupStatus?: ConciergeSetupStatus;
+}
+
+export interface ConciergeState {
+  setupStatus: ConciergeSetupStatus;
+  dismissed: boolean;
+  templateId?: string;
+  onboardingComplete: boolean;
+}
+
+export interface IndustryTemplatePreview {
+  id: string;
+  label: string;
+  products: Array<{
+    name: string;
+    price: number;
+    currency: string;
+    category: string;
+    duration?: number;
+    description?: string;
+  }>;
+  businessHours: Record<string, { open: string; close: string; closed: boolean }>;
+  paymentRecommendations: string[];
+  emailTemplate: { subject: string; body: string };
+}
+
+export interface NudgeItem {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  ctaLabel: string;
+  ctaHref: string;
+  snoozable: boolean;
+}
+
+export async function fetchConciergeState(businessId: string): Promise<ApiResult<ConciergeState>> {
+  return apiGet<ConciergeState>(`/onboarding-concierge/businesses/${encodeURIComponent(businessId)}/state`);
+}
+
+export async function fetchConciergeWelcome(businessId: string): Promise<ApiResult<ConciergeMessage>> {
+  return apiGet<ConciergeMessage>(`/onboarding-concierge/businesses/${encodeURIComponent(businessId)}/welcome`);
+}
+
+export async function fetchConciergeSetupStatus(businessId: string): Promise<ApiResult<ConciergeSetupStatus>> {
+  return apiGet<ConciergeSetupStatus>(`/onboarding-concierge/businesses/${encodeURIComponent(businessId)}/status`);
+}
+
+export async function fetchConciergeTemplates(businessId: string): Promise<ApiResult<Array<{ id: string; label: string; keywords: string[] }>>> {
+  return apiGet<Array<{ id: string; label: string; keywords: string[] }>>(`/onboarding-concierge/businesses/${encodeURIComponent(businessId)}/templates`);
+}
+
+export async function fetchConciergeTemplatePreview(businessId: string, templateId: string): Promise<ApiResult<IndustryTemplatePreview>> {
+  return apiGet<IndustryTemplatePreview>(`/onboarding-concierge/businesses/${encodeURIComponent(businessId)}/templates/${encodeURIComponent(templateId)}`);
+}
+
+export async function sendConciergeChat(
+  businessId: string,
+  message: string,
+  history?: Array<{ role: string; content: string }>,
+): Promise<ApiResult<ConciergeMessage>> {
+  return apiPost<ConciergeMessage>({
+    path: `/onboarding-concierge/businesses/${encodeURIComponent(businessId)}/chat`,
+    body: { message, history },
+  });
+}
+
+export interface AutoConfigureResult {
+  templateId: string;
+  templateLabel: string;
+  productsCreated?: number;
+  productsSkipped?: boolean;
+  businessHoursSet?: boolean;
+  paymentMethodsSet?: boolean;
+  storefrontEnabled?: boolean;
+}
+
+export interface DetectTypeResult {
+  template: { id: string; label: string };
+  confidence: string;
+}
+
+export interface SnoozeResult {
+  snoozed: boolean;
+  until: string;
+}
+
+export interface DismissResult {
+  dismissed: boolean;
+}
+
+export interface ResumeResult {
+  resumed: boolean;
+}
+
+export interface CompleteResult {
+  complete: boolean;
+}
+
+export async function conciergeAutoConfigure(
+  businessId: string,
+  templateId: string,
+  options?: {
+    createProducts?: boolean;
+    setBusinessHours?: boolean;
+    setPaymentMethods?: boolean;
+    configureStorefront?: boolean;
+  },
+): Promise<ApiResult<AutoConfigureResult>> {
+  return apiPost<AutoConfigureResult>({
+    path: `/onboarding-concierge/businesses/${encodeURIComponent(businessId)}/auto-configure`,
+    body: { templateId, ...options },
+  });
+}
+
+export async function conciergeDetectType(
+  businessId: string,
+  description: string,
+): Promise<ApiResult<DetectTypeResult>> {
+  return apiPost<DetectTypeResult>({
+    path: `/onboarding-concierge/businesses/${encodeURIComponent(businessId)}/detect-type`,
+    body: { description },
+  });
+}
+
+export async function fetchConciergeNudges(businessId: string): Promise<ApiResult<NudgeItem[]>> {
+  return apiGet<NudgeItem[]>(`/onboarding-concierge/businesses/${encodeURIComponent(businessId)}/nudges`);
+}
+
+export async function snoozeConciergeNudge(businessId: string, nudgeId: string, days?: number): Promise<ApiResult<SnoozeResult>> {
+  return apiPost<SnoozeResult>({
+    path: `/onboarding-concierge/businesses/${encodeURIComponent(businessId)}/nudges/${encodeURIComponent(nudgeId)}/snooze`,
+    body: { days },
+  });
+}
+
+export async function dismissConcierge(businessId: string): Promise<ApiResult<DismissResult>> {
+  return apiPost<DismissResult>({
+    path: `/onboarding-concierge/businesses/${encodeURIComponent(businessId)}/dismiss`,
+    body: {},
+  });
+}
+
+export async function resumeConcierge(businessId: string): Promise<ApiResult<ResumeResult>> {
+  return apiPost<ResumeResult>({
+    path: `/onboarding-concierge/businesses/${encodeURIComponent(businessId)}/resume`,
+    body: {},
+  });
+}
+
+export async function markConciergeComplete(businessId: string): Promise<ApiResult<CompleteResult>> {
+  return apiPost<CompleteResult>({
+    path: `/onboarding-concierge/businesses/${encodeURIComponent(businessId)}/complete`,
+    body: {},
+  });
+}
+
 export { DEFAULT_BUSINESS_ID };
