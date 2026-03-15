@@ -70,6 +70,7 @@ export default function CommandPage() {
         onNudgeSnooze={d.handleNudgeSnooze}
         onDismissTask={d.handleDismissTask}
         onDismissAlert={d.handleDismissAlert}
+        onDismissPriority={d.handleDismissPriority}
         completingTask={d.completingTask}
         momentumActionId={d.momentumActionId}
         dismissingNudge={d.dismissingNudge}

@@ -5,7 +5,7 @@ import { AlertCircle, Clock, Check, X, CheckCircle2, Sparkles, Loader2, HeartPul
 import type { PriorityItem, AutopilotTask, MomentumRecommendation, NudgeItem, FinancialAlert } from "./types";
 import { formatTTD } from "./types";
 
-export function PriorityRow({ priority }: { priority: PriorityItem }) {
+export function PriorityRow({ priority, onDismiss }: { priority: PriorityItem; onDismiss?: () => void }) {
   const urgencyColors: Record<string, { border: string; text: string }> = {
     critical: { border: "hsl(var(--kf-error) / 0.4)", text: "hsl(var(--kf-error))" },
     high: { border: "hsl(var(--kf-accent1) / 0.4)", text: "hsl(var(--kf-accent1))" },
@@ -15,7 +15,7 @@ export function PriorityRow({ priority }: { priority: PriorityItem }) {
   const colors = urgencyColors[priority.urgency] || urgencyColors.low;
 
   return (
-    <div className="flex items-center gap-3 p-3 kf-radius-md border transition-all hover:bg-muted/10" style={{ borderColor: colors.border }}>
+    <div className="flex items-center gap-3 p-3 kf-radius-md border transition-all hover:bg-muted/10 group" style={{ borderColor: colors.border }}>
       <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: colors.text }} />
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">{priority.title}</p>
@@ -30,6 +30,11 @@ export function PriorityRow({ priority }: { priority: PriorityItem }) {
       <Link href={priority.actionHref} className="text-xs font-medium px-3 py-1.5 kf-radius-sm transition-all hover:scale-105 flex-shrink-0 text-white" style={{ backgroundColor: colors.text }}>
         {priority.actionLabel}
       </Link>
+      {onDismiss && (
+        <button onClick={onDismiss} className="p-1.5 kf-radius-sm text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors flex-shrink-0 opacity-0 group-hover:opacity-100" title="Dismiss">
+          <X className="w-3 h-3" />
+        </button>
+      )}
     </div>
   );
 }
