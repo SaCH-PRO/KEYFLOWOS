@@ -50,35 +50,21 @@ export default function CommandPage() {
         </div>
       )}
 
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 order-2 sm:order-1">
+      <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="kf-text-title font-semibold tracking-tight">
             {d.greeting}
             {d.displayName ? `, ${d.displayName}` : ""}
           </h1>
           <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-            <MetricPill
-              icon={DollarSign}
-              color="--kf-accent1"
-              value={formatTTD(d.todayRevenue)}
-              label="today"
-            />
-            <MetricPill
-              icon={Calendar}
-              color="--kf-info"
-              value={String(d.todayBookings)}
-              label={d.todayBookings === 1 ? "booking" : "bookings"}
-            />
-            <MetricPill
-              icon={CheckCircle2}
-              color="--kf-success"
-              value={String(d.tasks.length)}
-              label={d.tasks.length === 1 ? "task" : "tasks"}
-            />
+            <MetricPill icon={DollarSign} color="--kf-accent1" value={formatTTD(d.todayRevenue)} label="today" />
+            <MetricPill icon={Calendar} color="--kf-info" value={String(d.todayBookings)} label={d.todayBookings === 1 ? "booking" : "bookings"} />
+            <MetricPill icon={CheckCircle2} color="--kf-success" value={String(d.tasks.length)} label={d.tasks.length === 1 ? "task" : "tasks"} />
           </div>
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
+          <QuickActionBar />
           <div className="relative" ref={moreRef}>
             <button
               onClick={() => setMoreOpen((prev) => !prev)}
@@ -91,7 +77,7 @@ export default function CommandPage() {
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setMoreOpen(false)} />
                 <div
-                  className="absolute right-0 top-full mt-1 z-50 py-1.5 kf-radius-md shadow-lg"
+                  className="absolute right-0 top-full mt-1 z-50 py-1.5 kf-radius-md shadow-lg min-w-[280px]"
                   style={{
                     background: "hsl(var(--kf-card))",
                     border: "1px solid hsl(var(--kf-border) / 0.4)",
@@ -99,15 +85,9 @@ export default function CommandPage() {
                 >
                   <div className="px-2 py-1 flex flex-col gap-1">
                     <SimulationDrawer businessId={d.businessId} />
-                    <ProgressDrawer
-                      gamification={d.gamification}
-                      momentum={d.momentum}
-                    />
+                    <ProgressDrawer gamification={d.gamification} momentum={d.momentum} />
                   </div>
-                  <div
-                    className="mx-2 my-1"
-                    style={{ borderTop: "1px solid hsl(var(--kf-border) / 0.2)" }}
-                  />
+                  <div className="mx-2 my-1" style={{ borderTop: "1px solid hsl(var(--kf-border) / 0.2)" }} />
                   <div className="px-2 py-1">
                     <AiCommandBar businessId={d.businessId} />
                   </div>
@@ -116,44 +96,36 @@ export default function CommandPage() {
             )}
           </div>
         </div>
-      </div>
+      </header>
 
-      <div className="order-1 sm:order-2">
-        <PriorityQueue
-          priorities={d.priorities}
-          tasks={d.tasks}
-          momentumRecs={d.momentumRecs}
-          nudges={d.nudges}
-          financialAlerts={d.financialAlerts}
-          completedToday={d.completedToday}
-          businessId={d.businessId}
-          onCompleteTask={d.handleCompleteTask}
-          onApproveTask={d.handleApproveTask}
-          onDenyTask={d.handleDenyTask}
-          onMomentumAction={d.handleMomentumAction}
-          onMomentumSnooze={d.handleMomentumSnooze}
-          onMomentumDismiss={d.handleMomentumDismiss}
-          onNudgeSnooze={d.handleNudgeSnooze}
-          onDismissTask={d.handleDismissTask}
-          onDismissAlert={d.handleDismissAlert}
-          onDismissPriority={d.handleDismissPriority}
-          completingTask={d.completingTask}
-          momentumActionId={d.momentumActionId}
-          dismissingNudge={d.dismissingNudge}
-        />
-      </div>
+      <PriorityQueue
+        priorities={d.priorities}
+        tasks={d.tasks}
+        momentumRecs={d.momentumRecs}
+        nudges={d.nudges}
+        financialAlerts={d.financialAlerts}
+        completedToday={d.completedToday}
+        businessId={d.businessId}
+        onCompleteTask={d.handleCompleteTask}
+        onApproveTask={d.handleApproveTask}
+        onDenyTask={d.handleDenyTask}
+        onMomentumAction={d.handleMomentumAction}
+        onMomentumSnooze={d.handleMomentumSnooze}
+        onMomentumDismiss={d.handleMomentumDismiss}
+        onNudgeSnooze={d.handleNudgeSnooze}
+        onDismissTask={d.handleDismissTask}
+        onDismissAlert={d.handleDismissAlert}
+        onDismissPriority={d.handleDismissPriority}
+        completingTask={d.completingTask}
+        momentumActionId={d.momentumActionId}
+        dismissingNudge={d.dismissingNudge}
+      />
 
-      <div className="order-3">
-        <QuickActionBar />
-      </div>
-
-      <div className="order-4">
-        <BriefingCard
-          businessId={d.businessId}
-          initialFinancialPulse={d.financialPulse}
-          initialCampaignBriefings={d.campaignBriefings}
-        />
-      </div>
+      <BriefingCard
+        businessId={d.businessId}
+        initialFinancialPulse={d.financialPulse}
+        initialCampaignBriefings={d.campaignBriefings}
+      />
     </div>
   );
 }
