@@ -427,7 +427,7 @@ export class FlowListener implements OnModuleInit {
 
       for (const booking of upcomingBookings) {
         const dedupeKey = `reminder_${booking.id}`;
-        const alreadySent = await (this.prisma.client as any).customerNotificationLog.findFirst({
+        const alreadySent = await this.prisma.client.customerNotificationLog.findFirst({
           where: {
             businessId: booking.businessId,
             type: 'booking_reminder',
