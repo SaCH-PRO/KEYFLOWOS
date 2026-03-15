@@ -438,7 +438,7 @@ export type BillingSegment = "quotes" | "invoices" | "schedules";
 const SEGMENTS: { key: BillingSegment; label: string; icon: React.ElementType; accent: string; accentMuted: string }[] = [
   { key: "quotes", label: "Quotes", icon: FileText, accent: "hsl(var(--kf-accent1))", accentMuted: "hsl(var(--kf-accent1) / 0.15)" },
   { key: "invoices", label: "Invoices", icon: CreditCard, accent: "hsl(var(--kf-success))", accentMuted: "hsl(var(--kf-success) / 0.15)" },
-  { key: "schedules", label: "Schedules", icon: RefreshCw, accent: "hsl(var(--kf-info))", accentMuted: "hsl(var(--kf-info) / 0.15)" },
+  { key: "schedules", label: "Recurring", icon: RefreshCw, accent: "hsl(var(--kf-info))", accentMuted: "hsl(var(--kf-info) / 0.15)" },
 ];
 
 interface BillingPanelProps {
@@ -881,7 +881,11 @@ export function BillingPanel({
 
       {slots?.renderInsightBanner?.()}
 
-      <div className="p-3 sm:p-4" data-swipe-ignore {...swipeHandlers}>
+      <div
+        className="p-3 sm:p-4"
+        onTouchStart={(e) => { e.stopPropagation(); swipeHandlers.onTouchStart(e); }}
+        onTouchEnd={(e) => { e.stopPropagation(); swipeHandlers.onTouchEnd(e); }}
+      >
         <AnimatePresence mode="wait" custom={slideDir}>
           {segment === "quotes" && (
             <motion.div
