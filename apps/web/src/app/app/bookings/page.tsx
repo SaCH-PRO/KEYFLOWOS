@@ -4,12 +4,8 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Calendar,
-  Package,
+  Briefcase,
   BarChart3,
-  Plus,
-  Link2,
-  Unlink,
-  AlertCircle,
   X,
 } from "lucide-react";
 import {
@@ -18,14 +14,12 @@ import {
   StaffMember,
   Contact,
   BookingStats,
-  Product,
   ScheduleHealth,
   createBooking,
   fetchBookings,
   fetchServices,
   fetchStaff,
   fetchContacts,
-  fetchProducts,
   getCalendarAuthUrl,
   getCalendarStatus,
   disconnectCalendar,
@@ -47,19 +41,19 @@ import { renderBookingsToolResult } from "./components/bookings-tool-results";
 import { BookingsSkeleton } from "./components/bookings-skeleton";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { moduleEvents } from "@/lib/module-events";
-import { useProducts } from "../commerce/hooks/use-products";
-import { ProductsPanel } from "../commerce/products/products-panel";
-import { ProductFormModal } from "../commerce/products/product-form-modal";
 import CalendarView from "./calendar/calendar-view";
-import BookingsInsightsTab from "./insights/bookings-insights-tab";
-import BookingForm from "./components/booking-form";
 import BookingDetailDrawer from "./components/booking-detail-drawer";
+import BookingSideSheet from "./components/booking-side-sheet";
+import TodayStrip from "./components/today-strip";
+import ScheduleFilters from "./components/schedule-filters";
+import CatalogCapacityTab from "./components/catalog-capacity-tab";
+import PerformanceTab from "./components/performance-tab";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 
 const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
-  { key: "calendar", label: "Calendar", icon: Calendar },
-  { key: "products", label: "Products", icon: Package },
-  { key: "insights", label: "Insights", icon: BarChart3 },
+  { key: "schedule", label: "Schedule", icon: Calendar },
+  { key: "catalog", label: "Catalog & Capacity", icon: Briefcase },
+  { key: "performance", label: "Performance", icon: BarChart3 },
 ];
 
 const slideVariants = {
@@ -72,7 +66,7 @@ export default function BookingsPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("calendar");
+  const [tab, setTab] = useState<Tab>("schedule");
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
@@ -81,9 +75,6 @@ export default function BookingsPage() {
   const [scheduleHealth, setScheduleHealth] = useState<ScheduleHealth | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const [products, setProducts] = useState<Product[]>([]);
-  const [cachedImages, setCachedImages] = useState<Record<string, string>>({});
 
   const [showCreateBooking, setShowCreateBooking] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -98,13 +89,16 @@ export default function BookingsPage() {
 
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
 
+  const [staffFilter, setStaffFilter] = useState("");
+  const [serviceFilter, setServiceFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+
+  const [staffForm, setStaffForm] = useState({ name: "", email: "" });
+
   const directionRef = useRef<number>(0);
-  const searchInputRef = useRef<HTMLInputElement>(null);
   const tabKeys = useMemo(() => TABS.map((t) => t.key), []);
 
   const ai = useBookingsAiHub();
-
-  const productHook = useProducts(businessId, setProducts, cachedImages, setCachedImages);
 
   const handleTabChange = useCallback((key: string) => {
     const newIndex = tabKeys.indexOf(key as Tab);
@@ -124,12 +118,11 @@ export default function BookingsPage() {
     {
       groupName: "Bookings",
       shortcuts: [
-        { key: "1", action: () => handleTabChange("calendar"), description: "Calendar tab" },
-        { key: "2", action: () => handleTabChange("products"), description: "Products tab" },
-        { key: "3", action: () => handleTabChange("insights"), description: "Insights tab" },
+        { key: "1", action: () => handleTabChange("schedule"), description: "Schedule tab" },
+        { key: "2", action: () => handleTabChange("catalog"), description: "Catalog tab" },
+        { key: "3", action: () => handleTabChange("performance"), description: "Performance tab" },
         { key: "n", action: () => setShowCreateBooking(true), description: "New booking" },
         { key: "r", action: () => void loadData(), description: "Refresh data" },
-        { key: "f", action: () => searchInputRef.current?.focus(), description: "Focus search" },
         { key: "a", shift: true, action: () => ai.togglePanel(), description: "AI Hub" },
         { key: "Escape", action: () => {
           if (showCreateBooking) setShowCreateBooking(false);
@@ -165,14 +158,13 @@ export default function BookingsPage() {
     if (!businessId) return;
     setLoading(true);
     try {
-      const [bookingsRes, servicesRes, staffRes, calendarRes, contactsRes, statsRes, productsRes, healthRes] = await Promise.all([
+      const [bookingsRes, servicesRes, staffRes, calendarRes, contactsRes, statsRes, healthRes] = await Promise.all([
         fetchBookings(businessId),
         fetchServices(businessId),
         fetchStaff(businessId),
         getCalendarStatus(businessId).catch(() => ({ data: null, error: null })),
         fetchContacts(businessId, { take: 200 }),
         fetchBookingStats(businessId).catch(() => ({ data: null, error: null })),
-        fetchProducts(businessId),
         fetchScheduleHealth(businessId).catch(() => ({ data: null, error: null })),
       ]);
       setBookings(bookingsRes.data ?? []);
@@ -181,7 +173,6 @@ export default function BookingsPage() {
       setContacts(contactsRes.data?.contacts ?? []);
       setStats(statsRes.data ?? null);
       setScheduleHealth(healthRes.data ?? null);
-      setProducts((productsRes.data ?? []).map((p) => ({ ...p, currency: p.currency ?? "TTD" } as Product)));
       setCalendarConnected((calendarRes.data as any)?.connected ?? false);
       setCalendarEmail((calendarRes.data as any)?.email ?? null);
       if (bookingsRes.error || servicesRes.error || staffRes.error) {
@@ -202,6 +193,14 @@ export default function BookingsPage() {
       ai.updateContext({ businessId, activeView: tab });
     }
   }, [businessId, tab, ai]);
+
+  const filteredBookings = useMemo(() => {
+    let result = bookings;
+    if (staffFilter) result = result.filter((b) => b.staff?.id === staffFilter);
+    if (serviceFilter) result = result.filter((b) => b.serviceId === serviceFilter);
+    if (statusFilter !== "ALL") result = result.filter((b) => b.status === statusFilter);
+    return result;
+  }, [bookings, staffFilter, serviceFilter, statusFilter]);
 
   async function handleConnectCalendar() {
     if (!businessId) return;
@@ -299,11 +298,6 @@ export default function BookingsPage() {
     setShowCreateBooking(true);
   }, []);
 
-  const handleViewContact = useCallback((contactId: string) => {
-    moduleEvents.emit("booking:view_contact", "bookings", { contactId });
-    router.push(`/app/crm?contact=${contactId}`);
-  }, [router]);
-
   const handleCreateInvoice = useCallback((booking: Booking) => {
     moduleEvents.emit("booking:create_invoice", "bookings", {
       contactId: booking.contact?.id,
@@ -313,6 +307,47 @@ export default function BookingsPage() {
     });
     router.push("/app/commerce?tab=invoices&action=new-invoice");
   }, [router]);
+
+  const handleSmartAction = useCallback((booking: Booking, action: string) => {
+    if (action === "INVOICE") {
+      handleCreateInvoice(booking);
+    } else if (action === "REBOOK") {
+      setPrefillDate(undefined);
+      setPrefillTime(undefined);
+      setShowCreateBooking(true);
+    } else {
+      void handleStatusChange(booking.id, action);
+    }
+  }, [handleCreateInvoice]);
+
+  async function handleCreateStaff() {
+    if (!businessId || !staffForm.name.trim()) return;
+    try {
+      const { createStaff } = await import("@/lib/client");
+      await createStaff({
+        businessId,
+        name: staffForm.name.trim(),
+        email: staffForm.email.trim() || undefined,
+      });
+      setStaffForm({ name: "", email: "" });
+      await loadData();
+      setBanner({ text: "Staff member added.", type: "success" });
+    } catch {
+      setBanner({ text: "Failed to add staff member.", type: "error" });
+    }
+  }
+
+  async function handleDeleteStaff(staffId: string) {
+    if (!businessId) return;
+    try {
+      const { deleteStaff } = await import("@/lib/client");
+      await deleteStaff(staffId, businessId);
+      await loadData();
+      setBanner({ text: "Staff member removed.", type: "info" });
+    } catch {
+      setBanner({ text: "Failed to remove staff member.", type: "error" });
+    }
+  }
 
   if (!businessId && !loading) {
     return <WorkspaceError />;
@@ -324,7 +359,7 @@ export default function BookingsPage() {
         <PageHeader
           icon={Calendar}
           title="Bookings"
-          subtitle="Schedule, manage products & staff"
+          subtitle="Schedule, catalog & performance"
         />
         <BookingsSkeleton />
       </div>
@@ -332,55 +367,27 @@ export default function BookingsPage() {
   }
 
   return (
-    <div className="space-y-6" {...swipeHandlers}>
+    <div className="space-y-5" {...swipeHandlers}>
       <PageHeader
         icon={Calendar}
         title="Bookings"
-        subtitle="Schedule, manage products & staff"
+        subtitle="Schedule, catalog & performance"
         titleExtra={
           <FeatureGuide
             featureKey="bookings"
             title="Getting Started with Bookings"
-            description="Set up your schedule, products, and staff to start accepting bookings."
+            description="Set up your schedule, services, and staff to start accepting bookings."
             steps={[
-              { title: "Add Products", description: "Define your bookable services, products, and packages with pricing." },
+              { title: "Add Services", description: "Define your bookable services with pricing and duration." },
               { title: "Add Staff", description: "Add team members who can be assigned to bookings." },
-              { title: "Share Booking Link", description: "Your public storefront lets customers browse services and book online." },
               { title: "Manage Schedule", description: "View bookings on the calendar, confirm or cancel appointments." },
-              { title: "Connect Google Calendar", description: "Sync bookings to your Google Calendar for real-time availability." },
-              { title: "Track Stats", description: "Monitor booking volume, revenue, and completion rates from the dashboard." },
+              { title: "Connect Google Calendar", description: "Sync bookings to your Google Calendar from Catalog & Capacity." },
+              { title: "Track Performance", description: "Monitor volume, revenue, and schedule health." },
             ]}
           />
         }
         actionLabel="New Booking"
         onAction={() => setShowCreateBooking(true)}
-        rightSlot={
-          <div className="flex items-center gap-2">
-            {calendarConnected ? (
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
-                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-xs text-emerald-400 hidden sm:inline">{calendarEmail}</span>
-                </div>
-                <button
-                  onClick={handleDisconnectCalendar}
-                  disabled={calendarLoading}
-                  className="kf-btn-secondary inline-flex items-center gap-1 text-xs"
-                >
-                  <Unlink className="w-3 h-3" /> <span className="hidden sm:inline">Disconnect</span>
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={handleConnectCalendar}
-                disabled={calendarLoading}
-                className="kf-btn-secondary inline-flex items-center gap-1.5 text-xs"
-              >
-                <Link2 className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Connect Google Calendar</span>
-              </button>
-            )}
-          </div>
-        }
       />
 
       <AnimatePresence>
@@ -409,19 +416,6 @@ export default function BookingsPage() {
         layoutId="bookings-tab"
       />
 
-      <AnimatePresence>
-        {formError && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="kf-card rounded-xl border-amber-500/40 px-4 py-2 text-sm text-amber-200 flex items-center gap-2"
-          >
-            <AlertCircle className="w-4 h-4 flex-shrink-0" /> {formError}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       <AnimatePresence mode="wait" custom={directionRef.current}>
         <motion.div
           key={tab}
@@ -432,55 +426,51 @@ export default function BookingsPage() {
           exit="exit"
           transition={{ type: "spring", bounce: 0.15, duration: 0.35 }}
         >
-          {tab === "calendar" && (
+          {tab === "schedule" && (
             <div className="space-y-3">
-              <AnimatePresence>
-                {showCreateBooking && (
-                  <BookingForm
-                    services={services}
-                    staff={staff}
-                    contacts={contacts}
-                    onSubmit={handleCreateBooking}
-                    onCancel={() => { setShowCreateBooking(false); setPrefillDate(undefined); setPrefillTime(undefined); setFormError(null); }}
-                    formError={formError}
-                    defaultDate={prefillDate}
-                    defaultTime={prefillTime}
-                    saving={bookingSaving}
-                  />
-                )}
-              </AnimatePresence>
-              <CalendarView
+              <TodayStrip
                 bookings={bookings}
+                stats={stats}
+                onSelectBooking={setSelectedBooking}
+                onConfirmBooking={(id) => void handleStatusChange(id, "CONFIRMED")}
+              />
+              <ScheduleFilters
+                services={services}
+                staff={staff}
+                staffFilter={staffFilter}
+                serviceFilter={serviceFilter}
+                statusFilter={statusFilter}
+                onStaffChange={setStaffFilter}
+                onServiceChange={setServiceFilter}
+                onStatusChange={setStatusFilter}
+              />
+              <CalendarView
+                bookings={filteredBookings}
                 onSelectBooking={setSelectedBooking}
                 onCreateBooking={handleCalendarCreate}
+                onSmartAction={handleSmartAction}
               />
             </div>
           )}
-          {tab === "products" && (
-            <ProductsPanel
-              products={products}
+          {tab === "catalog" && (
+            <CatalogCapacityTab
+              services={services}
+              staff={staff}
+              bookings={bookings}
+              staffForm={staffForm}
+              setStaffForm={setStaffForm}
+              onCreateStaff={handleCreateStaff}
+              onDeleteStaff={handleDeleteStaff}
+              calendarConnected={calendarConnected}
+              calendarEmail={calendarEmail}
+              calendarLoading={calendarLoading}
+              onConnectCalendar={handleConnectCalendar}
+              onDisconnectCalendar={handleDisconnectCalendar}
               loading={loading}
-              productSearch={productHook.productSearch}
-              setProductSearch={productHook.setProductSearch}
-              onEdit={productHook.openEditProduct}
-              onDelete={productHook.handleDeleteProduct}
-              onDuplicate={productHook.handleDuplicateProduct}
-              onToggleActive={productHook.handleToggleProductActive}
-              onInlineSave={productHook.handleInlineSave}
-              onAdd={productHook.openAddProduct}
-              setProducts={setProducts}
-              deleteConfirm={productHook.deleteConfirm}
-              setDeleteConfirm={productHook.setDeleteConfirm}
-              cachedImages={cachedImages}
-              businessId={businessId}
-              onBulkAction={() => void loadData()}
-              currency="TTD"
-              invoices={[]}
-              quotes={[]}
             />
           )}
-          {tab === "insights" && (
-            <BookingsInsightsTab
+          {tab === "performance" && (
+            <PerformanceTab
               bookings={bookings}
               services={services}
               stats={stats}
@@ -490,25 +480,22 @@ export default function BookingsPage() {
         </motion.div>
       </AnimatePresence>
 
-      <ProductFormModal
-        open={productHook.showProductForm}
-        editingProductId={productHook.editingProductId}
-        productForm={productHook.productForm}
-        setProductForm={productHook.setProductForm}
-        formError={productHook.formError}
-        saving={productHook.saving}
-        imagePreview={productHook.imagePreview}
-        imageMode={productHook.imageMode}
-        setImageMode={productHook.setImageMode}
-        setImagePreview={productHook.setImagePreview}
-        fileInputRef={productHook.fileInputRef}
-        onClose={productHook.closeProductForm}
-        onSave={productHook.handleSaveProduct}
-        onSaveAndAddAnother={productHook.handleSaveAndAddAnother}
-        onFileSelect={productHook.handleFileSelect}
-        onRemoveImage={productHook.removeImage}
-        currency="TTD"
-      />
+      <AnimatePresence>
+        {showCreateBooking && (
+          <BookingSideSheet
+            open={showCreateBooking}
+            services={services}
+            staff={staff}
+            contacts={contacts}
+            onSubmit={handleCreateBooking}
+            onClose={() => { setShowCreateBooking(false); setPrefillDate(undefined); setPrefillTime(undefined); setFormError(null); }}
+            formError={formError}
+            defaultDate={prefillDate}
+            defaultTime={prefillTime}
+            saving={bookingSaving}
+          />
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {selectedBooking && (
@@ -522,7 +509,6 @@ export default function BookingsPage() {
         )}
       </AnimatePresence>
 
-
       <AiCommandHub
         ai={ai}
         moduleName="Bookings"
@@ -531,7 +517,7 @@ export default function BookingsPage() {
           if (actionKey.startsWith("tool:")) {
             ai.executeTool(actionKey.replace("tool:", ""));
           } else if (actionKey.startsWith("filter_status:")) {
-            handleTabChange("calendar");
+            handleTabChange("schedule");
           } else if (actionKey.startsWith("switch_tab:")) {
             handleTabChange(actionKey.replace("switch_tab:", ""));
           }

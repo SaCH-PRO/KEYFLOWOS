@@ -1,9 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import { motion } from "framer-motion";
 import {
-  X,
   CalendarDays,
   Clock,
   User,
@@ -185,29 +183,8 @@ export default function BookingForm({
   }, [bookingDate, bookingTime]);
 
   return (
-    <motion.div
-      initial={{ opacity: 0, height: 0 }}
-      animate={{ opacity: 1, height: "auto" }}
-      exit={{ opacity: 0, height: 0 }}
-      transition={{ duration: 0.25, ease: "easeOut" }}
-    >
-      <div className="rounded-xl border border-border/60 bg-card/80 backdrop-blur-sm overflow-hidden shadow-lg">
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/40" style={{ background: "linear-gradient(to right, hsl(var(--kf-accent1)/0.08), hsl(var(--kf-accent2)/0.05))" }}>
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: "hsl(var(--kf-accent1)/0.15)" }}>
-              <CalendarDays className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
-            </div>
-            <span className="text-sm font-semibold">New Booking</span>
-            {summaryParts.length > 0 && (
-              <span className="text-[11px] text-muted-foreground hidden sm:inline">
-                {summaryParts.join(" at ")}
-              </span>
-            )}
-          </div>
-          <button onClick={onCancel} className="p-1 rounded-lg hover:bg-muted/50 transition-colors" aria-label="Close">
-            <X className="w-4 h-4 text-muted-foreground" />
-          </button>
-        </div>
+    <div>
+      <div className="rounded-xl bg-card/80 overflow-hidden">
 
         {formError && (
           <div className="mx-4 mt-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300 flex items-center gap-2">
@@ -473,6 +450,6 @@ export default function BookingForm({
           </div>
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }

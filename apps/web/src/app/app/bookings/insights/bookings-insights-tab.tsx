@@ -503,7 +503,7 @@ export default function BookingsInsightsTab({ bookings, services, stats, schedul
                     />
                     <Tooltip
                       {...RECHARTS_TOOLTIP_STYLE}
-                      formatter={(value: number) => [`${value}%`, "Utilization"]}
+                      formatter={(value: any) => [`${value}%`, "Utilization"]}
                     />
                     <Bar dataKey="utilizationRate" radius={[6, 6, 0, 0]}>
                       {scheduleHealth.weeklyUtilization.map((entry, i) => (
