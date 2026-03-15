@@ -1,10 +1,11 @@
 "use client";
 
+import { useState, useRef, useEffect } from "react";
 import {
   DollarSign,
   Calendar,
-  TrendingUp,
   CheckCircle2,
+  MoreHorizontal,
 } from "lucide-react";
 import { DashboardSkeleton } from "@/components/ui/skeleton";
 import { formatTTD } from "./_command/types";
@@ -18,40 +19,95 @@ import { ProgressDrawer } from "./_command/progress-section";
 
 export default function CommandPage() {
   const d = useCommandData();
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) {
+        setMoreOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [moreOpen]);
 
   if (d.loading) return <DashboardSkeleton />;
 
   return (
-    <div className="space-y-5 max-w-3xl mx-auto pb-10" aria-label="Command Center">
+    <div className="space-y-5 max-w-3xl mx-auto pb-10" aria-label="Today View">
       {d.error && (
-        <div className="p-4 kf-radius-lg" style={{ background: "hsl(var(--kf-error) / 0.1)", border: "1px solid hsl(var(--kf-error) / 0.2)", color: "hsl(var(--kf-error))" }}>
+        <div
+          className="p-4 kf-radius-lg"
+          style={{
+            background: "hsl(var(--kf-error) / 0.1)",
+            border: "1px solid hsl(var(--kf-error) / 0.2)",
+            color: "hsl(var(--kf-error))",
+          }}
+        >
           {d.error}
         </div>
       )}
 
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div>
           <h1 className="kf-text-title font-semibold tracking-tight">
-            {d.greeting}{d.displayName ? `, ${d.displayName}` : ""}
+            {d.greeting}
+            {d.displayName ? `, ${d.displayName}` : ""}
           </h1>
-          <p className="text-muted-foreground kf-text-body mt-0.5 flex items-center gap-2">
-            {d.tasks.length > 0
-              ? <span>{d.tasks.length} task{d.tasks.length > 1 ? "s" : ""} today</span>
-              : <span>All caught up!</span>}
-            <span className="text-border">·</span>
-            <span style={{ color: "hsl(var(--kf-accent1))" }}>{formatTTD(d.todayRevenue)}</span>
-            <span className="text-border">·</span>
-            <span>{d.todayBookings} booking{d.todayBookings !== 1 ? "s" : ""}</span>
-          </p>
+          <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+            <MetricPill
+              icon={DollarSign}
+              color="--kf-accent1"
+              value={formatTTD(d.todayRevenue)}
+              label="today"
+            />
+            <MetricPill
+              icon={Calendar}
+              color="--kf-info"
+              value={String(d.todayBookings)}
+              label={d.todayBookings === 1 ? "booking" : "bookings"}
+            />
+            <MetricPill
+              icon={CheckCircle2}
+              color="--kf-success"
+              value={String(d.tasks.length)}
+              label={d.tasks.length === 1 ? "task" : "tasks"}
+            />
+          </div>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+
+        <div className="flex items-center gap-2 flex-shrink-0">
           <QuickActionBar />
-          <SimulationDrawer businessId={d.businessId} />
-          <ProgressDrawer gamification={d.gamification} momentum={d.momentum} />
+          <div className="relative" ref={moreRef}>
+            <button
+              onClick={() => setMoreOpen((prev) => !prev)}
+              className="flex items-center justify-center w-8 h-8 kf-radius-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-all"
+              aria-label="More options"
+            >
+              <MoreHorizontal className="w-4 h-4" />
+            </button>
+            {moreOpen && (
+              <div
+                className="absolute right-0 top-full mt-1 z-50 py-1.5 kf-radius-md shadow-lg"
+                style={{
+                  background: "hsl(var(--kf-card))",
+                  border: "1px solid hsl(var(--kf-border) / 0.4)",
+                }}
+              >
+                <div className="px-2 py-1 flex flex-col gap-1">
+                  <SimulationDrawer businessId={d.businessId} />
+                  <ProgressDrawer
+                    gamification={d.gamification}
+                    momentum={d.momentum}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
-
-      <AiCommandBar businessId={d.businessId} />
 
       <PriorityQueue
         priorities={d.priorities}
@@ -76,48 +132,36 @@ export default function CommandPage() {
         dismissingNudge={d.dismissingNudge}
       />
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <MetricTile icon={DollarSign} color="--kf-accent1" label="Today" value={formatTTD(d.todayRevenue)} sub={d.pendingInvoices > 0 ? `${d.pendingInvoices} pending` : undefined} />
-        <div className="kf-card-metric">
-          <div className="flex items-center gap-1.5 text-muted-foreground mb-2">
-            <TrendingUp className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent2))" }} />
-            <span className="kf-text-micro font-medium">This Month</span>
-          </div>
-          <div className="text-lg font-semibold">{formatTTD(d.monthlyRevenue)}</div>
-          <div className="mt-2">
-            <div className="kf-momentum-bar">
-              <div className="kf-momentum-fill" style={{ width: `${d.momentum * 100}%` }} />
-            </div>
-          </div>
-        </div>
-        <MetricTile icon={Calendar} color="--kf-info" label="Bookings" value={String(d.todayBookings)} sub={`${d.completedBookingsToday} completed`} />
-        <MetricTile icon={CheckCircle2} color="--kf-success" label="Tasks Done" value={String(d.completedToday)} sub={`${d.tasks.length} remaining`} />
-      </div>
-
       <BriefingCard
         businessId={d.businessId}
         initialFinancialPulse={d.financialPulse}
         initialCampaignBriefings={d.campaignBriefings}
       />
+
+      <AiCommandBar businessId={d.businessId} />
     </div>
   );
 }
 
-function MetricTile({ icon: Icon, color, label, value, sub }: {
+function MetricPill({
+  icon: Icon,
+  color,
+  value,
+  label,
+}: {
   icon: React.ComponentType<{ className?: string }>;
   color: string;
-  label: string;
   value: string;
-  sub?: string;
+  label: string;
 }) {
   return (
-    <div className="kf-card-metric">
-      <div className="flex items-center gap-1.5 text-muted-foreground mb-2">
-        <Icon className="w-3.5 h-3.5" style={{ color: `hsl(var(${color}))` }} />
-        <span className="kf-text-micro font-medium">{label}</span>
-      </div>
-      <div className="text-lg font-semibold">{value}</div>
-      {sub && <p className="kf-text-micro text-muted-foreground mt-1">{sub}</p>}
+    <div className="flex items-center gap-1.5">
+      <Icon
+        className="w-3.5 h-3.5"
+        style={{ color: `hsl(var(${color}))` }}
+      />
+      <span className="text-sm font-semibold">{value}</span>
+      <span className="kf-text-micro text-muted-foreground">{label}</span>
     </div>
   );
 }
