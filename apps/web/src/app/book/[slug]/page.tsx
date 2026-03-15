@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { apiGet, apiPost, API_BASE } from "@/lib/api";
 import { formatPrice } from "@/lib/format";
-import { Loader2, CheckCircle2, Globe, Star, MessageCircle, Shield, Award, Flame, Sparkles } from "lucide-react";
+import { Loader2, CheckCircle2, Globe, Star, MessageCircle, Shield, Award, Flame, Sparkles, CalendarPlus, Clock, MapPin } from "lucide-react";
 import { ItemDetailModal } from "./components/item-detail-modal";
 import { trackStoreEvent, StorefrontConfig } from "@/lib/client";
 import { getThemeStyles, type ThemeKey } from "@/lib/storefront-themes";
@@ -41,6 +41,12 @@ export default function PublicBookingPage() {
 
   const [success, setSuccess] = useState(false);
   const [bookingResults, setBookingResults] = useState<{ bookingId: string; invoiceId?: string }[]>([]);
+  const [confirmedDetails, setConfirmedDetails] = useState<{
+    serviceNames: string[];
+    dates: string[];
+    times: string[];
+    businessName: string;
+  } | null>(null);
 
   const [selectedItem, setSelectedItem] = useState<CatalogItem | null>(null);
   const [storefrontConfig, setStorefrontConfig] = useState<StorefrontConfig | null>(null);
@@ -317,6 +323,23 @@ export default function PublicBookingPage() {
       results.push({ bookingId: "order-" + Date.now().toString(36) });
     }
 
+    const svcNames: string[] = [];
+    const svcDates: string[] = [];
+    const svcTimes: string[] = [];
+    for (const si of serviceItemsInCart) {
+      const bd = data.serviceBookings[`${si.id}_${si.itemType}`];
+      if (bd) {
+        svcNames.push(si.name);
+        svcDates.push(bd.date);
+        svcTimes.push(bd.time);
+      }
+    }
+    setConfirmedDetails({
+      serviceNames: svcNames,
+      dates: svcDates,
+      times: svcTimes,
+      businessName: business?.name || "",
+    });
     setBookingResults(results);
     setSuccess(true);
     updateCart([]);
@@ -360,6 +383,31 @@ export default function PublicBookingPage() {
 
   if (success) {
     const isOrder = bookingResults.length > 0 && bookingResults[0].bookingId.startsWith("order-");
+    const firstDate = confirmedDetails?.dates[0];
+    const firstTime = confirmedDetails?.times[0];
+    const calendarUrl = firstDate && firstTime && confirmedDetails
+      ? (() => {
+          const start = new Date(`${firstDate}T${firstTime}`);
+          const end = new Date(start.getTime() + 60 * 60 * 1000);
+          const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+          const title = encodeURIComponent(`${confirmedDetails.serviceNames[0] || "Appointment"} - ${confirmedDetails.businessName}`);
+          const location = encodeURIComponent(business?.address || "");
+          return `https://calendar.google.com/calendar/event?action=TEMPLATE&text=${title}&dates=${fmt(start)}/${fmt(end)}&location=${location}`;
+        })()
+      : null;
+
+    const formatDate = (d: string) => {
+      try { return new Date(d + "T00:00:00").toLocaleDateString("en-TT", { weekday: "short", month: "short", day: "numeric" }); }
+      catch { return d; }
+    };
+    const formatTime = (t: string) => {
+      try {
+        const [h, m] = t.split(":").map(Number);
+        const ampm = h >= 12 ? "PM" : "AM";
+        return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${ampm}`;
+      } catch { return t; }
+    };
+
     return (
       <main className="min-h-screen text-white flex items-center justify-center px-4 relative overflow-hidden" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
         <div className="absolute inset-0 pointer-events-none">
@@ -419,10 +467,37 @@ export default function PublicBookingPage() {
               {isOrder ? "Order Placed!" : "Booking Confirmed!"}
             </h1>
             <p className="text-sm text-white/50 leading-relaxed">
-              Your {serviceItemsInCart.length > 0 ? "appointment" : "order"} with{" "}
+              Your {isOrder ? "order" : "appointment"} with{" "}
               <span className="font-semibold text-white/80">{business?.name}</span> has been confirmed.
             </p>
           </div>
+
+          {confirmedDetails && confirmedDetails.serviceNames.length > 0 && !isOrder && (
+            <div className="space-y-2" style={{ animation: "fadeUp 500ms ease-out 400ms both" }}>
+              {confirmedDetails.serviceNames.map((name, idx) => (
+                <div
+                  key={idx}
+                  className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-3 text-left space-y-1.5"
+                >
+                  <p className="text-sm font-medium text-white/80">{name}</p>
+                  <div className="flex items-center gap-4 text-[12px] text-white/45">
+                    {confirmedDetails.dates[idx] && (
+                      <span className="flex items-center gap-1">
+                        <CalendarPlus className="w-3 h-3" />
+                        {formatDate(confirmedDetails.dates[idx])}
+                      </span>
+                    )}
+                    {confirmedDetails.times[idx] && (
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {formatTime(confirmedDetails.times[idx])}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="space-y-3" style={{ animation: "fadeUp 500ms ease-out 450ms both" }}>
             {bookingResults.map((br, idx) =>
@@ -444,6 +519,18 @@ export default function PublicBookingPage() {
           </div>
 
           <div className="flex flex-col gap-3 pt-2" style={{ animation: "fadeUp 500ms ease-out 600ms both" }}>
+            {calendarUrl && (
+              <a
+                href={calendarUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-3.5 rounded-2xl font-semibold text-sm text-white transition-all duration-300 hover:scale-[1.015] active:scale-[0.98] inline-flex items-center justify-center gap-2"
+                style={{ backgroundColor: primaryColor, boxShadow: `0 8px 32px ${primaryColor}30` }}
+              >
+                <CalendarPlus className="w-4 h-4" />
+                Add to Calendar
+              </a>
+            )}
             {bookingResults.some((br) => br.invoiceId) && (
               <button
                 onClick={() => {
@@ -451,8 +538,13 @@ export default function PublicBookingPage() {
                   if (inv?.invoiceId) window.open(`${API_BASE}/commerce/invoices/${inv.invoiceId}/receipt`, "_blank");
                 }}
                 aria-label="View invoice"
-                className="w-full py-3.5 rounded-2xl font-semibold text-sm text-white transition-all duration-300 hover:scale-[1.015] active:scale-[0.98]"
-                style={{ backgroundColor: primaryColor, boxShadow: `0 8px 32px ${primaryColor}30` }}
+                className="w-full py-3.5 rounded-2xl font-semibold text-sm transition-all duration-300 hover:scale-[1.015] active:scale-[0.98]"
+                style={{
+                  backgroundColor: calendarUrl ? "transparent" : primaryColor,
+                  color: calendarUrl ? "white" : "white",
+                  border: calendarUrl ? "1px solid rgba(255,255,255,0.1)" : "none",
+                  boxShadow: calendarUrl ? "none" : `0 8px 32px ${primaryColor}30`,
+                }}
               >
                 View Invoice
               </button>
@@ -462,12 +554,20 @@ export default function PublicBookingPage() {
                 setSuccess(false);
                 setCheckoutMode(false);
                 setBookingResults([]);
+                setConfirmedDetails(null);
               }}
               className="w-full py-3 rounded-2xl border border-white/[0.06] text-sm font-medium text-white/50 hover:text-white/80 hover:bg-white/[0.03] transition-all duration-200"
             >
               Continue Shopping
             </button>
           </div>
+
+          {business?.address && (
+            <div className="flex items-center justify-center gap-1.5 text-[11px] text-white/25" style={{ animation: "fadeUp 500ms ease-out 700ms both" }}>
+              <MapPin className="w-3 h-3" />
+              <span>{business.address}</span>
+            </div>
+          )}
 
           <div className="flex items-center justify-center gap-1.5 text-[10px] text-white/20">
             <Star className="w-3 h-3" />
