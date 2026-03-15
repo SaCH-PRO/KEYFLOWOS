@@ -99,7 +99,7 @@ export class TransactionalEmailService {
     error?: string;
   }) {
     try {
-      await (this.prisma.client as any).customerNotificationLog.create({
+      await this.prisma.client.customerNotificationLog.create({
         data: {
           businessId: params.businessId,
           contactId: params.contactId ?? null,
@@ -301,13 +301,13 @@ export class TransactionalEmailService {
     const updated = { ...current, ...prefs };
     await this.prisma.client.business.update({
       where: { id: businessId },
-      data: { notificationPreferences: updated as any },
+      data: { notificationPreferences: updated },
     });
     return updated;
   }
 
   async getNotificationLog(businessId: string, opts?: { limit?: number; type?: string }) {
-    return (this.prisma.client as any).customerNotificationLog.findMany({
+    return this.prisma.client.customerNotificationLog.findMany({
       where: {
         businessId,
         ...(opts?.type ? { type: opts.type } : {}),
