@@ -9,7 +9,7 @@ const modules = [
   { label: "Commerce", icon: CreditCard, href: "/app/commerce", description: "Products, invoices, payments" },
   { label: "Bookings", icon: Calendar, href: "/app/bookings", description: "Services, staff, public bookings" },
   { label: "Social", icon: Share2, href: "/app/social", description: "Posts, channels, scheduling" },
-  { label: "Playbooks", icon: Workflow, href: "/app/projects?tab=automations", description: "Event-driven automations" },
+  { label: "Playbooks", icon: Workflow, href: "/app/projects?tab=playbooks", description: "Event-driven automations" },
   { label: "Studio Settings", icon: Settings, href: "/app/settings", description: "Billing, branding, domains" },
 ];
 

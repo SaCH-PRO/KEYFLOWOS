@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { FolderKanban, Send, Zap } from "lucide-react";
+import { FolderKanban, Send, BookOpen } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
@@ -14,7 +14,7 @@ import { PlaybookPanel } from "./components/playbook-panel";
 
 const TABS = [
   { key: "projects", label: "Projects", icon: FolderKanban },
-  { key: "automations", label: "Automations", icon: Zap },
+  { key: "playbooks", label: "Playbooks", icon: BookOpen },
 ];
 
 export default function ProjectsPage() {
@@ -24,7 +24,7 @@ export default function ProjectsPage() {
   const [showContactPicker, setShowContactPicker] = useState(false);
 
   const tabParam = searchParams.get("tab");
-  const activeTab = tabParam === "automations" || tabParam === "intelligence" ? "automations" : "projects";
+  const activeTab = tabParam === "playbooks" || tabParam === "automations" || tabParam === "intelligence" ? "playbooks" : "projects";
 
   useEffect(() => { const bid = getStoredBusinessId(); if (bid) setBusinessId(bid); }, []);
 
@@ -74,8 +74,15 @@ export default function ProjectsPage() {
         <ProjectBoard businessId={businessId} />
       ) : (
         <div className="space-y-6">
-          <WorkflowConfig businessId={businessId} />
           <PlaybookPanel />
+          <div>
+            <h3 className="kf-text-heading font-semibold mb-3 flex items-center gap-2">
+              <span className="w-1.5 h-4 rounded-full" style={{ background: "hsl(var(--kf-accent2))" }} />
+              Automations
+            </h3>
+            <p className="kf-text-caption text-muted-foreground mb-4">Cross-module workflow triggers that run automatically when business events occur.</p>
+            <WorkflowConfig businessId={businessId} />
+          </div>
         </div>
       )}
 
