@@ -127,18 +127,23 @@ export class AutomationExecutorService {
       case 'SEND_EMAIL': {
         if (context.contactId) {
           try {
+            const validTypes = ['booking_confirmed', 'booking_reminder', 'booking_rescheduled', 'booking_cancelled', 'invoice_sent', 'payment_receipt'] as const;
+            const notifType = action.notificationType as typeof validTypes[number] | undefined;
+            if (!notifType || !validTypes.includes(notifType)) {
+              this.logger.warn(`Playbook "${playbookName}" has invalid notificationType "${action.notificationType}", skipping`);
+              break;
+            }
             const contact = await this.crm.contactDetail({ businessId, contactId: context.contactId });
             const c = contact.contact;
             if (c?.email) {
               const recipientName = [c.firstName, c.lastName].filter(Boolean).join(' ') || 'Customer';
               await this.transactionalEmail.send({
                 businessId,
-                type: action.notificationType || 'invoice_sent',
+                type: notifType,
                 recipientEmail: c.email,
                 recipientName,
                 contactId: context.contactId,
                 templateData: {
-                  subject: action.subject,
                   ...context,
                   ...(action.templateData ?? {}),
                 },
