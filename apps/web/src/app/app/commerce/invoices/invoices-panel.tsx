@@ -57,9 +57,10 @@ import {
   getDueDateFromTerms,
 } from "../components/commerce-types";
 import LineItemsEditor from "../components/line-items-editor";
-import { BillingCard } from "../components/billing-card";
 import { BillingDetailModal } from "../components/billing-detail-modal";
 import { BillingFormModal } from "../components/billing-form-modal";
+import { RecordRowCard, OverflowMenu, OverflowMenuItem } from "../components/standardized-cards";
+import { getInvoiceSmartCTA } from "../utils/smart-cta";
 import { useInvoiceForm } from "../hooks/use-invoice-form";
 import { useBusinessPreview } from "../hooks/use-business-preview";
 
@@ -87,6 +88,7 @@ interface InvoicesPanelProps {
   onViewClientIntel?: (contactId: string) => void;
   onSelectProduct?: (productId: string) => void;
   onAiDraftReminder?: (invoiceId: string) => void;
+  initialStatusFilter?: string;
 }
 
 export default function InvoicesPanel({
@@ -109,6 +111,7 @@ export default function InvoicesPanel({
   onViewClientIntel,
   onSelectProduct,
   onAiDraftReminder,
+  initialStatusFilter,
 }: InvoicesPanelProps) {
   const {
     showInvoiceBuilder,
@@ -141,7 +144,13 @@ export default function InvoicesPanel({
     prefillInvoice({ contactId: prefillContactId, items: prefillItems });
     onPrefillApplied?.();
   }, [prefillContactId, prefillItems, prefillToken, prefillInvoice, onPrefillApplied]);
-  const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<string>("ALL");
+  const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<string>(initialStatusFilter ?? "ALL");
+
+  useEffect(() => {
+    if (initialStatusFilter) {
+      setInvoiceStatusFilter(initialStatusFilter);
+    }
+  }, [initialStatusFilter]);
   const [invoiceSearch, setInvoiceSearch] = useState("");
   const [sortKey, setSortKey] = useState<BillingSortKey>("date-desc");
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
@@ -674,7 +683,7 @@ export default function InvoicesPanel({
         </div>
 
         <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none" role="group" aria-label="Filter by status">
-          {INVOICE_STATUS_FILTERS.map((f) => {
+          {INVOICE_STATUS_FILTERS.slice(0, 4).map((f) => {
             const count = statusCounts[f.value] ?? 0;
             return (
               <button
@@ -696,6 +705,25 @@ export default function InvoicesPanel({
               </button>
             );
           })}
+          {INVOICE_STATUS_FILTERS.length > 4 && (
+            <select
+              value={INVOICE_STATUS_FILTERS.slice(4).some((f) => f.value === invoiceStatusFilter) ? invoiceStatusFilter : ""}
+              onChange={(e) => { if (e.target.value) setInvoiceStatusFilter(e.target.value); }}
+              className={`appearance-none px-2 py-1 text-[11px] rounded-md font-medium shrink-0 cursor-pointer transition-all focus:outline-none ${
+                INVOICE_STATUS_FILTERS.slice(4).some((f) => f.value === invoiceStatusFilter)
+                  ? "bg-white/[0.08] border border-border/60 text-foreground"
+                  : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.05]"
+              }`}
+              aria-label="More status filters"
+            >
+              <option value="" disabled>More...</option>
+              {INVOICE_STATUS_FILTERS.slice(4).map((f) => (
+                <option key={f.value} value={f.value}>
+                  {f.label} ({statusCounts[f.value] ?? 0})
+                </option>
+              ))}
+            </select>
+          )}
           <span className="ml-auto text-[10px] text-muted-foreground/50 whitespace-nowrap shrink-0 pl-2" aria-live="polite" role="status">
             {filteredInvoices.length} of {invoices.length}
           </span>
@@ -757,6 +785,45 @@ export default function InvoicesPanel({
         <div className="space-y-2">
           {filteredInvoices.map((inv) => {
             const dueInfo = getDaysUntilDue(inv.dueDate);
+            const smartCTA = getInvoiceSmartCTA(inv.status);
+            const SmartIcon = smartCTA.icon;
+
+            const handleSmartAction = () => {
+              switch (smartCTA.actionKey) {
+                case "finish":
+                  setEditingInvoiceId(inv.id);
+                  setInvoiceForm({
+                    contactId: inv.contactId || "",
+                    dueDate: inv.dueDate ? inv.dueDate.split("T")[0] : "",
+                    items: (inv.items ?? []).map((item: any) => ({
+                      id: item.id,
+                      productId: item.productId ?? "",
+                      description: item.description,
+                      quantity: String(item.quantity),
+                      unitPrice: String(item.unitPrice),
+                    })),
+                    taxRate: String(inv.taxRate || 0),
+                    discountType: (inv.discountType as "PERCENT" | "FIXED") || "PERCENT",
+                    discountValue: inv.discountValue ? String(inv.discountValue) : "",
+                    notes: inv.notes || "",
+                  });
+                  setShowInvoiceBuilder(true);
+                  break;
+                case "remind":
+                  openReminderEmail(inv);
+                  break;
+                case "collect":
+                  openPaymentModal(inv);
+                  break;
+                case "view_receipt":
+                case "view":
+                  setSelectedInvoice(inv);
+                  break;
+                case "record_payment":
+                  openPaymentModal(inv);
+                  break;
+              }
+            };
 
             const cardBadges = (
               <>
@@ -767,161 +834,98 @@ export default function InvoicesPanel({
               </>
             );
 
-            const cardDesktopActions = (
-              <>
-                <button onClick={() => setSelectedInvoice(inv)} className="p-1 rounded-lg hover:bg-muted transition-colors" title="View details">
-                  <Eye className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
-                </button>
-                <button
-                  onClick={() => {
-                    setEditingInvoiceId(inv.id);
-                    setInvoiceForm({
-                      contactId: inv.contactId || "",
-                      dueDate: inv.dueDate ? inv.dueDate.split("T")[0] : "",
-                      items: (inv.items ?? []).map((item: any) => ({
-                        id: item.id,
-                        productId: item.productId ?? "",
-                        description: item.description,
-                        quantity: String(item.quantity),
-                        unitPrice: String(item.unitPrice),
-                      })),
-                      taxRate: String(inv.taxRate || 0),
-                      discountType: (inv.discountType as "PERCENT" | "FIXED") || "PERCENT",
-                      discountValue: inv.discountValue ? String(inv.discountValue) : "",
-                      notes: inv.notes || "",
-                    });
-                    setShowInvoiceBuilder(true);
-                  }}
-                  className="p-1 rounded-lg hover:bg-muted transition-colors"
-                  title="Edit invoice"
-                >
-                  <Pencil className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
-                </button>
-                <button onClick={() => duplicateInvoice(inv)} className="p-1 rounded-lg hover:bg-muted transition-colors" title="Duplicate">
-                  <Files className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
-                </button>
-                <button onClick={() => shareViaWhatsApp(inv)} className="p-1 rounded-lg hover:bg-green-500/20 transition-colors" title="WhatsApp">
-                  <MessageCircle className="w-3.5 h-3.5 text-green-400" />
-                </button>
-                {gmailStatus?.connected && (
-                  <button
-                    onClick={() => { setSelectedInvoice(inv); setShowEmailModal(true); }}
-                    className="p-1 rounded-lg hover:bg-blue-500/20 transition-colors"
-                    title="Send via email"
-                  >
-                    <Mail className="w-3.5 h-3.5 text-blue-400" />
-                  </button>
-                )}
-                {(inv.status === "SENT" || inv.status === "OVERDUE") && gmailStatus?.connected && (
-                  <button onClick={() => openReminderEmail(inv)} className="p-1 rounded-lg hover:bg-amber-500/20 transition-colors" title="Send reminder">
-                    <Bell className="w-3.5 h-3.5 text-amber-400" />
-                  </button>
-                )}
-                {inv.status === "DRAFT" && (
-                  <button onClick={() => handleSendInvoice(inv.id)} className="px-1.5 py-0.5 rounded-lg bg-blue-500/15 text-blue-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]}>
-                    {actionLoading[inv.id] === "send" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send
-                  </button>
-                )}
-                {(inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID") && (
-                  <button onClick={() => openPaymentModal(inv)} className="px-1.5 py-0.5 rounded-lg bg-amber-500/15 text-amber-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]} title="Record Payment">
-                    <DollarSign className="w-3.5 h-3.5" /> Payment
-                  </button>
-                )}
-                {(inv.status === "DRAFT" || inv.status === "SENT") && (
-                  <button onClick={() => handleMarkPaid(inv.id, inv)} className="px-1.5 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]}>
-                    {actionLoading[inv.id] === "paid" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Paid
-                  </button>
-                )}
-                {(inv.status === "DRAFT" || inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID") && (
-                  <button onClick={() => handleVoidInvoice(inv.id)} className="p-1 rounded-lg hover:bg-slate-500/20 transition-colors disabled:opacity-50" title="Void invoice" disabled={!!actionLoading[inv.id]}>
-                    {actionLoading[inv.id] === "void" ? <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin" /> : <Ban className="w-3.5 h-3.5 text-slate-400" />}
-                  </button>
-                )}
-                <button onClick={() => handleDeleteInvoice(inv.id)} className="p-1 rounded-lg hover:bg-red-500/20 transition-colors disabled:opacity-50" title="Delete" disabled={!!actionLoading[inv.id]}>
-                  {actionLoading[inv.id] === "delete" ? <Loader2 className="w-3.5 h-3.5 text-red-400 animate-spin" /> : <Trash2 className="w-3.5 h-3.5 text-red-400 hover:text-red-300" />}
-                </button>
-              </>
-            );
-
-            const cardMobileActions = (
-              <>
-                <button onClick={() => setSelectedInvoice(inv)} className="p-1 rounded-lg hover:bg-muted" title="View">
-                  <Eye className="w-3.5 h-3.5 text-muted-foreground" />
-                </button>
-                <button onClick={() => duplicateInvoice(inv)} className="p-1 rounded-lg hover:bg-muted" title="Duplicate">
-                  <Files className="w-3.5 h-3.5 text-muted-foreground" />
-                </button>
-                <button onClick={() => shareViaWhatsApp(inv)} className="p-1 rounded-lg hover:bg-green-500/20" title="WhatsApp">
-                  <MessageCircle className="w-3.5 h-3.5 text-green-400" />
-                </button>
-                {gmailStatus?.connected && (
-                  <button onClick={() => { setSelectedInvoice(inv); setShowEmailModal(true); }} className="p-1 rounded-lg hover:bg-blue-500/20" title="Email">
-                    <Mail className="w-3.5 h-3.5 text-blue-400" />
-                  </button>
-                )}
-                {(inv.status === "SENT" || inv.status === "OVERDUE") && gmailStatus?.connected && (
-                  <button onClick={() => openReminderEmail(inv)} className="p-1 rounded-lg hover:bg-amber-500/20" title="Remind">
-                    <Bell className="w-3.5 h-3.5 text-amber-400" />
-                  </button>
-                )}
-                {inv.status === "DRAFT" && (
-                  <button onClick={() => handleSendInvoice(inv.id)} className="px-1.5 py-0.5 rounded-lg bg-blue-500/15 text-blue-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]}>
-                    {actionLoading[inv.id] === "send" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send
-                  </button>
-                )}
-                {(inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID") && (
-                  <button onClick={() => openPaymentModal(inv)} className="px-1.5 py-0.5 rounded-lg bg-amber-500/15 text-amber-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]} title="Record Payment">
-                    <DollarSign className="w-3.5 h-3.5" /> Pay
-                  </button>
-                )}
-                {(inv.status === "DRAFT" || inv.status === "SENT") && (
-                  <button onClick={() => handleMarkPaid(inv.id, inv)} className="px-1.5 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-400 text-[10px] font-medium disabled:opacity-50 flex items-center gap-0.5" disabled={!!actionLoading[inv.id]}>
-                    {actionLoading[inv.id] === "paid" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Paid
-                  </button>
-                )}
-                {(inv.status === "DRAFT" || inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID") && (
-                  <button onClick={() => handleVoidInvoice(inv.id)} className="p-1 rounded-lg hover:bg-slate-500/20 disabled:opacity-50" title="Void" disabled={!!actionLoading[inv.id]}>
-                    {actionLoading[inv.id] === "void" ? <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin" /> : <Ban className="w-3.5 h-3.5 text-slate-400" />}
-                  </button>
-                )}
-                <button onClick={() => handleDeleteInvoice(inv.id)} className="p-1 rounded-lg hover:bg-red-500/20 disabled:opacity-50" title="Delete" disabled={!!actionLoading[inv.id]}>
-                  {actionLoading[inv.id] === "delete" ? <Loader2 className="w-3.5 h-3.5 text-red-400 animate-spin" /> : <Trash2 className="w-3.5 h-3.5 text-red-400" />}
-                </button>
-              </>
-            );
-
             const paidAmount = (inv.payments ?? []).filter((p) => p.status === "SUCCESSFUL").reduce((sum, p) => sum + p.amount, 0);
             const paymentPercent = Number(inv.total) > 0 ? Math.round((paidAmount / Number(inv.total)) * 100) : 0;
 
-            const paymentProgressBar = (inv.status === "PARTIALLY_PAID" || (paidAmount > 0 && inv.status !== "PAID")) ? (
-              <div className="mt-1.5">
-                <div className="flex items-center justify-between mb-0.5">
-                  <span className="text-[9px] text-muted-foreground/50">Paid: {formatAmount(paidAmount, inv.currency)}</span>
-                  <span className="text-[9px] text-muted-foreground/50">{paymentPercent}%</span>
-                </div>
-                <div className="h-1 w-full rounded-full bg-border/30 overflow-hidden">
-                  <div className="h-full rounded-full bg-amber-400 transition-all duration-300" style={{ width: `${paymentPercent}%` }} />
-                </div>
-              </div>
-            ) : null;
-
             return (
               <div key={inv.id}>
-              <BillingCard
-                type="invoice"
-                number={inv.invoiceNumber ?? inv.id.slice(0, 8)}
-                status={inv.status}
-                contact={inv.contact ?? null}
-                total={Number(inv.total)}
-                currency={inv.currency}
-                items={inv.items ?? []}
-                date={inv.issueDate ?? ""}
-                badges={cardBadges}
-                desktopActions={cardDesktopActions}
-                mobileActions={cardMobileActions}
-                onClick={() => setSelectedInvoice(inv)}
-              />
-              {paymentProgressBar}
+                <RecordRowCard
+                  type="invoice"
+                  number={inv.invoiceNumber ?? inv.id.slice(0, 8)}
+                  status={inv.status}
+                  contact={inv.contact ?? null}
+                  total={Number(inv.total)}
+                  currency={inv.currency}
+                  items={inv.items ?? []}
+                  date={inv.issueDate ?? ""}
+                  badges={cardBadges}
+                  selected={selectedInvoice?.id === inv.id}
+                  onClick={() => setSelectedInvoice(inv)}
+                  smartCTA={
+                    <button
+                      onClick={handleSmartAction}
+                      disabled={!!actionLoading[inv.id]}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all disabled:opacity-50 ${smartCTA.bgColor} ${smartCTA.color} ${smartCTA.hoverBgColor}`}
+                    >
+                      {actionLoading[inv.id] ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <SmartIcon className="w-3 h-3" />
+                      )}
+                      <span className="hidden sm:inline">{smartCTA.label}</span>
+                    </button>
+                  }
+                  overflowMenu={
+                    <OverflowMenu>
+                      <OverflowMenuItem icon={Eye} label="View details" onClick={() => setSelectedInvoice(inv)} />
+                      <OverflowMenuItem
+                        icon={Pencil}
+                        label="Edit"
+                        onClick={() => {
+                          setEditingInvoiceId(inv.id);
+                          setInvoiceForm({
+                            contactId: inv.contactId || "",
+                            dueDate: inv.dueDate ? inv.dueDate.split("T")[0] : "",
+                            items: (inv.items ?? []).map((item: any) => ({
+                              id: item.id,
+                              productId: item.productId ?? "",
+                              description: item.description,
+                              quantity: String(item.quantity),
+                              unitPrice: String(item.unitPrice),
+                            })),
+                            taxRate: String(inv.taxRate || 0),
+                            discountType: (inv.discountType as "PERCENT" | "FIXED") || "PERCENT",
+                            discountValue: inv.discountValue ? String(inv.discountValue) : "",
+                            notes: inv.notes || "",
+                          });
+                          setShowInvoiceBuilder(true);
+                        }}
+                      />
+                      <OverflowMenuItem icon={Files} label="Duplicate" onClick={() => duplicateInvoice(inv)} />
+                      <OverflowMenuItem icon={MessageCircle} label="Share via WhatsApp" onClick={() => shareViaWhatsApp(inv)} />
+                      {gmailStatus?.connected && (
+                        <OverflowMenuItem icon={Mail} label="Send via email" onClick={() => { setSelectedInvoice(inv); setShowEmailModal(true); }} />
+                      )}
+                      {(inv.status === "SENT" || inv.status === "OVERDUE") && gmailStatus?.connected && (
+                        <OverflowMenuItem icon={Bell} label="Send reminder" onClick={() => openReminderEmail(inv)} />
+                      )}
+                      {inv.status === "DRAFT" && (
+                        <OverflowMenuItem icon={Send} label="Mark as sent" onClick={() => handleSendInvoice(inv.id)} disabled={!!actionLoading[inv.id]} />
+                      )}
+                      {(inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID") && (
+                        <OverflowMenuItem icon={DollarSign} label="Record payment" onClick={() => openPaymentModal(inv)} />
+                      )}
+                      {(inv.status === "DRAFT" || inv.status === "SENT") && (
+                        <OverflowMenuItem icon={CheckCircle} label="Mark paid" onClick={() => handleMarkPaid(inv.id, inv)} disabled={!!actionLoading[inv.id]} />
+                      )}
+                      {(inv.status === "DRAFT" || inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID") && (
+                        <OverflowMenuItem icon={Ban} label="Void invoice" onClick={() => handleVoidInvoice(inv.id)} disabled={!!actionLoading[inv.id]} />
+                      )}
+                      <OverflowMenuItem icon={Trash2} label="Delete" onClick={() => handleDeleteInvoice(inv.id)} destructive disabled={!!actionLoading[inv.id]} />
+                    </OverflowMenu>
+                  }
+                />
+                {(inv.status === "PARTIALLY_PAID" || (paidAmount > 0 && inv.status !== "PAID")) && (
+                  <div className="mt-1.5 mx-4">
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="text-[9px] text-muted-foreground/50">Paid: {formatAmount(paidAmount, inv.currency)}</span>
+                      <span className="text-[9px] text-muted-foreground/50">{paymentPercent}%</span>
+                    </div>
+                    <div className="h-1 w-full rounded-full bg-border/30 overflow-hidden">
+                      <div className="h-full rounded-full bg-amber-400 transition-all duration-300" style={{ width: `${paymentPercent}%` }} />
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
