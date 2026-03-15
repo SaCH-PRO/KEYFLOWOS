@@ -350,7 +350,7 @@ export default function MarketingPage() {
                     AI Analyze
                   </button>
                 </div>
-                <MarketingInsightsTab campaigns={mk.campaigns} forms={mk.forms} submissions={mk.submissions} socialPosts={mk.socialPosts} stats={mk.stats} />
+                <MarketingInsightsTab campaigns={mk.campaigns} forms={mk.forms} submissions={mk.submissions} socialPosts={mk.socialPosts} stats={mk.stats} businessId={mk.businessId} />
               </div>
             )}
           </motion.div>

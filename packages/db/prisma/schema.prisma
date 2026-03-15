@@ -1199,8 +1199,36 @@ model EmailCampaign {
   updatedAt DateTime  @updatedAt      @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
+  briefing CampaignBriefing?
+
   @@index([businessId, status])
   @@map("email_campaigns")
+}
+
+model CampaignBriefing {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  campaignId String   @unique @map("campaign_id")
+  campaign   EmailCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  deliveryRate    Float?  @map("delivery_rate")
+  openRate        Float?  @map("open_rate")
+  clickRate       Float?  @map("click_rate")
+  bounceRate      Float?  @map("bounce_rate")
+  historicalAvgOpenRate  Float? @map("historical_avg_open_rate")
+  historicalAvgClickRate Float? @map("historical_avg_click_rate")
+
+  performanceVsAvg String? @map("performance_vs_avg")
+  insights         Json?
+  recommendations  Json?
+  audienceHealth   Json?   @map("audience_health")
+  sendTimeAnalysis Json?   @map("send_time_analysis")
+  aiBriefing       String? @map("ai_briefing")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([businessId])
+  @@map("campaign_briefings")
 }
 
 model EmailCampaignContact {

@@ -31,6 +31,8 @@ import {
   dismissMomentumRecommendation,
   generateMomentumDraft,
   MomentumRecommendation,
+  fetchCampaignBriefings,
+  CampaignBriefing,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId, getUserDisplayName } from "@/lib/workspace";
 import { DashboardSkeleton } from "@/components/ui/skeleton";
@@ -82,6 +84,7 @@ import {
   CornerDownLeft,
   HeartPulse,
   Clock3,
+  Mail,
 } from "lucide-react";
 
 interface AutopilotTask {
@@ -234,6 +237,9 @@ export default function CommandPage() {
   const [momentumLoading, setMomentumLoading] = useState(false);
   const [momentumActionId, setMomentumActionId] = useState<string | null>(null);
 
+  const [campaignBriefings, setCampaignBriefings] = useState<CampaignBriefing[]>([]);
+  const [campaignBriefingsLoading, setCampaignBriefingsLoading] = useState(false);
+
   useEffect(() => {
     const initWorkspace = async () => {
       const fresh = await refreshWorkspace();
@@ -258,18 +264,20 @@ export default function CommandPage() {
       setLoading(true);
       setError(null);
       try {
-        const [cockpitResult, gamificationResult, tasksResult, alertsResult, momentumResult] = await Promise.all([
+        const [cockpitResult, gamificationResult, tasksResult, alertsResult, momentumResult, briefingsResult] = await Promise.all([
           fetchCockpitSummary(businessId),
           fetchGamificationStats(businessId),
           fetchTodaysTasks(businessId),
           fetchCriticalAlerts(businessId),
           fetchMomentumRecommendations(businessId, 5),
+          fetchCampaignBriefings(businessId),
         ]);
         if (cockpitResult.data) setCockpit(cockpitResult.data as CockpitSummary);
         if (gamificationResult.data) setGamification(gamificationResult.data);
         if (tasksResult.data) setTasks(tasksResult.data as AutopilotTask[]);
         if (alertsResult.data) setAlerts(alertsResult.data as CriticalAlert[]);
         if (momentumResult.data) setMomentumRecs(momentumResult.data);
+        if (briefingsResult.data) setCampaignBriefings(briefingsResult.data);
         void updateStreak(businessId);
       } catch (err) {
         console.error("Dashboard load error:", err);
@@ -918,6 +926,62 @@ export default function CommandPage() {
               )}
             </div>
           </motion.div>
+
+          {campaignBriefings.length > 0 && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.17 }} className="bg-white/[0.03] backdrop-blur border border-white/10 rounded-2xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Mail className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+                  <h2 className="text-xs font-semibold uppercase tracking-wider">Campaign Intelligence</h2>
+                </div>
+                <Link href="/app/marketing?tab=insights" className="text-[10px] text-muted-foreground hover:text-white transition-colors">
+                  View All →
+                </Link>
+              </div>
+              <div className="p-4 space-y-3" style={{ maxHeight: 320, overflowY: "auto" }}>
+                {campaignBriefings.slice(0, 3).map((cb) => (
+                  <div key={cb.id} className="bg-white/5 rounded-lg p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold truncate max-w-[70%]">{cb.campaign?.name ?? "Campaign"}</p>
+                      <span className="text-[9px] text-muted-foreground">{new Date(cb.createdAt).toLocaleDateString()}</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <div className="bg-white/5 rounded p-1.5 text-center">
+                        <p className="text-[9px] text-muted-foreground uppercase">Open</p>
+                        <p className="text-xs font-semibold">{(cb.openRate ?? 0).toFixed(1)}%</p>
+                        {cb.historicalAvgOpenRate != null && cb.openRate != null && (
+                          <p className={`text-[9px] ${cb.openRate >= cb.historicalAvgOpenRate ? "text-green-400" : "text-red-400"}`}>
+                            {cb.openRate >= cb.historicalAvgOpenRate ? "+" : ""}{(cb.openRate - cb.historicalAvgOpenRate).toFixed(1)}%
+                          </p>
+                        )}
+                      </div>
+                      <div className="bg-white/5 rounded p-1.5 text-center">
+                        <p className="text-[9px] text-muted-foreground uppercase">Click</p>
+                        <p className="text-xs font-semibold">{(cb.clickRate ?? 0).toFixed(1)}%</p>
+                        {cb.historicalAvgClickRate != null && cb.clickRate != null && (
+                          <p className={`text-[9px] ${cb.clickRate >= cb.historicalAvgClickRate ? "text-green-400" : "text-red-400"}`}>
+                            {cb.clickRate >= cb.historicalAvgClickRate ? "+" : ""}{(cb.clickRate - cb.historicalAvgClickRate).toFixed(1)}%
+                          </p>
+                        )}
+                      </div>
+                      <div className="bg-white/5 rounded p-1.5 text-center">
+                        <p className="text-[9px] text-muted-foreground uppercase">Delivery</p>
+                        <p className="text-xs font-semibold">{(cb.deliveryRate ?? 0).toFixed(1)}%</p>
+                      </div>
+                    </div>
+                    {cb.aiBriefing && (
+                      <div className="p-2 rounded" style={{ backgroundColor: "hsl(var(--kf-accent1) / 0.08)", border: "1px solid hsl(var(--kf-accent1) / 0.15)" }}>
+                        <div className="flex items-start gap-1.5">
+                          <Sparkles className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-accent1))" }} />
+                          <p className="text-[10px] leading-relaxed text-gray-300 line-clamp-2">{cb.aiBriefing}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
 
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-white/[0.03] backdrop-blur border border-white/10 rounded-2xl overflow-hidden">
             <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">

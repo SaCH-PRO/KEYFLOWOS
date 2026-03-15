@@ -30,7 +30,10 @@ import {
   sendCampaign,
   scheduleCampaign,
   cancelScheduleCampaign,
+  runPreSendValidation,
+  type PreSendValidationResult,
 } from "@/lib/client";
+import { PreSendValidationWarnings } from "./campaign-intelligence-cards";
 import { CampaignsEmptyState } from "./marketing-empty-states";
 import { MarketingBulkBar } from "./marketing-bulk-bar";
 import { toast } from "sonner";
@@ -90,6 +93,8 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
   const [editingCampaign, setEditingCampaign] = useState<EmailCampaign | null>(null);
   const [campaignForm, setCampaignForm] = useState({ name: "", subject: "", body: "", segmentType: "all", tags: [] as string[], status: "" });
   const [confirmSendId, setConfirmSendId] = useState<string | null>(null);
+  const [preSendValidation, setPreSendValidation] = useState<PreSendValidationResult | null>(null);
+  const [preSendLoading, setPreSendLoading] = useState(false);
   const [scheduleMode, setScheduleMode] = useState(false);
   const [scheduleDate, setScheduleDate] = useState("");
   const [scheduling, setScheduling] = useState(false);
@@ -379,7 +384,7 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
         {campaigns.map(c => (
           <span key={`trigger-${c.id}`} className="hidden" aria-hidden="true">
             <button data-campaign-edit={c.id} onClick={() => openEditCampaign(c)} tabIndex={-1} />
-            <button data-campaign-send={c.id} onClick={() => setConfirmSendId(c.id)} tabIndex={-1} />
+            <button data-campaign-send={c.id} onClick={() => { setConfirmSendId(c.id); setPreSendValidation(null); if (businessId) { setPreSendLoading(true); runPreSendValidation(businessId, c.id).then(res => { if (res.data) setPreSendValidation(res.data); }).catch(() => {}).finally(() => setPreSendLoading(false)); } }} tabIndex={-1} />
           </span>
         ))}
         <div className="flex items-center gap-2">
@@ -494,7 +499,7 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
                         <button onClick={() => openEditCampaign(campaign)} disabled={operationInFlight} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors disabled:opacity-40" aria-label="Edit campaign">
                           <Pencil className="w-4 h-4" />
                         </button>
-                        <button onClick={() => setConfirmSendId(campaign.id)} disabled={operationInFlight} className="p-1.5 rounded-lg text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-40" aria-label="Send campaign">
+                        <button onClick={() => { setConfirmSendId(campaign.id); setPreSendValidation(null); if (businessId) { setPreSendLoading(true); runPreSendValidation(businessId, campaign.id).then(res => { if (res.data) setPreSendValidation(res.data); }).catch(() => {}).finally(() => setPreSendLoading(false)); } }} disabled={operationInFlight} className="p-1.5 rounded-lg text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-40" aria-label="Send campaign">
                           <Send className="w-4 h-4" />
                         </button>
                       </>
@@ -694,6 +699,11 @@ export const CampaignsPanel = React.memo(function CampaignsPanel({
                     ? "Choose a date and time to send this campaign."
                     : "This will send the email to all matching recipients. This action cannot be undone."}
                 </p>
+                {!scheduleMode && (
+                  <div className="mb-4">
+                    <PreSendValidationWarnings validation={preSendValidation} loading={preSendLoading} />
+                  </div>
+                )}
                 {scheduleMode && (
                   <div className="mb-4">
                     <input

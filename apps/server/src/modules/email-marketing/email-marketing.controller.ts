@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { EmailMarketingService } from './email-marketing.service';
+import { CampaignIntelligenceService } from './campaign-intelligence.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 
@@ -8,6 +9,7 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 export class EmailMarketingController {
   constructor(
     @Inject(EmailMarketingService) private readonly emailMarketing: EmailMarketingService,
+    @Inject(CampaignIntelligenceService) private readonly intelligence: CampaignIntelligenceService,
   ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -122,6 +124,42 @@ export class EmailMarketingController {
   @Get('businesses/:businessId/suppression-count')
   getSuppressionCount(@Param('businessId') businessId: string) {
     return this.emailMarketing.getSuppressionCount(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/campaign-intelligence/briefings')
+  getCampaignBriefings(@Param('businessId') businessId: string) {
+    return this.intelligence.getBriefings(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/campaign-intelligence/briefing/:campaignId')
+  getCampaignBriefing(
+    @Param('businessId') businessId: string,
+    @Param('campaignId') campaignId: string,
+  ) {
+    return this.intelligence.getBriefingForCampaign(businessId, campaignId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/campaign-intelligence/pre-send-validation/:campaignId')
+  preSendValidation(
+    @Param('businessId') businessId: string,
+    @Param('campaignId') campaignId: string,
+  ) {
+    return this.intelligence.preSendValidation(businessId, campaignId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/campaign-intelligence/audience-health')
+  getAudienceHealth(@Param('businessId') businessId: string) {
+    return this.intelligence.getAudienceHealth(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/campaign-intelligence/send-time-recommendations')
+  getSendTimeRecommendations(@Param('businessId') businessId: string) {
+    return this.intelligence.getSendTimeRecommendations(businessId);
   }
 
   @Get('marketing/unsubscribe/:token')
