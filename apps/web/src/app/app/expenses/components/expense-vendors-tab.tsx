@@ -21,6 +21,8 @@ export function ExpenseVendorsTab({ vendors }: ExpenseVendorsTabProps) {
               icon={Store}
               title="No vendor data yet"
               description="Add vendors to your expenses to see spending breakdowns and payment history."
+              actionLabel="Add Expense"
+              onAction={() => { window.location.href = "/app/expenses?tab=expenses"; }}
               tip="Track which vendors you spend the most with to negotiate better rates."
             />
           </div>
