@@ -9,6 +9,7 @@ import type {
   CashFlowForecast,
   SimulationResult,
   AiChatResponse,
+  GamificationStats,
 } from "@/lib/client";
 
 export type {
@@ -22,6 +23,7 @@ export type {
   CashFlowForecast,
   SimulationResult,
   AiChatResponse,
+  GamificationStats,
 };
 
 export interface AutopilotTask {

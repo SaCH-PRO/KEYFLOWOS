@@ -14,6 +14,7 @@ import { AiCommandBar } from "./_command/ai-command-bar";
 import { BriefingCard } from "./_command/briefing-card";
 import { PriorityQueue } from "./_command/priority-queue";
 import { SimulationDrawer } from "./_command/simulation-drawer";
+import { ProgressSection } from "./_command/progress-section";
 
 export default function CommandPage() {
   const d = useCommandData();
@@ -74,6 +75,8 @@ export default function CommandPage() {
         initialFinancialPulse={d.financialPulse}
         initialCampaignBriefings={d.campaignBriefings}
       />
+
+      <ProgressSection gamification={d.gamification} momentum={d.momentum} />
 
       <PriorityQueue
         priorities={d.priorities}

@@ -57,27 +57,32 @@ export function BriefingCard({ businessId, initialFinancialPulse, initialCampaig
 
   return (
     <div className="kf-card overflow-hidden">
-      <button
-        onClick={handleToggle}
-        className="w-full flex items-center justify-between px-4 py-3 border-b border-border hover:bg-muted/20 transition-colors"
-      >
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={handleToggle}
+          onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && handleToggle()}
+          className="flex items-center gap-2 flex-1 cursor-pointer hover:opacity-80 transition-opacity"
+        >
           <Sun className="w-4 h-4" style={{ color: "hsl(var(--kf-warning))" }} />
           <h2 className="kf-text-caption font-semibold uppercase tracking-wider">Daily Briefing</h2>
           {!hasContent && <span className="text-[10px] text-muted-foreground ml-1">Click Generate to start</span>}
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={(e) => { e.stopPropagation(); handleGenerate(); }}
+            onClick={handleGenerate}
             disabled={briefingLoading || !businessId}
             className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-colors disabled:opacity-40 bg-muted/30 border border-border hover:bg-muted/50"
           >
             <RefreshCw className={briefingLoading ? "w-3 h-3 animate-spin" : "w-3 h-3"} />
             {briefing ? "Refresh" : "Generate"}
           </button>
-          {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+          <div role="button" tabIndex={0} onClick={handleToggle} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && handleToggle()} className="cursor-pointer">
+            {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+          </div>
         </div>
-      </button>
+      </div>
 
       <AnimatePresence>
         {expanded && (
