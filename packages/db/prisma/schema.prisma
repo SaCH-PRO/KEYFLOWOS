@@ -132,6 +132,8 @@ model Business {
   purchaseOrders   PurchaseOrder[]
   marketplaceOrders MarketplaceOrder[]
   crmSequences      CrmSequence[]
+  crossModuleWorkflows CrossModuleWorkflow[]
+  scheduledAgentJobs   ScheduledAgentJob[]
 
   // Gmail Integration for sending quotes/invoices
   gmailEmail        String?   @map("gmail_email")
@@ -763,6 +765,47 @@ model Automation {
 
   @@index([businessId, trigger])
   @@map("automations")
+}
+
+model CrossModuleWorkflow {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  workflowKey String  @map("workflow_key")
+  enabled     Boolean @default(true)
+  config      Json?
+
+  lastRunAt DateTime? @map("last_run_at")
+  runCount  Int       @default(0) @map("run_count")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt      @map("updated_at")
+
+  @@unique([businessId, workflowKey])
+  @@index([businessId])
+  @@map("cross_module_workflows")
+}
+
+model ScheduledAgentJob {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  jobType    String   @map("job_type")
+  entityId   String   @map("entity_id")
+  checkpoint String
+  status     String   @default("PENDING")
+  payload    Json?
+  scheduledFor DateTime @map("scheduled_for")
+  executedAt   DateTime? @map("executed_at")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt      @map("updated_at")
+
+  @@unique([businessId, entityId, checkpoint])
+  @@index([status, scheduledFor])
+  @@map("scheduled_agent_jobs")
 }
 
 model Activity {

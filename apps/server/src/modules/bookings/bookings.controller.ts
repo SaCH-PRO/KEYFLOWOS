@@ -39,6 +39,16 @@ export class BookingsController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/bookings/:bookingId/reschedule')
+  rescheduleBooking(
+    @Param('businessId') businessId: string,
+    @Param('bookingId') bookingId: string,
+    @Body('startTime') startTime: string,
+  ) {
+    return this.bookings.rescheduleBooking(businessId, bookingId, new Date(startTime));
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId')
   createBooking(
     @Param('businessId') businessId: string,
