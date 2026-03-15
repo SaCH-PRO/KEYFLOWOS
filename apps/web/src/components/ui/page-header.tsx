@@ -1,7 +1,6 @@
 "use client";
 
 import { Plus } from "lucide-react";
-import { MissionsButton } from "./missions-button";
 
 interface PageHeaderProps {
   icon: React.ElementType;
@@ -28,19 +27,18 @@ export function PageHeader({
     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
       <div className="flex items-center gap-2.5 min-w-0">
         <div
-          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+          className="w-8 h-8 kf-radius-md flex items-center justify-center flex-shrink-0"
           style={{ background: "hsl(var(--kf-accent1) / 0.1)" }}
         >
           <Icon className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
         </div>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-semibold tracking-tight truncate">{title}</h1>
+            <h1 className="kf-text-title font-semibold tracking-tight truncate">{title}</h1>
             {titleExtra}
-            <MissionsButton />
           </div>
           {subtitle && (
-            <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>
+            <p className="kf-text-caption" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{subtitle}</p>
           )}
         </div>
       </div>
@@ -49,7 +47,7 @@ export function PageHeader({
         {actionLabel && onAction && (
           <button
             onClick={onAction}
-            className="kf-btn-primary inline-flex items-center gap-1.5 !text-xs !py-1.5 !px-3"
+            className="kf-btn-primary inline-flex items-center gap-1.5 kf-text-caption !py-1.5 !px-3"
           >
             <ActionIcon className="w-3.5 h-3.5" />
             {actionLabel}

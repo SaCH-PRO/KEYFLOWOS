@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { MetricCard } from "./metric-card";
 
 interface StatItem {
   label: string;
@@ -42,34 +43,16 @@ export function StatCards({ items, columns = 4 }: StatCardsProps) {
       animate="show"
       className={`grid gap-3 ${gridCols}`}
     >
-      {items.map((kpi) => {
-        const Icon = kpi.icon;
-        return (
-          <motion.div
-            key={kpi.label}
-            variants={fadeUp}
-            className="kf-card kf-card-hover p-4 rounded-xl relative overflow-hidden cursor-default"
-          >
-            <div className="flex items-start justify-between">
-              <div className="space-y-1 flex-1 min-w-0">
-                <p className="text-[11px] uppercase tracking-widest text-muted-foreground font-medium">
-                  {kpi.label}
-                </p>
-                <p className="text-xl font-bold truncate">{kpi.value}</p>
-                {kpi.sub && (
-                  <p className="text-xs text-muted-foreground">{kpi.sub}</p>
-                )}
-              </div>
-              <div
-                className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                style={{ background: `${kpi.color}20` }}
-              >
-                <Icon className="w-5 h-5" style={{ color: kpi.color }} />
-              </div>
-            </div>
-          </motion.div>
-        );
-      })}
+      {items.map((kpi) => (
+        <motion.div key={kpi.label} variants={fadeUp}>
+          <MetricCard
+            label={kpi.label}
+            value={kpi.value}
+            icon={kpi.icon}
+            iconColor={kpi.color}
+          />
+        </motion.div>
+      ))}
     </motion.div>
   );
 }
