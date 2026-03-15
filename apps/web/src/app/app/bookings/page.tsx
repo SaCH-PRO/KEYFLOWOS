@@ -9,7 +9,7 @@ import {
   X,
   Search,
   Sparkles,
-  Link2,
+  Share2,
 } from "lucide-react";
 import {
   Booking,
@@ -30,6 +30,7 @@ import {
   updateBookingStatus,
   fetchBookingStats,
   fetchScheduleHealth,
+  getBusinessById,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -52,6 +53,7 @@ import ScheduleFilters from "./components/schedule-filters";
 import CatalogCapacityTab from "./components/catalog-capacity-tab";
 import PerformanceTab from "./components/performance-tab";
 import { FeatureGuide } from "@/components/ui/feature-guide";
+import { ShareLinkModal } from "@/components/ui/share-link-modal";
 
 const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
   { key: "schedule", label: "Schedule", icon: Calendar },
@@ -91,6 +93,8 @@ export default function BookingsPage() {
   const [banner, setBanner] = useState<{ text: string; type: "success" | "error" | "info" } | null>(null);
 
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [businessSlug, setBusinessSlug] = useState<string | null>(null);
 
   const [staffFilter, setStaffFilter] = useState("");
   const [serviceFilter, setServiceFilter] = useState("");
@@ -194,6 +198,9 @@ export default function BookingsPage() {
   useEffect(() => {
     if (businessId) {
       ai.updateContext({ businessId, activeView: tab });
+      getBusinessById(businessId).then((res) => {
+        if (res.data?.slug) setBusinessSlug(res.data.slug);
+      }).catch(() => {});
     }
   }, [businessId, tab, ai]);
 
@@ -391,6 +398,21 @@ export default function BookingsPage() {
         }
         rightSlot={
           <div className="flex items-center gap-1.5">
+            {businessSlug && (
+              <button
+                onClick={() => setShareModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 kf-radius-sm kf-text-micro font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+                style={{
+                  background: "hsl(var(--kf-accent2) / 0.1)",
+                  border: "1px solid hsl(var(--kf-accent2) / 0.2)",
+                  color: "hsl(var(--kf-accent2))",
+                }}
+                title="Share booking link"
+              >
+                <Share2 className="w-3 h-3" />
+                Share
+              </button>
+            )}
             <a
               href="/app/settings/connections"
               className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] transition-colors"
@@ -402,7 +424,6 @@ export default function BookingsPage() {
               }}
               title={calendarConnected ? `Calendar connected: ${calendarEmail ?? ""}` : "Connect calendar in Settings"}
             >
-              <Link2 className="w-3 h-3" />
               {calendarConnected && <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-success))" }} />}
             </a>
             <button
@@ -568,6 +589,16 @@ export default function BookingsPage() {
         }}
       />
       <AiHubTrigger ai={ai} moduleName="Bookings" />
+
+      {businessSlug && (
+        <ShareLinkModal
+          open={shareModalOpen}
+          onClose={() => setShareModalOpen(false)}
+          url={typeof window !== "undefined" ? `${window.location.origin}/book/${businessSlug}` : `/book/${businessSlug}`}
+          title="Share Booking Link"
+          description="Clients can browse services and book directly from this link."
+        />
+      )}
     </div>
   );
 }
