@@ -1,8 +1,9 @@
 "use client";
 
 import { Card } from "@keyflow/ui";
-import { DollarSign, TrendingUp, ArrowDownRight, PieChart, FileText } from "lucide-react";
+import { DollarSign, TrendingUp, ArrowDownRight, PieChart, FileText, Wallet } from "lucide-react";
 import { GeneratedReport } from "@/lib/client";
+import { EmptyState } from "@/components/ui/empty-state";
 import { formatCurrency } from "./report-types";
 import { MetricCard, DataTable, NarrativeSection, StatusBadge } from "./shared-components";
 
@@ -45,7 +46,14 @@ export function PnlView({ report }: { report: GeneratedReport }) {
               e.count.toString(),
               formatCurrency(e.total, m.currency),
             ])}
-            emptyText="No expenses recorded for this period — try a wider date range"
+            emptyState={
+              <EmptyState
+                icon={Wallet}
+                title="No expense data"
+                description="No expenses recorded for this period. Try selecting a wider date range."
+                tip="Categorize expenses to see a full breakdown here."
+              />
+            }
           />
         </Card>
       </div>

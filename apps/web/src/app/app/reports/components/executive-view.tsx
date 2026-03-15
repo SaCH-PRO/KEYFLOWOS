@@ -6,6 +6,7 @@ import {
   AlertTriangle, Briefcase, Target
 } from "lucide-react";
 import { GeneratedReport } from "@/lib/client";
+import { EmptyState } from "@/components/ui/empty-state";
 import { formatCurrency } from "./report-types";
 import { MetricCard, DataTable, NarrativeSection, ProgressBar } from "./shared-components";
 
@@ -67,7 +68,14 @@ export function ExecutiveView({ report }: { report: GeneratedReport }) {
             formatCurrency(c.total, m.currency),
             <ProgressBar key={c.name} value={c.total} max={m.revenue.topClients[0]?.total || 1} />
           ])}
-          emptyText="No client data for this period — try a wider date range"
+          emptyState={
+            <EmptyState
+              icon={Users}
+              title="No client data"
+              description="No revenue data found for this period. Try selecting a wider date range."
+              tip="Client revenue is calculated from paid invoices."
+            />
+          }
         />
       </Card>
     </div>

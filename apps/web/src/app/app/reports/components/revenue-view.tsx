@@ -1,8 +1,9 @@
 "use client";
 
 import { Card } from "@keyflow/ui";
-import { DollarSign, TrendingUp, FileText, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { DollarSign, TrendingUp, FileText, AlertTriangle, CheckCircle2, Users } from "lucide-react";
 import { GeneratedReport } from "@/lib/client";
+import { EmptyState } from "@/components/ui/empty-state";
 import { formatCurrency } from "./report-types";
 import { MetricCard, DataTable, NarrativeSection, StatusBadge, ProgressBar } from "./shared-components";
 
@@ -46,7 +47,14 @@ export function RevenueView({ report }: { report: GeneratedReport }) {
           <DataTable
             headers={["Client", "Revenue"]}
             rows={m.revenue.topClients.map(c => [c.name, formatCurrency(c.total, m.currency)])}
-            emptyText="No client revenue data for this period — try a wider date range"
+            emptyState={
+              <EmptyState
+                icon={Users}
+                title="No client revenue data"
+                description="No paid invoices found for this period. Try selecting a wider date range."
+                tip="Revenue is tracked from paid invoices linked to contacts."
+              />
+            }
           />
         </Card>
       </div>
