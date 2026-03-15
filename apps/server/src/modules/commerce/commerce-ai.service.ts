@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { CommerceStatsService } from './commerce-stats.service';
@@ -9,6 +9,13 @@ import {
   buildInvoiceReminderPrompt,
   buildPricingSuggestionPrompt,
 } from './prompts/commerce-command.prompt';
+import {
+  buildCollectionsScoringPrompt,
+  buildPaymentPlanPrompt,
+  buildQuoteFollowUpPrompt,
+  buildChurnRiskPrompt,
+  buildRevenueJourneyPrompt,
+} from './prompts/innovation.prompt';
 
 @Injectable()
 export class CommerceAiService {
@@ -189,7 +196,7 @@ export class CommerceAiService {
         items: true,
       },
     });
-    if (!invoice) throw new Error('Invoice not found');
+    if (!invoice) throw new NotFoundException('Invoice not found');
 
     const contactName = invoice.contact
       ? `${invoice.contact.firstName ?? ''} ${invoice.contact.lastName ?? ''}`.trim() || invoice.contact.email || 'Customer'
@@ -231,7 +238,7 @@ Items: ${invoice.items.map((i: any) => `${i.description} ($${i.total})`).join(',
     const product = await this.db.product.findFirst({
       where: { id: productId, businessId, deletedAt: null },
     });
-    if (!product) throw new Error('Product not found');
+    if (!product) throw new NotFoundException('Product not found');
 
     const relatedInvoices = await this.db.invoiceItem.findMany({
       where: {
@@ -587,7 +594,7 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
       where: { id: contactId, businessId, deletedAt: null },
       select: { id: true, firstName: true, lastName: true, email: true, status: true, createdAt: true },
     });
-    if (!contact) throw new Error('Contact not found');
+    if (!contact) throw new NotFoundException('Contact not found');
 
     const [invoices, quotes, payments] = await Promise.all([
       this.db.invoice.findMany({
@@ -909,6 +916,358 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
     } finally {
       const duration = Date.now() - start;
       if (duration > 1000) this.logger.warn(`Command execution (${action}) took ${duration}ms`);
+    }
+  }
+
+  async predictiveCollectionsScore(businessId: string) {
+    const start = Date.now();
+    const now = new Date();
+
+    const overdueInvoices = await this.db.invoice.findMany({
+      where: { businessId, deletedAt: null, status: { in: ['OVERDUE', 'SENT'] }, dueDate: { lt: now } },
+      include: {
+        contact: { select: { id: true, firstName: true, lastName: true, email: true } },
+      },
+      orderBy: { dueDate: 'asc' },
+      take: 50,
+    });
+
+    if (overdueInvoices.length === 0) {
+      return {
+        scores: [],
+        summary: { totalOverdue: 0, estimatedRecovery: 0, highPriorityCount: 0, averageRecoveryScore: 0 },
+        strategy: 'No overdue invoices — great job staying on top of collections!',
+      };
+    }
+
+    const contactIds = [...new Set(overdueInvoices.map(i => i.contactId).filter(Boolean))];
+    const paymentHistory = await this.db.invoice.findMany({
+      where: { businessId, deletedAt: null, contactId: { in: contactIds as string[] }, status: 'PAID' },
+      select: { contactId: true, total: true, dueDate: true, paidAt: true },
+    });
+
+    const historyByContact = new Map<string, { paidCount: number; avgDelay: number; totalPaid: number }>();
+    for (const cid of contactIds) {
+      if (!cid) continue;
+      const paid = paymentHistory.filter(p => p.contactId === cid);
+      const delays = paid.filter(p => p.dueDate && p.paidAt).map(p => Math.floor((new Date(p.paidAt!).getTime() - new Date(p.dueDate!).getTime()) / 86400000));
+      historyByContact.set(cid, {
+        paidCount: paid.length,
+        avgDelay: delays.length > 0 ? Math.round(delays.reduce((s, d) => s + d, 0) / delays.length) : 0,
+        totalPaid: paid.reduce((s, p) => s + Number(p.total), 0),
+      });
+    }
+
+    const contextBlock = overdueInvoices.map(inv => {
+      const contactName = inv.contact ? `${inv.contact.firstName ?? ''} ${inv.contact.lastName ?? ''}`.trim() || 'Unknown' : 'Unknown';
+      const contactId = inv.contact?.id ?? 'unknown';
+      const daysOverdue = inv.dueDate ? Math.floor((now.getTime() - new Date(inv.dueDate).getTime()) / 86400000) : 0;
+      const history = inv.contactId ? historyByContact.get(inv.contactId) : null;
+      return `InvoiceID: ${inv.id} | Invoice #${inv.invoiceNumber} | $${inv.total} ${inv.currency} | ContactID: ${contactId} | ${contactName} | ${daysOverdue} days overdue | Contact history: ${history ? `${history.paidCount} paid, avg ${history.avgDelay}d delay, $${history.totalPaid} total` : 'no history'}`;
+    }).join('\n');
+
+    const result = await this.aiUsage.callAi({
+      businessId,
+      feature: 'commerce_collections_scoring',
+      messages: [
+        { role: 'system', content: buildCollectionsScoringPrompt(contextBlock) },
+        { role: 'user', content: `Score these ${overdueInvoices.length} overdue invoices for recovery likelihood.` },
+      ],
+      maxTokens: 2000,
+      temperature: 0.3,
+    });
+
+    const duration = Date.now() - start;
+    if (duration > 1000) this.logger.warn(`Collections scoring took ${duration}ms`);
+
+    try {
+      return JSON.parse(result.content);
+    } catch {
+      const totalOverdue = overdueInvoices.reduce((s, i) => s + Number(i.total), 0);
+      return {
+        scores: overdueInvoices.map(inv => ({
+          invoiceId: inv.id,
+          invoiceNumber: inv.invoiceNumber,
+          contactName: inv.contact ? `${inv.contact.firstName ?? ''} ${inv.contact.lastName ?? ''}`.trim() : 'Unknown',
+          amount: Number(inv.total),
+          daysOverdue: inv.dueDate ? Math.floor((now.getTime() - new Date(inv.dueDate).getTime()) / 86400000) : 0,
+          recoveryScore: 50,
+          recoveryLabel: 'uncertain',
+          recommendedChannel: 'email',
+          recommendedTone: 'firm',
+          reasoning: result.content,
+          nextAction: 'Send a follow-up reminder',
+        })),
+        summary: { totalOverdue, estimatedRecovery: totalOverdue * 0.6, highPriorityCount: 0, averageRecoveryScore: 50 },
+        strategy: result.content,
+      };
+    }
+  }
+
+  async suggestPaymentPlan(businessId: string, invoiceId: string) {
+    const invoice = await this.db.invoice.findFirst({
+      where: { id: invoiceId, businessId, deletedAt: null },
+      include: {
+        contact: { select: { id: true, firstName: true, lastName: true, email: true } },
+        items: true,
+      },
+    });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+
+    const contactName = invoice.contact
+      ? `${invoice.contact.firstName ?? ''} ${invoice.contact.lastName ?? ''}`.trim() || 'Customer'
+      : 'Customer';
+
+    let historyContext = '';
+    if (invoice.contactId) {
+      const pastInvoices = await this.db.invoice.findMany({
+        where: { contactId: invoice.contactId, businessId, deletedAt: null, status: 'PAID' },
+        select: { total: true, dueDate: true, paidAt: true },
+        orderBy: { paidAt: 'desc' },
+        take: 20,
+      });
+      const delays = pastInvoices.filter(i => i.dueDate && i.paidAt).map(i => Math.floor((new Date(i.paidAt!).getTime() - new Date(i.dueDate!).getTime()) / 86400000));
+      historyContext = `\nPayment History: ${pastInvoices.length} paid invoices, avg delay: ${delays.length > 0 ? Math.round(delays.reduce((s, d) => s + d, 0) / delays.length) : 0} days, total paid: $${pastInvoices.reduce((s, i) => s + Number(i.total), 0)}`;
+    }
+
+    const now = new Date();
+    const daysOverdue = invoice.dueDate
+      ? Math.max(0, Math.floor((now.getTime() - new Date(invoice.dueDate).getTime()) / 86400000))
+      : 0;
+
+    const contextBlock = `Invoice #${invoice.invoiceNumber}
+Amount: $${invoice.total} ${invoice.currency}
+Status: ${invoice.status}
+Days Overdue: ${daysOverdue}
+Contact: ${contactName}
+Items: ${invoice.items.map((i: any) => `${i.description} ($${i.total})`).join(', ')}${historyContext}`;
+
+    const result = await this.aiUsage.callAi({
+      businessId,
+      feature: 'commerce_payment_plan',
+      messages: [
+        { role: 'system', content: buildPaymentPlanPrompt(contextBlock) },
+        { role: 'user', content: `Suggest payment plan options for this $${invoice.total} invoice.` },
+      ],
+      maxTokens: 1500,
+      temperature: 0.4,
+    });
+
+    try {
+      return JSON.parse(result.content);
+    } catch {
+      return {
+        plans: [],
+        recommendation: result.content,
+        customerProfile: { paymentReliability: 'unknown', averagePaymentDelay: 0, totalRelationshipValue: 0 },
+      };
+    }
+  }
+
+  async smartQuoteFollowUp(businessId: string, quoteId: string) {
+    const quote = await this.db.quote.findFirst({
+      where: { id: quoteId, businessId, deletedAt: null },
+      include: {
+        contact: { select: { id: true, firstName: true, lastName: true, email: true } },
+        items: { select: { description: true, quantity: true, unitPrice: true, total: true } },
+      },
+    });
+    if (!quote) throw new NotFoundException('Quote not found');
+
+    const contactName = quote.contact
+      ? `${quote.contact.firstName ?? ''} ${quote.contact.lastName ?? ''}`.trim() || 'Customer'
+      : 'Customer';
+
+    let historyContext = '';
+    if (quote.contactId) {
+      const pastQuotes = await this.db.quote.findMany({
+        where: { contactId: quote.contactId, businessId, deletedAt: null },
+        select: { status: true, total: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      });
+      const accepted = pastQuotes.filter(q => q.status === 'ACCEPTED').length;
+      historyContext = `\nQuote History: ${pastQuotes.length} quotes, ${accepted} accepted (${pastQuotes.length > 0 ? Math.round((accepted / pastQuotes.length) * 100) : 0}% conversion)`;
+    }
+
+    const now = new Date();
+    const daysSinceCreated = Math.floor((now.getTime() - new Date(quote.createdAt).getTime()) / 86400000);
+    const daysUntilExpiry = quote.expiryDate
+      ? Math.floor((new Date(quote.expiryDate).getTime() - now.getTime()) / 86400000)
+      : null;
+
+    const contextBlock = `Quote #${quote.quoteNumber}
+Amount: $${quote.total} ${quote.currency}
+Status: ${quote.status}
+Created: ${daysSinceCreated} days ago
+Expiry: ${daysUntilExpiry !== null ? `${daysUntilExpiry} days ${daysUntilExpiry < 0 ? 'ago (expired)' : 'remaining'}` : 'No expiry set'}
+Contact: ${contactName}
+Items: ${(quote.items ?? []).map((i: any) => `${i.description} ($${i.total})`).join(', ')}${historyContext}`;
+
+    const result = await this.aiUsage.callAi({
+      businessId,
+      feature: 'commerce_quote_followup',
+      messages: [
+        { role: 'system', content: buildQuoteFollowUpPrompt(contextBlock) },
+        { role: 'user', content: `What's the best follow-up strategy for this $${quote.total} quote?` },
+      ],
+      maxTokens: 1500,
+      temperature: 0.4,
+    });
+
+    try {
+      return { quoteId: quote.id, quoteNumber: quote.quoteNumber, ...JSON.parse(result.content) };
+    } catch {
+      return {
+        quoteId: quote.id,
+        quoteNumber: quote.quoteNumber,
+        closeProbability: 50,
+        closeProbabilityLabel: 'moderate',
+        followUpWindow: 'within_week',
+        messagingApproach: { tone: 'consultative', keyPoints: [], openingLine: '', closingLine: '' },
+        reasoning: result.content,
+      };
+    }
+  }
+
+  async churnRiskAlerts(businessId: string) {
+    const start = Date.now();
+    const now = new Date();
+
+    const recurringSchedules = await this.db.recurringInvoice.findMany({
+      where: { businessId, deletedAt: null },
+      include: {
+        contact: { select: { id: true, firstName: true, lastName: true, email: true, status: true } },
+      },
+    });
+
+    const contactIds = [...new Set(recurringSchedules.map(r => r.contactId).filter(Boolean))];
+    if (contactIds.length === 0) {
+      return {
+        alerts: [],
+        summary: { totalAtRisk: 0, revenueAtRisk: 0, criticalCount: 0, highCount: 0 },
+        retentionStrategies: ['Set up recurring billing schedules to start tracking churn risk.'],
+      };
+    }
+
+    const invoices = await this.db.invoice.findMany({
+      where: { businessId, deletedAt: null, contactId: { in: contactIds } },
+      select: { contactId: true, status: true, total: true, createdAt: true, dueDate: true, paidAt: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const contextParts: string[] = [];
+    for (const schedule of recurringSchedules) {
+      if (!schedule.contact) continue;
+      const name = `${schedule.contact.firstName ?? ''} ${schedule.contact.lastName ?? ''}`.trim() || 'Unknown';
+      const contactInvoices = invoices.filter(i => i.contactId === schedule.contactId);
+      const paid = contactInvoices.filter(i => i.status === 'PAID');
+      const overdue = contactInvoices.filter(i => i.status === 'OVERDUE');
+      const lastPayment = paid.length > 0 ? paid[0].paidAt : null;
+      const daysSinceLastPayment = lastPayment ? Math.floor((now.getTime() - new Date(lastPayment).getTime()) / 86400000) : null;
+
+      contextParts.push(`ContactID: ${schedule.contact.id} | Contact: ${name} (${schedule.contact.status}) | Schedule: ${schedule.name} (${schedule.frequency}, ${schedule.isActive ? 'Active' : 'Paused'}) | Invoices: ${contactInvoices.length} total, ${paid.length} paid, ${overdue.length} overdue | Last payment: ${daysSinceLastPayment !== null ? `${daysSinceLastPayment} days ago` : 'never'} | Monthly value: ~$${Number(schedule.total || 0)}`);
+    }
+
+    const result = await this.aiUsage.callAi({
+      businessId,
+      feature: 'commerce_churn_risk',
+      messages: [
+        { role: 'system', content: buildChurnRiskPrompt(contextParts.join('\n')) },
+        { role: 'user', content: `Analyze these ${recurringSchedules.length} recurring customers for churn risk.` },
+      ],
+      maxTokens: 2000,
+      temperature: 0.3,
+    });
+
+    const duration = Date.now() - start;
+    if (duration > 1000) this.logger.warn(`Churn risk analysis took ${duration}ms`);
+
+    try {
+      return JSON.parse(result.content);
+    } catch {
+      return {
+        alerts: [],
+        summary: { totalAtRisk: 0, revenueAtRisk: 0, criticalCount: 0, highCount: 0 },
+        retentionStrategies: [result.content],
+      };
+    }
+  }
+
+  async revenueJourney(businessId: string) {
+    const start = Date.now();
+
+    const [contacts, quotes, invoices, payments] = await Promise.all([
+      this.db.contact.findMany({
+        where: { businessId, deletedAt: null },
+        select: { id: true, firstName: true, lastName: true, createdAt: true },
+      }),
+      this.db.quote.findMany({
+        where: { businessId, deletedAt: null },
+        select: { id: true, contactId: true, status: true, total: true, invoiceId: true, createdAt: true },
+      }),
+      this.db.invoice.findMany({
+        where: { businessId, deletedAt: null },
+        select: { id: true, contactId: true, status: true, total: true, createdAt: true, paidAt: true },
+      }),
+      this.db.payment.findMany({
+        where: { invoice: { businessId, deletedAt: null } },
+        select: { id: true, amount: true, invoiceId: true, createdAt: true },
+      }),
+    ]);
+
+    const totalContacts = contacts.length;
+    const contactsWithQuotes = new Set(quotes.map(q => q.contactId).filter(Boolean)).size;
+    const contactsWithInvoices = new Set(invoices.map(i => i.contactId).filter(Boolean)).size;
+    const paidInvoices = invoices.filter(i => i.status === 'PAID');
+    const contactsWithPayments = new Set(paidInvoices.map(i => i.contactId).filter(Boolean)).size;
+    const quotesConvertedToInvoice = quotes.filter(q => q.invoiceId).length;
+
+    const funnel = {
+      totalContacts,
+      contactsWithQuotes,
+      quotesToInvoices: quotesConvertedToInvoice,
+      invoicesToPayments: paidInvoices.length,
+      contactToQuoteRate: totalContacts > 0 ? Math.round((contactsWithQuotes / totalContacts) * 100) : 0,
+      quoteToInvoiceRate: quotes.length > 0 ? Math.round((quotesConvertedToInvoice / quotes.length) * 100) : 0,
+      invoiceToPaymentRate: invoices.length > 0 ? Math.round((paidInvoices.length / invoices.length) * 100) : 0,
+      overallConversionRate: totalContacts > 0 ? Math.round((contactsWithPayments / totalContacts) * 100) : 0,
+    };
+
+    const contextBlock = `Contacts: ${totalContacts}
+Contacts with quotes: ${contactsWithQuotes}
+Total quotes: ${quotes.length} (${quotes.filter(q => q.status === 'ACCEPTED').length} accepted, ${quotes.filter(q => q.status === 'REJECTED').length} rejected)
+Quotes converted to invoices: ${quotesConvertedToInvoice}
+Total invoices: ${invoices.length} (${paidInvoices.length} paid)
+Total payments: ${payments.length}
+Total revenue: $${paidInvoices.reduce((s, i) => s + Number(i.total), 0)}
+Funnel rates: Contact→Quote ${funnel.contactToQuoteRate}%, Quote→Invoice ${funnel.quoteToInvoiceRate}%, Invoice→Payment ${funnel.invoiceToPaymentRate}%`;
+
+    const result = await this.aiUsage.callAi({
+      businessId,
+      feature: 'commerce_revenue_journey',
+      messages: [
+        { role: 'system', content: buildRevenueJourneyPrompt(contextBlock) },
+        { role: 'user', content: 'Analyze the revenue journey funnel and identify drop-off points.' },
+      ],
+      maxTokens: 2000,
+      temperature: 0.3,
+    });
+
+    const duration = Date.now() - start;
+    if (duration > 1000) this.logger.warn(`Revenue journey analysis took ${duration}ms`);
+
+    try {
+      const aiAnalysis = JSON.parse(result.content);
+      return { ...aiAnalysis, funnel };
+    } catch {
+      return {
+        funnel,
+        dropOffPoints: [],
+        topPaths: [],
+        insights: [result.content],
+        recommendations: [],
+      };
     }
   }
 }

@@ -13,6 +13,7 @@ import {
   Terminal,
   Lightbulb,
   Zap,
+  BookOpen,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/page-header";
@@ -21,19 +22,25 @@ import { AiCommandHub } from "@/components/ai/ai-command-hub";
 
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { WorkspaceError } from "@/components/ui/workspace-error";
-import { useCommerce } from "./hooks/use-commerce";
-import { FeatureGuide } from "@/components/ui/feature-guide";
+import { useCommerceShell } from "./hooks/use-commerce-shell";
+import { useBillingWorkspace } from "./hooks/use-billing-workspace";
+import { useCommerceOverview } from "./hooks/use-commerce-overview";
+import { useCommerceCopilot } from "./hooks/use-commerce-copilot";
+import { useCommerceComposer } from "./hooks/use-commerce-composer";
 import { BillingPanel } from "./billing/billing-panel";
 import { CommerceInsightsTab } from "./insights/commerce-insights-tab";
 import { CommerceOverviewTab } from "./components/commerce-overview-tab";
 import { useCommerceAiHub, type CopilotMode } from "./hooks/use-commerce-ai-hub";
+import { SmartChecklist, SearchableHelpDrawer } from "./components/contextual-onboarding";
+import { CollectionsScoringPanel } from "./components/collections-scoring-panel";
+import { ChurnRiskPanel } from "./components/churn-risk-panel";
+import { RevenueJourneyPanel } from "./components/revenue-journey-panel";
 import { renderCommerceToolResult } from "./components/commerce-tool-results";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useModuleEmit, useModuleEvent } from "@/hooks/use-module-events";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { useRouter } from "next/navigation";
 import { commerceAiExecute } from "@/lib/client";
-import { formatCurrencyCompact } from "@/lib/currency";
 import type { BillingSlots } from "./utils/commerce-slots";
 
 const TABS = [
@@ -43,28 +50,48 @@ const TABS = [
 ];
 
 export default function CommercePage() {
-  const state = useCommerce();
-  const commerceAi = useCommerceAiHub();
+  const shell = useCommerceShell();
+  const billing = useBillingWorkspace();
+  const overview = useCommerceOverview(shell.invoices, shell.businessCurrency);
+  const composer = useCommerceComposer({
+    tab: overview.tab,
+    setTab: overview.setTab,
+    activeBillingSegment: billing.activeBillingSegment,
+    setActiveBillingSegment: billing.setActiveBillingSegment,
+    setTriggerNewQuote: billing.setTriggerNewQuote,
+    setTriggerNewInvoice: billing.setTriggerNewInvoice,
+    setTriggerNewSchedule: billing.setTriggerNewSchedule,
+  });
+  const copilot = useCommerceCopilot({
+    businessId: shell.businessId,
+    tab: overview.tab,
+    billingSegment: billing.activeBillingSegment,
+    invoiceCount: shell.invoices.length,
+    quoteCount: shell.quotes.length,
+    handleTabChange: overview.handleTabChange,
+    setBillingSegment: billing.setActiveBillingSegment,
+    prefillForContact: billing.prefillForContact,
+  });
+
   const emitEvent = useModuleEmit();
   const router = useRouter();
   const [slideDirection, setSlideDirection] = useState(0);
+  const [helpOpen, setHelpOpen] = useState(false);
   const COMMERCE_TAB_KEYS = TABS.map((t) => t.key);
-  const {
-    businessId, businessCurrency, workspaceLoading, workspaceError, tab, handleTabChange: rawTabChange,
-    products, invoices, quotes, contacts, loading, error,
-    handleNewItem,
-    activeBillingSegment: billingSegment, setActiveBillingSegment: setBillingSegment,
-    gmailStatus,
-    pendingPrefill, clearPrefill, prefillForContact,
-  } = state;
+
+  const { tab } = overview;
+  const { commerceAi } = copilot;
+  const { businessId, businessCurrency } = shell;
+  const { activeBillingSegment: billingSegment } = billing;
+  const { invoices, quotes } = shell;
 
   const handleTabChange = useCallback((t: string) => {
     if (t === tab) return;
     const oldIndex = COMMERCE_TAB_KEYS.indexOf(tab);
     const newIndex = COMMERCE_TAB_KEYS.indexOf(t);
     setSlideDirection(newIndex > oldIndex ? 1 : -1);
-    rawTabChange(t);
-  }, [tab, rawTabChange]);
+    overview.handleTabChange(t);
+  }, [tab, overview.handleTabChange]);
 
   const { swipeHandlers } = useSwipeTabs({
     tabs: COMMERCE_TAB_KEYS,
@@ -75,24 +102,24 @@ export default function CommercePage() {
   useModuleEvent("commerce:create_quote_for_contact", useCallback((event: any) => {
     const { contactId, items } = event.data ?? {};
     if (contactId) {
-      prefillForContact(contactId, "quotes", items);
+      billing.prefillForContact(contactId, "quotes", items);
       toast.success("Opening quote builder for contact...");
     }
-  }, [prefillForContact]));
+  }, [billing.prefillForContact]));
 
   useModuleEvent("commerce:create_invoice_for_contact", useCallback((event: any) => {
     const { contactId, items } = event.data ?? {};
     if (contactId) {
-      prefillForContact(contactId, "invoices", items);
+      billing.prefillForContact(contactId, "invoices", items);
       toast.success("Opening invoice builder for contact...");
     }
-  }, [prefillForContact]));
+  }, [billing.prefillForContact]));
 
   useEffect(() => {
-    if (pendingPrefill?.targetSegment && tab === "billing") {
-      setBillingSegment(pendingPrefill.targetSegment === "quotes" ? "quotes" : "invoices");
+    if (billing.pendingPrefill?.targetSegment && tab === "billing") {
+      billing.setActiveBillingSegment(billing.pendingPrefill.targetSegment === "quotes" ? "quotes" : "invoices");
     }
-  }, [pendingPrefill, tab]);
+  }, [billing.pendingPrefill, tab]);
 
   useEffect(() => {
     if (businessId) {
@@ -104,61 +131,29 @@ export default function CommercePage() {
     }
   }, [businessId, tab, billingSegment, invoices.length, quotes.length, commerceAi.updateCommerceContext]);
 
-  const handleViewContact = useCallback((contactId: string) => {
-    if (contactId) {
-      emitEvent("contact:selected", "commerce", { contactId });
-      router.push(`/app/crm/contacts/${contactId}`);
-    }
-  }, [emitEvent, router]);
-
-  const handleViewClientIntel = useCallback((contactId: string) => {
-    if (contactId) {
-      emitEvent("commerce:view_client_intel", "commerce", { contactId });
-      if (!commerceAi.panelOpen) commerceAi.setOpen(true);
-      commerceAi.executeTool("client-intelligence");
-    }
-  }, [emitEvent, commerceAi]);
-
-  const handleAiRecoveryPlan = useCallback(() => {
-    if (!commerceAi.panelOpen) commerceAi.setOpen(true);
-    commerceAi.executeTool("overdue-recovery");
-  }, [commerceAi]);
-
-  const handleAiForecast = useCallback(() => {
-    if (!commerceAi.panelOpen) commerceAi.setOpen(true);
-    commerceAi.executeTool("cashflow-forecast");
-  }, [commerceAi]);
-
-  const handleAiDraftReminder = useCallback((invoiceId: string) => {
-    commerceAi.updateCommerceContext({ businessId: businessId!, activeView: "invoices", selectedItemId: invoiceId });
-    if (!commerceAi.panelOpen) commerceAi.setOpen(true);
-    commerceAi.executeTool("invoice-reminder");
-  }, [businessId, commerceAi]);
-
-
   const handleAiAssistantAction = useCallback((actionKey: string) => {
     if (actionKey.startsWith("filter_status:")) {
       handleTabChange("billing");
-      setBillingSegment("invoices");
+      billing.setActiveBillingSegment("invoices");
       toast.success(`Filtering by ${actionKey.split(":")[1]}`);
     } else if (actionKey.startsWith("switch_tab:")) {
       const t = actionKey.split(":")[1];
       if (t === "quotes" || t === "invoices" || t === "schedules" || t === "recurring" || t === "collections") {
         handleTabChange("billing");
-        setBillingSegment(t === "recurring" ? "schedules" : t as "quotes" | "invoices" | "schedules" | "collections");
+        billing.setActiveBillingSegment(t === "recurring" ? "schedules" : t as "quotes" | "invoices" | "schedules" | "collections");
       } else {
         handleTabChange(t === "insights" ? "catalog" : t);
       }
     } else if (actionKey.startsWith("send_reminders:")) {
       handleTabChange("billing");
-      setBillingSegment("invoices");
+      billing.setActiveBillingSegment("invoices");
       toast.success("Opening invoices for reminders...");
     } else if (actionKey.startsWith("tool:")) {
       const toolId = actionKey.split(":")[1];
       if (!commerceAi.panelOpen) commerceAi.setOpen(true);
       commerceAi.executeTool(toolId);
     }
-  }, [handleTabChange, commerceAi]);
+  }, [handleTabChange, commerceAi, billing.setActiveBillingSegment]);
 
   const handleWrappedTabChange = useCallback((t: string) => {
     handleTabChange(t);
@@ -168,29 +163,24 @@ export default function CommercePage() {
   const handleOverviewNavigate = useCallback((navTab: string, segment?: string) => {
     handleTabChange(navTab);
     if (navTab === "billing" && segment) {
-      setBillingSegment(segment as "quotes" | "invoices" | "schedules");
+      billing.setActiveBillingSegment(segment as "quotes" | "invoices" | "schedules");
     }
   }, [handleTabChange]);
-
-  const revenuePulse = useMemo(() => {
-    const paidInvoices = invoices.filter((inv) => inv.status === "PAID");
-    const totalRevenue = paidInvoices.reduce((sum, inv) => sum + Number(inv.total), 0);
-    return formatCurrencyCompact(totalRevenue, businessCurrency);
-  }, [invoices, businessCurrency]);
 
   const commerceShortcuts = useMemo<ShortcutGroup[]>(() => {
     const shortcuts: ShortcutGroup[] = [
       {
         groupName: "Commerce Navigation",
         shortcuts: [
-          { key: "n", description: "New item", action: () => handleNewItem() },
+          { key: "n", description: "New item", action: () => composer.handleNewItem() },
           { key: "f", description: "Focus search", action: () => { if (!commerceAi.panelOpen) commerceAi.setOpen(true); } },
           { key: "/", description: "Focus search", action: () => { if (!commerceAi.panelOpen) commerceAi.setOpen(true); } },
           { key: "1", description: "Overview tab", action: () => handleTabChange("overview") },
           { key: "2", description: "Billing tab", action: () => handleTabChange("billing") },
           { key: "3", description: "Catalog tab", action: () => handleTabChange("catalog") },
-          { key: "r", description: "Refresh data", action: () => { state.refreshProducts(); } },
+          { key: "r", description: "Refresh data", action: () => { shell.refreshProducts(); } },
           { key: "a", shift: true, description: "Toggle AI Copilot", action: () => commerceAi.togglePanel() },
+          { key: "?", description: "Help", action: () => setHelpOpen(true) },
           { key: "Escape", description: "Close panels", action: () => { if (commerceAi.hubMode === "tool-result") commerceAi.clearToolResult(); else if (commerceAi.panelOpen) commerceAi.setOpen(false); } },
         ],
       },
@@ -199,17 +189,17 @@ export default function CommercePage() {
       shortcuts.push({
         groupName: "Billing Segments",
         shortcuts: [
-          { key: "i", description: "Invoices segment", action: () => setBillingSegment("invoices") },
-          { key: "q", description: "Quotes segment", action: () => setBillingSegment("quotes") },
-          { key: "s", description: "Recurring segment", action: () => setBillingSegment("schedules") },
-          { key: "c", description: "Collections segment", action: () => setBillingSegment("collections") },
+          { key: "i", description: "Invoices segment", action: () => billing.setActiveBillingSegment("invoices") },
+          { key: "q", description: "Quotes segment", action: () => billing.setActiveBillingSegment("quotes") },
+          { key: "s", description: "Recurring segment", action: () => billing.setActiveBillingSegment("schedules") },
+          { key: "c", description: "Collections segment", action: () => billing.setActiveBillingSegment("collections") },
         ],
       });
     }
     return shortcuts;
-  }, [handleNewItem, handleTabChange, state.refreshProducts, commerceAi.togglePanel, commerceAi.panelOpen, commerceAi.setOpen, commerceAi.hubMode, commerceAi.clearToolResult, tab, setBillingSegment]);
+  }, [composer.handleNewItem, handleTabChange, shell.refreshProducts, commerceAi.togglePanel, commerceAi.panelOpen, commerceAi.setOpen, commerceAi.hubMode, commerceAi.clearToolResult, tab, billing.setActiveBillingSegment]);
 
-  useKeyboardShortcuts(commerceShortcuts, !workspaceLoading);
+  useKeyboardShortcuts(commerceShortcuts, !shell.workspaceLoading);
 
   const customerBadgeMap = useMemo(() => {
     const map = new Map<string, { type: string; label: string; color: string; bgColor: string; borderColor: string; description: string }>();
@@ -276,9 +266,9 @@ export default function CommercePage() {
     renderTimelineBadge,
   }), [commerceAi.panelOpen, commerceAi.setOpen, renderTimelineBadge]);
 
-  if (workspaceLoading) return <ListPageSkeleton />;
+  if (shell.workspaceLoading) return <ListPageSkeleton />;
 
-  if (workspaceError) {
+  if (shell.workspaceError) {
     return <WorkspaceError />;
   }
 
@@ -288,29 +278,22 @@ export default function CommercePage() {
         icon={CreditCard}
         title="Commerce"
         subtitle="Revenue workspace"
-        titleExtra={
-          <FeatureGuide
-            featureKey="commerce"
-            title="Getting Started with Commerce"
-            description="Manage invoices, quotes, and track your revenue."
-            steps={[
-              { title: "Create Invoices", description: "Bill clients with professional invoices, track payments, and send reminders." },
-              { title: "Send Quotes", description: "Generate quotes and convert them to invoices when approved." },
-              { title: "Recurring Billing", description: "Set up recurring invoice schedules for subscription-based services." },
-              { title: "Payment Links", description: "Share payment links so clients can pay online via multiple gateways." },
-              { title: "Revenue Analytics", description: "Track cash flow, revenue trends, and use AI-powered forecasting." },
-              { title: "Product Catalog", description: "Manage your products and services with pricing and categories." },
-            ]}
-          />
-        }
         rightSlot={
           <div className="flex items-center gap-2">
             <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border/50 bg-white/[0.03] text-sm">
               <DollarSign className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span className="font-semibold text-xs text-emerald-400">{revenuePulse}</span>
+              <span className="font-semibold text-xs text-emerald-400">{overview.revenuePulse}</span>
               <span className="text-[10px] text-muted-foreground/50">collected</span>
             </div>
             <div className="flex items-center gap-1">
+              <button
+                onClick={() => setHelpOpen(true)}
+                className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-white/[0.06] transition-colors"
+                aria-label="Help"
+                title="Help (?)"
+              >
+                <BookOpen className="w-3.5 h-3.5 text-muted-foreground/60" />
+              </button>
               <button
                 onClick={() => commerceAi.togglePanel()}
                 className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-white/[0.06] transition-colors"
@@ -332,7 +315,7 @@ export default function CommercePage() {
         }
         actionLabel="+ New"
         actionIcon={Plus}
-        onAction={handleNewItem}
+        onAction={composer.handleNewItem}
       />
 
       <AnimatePresence>
@@ -376,9 +359,9 @@ export default function CommercePage() {
         onTabChange={handleWrappedTabChange}
       />
 
-      {error && (
+      {shell.error && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200 flex items-center gap-2">
-          <span className="text-amber-400">!</span> {error}
+          <span className="text-amber-400">!</span> {shell.error}
         </div>
       )}
 
@@ -386,47 +369,60 @@ export default function CommercePage() {
         <AnimatePresence mode="wait" custom={slideDirection}>
           {tab === "overview" && (
             <motion.div key="overview" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
-              <CommerceOverviewTab
-                businessId={businessId}
-                invoices={invoices}
-                quotes={quotes}
-                currency={businessCurrency}
-                loading={loading}
-                onNavigate={handleOverviewNavigate}
-                onNewItem={handleNewItem}
-              />
+              <div className="space-y-4">
+                <SmartChecklist
+                  productCount={shell.products.length}
+                  invoiceCount={shell.invoices.length}
+                  quoteCount={shell.quotes.length}
+                  onNavigate={handleOverviewNavigate}
+                />
+                <CommerceOverviewTab
+                  businessId={businessId}
+                  invoices={shell.invoices}
+                  quotes={shell.quotes}
+                  currency={businessCurrency}
+                  loading={shell.loading}
+                  onNavigate={handleOverviewNavigate}
+                  onNewItem={composer.handleNewItem}
+                />
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <CollectionsScoringPanel businessId={businessId} />
+                  <ChurnRiskPanel businessId={businessId} />
+                </div>
+                <RevenueJourneyPanel businessId={businessId} />
+              </div>
             </motion.div>
           )}
           {tab === "billing" && (
             <motion.div key="billing" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
               <BillingPanel
                 businessId={businessId}
-                contacts={contacts}
-                products={products}
-                quotes={quotes}
-                invoices={invoices}
-                loading={loading}
-                gmailStatus={gmailStatus}
+                contacts={shell.contacts}
+                products={shell.products}
+                quotes={shell.quotes}
+                invoices={shell.invoices}
+                loading={shell.loading}
+                gmailStatus={shell.integrations.gmailStatus}
                 currency={businessCurrency}
-                setProducts={state.setProducts}
-                setQuotes={state.setQuotes}
-                setInvoices={state.setInvoices}
-                triggerNewQuote={state.triggerNewQuote}
-                triggerNewInvoice={state.triggerNewInvoice}
-                triggerNewSchedule={state.triggerNewSchedule}
+                setProducts={shell.setProducts}
+                setQuotes={shell.setQuotes}
+                setInvoices={shell.setInvoices}
+                triggerNewQuote={billing.triggerNewQuote}
+                triggerNewInvoice={billing.triggerNewInvoice}
+                triggerNewSchedule={billing.triggerNewSchedule}
                 activeSegment={billingSegment}
                 defaultSegment={billingSegment}
-                onSegmentChange={(seg) => setBillingSegment(seg)}
-                prefillContactId={pendingPrefill?.contactId}
-                prefillItems={pendingPrefill?.items}
-                prefillToken={pendingPrefill?._token}
-                onPrefillApplied={clearPrefill}
+                onSegmentChange={(seg) => billing.setActiveBillingSegment(seg)}
+                prefillContactId={billing.pendingPrefill?.contactId}
+                prefillItems={billing.pendingPrefill?.items}
+                prefillToken={billing.pendingPrefill?._token}
+                onPrefillApplied={billing.clearPrefill}
                 slots={billingSlots}
-                onViewContact={handleViewContact}
-                onViewClientIntel={handleViewClientIntel}
-                onAiRecoveryPlan={handleAiRecoveryPlan}
-                onAiForecast={handleAiForecast}
-                onAiDraftReminder={handleAiDraftReminder}
+                onViewContact={copilot.handleViewContact}
+                onViewClientIntel={copilot.handleViewClientIntel}
+                onAiRecoveryPlan={copilot.handleAiRecoveryPlan}
+                onAiForecast={copilot.handleAiForecast}
+                onAiDraftReminder={copilot.handleAiDraftReminder}
               />
             </motion.div>
           )}
@@ -434,15 +430,21 @@ export default function CommercePage() {
             <motion.div key="catalog" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
               <CommerceInsightsTab
                 businessId={businessId}
-                invoices={invoices}
-                quotes={quotes}
+                invoices={shell.invoices}
+                quotes={shell.quotes}
                 currency={businessCurrency}
-                loading={loading}
+                loading={shell.loading}
               />
             </motion.div>
           )}
         </AnimatePresence>
       </div>
+
+      <SearchableHelpDrawer
+        isOpen={helpOpen}
+        onClose={() => setHelpOpen(false)}
+        onNavigate={handleOverviewNavigate}
+      />
     </div>
   );
 }
