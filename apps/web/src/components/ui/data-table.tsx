@@ -27,7 +27,7 @@ interface DataTableProps<T> {
   onRowClick?: (row: T) => void;
   pageSize?: number;
   emptyMessage?: string;
-  emptyState?: React.ReactNode;
+  emptyState?: React.ReactNode | (() => React.ReactNode);
   headerExtra?: React.ReactNode;
 }
 
@@ -261,7 +261,7 @@ export function DataTable<T extends Record<string, unknown>>({
                   className={emptyState ? "p-0" : "px-3 py-8 text-center kf-text-body"}
                   style={emptyState ? undefined : { color: "hsl(var(--kf-muted-foreground))" }}
                 >
-                  {emptyState || emptyMessage}
+                  {typeof emptyState === "function" ? emptyState() : emptyState || emptyMessage}
                 </td>
               </tr>
             ) : (

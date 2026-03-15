@@ -98,7 +98,7 @@ export default function ExpensesPage() {
           </div>
         )}
         {activeTab === "analytics" && (
-          <ExpenseAnalyticsTab summary={d.summary} vendors={d.vendors} />
+          <ExpenseAnalyticsTab summary={d.summary} vendors={d.vendors} loading={d.loading} />
         )}
       </AnimatePresence>
       <AnimatePresence>{showModal && d.businessId && <ExpenseFormModal businessId={d.businessId} categories={d.categories} editingExpense={editingExpense} onClose={() => setShowModal(false)} onSaved={d.loadData} />}</AnimatePresence>
