@@ -1,9 +1,23 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { X, CalendarDays } from "lucide-react";
 import type { Service, StaffMember, Contact } from "./bookings-types";
 import BookingForm from "./booking-form";
+
+const MOBILE_BP = 640;
+function useIsMobile() {
+  const [m, setM] = useState(false);
+  useEffect(() => {
+    const mql = window.matchMedia(`(max-width: ${MOBILE_BP - 1}px)`);
+    setM(mql.matches);
+    const h = (e: MediaQueryListEvent) => setM(e.matches);
+    mql.addEventListener("change", h);
+    return () => mql.removeEventListener("change", h);
+  }, []);
+  return m;
+}
 
 interface BookingSideSheetProps {
   open: boolean;
@@ -36,6 +50,8 @@ export default function BookingSideSheet({
   defaultTime,
   saving,
 }: BookingSideSheetProps) {
+  const isMobile = useIsMobile();
+
   if (!open) return null;
 
   return (
@@ -43,51 +59,108 @@ export default function BookingSideSheet({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-start justify-end"
+      className={isMobile ? "fixed inset-0 z-50 flex items-end" : "fixed inset-0 z-50 flex items-start justify-end"}
     >
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <motion.div
-        initial={{ x: "100%" }}
-        animate={{ x: 0 }}
-        exit={{ x: "100%" }}
-        transition={{ type: "spring", damping: 25, stiffness: 300 }}
-        className="relative w-full max-w-lg h-full bg-background border-l border-border/60 overflow-y-auto"
-      >
-        <div className="flex items-center justify-between px-5 py-3 border-b border-border/40 sticky top-0 bg-background/95 backdrop-blur-sm z-10">
-          <div className="flex items-center gap-2">
+
+      {isMobile ? (
+        <motion.div
+          initial={{ y: "100%" }}
+          animate={{ y: 0 }}
+          exit={{ y: "100%" }}
+          transition={{ type: "spring", damping: 25, stiffness: 300 }}
+          className="relative w-full rounded-t-2xl border-t overflow-y-auto"
+          style={{
+            maxHeight: "90vh",
+            background: "hsl(var(--kf-card))",
+            borderColor: "hsl(var(--kf-border))",
+          }}
+        >
+          <div className="flex justify-center pt-2 pb-1 flex-shrink-0">
             <div
-              className="w-7 h-7 rounded-lg flex items-center justify-center"
-              style={{ background: "hsl(var(--kf-accent1)/0.12)" }}
-            >
-              <CalendarDays
-                className="w-4 h-4"
-                style={{ color: "hsl(var(--kf-accent1))" }}
-              />
-            </div>
-            <h3 className="text-sm font-semibold">New Booking</h3>
+              className="w-10 h-1 rounded-full"
+              style={{ background: "hsl(var(--kf-muted-foreground) / 0.3)" }}
+            />
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors"
-            aria-label="Close"
-          >
-            <X className="w-4 h-4 text-muted-foreground" />
-          </button>
-        </div>
-        <div className="p-1">
-          <BookingForm
-            services={services}
-            staff={staff}
-            contacts={contacts}
-            onSubmit={onSubmit}
-            onCancel={onClose}
-            formError={formError}
-            defaultDate={defaultDate}
-            defaultTime={defaultTime}
-            saving={saving}
-          />
-        </div>
-      </motion.div>
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border/40 sticky top-0 bg-background/95 backdrop-blur-sm z-10">
+            <div className="flex items-center gap-2">
+              <div
+                className="w-8 h-8 rounded-lg flex items-center justify-center"
+                style={{ background: "hsl(var(--kf-accent1)/0.12)" }}
+              >
+                <CalendarDays
+                  className="w-4 h-4"
+                  style={{ color: "hsl(var(--kf-accent1))" }}
+                />
+              </div>
+              <h3 className="text-sm font-semibold">New Booking</h3>
+            </div>
+            <button
+              onClick={onClose}
+              className="min-w-[44px] min-h-[44px] rounded-lg flex items-center justify-center hover:bg-muted/50 transition-colors"
+              aria-label="Close"
+            >
+              <X className="w-5 h-5 text-muted-foreground" />
+            </button>
+          </div>
+          <div className="p-1">
+            <BookingForm
+              services={services}
+              staff={staff}
+              contacts={contacts}
+              onSubmit={onSubmit}
+              onCancel={onClose}
+              formError={formError}
+              defaultDate={defaultDate}
+              defaultTime={defaultTime}
+              saving={saving}
+            />
+          </div>
+        </motion.div>
+      ) : (
+        <motion.div
+          initial={{ x: "100%" }}
+          animate={{ x: 0 }}
+          exit={{ x: "100%" }}
+          transition={{ type: "spring", damping: 25, stiffness: 300 }}
+          className="relative w-full max-w-lg h-full bg-background border-l border-border/60 overflow-y-auto"
+        >
+          <div className="flex items-center justify-between px-5 py-3 border-b border-border/40 sticky top-0 bg-background/95 backdrop-blur-sm z-10">
+            <div className="flex items-center gap-2">
+              <div
+                className="w-7 h-7 rounded-lg flex items-center justify-center"
+                style={{ background: "hsl(var(--kf-accent1)/0.12)" }}
+              >
+                <CalendarDays
+                  className="w-4 h-4"
+                  style={{ color: "hsl(var(--kf-accent1))" }}
+                />
+              </div>
+              <h3 className="text-sm font-semibold">New Booking</h3>
+            </div>
+            <button
+              onClick={onClose}
+              className="min-w-[44px] min-h-[44px] rounded-lg flex items-center justify-center hover:bg-muted/50 transition-colors"
+              aria-label="Close"
+            >
+              <X className="w-4 h-4 text-muted-foreground" />
+            </button>
+          </div>
+          <div className="p-1">
+            <BookingForm
+              services={services}
+              staff={staff}
+              contacts={contacts}
+              onSubmit={onSubmit}
+              onCancel={onClose}
+              formError={formError}
+              defaultDate={defaultDate}
+              defaultTime={defaultTime}
+              saving={saving}
+            />
+          </div>
+        </motion.div>
+      )}
     </motion.div>
   );
 }

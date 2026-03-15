@@ -272,17 +272,20 @@ export function ContactCapture({ onManualAdd, onImportFile, onImportLink, onDevi
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-16 sm:pt-20 pointer-events-none">
+      <div className="fixed inset-0 z-50 flex items-end sm:items-start sm:justify-center sm:p-4 sm:pt-20 pointer-events-none">
         <motion.div
-          initial={{ opacity: 0, scale: 0.95, y: 8 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: 8 }}
-          className="w-full sm:w-[440px] kf-card border border-border shadow-2xl rounded-2xl max-h-[80vh] overflow-y-auto pointer-events-auto"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 20 }}
+          className="w-full sm:w-[440px] kf-card border border-border shadow-2xl rounded-t-2xl sm:rounded-2xl max-h-[90vh] sm:max-h-[80vh] overflow-y-auto pointer-events-auto"
         >
+        <div className="flex justify-center pt-2 pb-0 sm:hidden">
+          <div className="w-10 h-1 rounded-full" style={{ background: "hsl(var(--kf-muted-foreground) / 0.3)" }} />
+        </div>
         <div className="flex items-center justify-between p-4 pb-2">
           <h2 className="font-semibold text-base">Add Contacts</h2>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted/50 text-muted-foreground" aria-label="Close">
-            <X className="w-4 h-4" />
+          <button onClick={onClose} className="min-w-[44px] min-h-[44px] rounded-lg flex items-center justify-center hover:bg-muted/50 text-muted-foreground" aria-label="Close">
+            <X className="w-5 h-5" />
           </button>
         </div>
 
