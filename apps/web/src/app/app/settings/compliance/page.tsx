@@ -243,22 +243,6 @@ export default function ComplianceSettingsPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-between"
-      >
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Shield className="w-6 h-6" style={{ color: "hsl(var(--kf-accent1))" }} />
-            Compliance & Legal
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Track your business compliance requirements
-          </p>
-        </div>
-      </motion.div>
-
-      <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1 }}

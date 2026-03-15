@@ -47,6 +47,8 @@ export interface PipelineDetailPanelProps {
   onClose?: () => void;
   relatedContacts?: Array<{ id: string; firstName?: string | null; lastName?: string | null; email?: string | null; status?: string | null; jobTitle?: string | null }>;
   onSelectRelatedContact?: (contactId: string) => void;
+  invoices?: Array<{ id: string; status: string; total?: number | null; currency?: string | null; dueDate?: string | null; issueDate?: string | null; createdAt?: string; paidAt?: string | null }>;
+  bookings?: Array<{ id: string; startTime: string; endTime: string; status: string; service?: { name: string; price: number } | null; contact?: { firstName?: string | null } | null }>;
 }
 
 function PipelineDetailPanelInner({
@@ -82,6 +84,8 @@ function PipelineDetailPanelInner({
   onClose,
   relatedContacts,
   onSelectRelatedContact,
+  invoices,
+  bookings,
 }: PipelineDetailPanelProps) {
   if (detailError && !loading) {
     return (
@@ -137,6 +141,8 @@ function PipelineDetailPanelInner({
         onRefreshConversationContext={onRefreshConversationContext}
         relatedContacts={relatedContacts}
         onSelectRelatedContact={onSelectRelatedContact}
+        invoices={invoices}
+        bookings={bookings}
       />
     </div>
   );

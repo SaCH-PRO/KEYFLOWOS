@@ -85,11 +85,11 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
       description: "Setting your hours helps customers know when you're available and improves local SEO.",
       priority: "medium",
       actionLabel: "Set hours",
-      actionKey: "switch_tab:hours",
+      actionKey: "switch_tab:products",
     });
   }
 
-  if (activeView === "overview") {
+  if (activeView === "performance") {
     suggestions.push({
       id: `optimizer-tip-${Date.now()}`,
       type: "tip",
@@ -101,7 +101,7 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
     });
   }
 
-  if (activeView === "customize") {
+  if (activeView === "storefront") {
     suggestions.push({
       id: `seo-tip-${Date.now()}`,
       type: "tip",

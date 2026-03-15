@@ -22,6 +22,7 @@ import {
   ChevronRight,
   Bell,
   Pencil,
+  Settings,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -43,7 +44,7 @@ import QuotesPanel from "../quotes/quotes-panel";
 import InvoicesPanel from "../invoices/invoices-panel";
 import RecurringPanel from "../recurring/recurring-panel";
 import CollectionsPanel from "./collections-panel";
-import { BillingSettingsPanel } from "../components/billing-settings-panel";
+import Link from "next/link";
 
 function getDaysOverdue(dueDate: string | null | undefined): number {
   if (!dueDate) return 0;
@@ -881,7 +882,18 @@ export function BillingPanel({
           </div>
 
           <div className="px-3 sm:px-4 pb-4">
-            <BillingSettingsPanel />
+            <Link
+              href="/app/settings/business"
+              className="flex items-center justify-between w-full rounded-xl border border-border/30 bg-white/[0.03] px-4 py-3 text-sm font-medium text-foreground/90 hover:bg-white/[0.04] transition-colors group"
+            >
+              <span className="flex items-center gap-2">
+                <Settings className="w-4 h-4 text-muted-foreground" />
+                Billing & Invoice Settings
+              </span>
+              <span className="text-xs text-muted-foreground group-hover:text-[hsl(var(--kf-accent1))] transition-colors">
+                Manage in Settings →
+              </span>
+            </Link>
           </div>
         </div>
       </div>

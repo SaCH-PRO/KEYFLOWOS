@@ -1,4 +1,4 @@
-import { BarChart3, Palette, ShoppingBag, Clock, Settings2 } from "lucide-react";
+import { Store, ShoppingBag, BarChart3 } from "lucide-react";
 
 export type Banner = { text: string; type: "success" | "error" | "info" | "warning" };
 
@@ -11,14 +11,12 @@ export type DriftedItem = {
   commerceDuration: number | null;
 };
 
-export type TabKey = "overview" | "customize" | "products" | "hours" | "settings";
+export type TabKey = "storefront" | "products" | "performance";
 
 export const VIEW_TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
-  { key: "overview", label: "Overview", icon: BarChart3 },
-  { key: "customize", label: "Customize", icon: Palette },
-  { key: "products", label: "Products", icon: ShoppingBag },
-  { key: "hours", label: "Hours", icon: Clock },
-  { key: "settings", label: "Settings", icon: Settings2 },
+  { key: "storefront", label: "Storefront", icon: Store },
+  { key: "products", label: "Products & Hours", icon: ShoppingBag },
+  { key: "performance", label: "Performance", icon: BarChart3 },
 ];
 
 export type Testimonial = { id: string; name: string; text: string; rating: number; date: string };

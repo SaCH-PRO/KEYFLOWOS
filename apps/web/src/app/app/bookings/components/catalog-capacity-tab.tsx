@@ -10,7 +10,6 @@ import {
   Trash2,
   Mail,
   Link2,
-  Unlink,
   CalendarDays,
 } from "lucide-react";
 import type { Service, StaffMember, Booking } from "./bookings-types";
@@ -339,58 +338,42 @@ export default function CatalogCapacityTab({
           <h3 className="text-sm font-semibold">Integrations</h3>
         </div>
 
-        <div className="kf-card p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div
-                className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-                style={{ background: "hsl(var(--kf-accent2) / 0.1)" }}
-              >
-                <CalendarDays className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
-              </div>
-              <div>
-                <p className="text-sm font-medium">Google Calendar</p>
-                <p className="text-[11px] text-muted-foreground">
-                  {calendarConnected
-                    ? `Connected as ${calendarEmail ?? "your account"}`
-                    : "Sync bookings to your Google Calendar"}
-                </p>
-              </div>
+        <a href="/app/settings/connections" className="kf-card p-4 flex items-center justify-between group hover:border-[hsl(var(--kf-accent1))]/40 transition-colors block">
+          <div className="flex items-center gap-3">
+            <div
+              className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+              style={{ background: "hsl(var(--kf-accent2) / 0.1)" }}
+            >
+              <CalendarDays className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
             </div>
-            <div className="flex items-center gap-2">
-              {calendarConnected ? (
-                <>
-                  <div
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg"
-                    style={{
-                      background: "hsl(var(--kf-success) / 0.1)",
-                      borderWidth: 1,
-                      borderColor: "hsl(var(--kf-success) / 0.3)",
-                    }}
-                  >
-                    <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-success))" }} />
-                    <span className="text-[11px] font-medium" style={{ color: "hsl(var(--kf-success))" }}>Connected</span>
-                  </div>
-                  <button
-                    onClick={onDisconnectCalendar}
-                    disabled={calendarLoading}
-                    className="kf-btn-secondary inline-flex items-center gap-1 text-xs"
-                  >
-                    <Unlink className="w-3 h-3" /> Disconnect
-                  </button>
-                </>
-              ) : (
-                <button
-                  onClick={onConnectCalendar}
-                  disabled={calendarLoading}
-                  className="kf-btn-primary inline-flex items-center gap-1.5 text-xs"
-                >
-                  <Link2 className="w-3.5 h-3.5" /> Connect
-                </button>
-              )}
+            <div>
+              <p className="text-sm font-medium">Google Calendar</p>
+              <p className="text-[11px] text-muted-foreground">
+                {calendarConnected
+                  ? `Connected as ${calendarEmail ?? "your account"}`
+                  : "Sync bookings to your Google Calendar"}
+              </p>
             </div>
           </div>
-        </div>
+          <div className="flex items-center gap-2">
+            {calendarConnected && (
+              <div
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg"
+                style={{
+                  background: "hsl(var(--kf-success) / 0.1)",
+                  borderWidth: 1,
+                  borderColor: "hsl(var(--kf-success) / 0.3)",
+                }}
+              >
+                <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-success))" }} />
+                <span className="text-[11px] font-medium" style={{ color: "hsl(var(--kf-success))" }}>Connected</span>
+              </div>
+            )}
+            <span className="text-xs text-muted-foreground group-hover:text-[hsl(var(--kf-accent1))] transition-colors">
+              Manage in Settings →
+            </span>
+          </div>
+        </a>
       </motion.div>
     </motion.div>
   );
