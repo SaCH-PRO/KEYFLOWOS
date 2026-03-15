@@ -6,9 +6,10 @@ import {
   Calendar, DollarSign, FileText, Mail, Star,
   CheckCircle2, AlertTriangle, Sparkles, Clock,
   Users, Zap, MessageCircle, ChevronDown, ChevronUp,
-  Circle, Package, Megaphone, UserPlus,
+  Circle, Package, Megaphone, UserPlus, StickyNote,
+  ListTodo, ExternalLink, TrendingUp, Activity,
 } from "lucide-react";
-import type { ContactDetailData, ContactEvent } from "./contact-detail";
+import type { ContactDetailData, ContactEvent, ContactNote, ContactTask } from "./contact-detail";
 
 type ModuleFilter = "all" | "crm" | "bookings" | "commerce" | "marketing";
 
@@ -24,6 +25,9 @@ interface JourneyEntry {
   value?: number;
   currency?: string;
   status?: string;
+  ctaLabel?: string;
+  ctaHref?: string;
+  entityId?: string;
 }
 
 interface InvoiceSummary {
@@ -49,6 +53,8 @@ interface BookingSummary {
 interface ContactJourneyTimelineProps {
   contact: ContactDetailData;
   events: ContactEvent[];
+  notes?: ContactNote[];
+  tasks?: ContactTask[];
   invoices?: InvoiceSummary[];
   bookings?: BookingSummary[];
 }
@@ -72,36 +78,34 @@ const EVENT_CONFIG: Record<string, { icon: typeof Calendar; color: string; bg: s
   "contact.created": { icon: UserPlus, color: "hsl(var(--kf-accent1))", bg: "hsl(var(--kf-accent1) / 0.15)", label: "Contact created" },
   "status.changed": { icon: Sparkles, color: "hsl(var(--kf-accent2))", bg: "hsl(var(--kf-accent2) / 0.15)", label: "Status changed" },
   "STATUS_CHANGED": { icon: Sparkles, color: "hsl(var(--kf-accent2))", bg: "hsl(var(--kf-accent2) / 0.15)", label: "Status changed" },
+  "note.created": { icon: StickyNote, color: "hsl(var(--kf-accent1))", bg: "hsl(var(--kf-accent1) / 0.15)", label: "Note added" },
+  "note.updated": { icon: StickyNote, color: "hsl(var(--kf-accent1))", bg: "hsl(var(--kf-accent1) / 0.15)", label: "Note updated" },
+  "task.created": { icon: ListTodo, color: "hsl(var(--kf-accent1))", bg: "hsl(var(--kf-accent1) / 0.15)", label: "Task created" },
+  "task.completed": { icon: CheckCircle2, color: "hsl(var(--kf-success))", bg: "hsl(var(--kf-success) / 0.15)", label: "Task completed" },
   "invoice.created": { icon: FileText, color: "hsl(217 91% 60%)", bg: "hsl(217 91% 60% / 0.15)", label: "Invoice created" },
   "invoice.sent": { icon: Mail, color: "hsl(217 91% 60%)", bg: "hsl(217 91% 60% / 0.15)", label: "Invoice sent" },
-  "invoice.paid": { icon: DollarSign, color: "hsl(142 76% 36%)", bg: "hsl(142 76% 36% / 0.15)", label: "Payment received" },
-  "invoice.overdue": { icon: AlertTriangle, color: "hsl(0 84% 60%)", bg: "hsl(0 84% 60% / 0.15)", label: "Invoice overdue" },
+  "invoice.paid": { icon: DollarSign, color: "hsl(var(--kf-success))", bg: "hsl(var(--kf-success) / 0.15)", label: "Payment received" },
+  "invoice.overdue": { icon: AlertTriangle, color: "hsl(var(--kf-error))", bg: "hsl(var(--kf-error) / 0.15)", label: "Invoice overdue" },
   "booking.created": { icon: Calendar, color: "hsl(var(--kf-accent2))", bg: "hsl(var(--kf-accent2) / 0.15)", label: "Booking scheduled" },
-  "booking.confirmed": { icon: CheckCircle2, color: "hsl(142 76% 36%)", bg: "hsl(142 76% 36% / 0.15)", label: "Booking confirmed" },
+  "booking.confirmed": { icon: CheckCircle2, color: "hsl(var(--kf-success))", bg: "hsl(var(--kf-success) / 0.15)", label: "Booking confirmed" },
   "booking.completed": { icon: Star, color: "hsl(45 93% 47%)", bg: "hsl(45 93% 47% / 0.15)", label: "Service completed" },
-  "booking.cancelled": { icon: AlertTriangle, color: "hsl(0 84% 60%)", bg: "hsl(0 84% 60% / 0.15)", label: "Booking cancelled" },
+  "booking.cancelled": { icon: AlertTriangle, color: "hsl(var(--kf-error))", bg: "hsl(var(--kf-error) / 0.15)", label: "Booking cancelled" },
   "quote.created": { icon: FileText, color: "hsl(217 91% 60%)", bg: "hsl(217 91% 60% / 0.15)", label: "Quote sent" },
-  "quote.accepted": { icon: CheckCircle2, color: "hsl(142 76% 36%)", bg: "hsl(142 76% 36% / 0.15)", label: "Quote accepted" },
-  "quote.rejected": { icon: AlertTriangle, color: "hsl(0 84% 60%)", bg: "hsl(0 84% 60% / 0.15)", label: "Quote rejected" },
+  "quote.accepted": { icon: CheckCircle2, color: "hsl(var(--kf-success))", bg: "hsl(var(--kf-success) / 0.15)", label: "Quote accepted" },
+  "quote.rejected": { icon: AlertTriangle, color: "hsl(var(--kf-error))", bg: "hsl(var(--kf-error) / 0.15)", label: "Quote rejected" },
   "campaign.sent": { icon: Megaphone, color: "hsl(270 70% 60%)", bg: "hsl(270 70% 60% / 0.15)", label: "Campaign sent" },
-  "campaign.opened": { icon: Mail, color: "hsl(142 76% 36%)", bg: "hsl(142 76% 36% / 0.15)", label: "Campaign opened" },
+  "campaign.opened": { icon: Mail, color: "hsl(var(--kf-success))", bg: "hsl(var(--kf-success) / 0.15)", label: "Campaign opened" },
   "lead_form.submitted": { icon: FileText, color: "hsl(var(--kf-accent2))", bg: "hsl(var(--kf-accent2) / 0.15)", label: "Form submitted" },
   "email.sent": { icon: Mail, color: "hsl(217 91% 60%)", bg: "hsl(217 91% 60% / 0.15)", label: "Email sent" },
-  "whatsapp.sent": { icon: MessageCircle, color: "hsl(142 76% 36%)", bg: "hsl(142 76% 36% / 0.15)", label: "WhatsApp sent" },
+  "whatsapp.sent": { icon: MessageCircle, color: "hsl(var(--kf-success))", bg: "hsl(var(--kf-success) / 0.15)", label: "WhatsApp sent" },
   "automation.executed": { icon: Zap, color: "hsl(var(--kf-accent2))", bg: "hsl(var(--kf-accent2) / 0.15)", label: "Automation ran" },
+  "communication.call": { icon: MessageCircle, color: "hsl(var(--kf-accent1))", bg: "hsl(var(--kf-accent1) / 0.15)", label: "Call logged" },
+  "communication.email": { icon: Mail, color: "hsl(var(--kf-accent1))", bg: "hsl(var(--kf-accent1) / 0.15)", label: "Email logged" },
+  "communication.whatsapp": { icon: MessageCircle, color: "hsl(var(--kf-success))", bg: "hsl(var(--kf-success) / 0.15)", label: "WhatsApp logged" },
+  "communication.meeting": { icon: Users, color: "hsl(var(--kf-accent2))", bg: "hsl(var(--kf-accent2) / 0.15)", label: "Meeting logged" },
 };
 
 const DEFAULT_CONFIG = { icon: Circle, color: "hsl(var(--kf-muted-foreground))", bg: "hsl(var(--kf-muted-foreground) / 0.1)", label: "" };
-
-function getModuleColor(module: ModuleFilter): string {
-  switch (module) {
-    case "crm": return "hsl(var(--kf-accent1))";
-    case "bookings": return "hsl(var(--kf-accent2))";
-    case "commerce": return "hsl(142 76% 36%)";
-    case "marketing": return "hsl(270 70% 60%)";
-    default: return "hsl(var(--kf-muted-foreground))";
-  }
-}
 
 function getModuleLabel(module: ModuleFilter): string {
   switch (module) {
@@ -117,7 +121,20 @@ function formatAmount(amount: number, currency = "TTD"): string {
   return `${currency} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-export function ContactJourneyTimeline({ contact, events, invoices = [], bookings = [] }: ContactJourneyTimelineProps) {
+function computeMomentumScore(
+  eventsCount: number,
+  bookingsCount: number,
+  paidRevenue: number,
+  daysSinceLastInteraction: number,
+): number {
+  const activityScore = Math.min(40, eventsCount * 4);
+  const bookingScore = Math.min(20, bookingsCount * 10);
+  const revenueScore = paidRevenue > 0 ? Math.min(20, Math.log10(paidRevenue + 1) * 5) : 0;
+  const recencyScore = daysSinceLastInteraction <= 7 ? 20 : daysSinceLastInteraction <= 30 ? 10 : daysSinceLastInteraction <= 90 ? 5 : 0;
+  return Math.round(Math.min(100, activityScore + bookingScore + revenueScore + recencyScore));
+}
+
+export function ContactJourneyTimeline({ contact, events, notes = [], tasks = [], invoices = [], bookings = [] }: ContactJourneyTimelineProps) {
   const [filter, setFilter] = useState<ModuleFilter>("all");
   const [limit, setLimit] = useState(25);
 
@@ -136,6 +153,19 @@ export function ContactJourneyTimeline({ contact, events, invoices = [], booking
         description = `Amount: ${formatAmount(Number(data.amount), (data.currency as string) || "TTD")}`;
       }
 
+      let ctaLabel: string | undefined;
+      let ctaHref: string | undefined;
+      if (ev.type.startsWith("invoice.") && data?.invoiceId) {
+        ctaLabel = "View Invoice";
+        ctaHref = `/app/commerce?tab=invoices&id=${encodeURIComponent(String(data.invoiceId))}`;
+      } else if (ev.type.startsWith("booking.") && data?.bookingId) {
+        ctaLabel = "View Booking";
+        ctaHref = `/app/bookings?id=${encodeURIComponent(String(data.bookingId))}`;
+      } else if (ev.type.startsWith("campaign.") && data?.campaignId) {
+        ctaLabel = "View Campaign";
+        ctaHref = `/app/marketing?tab=calendar&id=${encodeURIComponent(String(data.campaignId))}`;
+      }
+
       items.push({
         id: ev.id,
         module,
@@ -147,6 +177,53 @@ export function ContactJourneyTimeline({ contact, events, invoices = [], booking
         timestamp: ev.createdAt,
         value: typeof data?.amount === "number" ? data.amount : undefined,
         currency: typeof data?.currency === "string" ? data.currency : undefined,
+        ctaLabel,
+        ctaHref,
+        entityId: typeof data?.invoiceId === "string" ? data.invoiceId : typeof data?.bookingId === "string" ? data.bookingId : undefined,
+      });
+    }
+
+    const noteEventIds = new Set(
+      events.filter((e) => e.type === "note.created" || e.type === "note.updated").map((e) => {
+        const d = e.data as Record<string, unknown> | null | undefined;
+        return typeof d?.noteId === "string" ? d.noteId : "";
+      }).filter(Boolean),
+    );
+    for (const note of notes) {
+      if (noteEventIds.has(note.id)) continue;
+      items.push({
+        id: `note-${note.id}`,
+        module: "crm",
+        icon: StickyNote,
+        iconColor: "hsl(var(--kf-accent1))",
+        iconBg: "hsl(var(--kf-accent1) / 0.15)",
+        title: "Note added",
+        description: note.body.length > 80 ? note.body.slice(0, 80) + "…" : note.body,
+        timestamp: note.createdAt,
+      });
+    }
+
+    const taskEventIds = new Set<string>();
+    const taskEventTitles = new Set<string>();
+    for (const e of events) {
+      if (e.type === "task.created" || e.type === "task.completed") {
+        const d = e.data as Record<string, unknown> | null | undefined;
+        if (typeof d?.taskId === "string") taskEventIds.add(d.taskId);
+        if (typeof d?.title === "string") taskEventTitles.add(d.title);
+      }
+    }
+    for (const task of tasks) {
+      if (taskEventIds.has(task.id) || taskEventTitles.has(task.title)) continue;
+      const isCompleted = task.status === "DONE";
+      items.push({
+        id: `task-${task.id}`,
+        module: "crm",
+        icon: isCompleted ? CheckCircle2 : ListTodo,
+        iconColor: isCompleted ? "hsl(var(--kf-success))" : "hsl(var(--kf-accent1))",
+        iconBg: isCompleted ? "hsl(var(--kf-success) / 0.15)" : "hsl(var(--kf-accent1) / 0.15)",
+        title: isCompleted ? "Task completed" : "Task created",
+        description: task.title,
+        timestamp: (isCompleted ? task.completedAt : task.createdAt) || task.createdAt || new Date().toISOString(),
       });
     }
 
@@ -164,14 +241,17 @@ export function ContactJourneyTimeline({ contact, events, invoices = [], booking
         id: `inv-${inv.id}`,
         module: "commerce",
         icon: isPaid ? DollarSign : isOverdue ? AlertTriangle : FileText,
-        iconColor: isPaid ? "hsl(142 76% 36%)" : isOverdue ? "hsl(0 84% 60%)" : "hsl(217 91% 60%)",
-        iconBg: isPaid ? "hsl(142 76% 36% / 0.15)" : isOverdue ? "hsl(0 84% 60% / 0.15)" : "hsl(217 91% 60% / 0.15)",
+        iconColor: isPaid ? "hsl(var(--kf-success))" : isOverdue ? "hsl(var(--kf-error))" : "hsl(217 91% 60%)",
+        iconBg: isPaid ? "hsl(var(--kf-success) / 0.15)" : isOverdue ? "hsl(var(--kf-error) / 0.15)" : "hsl(217 91% 60% / 0.15)",
         title: isPaid ? "Payment received" : isOverdue ? "Invoice overdue" : `Invoice ${inv.status.toLowerCase()}`,
         description: total > 0 ? formatAmount(total, inv.currency || "TTD") : undefined,
         timestamp: inv.paidAt || inv.issueDate || inv.createdAt || new Date().toISOString(),
         value: total,
         currency: inv.currency || "TTD",
         status: inv.status,
+        ctaLabel: "View Invoice",
+        ctaHref: `/app/commerce?tab=invoices&id=${encodeURIComponent(inv.id)}`,
+        entityId: inv.id,
       });
     }
 
@@ -188,20 +268,23 @@ export function ContactJourneyTimeline({ contact, events, invoices = [], booking
         id: `bk-${bk.id}`,
         module: "bookings",
         icon: isCompleted ? Star : isCancelled ? AlertTriangle : Calendar,
-        iconColor: isCompleted ? "hsl(45 93% 47%)" : isCancelled ? "hsl(0 84% 60%)" : "hsl(var(--kf-accent2))",
-        iconBg: isCompleted ? "hsl(45 93% 47% / 0.15)" : isCancelled ? "hsl(0 84% 60% / 0.15)" : "hsl(var(--kf-accent2) / 0.15)",
+        iconColor: isCompleted ? "hsl(45 93% 47%)" : isCancelled ? "hsl(var(--kf-error))" : "hsl(var(--kf-accent2))",
+        iconBg: isCompleted ? "hsl(45 93% 47% / 0.15)" : isCancelled ? "hsl(var(--kf-error) / 0.15)" : "hsl(var(--kf-accent2) / 0.15)",
         title: isCompleted ? "Service completed" : isCancelled ? "Booking cancelled" : "Appointment scheduled",
         description: bk.service?.name || undefined,
         timestamp: bk.startTime,
         value: bk.service?.price,
         currency: "TTD",
         status: bk.status,
+        ctaLabel: "View Booking",
+        ctaHref: `/app/bookings?id=${encodeURIComponent(bk.id)}`,
+        entityId: bk.id,
       });
     }
 
     items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     return items;
-  }, [events, invoices, bookings]);
+  }, [events, notes, tasks, invoices, bookings]);
 
   const filtered = useMemo(
     () => (filter === "all" ? entries : entries.filter((e) => e.module === filter)),
@@ -214,10 +297,19 @@ export function ContactJourneyTimeline({ contact, events, invoices = [], booking
     return counts;
   }, [entries]);
 
-  const totalRevenue = useMemo(
-    () => entries.filter((e) => e.module === "commerce" && e.value).reduce((sum, e) => sum + (e.value || 0), 0),
-    [entries],
-  );
+  const summary = useMemo(() => {
+    const paidInvoiceRevenue = invoices
+      .filter((inv) => inv.status === "PAID")
+      .reduce((sum, inv) => sum + (typeof inv.total === "number" ? inv.total : 0), 0);
+    const bookingsCount = bookings.length;
+    const allTimestamps = entries.map((e) => new Date(e.timestamp).getTime()).filter((t) => !Number.isNaN(t));
+    const lastInteractionTs = allTimestamps.length > 0 ? Math.max(...allTimestamps) : null;
+    const daysSinceLastInteraction = lastInteractionTs
+      ? Math.floor((Date.now() - lastInteractionTs) / (1000 * 60 * 60 * 24))
+      : 999;
+    const momentum = computeMomentumScore(events.length, bookingsCount, paidInvoiceRevenue, daysSinceLastInteraction);
+    return { totalRevenue: paidInvoiceRevenue, bookingsCount, lastInteractionTs, momentum, daysSinceLastInteraction };
+  }, [entries, events.length, invoices, bookings.length]);
 
   const contactFirstName = contact.firstName || "Contact";
 
@@ -261,8 +353,20 @@ export function ContactJourneyTimeline({ contact, events, invoices = [], booking
     );
   }
 
+  const momentumColor = summary.momentum >= 70
+    ? "text-[hsl(var(--kf-success))]"
+    : summary.momentum >= 40
+    ? "text-[hsl(var(--kf-warning))]"
+    : "text-[hsl(var(--kf-error))]";
+
+  const momentumBg = summary.momentum >= 70
+    ? "bg-[hsl(var(--kf-success))]/10"
+    : summary.momentum >= 40
+    ? "bg-[hsl(var(--kf-warning))]/10"
+    : "bg-[hsl(var(--kf-error))]/10";
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 px-1">
       <div className="flex items-center gap-2 flex-wrap">
         <div className="flex items-center gap-1 text-xs font-medium text-muted-foreground mr-1">
           <Package className="w-3.5 h-3.5" />
@@ -287,20 +391,46 @@ export function ContactJourneyTimeline({ contact, events, invoices = [], booking
         ))}
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
-        <div className="rounded-lg bg-muted/30 border border-border/50 p-2 text-center">
-          <div className="text-[10px] text-muted-foreground">Total Events</div>
-          <div className="text-sm font-semibold">{entries.length}</div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-lg bg-muted/30 border border-border/50 p-2.5">
+          <div className="flex items-center gap-1.5 mb-1">
+            <Calendar className="w-3 h-3 text-[hsl(var(--kf-accent2))]" />
+            <span className="text-[10px] text-muted-foreground">Bookings</span>
+          </div>
+          <div className="text-sm font-semibold">{summary.bookingsCount}</div>
         </div>
-        <div className="rounded-lg bg-muted/30 border border-border/50 p-2 text-center">
-          <div className="text-[10px] text-muted-foreground">Modules</div>
+        <div className="rounded-lg bg-muted/30 border border-border/50 p-2.5">
+          <div className="flex items-center gap-1.5 mb-1">
+            <DollarSign className="w-3 h-3 text-[hsl(var(--kf-success))]" />
+            <span className="text-[10px] text-muted-foreground">Revenue</span>
+          </div>
           <div className="text-sm font-semibold">
-            {Object.entries(moduleCounts).filter(([k, v]) => k !== "all" && v > 0).length}
+            {summary.totalRevenue > 0 ? formatAmount(summary.totalRevenue) : "—"}
           </div>
         </div>
-        <div className="rounded-lg bg-muted/30 border border-border/50 p-2 text-center">
-          <div className="text-[10px] text-muted-foreground">Revenue</div>
-          <div className="text-sm font-semibold">{totalRevenue > 0 ? formatAmount(totalRevenue) : "—"}</div>
+        <div className="rounded-lg bg-muted/30 border border-border/50 p-2.5">
+          <div className="flex items-center gap-1.5 mb-1">
+            <Clock className="w-3 h-3 text-[hsl(var(--kf-info))]" />
+            <span className="text-[10px] text-muted-foreground">Last Interaction</span>
+          </div>
+          <div className="text-sm font-semibold">
+            {summary.lastInteractionTs
+              ? summary.daysSinceLastInteraction === 0
+                ? "Today"
+                : summary.daysSinceLastInteraction === 1
+                ? "Yesterday"
+                : `${summary.daysSinceLastInteraction}d ago`
+              : "—"}
+          </div>
+        </div>
+        <div className={`rounded-lg border border-border/50 p-2.5 ${momentumBg}`}>
+          <div className="flex items-center gap-1.5 mb-1">
+            <TrendingUp className="w-3 h-3" />
+            <span className="text-[10px] text-muted-foreground">Momentum</span>
+          </div>
+          <div className={`text-sm font-semibold ${momentumColor}`}>
+            {summary.momentum}/100
+          </div>
         </div>
       </div>
 
@@ -350,6 +480,15 @@ export function ContactJourneyTimeline({ contact, events, invoices = [], booking
                         <p className="text-[11px] font-medium mt-0.5" style={{ color: entry.iconColor }}>
                           {formatAmount(entry.value, entry.currency)}
                         </p>
+                      )}
+                      {entry.ctaLabel && entry.ctaHref && (
+                        <a
+                          href={entry.ctaHref}
+                          className="inline-flex items-center gap-1 text-[10px] font-medium mt-1.5 px-2 py-0.5 rounded-md bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/20 transition-colors"
+                        >
+                          <ExternalLink className="w-2.5 h-2.5" />
+                          {entry.ctaLabel}
+                        </a>
                       )}
                     </div>
                   </motion.div>
