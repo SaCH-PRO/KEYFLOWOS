@@ -2,16 +2,16 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Trophy, Flame, Star, ChevronDown, ChevronUp, Target } from "lucide-react";
+import { Trophy, Flame, Star, X, Target } from "lucide-react";
 import type { GamificationStats } from "./types";
 
-interface ProgressSectionProps {
+interface ProgressDrawerProps {
   gamification: GamificationStats | null;
   momentum: number;
 }
 
-export function ProgressSection({ gamification, momentum }: ProgressSectionProps) {
-  const [expanded, setExpanded] = useState(false);
+export function ProgressDrawer({ gamification, momentum }: ProgressDrawerProps) {
+  const [open, setOpen] = useState(false);
 
   if (!gamification) return null;
 
@@ -19,76 +19,91 @@ export function ProgressSection({ gamification, momentum }: ProgressSectionProps
   const activeChallenge = gamification.challenges.find((c) => c.status === "IN_PROGRESS" || c.status === "ACTIVE");
 
   return (
-    <div className="kf-card overflow-hidden">
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={() => setExpanded((prev) => !prev)}
-        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setExpanded((prev) => !prev)}
-        className="w-full flex items-center justify-between px-4 py-3 border-b border-border hover:bg-muted/20 transition-colors cursor-pointer"
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="flex items-center gap-1.5 px-3 py-1.5 kf-radius-md text-xs font-medium transition-all hover:bg-muted/30 border border-border text-muted-foreground hover:text-foreground"
       >
-        <div className="flex items-center gap-2">
-          <Trophy className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-          <h2 className="kf-text-caption font-semibold uppercase tracking-wider">Progress & Streak</h2>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5">
-            <Flame className="w-3.5 h-3.5" style={{ color: gamification.streakDays > 0 ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-muted))" }} />
-            <span className="text-xs font-semibold" style={{ color: gamification.streakDays > 0 ? "hsl(var(--kf-accent1))" : undefined }}>{gamification.streakDays}d</span>
-          </div>
-          <span className="text-[10px] text-muted-foreground">Lv.{gamification.level}</span>
-          {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
-        </div>
-      </div>
+        <Trophy className="w-3 h-3" />
+        <Flame className="w-3 h-3" style={{ color: gamification.streakDays > 0 ? "hsl(var(--kf-accent1))" : undefined }} />
+        <span>{gamification.streakDays}d</span>
+      </button>
 
       <AnimatePresence>
-        {expanded && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
-            <div className="p-4 space-y-4">
-              <div className="grid grid-cols-3 gap-2">
-                <StatCell icon={<Flame className="w-3 h-3" />} color="hsl(var(--kf-accent1))" label="Streak" value={`${gamification.streakDays} days`} />
-                <StatCell icon={<Star className="w-3 h-3" />} color="hsl(var(--kf-warning))" label="Level" value={`${gamification.level}`} />
-                <StatCell icon={<Target className="w-3 h-3" />} color="hsl(var(--kf-accent2))" label="Momentum" value={`${momentum}%`} />
+        {open && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex justify-end">
+            <div className="absolute inset-0 bg-black/40" onClick={() => setOpen(false)} />
+            <motion.div
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="relative w-full max-w-sm bg-card border-l border-border shadow-xl flex flex-col"
+            >
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+                <div className="flex items-center gap-2">
+                  <Trophy className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+                  <h2 className="kf-text-heading font-semibold">Progress & Streak</h2>
+                </div>
+                <button onClick={() => setOpen(false)} className="p-1.5 kf-radius-sm text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] text-muted-foreground">XP Progress</span>
-                  <span className="text-[10px] font-medium">{gamification.currentXp} / {gamification.xpToNextLevel}</span>
+              <div className="flex-1 overflow-y-auto p-5 space-y-5">
+                <div className="grid grid-cols-3 gap-2">
+                  <StatCell icon={<Flame className="w-3 h-3" />} color="hsl(var(--kf-accent1))" label="Streak" value={`${gamification.streakDays} days`} />
+                  <StatCell icon={<Star className="w-3 h-3" />} color="hsl(var(--kf-warning))" label="Level" value={`${gamification.level}`} />
+                  <StatCell icon={<Target className="w-3 h-3" />} color="hsl(var(--kf-accent2))" label="Momentum" value={`${Math.round(momentum * 100)}%`} />
                 </div>
-                <div className="h-2 kf-radius-sm bg-muted/30 overflow-hidden">
-                  <div className="h-full kf-radius-sm transition-all duration-500" style={{ width: `${xpPercent}%`, background: "linear-gradient(90deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }} />
-                </div>
-              </div>
-
-              {activeChallenge && (
-                <div className="p-2.5 kf-radius-sm" style={{ background: "hsl(var(--kf-accent2) / 0.05)", border: "1px solid hsl(var(--kf-accent2) / 0.15)" }}>
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <Target className="w-3 h-3" style={{ color: "hsl(var(--kf-accent2))" }} />
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Active Challenge</span>
-                  </div>
-                  <p className="text-xs font-medium">{activeChallenge.title}</p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">{activeChallenge.description}</p>
-                </div>
-              )}
-
-              {gamification.achievements.length > 0 && (
                 <div>
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Recent Achievements</span>
-                  <div className="flex flex-wrap gap-1.5 mt-1.5">
-                    {gamification.achievements.slice(0, 4).map((a) => (
-                      <span key={a.id} className="text-[10px] px-2 py-1 kf-radius-sm bg-muted/30 border border-border" title={a.description}>
-                        {a.title}
-                      </span>
-                    ))}
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[10px] text-muted-foreground">XP Progress</span>
+                    <span className="text-[10px] font-medium">{gamification.currentXp} / {gamification.xpToNextLevel}</span>
                   </div>
+                  <div className="h-2 kf-radius-sm bg-muted/30 overflow-hidden">
+                    <div className="h-full kf-radius-sm transition-all duration-500" style={{ width: `${xpPercent}%`, background: "linear-gradient(90deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }} />
+                  </div>
+                  <p className="text-[9px] text-muted-foreground mt-1">{gamification.totalXp} total XP earned</p>
                 </div>
-              )}
-            </div>
+                {activeChallenge && (
+                  <div className="p-3 kf-radius-md" style={{ background: "hsl(var(--kf-accent2) / 0.05)", border: "1px solid hsl(var(--kf-accent2) / 0.15)" }}>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Target className="w-3 h-3" style={{ color: "hsl(var(--kf-accent2))" }} />
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Active Challenge</span>
+                    </div>
+                    <p className="text-xs font-medium">{activeChallenge.title}</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">{activeChallenge.description}</p>
+                  </div>
+                )}
+                {gamification.achievements.length > 0 && (
+                  <div>
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Achievements</span>
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      {gamification.achievements.map((a) => (
+                        <span key={a.id} className="text-[10px] px-2 py-1 kf-radius-sm bg-muted/30 border border-border" title={a.description}>{a.title}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {gamification.recentXpGains.length > 0 && (
+                  <div>
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Recent XP</span>
+                    <div className="space-y-1 mt-1.5">
+                      {gamification.recentXpGains.slice(0, 5).map((g, i) => (
+                        <div key={i} className="flex items-center justify-between text-[11px]">
+                          <span className="text-muted-foreground truncate">{g.action}</span>
+                          <span className="font-medium flex-shrink-0 ml-2" style={{ color: "hsl(var(--kf-success))" }}>+{g.xp} XP</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
+    </>
   );
 }
 
