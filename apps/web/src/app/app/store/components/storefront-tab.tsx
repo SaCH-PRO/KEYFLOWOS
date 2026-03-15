@@ -7,6 +7,7 @@ import { StoreSettings } from "./store-settings";
 import { AppearanceCustomizer } from "./appearance-customizer";
 import { StorefrontPreview } from "./storefront-preview";
 import { SocialProofPanel } from "./social-proof-panel";
+import { MerchandisingPanel } from "./merchandising-panel";
 import { ReadinessChecklist } from "./readiness-checklist";
 import type { Service, Product, StorefrontConfig } from "@/lib/client";
 
@@ -124,6 +125,15 @@ export function StorefrontTab({
           config={storefrontConfig}
         />
       </div>
+
+      <MerchandisingPanel
+        config={storefrontConfig}
+        products={commerceProducts}
+        services={services}
+        onConfigChange={onConfigChange}
+        onSave={onSaveConfig}
+        saving={configSaving}
+      />
 
       <SocialProofPanel
         storefrontConfig={storefrontConfig}

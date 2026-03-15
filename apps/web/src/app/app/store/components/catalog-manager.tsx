@@ -17,6 +17,22 @@ import {
 import { Product } from "@/lib/client";
 import { formatPrice } from "@/lib/format";
 
+function formatRelativeTime(dateStr: string | undefined | null): string {
+  if (!dateStr) return "";
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return "";
+  const now = Date.now();
+  const diffMs = now - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return "just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 30) return `${diffDays}d ago`;
+  return date.toLocaleDateString("en-TT", { month: "short", day: "numeric" });
+}
+
 type Props = {
   products: Product[];
   storeServiceNames: Set<string>;
@@ -364,6 +380,10 @@ export function CatalogManager({
                     <span className={`text-[11px] font-medium ${isOnStore ? "text-emerald-400" : "text-muted-foreground/60"}`}>
                       {isProcessing ? "Processing..." : isOnStore ? "\u2713 On store" : "Not on store"}
                     </span>
+                    {(() => {
+                      const updated = formatRelativeTime((p as Record<string, unknown>).updatedAt as string | undefined);
+                      return updated ? <span className="text-[10px] text-muted-foreground/40">&middot; {updated}</span> : null;
+                    })()}
                     {p.description && (
                       <span className="text-[10px] text-muted-foreground/40 truncate max-w-[200px]">&middot; {p.description}</span>
                     )}
