@@ -60,13 +60,17 @@ export function DataTable<T extends Record<string, unknown>>({
 
   const filtered = useMemo(() => {
     if (!search.trim()) return data;
-    const q = search.toLowerCase();
-    return data.filter((row) =>
-      visibleColumns.some((col) => {
-        const val = col.getValue ? col.getValue(row) : row[col.key];
-        return String(val ?? "").toLowerCase().includes(q);
-      }),
-    );
+    const tokens = search.toLowerCase().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) return data;
+    return data.filter((row) => {
+      const rowText = visibleColumns
+        .map((col) => {
+          const val = col.getValue ? col.getValue(row) : row[col.key];
+          return String(val ?? "").toLowerCase();
+        })
+        .join(" ");
+      return tokens.every((token) => rowText.includes(token));
+    });
   }, [data, search, visibleColumns]);
 
   const sorted = useMemo(() => {
@@ -124,7 +128,7 @@ export function DataTable<T extends Record<string, unknown>>({
   }, [pageData, keyField, selectedKeys, onSelectionChange]);
 
   return (
-    <div className="kf-card rounded-xl overflow-hidden">
+    <div className="kf-card kf-radius-lg overflow-hidden">
       {(searchable || headerExtra) && (
         <div
           className="flex items-center gap-2 px-3 py-2 border-b"
@@ -141,7 +145,7 @@ export function DataTable<T extends Record<string, unknown>>({
                 value={search}
                 onChange={(e) => { setSearch(e.target.value); setPage(0); }}
                 placeholder={searchPlaceholder}
-                className="w-full pl-8 pr-3 py-1.5 rounded-md text-[12px]"
+                className="w-full pl-8 pr-3 py-1.5 kf-radius-sm kf-text-caption"
                 style={{
                   background: "hsl(var(--kf-muted))",
                   color: "hsl(var(--kf-foreground))",
@@ -155,7 +159,7 @@ export function DataTable<T extends Record<string, unknown>>({
           <div className="relative ml-auto">
             <button
               onClick={() => setColMenuOpen(!colMenuOpen)}
-              className="w-7 h-7 rounded-md flex items-center justify-center transition-colors"
+              className="w-7 h-7 kf-radius-sm flex items-center justify-center transition-colors"
               style={{ color: "hsl(var(--kf-muted-foreground))" }}
               aria-label="Toggle columns"
               aria-expanded={colMenuOpen}
@@ -164,7 +168,7 @@ export function DataTable<T extends Record<string, unknown>>({
             </button>
             {colMenuOpen && (
               <div
-                className="absolute right-0 top-full mt-1 z-30 min-w-[160px] rounded-lg border p-1 shadow-lg"
+                className="absolute right-0 top-full mt-1 z-30 min-w-[160px] kf-radius-lg border p-1 shadow-lg"
                 style={{
                   background: "hsl(var(--kf-popover))",
                   borderColor: "hsl(var(--kf-border))",
@@ -174,7 +178,7 @@ export function DataTable<T extends Record<string, unknown>>({
                   <button
                     key={col.key}
                     onClick={() => toggleCol(col.key)}
-                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[12px] text-left transition-colors"
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 kf-radius-sm kf-text-caption text-left transition-colors"
                     style={{ color: "hsl(var(--kf-foreground))" }}
                   >
                     <span
@@ -305,7 +309,7 @@ export function DataTable<T extends Record<string, unknown>>({
           style={{ borderColor: "hsl(var(--kf-border))" }}
         >
           <span
-            className="text-[11px]"
+            className="kf-text-micro"
             style={{ color: "hsl(var(--kf-muted-foreground))" }}
           >
             {sorted.length} result{sorted.length !== 1 ? "s" : ""}
@@ -314,13 +318,13 @@ export function DataTable<T extends Record<string, unknown>>({
             <button
               onClick={() => setPage((p) => Math.max(0, p - 1))}
               disabled={page === 0}
-              className="w-7 h-7 rounded-md flex items-center justify-center disabled:opacity-30"
+              className="w-7 h-7 kf-radius-sm flex items-center justify-center disabled:opacity-30"
               style={{ color: "hsl(var(--kf-muted-foreground))" }}
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
             <span
-              className="text-[11px] px-2 tabular-nums"
+              className="kf-text-micro px-2 tabular-nums"
               style={{ color: "hsl(var(--kf-muted-foreground))" }}
             >
               {page + 1} / {totalPages}
@@ -328,7 +332,7 @@ export function DataTable<T extends Record<string, unknown>>({
             <button
               onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
               disabled={page >= totalPages - 1}
-              className="w-7 h-7 rounded-md flex items-center justify-center disabled:opacity-30"
+              className="w-7 h-7 kf-radius-sm flex items-center justify-center disabled:opacity-30"
               style={{ color: "hsl(var(--kf-muted-foreground))" }}
             >
               <ChevronRight className="w-4 h-4" />

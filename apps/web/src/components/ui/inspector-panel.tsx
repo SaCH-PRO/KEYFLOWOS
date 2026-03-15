@@ -50,10 +50,10 @@ export function InspectorPanel({
         style={{ borderColor: "hsl(var(--kf-border))" }}
       >
         <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-semibold truncate">{title}</h2>
+          <h2 className="kf-text-emphasis font-semibold truncate">{title}</h2>
           {subtitle && (
             <p
-              className="text-[11px] mt-0.5 truncate"
+              className="kf-text-micro mt-0.5 truncate"
               style={{ color: "hsl(var(--kf-muted-foreground))" }}
             >
               {subtitle}
@@ -65,7 +65,7 @@ export function InspectorPanel({
           {primaryAction && (
             <button
               onClick={primaryAction.onClick}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium"
+              className="inline-flex items-center gap-1 px-2.5 py-1 kf-radius-sm kf-text-micro font-medium"
               style={{
                 background: "hsl(var(--kf-accent1))",
                 color: "hsl(var(--kf-primary-foreground))",
@@ -77,7 +77,7 @@ export function InspectorPanel({
           )}
           <button
             onClick={onClose}
-            className="w-6 h-6 rounded-md flex items-center justify-center transition-colors"
+            className="w-6 h-6 kf-radius-sm flex items-center justify-center transition-colors"
             style={{ color: "hsl(var(--kf-muted-foreground))" }}
             aria-label="Close panel"
           >
@@ -124,7 +124,7 @@ function CollapsibleSection({ section }: { section: InspectorSection }) {
             style={{ color: "hsl(var(--kf-muted-foreground))" }}
           />
         )}
-        <span className="text-[12px] font-semibold flex-1">{section.title}</span>
+        <span className="kf-text-caption font-semibold flex-1">{section.title}</span>
         <ChevronDown
           className={`w-3.5 h-3.5 transition-transform duration-150 ${open ? "rotate-0" : "-rotate-90"}`}
           style={{ color: "hsl(var(--kf-muted-foreground))" }}

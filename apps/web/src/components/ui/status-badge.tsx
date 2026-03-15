@@ -71,8 +71,8 @@ export function StatusBadge({
   const displayLabel = label || status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
   const sizeClasses = size === "sm"
-    ? "text-[10px] px-1.5 py-px"
-    : "text-[11px] px-2 py-0.5";
+    ? "kf-text-micro px-1.5 py-px"
+    : "kf-text-micro px-2 py-0.5";
 
   const variantStyles = variant === "filled"
     ? { background: `hsl(${colorVar} / 0.1)`, color: `hsl(${colorVar})` }

@@ -89,7 +89,7 @@ export function SideSheet({
               </div>
               <button
                 onClick={onClose}
-                className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 transition-colors"
+                className="w-7 h-7 kf-radius-sm flex items-center justify-center flex-shrink-0 transition-colors"
                 style={{ color: "hsl(var(--kf-muted-foreground))" }}
                 aria-label="Close"
               >

@@ -46,7 +46,7 @@ export function FilterBar({ groups, values, onChange, onClearAll }: FilterBarPro
       <div className="flex items-center gap-2">
         <button
           onClick={() => setExpanded(!expanded)}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 kf-radius-md kf-text-caption font-medium transition-colors"
           style={{
             background: expanded || totalActive > 0
               ? "hsl(var(--kf-accent1) / 0.1)"
@@ -62,7 +62,7 @@ export function FilterBar({ groups, values, onChange, onClearAll }: FilterBarPro
           Filters
           {totalActive > 0 && (
             <span
-              className="ml-0.5 w-4 h-4 rounded-full text-[10px] font-semibold flex items-center justify-center"
+              className="ml-0.5 w-4 h-4 rounded-full kf-text-micro font-semibold flex items-center justify-center"
               style={{
                 background: "hsl(var(--kf-accent1))",
                 color: "hsl(var(--kf-primary-foreground))",
@@ -76,7 +76,7 @@ export function FilterBar({ groups, values, onChange, onClearAll }: FilterBarPro
         {totalActive > 0 && (
           <button
             onClick={handleClearAll}
-            className="text-[11px] font-medium flex items-center gap-0.5 transition-colors"
+            className="kf-text-micro font-medium flex items-center gap-0.5 transition-colors"
             style={{ color: "hsl(var(--kf-muted-foreground))" }}
           >
             <X className="w-3 h-3" />
@@ -103,7 +103,7 @@ export function FilterBar({ groups, values, onChange, onClearAll }: FilterBarPro
                   <div key={group.key} className="relative">
                     <button
                       onClick={() => setOpenGroup(isOpen ? null : group.key)}
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-medium border transition-colors"
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 kf-radius-sm kf-text-micro font-medium border transition-colors"
                       style={{
                         borderColor: activeCount > 0
                           ? "hsl(var(--kf-accent1) / 0.3)"
@@ -118,7 +118,7 @@ export function FilterBar({ groups, values, onChange, onClearAll }: FilterBarPro
                     >
                       {group.label}
                       {activeCount > 0 && (
-                        <span className="text-[9px] font-bold">{activeCount}</span>
+                        <span className="kf-text-micro font-bold">{activeCount}</span>
                       )}
                       <ChevronDown className={`w-3 h-3 transition-transform ${isOpen ? "rotate-180" : ""}`} />
                     </button>
@@ -130,7 +130,7 @@ export function FilterBar({ groups, values, onChange, onClearAll }: FilterBarPro
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, y: -4 }}
                           transition={{ duration: 0.12 }}
-                          className="absolute top-full left-0 mt-1 z-30 min-w-[160px] rounded-lg border p-1 shadow-lg"
+                          className="absolute top-full left-0 mt-1 z-30 min-w-[160px] kf-radius-lg border p-1 shadow-lg"
                           style={{
                             background: "hsl(var(--kf-popover))",
                             borderColor: "hsl(var(--kf-border))",
@@ -142,7 +142,7 @@ export function FilterBar({ groups, values, onChange, onClearAll }: FilterBarPro
                               <button
                                 key={option.value}
                                 onClick={() => handleToggle(group.key, option.value)}
-                                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[12px] transition-colors text-left"
+                                className="w-full flex items-center gap-2 px-2.5 py-1.5 kf-radius-sm kf-text-caption transition-colors text-left"
                                 style={{
                                   background: isSelected ? "hsl(var(--kf-accent1) / 0.08)" : "transparent",
                                   color: isSelected ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-foreground))",
