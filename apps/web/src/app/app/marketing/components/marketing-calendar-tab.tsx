@@ -75,7 +75,7 @@ export function MarketingCalendarTab({ campaigns, socialPosts, onTabChange }: Ma
     const items: CalendarEntry[] = [];
     if (filter !== "posts") {
       campaigns.forEach((c) => {
-        const d = c.sentAt || c.scheduledAt || c.createdAt;
+        const d = c.sentAt || c.scheduledAt;
         if (!d) return;
         items.push({
           id: `campaign-${c.id}`,
@@ -88,7 +88,7 @@ export function MarketingCalendarTab({ campaigns, socialPosts, onTabChange }: Ma
     }
     if (filter !== "campaigns") {
       socialPosts.forEach((p) => {
-        const d = p.postedAt || p.publishedAt || p.scheduledAt || p.scheduledFor || p.createdAt;
+        const d = p.postedAt || p.publishedAt || p.scheduledAt || p.scheduledFor;
         if (!d) return;
         items.push({
           id: `post-${p.id}`,
