@@ -13,17 +13,26 @@ class PrismaMock implements Partial<PrismaService> {
       findMany: vi.fn(({ where }: any) =>
         this.products.filter((p) => p.businessId === where.businessId && p.deletedAt === null),
       ),
+      count: vi.fn(({ where }: any) =>
+        this.products.filter((p) => p.businessId === where.businessId && p.deletedAt === null).length,
+      ),
       create: vi.fn(({ data }: any) => {
         const item = { ...data, id: `prod_${this.products.length + 1}`, deletedAt: null, createdAt: new Date() };
         this.products.push(item);
         return item;
       }),
     },
+    membership: {
+      findFirst: vi.fn(() => ({ id: 'mem_1', businessId: 'biz_1', userId: 'user_1', role: 'OWNER' })),
+    },
     invoice: {
       update: vi.fn(({ where, data }: any) => {
         const invoice = this.invoices.find((i) => i.id === where.id);
         Object.assign(invoice, data);
         return invoice;
+      }),
+      findUnique: vi.fn(({ where }: any) => {
+        return this.invoices.find((i) => i.id === where.id) || null;
       }),
       create: vi.fn(({ data }: any) => {
         const invoice = {
@@ -41,6 +50,9 @@ class PrismaMock implements Partial<PrismaService> {
         Object.assign(quote, data);
         return quote;
       }),
+      findUnique: vi.fn(({ where }: any) => {
+        return this.quotes.find((q) => q.id === where.id) || null;
+      }),
     },
   };
 }
@@ -52,7 +64,7 @@ describe('CommerceService', () => {
     const prisma = new PrismaMock() as unknown as PrismaService;
     const crm = { logContactEvent: vi.fn() } as any;
     const automation = { handle: vi.fn() } as any;
-    const service = new CommerceService(prisma, events, crm, automation);
+    const service = new CommerceService(prisma, events, crm, automation, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any);
 
     const invoice = await service.markInvoicePaid('inv_1');
 
@@ -71,13 +83,13 @@ describe('CommerceService', () => {
     const prisma = new PrismaMock() as unknown as PrismaService;
     const crm = { logContactEvent: vi.fn() } as any;
     const automation = { handle: vi.fn() } as any;
-    const service = new CommerceService(prisma, events, crm, automation);
+    const service = new CommerceService(prisma, events, crm, automation, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any);
 
     await service.createProduct({ businessId: 'biz_1', name: 'Plan', price: 10 });
     const products = await service.listProducts('biz_1');
 
-    expect(products).toHaveLength(1);
-    expect(products[0].name).toBe('Plan');
+    expect(products.data).toHaveLength(1);
+    expect(products.data[0].name).toBe('Plan');
   });
 
   it('creates invoice for service', async () => {
@@ -85,7 +97,7 @@ describe('CommerceService', () => {
     const prisma = new PrismaMock() as unknown as PrismaService;
     const crm = { logContactEvent: vi.fn() } as any;
     const automation = { handle: vi.fn() } as any;
-    const service = new CommerceService(prisma, events, crm, automation);
+    const service = new CommerceService(prisma, events, crm, automation, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any);
 
     const invoice = await service.createInvoiceForService('biz_1', 'contact_1', {
       id: 'service_1',
@@ -109,7 +121,7 @@ describe('CommerceService', () => {
     const prisma = new PrismaMock() as unknown as PrismaService;
     const crm = { logContactEvent: vi.fn() } as any;
     const automation = { handle: vi.fn() } as any;
-    const service = new CommerceService(prisma, events, crm, automation);
+    const service = new CommerceService(prisma, events, crm, automation, { checkAndEnforceLimit: vi.fn() } as any, { invalidateCache: vi.fn() } as any);
 
     const quote = await service.updateQuoteStatus({ quoteId: 'quote_1', status: 'ACCEPTED', actorId: 'user_1' });
 

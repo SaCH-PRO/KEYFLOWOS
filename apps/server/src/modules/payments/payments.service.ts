@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CommerceService } from '../commerce/commerce.service';
-import { Client, Environment, LogLevel, OrdersController } from '@paypal/paypal-server-sdk';
+import { CheckoutPaymentIntent, Client, Environment, LogLevel, OrdersController } from '@paypal/paypal-server-sdk';
 
 interface WipayCallbackParams {
   transaction_id?: string;
@@ -262,7 +262,7 @@ export class PaymentsService {
     try {
       const { result } = await paypal.ordersController.createOrder({
         body: {
-          intent: 'CAPTURE',
+          intent: CheckoutPaymentIntent.Capture,
           purchaseUnits: [
             {
               referenceId: invoiceId,

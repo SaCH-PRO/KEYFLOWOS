@@ -92,9 +92,9 @@ Only return the JSON array, no markdown or explanation.`,
       return items.map(item => ({
         name: item.name || undefined,
         description: item.description || undefined,
-        price: typeof item.price === 'number' ? item.price : (parseFloat(item.price) || undefined),
+        price: typeof item.price === 'number' ? item.price : (item.price ? parseFloat(item.price) || undefined : undefined),
         currency: item.currency || businessCurrency || 'TTD',
-        category: (['SERVICE', 'PRODUCT', 'PACKAGE'].includes(item.category) ? item.category : 'PRODUCT') as ExtractedProduct['category'],
+        category: (item.category && ['SERVICE', 'PRODUCT', 'PACKAGE'].includes(item.category) ? item.category : 'PRODUCT') as ExtractedProduct['category'],
         duration: typeof item.duration === 'number' ? item.duration : undefined,
         sku: item.sku || undefined,
       })).filter(item => item.name);

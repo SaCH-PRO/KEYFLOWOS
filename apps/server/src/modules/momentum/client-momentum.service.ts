@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AutopilotService } from '../autopilot/autopilot.service';
 import { AiUsageService } from '../ai/ai-usage.service';
@@ -34,9 +34,9 @@ export class ClientMomentumService {
   private readonly logger = new Logger(ClientMomentumService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly autopilotService: AutopilotService,
-    private readonly aiUsage: AiUsageService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(AutopilotService) private readonly autopilotService: AutopilotService,
+    @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {}
 
   private get db() {
