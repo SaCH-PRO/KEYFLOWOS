@@ -4,10 +4,10 @@ import Link from "next/link";
 import { FileText, Calendar, UserPlus, Send } from "lucide-react";
 
 const actions = [
-  { label: "Invoice", icon: FileText, href: "/app/commerce?action=new-invoice" },
-  { label: "Booking", icon: Calendar, href: "/app/bookings?action=new" },
-  { label: "Contact", icon: UserPlus, href: "/app/crm/pipeline?action=new" },
-  { label: "Campaign", icon: Send, href: "/app/marketing?tab=campaigns&action=new" },
+  { label: "New Invoice", icon: FileText, href: "/app/commerce?action=new-invoice" },
+  { label: "New Booking", icon: Calendar, href: "/app/bookings?action=new" },
+  { label: "New Contact", icon: UserPlus, href: "/app/crm/pipeline?action=new" },
+  { label: "New Campaign", icon: Send, href: "/app/marketing?tab=campaigns&action=new" },
 ];
 
 export function QuickActionBar() {
