@@ -350,7 +350,7 @@ export default function PerformanceTab({
                   <div className="flex items-center gap-1">
                     <p className="text-lg font-bold truncate">{card.value}</p>
                     {"trend" in card && card.trend !== 0 && (
-                      <span className={`flex items-center text-[10px] ${(card.trend ?? 0) > 0 ? "text-red-400" : "text-emerald-400"}`}>
+                      <span className="flex items-center text-[10px]" style={{ color: (card.trend ?? 0) > 0 ? "hsl(var(--kf-error))" : "hsl(var(--kf-success))" }}>
                         {(card.trend ?? 0) > 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
                         {Math.abs(card.trend ?? 0)}%
                       </span>
@@ -383,9 +383,9 @@ export default function PerformanceTab({
                   </ResponsiveContainer>
                 </div>
                 <div className="flex items-center gap-4 justify-center text-[10px] text-muted-foreground">
-                  <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-emerald-500" /><span>Good (70%+)</span></div>
-                  <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-amber-500" /><span>Fair (40-69%)</span></div>
-                  <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-red-500" /><span>Low (&lt;40%)</span></div>
+                  <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full" style={{ background: "hsl(var(--kf-success))" }} /><span>Good (70%+)</span></div>
+                  <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full" style={{ background: "hsl(var(--kf-warning))" }} /><span>Fair (40-69%)</span></div>
+                  <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full" style={{ background: "hsl(var(--kf-error))" }} /><span>Low (&lt;40%)</span></div>
                 </div>
               </motion.div>
 
@@ -443,7 +443,7 @@ export default function PerformanceTab({
               <div className="space-y-1.5">
                 {scheduleHealth.noShowRisks.slice(0, 5).map((risk) => (
                   <div key={risk.bookingId} className="flex items-center gap-3 p-2 rounded-lg bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
-                    <div className={`w-2 h-2 rounded-full shrink-0 ${risk.riskLevel === "HIGH" ? "bg-red-500" : risk.riskLevel === "MEDIUM" ? "bg-amber-500" : "bg-emerald-500"}`} />
+                    <div className="w-2 h-2 rounded-full shrink-0" style={{ background: risk.riskLevel === "HIGH" ? "hsl(var(--kf-error))" : risk.riskLevel === "MEDIUM" ? "hsl(var(--kf-warning))" : "hsl(var(--kf-success))" }} />
                     <div className="flex-1 min-w-0">
                       <span className="text-xs font-medium">{risk.contactName}</span>
                       <div className="flex flex-wrap gap-1 mt-0.5">
@@ -453,7 +453,7 @@ export default function PerformanceTab({
                       </div>
                     </div>
                     <div className="text-right shrink-0">
-                      <span className={`text-xs font-bold ${risk.riskLevel === "HIGH" ? "text-red-400" : risk.riskLevel === "MEDIUM" ? "text-amber-400" : "text-emerald-400"}`}>{risk.riskScore}%</span>
+                      <span className="text-xs font-bold" style={{ color: risk.riskLevel === "HIGH" ? "hsl(var(--kf-error))" : risk.riskLevel === "MEDIUM" ? "hsl(var(--kf-warning))" : "hsl(var(--kf-success))" }}>{risk.riskScore}%</span>
                       <p className="text-[9px] text-muted-foreground">{risk.riskLevel} risk</p>
                     </div>
                   </div>

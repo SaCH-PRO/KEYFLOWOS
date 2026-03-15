@@ -195,7 +195,22 @@ export default function CatalogCapacityTab({
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <h4 className="text-sm font-semibold truncate">{service.name}</h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-sm font-semibold truncate">{service.name}</h4>
+                        <div
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium shrink-0"
+                          style={{
+                            background: monthCount > 0 ? "hsl(var(--kf-success) / 0.1)" : "hsl(var(--muted) / 0.3)",
+                            color: monthCount > 0 ? "hsl(var(--kf-success))" : "hsl(var(--muted-foreground))",
+                          }}
+                        >
+                          <div
+                            className="w-1.5 h-1.5 rounded-full"
+                            style={{ background: monthCount > 0 ? "hsl(var(--kf-success))" : "hsl(var(--muted-foreground) / 0.4)" }}
+                          />
+                          {monthCount > 0 ? "Active" : "Inactive"}
+                        </div>
+                      </div>
                       {service.description && (
                         <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">
                           {service.description}

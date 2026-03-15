@@ -15,18 +15,18 @@ import type { Booking } from "../components/bookings-types";
 import { formatAmount } from "../../commerce/utils/commerce-utils";
 import { contactName, formatTime } from "../components/bookings-types";
 
-const STATUS_CARD: Record<string, string> = {
-  PENDING: "border-amber-500/40 bg-amber-500/10",
-  CONFIRMED: "border-blue-500/40 bg-blue-500/10",
-  COMPLETED: "border-emerald-500/40 bg-emerald-500/10",
-  CANCELLED: "border-red-500/40 bg-red-500/10",
+const STATUS_CARD_STYLE: Record<string, React.CSSProperties> = {
+  PENDING: { borderColor: "hsl(var(--kf-warning) / 0.4)", background: "hsl(var(--kf-warning) / 0.1)" },
+  CONFIRMED: { borderColor: "hsl(var(--kf-info) / 0.4)", background: "hsl(var(--kf-info) / 0.1)" },
+  COMPLETED: { borderColor: "hsl(var(--kf-success) / 0.4)", background: "hsl(var(--kf-success) / 0.1)" },
+  CANCELLED: { borderColor: "hsl(var(--kf-error) / 0.4)", background: "hsl(var(--kf-error) / 0.1)" },
 };
 
-const STATUS_BADGE: Record<string, string> = {
-  PENDING: "bg-amber-500/20 text-amber-300",
-  CONFIRMED: "bg-blue-500/20 text-blue-300",
-  COMPLETED: "bg-emerald-500/20 text-emerald-300",
-  CANCELLED: "bg-red-500/20 text-red-300",
+const STATUS_BADGE_STYLE: Record<string, React.CSSProperties> = {
+  PENDING: { background: "hsl(var(--kf-warning) / 0.2)", color: "hsl(var(--kf-warning))" },
+  CONFIRMED: { background: "hsl(var(--kf-info) / 0.2)", color: "hsl(var(--kf-info))" },
+  COMPLETED: { background: "hsl(var(--kf-success) / 0.2)", color: "hsl(var(--kf-success))" },
+  CANCELLED: { background: "hsl(var(--kf-error) / 0.2)", color: "hsl(var(--kf-error))" },
 };
 
 const START_HOUR = 8;
@@ -133,7 +133,14 @@ export default function DayTimeline({
                       onSlotClick(dateStr, `${String(hour).padStart(2, "0")}:00`);
                     }
                   }}
+                  onKeyDown={(e) => {
+                    if (hBookings.length === 0 && onSlotClick && (e.key === "Enter" || e.key === " ")) {
+                      e.preventDefault();
+                      onSlotClick(dateStr, `${String(hour).padStart(2, "0")}:00`);
+                    }
+                  }}
                   role={hBookings.length === 0 && onSlotClick ? "button" : undefined}
+                  tabIndex={hBookings.length === 0 && onSlotClick ? 0 : undefined}
                   aria-label={hBookings.length === 0 && onSlotClick ? `Book at ${label}` : undefined}
                   title={hBookings.length === 0 && onSlotClick ? `Click to book at ${label}` : undefined}
                 >
@@ -142,15 +149,24 @@ export default function DayTimeline({
                       new Date(b.endTime).getTime() -
                       new Date(b.startTime).getTime();
                     const durationMins = Math.round(durationMs / (1000 * 60));
+                    const cta = onSmartAction ? SMART_CTA[b.status] : undefined;
+                    const CtaIcon = cta?.icon;
 
                     return (
-                      <button
+                      <div
                         key={b.id}
+                        role="button"
+                        tabIndex={0}
                         onClick={() => onSelectBooking(b)}
-                        className={`w-full text-left rounded-xl border p-3 transition-all hover:ring-1 hover:ring-[hsl(var(--kf-accent1)/0.3)] ${
-                          STATUS_CARD[b.status] ??
-                          "border-border/40 bg-muted/10"
-                        }`}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            onSelectBooking(b);
+                          }
+                        }}
+                        aria-label={`${contactName(b)} - ${b.status} - ${formatTime(b.startTime)}`}
+                        className="w-full text-left rounded-xl border p-3 transition-all hover:ring-1 hover:ring-[hsl(var(--kf-accent1)/0.3)] cursor-pointer"
+                        style={STATUS_CARD_STYLE[b.status] ?? { borderColor: "hsl(var(--border) / 0.4)", background: "hsl(var(--muted) / 0.1)" }}
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 space-y-1">
@@ -159,10 +175,8 @@ export default function DayTimeline({
                                 {contactName(b)}
                               </span>
                               <span
-                                className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
-                                  STATUS_BADGE[b.status] ??
-                                  "bg-slate-500/20 text-slate-300"
-                                }`}
+                                className="px-1.5 py-0.5 rounded-full text-[10px] font-medium"
+                                style={STATUS_BADGE_STYLE[b.status] ?? { background: "hsl(var(--muted) / 0.2)", color: "hsl(var(--muted-foreground))" }}
                               >
                                 {b.status}
                               </span>
@@ -206,31 +220,28 @@ export default function DayTimeline({
                                 </div>
                               </div>
                             )}
-                            {onSmartAction && SMART_CTA[b.status] && (() => {
-                              const cta = SMART_CTA[b.status];
-                              const CtaIcon = cta.icon;
-                              return (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onSmartAction(b, cta.action);
-                                  }}
-                                  className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium flex items-center gap-1 transition-colors shrink-0"
-                                  style={{
-                                    background: `${cta.style.replace(")", " / 0.1)")} `,
-                                    color: cta.style,
-                                    borderWidth: 1,
-                                    borderColor: `${cta.style.replace(")", " / 0.25)")}`,
-                                  }}
-                                >
-                                  <CtaIcon className="w-3 h-3" />
-                                  {cta.label}
-                                </button>
-                              );
-                            })()}
+                            {cta && CtaIcon && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onSmartAction?.(b, cta.action);
+                                }}
+                                className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium flex items-center gap-1 transition-colors shrink-0"
+                                style={{
+                                  background: `${cta.style.replace(")", " / 0.1)")} `,
+                                  color: cta.style,
+                                  borderWidth: 1,
+                                  borderColor: `${cta.style.replace(")", " / 0.25)")}`,
+                                }}
+                                aria-label={`${cta.label} booking for ${contactName(b)}`}
+                              >
+                                <CtaIcon className="w-3 h-3" />
+                                {cta.label}
+                              </button>
+                            )}
                           </div>
                         </div>
-                      </button>
+                      </div>
                     );
                   })}
                 </div>

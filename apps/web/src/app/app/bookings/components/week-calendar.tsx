@@ -5,18 +5,30 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  CheckCircle2,
+  LogIn,
+  FileText,
+  RotateCcw,
 } from "lucide-react";
 import type { Booking } from "./bookings-types";
-import { STATUS_COLORS, formatTime, getWeekDays, isSameDay } from "./bookings-types";
+import { STATUS_STYLE, formatTime, getWeekDays, isSameDay } from "./bookings-types";
+
+const WEEK_SMART_CTA: Record<string, { icon: typeof CheckCircle2; action: string; color: string; title: string }> = {
+  PENDING: { icon: CheckCircle2, action: "CONFIRMED", color: "hsl(var(--kf-success))", title: "Confirm" },
+  CONFIRMED: { icon: LogIn, action: "COMPLETED", color: "hsl(var(--kf-accent2))", title: "Check in" },
+  COMPLETED: { icon: FileText, action: "INVOICE", color: "hsl(var(--kf-accent1))", title: "Invoice" },
+  CANCELLED: { icon: RotateCcw, action: "REBOOK", color: "hsl(var(--kf-info))", title: "Rebook" },
+};
 
 interface WeekCalendarProps {
   bookings: Booking[];
   weekOffset: number;
   setWeekOffset: (fn: (w: number) => number) => void;
   onSelectBooking: (booking: Booking) => void;
+  onSmartAction?: (booking: Booking, action: string) => void;
 }
 
-export default function WeekCalendar({ bookings, weekOffset, setWeekOffset, onSelectBooking }: WeekCalendarProps) {
+export default function WeekCalendar({ bookings, weekOffset, setWeekOffset, onSelectBooking, onSmartAction }: WeekCalendarProps) {
   const baseDate = useMemo(() => {
     const d = new Date();
     d.setDate(d.getDate() + weekOffset * 7);
@@ -81,16 +93,38 @@ export default function WeekCalendar({ bookings, weekOffset, setWeekOffset, onSe
                 </span>
               </div>
               <div className="space-y-1">
-                {dayBookings.slice(0, 3).map((b) => (
-                  <button
-                    key={b.id}
-                    onClick={() => onSelectBooking(b)}
-                    className={`w-full text-left rounded-lg px-1.5 py-1 text-[10px] leading-tight truncate border transition-colors hover:opacity-80 ${STATUS_COLORS[b.status] ?? "bg-slate-500/20 text-slate-300 border-slate-500/30"}`}
-                  >
-                    <div className="font-medium truncate">{formatTime(b.startTime)}</div>
-                    <div className="truncate opacity-80">{b.service?.name ?? "Service"}</div>
-                  </button>
-                ))}
+                {dayBookings.slice(0, 3).map((b) => {
+                  const cta = onSmartAction ? WEEK_SMART_CTA[b.status] : undefined;
+                  const CtaIcon = cta?.icon;
+                  return (
+                    <div
+                      key={b.id}
+                      className="w-full text-left rounded-lg px-1.5 py-1 text-[10px] leading-tight border transition-colors hover:opacity-80 flex items-start gap-1"
+                      style={STATUS_STYLE[b.status] ?? { background: "hsl(var(--muted) / 0.2)", color: "hsl(var(--muted-foreground))", borderColor: "hsl(var(--border) / 0.3)" }}
+                    >
+                      <button
+                        onClick={() => onSelectBooking(b)}
+                        className="flex-1 min-w-0 text-left"
+                      >
+                        <div className="font-medium truncate">{formatTime(b.startTime)}</div>
+                        <div className="truncate opacity-80">{b.service?.name ?? "Service"}</div>
+                      </button>
+                      {cta && CtaIcon && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSmartAction!(b, cta.action);
+                          }}
+                          className="p-0.5 rounded shrink-0 opacity-60 hover:opacity-100 transition-opacity"
+                          style={{ color: cta.color }}
+                          title={cta.title}
+                        >
+                          <CtaIcon className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
                 {dayBookings.length > 3 && (
                   <div className="text-[10px] text-muted-foreground text-center">+{dayBookings.length - 3} more</div>
                 )}

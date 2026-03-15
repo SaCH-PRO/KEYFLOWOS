@@ -259,6 +259,7 @@ export default function CalendarView({
               currentDate={currentDate}
               onSelectBooking={onSelectBooking}
               onSlotClick={handleSlotClick}
+              onSmartAction={onSmartAction}
             />
           )}
           {viewMode === "day" && (

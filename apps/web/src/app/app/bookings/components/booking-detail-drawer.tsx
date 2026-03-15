@@ -13,7 +13,7 @@ import {
   Link2,
 } from "lucide-react";
 import type { Booking } from "./bookings-types";
-import { STATUS_COLORS, formatTime, formatFullDate, contactName } from "./bookings-types";
+import { STATUS_STYLE, formatTime, formatFullDate, contactName } from "./bookings-types";
 
 interface BookingDetailDrawerProps {
   selectedBooking: Booking;
@@ -52,7 +52,7 @@ export default function BookingDetailDrawer({
           </button>
         </div>
 
-        <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium border ${STATUS_COLORS[selectedBooking.status] ?? "bg-slate-500/20 text-slate-300"}`}>
+        <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium border" style={STATUS_STYLE[selectedBooking.status] ?? { background: "hsl(var(--muted) / 0.2)", color: "hsl(var(--muted-foreground))" }}>
           {selectedBooking.status}
         </div>
 
