@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "sonner";
 import {
-  Users, BarChart3, Sparkles, Database,
+  Users, BarChart3, Layers,
 } from "lucide-react";
 import {
   ContactCardData,
@@ -22,7 +22,6 @@ import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
 import type { SmartSegment } from "./pipeline-toolbar";
 import { ContactsDatabase } from "./contacts-database";
 import { InsightsTab } from "./insights-tab";
-import { EngageTab } from "./engage-tab";
 import { PipelineTabContent } from "./pipeline-tab-content";
 import { GettingStartedGuide } from "./getting-started-guide";
 import { useContactsPipeline } from "./use-contacts-pipeline";
@@ -41,7 +40,7 @@ export default function ContactsPage() {
   const emitEvent = useModuleEmit();
   const [slideDirection, setSlideDirection] = useState(0);
 
-  const CRM_TABS = ["pipeline", "database", "insights", "engage"];
+  const CRM_TABS = ["contacts", "insights", "studio"];
 
   const {
     workspaceLoading, workspaceError, businessId,
@@ -79,7 +78,7 @@ export default function ContactsPage() {
     const { type, contactId } = crmAi.parseActionKey(actionKey);
     if (contactId) {
       selectContact(contactId);
-      setCrmViewTab("pipeline");
+      setCrmViewTab("contacts");
     }
     if (type === "follow_up" || type === "check_in" || type === "re_engage") {
       toast.success("Opening contact for follow-up...");
@@ -94,10 +93,9 @@ export default function ContactsPage() {
       shortcuts: [
         { key: "n", description: "New contact", action: () => state.setShowAddMenu(true) },
         { key: "f", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('[data-ai-search]'); el?.focus(); } },
-        { key: "1", description: "Pipeline tab", action: () => setCrmViewTab("pipeline") },
-        { key: "2", description: "Database tab", action: () => setCrmViewTab("database") },
-        { key: "3", description: "Insights tab", action: () => setCrmViewTab("insights") },
-        { key: "4", description: "Engage tab", action: () => setCrmViewTab("engage") },
+        { key: "1", description: "Contacts tab", action: () => setCrmViewTab("contacts") },
+        { key: "2", description: "Insights tab", action: () => setCrmViewTab("insights") },
+        { key: "3", description: "Studio tab", action: () => setCrmViewTab("studio") },
         { key: "r", description: "Refresh contacts", action: () => { void loadContacts(); void loadFlowData(); } },
         { key: "b", description: "Open broadcast", action: () => state.setShowBroadcast(true) },
         { key: "g", description: "Toggle guide", action: () => setShowGuide((p: boolean) => !p) },
@@ -142,29 +140,29 @@ export default function ContactsPage() {
   const handleSelectList = useCallback((listId: string | null, contactIds?: string[] | null) => {
     setActiveListId(listId);
     setActiveListContactIds(contactIds || null);
-    if (listId) setCrmViewTab("pipeline");
+    if (listId) setCrmViewTab("contacts");
   }, [setActiveListId, setActiveListContactIds, setCrmViewTab]);
-  const handleSelectDbContact = useCallback((id: string) => { selectContact(id); setCrmViewTab("pipeline"); }, [selectContact, setCrmViewTab]);
-  const handleViewCold = useCallback(() => { setStatusFilter("LEAD"); setCrmViewTab("pipeline"); }, [setStatusFilter, setCrmViewTab]);
-  const handleViewReady = useCallback(() => { setStatusFilter("PROSPECT"); setCrmViewTab("pipeline"); }, [setStatusFilter, setCrmViewTab]);
+  const handleSelectDbContact = useCallback((id: string) => { selectContact(id); setCrmViewTab("contacts"); }, [selectContact, setCrmViewTab]);
+  const handleViewCold = useCallback(() => { setStatusFilter("LEAD"); setCrmViewTab("contacts"); }, [setStatusFilter, setCrmViewTab]);
+  const handleViewReady = useCallback(() => { setStatusFilter("PROSPECT"); setCrmViewTab("contacts"); }, [setStatusFilter, setCrmViewTab]);
   const handleInsightsRefresh = useCallback(() => { void loadContacts(); void loadFlowData(); }, [loadContacts, loadFlowData]);
   const handleNavigatePipeline = useCallback((filter?: { status?: string; segment?: string }) => {
     if (filter?.status) setStatusFilter(filter.status);
     if (filter?.segment) state.setActiveSegment(filter.segment as any);
-    setCrmViewTab("pipeline");
+    setCrmViewTab("contacts");
   }, [setStatusFilter, setCrmViewTab, state.setActiveSegment]);
-  const handleViewEngageContact = useCallback((id: string) => { selectContact(id); setCrmViewTab("pipeline"); }, [selectContact, setCrmViewTab]);
+  const handleViewEngageContact = useCallback((id: string) => { selectContact(id); setCrmViewTab("contacts"); }, [selectContact, setCrmViewTab]);
   const handleToggleAutopilotPause = useCallback(() => setAutopilotPaused((prev: boolean) => !prev), [setAutopilotPaused]);
   const handleToggleGuide = useCallback(() => setShowGuide((prev: boolean) => !prev), [setShowGuide]);
   const handleGuideAddContact = useCallback(() => state.setShowAddMenu(true), [state.setShowAddMenu]);
-  const handleGuideSegment = useCallback((segment: string) => { state.setActiveSegment(segment as SmartSegment); setCrmViewTab("pipeline"); }, [state.setActiveSegment, setCrmViewTab]);
-  const handleGuideSelectMode = useCallback(() => { state.handleToggleSelectMode(); setCrmViewTab("pipeline"); }, [state.handleToggleSelectMode, setCrmViewTab]);
+  const handleGuideSegment = useCallback((segment: string) => { state.setActiveSegment(segment as SmartSegment); setCrmViewTab("contacts"); }, [state.setActiveSegment, setCrmViewTab]);
+  const handleGuideSelectMode = useCallback(() => { state.handleToggleSelectMode(); setCrmViewTab("contacts"); }, [state.handleToggleSelectMode, setCrmViewTab]);
   const handleTabChange = useCallback((t: string) => {
     if (t === crmViewTab) return;
     const oldIndex = CRM_TABS.indexOf(crmViewTab);
     const newIndex = CRM_TABS.indexOf(t);
     setSlideDirection(newIndex > oldIndex ? 1 : -1);
-    setCrmViewTab(t as "pipeline" | "insights" | "engage" | "database");
+    setCrmViewTab(t as "contacts" | "insights" | "studio");
     emitEvent("module:tab_changed", "crm", { tab: t });
   }, [crmViewTab, setCrmViewTab, emitEvent]);
 
@@ -182,29 +180,29 @@ export default function ContactsPage() {
         break;
       case "edit_contact":
         selectContact(cmd.contactId);
-        setCrmViewTab("pipeline");
+        setCrmViewTab("contacts");
         setTimeout(() => state.handleEditContact(), 300);
         toast.success("Opening contact for editing...");
         break;
       case "delete_contact":
         selectContact(cmd.contactId);
-        setCrmViewTab("pipeline");
+        setCrmViewTab("contacts");
         setTimeout(() => state.handleDeleteContact(), 300);
         break;
       case "view_contact":
         selectContact(cmd.contactId);
-        setCrmViewTab("pipeline");
+        setCrmViewTab("contacts");
         toast.success("Navigating to contact...");
         break;
       case "change_status":
         selectContact(cmd.contactId);
-        setCrmViewTab("pipeline");
+        setCrmViewTab("contacts");
         state.handleUpdateStatus(cmd.status);
         toast.success(`Status updated to ${cmd.status}`);
         break;
       case "add_note":
         selectContact(cmd.contactId);
-        setCrmViewTab("pipeline");
+        setCrmViewTab("contacts");
         if (cmd.body) {
           setTimeout(() => {
             state.handleAddNote(cmd.body!);
@@ -216,7 +214,7 @@ export default function ContactsPage() {
         break;
       case "add_task":
         selectContact(cmd.contactId);
-        setCrmViewTab("pipeline");
+        setCrmViewTab("contacts");
         if (cmd.title) {
           setTimeout(() => {
             state.handleAddTask(cmd.title!);
@@ -228,11 +226,11 @@ export default function ContactsPage() {
         break;
       case "log_communication":
         selectContact(cmd.contactId);
-        setCrmViewTab("pipeline");
+        setCrmViewTab("contacts");
         toast.success("Opening contact — use the Log Interaction button");
         break;
       case "switch_tab":
-        setCrmViewTab(cmd.tab as "pipeline" | "database" | "insights" | "engage");
+        setCrmViewTab(cmd.tab as "contacts" | "insights" | "studio");
         toast.success(`Switched to ${cmd.tab} view`);
         break;
       case "filter_status":
@@ -241,7 +239,7 @@ export default function ContactsPage() {
         } else {
           setStatusFilter(cmd.status);
         }
-        setCrmViewTab("pipeline");
+        setCrmViewTab("contacts");
         toast.success(cmd.status === "all" ? "Showing all contacts" : `Filtered to ${cmd.status} contacts`);
         break;
       case "open_broadcast":
@@ -254,7 +252,7 @@ export default function ContactsPage() {
         break;
       case "show_favorites":
         state.setActiveSegment("favorites" as any);
-        setCrmViewTab("pipeline");
+        setCrmViewTab("contacts");
         toast.success("Showing favorite contacts");
         break;
       case "toggle_favorite":
@@ -273,12 +271,12 @@ export default function ContactsPage() {
       case "generate_prep_brief":
       case "suggest_tags":
         selectContact(cmd.contactId);
-        setCrmViewTab("pipeline");
+        setCrmViewTab("contacts");
         toast.success("Opening contact — use the AI tools in the detail panel");
         break;
       case "search_contacts":
         state.setSearchInput(cmd.query);
-        setCrmViewTab("pipeline");
+        setCrmViewTab("contacts");
         break;
       case "find_duplicates":
         setCrmViewTab("insights");
@@ -293,7 +291,7 @@ export default function ContactsPage() {
         const targetId = cmd.params?.targetId as string;
         if (sourceId && targetId) {
           selectContact(targetId);
-          setCrmViewTab("pipeline");
+          setCrmViewTab("contacts");
           toast.success("Opening target contact — use the merge option in the detail panel");
         } else {
           toast.info("Specify the two contacts to merge");
@@ -305,17 +303,17 @@ export default function ContactsPage() {
         break;
       case "create_quote":
         selectContact(cmd.contactId);
-        setCrmViewTab("pipeline");
+        setCrmViewTab("contacts");
         toast.success("Opening contact — create a quote from the Quick Actions menu");
         break;
       case "create_invoice":
         selectContact(cmd.contactId);
-        setCrmViewTab("pipeline");
+        setCrmViewTab("contacts");
         toast.success("Opening contact — create an invoice from the Quick Actions menu");
         break;
       case "generate_follow_up":
         selectContact(cmd.contactId);
-        setCrmViewTab("pipeline");
+        setCrmViewTab("contacts");
         toast.success("Opening contact — use the Follow-up Drafter AI tool");
         break;
       case "revenue_scan":
@@ -323,8 +321,8 @@ export default function ContactsPage() {
         toast.success("Switching to Insights — use the Revenue Opportunity AI tool");
         break;
       case "reengagement_scan":
-        setCrmViewTab("engage");
-        toast.success("Switching to Engage — use the Re-engagement AI tool");
+        setCrmViewTab("contacts");
+        toast.success("Check re-engagement suggestions in the Next Actions queue");
         break;
       case "ai_execute": {
         const executing = toast.loading("Executing AI command...");
@@ -395,7 +393,7 @@ export default function ContactsPage() {
       />
 
       <AiSearchBar
-        onSelectContact={(id) => { selectContact(id); setCrmViewTab("pipeline"); }}
+        onSelectContact={(id) => { selectContact(id); setCrmViewTab("contacts"); }}
         onExecuteCommand={handleAiCommand}
       />
 
@@ -413,10 +411,9 @@ export default function ContactsPage() {
 
       <TabNav
         tabs={[
-          { key: "pipeline", label: "Pipeline", icon: Users },
-          { key: "database", label: "Database", icon: Database },
+          { key: "contacts", label: "Contacts", icon: Users },
           { key: "insights", label: "Insights", icon: BarChart3 },
-          { key: "engage", label: "Engage", icon: Sparkles },
+          { key: "studio", label: "Studio", icon: Layers },
         ]}
         activeTab={crmViewTab}
         onTabChange={handleTabChange}
@@ -424,38 +421,26 @@ export default function ContactsPage() {
 
       <div {...swipeHandlers} className="touch-pan-y">
         <AnimatePresence mode="wait" custom={slideDirection}>
-          {crmViewTab === "pipeline" && (
+          {crmViewTab === "contacts" && (
             <motion.div
-              key="pipeline"
+              key="contacts"
               custom={slideDirection}
               initial={{ opacity: 0, x: slideDirection * 60 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: slideDirection * -60 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
             >
-              <PipelineTabContent state={state} />
-            </motion.div>
-          )}
-
-          {crmViewTab === "database" && businessId && (
-            <motion.div
-              key="database"
-              custom={slideDirection}
-              initial={{ opacity: 0, x: slideDirection * 60 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: slideDirection * -60 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-            >
-              <ContactsDatabase
-                businessId={businessId}
-                contacts={databaseContacts}
-                onRefresh={handleRefreshContacts}
-                activeListId={activeListId}
-                onSelectList={handleSelectList}
-                onListsLoaded={setListsCount}
-                onSelectContact={handleSelectDbContact}
-                favoriteIds={state.favoriteIds}
-                onToggleFavorite={state.handleToggleFavorite}
+              <PipelineTabContent
+                state={state}
+                nextActions={nextActions}
+                autopilotActions={autopilotActions}
+                autopilotPaused={autopilotPaused}
+                onCompleteNextAction={handleCompleteNextAction}
+                onViewEngageContact={handleViewEngageContact}
+                onDoAction={handleDoAction}
+                onToggleAutopilotPause={handleToggleAutopilotPause}
+                onApproveAutopilot={handleApproveAutopilot}
+                onDenyAutopilot={handleDenyAutopilot}
               />
             </motion.div>
           )}
@@ -485,29 +470,25 @@ export default function ContactsPage() {
             </motion.div>
           )}
 
-          {crmViewTab === "engage" && (
+          {crmViewTab === "studio" && businessId && (
             <motion.div
-              key="engage"
+              key="studio"
               custom={slideDirection}
               initial={{ opacity: 0, x: slideDirection * 60 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: slideDirection * -60 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
             >
-              <EngageTab
-                nextActions={nextActions}
-                autopilotActions={autopilotActions}
-                autopilotPaused={autopilotPaused}
-                loading={flowDataLoading}
-                businessId={businessId ?? undefined}
-                revenueData={revenueData}
-                aiNextActions={aiNextActions}
-                onComplete={handleCompleteNextAction}
-                onViewContact={handleViewEngageContact}
-                onDoAction={handleDoAction}
-                onTogglePause={handleToggleAutopilotPause}
-                onApprove={handleApproveAutopilot}
-                onDeny={handleDenyAutopilot}
+              <ContactsDatabase
+                businessId={businessId}
+                contacts={databaseContacts}
+                onRefresh={handleRefreshContacts}
+                activeListId={activeListId}
+                onSelectList={handleSelectList}
+                onListsLoaded={setListsCount}
+                onSelectContact={handleSelectDbContact}
+                favoriteIds={state.favoriteIds}
+                onToggleFavorite={state.handleToggleFavorite}
               />
             </motion.div>
           )}

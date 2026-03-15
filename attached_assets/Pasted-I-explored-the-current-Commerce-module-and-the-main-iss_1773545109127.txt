@@ -1,0 +1,736 @@
+I explored the current Commerce module and the main issue is not lack of capability. It is over-surfacing capability. Commerce already combines billing operations, AI search, AI command hub, guide overlays, keyboard shortcuts, cross-module events, insights, and recurring billing in one screen, which makes it feel powerful but crowded  .
+
+The good news is that the foundations are strong. The module already supports:
+
+* quotes, invoices, schedules, and insights as top-level tabs 
+* AI search + action parsing + AI tool hub  
+* recurring billing, Gmail, payment gateways, and CRM linkage  
+* commerce-to-CRM event integration such as `invoice.paid`, `invoice.sent`, and `invoice.overdue` flowing into CRM intelligence 
+
+So the optimization plan should not be “add more.” It should be: simplify the operating model, reduce interface noise, and make the intelligence feel embedded rather than bolted on.
+
+## Core diagnosis
+
+The current page stacks too many control layers at once:
+
+* header
+* guide trigger
+* AI search bar
+* AI hub trigger
+* top tabs
+* error banners
+* billing subpanel
+* insights panel
+* swipe navigation
+* keyboard shortcut system
+* AI suggestion banners 
+
+The state model is also broad: business workspace state, products, invoices, quotes, contacts, Gmail, payment gateway integrations, pending prefill, trigger counters, guide visibility, cached images, and multiple new-item flows are all managed together in the commerce hook . That usually translates into UI clutter and modal proliferation.
+
+## Redesign principle
+
+Commerce should become a **revenue workspace**, not a collection of billing screens.
+
+The module should answer only four user questions:
+
+1. What needs attention right now?
+2. What am I creating or collecting?
+3. Which clients/products are driving revenue?
+4. What should I do next?
+
+Everything in the redesign should serve those four questions.
+
+---
+
+## 1. New information architecture
+
+### Replace the current top-level mental model
+
+Today the module is organized as:
+
+* Quotes
+* Invoices
+* Schedules
+* Insights 
+
+That is logical from a data-model perspective, but not from a user workflow perspective. It makes users think in object types instead of business outcomes.
+
+### Recommended new structure
+
+Use 3 primary surfaces:
+
+### A. Overview
+
+The operating dashboard:
+
+* urgent collections
+* draft/sent/overdue pipeline
+* next scheduled billing
+* top customers/products
+* quick actions
+
+### B. Billing
+
+The execution workspace:
+
+* invoices
+* quotes
+* recurring billing
+* payment links
+* reminders
+* payment status
+
+### C. Catalog & Intelligence
+
+The optimization workspace:
+
+* products/services
+* pricing
+* product health
+* revenue analysis
+* quote win analysis
+* client intelligence
+
+This keeps Insights, products, and AI-heavy optimizations out of the main billing lane unless needed. Right now, the page mixes operational and analytical modes too freely  .
+
+---
+
+## 2. Declutter navigation
+
+### Current issue
+
+There are at least four navigation paradigms in play:
+
+* top tab nav 
+* swipe tabs 
+* keyboard shortcuts for tab switching 
+* AI command-based navigation and filtering 
+
+That is flexible, but cognitively noisy.
+
+### Fix
+
+Keep multiple access methods, but not multiple visible control surfaces.
+
+### Visible navigation
+
+Only show:
+
+* 3 primary tabs: Overview, Billing, Catalog & Intelligence
+* within Billing, a secondary compact segment control: Invoices / Quotes / Recurring
+
+### Hidden but supported
+
+Keep:
+
+* keyboard shortcuts
+* swipe gestures
+* AI command navigation
+
+But these should be accelerators, not visible clutter.
+
+---
+
+## 3. Replace popup-heavy workflows with side sheets and inline builders
+
+### Current issue
+
+The command system and trigger counters imply many builder entry points:
+
+* new quote
+* new invoice
+* new schedule
+* contact-prefilled builders
+* AI-drafted reminders
+* conversions from quote to invoice  
+
+This usually causes stacked popups and disjointed flows.
+
+### New modal policy
+
+Use only 3 overlay patterns:
+
+#### A. Quick sheet
+
+For simple tasks:
+
+* mark as paid
+* send reminder
+* share payment link
+* duplicate item
+* apply status
+
+#### B. Builder side sheet
+
+For:
+
+* create invoice
+* create quote
+* create recurring schedule
+* add product/service
+
+This should slide from the right and preserve page context.
+
+#### C. Full-page flow
+
+For high-complexity actions:
+
+* convert quote to invoice with review
+* multi-step recurring billing setup
+* payment recovery workflow
+* bulk product import / price update
+
+### Hard rule
+
+No modal should try to teach, collect data, and present recommendations simultaneously.
+
+---
+
+## 4. Redesign cards: fewer card types, stronger hierarchy
+
+### Current issue
+
+The module likely contains too many equal-weight surfaces: suggestion banners, guide steps, tool result cards, billing cards, stat widgets, and segment panels. The AI suggestion system alone can generate warnings, actions, tips, and insights based on overdue amounts, quote conversion, top products, and billing health .
+
+### New card system
+
+Use only 4 standardized card types:
+
+#### 1. Action card
+
+For urgent tasks:
+
+* “12 overdue invoices, TTD X outstanding”
+* one primary CTA
+* one secondary action
+
+#### 2. Metric card
+
+For KPI snapshots:
+
+* collected this month
+* overdue amount
+* quote conversion
+* average invoice value
+
+#### 3. Record row card
+
+For invoices, quotes, recurring schedules, products
+
+* title
+* status
+* value
+* date
+* one main action
+* overflow menu
+
+#### 4. Insight card
+
+For AI/business recommendations
+
+* short finding
+* why it matters
+* recommended action
+* confidence/impact label
+
+### Result
+
+The interface feels modern because visual grammar is consistent, not because it has more effects.
+
+---
+
+## 5. Simplify the header
+
+### Current issue
+
+The Commerce page header currently includes the guide as an always-available title extra, then immediately below that places the AI search bar, AI hub, and tabs .
+
+### Better header layout
+
+Header should contain only:
+
+* title
+* one revenue pulse metric
+* one primary CTA
+* compact overflow
+
+### Suggested header
+
+**Commerce**
+“Manage billing, collections, and revenue”
+
+Right side:
+
+* `+ New`
+* search icon
+* automation/AI icon
+* help icon
+
+Move the guide into Help, not title chrome. The current guide is detailed and useful, but it is too prominent for an everyday workflow. It includes product, quote, invoice, recurring, AI, and shortcut education all in one dialog  .
+
+---
+
+## 6. Turn AI into an embedded copilot, not a parallel app
+
+### Current issue
+
+Commerce has both:
+
+* AI natural-language search bar
+* AI command hub trigger
+* AI assistant result panel
+* AI-generated suggestion banners
+* multiple specialized tools like pricing advisor, overdue recovery, quote win analysis, client intelligence, product health, revenue analysis, forecast, and reminder drafting  
+
+That is an impressive toolset, but the surface area is too large.
+
+### Recommended AI model
+
+Unify all AI into one **Commerce Copilot**.
+
+#### Entry points
+
+Only two visible AI entry points:
+
+* one global command/search field
+* one “Ask AI” button in context panels
+
+#### AI modes behind the scenes
+
+The system can still run:
+
+* search
+* analysis
+* reminder drafting
+* pricing recommendation
+* overdue recovery
+* quote analysis
+* client intelligence
+
+But users should not need to understand the tool taxonomy.
+
+### Best-practice behavior
+
+The AI should behave as:
+
+* **command mode** when user intent is explicit
+* **recommendation mode** when system detects risk/opportunity
+* **contextual assist mode** inside records
+
+### Example
+
+On an overdue invoice row:
+
+* “Remind”
+* “Offer plan”
+* “Ask AI”
+
+Inside that AI action:
+
+* draft message
+* suggest escalation
+* estimate recovery likelihood
+
+That is better than opening a separate AI universe from every surface.
+
+---
+
+## 7. Build an Overview tab around operational priorities
+
+The module already has enough signals to power a strong overview:
+
+* overdue amount
+* outstanding amount
+* quote conversion rate
+* average invoice value
+* top products
+* invoice status breakdown
+* quote count and revenue data 
+
+### Recommended Overview composition
+
+#### Top strip
+
+* collected this month
+* outstanding
+* overdue
+* quote conversion
+
+#### Priority lane
+
+* overdue payments
+* pending invoices
+* expiring quotes
+* recurring jobs due soon
+
+#### Revenue feed
+
+* top customers
+* top products
+* recent paid invoices
+* quotes converted this week
+
+#### Suggested actions
+
+* send reminders
+* review low conversion quotes
+* run cash flow forecast
+* inspect products with no sales
+
+This turns AI and metrics into decision support instead of decorative extras.
+
+---
+
+## 8. Rebuild Billing as a true workbench
+
+### Current issue
+
+The current `BillingPanel` appears to handle quotes, invoices, schedules, prefill flows, client intelligence callbacks, AI reminders, and recovery plan access all together . This is efficient in code reuse, but risky for UX density.
+
+### New Billing workbench
+
+Within the Billing surface, use a 3-pane model:
+
+#### Left rail
+
+Saved views:
+
+* All invoices
+* Overdue
+* Sent
+* Drafts
+* Recurring
+* Quotes awaiting response
+* Paid this month
+
+#### Center list
+
+Primary working list with rows, filters, bulk actions
+
+#### Right detail pane
+
+Selected invoice / quote / schedule detail, timeline, actions, payment history, related contact
+
+### Benefits
+
+* fewer page hops
+* fewer popups
+* easier keyboard flow
+* detail stays in context
+
+---
+
+## 9. Improve invoice and quote row design
+
+### Current issue
+
+The command layer suggests actions like mark paid, send reminder, void invoice, convert quote, send quote, and view invoice/quote  . If these all appear as separate buttons, row clutter happens fast.
+
+### Better row anatomy
+
+Each invoice/quote row should show:
+
+* number
+* customer
+* amount
+* due/expiry date
+* status
+* one smart CTA
+
+Examples:
+
+* Draft → `Finish`
+* Sent → `Remind`
+* Overdue → `Collect`
+* Paid → `View receipt`
+* Quote pending → `Follow up`
+* Quote accepted → `Convert`
+
+Everything else goes into overflow.
+
+This is a modern best practice: context-driven CTA instead of button soup.
+
+---
+
+## 10. Recurring billing should feel like a system, not a tab
+
+The guide shows recurring billing already includes frequency, start dates, run counts, pause/resume, and monitoring next run dates . That is strong functionality.
+
+### Improvement
+
+Do not let recurring schedules feel like just another record type beside quotes/invoices. Treat them as automations with financial consequences.
+
+### Recommended recurring experience
+
+Each schedule card should show:
+
+* template name
+* linked contact(s)
+* next run
+* frequency
+* generated revenue to date
+* failure/pause status
+* last run result
+
+### Innovations to add
+
+* forecasted recurring revenue line
+* failed-run diagnostics
+* “risk of churn” signal if a recurring client shows declining payments
+* one-click retry after payment or send failure
+* smart pause suggestions when linked contact is inactive
+
+---
+
+## 11. Modernize product/catalog management
+
+The module clearly supports products/services, images, categories, SKU, pricing, active/inactive state, and pricing advisor AI  .
+
+### Catalog redesign
+
+Split products into:
+
+* Services
+* Products
+* Packages
+
+### Each record should surface
+
+* price
+* category
+* status
+* usage count
+* last sold
+* revenue contribution
+
+### Best-practice innovations
+
+* pricing change history
+* recommended upsell bundles
+* stale product detection
+* missing-data health score
+* margin-aware recommendations if cost basis is later added
+
+### Important
+
+Do not bury products inside invoice builders only. They should have their own optimization area in Catalog & Intelligence.
+
+---
+
+## 12. Integrate CRM more intelligently
+
+Commerce already routes users to CRM contacts and supports contact-prefilled quote/invoice creation; it also triggers CRM-related events and client intelligence actions  .
+
+### Optimize this integration
+
+Commerce should be contact-aware everywhere.
+
+#### For every invoice/quote
+
+Show:
+
+* customer payment reliability
+* outstanding balance across all invoices
+* recent bookings/projects
+* recommended follow-up cadence
+
+#### Best-practice innovation
+
+Introduce a **Customer financial profile badge**:
+
+* Healthy
+* Slow payer
+* High value
+* At risk
+* New client
+
+This would turn raw invoice data into decision support.
+
+---
+
+## 13. Make payments and collections more proactive
+
+The system already supports overdue warnings, reminder drafting, recovery plans, shareable payment links, and status tracking  .
+
+### Recommended collections redesign
+
+Create a dedicated **Collections mode** inside Billing.
+
+#### It should include
+
+* overdue queue ordered by recovery priority
+* payment reminder templates
+* AI tone chooser
+* payment-plan suggestion
+* contact attempt tracking
+* estimated recoverable amount
+
+### Best-practice innovation
+
+Introduce:
+
+* reminder cadence orchestration
+* “best time to follow up” scoring
+* one-click WhatsApp + email sequence
+* promise-to-pay tracking
+* partial payment flow
+
+This would make the module much more effective for cash flow, not just record keeping.
+
+---
+
+## 14. Rationalize guides, tips, and onboarding
+
+The current guide is comprehensive, sectioned, and tracks exploration progress, but it occupies too much high-level UX emphasis for mature users  .
+
+### Better pattern
+
+Replace the persistent guide trigger with:
+
+* contextual empty-state education
+* smart first-run checklist
+* searchable help drawer
+* spotlight tours only when a feature is first encountered
+
+### Modern principle
+
+Teach in place, not in a separate encyclopedic popup.
+
+---
+
+## 15. Performance and maintainability refactor
+
+The current `useCommerce` hook is carrying too much responsibility: workspace bootstrap, URL parsing, datasets, trigger state, guide state, integrations, prefill orchestration, and refresh logic .
+
+### Refactor proposal
+
+Split into:
+
+* `useCommerceShell`
+* `useBillingWorkspace`
+* `useCatalogWorkspace`
+* `useCommerceOverview`
+* `useCommerceCopilot`
+* `useCommerceIntegrations`
+* `useCommerceComposer`
+
+### Why this matters
+
+It will reduce accidental coupling between:
+
+* UI modes
+* builder triggers
+* AI state
+* data loading
+* integration state
+
+That is essential if you want a calmer, more maintainable interface.
+
+---
+
+## 16. Concrete menu decluttering rules
+
+Apply these hard rules across Commerce:
+
+### Menus
+
+* maximum 5 visible actions in any toolbar
+* maximum 1 primary CTA per zone
+* destructive actions only inside overflow or confirmation sheet
+* filter bars should show only 4 quick filters, with the rest inside “More”
+
+### Cards
+
+* maximum 3 metadata points per card before expansion
+* only one primary action per card
+* status badges use a single standard system
+
+### Popups
+
+* no nested modal on top of modal
+* forms use side sheets
+* confirmations use tiny dialogs only
+* analytics should never open as popups; use right panels or full pages
+
+---
+
+## 17. Recommended end-state UX
+
+### The ideal Commerce module should feel like:
+
+* one revenue control room
+* one billing workbench
+* one embedded AI copilot
+* one catalog optimization area
+* one consistent design grammar
+
+Not:
+
+* one tab for each object type
+* one popup for each action
+* one AI surface for each intelligence feature
+* one guide floating over everything
+
+---
+
+## 18. Phased rollout plan
+
+### Phase 1: declutter and modernize shell
+
+* replace top IA with Overview / Billing / Catalog & Intelligence
+* compress header
+* move guide into Help
+* unify AI entry points
+* simplify visible actions and banners
+
+### Phase 2: rebuild working surfaces
+
+* billing 3-pane workspace
+* right-side detail inspector
+* contextual smart CTA rows
+* side-sheet builders for quote/invoice/schedule/product
+
+### Phase 3: intelligence and collections upgrade
+
+* collections mode
+* customer financial profiles
+* recurring revenue forecasting
+* product health center
+* unified commerce copilot
+
+### Phase 4: innovation layer
+
+* predictive collections scoring
+* AI-assisted partial payment plans
+* smart quote follow-up recommendations
+* automated churn/risk alerts for recurring customers
+* cross-module revenue journey from CRM → Quote → Invoice → Paid
+
+---
+
+## 19. Final recommendation
+
+Commerce already has advanced primitives: AI command interpretation, financial analysis tools, recurring billing, CRM hooks, and payment recovery assistance   . The biggest improvement now is not adding more features. It is reducing friction between the features already present.
+
+The most effective redesign move is this:
+
+**Turn Commerce from a tabbed billing module into a streamlined revenue operating system.**
+
+That means:
+
+* fewer tabs
+* fewer visible AI surfaces
+* fewer popups
+* stronger row-level actions
+* more contextual intelligence
+* tighter CRM/payment/recurring integration
+
+I can turn this into a **screen-by-screen redesign spec for Commerce** next, with exact layouts for:
+
+* Overview
+* Billing workbench
+* Invoice detail
+* Quote flow
+* Recurring billing
+* Catalog & Intelligence
+* Commerce Copilot interactions

@@ -87,14 +87,12 @@ function buildContextualPrompt(
 
   parts.push("Analyze my CRM data and provide 3-5 specific, actionable suggestions.");
 
-  if (activeView === "pipeline") {
-    parts.push("I'm viewing the Pipeline. Focus on: contacts needing follow-up, status changes that should be made, and high-priority actions.");
-  } else if (activeView === "database") {
-    parts.push("I'm in the Database view. Focus on: data quality issues, missing information, and contacts that need attention.");
+  if (activeView === "contacts" || activeView === "pipeline") {
+    parts.push("I'm viewing Contacts. Focus on: contacts needing follow-up, status changes that should be made, and high-priority actions.");
+  } else if (activeView === "studio" || activeView === "database") {
+    parts.push("I'm in the Studio view. Focus on: data quality issues, missing information, and contacts that need attention.");
   } else if (activeView === "insights") {
     parts.push("I'm viewing Insights. Focus on: trends, revenue opportunities, and strategic recommendations.");
-  } else if (activeView === "engage") {
-    parts.push("I'm in the Engage tab. Focus on: sequence optimization, engagement gaps, and re-engagement opportunities.");
   }
 
   if (itemCount !== undefined) {

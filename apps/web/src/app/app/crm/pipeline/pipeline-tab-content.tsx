@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, type PanInfo } from "framer-motion";
-import { X, List, Heart } from "lucide-react";
+import { X, List, Heart, ChevronDown, Zap, Bot } from "lucide-react";
 import { STATUS_COLORS } from "@/lib/crm-utils";
 import {
   ContactCapture,
@@ -12,6 +12,10 @@ import {
   type ContactFormData,
 } from "@/components/contacts";
 import type { QuickActionType } from "@/components/contacts";
+import { NextActionQueue } from "@/components/contacts";
+import { AutopilotActions } from "@/components/contacts";
+import type { NextAction } from "@/components/contacts/next-action-queue";
+import type { AutopilotAction } from "@/components/contacts/autopilot-actions";
 import { BulkActionBar } from "./bulk-action-bar";
 import { PipelineToolbar } from "./pipeline-toolbar";
 import type { ViewMode } from "./pipeline-toolbar";
@@ -23,6 +27,15 @@ import type { PipelineState } from "./use-contacts-pipeline";
 
 interface PipelineTabContentProps {
   state: PipelineState;
+  nextActions?: NextAction[];
+  autopilotActions?: AutopilotAction[];
+  autopilotPaused?: boolean;
+  onCompleteNextAction?: (id: string) => Promise<void>;
+  onViewEngageContact?: (id: string) => void;
+  onDoAction?: (action: NextAction) => void;
+  onToggleAutopilotPause?: () => void;
+  onApproveAutopilot?: (id: string) => Promise<void>;
+  onDenyAutopilot?: (id: string) => Promise<void>;
 }
 
 const PIPELINE_VIEW_KEY = "kf_pipeline_view";
@@ -37,7 +50,7 @@ function getStoredViewMode(): ViewMode {
   }
 }
 
-function PipelineTabContentInner({ state }: PipelineTabContentProps) {
+function PipelineTabContentInner({ state, nextActions, autopilotActions, autopilotPaused, onCompleteNextAction, onViewEngageContact, onDoAction, onToggleAutopilotPause, onApproveAutopilot, onDenyAutopilot }: PipelineTabContentProps) {
   const {
     businessId,
     displayContacts, loading, loadError, hasMore, activeListTab,
@@ -66,6 +79,7 @@ function PipelineTabContentInner({ state }: PipelineTabContentProps) {
 
   const [viewMode, setViewMode] = useState<ViewMode>(getStoredViewMode);
   const [showImport, setShowImport] = useState(false);
+  const [showEngageSection, setShowEngageSection] = useState(false);
   const handleViewModeChange = useCallback((mode: ViewMode) => {
     setViewMode(mode);
     try { localStorage.setItem(PIPELINE_VIEW_KEY, mode); } catch {}
@@ -109,6 +123,63 @@ function PipelineTabContentInner({ state }: PipelineTabContentProps) {
     <div className="space-y-6">
       {businessId && (
         <DuplicateDetector businessId={businessId} onMergeComplete={handleMergeComplete} />
+      )}
+
+      {((nextActions && nextActions.length > 0) || (autopilotActions && autopilotActions.length > 0)) && (
+        <div className="rounded-xl border border-border/50 bg-card overflow-hidden">
+          <button
+            onClick={() => setShowEngageSection(!showEngageSection)}
+            className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"
+          >
+            <Zap className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+            <span className="text-sm font-semibold">
+              Actions
+              {nextActions && nextActions.length > 0 && (
+                <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                  {nextActions.length} pending
+                </span>
+              )}
+            </span>
+            {autopilotActions && autopilotActions.length > 0 && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-[hsl(var(--kf-accent2))]/10 text-[hsl(var(--kf-accent2))] border border-[hsl(var(--kf-accent2))]/20">
+                <Bot className="w-3 h-3" />
+                {autopilotActions.length} autopilot
+              </span>
+            )}
+            <ChevronDown className={`w-4 h-4 ml-auto text-muted-foreground transition-transform ${showEngageSection ? "rotate-180" : ""}`} />
+          </button>
+          <AnimatePresence>
+            {showEngageSection && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <div className="px-4 pb-4 space-y-3">
+                  {nextActions && nextActions.length > 0 && onCompleteNextAction && onViewEngageContact && onDoAction && (
+                    <NextActionQueue
+                      actions={nextActions}
+                      onComplete={onCompleteNextAction}
+                      onViewContact={onViewEngageContact}
+                      onDoAction={onDoAction}
+                    />
+                  )}
+                  {autopilotActions && autopilotActions.length > 0 && onApproveAutopilot && onDenyAutopilot && (
+                    <AutopilotActions
+                      actions={autopilotActions}
+                      paused={autopilotPaused ?? false}
+                      onApprove={onApproveAutopilot}
+                      onDeny={onDenyAutopilot}
+                      onTogglePause={onToggleAutopilotPause ?? (() => {})}
+                    />
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       )}
 
       {favoriteContacts.length > 0 && (

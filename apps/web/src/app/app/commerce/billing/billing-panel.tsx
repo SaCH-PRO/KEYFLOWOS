@@ -588,7 +588,7 @@ export function BillingPanel({
   const kpiChips = useMemo(() => [
     { icon: DollarSign, label: "Revenue", value: formatCurrencyCompact(stats.totalRevenue, currency), color: "hsl(var(--kf-success))" },
     { icon: Clock, label: "Owed", value: formatCurrencyCompact(stats.outstanding, currency), color: "hsl(var(--kf-warning))" },
-    { icon: TrendingUp, label: "Conversion", value: `${stats.conversionRate}%`, color: "hsl(142 76% 36%)" },
+    { icon: TrendingUp, label: "Conversion", value: `${stats.conversionRate}%`, color: "hsl(var(--kf-success))" },
     { icon: FileText, label: "Pending", value: `${pendingQuotesCount}`, color: "hsl(var(--kf-accent1))" },
     { icon: CheckCircle2, label: "Collected", value: `${collectionRate}%`, color: "hsl(var(--kf-success))" },
   ], [stats, currency, pendingQuotesCount, collectionRate]);
