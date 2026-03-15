@@ -7,10 +7,10 @@ import type { HealthMetrics } from "@/components/contacts/contact-health-score";
 import type { JourneyMilestone } from "@/components/contacts/relationship-timeline";
 import type { ConversationContextData } from "@/components/contacts/conversation-context";
 import type { AiInsight } from "@/components/contacts/ai-copilot";
-import type { Contact, ContactDetail as ContactDetailAPI } from "@/lib/client";
+import type { Contact, ContactDetail as ContactDetailAPI, CrossJourneyResponse } from "@/lib/client";
 import {
   fetchContactDetail, fetchContactHealthMetrics, fetchContactJourney,
-  fetchConversationContext, generateAiInsight,
+  fetchConversationContext, generateAiInsight, fetchContactCrossJourney,
 } from "@/lib/client";
 
 export function useContactDetail(businessId: string | null, contacts: Contact[]) {
@@ -22,6 +22,7 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
 
   const [healthMetrics, setHealthMetrics] = useState<HealthMetrics | null>(null);
   const [journeyMilestones, setJourneyMilestones] = useState<JourneyMilestone[]>([]);
+  const [crossJourney, setCrossJourney] = useState<CrossJourneyResponse | null>(null);
   const [conversationContext, setConversationContext] = useState<ConversationContextData | null>(null);
   const [aiInsight, setAiInsight] = useState<AiInsight | null>(null);
   const [aiInsightLoading, setAiInsightLoading] = useState(false);
@@ -42,12 +43,18 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
 
       setDetailLoading(true);
       setDetailError(null);
+      setCrossJourney(null);
+      setHealthMetrics(null);
+      setJourneyMilestones([]);
+      setConversationContext(null);
+      setAiInsight(null);
       try {
         const results = await Promise.allSettled([
           fetchContactDetail(contactId, businessId, { signal }),
           fetchContactHealthMetrics(contactId, businessId, { signal }),
           fetchContactJourney(contactId, businessId, { signal }),
           fetchConversationContext(contactId, businessId, { signal }),
+          fetchContactCrossJourney(contactId, businessId, { signal }),
         ]);
         if (signal.aborted) return;
 
@@ -65,6 +72,7 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
         if (results[1].status === "fulfilled" && results[1].value.data) setHealthMetrics(results[1].value.data);
         if (results[2].status === "fulfilled" && results[2].value.data) setJourneyMilestones(results[2].value.data);
         if (results[3].status === "fulfilled" && results[3].value.data) setConversationContext(results[3].value.data);
+        if (results[4].status === "fulfilled" && results[4].value.data) setCrossJourney(results[4].value.data);
         setAiInsight(null);
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === "AbortError") return;
@@ -155,7 +163,7 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
     contactDetail, setContactDetail,
     detailLoading, detailError,
     showMobileDetail, setShowMobileDetail,
-    healthMetrics, journeyMilestones, conversationContext,
+    healthMetrics, journeyMilestones, crossJourney, conversationContext,
     aiInsight, aiInsightLoading,
     selectedContact, detailEvents, detailNotes, detailTasks, detailInvoices, detailBookings, contactName,
     loadDetail, selectContact,

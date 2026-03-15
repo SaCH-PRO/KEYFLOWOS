@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { MessageSquare, ClipboardList, Sparkles, ChevronDown } from "lucide-react";
+import type { CrossJourneyResponse } from "@/lib/client";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ContactDetailHeader } from "./contact-detail-header";
 import { ContactDetailStats } from "./contact-detail-stats";
@@ -111,6 +112,7 @@ interface ContactDetailProps {
   onLogCommunication?: (data: { channelType: string; outcome: string; duration?: number; notes?: string }) => Promise<void>;
   healthMetrics?: { engagement: number; payment: number; responsiveness: number; relationship: number } | null;
   journeyMilestones?: Array<{ id: string; type: string; title: string; description?: string; date: string; value?: number; isNext?: boolean }>;
+  crossJourney?: CrossJourneyResponse | null;
   conversationContext?: { lastDiscussed?: string; concerns?: string[]; preferences?: string[]; suggestedOpening?: string; sentiment?: string; engagementLevel?: string } | null;
   aiInsight?: { summary: string; nextBestAction: string; reasoning?: string; confidence: number; suggestedMessage?: string; tags?: string[] } | null;
   aiInsightLoading?: boolean;
@@ -146,6 +148,7 @@ export function ContactDetail({
   onLogCommunication,
   healthMetrics,
   journeyMilestones,
+  crossJourney,
   conversationContext,
   aiInsight,
   aiInsightLoading,
@@ -314,6 +317,7 @@ export function ContactDetail({
             onUpdateTask={onUpdateTask}
             healthMetrics={healthMetrics}
             journeyMilestones={journeyMilestones}
+            crossJourney={crossJourney}
             conversationContext={conversationContext}
             aiInsight={aiInsight}
             aiInsightLoading={aiInsightLoading}
