@@ -17,7 +17,7 @@ export function QuickActionBar() {
         <Link
           key={a.label}
           href={a.href}
-          className="flex items-center gap-1.5 px-3 py-1.5 kf-radius-md text-xs font-medium transition-all hover:scale-[1.03]"
+          className="flex items-center gap-1.5 px-3 min-h-[44px] kf-radius-md text-xs font-medium transition-all hover:scale-[1.03]"
           style={{
             background: "hsl(var(--kf-accent1) / 0.08)",
             border: "1px solid hsl(var(--kf-accent1) / 0.15)",
