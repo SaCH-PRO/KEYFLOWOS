@@ -37,6 +37,7 @@ import { CommunityModule } from './modules/community/community.module';
 import { MarketplaceModule } from './modules/marketplace/marketplace.module';
 import { MomentumModule } from './modules/momentum/momentum.module';
 import { SeedModule } from './core/seed/seed.module';
+import { OnboardingConciergeModule } from './modules/onboarding-concierge/onboarding-concierge.module';
 
 @Module({
   imports: [
@@ -75,6 +76,7 @@ import { SeedModule } from './core/seed/seed.module';
     MarketplaceModule,
     MomentumModule,
     SeedModule,
+    OnboardingConciergeModule,
   ],
   controllers: [AppController],
   providers: [

@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Building2, Globe, Palette, CreditCard, Crown, CheckCircle2, AlertCircle } from "lucide-react";
+import { Building2, Globe, Palette, CreditCard, Crown, CheckCircle2, AlertCircle, Bot } from "lucide-react";
 import { Button } from "@keyflow/ui";
 import { useBusinessSettings } from "./use-business-settings";
 import { LogoUploader } from "./logo-uploader";
@@ -47,6 +48,7 @@ function SkeletonBusiness() {
 }
 
 export default function BusinessSettingsPage() {
+  const router = useRouter();
   const {
     form, setField, loading, saving, uploading, status,
     business, handleSave, handleLogoUpload, fileInputRef, logoUrl,
@@ -158,6 +160,28 @@ export default function BusinessSettingsPage() {
           </Button>
         </motion.div>
       )}
+
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="mt-4"
+      >
+        <button
+          onClick={() => router.push("/app/onboarding")}
+          className="w-full flex items-center gap-3 p-4 rounded-xl border border-border/40 bg-muted/10 hover:bg-muted/20 transition-all group"
+        >
+          <div
+            className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
+          >
+            <Bot className="w-5 h-5 text-white" />
+          </div>
+          <div className="text-left flex-1">
+            <p className="text-sm font-medium group-hover:text-foreground transition-colors">Setup Assistant</p>
+            <p className="text-xs text-muted-foreground">Re-run the onboarding concierge to set up or reconfigure your business</p>
+          </div>
+        </button>
+      </motion.div>
     </motion.div>
   );
 }

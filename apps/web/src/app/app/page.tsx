@@ -33,6 +33,9 @@ import {
   MomentumRecommendation,
   fetchCampaignBriefings,
   CampaignBriefing,
+  fetchConciergeNudges,
+  snoozeConciergeNudge,
+  NudgeItem,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId, getUserDisplayName } from "@/lib/workspace";
 import { DashboardSkeleton } from "@/components/ui/skeleton";
@@ -240,6 +243,9 @@ export default function CommandPage() {
   const [campaignBriefings, setCampaignBriefings] = useState<CampaignBriefing[]>([]);
   const [campaignBriefingsLoading, setCampaignBriefingsLoading] = useState(false);
 
+  const [nudges, setNudges] = useState<NudgeItem[]>([]);
+  const [dismissingNudge, setDismissingNudge] = useState<string | null>(null);
+
   useEffect(() => {
     const initWorkspace = async () => {
       const fresh = await refreshWorkspace();
@@ -279,6 +285,9 @@ export default function CommandPage() {
         if (momentumResult.data) setMomentumRecs(momentumResult.data);
         if (briefingsResult.data) setCampaignBriefings(briefingsResult.data);
         void updateStreak(businessId);
+        fetchConciergeNudges(businessId).then(res => {
+          if (res.data) setNudges(res.data);
+        }).catch(() => {});
       } catch (err) {
         console.error("Dashboard load error:", err);
         setError("Failed to load dashboard. Please refresh the page.");
@@ -492,6 +501,50 @@ export default function CommandPage() {
               <div className="flex-1 min-w-0"><p className="text-sm font-medium">{alert.message}</p></div>
               {alert.action && <ChevronRight className="w-5 h-5 flex-shrink-0 opacity-60" />}
             </Link>
+          ))}
+        </motion.div>
+      )}
+
+      {nudges.length > 0 && (
+        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="space-y-2">
+          {nudges.map((nudge) => (
+            <div
+              key={nudge.id}
+              className="flex items-start gap-3 p-4 rounded-xl border transition-all"
+              style={{ backgroundColor: "hsl(var(--kf-accent2) / 0.05)", borderColor: "hsl(var(--kf-accent2) / 0.2)" }}
+            >
+              <div className="flex-shrink-0 mt-0.5">
+                <Sparkles className="w-5 h-5" style={{ color: "hsl(var(--kf-accent2))" }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">{nudge.title}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{nudge.body}</p>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <Link
+                  href={nudge.ctaHref}
+                  className="text-xs font-medium px-3 py-1.5 rounded-lg text-white transition-all hover:scale-105"
+                  style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
+                >
+                  {nudge.ctaLabel}
+                </Link>
+                {nudge.snoozable && (
+                  <button
+                    onClick={async () => {
+                      if (!businessId) return;
+                      setDismissingNudge(nudge.id);
+                      await snoozeConciergeNudge(businessId, nudge.id, 3);
+                      setNudges(prev => prev.filter(n => n.id !== nudge.id));
+                      setDismissingNudge(null);
+                    }}
+                    disabled={dismissingNudge === nudge.id}
+                    className="text-xs text-muted-foreground hover:text-foreground px-2 py-1.5 rounded-lg hover:bg-muted/30 transition-all"
+                  >
+                    {dismissingNudge === nudge.id ? "..." : "Later"}
+                  </button>
+                )}
+              </div>
+            </div>
           ))}
         </motion.div>
       )}
