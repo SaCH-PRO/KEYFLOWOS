@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Plus, Users, RefreshCw, AlertTriangle, Lightbulb } from "lucide-react";
+import { Plus, Users, RefreshCw, AlertTriangle } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
+import { CardListSkeleton } from "@/components/ui/skeleton";
 import { ContactCard, ContactCardData } from "@/components/contacts";
 import type { QuickActionType } from "@/components/contacts";
 import type { ListTab } from "./pipeline-toolbar";
@@ -177,20 +178,7 @@ function PipelineContactListInner({
   }, []);
 
   if (loading && contacts.length === 0) {
-    return (
-      <div className="space-y-3">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="rounded-2xl border border-border/40 p-4 flex items-center gap-3" style={{ background: "hsl(var(--kf-muted) / 0.05)" }}>
-            <div className="w-10 h-10 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.2)" }} />
-            <div className="flex-1 space-y-2">
-              <div className="h-4 w-2/5 rounded animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.2)" }} />
-              <div className="h-3 w-3/5 rounded animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.12)" }} />
-            </div>
-            <div className="h-6 w-14 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.15)" }} />
-          </div>
-        ))}
-      </div>
-    );
+    return <CardListSkeleton rows={4} />;
   }
 
   if (loadError && contacts.length === 0) {

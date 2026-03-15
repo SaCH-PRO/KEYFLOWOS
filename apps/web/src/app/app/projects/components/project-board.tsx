@@ -7,6 +7,7 @@ import {
   Trash2, FolderKanban, ChevronDown, ChevronRight,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
+import { KanbanSkeleton } from "@/components/ui/skeleton";
 import {
   fetchProjects, createProject, updateProject, deleteProject,
   createProjectTask, updateProjectTask, deleteProjectTask,
@@ -122,24 +123,7 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
   }));
 
   if (loading) {
-    return (
-      <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
-        {STATUS_COLUMNS.map((col) => (
-          <div key={col.key} className="rounded-2xl border border-border/40 p-4 space-y-3" style={{ background: "hsl(var(--kf-muted) / 0.05)" }}>
-            <div className="flex items-center justify-between mb-2">
-              <div className="h-4 w-24 rounded animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.2)" }} />
-              <div className="h-5 w-6 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.15)" }} />
-            </div>
-            {Array.from({ length: col.key === "ACTIVE" ? 3 : col.key === "IN_PROGRESS" ? 2 : 1 }).map((_, i) => (
-              <div key={i} className="rounded-xl border border-border/20 p-3 space-y-2" style={{ background: "hsl(var(--kf-muted) / 0.08)" }}>
-                <div className="h-4 w-3/4 rounded animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.2)" }} />
-                <div className="h-3 w-1/2 rounded animate-pulse" style={{ background: "hsl(var(--kf-muted) / 0.12)" }} />
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-    );
+    return <KanbanSkeleton />;
   }
 
   return (

@@ -46,7 +46,7 @@ export function ExpensesView({ report }: { report: GeneratedReport }) {
           <DataTable
             headers={["Vendor", "Total Spent"]}
             rows={m.expenses.topVendors.map(v => [v.vendor, formatCurrency(v.total, m.currency)])}
-            emptyText="No vendor data"
+            emptyText="No vendor data for this period — try a wider date range"
           />
         </Card>
       </div>

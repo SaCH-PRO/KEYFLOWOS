@@ -27,8 +27,8 @@ export function MetricCard({ label, value, subtext, icon: Icon, color = "text-wh
   );
 }
 
-export function DataTable({ headers, rows, emptyText = "No data" }: {
-  headers: string[]; rows: Array<Array<string | React.ReactNode>>; emptyText?: string;
+export function DataTable({ headers, rows, emptyText = "No data", emptyState }: {
+  headers: string[]; rows: Array<Array<string | React.ReactNode>>; emptyText?: string; emptyState?: React.ReactNode;
 }) {
   return (
     <div className="overflow-x-auto">
@@ -42,7 +42,11 @@ export function DataTable({ headers, rows, emptyText = "No data" }: {
         </thead>
         <tbody>
           {rows.length === 0 ? (
-            <tr><td colSpan={headers.length} className="py-4 text-center text-muted-foreground">{emptyText}</td></tr>
+            <tr>
+              <td colSpan={headers.length} className={emptyState ? "p-0" : "py-4 text-center text-muted-foreground"}>
+                {emptyState || emptyText}
+              </td>
+            </tr>
           ) : (
             rows.map((row, i) => (
               <tr key={i} className="border-b border-border/20 hover:bg-white/[0.02]">
