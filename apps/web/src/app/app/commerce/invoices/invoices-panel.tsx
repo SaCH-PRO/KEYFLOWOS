@@ -951,6 +951,7 @@ export default function InvoicesPanel({
             discountType={selectedInvoice.discountType}
             discountValue={selectedInvoice.discountValue ? Number(selectedInvoice.discountValue) : undefined}
             notes={selectedInvoice.notes}
+            allInvoices={invoices.map((inv) => ({ id: inv.id, contactId: inv.contactId, status: inv.status, total: Number(inv.total), invoiceNumber: inv.invoiceNumber, dueDate: inv.dueDate }))}
             onClose={() => setSelectedInvoice(null)}
             businessData={businessData}
             onSaveBranding={saveBranding}

@@ -10,6 +10,9 @@ import {
   Search,
   Sparkles,
   DollarSign,
+  Terminal,
+  Lightbulb,
+  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/page-header";
@@ -23,7 +26,7 @@ import { FeatureGuide } from "@/components/ui/feature-guide";
 import { BillingPanel } from "./billing/billing-panel";
 import { CommerceInsightsTab } from "./insights/commerce-insights-tab";
 import { CommerceOverviewTab } from "./components/commerce-overview-tab";
-import { useCommerceAiHub } from "./hooks/use-commerce-ai-hub";
+import { useCommerceAiHub, type CopilotMode } from "./hooks/use-commerce-ai-hub";
 import { renderCommerceToolResult } from "./components/commerce-tool-results";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useModuleEmit, useModuleEvent } from "@/hooks/use-module-events";
@@ -140,9 +143,9 @@ export default function CommercePage() {
       toast.success(`Filtering by ${actionKey.split(":")[1]}`);
     } else if (actionKey.startsWith("switch_tab:")) {
       const t = actionKey.split(":")[1];
-      if (t === "quotes" || t === "invoices" || t === "schedules" || t === "recurring") {
+      if (t === "quotes" || t === "invoices" || t === "schedules" || t === "recurring" || t === "collections") {
         handleTabChange("billing");
-        setBillingSegment(t === "recurring" ? "schedules" : t as "quotes" | "invoices" | "schedules");
+        setBillingSegment(t === "recurring" ? "schedules" : t as "quotes" | "invoices" | "schedules" | "collections");
       } else {
         handleTabChange(t === "insights" ? "catalog" : t);
       }
@@ -199,6 +202,7 @@ export default function CommercePage() {
           { key: "i", description: "Invoices segment", action: () => setBillingSegment("invoices") },
           { key: "q", description: "Quotes segment", action: () => setBillingSegment("quotes") },
           { key: "s", description: "Recurring segment", action: () => setBillingSegment("schedules") },
+          { key: "c", description: "Collections segment", action: () => setBillingSegment("collections") },
         ],
       });
     }
@@ -206,6 +210,58 @@ export default function CommercePage() {
   }, [handleNewItem, handleTabChange, state.refreshProducts, commerceAi.togglePanel, commerceAi.panelOpen, commerceAi.setOpen, commerceAi.hubMode, commerceAi.clearToolResult, tab, setBillingSegment]);
 
   useKeyboardShortcuts(commerceShortcuts, !workspaceLoading);
+
+  const customerBadgeMap = useMemo(() => {
+    const map = new Map<string, { type: string; label: string; color: string; bgColor: string; borderColor: string; description: string }>();
+    const contactIds = new Set<string>();
+    for (const inv of invoices) { if (inv.contactId) contactIds.add(inv.contactId); }
+    for (const q of quotes) { if (q.contactId) contactIds.add(q.contactId); }
+    for (const cid of contactIds) {
+      const contactInvoices = invoices.filter((inv) => inv.contactId === cid);
+      if (contactInvoices.length === 0) {
+        map.set(cid, { type: "new_client", label: "New Client", color: "text-blue-400", bgColor: "bg-blue-500/10", borderColor: "border-blue-500/25", description: "No invoice history" });
+        continue;
+      }
+      if (contactInvoices.length <= 2) {
+        map.set(cid, { type: "new_client", label: "New Client", color: "text-blue-400", bgColor: "bg-blue-500/10", borderColor: "border-blue-500/25", description: `${contactInvoices.length} invoice${contactInvoices.length > 1 ? "s" : ""}` });
+        continue;
+      }
+      const paid = contactInvoices.filter((inv) => inv.status === "PAID");
+      const overdue = contactInvoices.filter((inv) => inv.status === "OVERDUE");
+      const totalRev = paid.reduce((s, inv) => s + Number(inv.total ?? 0), 0);
+      const overdueAmt = overdue.reduce((s, inv) => s + Number(inv.total ?? 0), 0);
+      const payRate = paid.length / contactInvoices.length;
+      if (overdue.length >= 2 || overdueAmt > totalRev * 0.5) {
+        map.set(cid, { type: "at_risk", label: "At Risk", color: "text-red-400", bgColor: "bg-red-500/10", borderColor: "border-red-500/25", description: `${overdue.length} overdue` });
+      } else if (payRate < 0.5 && contactInvoices.length > 3) {
+        map.set(cid, { type: "slow_payer", label: "Slow Payer", color: "text-amber-400", bgColor: "bg-amber-500/10", borderColor: "border-amber-500/25", description: `${Math.round(payRate * 100)}% payment rate` });
+      } else if (totalRev > 10000 || paid.length >= 10) {
+        map.set(cid, { type: "high_value", label: "High Value", color: "text-purple-400", bgColor: "bg-purple-500/10", borderColor: "border-purple-500/25", description: `${paid.length} paid invoices` });
+      } else if (payRate >= 0.7) {
+        map.set(cid, { type: "healthy", label: "Healthy", color: "text-emerald-400", bgColor: "bg-emerald-500/10", borderColor: "border-emerald-500/25", description: `${Math.round(payRate * 100)}% on-time` });
+      } else if (overdue.length >= 1) {
+        map.set(cid, { type: "slow_payer", label: "Slow Payer", color: "text-amber-400", bgColor: "bg-amber-500/10", borderColor: "border-amber-500/25", description: `${overdue.length} overdue` });
+      } else {
+        map.set(cid, { type: "healthy", label: "Healthy", color: "text-emerald-400", bgColor: "bg-emerald-500/10", borderColor: "border-emerald-500/25", description: "Good payment history" });
+      }
+    }
+    return map;
+  }, [invoices, quotes]);
+
+  const renderTimelineBadge = useCallback((item: { contactId?: string | null }) => {
+    if (!item.contactId) return null;
+    const badge = customerBadgeMap.get(item.contactId);
+    if (!badge) return null;
+    const ICONS: Record<string, string> = { healthy: "🟢", slow_payer: "🟡", high_value: "🟣", at_risk: "🔴", new_client: "🔵" };
+    return (
+      <span
+        className={`inline-flex items-center gap-1 rounded-full border font-medium px-1.5 py-0.5 text-[10px] ${badge.bgColor} ${badge.color} ${badge.borderColor}`}
+        title={badge.description}
+      >
+        {badge.label}
+      </span>
+    );
+  }, [customerBadgeMap]);
 
   const billingSlots = useMemo<BillingSlots>(() => ({
     renderHeaderExtra: () => (
@@ -217,7 +273,8 @@ export default function CommercePage() {
         Ask AI
       </button>
     ),
-  }), [commerceAi.panelOpen, commerceAi.setOpen]);
+    renderTimelineBadge,
+  }), [commerceAi.panelOpen, commerceAi.setOpen, renderTimelineBadge]);
 
   if (workspaceLoading) return <ListPageSkeleton />;
 
@@ -280,12 +337,36 @@ export default function CommercePage() {
 
       <AnimatePresence>
         {commerceAi.panelOpen && (
-          <AiCommandHub
-            ai={commerceAi}
-            moduleName="Commerce"
-            onAction={handleAiAssistantAction}
-            toolResultRenderer={renderCommerceToolResult}
-          />
+          <div className="space-y-2">
+            <div className="flex items-center gap-1 px-1">
+              {(["command", "recommend", "assist"] as CopilotMode[]).map((mode) => {
+                const isActive = commerceAi.copilotMode === mode;
+                const ModeIcon = mode === "command" ? Terminal : mode === "recommend" ? Lightbulb : Zap;
+                const cfg = commerceAi.copilotModeConfig[mode];
+                return (
+                  <button
+                    key={mode}
+                    onClick={() => commerceAi.setCopilotMode(mode)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      isActive
+                        ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] border border-[hsl(var(--kf-accent1))]/30"
+                        : "text-muted-foreground/60 hover:text-muted-foreground hover:bg-white/[0.04] border border-transparent"
+                    }`}
+                    title={cfg.description}
+                  >
+                    <ModeIcon className="w-3 h-3" />
+                    {cfg.label}
+                  </button>
+                );
+              })}
+            </div>
+            <AiCommandHub
+              ai={commerceAi}
+              moduleName="Commerce"
+              onAction={handleAiAssistantAction}
+              toolResultRenderer={renderCommerceToolResult}
+            />
+          </div>
         )}
       </AnimatePresence>
 

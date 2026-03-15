@@ -1086,6 +1086,7 @@ export default function QuotesPanel({
             dateValue1={selectedQuote.issueDate}
             dateLabel2="Expiry Date"
             dateValue2={selectedQuote.expiryDate ?? null}
+            allInvoices={[]}
             dateExtra={
               <>
                 {isQuoteExpired(selectedQuote) && (

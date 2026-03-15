@@ -77,7 +77,7 @@ export function useCommerce() {
     if (urlTab && validTabs.includes(urlTab as Tab)) setTab(urlTab as Tab);
     if (urlTab === "invoices" || urlTab === "quotes" || urlTab === "schedules") {
       setTab("billing");
-      setActiveBillingSegment(urlTab as "quotes" | "invoices" | "schedules");
+      setActiveBillingSegment(urlTab as "quotes" | "invoices" | "schedules" | "collections");
     }
     if (urlTab === "insights") setTab("catalog");
 
@@ -178,7 +178,7 @@ export function useCommerce() {
   const handleCloseGuide = useCallback(() => setShowGuide(false), []);
   const handleTabChange = useCallback((t: string) => setTab(t as Tab), []);
 
-  const [activeBillingSegment, setActiveBillingSegment] = useState<"quotes" | "invoices" | "schedules">("invoices");
+  const [activeBillingSegment, setActiveBillingSegment] = useState<"quotes" | "invoices" | "schedules" | "collections">("invoices");
 
   const handleNewItem = useCallback(() => {
     if (tab !== "billing") setTab("billing");

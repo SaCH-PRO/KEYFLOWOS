@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useModuleAi, type ModuleContext, type AiSuggestion, type AiTool } from "@/hooks/use-module-ai";
 import {
   commerceAiAnalyze,
@@ -344,6 +344,26 @@ function buildCommerceTools(): AiTool[] {
   ];
 }
 
+export type CopilotMode = "command" | "recommend" | "assist";
+
+const COPILOT_MODE_CONFIG: Record<CopilotMode, { label: string; description: string; icon: string }> = {
+  command: {
+    label: "Command",
+    description: "Execute specific commerce tools and actions directly",
+    icon: "terminal",
+  },
+  recommend: {
+    label: "Recommend",
+    description: "Get proactive AI suggestions based on your data",
+    icon: "lightbulb",
+  },
+  assist: {
+    label: "Contextual Assist",
+    description: "Context-aware help based on your current view",
+    icon: "sparkles",
+  },
+};
+
 export function useCommerceAiHub() {
   const tools = useMemo(() => buildCommerceTools(), []);
 
@@ -353,6 +373,9 @@ export function useCommerceAiHub() {
     generateSuggestions: generateCommerceSuggestions,
     tools,
   });
+
+  const [copilotMode, setCopilotMode] = useState<CopilotMode>("command");
+  const [activeView, setActiveView] = useState("");
 
   const updateCommerceContext = useCallback((params: {
     businessId: string;
@@ -366,11 +389,41 @@ export function useCommerceAiHub() {
       selectedItemId: params.selectedItemId,
       itemCount: params.itemCount,
     });
+    setActiveView(params.activeView);
   }, [ai.updateContext]);
+
+  const contextualTools = useMemo(() => {
+    if (copilotMode === "recommend") {
+      return tools.filter((t) => !t.requiresSelection);
+    }
+
+    if (copilotMode === "assist") {
+      if (activeView === "invoices" || activeView === "billing" || activeView === "collections") {
+        return tools.filter((t) => ["revenue-analysis", "cashflow-forecast", "invoice-reminder", "overdue-recovery", "client-intelligence"].includes(t.id));
+      }
+      if (activeView === "quotes") {
+        return tools.filter((t) => ["quote-win-analysis", "pipeline-analysis", "client-intelligence"].includes(t.id));
+      }
+      if (activeView === "products" || activeView === "catalog") {
+        return tools.filter((t) => ["product-health-scan", "pricing-advisor", "revenue-analysis"].includes(t.id));
+      }
+      if (activeView === "schedules") {
+        return tools.filter((t) => ["cashflow-forecast", "revenue-analysis"].includes(t.id));
+      }
+      return tools.slice(0, 4);
+    }
+
+    return tools;
+  }, [copilotMode, tools, activeView]);
 
   return {
     ...ai,
+    tools: contextualTools,
     updateCommerceContext,
+    copilotMode,
+    setCopilotMode,
+    copilotModeConfig: COPILOT_MODE_CONFIG,
+    contextualTools,
   };
 }
 
