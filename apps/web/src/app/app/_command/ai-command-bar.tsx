@@ -98,11 +98,11 @@ export function AiCommandBar({ businessId }: AiCommandBarProps) {
             {voiceSupported && (
               <button
                 onClick={startVoice}
-                className={voiceListening
-                  ? "p-1.5 rounded-md transition-all animate-pulse"
-                  : "p-1.5 rounded-md transition-all text-muted-foreground hover:text-foreground hover:bg-muted"
+                className="p-1.5 rounded-md transition-all"
+                style={voiceListening
+                  ? { backgroundColor: "hsl(var(--kf-error) / 0.2)", color: "hsl(var(--kf-error))" }
+                  : undefined
                 }
-                style={voiceListening ? { backgroundColor: "hsl(var(--kf-error) / 0.2)", color: "hsl(var(--kf-error))" } : undefined}
                 title={voiceListening ? "Listening..." : "Voice input"}
               >
                 {voiceListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
@@ -112,8 +112,8 @@ export function AiCommandBar({ businessId }: AiCommandBarProps) {
               onClick={handleSend}
               disabled={sending || !aiInput.trim() || !businessId}
               aria-label="Send message"
-              className="p-1.5 rounded-md transition-all disabled:opacity-30 text-white"
-              style={{ background: "hsl(var(--kf-accent1))" }}
+              className="p-1.5 rounded-md transition-all disabled:opacity-30"
+              style={{ background: "hsl(var(--kf-accent1))", color: "hsl(var(--kf-foreground))" }}
             >
               {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CornerDownLeft className="w-3.5 h-3.5" />}
             </button>

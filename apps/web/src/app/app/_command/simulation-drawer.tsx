@@ -52,7 +52,7 @@ export function SimulationDrawer({ businessId }: SimulationDrawerProps) {
       <AnimatePresence>
         {open && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex justify-end">
-            <div className="absolute inset-0 bg-black/40" onClick={() => setOpen(false)} />
+            <div className="absolute inset-0" style={{ background: "hsl(var(--kf-background) / 0.6)" }} onClick={() => setOpen(false)} />
             <motion.div
               initial={{ x: "100%" }}
               animate={{ x: 0 }}
