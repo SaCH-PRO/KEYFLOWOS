@@ -13,6 +13,7 @@ import {
   BarChart3,
   Brain,
   CheckCircle,
+  DollarSign,
   ChevronRight,
   Lightbulb,
   Rocket,
@@ -145,10 +146,10 @@ export function SmartChecklist({ productCount, invoiceCount, quoteCount, onNavig
               onClick={() => {
                 if (!isComplete) {
                   markComplete(item.id);
-                  if (item.id === "first-product") onNavigate?.("catalog");
-                  else if (item.id === "first-invoice") onNavigate?.("billing", "invoices");
-                  else if (item.id === "first-quote") onNavigate?.("billing", "quotes");
-                  else if (item.id === "first-recurring") onNavigate?.("billing", "schedules");
+                  if (item.id === "first-product") onNavigate?.("invoices");
+                  else if (item.id === "first-invoice") onNavigate?.("invoices");
+                  else if (item.id === "first-quote") onNavigate?.("quotes");
+                  else if (item.id === "first-recurring") onNavigate?.("recurring");
                 }
               }}
               className={`w-full flex items-center gap-2.5 p-2 rounded-lg transition-colors ${isComplete ? "opacity-60" : "hover:bg-muted/20"}`}
@@ -336,15 +337,15 @@ interface SearchableHelpDrawerProps {
 }
 
 const HELP_TOPICS = [
-  { id: "invoices", category: "Billing", title: "Creating Invoices", desc: "Build professional invoices with line items, tax, and payment terms. Link to CRM contacts.", icon: CreditCard, tab: "billing", segment: "invoices" },
-  { id: "quotes", category: "Billing", title: "Sending Quotes", desc: "Create proposals, set expiry dates, and convert accepted quotes to invoices.", icon: FileText, tab: "billing", segment: "quotes" },
-  { id: "recurring", category: "Billing", title: "Recurring Billing", desc: "Automate invoice generation on weekly, monthly, or custom schedules.", icon: RefreshCw, tab: "billing", segment: "schedules" },
-  { id: "products", category: "Catalog", title: "Product Catalog", desc: "Manage products, services, and packages with pricing and categories.", icon: Package, tab: "catalog" },
-  { id: "ai-tools", category: "Intelligence", title: "AI Copilot", desc: "Revenue analysis, cash flow forecasts, pricing advice, and natural language search.", icon: Brain, tab: "catalog" },
-  { id: "collections", category: "Intelligence", title: "Collections Scoring", desc: "AI scores overdue invoices for recovery likelihood and recommends follow-up timing.", icon: BarChart3, tab: "billing", segment: "invoices" },
-  { id: "payment-plans", category: "Intelligence", title: "Payment Plans", desc: "AI suggests installment structures based on invoice amount and customer history.", icon: CreditCard, tab: "billing", segment: "invoices" },
-  { id: "churn-risk", category: "Intelligence", title: "Churn Alerts", desc: "Detect declining payment patterns and risk signals in recurring customers.", icon: RefreshCw, tab: "billing", segment: "schedules" },
-  { id: "revenue-journey", category: "Intelligence", title: "Revenue Journey", desc: "Visualize the CRM contact → Quote → Invoice → Payment conversion funnel.", icon: BarChart3, tab: "overview" },
+  { id: "invoices", category: "Billing", title: "Creating Invoices", desc: "Build professional invoices with line items, tax, and payment terms. Link to CRM contacts.", icon: CreditCard, tab: "invoices" },
+  { id: "quotes", category: "Billing", title: "Sending Quotes", desc: "Create proposals, set expiry dates, and convert accepted quotes to invoices.", icon: FileText, tab: "quotes" },
+  { id: "recurring", category: "Billing", title: "Recurring Billing", desc: "Automate invoice generation on weekly, monthly, or custom schedules.", icon: RefreshCw, tab: "recurring" },
+  { id: "payments", category: "Payments", title: "Payments & Collections", desc: "Track received payments, pending amounts, overdue recovery, and payment methods.", icon: DollarSign, tab: "payments" },
+  { id: "ai-tools", category: "Intelligence", title: "AI Copilot", desc: "Revenue analysis, cash flow forecasts, pricing advice, and natural language search.", icon: Brain, tab: "invoices" },
+  { id: "collections", category: "Intelligence", title: "Collections Scoring", desc: "AI scores overdue invoices for recovery likelihood and recommends follow-up timing.", icon: BarChart3, tab: "payments" },
+  { id: "payment-plans", category: "Intelligence", title: "Payment Plans", desc: "AI suggests installment structures based on invoice amount and customer history.", icon: CreditCard, tab: "payments" },
+  { id: "churn-risk", category: "Intelligence", title: "Churn Alerts", desc: "Detect declining payment patterns and risk signals in recurring customers.", icon: RefreshCw, tab: "recurring" },
+  { id: "revenue-journey", category: "Intelligence", title: "Revenue Journey", desc: "Visualize the CRM contact → Quote → Invoice → Payment conversion funnel.", icon: BarChart3, tab: "payments" },
 ];
 
 export function SearchableHelpDrawer({ isOpen, onClose, onNavigate }: SearchableHelpDrawerProps) {
@@ -440,7 +441,7 @@ export function SearchableHelpDrawer({ isOpen, onClose, onNavigate }: Searchable
                         <button
                           key={topic.id}
                           type="button"
-                          onClick={() => { onNavigate?.(topic.tab, topic.segment); onClose(); }}
+                          onClick={() => { onNavigate?.(topic.tab); onClose(); }}
                           className="w-full flex items-start gap-2.5 p-2.5 rounded-lg hover:bg-muted/20 transition-colors text-left"
                         >
                           <div className="w-6 h-6 rounded-md bg-muted/30 flex items-center justify-center shrink-0 mt-0.5">

@@ -10,11 +10,9 @@ import type { Tab } from "../components/commerce-types";
 interface CopilotDeps {
   businessId: string | null;
   tab: Tab;
-  billingSegment: string;
   invoiceCount: number;
   quoteCount: number;
   handleTabChange: (t: string) => void;
-  setBillingSegment: (seg: "quotes" | "invoices" | "schedules") => void;
   prefillForContact: (contactId: string, target: "quotes" | "invoices") => void;
 }
 
@@ -24,19 +22,19 @@ export function useCommerceCopilot(deps: CopilotDeps) {
   const router = useRouter();
 
   const {
-    businessId, tab, billingSegment, invoiceCount, quoteCount,
-    handleTabChange, setBillingSegment, prefillForContact,
+    businessId, tab, invoiceCount, quoteCount,
+    handleTabChange, prefillForContact,
   } = deps;
 
   useEffect(() => {
     if (businessId) {
       commerceAi.updateCommerceContext({
         businessId,
-        activeView: tab === "billing" ? billingSegment : tab,
+        activeView: tab,
         itemCount: invoiceCount + quoteCount,
       });
     }
-  }, [businessId, tab, billingSegment, invoiceCount, quoteCount, commerceAi.updateCommerceContext]);
+  }, [businessId, tab, invoiceCount, quoteCount, commerceAi.updateCommerceContext]);
 
   const handleViewContact = useCallback((contactId: string) => {
     if (contactId) {
@@ -71,27 +69,22 @@ export function useCommerceCopilot(deps: CopilotDeps) {
 
   const handleAiAssistantAction = useCallback((actionKey: string) => {
     if (actionKey.startsWith("filter_status:")) {
-      handleTabChange("billing");
-      setBillingSegment("invoices");
+      handleTabChange("invoices");
       toast.success(`Filtering by ${actionKey.split(":")[1]}`);
     } else if (actionKey.startsWith("switch_tab:")) {
       const t = actionKey.split(":")[1];
-      if (t === "quotes" || t === "invoices" || t === "schedules" || t === "recurring") {
-        handleTabChange("billing");
-        setBillingSegment(t === "recurring" ? "schedules" : t as "quotes" | "invoices" | "schedules");
-      } else {
-        handleTabChange(t === "insights" ? "catalog" : t);
-      }
+      if (t === "schedules") handleTabChange("recurring");
+      else if (t === "quotes" || t === "invoices" || t === "payments" || t === "recurring") handleTabChange(t);
+      else handleTabChange("invoices");
     } else if (actionKey.startsWith("send_reminders:")) {
-      handleTabChange("billing");
-      setBillingSegment("invoices");
+      handleTabChange("invoices");
       toast.success("Opening invoices for reminders...");
     } else if (actionKey.startsWith("tool:")) {
       const toolId = actionKey.split(":")[1];
       if (!commerceAi.panelOpen) commerceAi.setOpen(true);
       commerceAi.executeTool(toolId);
     }
-  }, [handleTabChange, setBillingSegment, commerceAi]);
+  }, [handleTabChange, commerceAi]);
 
   return {
     commerceAi,

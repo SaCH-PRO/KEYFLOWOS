@@ -100,7 +100,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
       }
     }
 
-    if (activeView === "billing" || activeView === "invoices") {
+    if (activeView === "invoices" || activeView === "payments") {
       if (stats.invoiceStatusBreakdown?.SENT) {
         const sent = stats.invoiceStatusBreakdown.SENT;
         suggestions.push({
@@ -163,7 +163,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
       });
     }
 
-    if (activeView === "overview") {
+    if (activeView === "payments") {
       suggestions.push({
         id: `revenue-journey-${Date.now()}`,
         type: "insight",
@@ -175,7 +175,7 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
       });
     }
 
-    if (stats.overdueAmount > 0 && (activeView === "invoices" || activeView === "billing")) {
+    if (stats.overdueAmount > 0 && (activeView === "invoices" || activeView === "payments")) {
       suggestions.push({
         id: `collections-scoring-${Date.now()}`,
         type: "action",
@@ -479,17 +479,14 @@ export function useCommerceAiHub() {
     }
 
     if (copilotMode === "assist") {
-      if (activeView === "invoices" || activeView === "billing" || activeView === "collections") {
+      if (activeView === "invoices" || activeView === "payments") {
         return tools.filter((t) => ["revenue-analysis", "cashflow-forecast", "invoice-reminder", "overdue-recovery", "client-intelligence"].includes(t.id));
       }
       if (activeView === "quotes") {
         return tools.filter((t) => ["quote-win-analysis", "pipeline-analysis", "client-intelligence"].includes(t.id));
       }
-      if (activeView === "products" || activeView === "catalog") {
-        return tools.filter((t) => ["product-health-scan", "pricing-advisor", "revenue-analysis"].includes(t.id));
-      }
-      if (activeView === "schedules") {
-        return tools.filter((t) => ["cashflow-forecast", "revenue-analysis"].includes(t.id));
+      if (activeView === "recurring") {
+        return tools.filter((t) => ["cashflow-forecast", "revenue-analysis", "pricing-advisor"].includes(t.id));
       }
       return tools.slice(0, 4);
     }
