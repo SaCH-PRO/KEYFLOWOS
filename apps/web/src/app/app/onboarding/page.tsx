@@ -141,11 +141,8 @@ const STEP_KEY_MAP: Record<string, number> = {
   payments: 2,
 };
 
-function getPublicPageUrl(businessId: string, businessType?: "Services" | "Products" | "Mixed"): string {
+function getPublicPageUrl(businessId: string): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
-  if (businessType === "Products") {
-    return `${origin}/store/${businessId}`;
-  }
   return `${origin}/book/${businessId}`;
 }
 
@@ -480,8 +477,7 @@ export default function OnboardingPage() {
               );
             }
             if (stateRes.data.setupStatus.products) {
-              const tmpl = TEMPLATES.find((t) => t.id === stateRes.data!.templateId);
-              setPublicUrl(getPublicPageUrl(bid, tmpl?.businessType));
+              setPublicUrl(getPublicPageUrl(bid));
               setStep(requestedStep !== null && requestedStep >= 0 && requestedStep <= 2 ? requestedStep : 2);
             } else {
               setStep(requestedStep !== null && requestedStep >= 0 && requestedStep <= 1 ? requestedStep : 1);
@@ -595,8 +591,7 @@ export default function OnboardingPage() {
         },
       });
 
-      const tmpl = TEMPLATES.find((t) => t.id === selectedTemplate);
-      setPublicUrl(getPublicPageUrl(businessId, tmpl?.businessType));
+      setPublicUrl(getPublicPageUrl(businessId));
       setStep(2);
     } catch (err) {
       console.error("Configure error:", err);
