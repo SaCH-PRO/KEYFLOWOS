@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   DollarSign,
   TrendingUp,
+  TrendingDown,
+  Minus,
   Clock,
   Calendar,
   Info,
@@ -12,7 +14,10 @@ import {
   History,
   BarChart3,
   ChevronRight,
+  HeartPulse,
 } from "lucide-react";
+import { fetchContactMomentum, fetchContactMomentumHistory, type MomentumScore, type MomentumHistory } from "@/lib/client";
+import { getStoredBusinessId } from "@/lib/workspace";
 import type { ContactDetailData, ContactEvent, DetailQuickAction } from "./contact-detail";
 
 interface ContactDetailStatsProps {
@@ -160,6 +165,140 @@ function relativeTime(dateStr: string): string {
   return d.toLocaleDateString("en-TT", { month: "short", day: "numeric" });
 }
 
+function MomentumSparkline({ data }: { data: { score: number; calculatedAt: string }[] }) {
+  if (data.length < 2) return null;
+
+  const width = 200;
+  const height = 40;
+  const padding = 2;
+  const scores = data.map(d => d.score);
+  const min = Math.max(0, Math.min(...scores) - 5);
+  const max = Math.min(100, Math.max(...scores) + 5);
+  const range = max - min || 1;
+
+  const points = data.map((d, i) => {
+    const x = padding + (i / (data.length - 1)) * (width - padding * 2);
+    const y = height - padding - ((d.score - min) / range) * (height - padding * 2);
+    return `${x},${y}`;
+  }).join(" ");
+
+  const last = scores[scores.length - 1];
+  const first = scores[0];
+  const strokeColor = last >= first ? "rgb(74 222 128)" : "rgb(248 113 113)";
+  const fillColor = last >= first ? "rgba(74,222,128,0.1)" : "rgba(248,113,113,0.1)";
+
+  const areaPoints = `${padding},${height - padding} ${points} ${width - padding},${height - padding}`;
+
+  return (
+    <div className="kf-stat-card p-3 mt-3">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[10px] text-muted-foreground uppercase tracking-wider">30-Day Trend</span>
+        <span className="text-[10px] text-muted-foreground">{data.length} data points</span>
+      </div>
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ height: 40 }}>
+        <polygon points={areaPoints} fill={fillColor} />
+        <polyline points={points} fill="none" stroke={strokeColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        {data.length > 0 && (() => {
+          const lastIdx = data.length - 1;
+          const lx = padding + (lastIdx / (data.length - 1)) * (width - padding * 2);
+          const ly = height - padding - ((scores[lastIdx] - min) / range) * (height - padding * 2);
+          return <circle cx={lx} cy={ly} r="2.5" fill={strokeColor} />;
+        })()}
+      </svg>
+      <div className="flex justify-between mt-1">
+        <span className="text-[9px] text-muted-foreground">{data.length > 0 ? new Date(data[0].calculatedAt).toLocaleDateString("en-TT", { month: "short", day: "numeric" }) : ""}</span>
+        <span className="text-[9px] text-muted-foreground">{data.length > 0 ? new Date(data[data.length - 1].calculatedAt).toLocaleDateString("en-TT", { month: "short", day: "numeric" }) : ""}</span>
+      </div>
+    </div>
+  );
+}
+
+function MomentumBadge({ contactId }: { contactId: string }) {
+  const [momentum, setMomentum] = useState<MomentumScore | null>(null);
+  const [history, setHistory] = useState<MomentumHistory>([]);
+
+  useEffect(() => {
+    const bid = getStoredBusinessId();
+    if (!bid) return;
+    Promise.all([
+      fetchContactMomentum(contactId, bid),
+      fetchContactMomentumHistory(contactId, 30, bid),
+    ]).then(([scoreRes, historyRes]) => {
+      if (scoreRes.data) setMomentum(scoreRes.data);
+      if (historyRes.data) setHistory(historyRes.data);
+    });
+  }, [contactId]);
+
+  if (!momentum) return null;
+
+  const score = Math.max(0, Math.min(100, momentum.score));
+  const color =
+    score >= 70 ? "hsl(142 76% 36%)" :
+    score >= 40 ? "hsl(var(--kf-accent1))" :
+    "hsl(0 72% 51%)";
+  const label = score >= 70 ? "Strong" : score >= 40 ? "Moderate" : "At Risk";
+
+  const TrendIcon = momentum.trend === "rising" ? TrendingUp :
+    momentum.trend === "falling" ? TrendingDown : Minus;
+  const trendColor = momentum.trend === "rising" ? "text-green-400" :
+    momentum.trend === "falling" ? "text-red-400" : "text-muted-foreground";
+
+  return (
+    <CollapsibleCard icon={HeartPulse} title="Momentum" hasData={true}
+      badge={<span className="text-[10px] px-1.5 py-0.5 rounded-md bg-muted font-medium" style={{ color }}>{label}</span>}
+    >
+      <div className="grid grid-cols-2 gap-3">
+        <div className="kf-stat-card p-3">
+          <div className="flex items-center gap-1 text-muted-foreground text-xs mb-1">
+            <HeartPulse className="w-3 h-3" />
+            <span>Score</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-lg font-semibold">{score}</span>
+            <div className="flex-1 flex flex-col gap-0.5">
+              <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                <div className="h-full rounded-full transition-all duration-500" style={{ width: `${score}%`, backgroundColor: color }} />
+              </div>
+              <span className="text-[10px] font-medium" style={{ color }}>{label}</span>
+            </div>
+          </div>
+        </div>
+        <div className="kf-stat-card p-3">
+          <div className="flex items-center gap-1 text-muted-foreground text-xs mb-1">
+            <TrendIcon className={`w-3 h-3 ${trendColor}`} />
+            <span>Trend</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={`text-sm font-medium capitalize ${trendColor}`}>{momentum.trend}</span>
+            {momentum.previousScore != null && (
+              <span className="text-[10px] text-muted-foreground">
+                (prev: {momentum.previousScore})
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+      {history.length >= 2 && (
+        <MomentumSparkline data={history.map(h => ({ score: h.score, calculatedAt: h.calculatedAt ?? new Date().toISOString() }))} />
+      )}
+      <div className="grid grid-cols-5 gap-1.5 mt-3">
+        {[
+          { label: "Recency", value: momentum.recencyScore },
+          { label: "Frequency", value: momentum.frequencyScore },
+          { label: "Monetary", value: momentum.monetaryScore },
+          { label: "Engage", value: momentum.engagementScore },
+          { label: "Tenure", value: momentum.tenureScore },
+        ].map(f => (
+          <div key={f.label} className="text-center p-1.5 rounded-lg bg-muted/30">
+            <div className="text-xs font-semibold">{Math.round(f.value)}</div>
+            <div className="text-[9px] text-muted-foreground">{f.label}</div>
+          </div>
+        ))}
+      </div>
+    </CollapsibleCard>
+  );
+}
+
 export function ContactDetailStats({ contact, events, onSetActiveTab, onQuickAction }: ContactDetailStatsProps) {
   const hasAnyMetric = contact.meta?.leadScore != null ||
     (contact.meta?.outstandingBalance ?? 0) > 0 ||
@@ -236,6 +375,8 @@ export function ContactDetailStats({ contact, events, onSetActiveTab, onQuickAct
           </div>
         )}
       </CollapsibleCard>
+
+      <MomentumBadge contactId={contact.id} />
 
       <CollapsibleCard icon={BarChart3} title="Financial Summary" hasData={hasFinancial}>
         <div className="grid grid-cols-3 gap-3 text-center">

@@ -2385,6 +2385,171 @@ export async function updateAutopilotSettings(
   );
 }
 
+const momentumContactSchema = z.object({
+  id: z.string(),
+  firstName: z.string().nullable().optional(),
+  lastName: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  status: z.string().nullable().optional(),
+  companyName: z.string().nullable().optional(),
+});
+
+const momentumRecommendationSchema = z.object({
+  id: z.string(),
+  businessId: z.string(),
+  contactId: z.string(),
+  type: z.string(),
+  title: z.string(),
+  description: z.string(),
+  priority: z.string(),
+  status: z.string(),
+  draftMessage: z.string().nullable().optional(),
+  draftSubject: z.string().nullable().optional(),
+  suggestedChannel: z.string().nullable().optional(),
+  triggerReason: z.string().nullable().optional(),
+  momentumScore: z.number().nullable().optional(),
+  snoozedUntil: z.string().nullable().optional(),
+  actionedAt: z.string().nullable().optional(),
+  dismissedAt: z.string().nullable().optional(),
+  autoExecuted: z.boolean().optional(),
+  scheduledFor: z.string().nullable().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string().optional(),
+  contact: momentumContactSchema.optional(),
+});
+
+export type MomentumRecommendation = z.infer<typeof momentumRecommendationSchema>;
+
+const momentumScoreSchema = z.object({
+  score: z.number(),
+  previousScore: z.number().nullable().optional(),
+  trend: z.string(),
+  recencyScore: z.number(),
+  frequencyScore: z.number(),
+  monetaryScore: z.number(),
+  engagementScore: z.number(),
+  tenureScore: z.number(),
+  calculatedAt: z.string().optional(),
+  contactId: z.string().optional(),
+});
+
+export type MomentumScore = z.infer<typeof momentumScoreSchema>;
+
+const momentumSummarySchema = z.object({
+  total: z.number(),
+  averageScore: z.number(),
+  rising: z.number(),
+  falling: z.number(),
+  stable: z.number(),
+  atRisk: z.number(),
+  hotLeads: z.number(),
+});
+
+export type MomentumSummary = z.infer<typeof momentumSummarySchema>;
+
+const momentumHistorySchema = z.array(z.object({
+  score: z.number(),
+  trend: z.string(),
+  calculatedAt: z.string(),
+  recencyScore: z.number(),
+  frequencyScore: z.number(),
+  monetaryScore: z.number(),
+  engagementScore: z.number(),
+  tenureScore: z.number(),
+}));
+
+export type MomentumHistory = z.infer<typeof momentumHistorySchema>;
+
+const momentumDraftSchema = z.object({
+  subject: z.string(),
+  message: z.string(),
+  tone: z.string(),
+  suggestedChannel: z.enum(['whatsapp', 'email']),
+});
+
+export type MomentumDraft = z.infer<typeof momentumDraftSchema>;
+
+export async function fetchMomentumRecommendations(businessId?: string, limit?: number): Promise<ApiResult<MomentumRecommendation[]>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const query = limit ? `?limit=${limit}` : '';
+  return apiGet(
+    `/momentum/businesses/${encodeURIComponent(bid)}/recommendations${query}`,
+    z.array(momentumRecommendationSchema),
+    [],
+  );
+}
+
+export async function actionMomentumRecommendation(id: string, businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<MomentumRecommendation>({
+    path: `/momentum/businesses/${encodeURIComponent(bid)}/recommendations/${encodeURIComponent(id)}/action`,
+    body: {},
+  });
+}
+
+export async function snoozeMomentumRecommendation(id: string, days?: number, businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<MomentumRecommendation>({
+    path: `/momentum/businesses/${encodeURIComponent(bid)}/recommendations/${encodeURIComponent(id)}/snooze`,
+    body: { days: days ?? 7 },
+  });
+}
+
+export async function dismissMomentumRecommendation(id: string, businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<MomentumRecommendation>({
+    path: `/momentum/businesses/${encodeURIComponent(bid)}/recommendations/${encodeURIComponent(id)}/dismiss`,
+    body: {},
+  });
+}
+
+export async function generateMomentumDraft(
+  id: string,
+  body: { contactId: string; contactName: string; type: string; description: string; momentumScore?: number },
+  businessId?: string,
+): Promise<ApiResult<MomentumDraft>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<MomentumDraft>({
+    path: `/momentum/businesses/${encodeURIComponent(bid)}/recommendations/${encodeURIComponent(id)}/draft`,
+    body,
+  });
+}
+
+export async function fetchContactMomentum(contactId: string, businessId?: string): Promise<ApiResult<MomentumScore>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/momentum/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}`,
+    momentumScoreSchema,
+  );
+}
+
+export async function fetchContactMomentumHistory(contactId: string, days?: number, businessId?: string): Promise<ApiResult<MomentumHistory>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const query = days ? `?days=${days}` : '';
+  return apiGet(
+    `/momentum/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/history${query}`,
+    momentumHistorySchema,
+    [],
+  );
+}
+
+export async function fetchMomentumSummary(businessId?: string): Promise<ApiResult<MomentumSummary>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/momentum/businesses/${encodeURIComponent(bid)}/summary`,
+    momentumSummarySchema,
+  );
+}
+
+export async function triggerMomentumSweep(businessId?: string) {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{ contactsProcessed: number; recommendationsGenerated: number }>({
+    path: `/momentum/businesses/${encodeURIComponent(bid)}/sweep`,
+    body: {},
+  });
+}
+
 const flowIntelligenceSchema = z.object({
   totalContacts: z.number(),
   leads: z.number(),
