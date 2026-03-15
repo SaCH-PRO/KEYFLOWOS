@@ -50,49 +50,52 @@ export default function CommandPage() {
         </div>
       )}
 
-      <header className="flex items-center justify-between gap-3 order-3 sm:order-1">
-        <div>
-          <h1 className="kf-text-title font-semibold tracking-tight">
-            {d.greeting}
-            {d.displayName ? `, ${d.displayName}` : ""}
-          </h1>
-          <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-            <MetricPill icon={DollarSign} color="--kf-accent1" value={formatTTD(d.todayRevenue)} label="today" />
-            <MetricPill icon={Calendar} color="--kf-info" value={String(d.todayBookings)} label={d.todayBookings === 1 ? "booking" : "bookings"} />
-            <MetricPill icon={CheckCircle2} color="--kf-success" value={String(d.tasks.length)} label={d.tasks.length === 1 ? "task" : "tasks"} />
+      <header className="flex flex-col gap-3 order-2 sm:order-1">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h1 className="kf-text-title font-semibold tracking-tight">
+              {d.greeting}
+              {d.displayName ? `, ${d.displayName}` : ""}
+            </h1>
+            <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+              <MetricPill icon={DollarSign} color="--kf-accent1" value={formatTTD(d.todayRevenue)} label="today" />
+              <MetricPill icon={Calendar} color="--kf-info" value={String(d.todayBookings)} label={d.todayBookings === 1 ? "booking" : "bookings"} />
+              <MetricPill icon={CheckCircle2} color="--kf-success" value={String(d.tasks.length)} label={d.tasks.length === 1 ? "task" : "tasks"} />
+            </div>
+          </div>
+
+          <div className="relative flex-shrink-0" ref={moreRef}>
+            <button
+              onClick={() => setMoreOpen((prev) => !prev)}
+              className="flex items-center justify-center min-w-[44px] min-h-[44px] kf-radius-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-all"
+              aria-label="More options"
+            >
+              <MoreHorizontal className="w-4 h-4" />
+            </button>
+            {moreOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setMoreOpen(false)} />
+                <div
+                  className="absolute right-0 top-full mt-1 z-50 py-1.5 kf-radius-md shadow-lg min-w-[280px]"
+                  style={{
+                    background: "hsl(var(--kf-card))",
+                    border: "1px solid hsl(var(--kf-border) / 0.4)",
+                  }}
+                >
+                  <div className="px-2 py-1 flex flex-col gap-1">
+                    <SimulationDrawer businessId={d.businessId} />
+                    <ProgressDrawer gamification={d.gamification} momentum={d.momentum} />
+                  </div>
+                  <div className="mx-2 my-1" style={{ borderTop: "1px solid hsl(var(--kf-border) / 0.2)" }} />
+                  <div className="px-2 py-1">
+                    <AiCommandBar businessId={d.businessId} />
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
-
-        <div className="relative flex-shrink-0" ref={moreRef}>
-          <button
-            onClick={() => setMoreOpen((prev) => !prev)}
-            className="flex items-center justify-center min-w-[44px] min-h-[44px] kf-radius-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-all"
-            aria-label="More options"
-          >
-            <MoreHorizontal className="w-4 h-4" />
-          </button>
-          {moreOpen && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={() => setMoreOpen(false)} />
-              <div
-                className="absolute right-0 top-full mt-1 z-50 py-1.5 kf-radius-md shadow-lg min-w-[280px]"
-                style={{
-                  background: "hsl(var(--kf-card))",
-                  border: "1px solid hsl(var(--kf-border) / 0.4)",
-                }}
-              >
-                <div className="px-2 py-1 flex flex-col gap-1">
-                  <SimulationDrawer businessId={d.businessId} />
-                  <ProgressDrawer gamification={d.gamification} momentum={d.momentum} />
-                </div>
-                <div className="mx-2 my-1" style={{ borderTop: "1px solid hsl(var(--kf-border) / 0.2)" }} />
-                <div className="px-2 py-1">
-                  <AiCommandBar businessId={d.businessId} />
-                </div>
-              </div>
-            </>
-          )}
-        </div>
+        <QuickActionBar />
       </header>
 
       <div className="order-1 sm:order-2">
@@ -120,11 +123,7 @@ export default function CommandPage() {
         />
       </div>
 
-      <div className="order-2 sm:order-3">
-        <QuickActionBar />
-      </div>
-
-      <div className="order-4">
+      <div className="order-3">
         <BriefingCard
           businessId={d.businessId}
           initialFinancialPulse={d.financialPulse}
