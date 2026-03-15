@@ -55,12 +55,14 @@ import {
   generateItemId,
 } from "../components/commerce-types";
 import LineItemsEditor from "../components/line-items-editor";
-import { BillingCard } from "../components/billing-card";
 import { BillingDetailModal } from "../components/billing-detail-modal";
 import { BillingFormModal } from "../components/billing-form-modal";
+import { RecordRowCard, OverflowMenu, OverflowMenuItem } from "../components/standardized-cards";
+import { getQuoteSmartCTA } from "../utils/smart-cta";
 import { useQuoteForm } from "../hooks/use-quote-form";
 import { useBusinessPreview } from "../hooks/use-business-preview";
 import { useModuleEmit } from "@/hooks/use-module-events";
+import { ArrowRightLeft, Eye, DollarSign, Ban, Bell } from "lucide-react";
 
 interface QuotesPanelProps {
   quotes: Quote[];
@@ -83,6 +85,7 @@ interface QuotesPanelProps {
   onViewContact?: (contactId: string) => void;
   onViewClientIntel?: (contactId: string) => void;
   onSelectProduct?: (productId: string) => void;
+  initialStatusFilter?: string;
 }
 
 export default function QuotesPanel({
@@ -106,6 +109,7 @@ export default function QuotesPanel({
   onViewContact,
   onViewClientIntel,
   onSelectProduct,
+  initialStatusFilter,
 }: QuotesPanelProps) {
   const {
     showQuoteBuilder,
@@ -139,7 +143,13 @@ export default function QuotesPanel({
     onPrefillApplied?.();
   }, [prefillContactId, prefillItems, prefillToken, prefillQuote, onPrefillApplied]);
   const [quoteSearch, setQuoteSearch] = useState("");
-  const [quoteStatusFilter, setQuoteStatusFilter] = useState<string>("ALL");
+  const [quoteStatusFilter, setQuoteStatusFilter] = useState<string>(initialStatusFilter ?? "ALL");
+
+  useEffect(() => {
+    if (initialStatusFilter) {
+      setQuoteStatusFilter(initialStatusFilter);
+    }
+  }, [initialStatusFilter]);
   const [sortKey, setSortKey] = useState<BillingSortKey>("date-desc");
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
   const [extendDate, setExtendDate] = useState("");
@@ -684,7 +694,7 @@ export default function QuotesPanel({
         </div>
 
         <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none" role="group" aria-label="Filter by status">
-          {QUOTE_STATUS_FILTERS.map((f) => {
+          {QUOTE_STATUS_FILTERS.slice(0, 4).map((f) => {
             const count = statusCounts[f.value] ?? 0;
             return (
               <button
@@ -706,6 +716,25 @@ export default function QuotesPanel({
               </button>
             );
           })}
+          {QUOTE_STATUS_FILTERS.length > 4 && (
+            <select
+              value={QUOTE_STATUS_FILTERS.slice(4).some((f) => f.value === quoteStatusFilter) ? quoteStatusFilter : ""}
+              onChange={(e) => { if (e.target.value) setQuoteStatusFilter(e.target.value); }}
+              className={`appearance-none px-2 py-1 text-[11px] rounded-md font-medium shrink-0 cursor-pointer transition-all focus:outline-none ${
+                QUOTE_STATUS_FILTERS.slice(4).some((f) => f.value === quoteStatusFilter)
+                  ? "bg-white/[0.08] border border-border/60 text-foreground"
+                  : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.05]"
+              }`}
+              aria-label="More status filters"
+            >
+              <option value="" disabled>More...</option>
+              {QUOTE_STATUS_FILTERS.slice(4).map((f) => (
+                <option key={f.value} value={f.value}>
+                  {f.label} ({statusCounts[f.value] ?? 0})
+                </option>
+              ))}
+            </select>
+          )}
           <span className="ml-auto text-[10px] text-muted-foreground/50 whitespace-nowrap shrink-0 pl-2" aria-live="polite" role="status">
             {filteredQuotes.length} of {quotes.length}
           </span>
@@ -767,6 +796,34 @@ export default function QuotesPanel({
           {filteredQuotes.map((quote) => {
             const expired = isQuoteExpired(quote);
             const daysRemaining = getDaysRemaining(quote);
+            const smartCTA = getQuoteSmartCTA(quote.status);
+            const SmartIcon = smartCTA.icon;
+
+            const handleSmartAction = () => {
+              switch (smartCTA.actionKey) {
+                case "send":
+                  handleMarkSent(quote);
+                  break;
+                case "follow_up":
+                  setSelectedQuote(quote);
+                  setShowEmailModal(true);
+                  break;
+                case "convert":
+                  setSelectedQuote(quote);
+                  setConvertForm({
+                    taxRate: String(quote.taxRate ?? 12.5),
+                    discountType: (quote.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
+                    discountValue: quote.discountValue ? String(quote.discountValue) : "",
+                    notes: quote.notes ?? "",
+                    dueDate: "",
+                  });
+                  setShowConvertModal(true);
+                  break;
+                case "view":
+                  setSelectedQuote(quote);
+                  break;
+              }
+            };
 
             const cardBadges = (
               <>
@@ -786,151 +843,8 @@ export default function QuotesPanel({
               </>
             );
 
-            const desktopActions = (
-              <>
-                <button
-                  onClick={() => openEditQuote(quote)}
-                  className="p-1 rounded-lg hover:bg-muted text-muted-foreground/70 hover:text-foreground"
-                  title="Edit Quote"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => duplicateQuote(quote)}
-                  className="p-1 rounded-lg hover:bg-muted text-muted-foreground/70 hover:text-foreground"
-                  title="Duplicate Quote"
-                >
-                  <Files className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => shareQuoteViaWhatsApp(quote)}
-                  className="p-1 rounded-lg hover:bg-green-500/20 text-green-400"
-                  title="Share via WhatsApp"
-                >
-                  <MessageCircle className="w-3.5 h-3.5" />
-                </button>
-                {(quote.status === "DRAFT" || quote.status === "SENT") && (
-                  <button
-                    onClick={() => {
-                      setSelectedQuote(quote);
-                      setShowEmailModal(true);
-                    }}
-                    className="p-1 rounded-lg hover:bg-blue-500/20 text-blue-400"
-                    title="Send to Email"
-                  >
-                    <Mail className="w-3.5 h-3.5" />
-                  </button>
-                )}
-                {quote.status === "DRAFT" && (
-                  <button
-                    onClick={() => handleMarkSent(quote)}
-                    className="p-1 rounded-lg hover:bg-primary/20 text-primary disabled:opacity-50"
-                    title="Mark as Sent"
-                    disabled={!!actionLoading[quote.id]}
-                  >
-                    {actionLoading[quote.id] === "send" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                  </button>
-                )}
-                {quote.status === "SENT" && (
-                  <>
-                    <button
-                      onClick={() => handleAcceptQuote(quote)}
-                      className={`p-1 rounded-lg ${expired ? "opacity-50 cursor-not-allowed" : "hover:bg-green-500/20"} text-green-400 disabled:opacity-50`}
-                      title={expired ? "Cannot accept — quote has expired" : "Mark Accepted"}
-                      disabled={expired || !!actionLoading[quote.id]}
-                    >
-                      {actionLoading[quote.id] === "accept" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
-                    </button>
-                    <button
-                      onClick={() => handleRejectQuote(quote)}
-                      className="p-1 rounded-lg hover:bg-red-500/20 text-red-400 disabled:opacity-50"
-                      title="Mark Rejected"
-                      disabled={!!actionLoading[quote.id]}
-                    >
-                      {actionLoading[quote.id] === "reject" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
-                    </button>
-                  </>
-                )}
-                {quote.status === "ACCEPTED" && !quote.invoiceId && (
-                  <button
-                    onClick={() => {
-                      setSelectedQuote(quote);
-                      setShowConvertModal(true);
-                    }}
-                    className="px-1.5 py-0.5 rounded-lg bg-primary/20 text-primary text-[10px] font-medium hover:bg-primary/30"
-                    title="Convert to Invoice"
-                  >
-                    Convert
-                  </button>
-                )}
-                <button
-                  onClick={() => handleDeleteQuote(quote)}
-                  className="p-1 rounded-lg hover:bg-red-500/20 text-red-400 disabled:opacity-50"
-                  title="Delete Quote"
-                  disabled={!!actionLoading[quote.id]}
-                >
-                  {actionLoading[quote.id] === "delete" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                </button>
-              </>
-            );
-
-            const mobileActions = (
-              <>
-                <button onClick={() => openEditQuote(quote)} className="p-1 rounded-lg hover:bg-muted" title="Edit">
-                  <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
-                </button>
-                <button onClick={() => duplicateQuote(quote)} className="p-1 rounded-lg hover:bg-muted" title="Duplicate">
-                  <Files className="w-3.5 h-3.5 text-muted-foreground" />
-                </button>
-                <button onClick={() => shareQuoteViaWhatsApp(quote)} className="p-1 rounded-lg hover:bg-green-500/20" title="WhatsApp">
-                  <MessageCircle className="w-3.5 h-3.5 text-green-400" />
-                </button>
-                {(quote.status === "DRAFT" || quote.status === "SENT") && (
-                  <button onClick={() => { setSelectedQuote(quote); setShowEmailModal(true); }} className="p-1 rounded-lg hover:bg-blue-500/20" title="Email">
-                    <Mail className="w-3.5 h-3.5 text-blue-400" />
-                  </button>
-                )}
-                {quote.status === "DRAFT" && (
-                  <button
-                    onClick={() => handleMarkSent(quote)}
-                    className="p-1 rounded-lg hover:bg-primary/20 text-primary disabled:opacity-50"
-                    title="Mark as Sent"
-                    disabled={!!actionLoading[quote.id]}
-                  >
-                    {actionLoading[quote.id] === "send" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                  </button>
-                )}
-                {quote.status === "SENT" && (
-                  <button
-                    onClick={() => handleAcceptQuote(quote)}
-                    className={`p-1 rounded-lg ${expired ? "opacity-50 cursor-not-allowed" : "hover:bg-green-500/20"} text-green-400 disabled:opacity-50`}
-                    title={expired ? "Cannot accept — expired" : "Accept"}
-                    disabled={expired || !!actionLoading[quote.id]}
-                  >
-                    {actionLoading[quote.id] === "accept" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
-                  </button>
-                )}
-                {quote.status === "ACCEPTED" && !quote.invoiceId && (
-                  <button
-                    onClick={() => { setSelectedQuote(quote); setShowConvertModal(true); }}
-                    className="px-1.5 py-0.5 rounded-lg bg-primary/20 text-primary text-[10px] font-medium hover:bg-primary/30"
-                  >
-                    Convert
-                  </button>
-                )}
-                <button
-                  onClick={() => handleDeleteQuote(quote)}
-                  className="p-1 rounded-lg hover:bg-red-500/20 text-red-400 disabled:opacity-50"
-                  title="Delete"
-                  disabled={!!actionLoading[quote.id]}
-                >
-                  {actionLoading[quote.id] === "delete" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                </button>
-              </>
-            );
-
             return (
-              <BillingCard
+              <RecordRowCard
                 key={quote.id}
                 type="quote"
                 number={quote.quoteNumber}
@@ -941,9 +855,56 @@ export default function QuotesPanel({
                 items={(quote.items ?? []) as Array<{ description?: string | null }>}
                 date={quote.issueDate}
                 badges={cardBadges}
-                desktopActions={desktopActions}
-                mobileActions={mobileActions}
+                selected={selectedQuote?.id === quote.id}
                 onClick={() => setSelectedQuote(quote)}
+                smartCTA={
+                  <button
+                    onClick={handleSmartAction}
+                    disabled={!!actionLoading[quote.id] || (smartCTA.actionKey === "convert" && !!quote.invoiceId)}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all disabled:opacity-50 ${smartCTA.bgColor} ${smartCTA.color} ${smartCTA.hoverBgColor}`}
+                  >
+                    {actionLoading[quote.id] ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <SmartIcon className="w-3 h-3" />
+                    )}
+                    <span className="hidden sm:inline">{smartCTA.label}</span>
+                  </button>
+                }
+                overflowMenu={
+                  <OverflowMenu>
+                    <OverflowMenuItem icon={Eye} label="View details" onClick={() => setSelectedQuote(quote)} />
+                    <OverflowMenuItem icon={Pencil} label="Edit" onClick={() => openEditQuote(quote)} />
+                    <OverflowMenuItem icon={Files} label="Duplicate" onClick={() => duplicateQuote(quote)} />
+                    <OverflowMenuItem icon={MessageCircle} label="Share via WhatsApp" onClick={() => shareQuoteViaWhatsApp(quote)} />
+                    {(quote.status === "DRAFT" || quote.status === "SENT") && (
+                      <OverflowMenuItem icon={Mail} label="Send via email" onClick={() => { setSelectedQuote(quote); setShowEmailModal(true); }} />
+                    )}
+                    {quote.status === "DRAFT" && (
+                      <OverflowMenuItem icon={Send} label="Mark as sent" onClick={() => handleMarkSent(quote)} disabled={!!actionLoading[quote.id]} />
+                    )}
+                    {quote.status === "SENT" && !expired && (
+                      <OverflowMenuItem icon={CheckCircle} label="Accept quote" onClick={() => handleAcceptQuote(quote)} disabled={!!actionLoading[quote.id]} />
+                    )}
+                    {quote.status === "SENT" && (
+                      <OverflowMenuItem icon={X} label="Reject quote" onClick={() => handleRejectQuote(quote)} disabled={!!actionLoading[quote.id]} />
+                    )}
+                    {quote.status === "ACCEPTED" && !quote.invoiceId && (
+                      <OverflowMenuItem icon={ArrowRightLeft} label="Convert to invoice" onClick={() => {
+                        setSelectedQuote(quote);
+                        setConvertForm({
+                          taxRate: String(quote.taxRate ?? 12.5),
+                          discountType: (quote.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
+                          discountValue: quote.discountValue ? String(quote.discountValue) : "",
+                          notes: quote.notes ?? "",
+                          dueDate: "",
+                        });
+                        setShowConvertModal(true);
+                      }} />
+                    )}
+                    <OverflowMenuItem icon={Trash2} label="Delete" onClick={() => handleDeleteQuote(quote)} destructive disabled={!!actionLoading[quote.id]} />
+                  </OverflowMenu>
+                }
               />
             );
           })}

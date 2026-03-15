@@ -6,6 +6,7 @@ import {
   X, FileText, CreditCard, User, Calendar, ChevronDown,
   Plus, Minus, MessageSquare, Percent, Tag, Loader2, Receipt,
 } from "lucide-react";
+import { SideSheet } from "./side-sheet";
 import { ContactSelect } from "@/components/contacts";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type { Contact, Product } from "@/lib/client";
@@ -172,52 +173,78 @@ export const BillingFormModal = React.memo(function BillingFormModal({
 
   return (
     <>
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-6 sm:pt-8 overflow-y-auto"
-            onClick={(e) => e.target === e.currentTarget && handleClose()}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="billing-form-title"
+      <SideSheet
+        open={open}
+        onClose={handleClose}
+        title={isEditing ? `Edit ${theme.label}` : `New ${theme.label}`}
+        subtitle={isEditing ? `Update ${theme.label.toLowerCase()} details` : `Create a new ${theme.label.toLowerCase()} for your client`}
+        icon={
+          <div
+            className="w-9 h-9 rounded-xl flex items-center justify-center"
+            style={{ backgroundColor: theme.accentLight }}
           >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0, y: 10 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 10 }}
-              transition={{ type: "spring", bounce: 0.15, duration: 0.35 }}
-              className="w-full max-w-2xl bg-card rounded-2xl border border-border shadow-2xl flex flex-col max-h-[90vh] mb-4"
-            >
-              <div
-                className="p-5 border-b border-border flex items-center justify-between shrink-0"
-                style={{ borderBottomColor: theme.accentBorder }}
-              >
-                <h3 id="billing-form-title" className="text-lg font-semibold flex items-center gap-2.5">
-                  <div
-                    className="w-9 h-9 rounded-xl flex items-center justify-center"
-                    style={{ backgroundColor: theme.accentLight }}
-                  >
-                    <ThemeIcon className="w-4.5 h-4.5" style={{ color: theme.accent }} />
+            <ThemeIcon className="w-4.5 h-4.5" style={{ color: theme.accent }} />
+          </div>
+        }
+        footer={
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-sm">
+              <div className="space-y-1 text-muted-foreground">
+                <div className="flex justify-between gap-8">
+                  <span>Subtotal</span>
+                  <span className="text-foreground">{formatAmount(totals.subtotal, currency)}</span>
+                </div>
+                {totals.tax > 0 && (
+                  <div className="flex justify-between gap-8 text-xs">
+                    <span>Tax ({taxRate}%)</span>
+                    <span className="text-foreground/80">+{formatAmount(totals.tax, currency)}</span>
                   </div>
-                  <div>
-                    <span>{isEditing ? `Edit ${theme.label}` : `New ${theme.label}`}</span>
-                    <p className="text-[11px] text-muted-foreground font-normal mt-0.5">
-                      {isEditing ? `Update ${theme.label.toLowerCase()} details` : `Create a new ${theme.label.toLowerCase()} for your client`}
-                    </p>
+                )}
+                {totals.discount > 0 && (
+                  <div className="flex justify-between gap-8 text-xs">
+                    <span>Discount</span>
+                    <span className="text-green-400">-{formatAmount(totals.discount, currency)}</span>
                   </div>
-                </h3>
-                <button
-                  onClick={handleClose}
-                  className="p-2 hover:bg-muted rounded-xl transition-colors"
-                >
-                  <X className="w-5 h-5 text-muted-foreground" />
-                </button>
+                )}
               </div>
-
-              <div className="p-5 space-y-1 overflow-y-auto flex-1 min-h-0">
+              <div className="text-right">
+                <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Total</p>
+                <p className="text-xl font-bold" style={{ color: theme.accent }}>
+                  {formatAmount(totals.total, currency)}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={handleClose}
+                className="px-4 py-2.5 text-sm font-medium rounded-xl border border-border/50 bg-white/[0.03] hover:bg-white/[0.06] text-muted-foreground hover:text-foreground transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={onSubmit}
+                disabled={saving}
+                className="px-5 py-2.5 text-sm font-semibold rounded-xl text-white transition-all flex items-center gap-2 disabled:opacity-50"
+                style={{ backgroundColor: theme.accent }}
+              >
+                {saving ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <ThemeIcon className="w-4 h-4" />
+                )}
+                {saving
+                  ? "Saving..."
+                  : isEditing
+                    ? `Update ${theme.label}`
+                    : `Create ${theme.label}`}
+              </button>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-1">
                 {formError && (
                   <motion.div
                     initial={{ opacity: 0, y: -5 }}
@@ -541,70 +568,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
                   </motion.div>
                 )}
               </div>
-
-              <div
-                className="px-5 py-4 border-t border-border shrink-0 space-y-3"
-                style={{ borderTopColor: theme.accentBorder }}
-              >
-                <div className="flex items-center justify-between text-sm">
-                  <div className="space-y-1 text-muted-foreground">
-                    <div className="flex justify-between gap-8">
-                      <span>Subtotal</span>
-                      <span className="text-foreground">{formatAmount(totals.subtotal, currency)}</span>
-                    </div>
-                    {totals.tax > 0 && (
-                      <div className="flex justify-between gap-8 text-xs">
-                        <span>Tax ({taxRate}%)</span>
-                        <span className="text-foreground/80">+{formatAmount(totals.tax, currency)}</span>
-                      </div>
-                    )}
-                    {totals.discount > 0 && (
-                      <div className="flex justify-between gap-8 text-xs">
-                        <span>Discount</span>
-                        <span className="text-green-400">-{formatAmount(totals.discount, currency)}</span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Total</p>
-                    <p className="text-xl font-bold" style={{ color: theme.accent }}>
-                      {formatAmount(totals.total, currency)}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={handleClose}
-                    className="px-4 py-2.5 text-sm font-medium rounded-xl border border-border/50 bg-white/[0.03] hover:bg-white/[0.06] text-muted-foreground hover:text-foreground transition-all"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onSubmit}
-                    disabled={saving}
-                    className="px-5 py-2.5 text-sm font-semibold rounded-xl text-white transition-all flex items-center gap-2 disabled:opacity-50"
-                    style={{ backgroundColor: theme.accent }}
-                  >
-                    {saving ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <ThemeIcon className="w-4 h-4" />
-                    )}
-                    {saving
-                      ? "Saving..."
-                      : isEditing
-                        ? `Update ${theme.label}`
-                        : `Create ${theme.label}`}
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      </SideSheet>
 
       <ConfirmDialog
         open={showDiscardDialog}
@@ -614,7 +578,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
         cancelLabel="Keep Editing"
         onConfirm={() => { setShowDiscardDialog(false); onClose(); }}
         onCancel={() => setShowDiscardDialog(false)}
-        variant="destructive"
+        variant="danger"
       />
     </>
   );
