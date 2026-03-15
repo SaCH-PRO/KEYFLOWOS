@@ -1,0 +1,545 @@
+You are acting as a principal product strategist, staff UX architect, platform systems designer, service-operations architect, and repo-aware AI product auditor.
+
+Your task is to inspect the attached GitHub repository in depth and produce one complete, integrated product analysis of the app.
+
+You must not treat this as a generic SaaS audit.
+You must treat the repository itself as the source of truth.
+
+Your job is to:
+1. inspect the repo structure,
+2. identify and classify every major route, module, workspace, public surface, shared shell, and platform pattern,
+3. infer the real product architecture from the implementation,
+4. understand how the app currently behaves as a business operating system,
+5. critique it deeply,
+6. identify structural, UX, workflow, and platform weaknesses,
+7. recommend high-level improvements,
+8. define how the system should become cleaner, more modular, more pluggable, more tiered, and easier to use,
+9. integrate best practices, innovation, and competitive product thinking,
+10. produce all major deliverables in one run.
+
+Do not be shallow.
+Do not summarize files one by one.
+Do not give generic advice detached from the repo.
+Think like someone preparing a serious product architecture and redesign strategy for this exact app.
+
+================================
+PHASE 0 — HOW TO INSPECT THE REPO
+================================
+
+Before giving conclusions, inspect the repository systematically.
+
+You must:
+- identify the app shell and navigation structure,
+- identify all primary routes and route groups,
+- identify all major modules,
+- identify all public-facing routes,
+- identify all shared components and layout patterns,
+- identify global interaction primitives,
+- identify AI-related architecture,
+- identify event-driven or cross-module patterns,
+- identify onboarding, workspace, and business-context patterns,
+- identify mobile-specific navigation/interaction patterns,
+- identify shared list/detail, tab, drawer, popup, panel, guide, and inspector patterns.
+
+Pay special attention to:
+- app layout files,
+- route structure,
+- app shell and navigation files,
+- major module entry pages,
+- shared UI components,
+- AI hub / command components,
+- hooks related to module events, workspace, keyboard shortcuts, swipe tabs, notifications, and shared state,
+- public booking/payment/storefront surfaces,
+- settings and admin surfaces,
+- any Studio, Cockpit, builder, command, or automation-related concepts.
+
+You must infer the product model from implementation patterns, not just labels.
+
+================================
+PHASE 1 — CLASSIFY THE APP
+================================
+
+After inspecting the repo, classify the app into a structured product map.
+
+You must identify and classify:
+
+A. Core operating modules
+Examples may include:
+- Command / Cockpit
+- Contacts / CRM
+- Commerce
+- Bookings
+- Marketing / Social
+- Store
+- Marketplace
+- Expenses
+- Projects
+- Reports
+- Settings
+- Learn / Community
+- Studio or build-mode concepts
+- Admin/system surfaces
+
+B. Shared platform surfaces
+Examples may include:
+- app shell
+- sidebar nav
+- mobile bottom nav
+- mobile drawer
+- command palette
+- global add/new menu
+- notifications
+- workspace/business context
+- onboarding redirect logic
+- theme/accent system
+- keyboard shortcuts
+- swipe interactions
+- shared page headers
+- AI triggers / AI command hubs
+
+C. Public-facing surfaces
+Examples may include:
+- public booking page
+- public store/storefront
+- payment / invoice receipt surfaces
+- test/demo public flows
+- externally shareable URLs
+
+D. Platform-level patterns
+Examples may include:
+- module AI hooks
+- event emissions
+- analytics dashboards
+- shared list-detail flows
+- tabs and sub-workspaces
+- guide/onboarding overlays
+- mobile-safe interaction patterns
+- builder/configuration surfaces
+
+For every major route or module you identify, classify it as one or more of:
+- Operational workspace
+- Setup/admin workspace
+- Public customer-facing surface
+- Shared platform service
+- Cross-module utility
+- Intelligence / analytics layer
+- AI/copilot surface
+- Builder / configuration surface
+
+================================
+PHASE 2 — MASTER AUDIT
+================================
+
+Once classification is complete, perform a repo-aware full product audit.
+
+Analyze the app through these lenses:
+
+1. Product Architecture
+- What kind of product architecture does the app currently have?
+- Does it actually behave like one coherent business operating system?
+- Are modules organized around user goals or internal object categories?
+- Which modules are overgrown, under-defined, redundant, or mixed-purpose?
+- Which responsibilities belong at module level versus platform level?
+
+2. UX / UI Quality
+- Is the app shell helping or creating clutter?
+- Are there too many tabs, cards, menus, drawers, popups, banners, guides, and triggers?
+- Is there a consistent interaction grammar?
+- Does the app feel premium, modern, calm, and operationally efficient?
+- Where does visual or behavioral fragmentation exist?
+
+3. Workflow Efficiency
+- Can users move smoothly across major journeys such as:
+  - lead → contact → quote → booking → invoice → payment → follow-up
+  - service setup → public booking/store → booking/invoice → customer communication
+  - campaign/social lead → CRM → booking → revenue
+- Where do handoffs feel broken, manual, or repetitive?
+- Which module transitions should become more native and seamless?
+
+4. Modularity / Plug-In Architecture
+- Which entities should anchor the platform?
+- Which components should be reusable across modules?
+- Which cross-module contracts are missing?
+- How should modules plug into each other without becoming tightly coupled?
+
+5. Tiering / Progressive Disclosure
+- What should beginner users see first?
+- What should power users gain access to?
+- What belongs in admin/studio/build mode?
+- How can the app stay simple by default and powerful as users grow?
+
+6. AI / Automation Readiness
+- Does the current AI pattern reduce effort or add UI noise?
+- How should command palette, module AI hubs, contextual AI, and proactive AI coexist?
+- Which AI features should be visible versus embedded?
+- Where should automation and event-driven workflows be first-class?
+
+7. Competitive and Best-Practice Review
+- Compare the product’s patterns to strong modern products in service-business operations, scheduling, CRM, billing, storefront, and marketing.
+- Identify where the app is already differentiated.
+- Identify where the app still feels fragmented, overbuilt, or immature.
+
+================================
+PHASE 3 — PRODUCE ALL FOUR DELIVERABLES
+================================
+
+You must produce all four deliverables below in a single response.
+
+DELIVERABLE 1 — MASTER PRODUCT AUDIT
+DELIVERABLE 2 — MODULE-BY-MODULE REDESIGN CRITIQUE
+DELIVERABLE 3 — DESIGN-SYSTEM / SHARED-INTERACTION AUDIT
+DELIVERABLE 4 — CROSS-MODULE INTEGRATION / PLUG-IN ARCHITECTURE PLAN
+
+================================
+REQUIRED OUTPUT STRUCTURE
+================================
+
+Structure your response exactly like this:
+
+# 1. Repo Classification Map
+
+Start by listing and classifying all major app surfaces you found in the repo.
+
+Use this structure:
+
+## 1.1 App Shell and Shared Platform Surfaces
+- [surface name] — [classification] — [what it does]
+
+## 1.2 Core Modules
+- [module name] — [classification] — [what it does]
+
+## 1.3 Public / External Surfaces
+- [surface name] — [classification] — [what it does]
+
+## 1.4 Platform Patterns
+- [pattern name] — [classification] — [what it does]
+
+Then summarize:
+- what the product currently appears to be,
+- what its intended operating model seems to be,
+- what the repo reveals about its maturity and direction.
+
+# 2. Executive Product Diagnosis
+
+Provide:
+- what the app currently feels like,
+- what is already strong,
+- what is fragmented or immature,
+- the biggest product-wide weaknesses,
+- the biggest high-value opportunities.
+
+# 3. Global Architecture Critique
+
+Explain:
+- the current architectural model inferred from the repo,
+- whether the product behaves like a true business operating system,
+- where module boundaries are weak,
+- where page-level logic should become platform-level logic,
+- where setup/build logic and run/operate logic are mixed,
+- where the app shell is succeeding or failing,
+- how the architecture should evolve.
+
+# 4. Deliverable 1 — Master Product Audit
+
+Provide a full strategic audit of the product, covering:
+- product architecture,
+- UX quality,
+- workflow quality,
+- modularity,
+- tiering,
+- AI readiness,
+- competitive fit,
+- platform readiness.
+
+# 5. Deliverable 2 — Module-by-Module Redesign Critique
+
+For every major module/surface identified in the classification map, include:
+
+## [Module Name]
+
+A. Current Role
+- what it appears to do today
+
+B. Main User Jobs
+- primary jobs
+- secondary jobs
+- setup/admin jobs if relevant
+
+C. Current Strengths
+- what already works
+
+D. Current Problems
+- clutter
+- hierarchy issues
+- action overload
+- modal/popup excess
+- weak workflow
+- weak mobile UX
+- weak integration
+- structural confusion
+- outdated patterns
+
+E. High-Level Redesign Direction
+- what the module should become
+- what should remain, move, merge, split, or disappear
+- whether it should behave more like a dashboard, workspace, queue, builder, inspector, or setup surface
+
+F. Navigation / Layout Recommendations
+- ideal IA
+- pane model
+- tabs/sections
+- action placement
+- overlay strategy
+
+G. Best-Practice Upgrades
+- modern patterns to apply
+- interaction improvements
+- visibility improvements
+- operational improvements
+
+H. Innovation Opportunities
+- AI opportunities
+- automation opportunities
+- predictive workflows
+- strategic differentiators
+
+I. Plug-In / Cross-Module Integration
+- shared entities
+- shared actions
+- event triggers
+- handoffs to other modules
+- contextual continuity
+
+J. Tiering Strategy
+- beginner
+- intermediate/power-user
+- advanced/admin/studio
+
+K. Ideal End-State
+- concise description of the best future version of the module
+
+# 6. Deliverable 3 — Design-System / Shared-Interaction Audit
+
+Audit and redesign the shared UX system across the product.
+
+Include:
+
+## 6.1 Design-System Diagnosis
+- what the current design system feels like
+- what is consistent
+- what is inconsistent
+- what creates clutter
+
+## 6.2 Shared Shell Critique
+Critique:
+- sidebar
+- mobile nav
+- mobile drawer
+- top header
+- command palette
+- add/new menu
+- notifications
+- workspace context
+- onboarding logic
+
+## 6.3 Shared Component Recommendations
+Define standards for:
+- buttons
+- action bars
+- cards
+- list rows
+- tabs
+- badges/status chips
+- forms
+- filters
+- tables
+- inspectors
+- side sheets
+- bottom sheets
+- popups
+- drawers
+- banners
+- toasts
+- empty states
+- guides/help patterns
+
+## 6.4 Shared Interaction Rules
+Define product-wide rules for:
+- primary actions
+- secondary actions
+- destructive actions
+- inline actions
+- bulk actions
+- create/edit flows
+- detail inspection
+- list/detail patterns
+- overlay usage
+- confirmation behavior
+- mobile-safe behavior
+
+## 6.5 Search / Command / AI Standardization
+Define:
+- role of command palette
+- role of module AI hubs
+- role of contextual AI
+- role of proactive AI
+- how to avoid AI surface sprawl
+- how AI should feel embedded, not bolted on
+
+## 6.6 Decluttering Framework
+Create hard rules for:
+- action density
+- card density
+- menu depth
+- tab count
+- banner usage
+- popup usage
+- drawer vs sheet usage
+- guide usage
+- mobile-safe patterns
+- repeated controls
+
+## 6.7 Ideal Future Design System
+- describe the desired end-state of the shared UX system
+
+# 7. Deliverable 4 — Cross-Module Integration / Plug-In Architecture Plan
+
+Design the app as one connected platform.
+
+Include:
+
+## 7.1 Ecosystem Diagnosis
+- where modules already connect well
+- where continuity is weak
+- where the platform promise is not yet realized
+
+## 7.2 Shared Entity Model
+For each key entity:
+- entity name
+- owner module
+- reader modules
+- writer modules
+- event implications
+- recommended shared contract
+
+Potential entities to evaluate include:
+- business
+- workspace
+- contact
+- lead
+- segment
+- booking
+- service
+- staff
+- quote
+- invoice
+- payment
+- product
+- store item
+- campaign
+- post
+- automation
+- task
+- notification
+- report metric
+- AI insight
+
+## 7.3 Cross-Module Workflow Recommendations
+Define the most important end-to-end workflows.
+For each:
+- workflow name
+- entry point
+- modules involved
+- current friction
+- ideal future flow
+- recommended redesign
+
+## 7.4 Event Architecture Recommendations
+For each major event:
+- event name
+- source
+- listeners
+- user value
+- automation value
+
+## 7.5 Shared UI / Interaction Contracts
+Define reusable platform contracts for:
+- inspectors
+- action launchers
+- timelines/feeds
+- filter/search grammar
+- AI context
+- mobile interactions
+- public/private handoffs
+
+## 7.6 Tiering / Exposure Model
+Define:
+- default/simple tier
+- growth/business tier
+- advanced/admin/studio tier
+- AI/automation/pro tier
+
+## 7.7 Ideal Future Platform Model
+- describe the best future state of the app as a modular, pluggable, event-driven, AI-native business OS
+
+# 8. Strategic Prioritization
+
+Provide:
+- top product-wide priorities,
+- top module-specific priorities,
+- top design-system priorities,
+- top cross-module integration priorities,
+- which changes create the biggest UX and business impact first.
+
+# 9. Final Product Vision
+
+End with a concise but strong description of the ideal future-state product.
+
+It should describe how the app should feel when finished:
+- cohesive
+- modular
+- elegant
+- low-friction
+- mobile-capable
+- AI-native
+- event-driven
+- commercially competitive
+- easy for beginners
+- powerful for advanced users
+
+================================
+IMPORTANT WORKING RULES
+================================
+
+You must:
+- be decisive,
+- be highly critical,
+- recommend consolidation or removal when necessary,
+- optimize for clarity, speed, modularity, continuity, and premium UX,
+- prioritize fewer surfaces and stronger workflows,
+- prefer embedded intelligence over noisy intelligence,
+- separate setup/build logic from run/operate logic when appropriate,
+- identify repeated patterns across modules,
+- treat the repository as the product source of truth.
+
+Avoid:
+- generic praise,
+- vague advice,
+- superficial summaries,
+- feature ideation without architectural reasoning,
+- copying other products blindly.
+
+Always think in terms of:
+- less clutter, more meaning
+- fewer surfaces, stronger workflows
+- modular systems, not tangled features
+- one business graph, not disconnected modules
+- progressive power, not overwhelming complexity
+- AI that reduces effort, not AI that adds chrome
+
+At the very start of your response, include a brief section titled:
+“Inspection Summary”
+where you state:
+- what you inspected,
+- how you classified the app,
+- and the core product model you believe the repository is aiming for.
