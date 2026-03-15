@@ -61,22 +61,22 @@ export function useContactsPipeline() {
       case "email":
       case "follow_up":
         selectContact(action.contactId);
-        contactsData.setCrmViewTab("pipeline");
+        contactsData.setCrmViewTab("contacts");
         toast.info(`Opening ${action.contactName} — ${action.description}`);
         break;
       case "call":
         selectContact(action.contactId);
-        contactsData.setCrmViewTab("pipeline");
+        contactsData.setCrmViewTab("contacts");
         toast.info(`Opening ${action.contactName} — ready to call`);
         break;
       case "task":
         selectContact(action.contactId);
-        contactsData.setCrmViewTab("pipeline");
+        contactsData.setCrmViewTab("contacts");
         toast.info(`Opening ${action.contactName} — task details`);
         break;
       default:
         selectContact(action.contactId);
-        contactsData.setCrmViewTab("pipeline");
+        contactsData.setCrmViewTab("contacts");
         break;
     }
   }, [selectContact, router, contactsData.setCrmViewTab]);

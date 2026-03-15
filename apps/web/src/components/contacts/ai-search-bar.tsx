@@ -191,7 +191,7 @@ export function AiSearchBar({ onSelectContact, onApplyFilters, onExecuteCommand 
         onExecuteCommand({ type: "view_contact", contactId: contactId! });
         break;
       case "switch_tab":
-        onExecuteCommand({ type: "switch_tab", tab: (params?.tab as string) ?? "pipeline" });
+        onExecuteCommand({ type: "switch_tab", tab: (params?.tab as string) ?? "contacts" });
         break;
       case "filter_status":
         onExecuteCommand({ type: "filter_status", status: (params?.status as string) ?? "all" });

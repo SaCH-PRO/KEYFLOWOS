@@ -3,9 +3,9 @@
 import { useState, useRef, useEffect } from "react";
 import React from "react";
 import { motion } from "framer-motion";
-import { Mail, Phone, Building2, Tag, Trash2, MessageCircle, Star, Heart, Globe, FileText, CalendarCheck, UserPlus, Upload, Sparkles, MoreHorizontal, Receipt, Calendar, FileSignature, TrendingUp, Clock } from "lucide-react";
+import { Mail, Phone, Building2, Tag, Trash2, MessageCircle, MoreHorizontal, Receipt, Calendar, FileSignature, TrendingUp, Clock } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
-import { relativeTime, getScoreStyle, STATUS_COLORS, STATUS_BADGE_CLASSES, STATUS_BORDER_CLASSES } from "@/lib/crm-utils";
+import { relativeTime, getScoreStyle, STATUS_COLORS } from "@/lib/crm-utils";
 
 export type ContactCardData = {
   id: string;
@@ -34,21 +34,14 @@ export type ContactCardData = {
   } | null;
 };
 
-const SOURCE_CONFIG: Record<string, { label: string; icon: typeof Globe; color: string }> = {
-  booking: { label: "Booking", icon: CalendarCheck, color: "hsl(var(--kf-accent2))" },
-  store: { label: "Store", icon: Globe, color: "hsl(280 70% 60%)" },
-  "lead-form": { label: "Lead Form", icon: FileText, color: "hsl(200 70% 50%)" },
-  import: { label: "Import", icon: Upload, color: "hsl(45 90% 50%)" },
-  manual: { label: "Manual", icon: UserPlus, color: "hsl(var(--kf-accent1))" },
-  google: { label: "Google", icon: Globe, color: "hsl(120 60% 45%)" },
-  referral: { label: "Referral", icon: Sparkles, color: "hsl(320 70% 55%)" },
+const STATUS_DOT_COLORS: Record<string, string> = {
+  LEAD: "bg-blue-400",
+  PROSPECT: "bg-amber-400",
+  CLIENT: "bg-emerald-400",
+  LOST: "bg-muted-foreground/50",
+  VIP: "bg-violet-400",
+  INACTIVE: "bg-muted-foreground/30",
 };
-
-function getSourceInfo(source?: string | null) {
-  if (!source) return SOURCE_CONFIG.manual;
-  const key = source.toLowerCase().replace(/[_\s]/g, "-");
-  return SOURCE_CONFIG[key] || { label: source, icon: Globe, color: "hsl(var(--kf-muted-foreground))" };
-}
 
 export type QuickActionType = "create-invoice" | "book-appointment" | "send-quote";
 
@@ -68,26 +61,21 @@ interface ContactCardProps {
   index?: number;
 }
 
-function ContactCardInner({ contact, isSelected, selectable, selected, onToggleSelect, isPinned, onTogglePin, isFavorite, onToggleFavorite, onClick, onDelete, onQuickAction, index = 0 }: ContactCardProps) {
+function ContactCardInner({ contact, isSelected, selectable, selected, onToggleSelect, onClick, onDelete, onQuickAction, index = 0 }: ContactCardProps) {
   const [showActions, setShowActions] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
   const fullName = `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "Unnamed";
   const initials = `${contact.firstName?.[0] ?? ""}${contact.lastName?.[0] ?? ""}`.toUpperCase() || "?";
   const statusColor = STATUS_COLORS[contact.status ?? ""] ?? STATUS_COLORS.LEAD;
-  const badgeClass = STATUS_BADGE_CLASSES[contact.status ?? ""] ?? "bg-muted/20 text-muted-foreground border-border/30";
-  const borderClass = STATUS_BORDER_CLASSES[contact.status ?? ""] ?? "border-l-border/30";
-  const sourceInfo = getSourceInfo(contact.source);
-  const SourceIcon = sourceInfo.icon;
+  const statusDot = STATUS_DOT_COLORS[contact.status ?? ""] ?? "bg-blue-400";
 
   const leadScore = contact.meta?.leadScore;
   const hasLeadScore = leadScore != null && leadScore > 0;
   const scoreStyle = hasLeadScore ? getScoreStyle(leadScore!) : null;
 
-  const totalRevenue = contact.meta?.totalRevenue;
-  const hasRevenue = totalRevenue != null && totalRevenue > 0;
-
   const lastInteraction = contact.meta?.lastInteractionAt;
-  const hasLastInteraction = !!lastInteraction;
+
+  const waPhone = getContactPhone(contact);
 
   useEffect(() => {
     if (!showActions) return;
@@ -103,16 +91,6 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
     onDelete?.(contact);
   };
 
-  const handlePin = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onTogglePin?.(contact.id);
-  };
-
-  const handleFavorite = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onToggleFavorite?.(contact.id);
-  };
-
   const handleQuickAction = (e: React.MouseEvent, action: QuickActionType) => {
     e.stopPropagation();
     setShowActions(false);
@@ -123,184 +101,133 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
     <motion.div
       role="option"
       aria-selected={isSelected || selected || false}
-      aria-label={`${fullName} - ${contact.status ?? "LEAD"}${hasLeadScore ? ` - Lead Score: ${leadScore}` : ""}`}
-      initial={{ opacity: 0, y: 8 }}
+      aria-label={`${fullName} - ${contact.status ?? "LEAD"}`}
+      initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index < 10 ? index * 0.03 : 0 }}
+      transition={{ delay: index < 10 ? index * 0.02 : 0 }}
       onClick={onClick}
-      className={`rounded-2xl border border-l-2 ${borderClass} bg-card p-3 sm:p-4 cursor-pointer transition-all hover:bg-white/[0.02] group overflow-hidden ${
-        isSelected ? "border-[hsl(var(--kf-accent1))]/50 bg-[hsl(var(--kf-accent1))]/[0.04]" : "border-border/50"
+      className={`rounded-xl border bg-card px-3 py-2.5 cursor-pointer transition-all hover:bg-white/[0.02] group ${
+        isSelected ? "border-[hsl(var(--kf-accent1))]/50 bg-[hsl(var(--kf-accent1))]/[0.04]" : "border-border/40"
       } ${selected ? "border-[hsl(var(--kf-accent2))]/50 bg-[hsl(var(--kf-accent2))]/[0.04]" : ""}`}
     >
-      <div className="flex items-start gap-2.5 sm:gap-3 min-w-0">
+      <div className="flex items-center gap-2.5 min-w-0">
         {selectable && (
-          <div className="flex items-center pt-1.5 flex-shrink-0">
-            <input
-              type="checkbox"
-              checked={selected}
-              onChange={() => onToggleSelect?.(contact.id)}
-              onClick={(e) => e.stopPropagation()}
-              className="w-4 h-4 rounded border-border accent-[hsl(var(--kf-accent1))] cursor-pointer"
-            />
-          </div>
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onToggleSelect?.(contact.id)}
+            onClick={(e) => e.stopPropagation()}
+            className="w-4 h-4 rounded border-border accent-[hsl(var(--kf-accent1))] cursor-pointer flex-shrink-0"
+          />
         )}
 
-        <div className="flex-shrink-0">
-          <div
-            className="h-9 w-9 sm:h-10 sm:w-10 rounded-full flex items-center justify-center text-white text-xs font-bold"
-            style={{ background: statusColor }}
-          >
-            {initials}
-          </div>
+        <div
+          className="h-8 w-8 rounded-full flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0"
+          style={{ background: statusColor }}
+        >
+          {initials}
         </div>
 
-        <div className="flex-1 min-w-0 overflow-hidden">
-          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-            <h3 className="text-sm font-semibold truncate min-w-0 flex-shrink">{fullName}</h3>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <h3 className="text-sm font-semibold truncate">{fullName}</h3>
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDot}`} title={contact.status ?? "LEAD"} />
             {hasLeadScore && scoreStyle && (
               <span
                 className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${scoreStyle.bg} ${scoreStyle.text} flex-shrink-0`}
-                title={`Lead Score: ${leadScore} (${scoreStyle.label})`}
+                title={`Lead Score: ${leadScore}`}
               >
                 {leadScore}
               </span>
             )}
-            {onToggleFavorite && (
-              <button
-                onClick={handleFavorite}
-                className={`p-0.5 rounded transition-colors flex-shrink-0 ${isFavorite ? "text-rose-400" : "text-muted-foreground/50 md:opacity-0 md:group-hover:opacity-100"}`}
-                title={isFavorite ? "Remove from favorites" : "Add to favorites"}
-                aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
-              >
-                <Heart className={`w-3.5 h-3.5 ${isFavorite ? "fill-current" : ""}`} />
-              </button>
-            )}
-            {onTogglePin && (
-              <button
-                onClick={handlePin}
-                className={`p-0.5 rounded transition-colors flex-shrink-0 ${isPinned ? "text-yellow-400" : "text-muted-foreground/50 md:opacity-0 md:group-hover:opacity-100"}`}
-                title={isPinned ? "Unpin" : "Pin contact"}
-                aria-label={isPinned ? "Unpin contact" : "Pin contact"}
-              >
-                <Star className={`w-3.5 h-3.5 ${isPinned ? "fill-current" : ""}`} />
-              </button>
-            )}
-            <div className="flex-1" />
-            <span className={`text-[10px] font-semibold px-1.5 sm:px-2 py-0.5 rounded-md border flex-shrink-0 ${badgeClass}`}>
-              {contact.status ?? "LEAD"}
-            </span>
           </div>
-
-          <div className="flex items-center gap-1.5 mt-1 flex-wrap min-w-0">
-            {hasRevenue && (
-              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex-shrink-0">
-                <TrendingUp className="w-3 h-3 inline-block mr-0.5 -mt-px" />
-                TTD {totalRevenue!.toLocaleString("en-TT")}
+          <div className="flex items-center gap-2 mt-0.5 min-w-0">
+            {(contact.companyName || contact.jobTitle) && (
+              <span className="text-xs text-muted-foreground/70 truncate min-w-0">
+                {contact.companyName || contact.jobTitle}
               </span>
             )}
-            {(contact.companyName || contact.jobTitle) && (
-              <p className="text-xs text-muted-foreground/70 truncate min-w-0">
-                <Building2 className="w-3 h-3 inline-block mr-1 -mt-px" />
-                {contact.jobTitle && contact.companyName
-                  ? `${contact.jobTitle} at ${contact.companyName}`
-                  : contact.companyName || contact.jobTitle}
-              </p>
-            )}
-            {hasLastInteraction && (
+            {lastInteraction && (
               <span className="text-[10px] text-muted-foreground/50 flex items-center gap-0.5 flex-shrink-0">
                 <Clock className="w-3 h-3" />
-                {relativeTime(lastInteraction!)}
+                {relativeTime(lastInteraction)}
               </span>
             )}
           </div>
+        </div>
 
-          <div className="flex items-center gap-1.5 mt-1.5 min-w-0">
-            <span
-              className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md flex-shrink-0"
-              style={{ background: `${sourceInfo.color}15`, color: sourceInfo.color }}
-              title={`Source: ${sourceInfo.label}${contact.sourceDetail ? ` (${contact.sourceDetail})` : ""}`}
+        <div className="flex items-center gap-0.5 flex-shrink-0">
+          {contact.email && (
+            <a
+              href={`mailto:${contact.email}`}
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-blue-500/10 transition-colors"
+              title={`Email ${contact.email}`}
+              aria-label={`Email ${contact.email}`}
             >
-              <SourceIcon className="w-3 h-3" />
-              {sourceInfo.label}
-            </span>
-            {contact.preferredChannel && (
-              <span className="text-[10px] text-muted-foreground/60">
-                via {contact.preferredChannel}
-              </span>
-            )}
-          </div>
+              <Mail className="w-3.5 h-3.5 text-blue-400" />
+            </a>
+          )}
+          {contact.phone && (
+            <a
+              href={`tel:${contact.phone}`}
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-violet-500/10 transition-colors md:opacity-0 md:group-hover:opacity-100"
+              title={`Call ${contact.phone}`}
+              aria-label={`Call ${contact.phone}`}
+            >
+              <Phone className="w-3.5 h-3.5 text-violet-400" />
+            </a>
+          )}
+          {waPhone && (
+            <a
+              href={buildWhatsAppLink(waPhone, `Hi ${contact.firstName || ""}, `)}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-emerald-500/10 transition-colors md:opacity-0 md:group-hover:opacity-100"
+              title="WhatsApp"
+              aria-label="Message on WhatsApp"
+            >
+              <MessageCircle className="w-3.5 h-3.5 text-emerald-500" />
+            </a>
+          )}
 
-          <div className="flex items-center gap-1 mt-2 min-w-0 flex-wrap">
-            {contact.email && (
-              <a
-                href={`mailto:${contact.email}`}
-                onClick={(e) => e.stopPropagation()}
-                className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-blue-500/10 transition-colors flex-shrink-0"
-                title={`Email ${contact.email}`}
-                aria-label={`Email ${contact.email}`}
+          {onQuickAction && (
+            <div className="relative flex-shrink-0" ref={actionsRef}>
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowActions(!showActions); }}
+                className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-white/[0.06] text-muted-foreground/50 hover:text-muted-foreground transition-colors md:opacity-0 md:group-hover:opacity-100"
+                title="Quick actions"
+                aria-haspopup="menu"
+                aria-expanded={showActions}
               >
-                <Mail className="w-3.5 h-3.5 text-blue-400" />
-              </a>
-            )}
-            {contact.phone && (
-              <a
-                href={`tel:${contact.phone}`}
-                onClick={(e) => e.stopPropagation()}
-                className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-violet-500/10 transition-colors flex-shrink-0"
-                title={`Call ${contact.phone}`}
-                aria-label={`Call ${contact.phone}`}
-              >
-                <Phone className="w-3.5 h-3.5 text-violet-400" />
-              </a>
-            )}
-            {(() => {
-              const waPhone = getContactPhone(contact);
-              if (!waPhone) return null;
-              const firstName = contact.firstName || "";
-              return (
-                <a
-                  href={buildWhatsAppLink(waPhone, `Hi ${firstName}, `)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-emerald-500/10 transition-colors flex-shrink-0"
-                  title="WhatsApp"
-                  aria-label="Message on WhatsApp"
-                >
-                  <MessageCircle className="w-3.5 h-3.5 text-emerald-500" />
-                </a>
-              );
-            })()}
-
-            {onQuickAction && (
-              <div className="relative flex-shrink-0" ref={actionsRef}>
-                <button
-                  onClick={(e) => { e.stopPropagation(); setShowActions(!showActions); }}
-                  className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-white/[0.06] text-muted-foreground/50 hover:text-muted-foreground transition-colors md:opacity-0 md:group-hover:opacity-100"
-                  title="Quick actions"
-                  aria-haspopup="menu"
-                  aria-expanded={showActions}
-                >
-                  <MoreHorizontal className="w-3.5 h-3.5" />
-                </button>
-                {showActions && (
-                  <div role="menu" className="absolute right-0 bottom-full mb-1 sm:bottom-auto sm:top-9 sm:mb-0 z-50 w-48 bg-popover/95 backdrop-blur-xl border border-border/50 shadow-xl rounded-xl py-1 animate-in fade-in zoom-in-95">
-                    <button role="menuitem" onClick={(e) => handleQuickAction(e, "create-invoice")} className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs hover:bg-white/[0.05] transition-colors">
-                      <Receipt className="w-4 h-4 text-emerald-400" />
-                      Create Invoice
-                    </button>
-                    <button role="menuitem" onClick={(e) => handleQuickAction(e, "book-appointment")} className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs hover:bg-white/[0.05] transition-colors">
-                      <Calendar className="w-4 h-4 text-blue-400" />
-                      Book Appointment
-                    </button>
-                    <button role="menuitem" onClick={(e) => handleQuickAction(e, "send-quote")} className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs hover:bg-white/[0.05] transition-colors">
-                      <FileSignature className="w-4 h-4 text-violet-400" />
-                      Send Quote
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
+                <MoreHorizontal className="w-3.5 h-3.5" />
+              </button>
+              {showActions && (
+                <div role="menu" className="absolute right-0 bottom-full mb-1 sm:bottom-auto sm:top-9 sm:mb-0 z-50 w-44 bg-popover/95 backdrop-blur-xl border border-border/50 shadow-xl rounded-xl py-1 animate-in fade-in zoom-in-95">
+                  <button role="menuitem" onClick={(e) => handleQuickAction(e, "create-invoice")} className="w-full flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-white/[0.05] transition-colors">
+                    <Receipt className="w-3.5 h-3.5 text-emerald-400" />
+                    Create Invoice
+                  </button>
+                  <button role="menuitem" onClick={(e) => handleQuickAction(e, "book-appointment")} className="w-full flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-white/[0.05] transition-colors">
+                    <Calendar className="w-3.5 h-3.5 text-blue-400" />
+                    Book Appointment
+                  </button>
+                  <button role="menuitem" onClick={(e) => handleQuickAction(e, "send-quote")} className="w-full flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-white/[0.05] transition-colors">
+                    <FileSignature className="w-3.5 h-3.5 text-violet-400" />
+                    Send Quote
+                  </button>
+                  <hr className="my-1 border-border/30" />
+                  <button role="menuitem" onClick={handleDelete} className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors">
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Delete
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          {!onQuickAction && onDelete && (
             <button
               onClick={handleDelete}
               className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-red-500/10 text-muted-foreground/40 hover:text-red-400 transition-colors md:opacity-0 md:group-hover:opacity-100 flex-shrink-0"
@@ -309,28 +236,26 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
-
-            <div className="flex-1" />
-
-            {contact.tags && contact.tags.length > 0 && (
-              <div className="flex items-center gap-1 flex-shrink-0">
-                {contact.tags.slice(0, 2).map((tag) => (
-                  <span
-                    key={tag}
-                    className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-white/[0.06] text-muted-foreground border border-border/30 max-w-[80px] truncate"
-                  >
-                    <Tag className="w-3 h-3 flex-shrink-0" />
-                    {tag}
-                  </span>
-                ))}
-                {contact.tags.length > 2 && (
-                  <span className="text-[10px] text-muted-foreground/50 font-medium">+{contact.tags.length - 2}</span>
-                )}
-              </div>
-            )}
-          </div>
+          )}
         </div>
       </div>
+
+      {contact.tags && contact.tags.length > 0 && (
+        <div className="flex items-center gap-1 mt-1.5 ml-[42px] min-w-0">
+          {contact.tags.slice(0, 3).map((tag) => (
+            <span
+              key={tag}
+              className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-white/[0.05] text-muted-foreground/70 max-w-[80px] truncate"
+            >
+              <Tag className="w-2.5 h-2.5 flex-shrink-0" />
+              {tag}
+            </span>
+          ))}
+          {contact.tags.length > 3 && (
+            <span className="text-[10px] text-muted-foreground/40">+{contact.tags.length - 3}</span>
+          )}
+        </div>
+      )}
     </motion.div>
   );
 }

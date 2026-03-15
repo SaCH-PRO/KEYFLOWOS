@@ -50,7 +50,7 @@ interface FilterState {
   activeListId: string | null;
   activeListContactIds: string[] | null;
   listsCount: number;
-  crmViewTab: "pipeline" | "insights" | "engage" | "database";
+  crmViewTab: "contacts" | "insights" | "studio";
   selectMode: boolean;
   selectedIds: Set<string>;
 }
@@ -64,7 +64,7 @@ type FilterAction =
   | { type: "SET_ACTIVE_LIST_ID"; payload: string | null }
   | { type: "SET_ACTIVE_LIST_CONTACT_IDS"; payload: string[] | null }
   | { type: "SET_LISTS_COUNT"; payload: number }
-  | { type: "SET_CRM_VIEW_TAB"; payload: "pipeline" | "insights" | "engage" | "database" }
+  | { type: "SET_CRM_VIEW_TAB"; payload: "contacts" | "insights" | "studio" }
   | { type: "SET_SELECT_MODE"; payload: boolean }
   | { type: "SET_SELECTED_IDS"; payload: Set<string> }
   | { type: "TOGGLE_SELECT_MODE" }
@@ -79,7 +79,7 @@ const initialFilterState: FilterState = {
   activeListId: null,
   activeListContactIds: null,
   listsCount: 0,
-  crmViewTab: "pipeline",
+  crmViewTab: "contacts",
   selectMode: false,
   selectedIds: new Set(),
 };
@@ -139,7 +139,7 @@ export function useContactsData() {
   const setActiveListId = useCallback((v: string | null) => dispatch({ type: "SET_ACTIVE_LIST_ID", payload: v }), []);
   const setActiveListContactIds = useCallback((v: string[] | null) => dispatch({ type: "SET_ACTIVE_LIST_CONTACT_IDS", payload: v }), []);
   const setListsCount = useCallback((v: number) => dispatch({ type: "SET_LISTS_COUNT", payload: v }), []);
-  const setCrmViewTab = useCallback((v: "pipeline" | "insights" | "engage" | "database") => dispatch({ type: "SET_CRM_VIEW_TAB", payload: v }), []);
+  const setCrmViewTab = useCallback((v: "contacts" | "insights" | "studio") => dispatch({ type: "SET_CRM_VIEW_TAB", payload: v }), []);
   const setSelectMode = useCallback((v: boolean) => {
     dispatch({ type: "SET_SELECT_MODE", payload: v });
   }, []);

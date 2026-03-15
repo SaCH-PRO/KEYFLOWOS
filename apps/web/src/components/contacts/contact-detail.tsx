@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { motion } from "framer-motion";
-import { MessageSquare, ClipboardList } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { MessageSquare, ClipboardList, Sparkles, ChevronDown } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ContactDetailHeader } from "./contact-detail-header";
 import { ContactDetailStats } from "./contact-detail-stats";
@@ -158,6 +158,7 @@ export function ContactDetail({
     action: () => {},
   });
   const [commLoggerOpen, setCommLoggerOpen] = useState(false);
+  const [aiPanelsOpen, setAiPanelsOpen] = useState(false);
 
   if (loading) {
     return (
@@ -288,13 +289,6 @@ export function ContactDetail({
           />
         </div>
 
-        <div className="shrink-0 space-y-2">
-          <AiPrepBriefPanel contactId={contact.id} />
-          <AiContactSummaryPanel contactId={contact.id} />
-          <AiLeadScorePanel contactId={contact.id} currentScore={contact.meta?.leadScore} />
-          <AiTagSuggestionsPanel contactId={contact.id} currentTags={contact.tags} />
-        </div>
-
         <div className="shrink-0">
           <ContactDetailInfo contact={contact} relatedContacts={relatedContacts} onSelectRelatedContact={onSelectRelatedContact} />
         </div>
@@ -322,6 +316,35 @@ export function ContactDetail({
             onGenerateAiInsight={onGenerateAiInsight}
             onRefreshConversationContext={onRefreshConversationContext}
           />
+        </div>
+
+        <div className="shrink-0">
+          <button
+            onClick={() => setAiPanelsOpen(!aiPanelsOpen)}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-white/[0.03] transition-colors text-left"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-[hsl(var(--kf-accent2))]" />
+            <span className="text-xs font-semibold text-muted-foreground">AI Intelligence</span>
+            <ChevronDown className={`w-3.5 h-3.5 ml-auto text-muted-foreground/50 transition-transform ${aiPanelsOpen ? "rotate-180" : ""}`} />
+          </button>
+          <AnimatePresence>
+            {aiPanelsOpen && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <div className="space-y-2 pt-1">
+                  <AiContactSummaryPanel contactId={contact.id} />
+                  <AiPrepBriefPanel contactId={contact.id} />
+                  <AiLeadScorePanel contactId={contact.id} currentScore={contact.meta?.leadScore} />
+                  <AiTagSuggestionsPanel contactId={contact.id} currentTags={contact.tags} />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </motion.div>
 

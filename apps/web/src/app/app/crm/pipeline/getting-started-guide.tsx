@@ -16,13 +16,11 @@ import {
   LayoutGrid,
   Database,
   BarChart3,
-  Sparkles,
   GripVertical,
   Eye,
   Brain,
   ListChecks,
   StickyNote,
-  Route,
   ChevronDown,
   ChevronUp,
   Search,
@@ -60,8 +58,8 @@ interface GuideSection {
 const GUIDE_SECTIONS: GuideSection[] = [
   {
     id: "pipeline",
-    tab: "pipeline",
-    label: "Pipeline",
+    tab: "contacts",
+    label: "Contacts",
     icon: LayoutGrid,
     color: "hsl(var(--kf-accent1))",
     steps: [
@@ -121,8 +119,8 @@ const GUIDE_SECTIONS: GuideSection[] = [
   },
   {
     id: "database",
-    tab: "database",
-    label: "Database",
+    tab: "studio",
+    label: "Studio",
     icon: Database,
     color: "hsl(200 80% 55%)",
     steps: [
@@ -194,45 +192,8 @@ const GUIDE_SECTIONS: GuideSection[] = [
     ],
   },
   {
-    id: "engage",
-    tab: "engage",
-    label: "Engage",
-    icon: Sparkles,
-    color: "hsl(var(--kf-accent2))",
-    steps: [
-      {
-        id: "next-actions",
-        title: "Next Actions Queue",
-        desc: "Your AI generates a prioritized queue of what to do next — follow up on overdue tasks, convert stale prospects, re-engage cold leads, and more.",
-        icon: Zap,
-        color: "hsl(45 93% 47%)",
-      },
-      {
-        id: "autopilot",
-        title: "Autopilot Actions",
-        desc: "Let AI handle routine tasks automatically — welcome messages for new leads, payment reminders, post-session follow-ups. Approve or deny each one.",
-        icon: Sparkles,
-        color: "hsl(var(--kf-accent2))",
-      },
-      {
-        id: "sequences",
-        title: "Engagement Sequences",
-        desc: "Build multi-step automated sequences — like a 5-step new lead onboarding or a re-engagement drip. Enroll contacts and track progress through each step.",
-        icon: Route,
-        color: "hsl(var(--kf-accent1))",
-      },
-      {
-        id: "momentum",
-        title: "CRM Momentum",
-        desc: "Earn XP for completing actions, closing deals, and staying consistent. Track your streaks and level up your CRM game with the built-in gamification system.",
-        icon: TrendingUp,
-        color: "hsl(142 76% 36%)",
-      },
-    ],
-  },
-  {
     id: "ai",
-    tab: "pipeline",
+    tab: "contacts",
     label: "AI Intelligence",
     icon: Brain,
     color: "hsl(270 70% 60%)",
