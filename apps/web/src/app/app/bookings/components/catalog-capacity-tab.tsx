@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Briefcase,
@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import type { Service, StaffMember, Booking } from "./bookings-types";
 import { formatAmount } from "../../commerce/utils/commerce-utils";
+
+const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 interface CatalogCapacityTabProps {
   services: Service[];
@@ -39,6 +41,85 @@ const stagger = {
     visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
   },
 };
+
+function AvailabilityHours() {
+  const [hours, setHours] = useState<Record<number, { open: string; close: string; enabled: boolean }>>(() => {
+    const defaults: Record<number, { open: string; close: string; enabled: boolean }> = {};
+    for (let i = 0; i < 7; i++) {
+      defaults[i] = { open: "09:00", close: "17:00", enabled: i >= 1 && i <= 5 };
+    }
+    return defaults;
+  });
+
+  return (
+    <motion.div variants={stagger.item} className="space-y-3">
+      <div className="flex items-center gap-2">
+        <Clock className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+        <h3 className="text-sm font-semibold">Availability & Hours</h3>
+      </div>
+
+      <div className="kf-card p-4 space-y-2">
+        <p className="text-[11px] text-muted-foreground mb-3">
+          Set your booking availability for each day of the week.
+        </p>
+        {DAY_LABELS.map((day, idx) => {
+          const entry = hours[idx];
+          return (
+            <div key={day} className="flex items-center gap-3">
+              <button
+                onClick={() =>
+                  setHours((prev) => ({
+                    ...prev,
+                    [idx]: { ...prev[idx], enabled: !prev[idx].enabled },
+                  }))
+                }
+                className="w-5 h-5 rounded border flex items-center justify-center shrink-0 transition-colors"
+                style={{
+                  borderColor: entry.enabled ? "hsl(var(--kf-success) / 0.5)" : "hsl(var(--border))",
+                  background: entry.enabled ? "hsl(var(--kf-success) / 0.1)" : "transparent",
+                }}
+              >
+                {entry.enabled && (
+                  <div className="w-2.5 h-2.5 rounded-sm" style={{ background: "hsl(var(--kf-success))" }} />
+                )}
+              </button>
+              <span className="text-xs font-medium w-24">{day}</span>
+              {entry.enabled ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="time"
+                    value={entry.open}
+                    onChange={(e) =>
+                      setHours((prev) => ({
+                        ...prev,
+                        [idx]: { ...prev[idx], open: e.target.value },
+                      }))
+                    }
+                    className="kf-input text-xs px-2 py-1 w-[100px]"
+                  />
+                  <span className="text-xs text-muted-foreground">to</span>
+                  <input
+                    type="time"
+                    value={entry.close}
+                    onChange={(e) =>
+                      setHours((prev) => ({
+                        ...prev,
+                        [idx]: { ...prev[idx], close: e.target.value },
+                      }))
+                    }
+                    className="kf-input text-xs px-2 py-1 w-[100px]"
+                  />
+                </div>
+              ) : (
+                <span className="text-xs text-muted-foreground italic">Closed</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </motion.div>
+  );
+}
 
 export default function CatalogCapacityTab({
   services,
@@ -224,7 +305,8 @@ export default function CatalogCapacityTab({
                 </div>
                 <button
                   onClick={() => onDeleteStaff(s.id)}
-                  className="p-1 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-500/10 hover:text-red-400 transition-all shrink-0"
+                  className="p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-all shrink-0"
+                  style={{ color: "hsl(var(--kf-error) / 0.7)" }}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -233,6 +315,8 @@ export default function CatalogCapacityTab({
           </div>
         )}
       </motion.div>
+
+      <AvailabilityHours />
 
       <motion.div variants={stagger.item} className="space-y-3">
         <div className="flex items-center gap-2">
@@ -261,9 +345,16 @@ export default function CatalogCapacityTab({
             <div className="flex items-center gap-2">
               {calendarConnected ? (
                 <>
-                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
-                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <span className="text-[11px] text-emerald-400 font-medium">Connected</span>
+                  <div
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg"
+                    style={{
+                      background: "hsl(var(--kf-success) / 0.1)",
+                      borderWidth: 1,
+                      borderColor: "hsl(var(--kf-success) / 0.3)",
+                    }}
+                  >
+                    <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-success))" }} />
+                    <span className="text-[11px] font-medium" style={{ color: "hsl(var(--kf-success))" }}>Connected</span>
                   </div>
                   <button
                     onClick={onDisconnectCalendar}
