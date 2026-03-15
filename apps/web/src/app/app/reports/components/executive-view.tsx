@@ -55,22 +55,21 @@ export function ExecutiveView({ report }: { report: GeneratedReport }) {
         <NarrativeSection content={report.aiNarrative} />
       </Card>
 
-      {m.revenue.topClients.length > 0 && (
-        <Card className="p-4 bg-slate-950/60 backdrop-blur border-border/60">
-          <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-            <Target className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
-            Top Revenue Clients
-          </h3>
-          <DataTable
-            headers={["Client", "Revenue", "Share"]}
-            rows={m.revenue.topClients.map(c => [
-              c.name,
-              formatCurrency(c.total, m.currency),
-              <ProgressBar key={c.name} value={c.total} max={m.revenue.topClients[0]?.total || 1} />
-            ])}
-          />
-        </Card>
-      )}
+      <Card className="p-4 bg-slate-950/60 backdrop-blur border-border/60">
+        <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+          <Target className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+          Top Revenue Clients
+        </h3>
+        <DataTable
+          headers={["Client", "Revenue", "Share"]}
+          rows={m.revenue.topClients.map(c => [
+            c.name,
+            formatCurrency(c.total, m.currency),
+            <ProgressBar key={c.name} value={c.total} max={m.revenue.topClients[0]?.total || 1} />
+          ])}
+          emptyText="No client data for this period — try a wider date range"
+        />
+      </Card>
     </div>
   );
 }

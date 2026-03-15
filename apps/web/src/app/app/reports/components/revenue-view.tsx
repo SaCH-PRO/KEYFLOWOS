@@ -41,15 +41,14 @@ export function RevenueView({ report }: { report: GeneratedReport }) {
           </div>
         </Card>
 
-        {m.revenue.topClients.length > 0 && (
-          <Card className="p-4 bg-slate-950/60 backdrop-blur border-border/60">
-            <h3 className="text-sm font-semibold mb-3">Top Clients by Revenue</h3>
-            <DataTable
-              headers={["Client", "Revenue"]}
-              rows={m.revenue.topClients.map(c => [c.name, formatCurrency(c.total, m.currency)])}
-            />
-          </Card>
-        )}
+        <Card className="p-4 bg-slate-950/60 backdrop-blur border-border/60">
+          <h3 className="text-sm font-semibold mb-3">Top Clients by Revenue</h3>
+          <DataTable
+            headers={["Client", "Revenue"]}
+            rows={m.revenue.topClients.map(c => [c.name, formatCurrency(c.total, m.currency)])}
+            emptyText="No client revenue data for this period — try a wider date range"
+          />
+        </Card>
       </div>
     </div>
   );
