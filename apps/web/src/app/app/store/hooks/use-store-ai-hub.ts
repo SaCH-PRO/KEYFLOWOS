@@ -24,8 +24,8 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
       title: "Store is Offline",
       description: "Your storefront is currently in draft mode. Toggle it live so customers can find you.",
       priority: "high",
-      actionLabel: "Go to Overview",
-      actionKey: "switch_tab:overview",
+      actionLabel: "Go to Storefront",
+      actionKey: "switch_tab:storefront",
     });
   }
 
@@ -49,7 +49,7 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
       description: "Stores with a hero banner image see up to 40% higher engagement. Upload one in Customize.",
       priority: "medium",
       actionLabel: "Customize store",
-      actionKey: "switch_tab:customize",
+      actionKey: "switch_tab:storefront",
     });
   }
 
@@ -60,8 +60,8 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
       title: "No Logo Uploaded",
       description: "A branded logo builds trust and recognition. Add one in your store settings.",
       priority: "medium",
-      actionLabel: "Go to settings",
-      actionKey: "switch_tab:settings",
+      actionLabel: "Go to storefront",
+      actionKey: "switch_tab:storefront",
     });
   }
 
@@ -73,7 +73,7 @@ async function generateStoreSuggestions(context: ModuleContext): Promise<AiSugge
       description: `You only have ${testimonials.length} testimonial${testimonials.length !== 1 ? "s" : ""}. Adding more social proof can boost conversions by up to 30%.`,
       priority: "medium",
       actionLabel: "Manage testimonials",
-      actionKey: "switch_tab:customize",
+      actionKey: "switch_tab:storefront",
     });
   }
 
