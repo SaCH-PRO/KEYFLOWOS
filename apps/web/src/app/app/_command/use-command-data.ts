@@ -46,6 +46,7 @@ export function useCommandData() {
   const [nudges, setNudges] = useState<NudgeItem[]>([]);
   const [dismissingNudge, setDismissingNudge] = useState<string | null>(null);
   const [financialPulse, setFinancialPulse] = useState<FinancialPulse | null>(null);
+  const [dismissedAlertIds, setDismissedAlertIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const initWorkspace = async () => {
@@ -202,7 +203,7 @@ export function useCommandData() {
   const completedBookingsToday = cockpit?.stats?.completedBookingsToday ?? 0;
   const completedToday = gamification?.dailyTasksCompleted ?? 0;
   const priorities = cockpit?.priorities ?? [];
-  const financialAlerts = financialPulse?.alerts ?? [];
+  const financialAlerts = (financialPulse?.alerts ?? []).filter((a) => !dismissedAlertIds.has(a.id));
   const momentum = cockpit?.momentum ?? 0;
 
   const greeting = useMemo(() => {
@@ -245,5 +246,7 @@ export function useCommandData() {
     handleMomentumSnooze,
     handleMomentumDismiss,
     handleNudgeSnooze,
+    handleDismissTask: (id: string) => setTasks((prev) => prev.filter((t) => t.id !== id)),
+    handleDismissAlert: (id: string) => setDismissedAlertIds((prev) => new Set(prev).add(id)),
   };
 }
