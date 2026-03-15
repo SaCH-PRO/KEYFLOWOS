@@ -30,7 +30,10 @@ import { FormOptimizationQueue } from "./components/form-optimization-queue";
 import MarketingInsightsTab from "./insights/marketing-insights-tab";
 import { SocialTabContent } from "./components/social-tab-content";
 import { MarketingCalendarTab } from "./components/marketing-calendar-tab";
+import { AudienceHealthSection } from "./components/campaign-intelligence-cards";
 import type { EmailCampaign, LeadForm } from "@/lib/client";
+
+type CreateMode = "email" | "social";
 
 type MarketingTab = "create" | "calendar" | "audience" | "performance";
 
@@ -63,6 +66,7 @@ export default function MarketingPage() {
   const marketingAi = useMarketingAiHub();
 
   const [activeTab, setActiveTab] = useState<MarketingTab>("create");
+  const [createMode, setCreateMode] = useState<CreateMode>("email");
   const [showSearch, setShowSearch] = useState(false);
   const initialTabSet = useRef(false);
   const directionRef = useRef<number>(0);
@@ -164,7 +168,9 @@ export default function MarketingPage() {
     );
   }
 
-  const actionLabel = activeTab === "create" ? "New Campaign" : activeTab === "audience" ? "New Form" : undefined;
+  const actionLabel = activeTab === "create"
+    ? (createMode === "email" ? "New Campaign" : "New Post")
+    : activeTab === "audience" ? "New Form" : undefined;
 
   return (
     <div className="space-y-6" aria-label="Marketing">
@@ -214,29 +220,51 @@ export default function MarketingPage() {
             {activeTab === "create" && (
               <div className="space-y-6">
                 <CampaignActionQueue campaigns={mk.campaigns} onEdit={handleEditCampaign} onSend={handleSendCampaign} onAiWrite={() => handleAiAction("campaign-content-generator")} />
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <h3 className="text-sm font-semibold flex items-center gap-2">
-                      <Mail className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} /> Email Campaigns
-                    </h3>
-                    <CampaignsPanel businessId={mk.businessId} campaigns={mk.campaigns} setCampaigns={mk.setCampaigns} availableTags={mk.availableTags} onCampaignCreated={mk.handleCampaignCreated} onCampaignSent={mk.handleCampaignSent} onViewContact={mk.handleViewContact} onAiWrite={() => handleAiAction("campaign-content-generator")} />
-                  </div>
-                  <div className="space-y-4">
-                    <h3 className="text-sm font-semibold flex items-center gap-2">
-                      <PenSquare className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} /> Social Posts
-                    </h3>
-                    <SocialTabContent businessId={mk.businessId} onPostsLoaded={mk.handleSocialPostsLoaded} />
-                  </div>
+                <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/20 border border-border/30 w-fit">
+                  <button
+                    onClick={() => setCreateMode("email")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                      createMode === "email"
+                        ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <Mail className="w-3.5 h-3.5" /> Email Campaign
+                  </button>
+                  <button
+                    onClick={() => setCreateMode("social")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                      createMode === "social"
+                        ? "bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))] shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <PenSquare className="w-3.5 h-3.5" /> Social Post
+                  </button>
                 </div>
+                <AnimatePresence mode="wait">
+                  {createMode === "email" ? (
+                    <motion.div key="email" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+                      <CampaignsPanel businessId={mk.businessId} campaigns={mk.campaigns} setCampaigns={mk.setCampaigns} availableTags={mk.availableTags} onCampaignCreated={mk.handleCampaignCreated} onCampaignSent={mk.handleCampaignSent} onViewContact={mk.handleViewContact} onAiWrite={() => handleAiAction("campaign-content-generator")} />
+                    </motion.div>
+                  ) : (
+                    <motion.div key="social" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+                      <SocialTabContent businessId={mk.businessId} onPostsLoaded={mk.handleSocialPostsLoaded} />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             )}
             {activeTab === "calendar" && (
               <MarketingCalendarTab campaigns={mk.campaigns} socialPosts={mk.socialPosts} onTabChange={handleTabChange} />
             )}
             {activeTab === "audience" && (
-              <div className="space-y-4">
-                <FormOptimizationQueue forms={mk.forms} onAiOptimize={() => handleAiAction("lead-form-optimizer")} onEdit={handleEditForm} onToggle={mk.handleToggleForm} />
-                <LeadFormsPanel businessId={mk.businessId} forms={mk.forms} setForms={mk.setForms} onViewContact={mk.handleViewContact} onAiOptimize={() => handleAiAction("lead-form-optimizer")} />
+              <div className="space-y-6">
+                <AudienceHealthSection businessId={mk.businessId} />
+                <div className="space-y-4">
+                  <FormOptimizationQueue forms={mk.forms} onAiOptimize={() => handleAiAction("lead-form-optimizer")} onEdit={handleEditForm} onToggle={mk.handleToggleForm} />
+                  <LeadFormsPanel businessId={mk.businessId} forms={mk.forms} setForms={mk.setForms} onViewContact={mk.handleViewContact} onAiOptimize={() => handleAiAction("lead-form-optimizer")} />
+                </div>
               </div>
             )}
             {activeTab === "performance" && (
