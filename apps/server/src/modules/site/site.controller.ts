@@ -35,9 +35,9 @@ export class SiteController {
   @Post('businesses/:businessId/analytics/event')
   trackEvent(
     @Param('businessId') businessId: string,
-    @Body() body: { type: string; itemId?: string; metadata?: any },
+    @Body() body: { type: string; itemId?: string },
   ) {
-    return this.siteService.trackEvent(businessId, body.type, body.itemId, body.metadata);
+    return this.siteService.trackEvent(businessId, body.type, body.itemId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -47,5 +47,35 @@ export class SiteController {
     @Query('days') days?: string,
   ) {
     return this.siteService.getAnalytics(businessId, days ? parseInt(days, 10) : undefined);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/conversion-funnel')
+  getConversionFunnel(@Param('businessId') businessId: string) {
+    return this.siteService.getConversionFunnel(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/product-health')
+  getProductHealth(@Param('businessId') businessId: string) {
+    return this.siteService.getProductHealthAudit(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/seo-health')
+  getSeoHealth(@Param('businessId') businessId: string) {
+    return this.siteService.getSeoHealthCheck(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/conversion-suggestions')
+  getConversionSuggestions(@Param('businessId') businessId: string) {
+    return this.siteService.getConversionSuggestions(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/conversion-advice')
+  getAiConversionAdvice(@Param('businessId') businessId: string) {
+    return this.siteService.getAiConversionAdvice(businessId);
   }
 }

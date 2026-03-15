@@ -52,6 +52,7 @@ import { AppearanceCustomizer } from "./components/appearance-customizer";
 import { MerchandisingPanel } from "./components/merchandising-panel";
 import { StoreAnalyticsDashboard } from "./components/store-analytics";
 import { StoreCommandHero } from "./components/store-command-hero";
+import { ConversionInsightsPanel } from "./components/conversion-insights";
 import { SocialProofPanel } from "./components/social-proof-panel";
 import type { DriftedItem } from "./components/store-types";
 import { fetchStoreAnalytics, StoreAnalytics } from "@/lib/client";
@@ -598,6 +599,7 @@ export default function StorePage() {
                   businessName={businessData?.name}
                   onTabChange={handleTabChange}
                 />
+                <ConversionInsightsPanel businessId={businessId} onTabChange={handleTabChange} />
                 <StoreAnalyticsDashboard businessId={businessId} />
               </div>
             )}
