@@ -1,6 +1,7 @@
-import { Controller, Get, Inject, Param, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Query, UseGuards } from '@nestjs/common';
 import { FlowService } from './flow.service';
 import { ActivityService } from './activity.service';
+import { CrossModuleAgentService } from './cross-module-agent.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -10,6 +11,7 @@ export class FlowController {
   constructor(
     @Inject(FlowService) private readonly flowService: FlowService,
     @Inject(ActivityService) private readonly activityService: ActivityService,
+    @Inject(CrossModuleAgentService) private readonly crossModuleAgent: CrossModuleAgentService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
@@ -37,6 +39,22 @@ export class FlowController {
       limit: limit ? parseInt(limit, 10) : 30,
       cursor,
     });
+  }
+
+  @Get('businesses/:businessId/cross-module-workflows')
+  @UseGuards(AuthGuard, BusinessGuard)
+  async listCrossModuleWorkflows(@Param('businessId') businessId: string) {
+    return this.crossModuleAgent.listWorkflows(businessId);
+  }
+
+  @Patch('businesses/:businessId/cross-module-workflows/:workflowKey')
+  @UseGuards(AuthGuard, BusinessGuard)
+  async updateCrossModuleWorkflow(
+    @Param('businessId') businessId: string,
+    @Param('workflowKey') workflowKey: string,
+    @Body() body: { enabled?: boolean; config?: any },
+  ) {
+    return this.crossModuleAgent.updateWorkflow(businessId, workflowKey, body);
   }
 
   @Get('businesses/:businessId/search')

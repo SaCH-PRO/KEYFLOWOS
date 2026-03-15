@@ -4450,4 +4450,58 @@ export async function bookingsAiRevenueInsights(businessId?: string): Promise<Ap
   });
 }
 
+export type CrossModuleWorkflow = {
+  key: string;
+  name: string;
+  description: string;
+  category: string;
+  triggerEvent: string;
+  enabled: boolean;
+  config: Record<string, any>;
+  configSchema: { key: string; label: string; type: string; default: any }[];
+  lastRunAt: string | null;
+  runCount: number;
+};
+
+export async function fetchCrossModuleWorkflows(businessId?: string): Promise<ApiResult<CrossModuleWorkflow[]>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/flow/businesses/${encodeURIComponent(bid)}/cross-module-workflows`,
+    z.array(z.object({
+      key: z.string(),
+      name: z.string(),
+      description: z.string(),
+      category: z.string(),
+      triggerEvent: z.string(),
+      enabled: z.boolean(),
+      config: z.record(z.unknown()),
+      configSchema: z.array(z.object({ key: z.string(), label: z.string(), type: z.string(), default: z.unknown() })),
+      lastRunAt: z.string().nullable(),
+      runCount: z.number(),
+    })),
+    [],
+  );
+}
+
+export async function updateCrossModuleWorkflow(input: {
+  businessId?: string;
+  workflowKey: string;
+  enabled?: boolean;
+  config?: Record<string, any>;
+}): Promise<ApiResult<any>> {
+  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  try {
+    const res = await fetch(`${API_BASE}/flow/businesses/${encodeURIComponent(businessId)}/cross-module-workflows/${encodeURIComponent(input.workflowKey)}`, {
+      method: "PATCH",
+      headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: input.enabled, config: input.config }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) return { data: null, error: res.statusText };
+    return { data: json, error: null };
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e.message : "Network error" };
+  }
+}
+
 export { DEFAULT_BUSINESS_ID };

@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { BookingCompletedPayload, BookingConfirmedPayload, BookingCreatedPayload } from '../../core/event-bus/events.types';
+import { BookingCompletedPayload, BookingConfirmedPayload, BookingCreatedPayload, BookingRescheduledPayload } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
@@ -100,6 +100,65 @@ export class BookingsService {
         contactId: booking.contactId,
         type: 'booking.cancelled',
         data: { bookingId, status },
+        actorType: 'USER',
+        source: 'bookings',
+      });
+    }
+
+    return updated;
+  }
+
+  async rescheduleBooking(businessId: string, bookingId: string, newStartTime: Date) {
+    const booking = await this.prisma.client.booking.findFirst({
+      where: { id: bookingId, businessId, deletedAt: null },
+      include: {
+        service: { select: { duration: true } },
+      },
+    });
+    if (!booking) {
+      throw new BadRequestException('Booking not found');
+    }
+    if (booking.status === 'CANCELLED' || booking.status === 'COMPLETED') {
+      throw new BadRequestException('Cannot reschedule a cancelled or completed booking');
+    }
+
+    const previousStartTime = booking.startTime;
+    const previousEndTime = booking.endTime;
+    const start = new Date(newStartTime);
+    const duration = booking.service?.duration ?? 60;
+    const end = new Date(start.getTime() + duration * 60000);
+
+    const updated = await this.prisma.client.booking.update({
+      where: { id: bookingId },
+      data: { startTime: start, endTime: end },
+      include: {
+        contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+        service: { select: { id: true, name: true, duration: true, price: true } },
+        staff: { select: { id: true, name: true } },
+      },
+    });
+
+    if (booking.contactId) {
+      const payload: BookingRescheduledPayload = {
+        booking: updated,
+        contact: updated.contact ?? undefined,
+        businessId,
+        previousStartTime,
+        previousEndTime,
+      };
+      this.events.emit('booking.rescheduled', payload);
+
+      await this.crm.logContactEvent({
+        businessId,
+        contactId: booking.contactId,
+        type: 'booking.rescheduled',
+        data: {
+          bookingId,
+          previousStartTime,
+          previousEndTime,
+          newStartTime: start,
+          newEndTime: end,
+        },
         actorType: 'USER',
         source: 'bookings',
       });
