@@ -2808,6 +2808,54 @@ export async function fetchContactJourney(contactId: string, businessId?: string
   );
 }
 
+const crossJourneyItemSchema = z.object({
+  id: z.string(),
+  module: z.enum(["crm", "bookings", "commerce", "marketing"]),
+  type: z.string(),
+  title: z.string(),
+  description: z.string().optional(),
+  timestamp: z.string(),
+  value: z.number().optional(),
+  currency: z.string().optional(),
+  status: z.string().optional(),
+  entityId: z.string().optional(),
+  ctaLabel: z.string().optional(),
+  ctaModule: z.string().optional(),
+});
+
+const crossJourneySummarySchema = z.object({
+  bookingsCount: z.number(),
+  totalRevenue: z.number(),
+  lastInteractionAt: z.string().nullable(),
+  momentum: z.number(),
+  engagementLevel: z.enum(["high", "medium", "low"]),
+  moduleCounts: z.object({
+    crm: z.number(),
+    bookings: z.number(),
+    commerce: z.number(),
+    marketing: z.number(),
+  }),
+});
+
+const crossJourneyResponseSchema = z.object({
+  timeline: z.array(crossJourneyItemSchema),
+  summary: crossJourneySummarySchema,
+});
+
+export type CrossJourneyItem = z.infer<typeof crossJourneyItemSchema>;
+export type CrossJourneySummary = z.infer<typeof crossJourneySummarySchema>;
+export type CrossJourneyResponse = z.infer<typeof crossJourneyResponseSchema>;
+
+export async function fetchContactCrossJourney(contactId: string, businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<CrossJourneyResponse>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet(
+    `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/cross-journey`,
+    crossJourneyResponseSchema,
+    undefined,
+    { signal: opts?.signal },
+  );
+}
+
 export async function fetchPredictiveRevenue(businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<RevenueData>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiGet(

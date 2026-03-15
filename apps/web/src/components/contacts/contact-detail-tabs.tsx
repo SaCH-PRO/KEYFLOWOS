@@ -4,6 +4,7 @@ import React, { Suspense, useRef } from "react";
 import { MessageSquare, ListTodo, History, AlertCircle, Loader2, Activity, Route } from "lucide-react";
 import type { ContactDetailData, ContactEvent, ContactNote, ContactTask } from "./contact-detail";
 import type { HealthMetricsData, JourneyMilestoneData, ConversationContextData, AiInsightData } from "./tab-constants";
+import type { CrossJourneyResponse } from "@/lib/client";
 
 const NotesTabPanel = React.lazy(() => import("./notes-tab-panel").then(m => ({ default: m.NotesTabPanel })));
 const TasksTabPanel = React.lazy(() => import("./tasks-tab-panel").then(m => ({ default: m.TasksTabPanel })));
@@ -74,6 +75,7 @@ interface ContactDetailTabsProps {
   onUpdateTask?: (taskId: string, data: { title?: string; dueDate?: string; priority?: string; remindAt?: string }) => Promise<void>;
   healthMetrics?: HealthMetricsData | null;
   journeyMilestones?: JourneyMilestoneData[];
+  crossJourney?: CrossJourneyResponse | null;
   conversationContext?: ConversationContextData | null;
   aiInsight?: AiInsightData | null;
   aiInsightLoading?: boolean;
@@ -89,6 +91,7 @@ export function ContactDetailTabs({
   onAddNote, onAddTask, onCompleteTask, onDeleteNote, onDeleteTask,
   onUpdateNote, onUpdateTask,
   healthMetrics, journeyMilestones = [],
+  crossJourney,
   conversationContext, aiInsight, aiInsightLoading,
   onGenerateAiInsight, onRefreshConversationContext,
   invoices = [], bookings = [],
@@ -140,7 +143,7 @@ export function ContactDetailTabs({
           {activatedTabs.current.has("journey") && (
             <div className={`space-y-3 pt-3 pb-6 ${activeTab === "journey" ? "" : "hidden"}`}>
               <TabErrorBoundary resetKey="journey">
-                <ContactJourneyTimeline contact={contact} events={events} notes={notes} tasks={tasks} invoices={invoices} bookings={bookings} />
+                <ContactJourneyTimeline contact={contact} events={events} notes={notes} tasks={tasks} invoices={invoices} bookings={bookings} crossJourney={crossJourney} />
               </TabErrorBoundary>
             </div>
           )}

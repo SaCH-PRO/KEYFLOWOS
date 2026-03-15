@@ -724,6 +724,16 @@ export class CrmController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(120, 60_000)
+  @Get('businesses/:businessId/contacts/:contactId/cross-journey')
+  getContactCrossJourney(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+  ) {
+    return this.journey.getContactCrossJourney(businessId, contactId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/conversation-context')
   getConversationContext(
     @Param('businessId') businessId: string,

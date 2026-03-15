@@ -10,6 +10,7 @@ import {
   ListTodo, ExternalLink, TrendingUp, Activity,
 } from "lucide-react";
 import type { ContactDetailData, ContactEvent, ContactNote, ContactTask } from "./contact-detail";
+import type { CrossJourneyResponse } from "@/lib/client";
 
 type ModuleFilter = "all" | "crm" | "bookings" | "commerce" | "marketing";
 
@@ -57,14 +58,15 @@ interface ContactJourneyTimelineProps {
   tasks?: ContactTask[];
   invoices?: InvoiceSummary[];
   bookings?: BookingSummary[];
+  crossJourney?: CrossJourneyResponse | null;
 }
 
 const MODULE_PILLS: { key: ModuleFilter; label: string; icon: typeof Calendar; color: string }[] = [
   { key: "all", label: "All", icon: Circle, color: "text-foreground" },
   { key: "crm", label: "CRM", icon: Users, color: "text-[hsl(var(--kf-accent1))]" },
   { key: "bookings", label: "Bookings", icon: Calendar, color: "text-[hsl(var(--kf-accent2))]" },
-  { key: "commerce", label: "Commerce", icon: DollarSign, color: "text-emerald-400" },
-  { key: "marketing", label: "Marketing", icon: Megaphone, color: "text-violet-400" },
+  { key: "commerce", label: "Commerce", icon: DollarSign, color: "text-[hsl(var(--kf-success))]" },
+  { key: "marketing", label: "Marketing", icon: Megaphone, color: "text-[hsl(var(--kf-info))]" },
 ];
 
 function classifyEvent(type: string): ModuleFilter {
@@ -82,21 +84,21 @@ const EVENT_CONFIG: Record<string, { icon: typeof Calendar; color: string; bg: s
   "note.updated": { icon: StickyNote, color: "hsl(var(--kf-accent1))", bg: "hsl(var(--kf-accent1) / 0.15)", label: "Note updated" },
   "task.created": { icon: ListTodo, color: "hsl(var(--kf-accent1))", bg: "hsl(var(--kf-accent1) / 0.15)", label: "Task created" },
   "task.completed": { icon: CheckCircle2, color: "hsl(var(--kf-success))", bg: "hsl(var(--kf-success) / 0.15)", label: "Task completed" },
-  "invoice.created": { icon: FileText, color: "hsl(217 91% 60%)", bg: "hsl(217 91% 60% / 0.15)", label: "Invoice created" },
-  "invoice.sent": { icon: Mail, color: "hsl(217 91% 60%)", bg: "hsl(217 91% 60% / 0.15)", label: "Invoice sent" },
+  "invoice.created": { icon: FileText, color: "hsl(var(--kf-info))", bg: "hsl(var(--kf-info) / 0.15)", label: "Invoice created" },
+  "invoice.sent": { icon: Mail, color: "hsl(var(--kf-info))", bg: "hsl(var(--kf-info) / 0.15)", label: "Invoice sent" },
   "invoice.paid": { icon: DollarSign, color: "hsl(var(--kf-success))", bg: "hsl(var(--kf-success) / 0.15)", label: "Payment received" },
   "invoice.overdue": { icon: AlertTriangle, color: "hsl(var(--kf-error))", bg: "hsl(var(--kf-error) / 0.15)", label: "Invoice overdue" },
   "booking.created": { icon: Calendar, color: "hsl(var(--kf-accent2))", bg: "hsl(var(--kf-accent2) / 0.15)", label: "Booking scheduled" },
   "booking.confirmed": { icon: CheckCircle2, color: "hsl(var(--kf-success))", bg: "hsl(var(--kf-success) / 0.15)", label: "Booking confirmed" },
-  "booking.completed": { icon: Star, color: "hsl(45 93% 47%)", bg: "hsl(45 93% 47% / 0.15)", label: "Service completed" },
+  "booking.completed": { icon: Star, color: "hsl(var(--kf-warning))", bg: "hsl(var(--kf-warning) / 0.15)", label: "Service completed" },
   "booking.cancelled": { icon: AlertTriangle, color: "hsl(var(--kf-error))", bg: "hsl(var(--kf-error) / 0.15)", label: "Booking cancelled" },
-  "quote.created": { icon: FileText, color: "hsl(217 91% 60%)", bg: "hsl(217 91% 60% / 0.15)", label: "Quote sent" },
+  "quote.created": { icon: FileText, color: "hsl(var(--kf-info))", bg: "hsl(var(--kf-info) / 0.15)", label: "Quote sent" },
   "quote.accepted": { icon: CheckCircle2, color: "hsl(var(--kf-success))", bg: "hsl(var(--kf-success) / 0.15)", label: "Quote accepted" },
   "quote.rejected": { icon: AlertTriangle, color: "hsl(var(--kf-error))", bg: "hsl(var(--kf-error) / 0.15)", label: "Quote rejected" },
-  "campaign.sent": { icon: Megaphone, color: "hsl(270 70% 60%)", bg: "hsl(270 70% 60% / 0.15)", label: "Campaign sent" },
+  "campaign.sent": { icon: Megaphone, color: "hsl(var(--kf-info))", bg: "hsl(var(--kf-info) / 0.15)", label: "Campaign sent" },
   "campaign.opened": { icon: Mail, color: "hsl(var(--kf-success))", bg: "hsl(var(--kf-success) / 0.15)", label: "Campaign opened" },
   "lead_form.submitted": { icon: FileText, color: "hsl(var(--kf-accent2))", bg: "hsl(var(--kf-accent2) / 0.15)", label: "Form submitted" },
-  "email.sent": { icon: Mail, color: "hsl(217 91% 60%)", bg: "hsl(217 91% 60% / 0.15)", label: "Email sent" },
+  "email.sent": { icon: Mail, color: "hsl(var(--kf-info))", bg: "hsl(var(--kf-info) / 0.15)", label: "Email sent" },
   "whatsapp.sent": { icon: MessageCircle, color: "hsl(var(--kf-success))", bg: "hsl(var(--kf-success) / 0.15)", label: "WhatsApp sent" },
   "automation.executed": { icon: Zap, color: "hsl(var(--kf-accent2))", bg: "hsl(var(--kf-accent2) / 0.15)", label: "Automation ran" },
   "communication.call": { icon: MessageCircle, color: "hsl(var(--kf-accent1))", bg: "hsl(var(--kf-accent1) / 0.15)", label: "Call logged" },
@@ -134,11 +136,45 @@ function computeMomentumScore(
   return Math.round(Math.min(100, activityScore + bookingScore + revenueScore + recencyScore));
 }
 
-export function ContactJourneyTimeline({ contact, events, notes = [], tasks = [], invoices = [], bookings = [] }: ContactJourneyTimelineProps) {
+const CTA_HREF_MAP: Record<string, (entityId?: string) => string> = {
+  commerce: (id) => id ? `/app/commerce?tab=invoices&id=${encodeURIComponent(id)}` : "/app/commerce?tab=invoices",
+  bookings: (id) => id ? `/app/bookings?id=${encodeURIComponent(id)}` : "/app/bookings",
+  marketing: (id) => id ? `/app/marketing?tab=calendar&id=${encodeURIComponent(id)}` : "/app/marketing?tab=calendar",
+};
+
+function serverTimelineToEntries(timeline: CrossJourneyResponse["timeline"]): JourneyEntry[] {
+  return timeline.map((item) => {
+    const config = EVENT_CONFIG[item.type] || DEFAULT_CONFIG;
+    const mod = (item.module === "crm" || item.module === "bookings" || item.module === "commerce" || item.module === "marketing") ? item.module : "crm";
+    const hrefFn = item.ctaModule ? CTA_HREF_MAP[item.ctaModule] : undefined;
+    return {
+      id: item.id,
+      module: mod as ModuleFilter,
+      icon: config.icon,
+      iconColor: config.color,
+      iconBg: config.bg,
+      title: item.title,
+      description: item.description,
+      timestamp: item.timestamp,
+      value: item.value,
+      currency: item.currency,
+      status: item.status,
+      ctaLabel: item.ctaLabel,
+      ctaHref: hrefFn ? hrefFn(item.entityId) : undefined,
+      entityId: item.entityId,
+    };
+  });
+}
+
+export function ContactJourneyTimeline({ contact, events, notes = [], tasks = [], invoices = [], bookings = [], crossJourney }: ContactJourneyTimelineProps) {
   const [filter, setFilter] = useState<ModuleFilter>("all");
   const [limit, setLimit] = useState(25);
 
   const entries = useMemo(() => {
+    if (crossJourney?.timeline) {
+      return serverTimelineToEntries(crossJourney.timeline);
+    }
+
     const items: JourneyEntry[] = [];
 
     for (const ev of events) {
@@ -241,8 +277,8 @@ export function ContactJourneyTimeline({ contact, events, notes = [], tasks = []
         id: `inv-${inv.id}`,
         module: "commerce",
         icon: isPaid ? DollarSign : isOverdue ? AlertTriangle : FileText,
-        iconColor: isPaid ? "hsl(var(--kf-success))" : isOverdue ? "hsl(var(--kf-error))" : "hsl(217 91% 60%)",
-        iconBg: isPaid ? "hsl(var(--kf-success) / 0.15)" : isOverdue ? "hsl(var(--kf-error) / 0.15)" : "hsl(217 91% 60% / 0.15)",
+        iconColor: isPaid ? "hsl(var(--kf-success))" : isOverdue ? "hsl(var(--kf-error))" : "hsl(var(--kf-info))",
+        iconBg: isPaid ? "hsl(var(--kf-success) / 0.15)" : isOverdue ? "hsl(var(--kf-error) / 0.15)" : "hsl(var(--kf-info) / 0.15)",
         title: isPaid ? "Payment received" : isOverdue ? "Invoice overdue" : `Invoice ${inv.status.toLowerCase()}`,
         description: total > 0 ? formatAmount(total, inv.currency || "TTD") : undefined,
         timestamp: inv.paidAt || inv.issueDate || inv.createdAt || new Date().toISOString(),
@@ -268,8 +304,8 @@ export function ContactJourneyTimeline({ contact, events, notes = [], tasks = []
         id: `bk-${bk.id}`,
         module: "bookings",
         icon: isCompleted ? Star : isCancelled ? AlertTriangle : Calendar,
-        iconColor: isCompleted ? "hsl(45 93% 47%)" : isCancelled ? "hsl(var(--kf-error))" : "hsl(var(--kf-accent2))",
-        iconBg: isCompleted ? "hsl(45 93% 47% / 0.15)" : isCancelled ? "hsl(var(--kf-error) / 0.15)" : "hsl(var(--kf-accent2) / 0.15)",
+        iconColor: isCompleted ? "hsl(var(--kf-warning))" : isCancelled ? "hsl(var(--kf-error))" : "hsl(var(--kf-accent2))",
+        iconBg: isCompleted ? "hsl(var(--kf-warning) / 0.15)" : isCancelled ? "hsl(var(--kf-error) / 0.15)" : "hsl(var(--kf-accent2) / 0.15)",
         title: isCompleted ? "Service completed" : isCancelled ? "Booking cancelled" : "Appointment scheduled",
         description: bk.service?.name || undefined,
         timestamp: bk.startTime,
@@ -284,7 +320,7 @@ export function ContactJourneyTimeline({ contact, events, notes = [], tasks = []
 
     items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     return items;
-  }, [events, notes, tasks, invoices, bookings]);
+  }, [crossJourney, events, notes, tasks, invoices, bookings]);
 
   const filtered = useMemo(
     () => (filter === "all" ? entries : entries.filter((e) => e.module === filter)),
@@ -298,6 +334,19 @@ export function ContactJourneyTimeline({ contact, events, notes = [], tasks = []
   }, [entries]);
 
   const summary = useMemo(() => {
+    if (crossJourney?.summary) {
+      const s = crossJourney.summary;
+      const lastTs = s.lastInteractionAt ? new Date(s.lastInteractionAt).getTime() : null;
+      const daysSince = lastTs ? Math.floor((Date.now() - lastTs) / (1000 * 60 * 60 * 24)) : 999;
+      return {
+        totalRevenue: s.totalRevenue,
+        bookingsCount: s.bookingsCount,
+        lastInteractionTs: lastTs,
+        momentum: s.momentum,
+        engagementLevel: s.engagementLevel as "high" | "medium" | "low",
+        daysSinceLastInteraction: daysSince,
+      };
+    }
     const paidInvoiceRevenue = invoices
       .filter((inv) => inv.status === "PAID")
       .reduce((sum, inv) => sum + (typeof inv.total === "number" ? inv.total : 0), 0);
@@ -308,8 +357,9 @@ export function ContactJourneyTimeline({ contact, events, notes = [], tasks = []
       ? Math.floor((Date.now() - lastInteractionTs) / (1000 * 60 * 60 * 24))
       : 999;
     const momentum = computeMomentumScore(events.length, bookingsCount, paidInvoiceRevenue, daysSinceLastInteraction);
-    return { totalRevenue: paidInvoiceRevenue, bookingsCount, lastInteractionTs, momentum, daysSinceLastInteraction };
-  }, [entries, events.length, invoices, bookings.length]);
+    const engLevel: "high" | "medium" | "low" = events.length >= 10 ? "high" : events.length >= 3 ? "medium" : "low";
+    return { totalRevenue: paidInvoiceRevenue, bookingsCount, lastInteractionTs, momentum, engagementLevel: engLevel, daysSinceLastInteraction };
+  }, [crossJourney, entries, events.length, invoices, bookings.length]);
 
   const contactFirstName = contact.firstName || "Contact";
 

@@ -13,6 +13,7 @@ import type { HealthMetrics } from "@/components/contacts/contact-health-score";
 import type { JourneyMilestone } from "@/components/contacts/relationship-timeline";
 import type { ConversationContextData } from "@/components/contacts/conversation-context";
 import type { AiInsight } from "@/components/contacts/ai-copilot";
+import type { CrossJourneyResponse } from "@/lib/client";
 
 export interface PipelineDetailPanelProps {
   contact: ContactDetailData | null;
@@ -26,6 +27,7 @@ export interface PipelineDetailPanelProps {
   contactName: string;
   healthMetrics: HealthMetrics | null;
   journeyMilestones: JourneyMilestone[];
+  crossJourney?: CrossJourneyResponse | null;
   conversationContext: ConversationContextData | null;
   aiInsight: AiInsight | null;
   aiInsightLoading: boolean;
@@ -63,6 +65,7 @@ function PipelineDetailPanelInner({
   contactName,
   healthMetrics,
   journeyMilestones,
+  crossJourney,
   conversationContext,
   aiInsight,
   aiInsightLoading,
@@ -134,6 +137,7 @@ function PipelineDetailPanelInner({
         onClose={onClose}
         healthMetrics={healthMetrics}
         journeyMilestones={journeyMilestones}
+        crossJourney={crossJourney}
         conversationContext={conversationContext}
         aiInsight={aiInsight}
         aiInsightLoading={aiInsightLoading}
