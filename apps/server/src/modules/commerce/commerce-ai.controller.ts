@@ -163,4 +163,55 @@ export class CommerceAiController {
     checkAiRateLimit(businessId);
     return this.commerceAi.executeCommand(businessId, body.action, body.params ?? {});
   }
+
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @RequireFeature('ai_tools')
+  @CrmRateLimit(10, 60_000)
+  @Post('businesses/:businessId/ai-collections-score')
+  aiCollectionsScore(@Param('businessId') businessId: string) {
+    checkAiRateLimit(businessId);
+    return this.commerceAi.predictiveCollectionsScore(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @RequireFeature('ai_tools')
+  @CrmRateLimit(10, 60_000)
+  @Post('businesses/:businessId/invoices/:invoiceId/ai-payment-plan')
+  aiPaymentPlan(
+    @Param('businessId') businessId: string,
+    @Param('invoiceId') invoiceId: string,
+  ) {
+    checkAiRateLimit(businessId);
+    return this.commerceAi.suggestPaymentPlan(businessId, invoiceId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @RequireFeature('ai_tools')
+  @CrmRateLimit(10, 60_000)
+  @Post('businesses/:businessId/quotes/:quoteId/ai-follow-up')
+  aiQuoteFollowUp(
+    @Param('businessId') businessId: string,
+    @Param('quoteId') quoteId: string,
+  ) {
+    checkAiRateLimit(businessId);
+    return this.commerceAi.smartQuoteFollowUp(businessId, quoteId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @RequireFeature('ai_tools')
+  @CrmRateLimit(10, 60_000)
+  @Post('businesses/:businessId/ai-churn-risk')
+  aiChurnRisk(@Param('businessId') businessId: string) {
+    checkAiRateLimit(businessId);
+    return this.commerceAi.churnRiskAlerts(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @RequireFeature('ai_tools')
+  @CrmRateLimit(10, 60_000)
+  @Post('businesses/:businessId/ai-revenue-journey')
+  aiRevenueJourney(@Param('businessId') businessId: string) {
+    checkAiRateLimit(businessId);
+    return this.commerceAi.revenueJourney(businessId);
+  }
 }

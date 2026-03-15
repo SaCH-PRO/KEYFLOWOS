@@ -4838,6 +4838,132 @@ export async function commerceAiQuoteAnalysis(businessId?: string): Promise<ApiR
   });
 }
 
+export type CommerceCollectionsScore = {
+  scores: Array<{
+    invoiceId: string;
+    invoiceNumber: string;
+    contactName: string;
+    amount: number;
+    daysOverdue: number;
+    recoveryScore: number;
+    recoveryLabel: string;
+    optimalFollowUpDate?: string;
+    recommendedChannel: string;
+    recommendedTone: string;
+    reasoning: string;
+    nextAction: string;
+  }>;
+  summary: { totalOverdue: number; estimatedRecovery: number; highPriorityCount: number; averageRecoveryScore: number };
+  strategy: string;
+};
+
+export type CommercePaymentPlan = {
+  plans: Array<{
+    name: string;
+    installments: number;
+    frequency: string;
+    amounts: number[];
+    totalAmount: number;
+    startDate?: string;
+    reasoning: string;
+    riskLevel: string;
+  }>;
+  recommendation: string;
+  customerProfile: { paymentReliability: string; averagePaymentDelay: number; totalRelationshipValue: number };
+};
+
+export type CommerceQuoteFollowUp = {
+  quoteId: string;
+  quoteNumber: string;
+  closeProbability: number;
+  closeProbabilityLabel: string;
+  bestFollowUpTime?: string;
+  followUpWindow: string;
+  messagingApproach: {
+    tone: string;
+    keyPoints: string[];
+    openingLine: string;
+    closingLine: string;
+  };
+  competitiveFactors?: string[];
+  objectionHandling?: Array<{ objection: string; response: string }>;
+  dealAccelerators?: string[];
+  reasoning: string;
+};
+
+export type CommerceChurnRisk = {
+  alerts: Array<{
+    contactId: string;
+    contactName: string;
+    riskLevel: string;
+    riskScore: number;
+    signals: string[];
+    lastPaymentDate: string | null;
+    monthlyRevenue: number;
+    recommendedAction: string;
+    urgency: string;
+  }>;
+  summary: { totalAtRisk: number; revenueAtRisk: number; criticalCount: number; highCount: number };
+  retentionStrategies: string[];
+};
+
+export type CommerceRevenueJourney = {
+  funnel: {
+    totalContacts: number;
+    contactsWithQuotes: number;
+    quotesToInvoices: number;
+    invoicesToPayments: number;
+    contactToQuoteRate: number;
+    quoteToInvoiceRate: number;
+    invoiceToPaymentRate: number;
+    overallConversionRate: number;
+  };
+  dropOffPoints: Array<{ stage: string; dropOffRate: number; estimatedLostRevenue: number; reason: string; improvement: string }>;
+  topPaths: Array<{ path: string; count: number; avgValue: number; avgDuration: string }>;
+  insights: string[];
+  recommendations: Array<{ title: string; description: string; priority: string; estimatedImpact: string }>;
+};
+
+export async function commerceAiCollectionsScore(businessId?: string): Promise<ApiResult<CommerceCollectionsScore>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<CommerceCollectionsScore>({
+    path: `/commerce/businesses/${encodeURIComponent(bid)}/ai-collections-score`,
+    body: {},
+  });
+}
+
+export async function commerceAiPaymentPlan(invoiceId: string, businessId?: string): Promise<ApiResult<CommercePaymentPlan>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<CommercePaymentPlan>({
+    path: `/commerce/businesses/${encodeURIComponent(bid)}/invoices/${encodeURIComponent(invoiceId)}/ai-payment-plan`,
+    body: {},
+  });
+}
+
+export async function commerceAiQuoteFollowUp(quoteId: string, businessId?: string): Promise<ApiResult<CommerceQuoteFollowUp>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<CommerceQuoteFollowUp>({
+    path: `/commerce/businesses/${encodeURIComponent(bid)}/quotes/${encodeURIComponent(quoteId)}/ai-follow-up`,
+    body: {},
+  });
+}
+
+export async function commerceAiChurnRisk(businessId?: string): Promise<ApiResult<CommerceChurnRisk>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<CommerceChurnRisk>({
+    path: `/commerce/businesses/${encodeURIComponent(bid)}/ai-churn-risk`,
+    body: {},
+  });
+}
+
+export async function commerceAiRevenueJourney(businessId?: string): Promise<ApiResult<CommerceRevenueJourney>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<CommerceRevenueJourney>({
+    path: `/commerce/businesses/${encodeURIComponent(bid)}/ai-revenue-journey`,
+    body: {},
+  });
+}
+
 export type BookingsAiSearchResult = {
   type: string;
   filters: Record<string, unknown>;

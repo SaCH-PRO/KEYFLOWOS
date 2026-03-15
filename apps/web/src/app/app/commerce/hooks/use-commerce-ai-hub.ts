@@ -11,6 +11,9 @@ import {
   commerceAiProductHealth,
   commerceAiClientIntelligence,
   commerceAiQuoteAnalysis,
+  commerceAiCollectionsScore,
+  commerceAiChurnRisk,
+  commerceAiRevenueJourney,
   fetchCommerceStats,
 } from "@/lib/client";
 
@@ -146,6 +149,42 @@ async function generateCommerceSuggestions(context: ModuleContext): Promise<AiSu
           actionKey: "tool:quote-win-analysis",
         });
       }
+    }
+
+    if (activeView === "schedules" || activeView === "recurring") {
+      suggestions.push({
+        id: `churn-risk-${Date.now()}`,
+        type: "warning",
+        title: "Churn Risk Scanner",
+        description: "Detect declining payment patterns in recurring customers before you lose revenue.",
+        priority: "medium",
+        actionLabel: "Scan for risk",
+        actionKey: "tool:churn-risk",
+      });
+    }
+
+    if (activeView === "overview") {
+      suggestions.push({
+        id: `revenue-journey-${Date.now()}`,
+        type: "insight",
+        title: "Revenue Journey Analysis",
+        description: "Map your Contact → Quote → Invoice → Payment funnel and find conversion drop-off points.",
+        priority: "medium",
+        actionLabel: "View funnel",
+        actionKey: "tool:revenue-journey",
+      });
+    }
+
+    if (stats.overdueAmount > 0 && (activeView === "invoices" || activeView === "billing")) {
+      suggestions.push({
+        id: `collections-scoring-${Date.now()}`,
+        type: "action",
+        title: "Predictive Collections",
+        description: `Score ${stats.invoiceStatusBreakdown?.OVERDUE?.count ?? 0} overdue invoices for recovery likelihood with AI-recommended follow-up timing.`,
+        priority: "high",
+        actionLabel: "Score invoices",
+        actionKey: "tool:collections-scoring",
+      });
     }
 
     if (suggestions.length === 0) {
@@ -339,6 +378,48 @@ function buildCommerceTools(): AiTool[] {
           risks: cf?.risks ?? [],
           opportunities: cf?.opportunities ?? [],
         };
+      },
+    },
+    {
+      id: "collections-scoring",
+      name: "Predictive Collections",
+      description: "AI-scored recovery likelihood for each overdue invoice with optimal follow-up timing and channel recommendations.",
+      icon: "score",
+      category: "detect",
+      requiresSelection: false,
+      creditCost: 3,
+      execute: async (ctx) => {
+        const result = await commerceAiCollectionsScore(ctx.businessId);
+        if (result.error) throw new Error(result.error);
+        return result.data;
+      },
+    },
+    {
+      id: "churn-risk",
+      name: "Churn Risk Alerts",
+      description: "Detect declining payment patterns and risk signals in recurring customers to prevent revenue loss.",
+      icon: "overdue",
+      category: "detect",
+      requiresSelection: false,
+      creditCost: 3,
+      execute: async (ctx) => {
+        const result = await commerceAiChurnRisk(ctx.businessId);
+        if (result.error) throw new Error(result.error);
+        return result.data;
+      },
+    },
+    {
+      id: "revenue-journey",
+      name: "Revenue Journey",
+      description: "Analyze the full Contact → Quote → Invoice → Payment funnel to find drop-off points and optimize conversions.",
+      icon: "pipeline",
+      category: "analyze",
+      requiresSelection: false,
+      creditCost: 3,
+      execute: async (ctx) => {
+        const result = await commerceAiRevenueJourney(ctx.businessId);
+        if (result.error) throw new Error(result.error);
+        return result.data;
       },
     },
   ];
