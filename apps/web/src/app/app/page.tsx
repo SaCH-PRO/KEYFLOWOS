@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   fetchCockpitSummary,
   fetchGamificationStats,
@@ -24,6 +25,12 @@ import {
   CashFlowForecast,
   runSimulation,
   SimulationResult,
+  fetchMomentumRecommendations,
+  actionMomentumRecommendation,
+  snoozeMomentumRecommendation,
+  dismissMomentumRecommendation,
+  generateMomentumDraft,
+  MomentumRecommendation,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId, getUserDisplayName } from "@/lib/workspace";
 import { DashboardSkeleton } from "@/components/ui/skeleton";
@@ -73,6 +80,8 @@ import {
   Terminal,
   Command,
   CornerDownLeft,
+  HeartPulse,
+  Clock3,
 } from "lucide-react";
 
 interface AutopilotTask {
@@ -193,6 +202,7 @@ function PriorityCard({ priority, index }: { priority: PriorityItem; index: numb
 }
 
 export default function CommandPage() {
+  const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [cockpit, setCockpit] = useState<CockpitSummary | null>(null);
   const [gamification, setGamification] = useState<GamificationStats | null>(null);
@@ -220,6 +230,9 @@ export default function CommandPage() {
   const [simLoading, setSimLoading] = useState(false);
 
   const [insightsExpanded, setInsightsExpanded] = useState(false);
+  const [momentumRecs, setMomentumRecs] = useState<MomentumRecommendation[]>([]);
+  const [momentumLoading, setMomentumLoading] = useState(false);
+  const [momentumActionId, setMomentumActionId] = useState<string | null>(null);
 
   useEffect(() => {
     const initWorkspace = async () => {
@@ -245,16 +258,18 @@ export default function CommandPage() {
       setLoading(true);
       setError(null);
       try {
-        const [cockpitResult, gamificationResult, tasksResult, alertsResult] = await Promise.all([
+        const [cockpitResult, gamificationResult, tasksResult, alertsResult, momentumResult] = await Promise.all([
           fetchCockpitSummary(businessId),
           fetchGamificationStats(businessId),
           fetchTodaysTasks(businessId),
           fetchCriticalAlerts(businessId),
+          fetchMomentumRecommendations(businessId, 5),
         ]);
         if (cockpitResult.data) setCockpit(cockpitResult.data as CockpitSummary);
         if (gamificationResult.data) setGamification(gamificationResult.data);
         if (tasksResult.data) setTasks(tasksResult.data as AutopilotTask[]);
         if (alertsResult.data) setAlerts(alertsResult.data as CriticalAlert[]);
+        if (momentumResult.data) setMomentumRecs(momentumResult.data);
         void updateStreak(businessId);
       } catch (err) {
         console.error("Dashboard load error:", err);
@@ -306,6 +321,64 @@ export default function CommandPage() {
       setTasks(prev => prev.filter(t => t.id !== taskId));
     } catch (err) { console.error("Failed to deny task:", err); }
     setCompletingTask(null);
+  };
+
+  const handleMomentumAction = async (rec: MomentumRecommendation) => {
+    if (!businessId) return;
+    setMomentumActionId(rec.id);
+    try {
+      const contactId = rec.contact?.id || rec.contactId;
+      const contactName = rec.contact
+        ? `${rec.contact.firstName ?? ""} ${rec.contact.lastName ?? ""}`.trim() || "Contact"
+        : "Contact";
+
+      const [actionResult, draftResult] = await Promise.all([
+        actionMomentumRecommendation(rec.id, businessId),
+        generateMomentumDraft(rec.id, {
+          contactId,
+          contactName,
+          type: rec.type,
+          description: rec.description,
+          momentumScore: rec.momentumScore ?? undefined,
+        }, businessId),
+      ]);
+
+      if (actionResult.error) {
+        console.error("Failed to action momentum rec:", actionResult.error);
+      } else {
+        setMomentumRecs(prev => prev.filter(r => r.id !== rec.id));
+        const draft = draftResult.data;
+        if (contactId) {
+          const draftParam = draft?.message ? `&momentumDraft=${encodeURIComponent(draft.message)}` : "";
+          router.push(`/app/crm?contact=${contactId}${draftParam}`);
+        }
+      }
+    } catch (err) { console.error("Failed to action momentum rec:", err); }
+    setMomentumActionId(null);
+  };
+
+  const handleMomentumSnooze = async (id: string) => {
+    if (!businessId) return;
+    setMomentumActionId(id);
+    try {
+      const result = await snoozeMomentumRecommendation(id, 7, businessId);
+      if (!result.error) {
+        setMomentumRecs(prev => prev.filter(r => r.id !== id));
+      }
+    } catch (err) { console.error("Failed to snooze momentum rec:", err); }
+    setMomentumActionId(null);
+  };
+
+  const handleMomentumDismiss = async (id: string) => {
+    if (!businessId) return;
+    setMomentumActionId(id);
+    try {
+      const result = await dismissMomentumRecommendation(id, businessId);
+      if (!result.error) {
+        setMomentumRecs(prev => prev.filter(r => r.id !== id));
+      }
+    } catch (err) { console.error("Failed to dismiss momentum rec:", err); }
+    setMomentumActionId(null);
   };
 
   const handleSend = useCallback(async () => {
@@ -655,6 +728,92 @@ export default function CommandPage() {
               </div>
             )}
           </div>
+
+          {momentumRecs.length > 0 && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.22 }}>
+              <div className="flex items-center gap-2 mb-3">
+                <HeartPulse className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
+                <h2 className="text-sm font-semibold uppercase tracking-wider">Client Momentum</h2>
+                <span className="ml-auto text-[10px] text-muted-foreground">{momentumRecs.length} action{momentumRecs.length !== 1 ? "s" : ""}</span>
+              </div>
+              <div className="space-y-2">
+                {momentumRecs.slice(0, 5).map((rec, idx) => {
+                  const contactName = rec.contact
+                    ? `${rec.contact.firstName ?? ""} ${rec.contact.lastName ?? ""}`.trim() || "Unnamed"
+                    : "Contact";
+                  const priorityColors: Record<string, { border: string; bg: string; text: string }> = {
+                    urgent: { border: "rgb(239 68 68 / 0.5)", bg: "rgb(239 68 68 / 0.05)", text: "rgb(239 68 68)" },
+                    high: { border: "hsl(var(--kf-accent1) / 0.5)", bg: "hsl(var(--kf-accent1) / 0.05)", text: "hsl(var(--kf-accent1))" },
+                    medium: { border: "rgb(234 179 8 / 0.5)", bg: "rgb(234 179 8 / 0.05)", text: "rgb(234 179 8)" },
+                    low: { border: "rgb(59 130 246 / 0.5)", bg: "rgb(59 130 246 / 0.05)", text: "rgb(59 130 246)" },
+                  };
+                  const pColors = priorityColors[rec.priority] || priorityColors.medium;
+                  const typeIcons: Record<string, React.ReactNode> = {
+                    churn_risk: <TrendingDown className="w-3.5 h-3.5" />,
+                    check_in: <MessageCircle className="w-3.5 h-3.5" />,
+                    upsell: <TrendingUp className="w-3.5 h-3.5" />,
+                    package_offer: <Package className="w-3.5 h-3.5" />,
+                    re_engage: <Send className="w-3.5 h-3.5" />,
+                    birthday: <Award className="w-3.5 h-3.5" />,
+                  };
+
+                  return (
+                    <motion.div
+                      key={rec.id}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.05 * idx }}
+                      className="kf-card p-3.5 group"
+                      style={{ borderColor: pColors.border, backgroundColor: pColors.bg }}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: pColors.border, color: "#fff" }}>
+                          {typeIcons[rec.type] || <HeartPulse className="w-3.5 h-3.5" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full" style={{ backgroundColor: pColors.border, color: "#fff" }}>
+                              {rec.priority}
+                            </span>
+                            <span className="text-xs text-muted-foreground truncate">{contactName}</span>
+                            {rec.momentumScore != null && (
+                              <span className="text-[10px] text-muted-foreground ml-auto">Score: {rec.momentumScore}</span>
+                            )}
+                          </div>
+                          <h4 className="font-medium text-sm">{rec.title}</h4>
+                          <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{rec.description}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-2.5 ml-11">
+                        <button
+                          onClick={() => handleMomentumAction(rec)}
+                          disabled={momentumActionId === rec.id}
+                          className="text-[10px] font-medium px-3 py-1.5 rounded-lg transition-all hover:scale-105 text-white"
+                          style={{ backgroundColor: pColors.border }}
+                        >
+                          {momentumActionId === rec.id ? <Loader2 className="w-3 h-3 animate-spin inline" /> : "Do it"}
+                        </button>
+                        <button
+                          onClick={() => handleMomentumSnooze(rec.id)}
+                          disabled={momentumActionId === rec.id}
+                          className="text-[10px] font-medium px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-muted-foreground hover:text-foreground hover:bg-white/10 transition-all flex items-center gap-1"
+                        >
+                          <Clock3 className="w-3 h-3" />Snooze
+                        </button>
+                        <button
+                          onClick={() => handleMomentumDismiss(rec.id)}
+                          disabled={momentumActionId === rec.id}
+                          className="text-[10px] font-medium px-2 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/5 transition-all"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            </motion.div>
+          )}
 
           {revenueInsights && (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}>

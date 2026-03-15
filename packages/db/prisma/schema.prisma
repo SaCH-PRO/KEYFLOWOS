@@ -246,6 +246,9 @@ model Contact {
     recurringInvoices RecurringInvoice[]
     sequenceEnrollments CrmSequenceEnrollment[]
   listMembers         ContactListMember[]
+  momentum            ContactMomentum[]
+  momentumSnapshots   ContactMomentumSnapshot[]
+  momentumRecommendations MomentumRecommendation[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   leadScore        Int?      @map("lead_score")
@@ -1785,4 +1788,82 @@ model CrmSequenceEnrollment {
   @@index([contactId])
   @@index([status, nextStepAt])
   @@map("crm_sequence_enrollments")
+}
+
+model ContactMomentum {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  contactId   String   @map("contact_id")
+  score       Int      @default(0)
+  previousScore Int?   @map("previous_score")
+  trend       String   @default("stable")
+  recencyScore    Float @default(0) @map("recency_score")
+  frequencyScore  Float @default(0) @map("frequency_score")
+  monetaryScore   Float @default(0) @map("monetary_score")
+  engagementScore Float @default(0) @map("engagement_score")
+  tenureScore     Float @default(0) @map("tenure_score")
+  calculatedAt DateTime @default(now()) @map("calculated_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, contactId])
+  @@index([businessId])
+  @@index([businessId, score])
+  @@index([businessId, calculatedAt])
+  @@map("contact_momentum")
+}
+
+model ContactMomentumSnapshot {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  contactId   String   @map("contact_id")
+  score       Int      @default(0)
+  trend       String   @default("stable")
+  recencyScore    Float @default(0) @map("recency_score")
+  frequencyScore  Float @default(0) @map("frequency_score")
+  monetaryScore   Float @default(0) @map("monetary_score")
+  engagementScore Float @default(0) @map("engagement_score")
+  tenureScore     Float @default(0) @map("tenure_score")
+  snapshotDate DateTime @map("snapshot_date")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, contactId, snapshotDate])
+  @@index([businessId, contactId])
+  @@index([businessId, snapshotDate])
+  @@map("contact_momentum_snapshots")
+}
+
+model MomentumRecommendation {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  contactId   String   @map("contact_id")
+  type        String
+  title       String
+  description String
+  priority    String   @default("medium")
+  status      String   @default("pending")
+  draftMessage String? @map("draft_message")
+  draftSubject String? @map("draft_subject")
+  suggestedChannel String? @map("suggested_channel")
+  triggerReason String? @map("trigger_reason")
+  momentumScore Int?   @map("momentum_score")
+  snoozedUntil DateTime? @map("snoozed_until")
+  actionedAt   DateTime? @map("actioned_at")
+  dismissedAt  DateTime? @map("dismissed_at")
+  autoExecuted Boolean @default(false) @map("auto_executed")
+  scheduledFor DateTime? @map("scheduled_for")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, status])
+  @@index([businessId, contactId])
+  @@index([businessId, scheduledFor])
+  @@index([businessId, createdAt])
+  @@map("momentum_recommendations")
 }
