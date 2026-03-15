@@ -14,7 +14,7 @@ import { AiCommandBar } from "./_command/ai-command-bar";
 import { BriefingCard } from "./_command/briefing-card";
 import { PriorityQueue } from "./_command/priority-queue";
 import { SimulationDrawer } from "./_command/simulation-drawer";
-import { ProgressSection } from "./_command/progress-section";
+import { ProgressDrawer } from "./_command/progress-section";
 
 export default function CommandPage() {
   const d = useCommandData();
@@ -47,10 +47,33 @@ export default function CommandPage() {
         <div className="flex items-center gap-2">
           <QuickActionBar />
           <SimulationDrawer businessId={d.businessId} />
+          <ProgressDrawer gamification={d.gamification} momentum={d.momentum} />
         </div>
       </div>
 
       <AiCommandBar businessId={d.businessId} />
+
+      <PriorityQueue
+        priorities={d.priorities}
+        tasks={d.tasks}
+        momentumRecs={d.momentumRecs}
+        nudges={d.nudges}
+        financialAlerts={d.financialAlerts}
+        completedToday={d.completedToday}
+        businessId={d.businessId}
+        onCompleteTask={d.handleCompleteTask}
+        onApproveTask={d.handleApproveTask}
+        onDenyTask={d.handleDenyTask}
+        onMomentumAction={d.handleMomentumAction}
+        onMomentumSnooze={d.handleMomentumSnooze}
+        onMomentumDismiss={d.handleMomentumDismiss}
+        onNudgeSnooze={d.handleNudgeSnooze}
+        onDismissTask={d.handleDismissTask}
+        onDismissAlert={d.handleDismissAlert}
+        completingTask={d.completingTask}
+        momentumActionId={d.momentumActionId}
+        dismissingNudge={d.dismissingNudge}
+      />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <MetricTile icon={DollarSign} color="--kf-accent1" label="Today" value={formatTTD(d.todayRevenue)} sub={d.pendingInvoices > 0 ? `${d.pendingInvoices} pending` : undefined} />
@@ -74,30 +97,6 @@ export default function CommandPage() {
         businessId={d.businessId}
         initialFinancialPulse={d.financialPulse}
         initialCampaignBriefings={d.campaignBriefings}
-      />
-
-      <ProgressSection gamification={d.gamification} momentum={d.momentum} />
-
-      <PriorityQueue
-        priorities={d.priorities}
-        tasks={d.tasks}
-        momentumRecs={d.momentumRecs}
-        nudges={d.nudges}
-        financialAlerts={d.financialAlerts}
-        completedToday={d.completedToday}
-        businessId={d.businessId}
-        onCompleteTask={d.handleCompleteTask}
-        onApproveTask={d.handleApproveTask}
-        onDenyTask={d.handleDenyTask}
-        onMomentumAction={d.handleMomentumAction}
-        onMomentumSnooze={d.handleMomentumSnooze}
-        onMomentumDismiss={d.handleMomentumDismiss}
-        onNudgeSnooze={d.handleNudgeSnooze}
-        onDismissTask={d.handleDismissTask}
-        onDismissAlert={d.handleDismissAlert}
-        completingTask={d.completingTask}
-        momentumActionId={d.momentumActionId}
-        dismissingNudge={d.dismissingNudge}
       />
     </div>
   );

@@ -16,10 +16,11 @@ interface BriefingCardProps {
 const STORAGE_KEY = "kf-briefing-seen";
 
 export function BriefingCard({ businessId, initialFinancialPulse, initialCampaignBriefings = [] }: BriefingCardProps) {
-  const [expanded, setExpanded] = useState(() => {
-    if (typeof window === "undefined") return true;
-    return !localStorage.getItem(STORAGE_KEY);
-  });
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    setExpanded(!localStorage.getItem(STORAGE_KEY));
+  }, []);
 
   const [briefing, setBriefing] = useState<AiBriefing | null>(null);
   const [briefingLoading, setBriefingLoading] = useState(false);
@@ -28,8 +29,9 @@ export function BriefingCard({ businessId, initialFinancialPulse, initialCampaig
 
   const handleToggle = () => {
     setExpanded((prev) => {
-      if (!prev === false) localStorage.setItem(STORAGE_KEY, "1");
-      return !prev;
+      const next = !prev;
+      if (!next) localStorage.setItem(STORAGE_KEY, "1");
+      return next;
     });
   };
 
