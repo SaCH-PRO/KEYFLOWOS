@@ -246,6 +246,7 @@ export function useCommandData() {
     handleMomentumSnooze,
     handleMomentumDismiss,
     handleNudgeSnooze,
+    gamification,
     handleDismissTask: (id: string) => setTasks((prev) => prev.filter((t) => t.id !== id)),
     handleDismissAlert: (id: string) => setDismissedAlertIds((prev) => new Set(prev).add(id)),
   };
