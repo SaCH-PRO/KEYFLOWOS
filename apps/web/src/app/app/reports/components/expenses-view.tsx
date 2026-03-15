@@ -52,6 +52,8 @@ export function ExpensesView({ report }: { report: GeneratedReport }) {
                 icon={Store}
                 title="No vendor data"
                 description="No vendor expenses found for this period. Try selecting a wider date range."
+                actionLabel="Go to Expenses"
+                onAction={() => { window.location.href = "/app/expenses"; }}
                 tip="Assign vendors to expenses to track spending per supplier."
               />
             }

@@ -73,6 +73,8 @@ export function ExecutiveView({ report }: { report: GeneratedReport }) {
               icon={Users}
               title="No client data"
               description="No revenue data found for this period. Try selecting a wider date range."
+              actionLabel="Go to Invoices"
+              onAction={() => { window.location.href = "/app/commerce?tab=invoices"; }}
               tip="Client revenue is calculated from paid invoices."
             />
           }

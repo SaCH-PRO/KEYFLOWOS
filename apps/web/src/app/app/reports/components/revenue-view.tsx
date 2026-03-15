@@ -52,6 +52,8 @@ export function RevenueView({ report }: { report: GeneratedReport }) {
                 icon={Users}
                 title="No client revenue data"
                 description="No paid invoices found for this period. Try selecting a wider date range."
+                actionLabel="Go to Invoices"
+                onAction={() => { window.location.href = "/app/commerce?tab=invoices"; }}
                 tip="Revenue is tracked from paid invoices linked to contacts."
               />
             }

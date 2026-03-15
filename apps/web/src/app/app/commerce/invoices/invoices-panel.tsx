@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { SkeletonList } from "@/components/ui/skeleton";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button, Input } from "@keyflow/ui";
 import {
@@ -731,32 +732,7 @@ export default function InvoicesPanel({
       </div>
 
       {loading ? (
-        <div className="space-y-2" role="status" aria-label="Loading invoices">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div
-              key={i}
-              className="flex items-center gap-3 p-3 rounded-xl border border-border/30 bg-white/[0.02]"
-              style={{ animation: `pulse 1.5s ease-in-out ${(i - 1) * 0.1}s infinite` }}
-            >
-              <div className="w-9 h-9 rounded-lg bg-muted/30 shrink-0" />
-              <div className="flex-1 space-y-1.5">
-                <div className="flex items-center gap-2">
-                  <div className="h-3.5 bg-muted/30 rounded w-24" />
-                  <div className="h-4 bg-muted/20 rounded-full w-14" />
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="h-2.5 bg-muted/20 rounded w-32" />
-                  <div className="h-2.5 bg-muted/20 rounded w-16" />
-                </div>
-              </div>
-              <div className="h-4 bg-muted/30 rounded w-20 shrink-0" />
-              <div className="flex gap-1 shrink-0">
-                <div className="w-7 h-7 rounded-lg bg-muted/20" />
-                <div className="w-7 h-7 rounded-lg bg-muted/20" />
-              </div>
-            </div>
-          ))}
-        </div>
+        <SkeletonList rows={5} cols={4} />
       ) : invoices.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <div className="w-14 h-14 rounded-xl bg-white/[0.03] border border-border/50 flex items-center justify-center mb-4">

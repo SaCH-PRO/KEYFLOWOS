@@ -40,6 +40,8 @@ export function ExpenseAnalyticsTab({ summary, vendors, loading }: ExpenseAnalyt
           icon={BarChart3}
           title="No analytics data yet"
           description="Start tracking expenses to see spending trends, vendor breakdowns, and category insights."
+          actionLabel="Add Expense"
+          onAction={() => { window.location.href = "/app/expenses?tab=expenses"; }}
           tip="Add expenses with categories and vendors for the richest analytics."
         />
       </motion.div>

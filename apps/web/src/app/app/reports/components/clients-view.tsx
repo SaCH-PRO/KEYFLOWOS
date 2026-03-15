@@ -78,6 +78,8 @@ export function ClientsView({ report }: { report: GeneratedReport }) {
               icon={Users}
               title="No client revenue data"
               description="No paid invoices found for this period. Try selecting a wider date range."
+              actionLabel="Go to CRM"
+              onAction={() => { window.location.href = "/app/crm/pipeline"; }}
               tip="Revenue per client is calculated from paid invoices linked to contacts."
             />
           }

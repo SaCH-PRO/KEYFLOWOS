@@ -291,7 +291,12 @@ export default function CatalogCapacityTab({
           <EmptyState
             icon={Users}
             title="No staff members"
-            description="Add your first team member above to manage bookings and schedules."
+            description="Add your first team member using the form above to manage bookings and schedules."
+            actionLabel="Scroll to Add Staff"
+            onAction={() => {
+              const el = document.querySelector<HTMLInputElement>('input[placeholder="Jane Doe"]');
+              if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.focus(); }
+            }}
             tip="Staff members can be assigned to services for appointment scheduling."
           />
         )}

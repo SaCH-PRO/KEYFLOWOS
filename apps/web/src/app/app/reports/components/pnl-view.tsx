@@ -51,6 +51,8 @@ export function PnlView({ report }: { report: GeneratedReport }) {
                 icon={Wallet}
                 title="No expense data"
                 description="No expenses recorded for this period. Try selecting a wider date range."
+                actionLabel="Go to Expenses"
+                onAction={() => { window.location.href = "/app/expenses"; }}
                 tip="Categorize expenses to see a full breakdown here."
               />
             }
