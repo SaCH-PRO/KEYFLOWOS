@@ -1,10 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { ExpenseCreatedPayload } from '../../core/event-bus/events.types';
 
 @Injectable()
 export class ExpensesService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
 
   async listExpenses(
@@ -92,7 +95,7 @@ export class ExpensesService {
     recurringFrequency?: string;
     categoryId?: string;
   }) {
-    return this.prisma.client.expense.create({
+    const expense = await this.prisma.client.expense.create({
       data: {
         businessId: input.businessId,
         description: input.description,
@@ -110,6 +113,13 @@ export class ExpensesService {
       },
       include: { category: true },
     });
+
+    this.events.emit('expense.created', {
+      expense: { id: expense.id, businessId: input.businessId, amount: expense.amount, description: expense.description, categoryId: expense.categoryId },
+      businessId: input.businessId,
+    } as ExpenseCreatedPayload);
+
+    return expense;
   }
 
   async updateExpense(input: {

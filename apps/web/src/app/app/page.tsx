@@ -36,6 +36,9 @@ import {
   fetchConciergeNudges,
   snoozeConciergeNudge,
   NudgeItem,
+  fetchFinancialPulse,
+  FinancialPulse,
+  FinancialAlert,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId, getUserDisplayName } from "@/lib/workspace";
 import { DashboardSkeleton } from "@/components/ui/skeleton";
@@ -246,6 +249,9 @@ export default function CommandPage() {
   const [nudges, setNudges] = useState<NudgeItem[]>([]);
   const [dismissingNudge, setDismissingNudge] = useState<string | null>(null);
 
+  const [financialPulse, setFinancialPulse] = useState<FinancialPulse | null>(null);
+  const [financialPulseLoading, setFinancialPulseLoading] = useState(false);
+
   useEffect(() => {
     const initWorkspace = async () => {
       const fresh = await refreshWorkspace();
@@ -270,13 +276,14 @@ export default function CommandPage() {
       setLoading(true);
       setError(null);
       try {
-        const [cockpitResult, gamificationResult, tasksResult, alertsResult, momentumResult, briefingsResult] = await Promise.all([
+        const [cockpitResult, gamificationResult, tasksResult, alertsResult, momentumResult, briefingsResult, financialResult] = await Promise.all([
           fetchCockpitSummary(businessId),
           fetchGamificationStats(businessId),
           fetchTodaysTasks(businessId),
           fetchCriticalAlerts(businessId),
           fetchMomentumRecommendations(businessId, 5),
           fetchCampaignBriefings(businessId),
+          fetchFinancialPulse(businessId),
         ]);
         if (cockpitResult.data) setCockpit(cockpitResult.data as CockpitSummary);
         if (gamificationResult.data) setGamification(gamificationResult.data);
@@ -284,6 +291,7 @@ export default function CommandPage() {
         if (alertsResult.data) setAlerts(alertsResult.data as CriticalAlert[]);
         if (momentumResult.data) setMomentumRecs(momentumResult.data);
         if (briefingsResult.data) setCampaignBriefings(briefingsResult.data);
+        if (financialResult.data) setFinancialPulse(financialResult.data);
         void updateStreak(businessId);
         fetchConciergeNudges(businessId).then(res => {
           if (res.data) setNudges(res.data);
@@ -919,6 +927,141 @@ export default function CommandPage() {
         </div>
 
         <div className="space-y-4">
+          {financialPulse && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }} className="bg-white/[0.03] backdrop-blur border border-white/10 rounded-2xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-white/[0.06] flex items-center gap-2">
+                <HeartPulse className="w-4 h-4 text-emerald-400" />
+                <h2 className="text-xs font-semibold uppercase tracking-wider">Financial Pulse</h2>
+              </div>
+              <div className="p-4 space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-white/5 rounded-lg p-2.5">
+                    <p className="text-[9px] text-muted-foreground uppercase">Cash Position</p>
+                    <p className={`text-sm font-bold ${financialPulse.cashPosition >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                      {formatTTD(financialPulse.cashPosition)}
+                    </p>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-2.5">
+                    <p className="text-[9px] text-muted-foreground uppercase">This Week</p>
+                    <div className="flex items-center gap-1">
+                      <p className="text-sm font-bold">{formatTTD(financialPulse.weeklyRevenue)}</p>
+                      {financialPulse.weeklyRevenueChange !== 0 && (
+                        <span className={`text-[9px] font-medium flex items-center ${financialPulse.weeklyRevenueChange > 0 ? "text-emerald-400" : "text-red-400"}`}>
+                          {financialPulse.weeklyRevenueChange > 0 ? <ArrowUpRight className="w-2.5 h-2.5" /> : <ArrowDownRight className="w-2.5 h-2.5" />}
+                          {Math.abs(financialPulse.weeklyRevenueChange)}%
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-1.5">
+                  <div className="bg-white/5 rounded-lg p-2 text-center">
+                    <p className="text-[8px] text-muted-foreground uppercase">Revenue</p>
+                    <p className="text-[11px] font-semibold text-emerald-400">{formatCurrency(financialPulse.monthlyRevenue)}</p>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-2 text-center">
+                    <p className="text-[8px] text-muted-foreground uppercase">Expenses</p>
+                    <p className="text-[11px] font-semibold text-red-400">{formatCurrency(financialPulse.monthlyExpenses)}</p>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-2 text-center">
+                    <p className="text-[8px] text-muted-foreground uppercase">Net</p>
+                    <p className={`text-[11px] font-semibold ${financialPulse.netIncome >= 0 ? "text-emerald-400" : "text-red-400"}`}>{formatCurrency(financialPulse.netIncome)}</p>
+                  </div>
+                </div>
+
+                {financialPulse.cashFlowForecast.length > 0 && (
+                  <div>
+                    <p className="text-[9px] text-muted-foreground uppercase mb-1.5">Cash Flow Forecast</p>
+                    <div className="flex items-end gap-1 h-12">
+                      {financialPulse.cashFlowForecast.map((f, i) => {
+                        const maxVal = Math.max(...financialPulse.cashFlowForecast.map(fc => Math.abs(fc.projected)), 1);
+                        const height = Math.max(8, (Math.abs(f.projected) / maxVal) * 100);
+                        const isPositive = f.projected >= 0;
+                        return (
+                          <div key={f.period} className="flex-1 flex flex-col items-center gap-0.5">
+                            <div
+                              className="w-full rounded-t-sm transition-all"
+                              style={{
+                                height: `${height}%`,
+                                backgroundColor: isPositive ? "rgb(52 211 153 / 0.4)" : "rgb(248 113 113 / 0.4)",
+                                border: `1px solid ${isPositive ? "rgb(52 211 153 / 0.6)" : "rgb(248 113 113 / 0.6)"}`,
+                              }}
+                            />
+                            <span className="text-[8px] text-muted-foreground">{f.label}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {financialPulse.overdueCount > 0 && (
+                  <div className="p-2 rounded-lg bg-red-500/5 border border-red-500/10">
+                    <div className="flex items-center gap-1.5">
+                      <AlertTriangle className="w-3 h-3 text-red-400 flex-shrink-0" />
+                      <p className="text-[10px] text-red-300">
+                        {financialPulse.overdueCount} overdue invoice{financialPulse.overdueCount > 1 ? "s" : ""} — {formatTTD(financialPulse.overdueReceivables)}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {financialPulse.alerts.filter(a => a.severity !== 'INFO').slice(0, 2).map(alert => (
+                  <Link
+                    key={alert.id}
+                    href={alert.action || "/app/commerce"}
+                    className="block p-2 rounded-lg transition-colors hover:bg-white/5"
+                    style={{
+                      backgroundColor: alert.severity === 'CRITICAL' ? "rgb(239 68 68 / 0.05)" : "hsl(var(--kf-accent1) / 0.05)",
+                      border: `1px solid ${alert.severity === 'CRITICAL' ? "rgb(239 68 68 / 0.15)" : "hsl(var(--kf-accent1) / 0.15)"}`,
+                    }}
+                  >
+                    <div className="flex items-start gap-1.5">
+                      <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: alert.severity === 'CRITICAL' ? "rgb(239 68 68)" : "hsl(var(--kf-accent1))" }} />
+                      <p className="text-[10px] leading-relaxed">{alert.message}</p>
+                    </div>
+                  </Link>
+                ))}
+
+                {financialPulse.alerts.filter(a => a.type === 'milestone').map(alert => (
+                  <div key={alert.id} className="p-2 rounded-lg bg-emerald-500/5 border border-emerald-500/15">
+                    <div className="flex items-start gap-1.5">
+                      <Award className="w-3 h-3 text-emerald-400 mt-0.5 flex-shrink-0" />
+                      <p className="text-[10px] text-emerald-300 leading-relaxed">{alert.message}</p>
+                    </div>
+                  </div>
+                ))}
+
+                {financialPulse.topUnpaidInvoices.length > 0 && (
+                  <div>
+                    <p className="text-[9px] text-muted-foreground uppercase mb-1.5">Collection Priority</p>
+                    <div className="space-y-1">
+                      {financialPulse.topUnpaidInvoices.slice(0, 3).map(inv => (
+                        <Link
+                          key={inv.id}
+                          href={`/app/commerce`}
+                          className="flex items-center justify-between p-1.5 rounded-lg hover:bg-white/5 transition-colors"
+                        >
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                              inv.priority === 'high' ? 'bg-red-400' : inv.priority === 'medium' ? 'bg-yellow-400' : 'bg-blue-400'
+                            }`} />
+                            <span className="text-[10px] truncate">{inv.contactName}</span>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {inv.daysOverdue > 0 && <span className="text-[9px] text-red-400">{inv.daysOverdue}d</span>}
+                            <span className="text-[10px] font-medium">{formatTTD(inv.total)}</span>
+                          </div>
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="bg-white/[0.03] backdrop-blur border border-white/10 rounded-2xl overflow-hidden">
             <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
               <div className="flex items-center gap-2">
