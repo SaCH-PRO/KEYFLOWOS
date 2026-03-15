@@ -415,79 +415,65 @@ export default function CommandPage() {
         </motion.div>
       )}
 
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="relative">
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center gap-2 mb-2">
-            <div className="h-8 w-8 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}>
-              <Zap className="w-4 h-4 text-white" />
-            </div>
-            <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
-              {greeting}{getUserDisplayName() ? `, ${getUserDisplayName()}` : ""}
-            </h1>
-          </div>
-          <p className="text-muted-foreground text-sm">
+      <div>
+        <div className="mb-5">
+          <h1 className="text-xl font-semibold tracking-tight">
+            {greeting}{getUserDisplayName() ? `, ${getUserDisplayName()}` : ""}
+          </h1>
+          <p className="text-muted-foreground text-[13px] mt-1 flex items-center gap-2">
             {tasksRemaining > 0
-              ? `${tasksRemaining} task${tasksRemaining > 1 ? "s" : ""} today`
-              : "All caught up!"}
-            {" "}
-            <span className="text-muted-foreground/60">|</span>
-            {" "}
-            <span style={{ color: "hsl(var(--kf-accent1))" }}>{formatTTD(todayRevenue)}</span> today
-            {" "}
-            <span className="text-muted-foreground/60">|</span>
-            {" "}
-            <span style={{ color: "hsl(var(--kf-accent2))" }}>{todayBookings}</span> bookings
+              ? <><span>{tasksRemaining} task{tasksRemaining > 1 ? "s" : ""} today</span><span className="text-border">·</span></>
+              : <><span>All caught up!</span><span className="text-border">·</span></>}
+            <span style={{ color: "hsl(var(--kf-accent1))" }}>{formatTTD(todayRevenue)}</span>
+            <span className="text-border">·</span>
+            <span>{todayBookings} booking{todayBookings !== 1 ? "s" : ""}</span>
           </p>
         </div>
 
-        <div className="relative group">
-          <div className="absolute inset-0 rounded-2xl opacity-0 group-focus-within:opacity-100 transition-opacity duration-300" style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.15), hsl(var(--kf-accent2) / 0.15))", filter: "blur(20px)" }} />
-          <div className="relative flex items-center gap-2 p-2 rounded-2xl bg-white/[0.04] backdrop-blur-xl border border-white/10 group-focus-within:border-white/20 transition-all">
-            <div className="flex items-center gap-2 pl-3">
-              <Terminal className="w-5 h-5 text-muted-foreground" />
-            </div>
+        <div className="relative group mb-5">
+          <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-border bg-card group-focus-within:border-[hsl(var(--kf-accent1)/0.3)] transition-all">
+            <Terminal className="w-4 h-4 text-muted-foreground flex-shrink-0" />
             <input
               ref={inputRef}
               value={aiInput}
               onChange={(e) => setAiInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
               onFocus={() => setChatOpen(true)}
-              placeholder="Ask AI anything, run a command, or use voice..."
+              placeholder="Ask AI anything or run a command..."
               aria-label="AI command input"
-              className="flex-1 bg-transparent text-sm py-3 focus:outline-none placeholder:text-muted-foreground/60"
+              className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/50"
               disabled={sending || !businessId}
             />
-            <div className="flex items-center gap-1.5 pr-1">
+            <div className="flex items-center gap-1">
               {voiceSupported && (
                 <button
                   onClick={startVoice}
-                  className={`p-2.5 rounded-xl transition-all ${voiceListening ? "bg-red-500/20 text-red-400 animate-pulse" : "text-muted-foreground hover:text-white hover:bg-white/10"}`}
+                  className={`p-1.5 rounded-md transition-all ${voiceListening ? "bg-red-500/20 text-red-400 animate-pulse" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}
                   title={voiceListening ? "Listening..." : "Voice input"}
                 >
-                  {voiceListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                  {voiceListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
                 </button>
               )}
               <button
                 onClick={handleSend}
                 disabled={sending || !aiInput.trim() || !businessId}
                 aria-label="Send message"
-                className="p-2.5 rounded-xl transition-all disabled:opacity-30 hover:scale-105"
-                style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
+                className="p-1.5 rounded-md transition-all disabled:opacity-30"
+                style={{ background: "hsl(var(--kf-accent1))" }}
               >
-                {sending ? <Loader2 className="w-4 h-4 text-white animate-spin" /> : <CornerDownLeft className="w-4 h-4 text-white" />}
+                {sending ? <Loader2 className="w-3.5 h-3.5 text-white animate-spin" /> : <CornerDownLeft className="w-3.5 h-3.5 text-white" />}
               </button>
             </div>
           </div>
-          <div className="flex items-center gap-3 mt-2 px-3">
-            <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider">Quick:</span>
-            {["Daily briefing", "Cash flow forecast", "What should I focus on?"].map(q => (
-              <button key={q} onClick={() => { setAiInput(q); inputRef.current?.focus(); }} className="text-[11px] px-2.5 py-1 rounded-lg bg-white/[0.03] border border-white/[0.06] text-muted-foreground hover:text-foreground hover:border-white/15 transition-all">
+          <div className="flex items-center gap-2 mt-1.5">
+            {["Daily briefing", "Cash flow", "Focus areas"].map(q => (
+              <button key={q} onClick={() => { setAiInput(q); inputRef.current?.focus(); }} className="text-[11px] px-2 py-1 rounded-md border border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground/30 transition-all">
                 {q}
               </button>
             ))}
           </div>
         </div>
-      </motion.div>
+      </div>
 
       <AnimatePresence>
         {chatOpen && messages.length > 1 && (
@@ -497,34 +483,34 @@ export default function CommandPage() {
             exit={{ opacity: 0, height: 0 }}
             className="overflow-hidden"
           >
-            <div className="bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.06]">
+            <div className="kf-card overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-2 border-b border-border">
                 <div className="flex items-center gap-2">
-                  <div className="h-6 w-6 rounded-md flex items-center justify-center" style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}>
-                    <Brain className="w-3 h-3 text-white" />
+                  <div className="h-5 w-5 rounded flex items-center justify-center" style={{ background: "hsl(var(--kf-accent1) / 0.1)" }}>
+                    <Brain className="w-3 h-3" style={{ color: "hsl(var(--kf-accent1))" }} />
                   </div>
                   <span className="text-xs font-medium text-muted-foreground">KeyFlow AI</span>
                   {sending && <span className="text-[10px] text-muted-foreground/60 animate-pulse">Thinking...</span>}
                 </div>
-                <button onClick={() => setChatOpen(false)} className="text-muted-foreground hover:text-foreground p-1 rounded-lg hover:bg-white/5 transition-colors">
-                  <X className="w-4 h-4" />
+                <button onClick={() => setChatOpen(false)} className="text-muted-foreground hover:text-foreground p-1 rounded-md hover:bg-muted transition-colors">
+                  <X className="w-3.5 h-3.5" />
                 </button>
               </div>
-              <div className="max-h-80 overflow-y-auto p-4 space-y-3">
+              <div className="max-h-72 overflow-y-auto p-3 space-y-2.5">
                 {messages.slice(1).map((msg, i) => (
-                  <motion.div key={i} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed ${
+                  <motion.div key={i} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                    <div className={`max-w-[85%] rounded-lg px-3 py-2 text-[13px] leading-relaxed ${
                       msg.role === "user"
-                        ? "bg-white/[0.08] border border-white/10"
+                        ? "bg-muted border border-border"
                         : ""
-                    }`} style={msg.role === "assistant" ? { background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.08), hsl(var(--kf-accent2) / 0.08))", border: "1px solid hsl(var(--kf-accent1) / 0.15)" } : undefined}>
+                    }`} style={msg.role === "assistant" ? { background: "hsl(var(--kf-accent1) / 0.06)", border: "1px solid hsl(var(--kf-accent1) / 0.1)" } : undefined}>
                       <p className="whitespace-pre-wrap">{msg.content}</p>
                     </div>
                   </motion.div>
                 ))}
                 {sending && (
                   <div className="flex justify-start">
-                    <div className="rounded-xl px-4 py-3 flex items-center gap-1.5" style={{ background: "hsl(var(--kf-accent1) / 0.08)", border: "1px solid hsl(var(--kf-accent1) / 0.15)" }}>
+                    <div className="rounded-lg px-3.5 py-2.5 flex items-center gap-1.5" style={{ background: "hsl(var(--kf-accent1) / 0.06)", border: "1px solid hsl(var(--kf-accent1) / 0.1)" }}>
                       <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: "hsl(var(--kf-accent2))" }} />
                       <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: "hsl(var(--kf-accent2))", animationDelay: "0.2s" }} />
                       <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: "hsl(var(--kf-accent2))", animationDelay: "0.4s" }} />
@@ -538,77 +524,73 @@ export default function CommandPage() {
         )}
       </AnimatePresence>
 
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="kf-card p-4 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-16 h-16 rounded-bl-[40px] opacity-10" style={{ background: "hsl(var(--kf-accent1))" }} />
-          <div className="flex items-center gap-2 text-muted-foreground mb-1.5">
-            <DollarSign className="w-4 h-4" />
-            <span className="text-[10px] uppercase tracking-wider font-medium">Today</span>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="kf-stat-card">
+          <div className="flex items-center gap-1.5 text-muted-foreground mb-2">
+            <DollarSign className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+            <span className="text-[11px] font-medium">Today</span>
           </div>
-          <div className="text-xl font-bold">{formatTTD(todayRevenue)}</div>
+          <div className="text-lg font-semibold">{formatTTD(todayRevenue)}</div>
           {pendingInvoices > 0 && <p className="text-[11px] text-muted-foreground mt-1">{pendingInvoices} pending</p>}
         </div>
 
-        <div className="kf-card p-4 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-16 h-16 rounded-bl-[40px] opacity-10" style={{ background: "hsl(var(--kf-accent2))" }} />
-          <div className="flex items-center gap-2 text-muted-foreground mb-1.5">
-            <TrendingUp className="w-4 h-4" />
-            <span className="text-[10px] uppercase tracking-wider font-medium">This Month</span>
+        <div className="kf-stat-card">
+          <div className="flex items-center gap-1.5 text-muted-foreground mb-2">
+            <TrendingUp className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent2))" }} />
+            <span className="text-[11px] font-medium">This Month</span>
           </div>
-          <div className="text-xl font-bold">{formatTTD(monthlyRevenue)}</div>
-          <div className="mt-1.5">
-            <div className="kf-momentum-bar h-1.5">
+          <div className="text-lg font-semibold">{formatTTD(monthlyRevenue)}</div>
+          <div className="mt-2">
+            <div className="kf-momentum-bar">
               <div className="kf-momentum-fill" style={{ width: `${(cockpit?.momentum ?? 0) * 100}%` }} />
             </div>
           </div>
         </div>
 
-        <div className="kf-card p-4 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-16 h-16 rounded-bl-[40px] opacity-10 bg-blue-500" />
-          <div className="flex items-center gap-2 text-muted-foreground mb-1.5">
-            <Calendar className="w-4 h-4" />
-            <span className="text-[10px] uppercase tracking-wider font-medium">Bookings</span>
+        <div className="kf-stat-card">
+          <div className="flex items-center gap-1.5 text-muted-foreground mb-2">
+            <Calendar className="w-3.5 h-3.5 text-blue-500" />
+            <span className="text-[11px] font-medium">Bookings</span>
           </div>
-          <div className="text-xl font-bold">{todayBookings}</div>
+          <div className="text-lg font-semibold">{todayBookings}</div>
           <p className="text-[11px] text-muted-foreground mt-1">{completedBookingsToday} completed</p>
         </div>
 
-        <div className="kf-card p-4 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-16 h-16 rounded-bl-[40px] opacity-10 bg-green-500" />
-          <div className="flex items-center gap-2 text-muted-foreground mb-1.5">
-            <CheckCircle2 className="w-4 h-4" />
-            <span className="text-[10px] uppercase tracking-wider font-medium">Tasks Done</span>
+        <div className="kf-stat-card">
+          <div className="flex items-center gap-1.5 text-muted-foreground mb-2">
+            <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
+            <span className="text-[11px] font-medium">Tasks Done</span>
           </div>
-          <div className="text-xl font-bold">{completedToday}</div>
+          <div className="text-lg font-semibold">{completedToday}</div>
           <p className="text-[11px] text-muted-foreground mt-1">{tasksRemaining} remaining</p>
         </div>
-      </motion.div>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 space-y-4">
+        <div className="lg:col-span-2 space-y-5">
           {priorities.length > 0 && (
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
-              <div className="flex items-center gap-2 mb-3">
-                <AlertTriangle className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-                <h2 className="text-sm font-semibold uppercase tracking-wider">Priorities</h2>
-                <span className="ml-auto text-[10px] text-muted-foreground">{priorities.length} items</span>
+            <div>
+              <div className="flex items-center gap-2 mb-2.5">
+                <AlertTriangle className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+                <h2 className="text-[13px] font-semibold">Priorities</h2>
+                <span className="ml-auto text-[11px] text-muted-foreground">{priorities.length} items</span>
               </div>
               <div className="space-y-2">
                 {priorities.slice(0, 4).map((priority, idx) => (
                   <PriorityCard key={priority.id} priority={priority} index={idx} />
                 ))}
               </div>
-            </motion.div>
+            </div>
           )}
 
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-            <div className="flex items-center justify-between mb-3">
+          <div>
+            <div className="flex items-center justify-between mb-2.5">
               <div className="flex items-center gap-2">
-                <Zap className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-                <h2 className="text-sm font-semibold uppercase tracking-wider">Today&apos;s Tasks</h2>
+                <Zap className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+                <h2 className="text-[13px] font-semibold">Today&apos;s Tasks</h2>
               </div>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
+              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <CheckCircle2 className="w-3 h-3 text-green-500" />
                 <span>{completedToday} done</span>
               </div>
             </div>
@@ -672,7 +654,7 @@ export default function CommandPage() {
                 ))}
               </div>
             )}
-          </motion.div>
+          </div>
 
           {revenueInsights && (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}>
