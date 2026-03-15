@@ -85,7 +85,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
-  const momentumValue = 0.52;
   const { setAccent1, setAccent2 } = useThemeColors();
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -323,15 +322,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
 
             <div className="flex items-center gap-1.5 sm:gap-2">
-              <div className="hidden sm:flex items-center gap-1.5 mr-1 px-2 py-1 rounded-md bg-muted/50">
-                <div className="w-16 kf-momentum-bar">
-                  <div className="kf-momentum-fill" style={{ width: `${momentumValue * 100}%` }} />
-                </div>
-                <div className="text-[11px] font-medium" style={{ color: "hsl(var(--kf-accent1))" }}>
-                  {Math.round(momentumValue * 100)}%
-                </div>
-              </div>
-
               <button
                 onClick={() => setPaletteOpen(true)}
                 className="lg:hidden p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"

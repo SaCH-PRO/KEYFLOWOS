@@ -9,7 +9,6 @@ import {
   Plus,
   Search,
   Sparkles,
-  HelpCircle,
   DollarSign,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -20,7 +19,7 @@ import { AiCommandHub } from "@/components/ai/ai-command-hub";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { useCommerce } from "./hooks/use-commerce";
-import { CommerceGuideDrawer } from "./components/commerce-guide";
+import { FeatureGuide } from "@/components/ui/feature-guide";
 import { BillingPanel } from "./billing/billing-panel";
 import { CommerceInsightsTab } from "./insights/commerce-insights-tab";
 import { CommerceOverviewTab } from "./components/commerce-overview-tab";
@@ -50,7 +49,7 @@ export default function CommercePage() {
   const {
     businessId, businessCurrency, workspaceLoading, workspaceError, tab, handleTabChange: rawTabChange,
     products, invoices, quotes, contacts, loading, error,
-    showGuide, handleToggleGuide, handleCloseGuide, handleNewItem,
+    handleNewItem,
     activeBillingSegment: billingSegment, setActiveBillingSegment: setBillingSegment,
     gmailStatus,
     pendingPrefill, clearPrefill, prefillForContact,
@@ -189,7 +188,6 @@ export default function CommercePage() {
           { key: "3", description: "Catalog tab", action: () => handleTabChange("catalog") },
           { key: "r", description: "Refresh data", action: () => { state.refreshProducts(); } },
           { key: "a", shift: true, description: "Toggle AI Copilot", action: () => commerceAi.togglePanel() },
-          { key: "?", description: "Help", action: () => handleToggleGuide() },
           { key: "Escape", description: "Close panels", action: () => { if (commerceAi.hubMode === "tool-result") commerceAi.clearToolResult(); else if (commerceAi.panelOpen) commerceAi.setOpen(false); } },
         ],
       },
@@ -205,7 +203,7 @@ export default function CommercePage() {
       });
     }
     return shortcuts;
-  }, [handleNewItem, handleTabChange, state.refreshProducts, commerceAi.togglePanel, commerceAi.panelOpen, commerceAi.setOpen, commerceAi.hubMode, commerceAi.clearToolResult, handleToggleGuide, tab, setBillingSegment]);
+  }, [handleNewItem, handleTabChange, state.refreshProducts, commerceAi.togglePanel, commerceAi.panelOpen, commerceAi.setOpen, commerceAi.hubMode, commerceAi.clearToolResult, tab, setBillingSegment]);
 
   useKeyboardShortcuts(commerceShortcuts, !workspaceLoading);
 
@@ -233,6 +231,21 @@ export default function CommercePage() {
         icon={CreditCard}
         title="Commerce"
         subtitle="Revenue workspace"
+        titleExtra={
+          <FeatureGuide
+            featureKey="commerce"
+            title="Getting Started with Commerce"
+            description="Manage invoices, quotes, and track your revenue."
+            steps={[
+              { title: "Create Invoices", description: "Bill clients with professional invoices, track payments, and send reminders." },
+              { title: "Send Quotes", description: "Generate quotes and convert them to invoices when approved." },
+              { title: "Recurring Billing", description: "Set up recurring invoice schedules for subscription-based services." },
+              { title: "Payment Links", description: "Share payment links so clients can pay online via multiple gateways." },
+              { title: "Revenue Analytics", description: "Track cash flow, revenue trends, and use AI-powered forecasting." },
+              { title: "Product Catalog", description: "Manage your products and services with pricing and categories." },
+            ]}
+          />
+        }
         rightSlot={
           <div className="flex items-center gap-2">
             <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border/50 bg-white/[0.03] text-sm">
@@ -257,14 +270,6 @@ export default function CommercePage() {
               >
                 <Sparkles className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]/60" />
               </button>
-              <button
-                onClick={handleToggleGuide}
-                className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-white/[0.06] transition-colors"
-                aria-label="Help"
-                title="Help (?)"
-              >
-                <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60" />
-              </button>
             </div>
           </div>
         }
@@ -283,12 +288,6 @@ export default function CommercePage() {
           />
         )}
       </AnimatePresence>
-
-      <CommerceGuideDrawer
-        isOpen={showGuide}
-        onClose={handleCloseGuide}
-        onTabChange={handleTabChange}
-      />
 
       <TabNav
         tabs={TABS}

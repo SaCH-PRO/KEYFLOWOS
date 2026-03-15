@@ -41,7 +41,7 @@ import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { useStoreAiHub } from "./hooks/use-store-ai-hub";
 import { renderStoreToolResult } from "./components/store-tool-results";
-import { StoreGuide } from "./components/store-guide";
+import { FeatureGuide } from "@/components/ui/feature-guide";
 import { StoreSkeleton } from "./components/store-skeleton";
 import { StoreHeaderActions } from "./components/store-header-actions";
 import { StoreSettings } from "./components/store-settings";
@@ -110,7 +110,6 @@ export default function StorePage() {
   const [businessHours, setBusinessHours] = useState<BusinessHoursMap>(DEFAULT_HOURS);
   const [hoursSaving, setHoursSaving] = useState(false);
   const [driftedItems, setDriftedItems] = useState<DriftedItem[]>([]);
-  const [showGuide, setShowGuide] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [overviewAnalytics, setOverviewAnalytics] = useState<StoreAnalytics | null>(null);
 
@@ -462,8 +461,6 @@ export default function StorePage() {
     }
   }, [handleTabChange, storeAi]);
 
-  const toggleGuide = useCallback(() => setShowGuide((prev) => !prev), []);
-
   const storeShortcuts = useMemo<ShortcutGroup[]>(() => [
     {
       groupName: "Store Navigation",
@@ -474,16 +471,14 @@ export default function StorePage() {
         { key: "4", description: "Settings tab", action: () => handleTabChange("settings") },
         { key: "5", description: "Customize tab", action: () => handleTabChange("customize") },
         { key: "r", description: "Refresh data", action: () => { void loadData(); } },
-        { key: "g", description: "Toggle guide", action: toggleGuide },
         { key: "a", shift: true, description: "Toggle AI Hub", action: () => storeAi.togglePanel() },
         { key: "Escape", description: "Close panels", action: () => {
           if (storeAi.hubMode === "tool-result") storeAi.clearToolResult();
           else if (storeAi.panelOpen) storeAi.setOpen(false);
-          else setShowGuide(false);
         } },
       ],
     },
-  ], [handleTabChange, loadData, toggleGuide, storeAi.togglePanel, storeAi.panelOpen, storeAi.setOpen, storeAi.hubMode, storeAi.clearToolResult]);
+  ], [handleTabChange, loadData, storeAi.togglePanel, storeAi.panelOpen, storeAi.setOpen, storeAi.hubMode, storeAi.clearToolResult]);
 
   useKeyboardShortcuts(storeShortcuts, !loading);
 
@@ -514,10 +509,18 @@ export default function StorePage() {
         title="Store"
         subtitle={`${services.length} services · ${commerceProducts.length} products · ${storeEnabled ? "Live" : "Draft"}`}
         titleExtra={
-          <StoreGuide
-            isOpen={showGuide}
-            onToggle={toggleGuide}
-            onTabChange={handleTabChange}
+          <FeatureGuide
+            featureKey="store"
+            title="Getting Started with Your Store"
+            description="Set up your online storefront to accept bookings and sell products."
+            steps={[
+              { title: "Add Products & Services", description: "List your offerings with pricing, descriptions, and images." },
+              { title: "Set Business Hours", description: "Configure your availability so customers know when to book." },
+              { title: "Customize Appearance", description: "Brand your storefront with colors, logo, and layout preferences." },
+              { title: "Go Live", description: "Enable your store and share the public link with customers." },
+              { title: "Track Performance", description: "Monitor readiness score, conversion insights, and SEO health." },
+              { title: "AI Optimization", description: "Use AI tools for store optimization and SEO recommendations." },
+            ]}
           />
         }
         rightSlot={

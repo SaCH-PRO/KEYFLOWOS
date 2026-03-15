@@ -25,9 +25,8 @@ import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
 import { useMarketingAiHub } from "./hooks/use-marketing-ai-hub";
 import { useMarketing } from "./hooks/use-marketing";
 import { renderMarketingToolResult } from "./components/marketing-tool-results";
-import { MarketingAiSearchBar } from "./components/marketing-ai-search-bar";
 import { MarketingSkeleton } from "./components/marketing-skeleton";
-import { MarketingGuide } from "./components/marketing-guide";
+import { FeatureGuide } from "@/components/ui/feature-guide";
 import { CampaignsPanel } from "./components/campaigns-panel";
 import { LeadFormsPanel } from "./components/lead-forms-panel";
 import { CampaignActionQueue } from "./components/campaign-action-queue";
@@ -64,7 +63,6 @@ export default function MarketingPage() {
   const { gmailConnected, gmailEmail, socialConnections, loading: connectionsLoading } = useConnections();
 
   const [activeTab, setActiveTab] = useState<MarketingTab>("social");
-  const [showGuide, setShowGuide] = useState(false);
   const [showStrategy, setShowStrategy] = useState(false);
   const [showBrief, setShowBrief] = useState(false);
   const initialTabSet = useRef(false);
@@ -145,7 +143,6 @@ export default function MarketingPage() {
     else if (actionKey.startsWith("tool:")) handleAiAction(actionKey.split(":")[1]);
   }, [handleTabChange, handleAiAction]);
 
-  const toggleGuide = useCallback(() => setShowGuide((prev) => !prev), []);
 
   const marketingShortcuts = useMemo<ShortcutGroup[]>(() => [
     {
@@ -157,8 +154,6 @@ export default function MarketingPage() {
         { key: "4", description: "Insights tab", action: () => handleTabChange("insights") },
         { key: "n", description: "New item", action: handleNewItem },
         { key: "r", description: "Refresh data", action: () => { void mk.loadData(); } },
-        { key: "f", description: "Focus search", action: () => document.querySelector<HTMLInputElement>("[data-marketing-ai-search]")?.focus() },
-        { key: "g", description: "Toggle guide", action: toggleGuide },
         { key: "b", description: "Marketing brief", action: () => setShowBrief(true) },
         { key: "s", shift: true, description: "AI Strategy", action: () => setShowStrategy(true) },
         { key: "a", shift: true, description: "Toggle AI Hub", action: () => marketingAi.togglePanel() },
@@ -167,11 +162,10 @@ export default function MarketingPage() {
           else if (marketingAi.panelOpen) marketingAi.setOpen(false);
           else if (showStrategy) setShowStrategy(false);
           else if (showBrief) setShowBrief(false);
-          else setShowGuide(false);
         } },
       ],
     },
-  ], [handleTabChange, handleNewItem, mk.loadData, toggleGuide, marketingAi.togglePanel, marketingAi.panelOpen, marketingAi.setOpen, marketingAi.hubMode, marketingAi.clearToolResult, showStrategy, showBrief]);
+  ], [handleTabChange, handleNewItem, mk.loadData, marketingAi.togglePanel, marketingAi.panelOpen, marketingAi.setOpen, marketingAi.hubMode, marketingAi.clearToolResult, showStrategy, showBrief]);
 
   useKeyboardShortcuts(marketingShortcuts, !mk.loading);
 
@@ -194,7 +188,19 @@ export default function MarketingPage() {
         actionLabel={activeTab === "social" ? "New Post" : activeTab === "campaigns" ? "New Campaign" : activeTab === "forms" ? "New Form" : undefined}
         onAction={activeTab === "insights" ? undefined : handleNewItem}
         titleExtra={
-          <MarketingGuide isOpen={showGuide} onToggle={toggleGuide} onTabChange={handleTabChange} />
+          <FeatureGuide
+            featureKey="marketing"
+            title="Getting Started with Marketing"
+            description="Create campaigns, capture leads, and grow your audience."
+            steps={[
+              { title: "Email Campaigns", description: "Build and send email campaigns with AI-generated content and audience targeting." },
+              { title: "Social Media", description: "Connect social channels, schedule posts, and track engagement." },
+              { title: "Lead Forms", description: "Create embeddable forms to capture leads and auto-add contacts to your CRM." },
+              { title: "AI Strategy", description: "Get AI-powered strategy recommendations and performance briefings." },
+              { title: "Analytics", description: "Track campaign performance, open rates, leads captured, and conversion funnels." },
+              { title: "Automation", description: "Use cross-module events to trigger campaigns from CRM or commerce actions." },
+            ]}
+          />
         }
         rightSlot={
           <div className="flex items-center gap-2">
@@ -222,8 +228,6 @@ export default function MarketingPage() {
           </div>
         }
       />
-
-      <MarketingAiSearchBar businessId={mk.businessId} />
 
       <MarketingLaunchpad
         campaigns={mk.campaigns}

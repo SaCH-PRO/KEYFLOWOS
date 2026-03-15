@@ -8,7 +8,6 @@ import {
   Users, BarChart3, Layers,
 } from "lucide-react";
 import {
-  ContactCardData,
   BroadcastDrawer,
 } from "@/components/contacts";
 import { KanbanSkeleton } from "@/components/ui/skeleton";
@@ -16,14 +15,11 @@ import { WorkspaceError } from "@/components/ui/workspace-error";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
-import { AiSearchBar, type CrmCommand } from "@/components/contacts/ai-search-bar";
-import { aiExecuteCommand } from "@/lib/client";
 import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
-import type { SmartSegment } from "./pipeline-toolbar";
+import { FeatureGuide } from "@/components/ui/feature-guide";
 import { ContactsDatabase } from "./contacts-database";
 import { InsightsTab } from "./insights-tab";
 import { PipelineTabContent } from "./pipeline-tab-content";
-import { GettingStartedGuide } from "./getting-started-guide";
 import { useContactsPipeline } from "./use-contacts-pipeline";
 import { useCrmAiHub } from "./hooks/use-crm-ai-hub";
 import { renderCrmToolResult } from "./components/crm-tool-results";
@@ -45,7 +41,6 @@ export default function ContactsPage() {
   const {
     workspaceLoading, workspaceError, businessId,
     crmViewTab, setCrmViewTab,
-    showGuide, setShowGuide,
     showBroadcast, setShowBroadcast,
     confirmState, setConfirmState,
     selectedContactsForBroadcast,
@@ -92,18 +87,17 @@ export default function ContactsPage() {
       groupName: "CRM Navigation",
       shortcuts: [
         { key: "n", description: "New contact", action: () => state.setShowAddMenu(true) },
-        { key: "f", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('[data-ai-search]'); el?.focus(); } },
+        { key: "f", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('input[aria-label="Search contacts"]'); el?.focus(); } },
         { key: "1", description: "Contacts tab", action: () => setCrmViewTab("contacts") },
         { key: "2", description: "Insights tab", action: () => setCrmViewTab("insights") },
         { key: "3", description: "Studio tab", action: () => setCrmViewTab("studio") },
         { key: "r", description: "Refresh contacts", action: () => { void loadContacts(); void loadFlowData(); } },
         { key: "b", description: "Open broadcast", action: () => state.setShowBroadcast(true) },
-        { key: "g", description: "Toggle guide", action: () => setShowGuide((p: boolean) => !p) },
         { key: "a", shift: true, description: "Toggle AI Hub", action: () => crmAi.togglePanel() },
         { key: "Escape", description: "Close panels", action: () => { if (crmAi.hubMode === "tool-result") crmAi.clearToolResult(); else if (crmAi.panelOpen) crmAi.setOpen(false); } },
       ],
     },
-  ], [setCrmViewTab, loadContacts, loadFlowData, state.setShowAddMenu, state.setShowBroadcast, setShowGuide, crmAi.panelOpen, crmAi.setOpen, crmAi.togglePanel, crmAi.hubMode, crmAi.clearToolResult]);
+  ], [setCrmViewTab, loadContacts, loadFlowData, state.setShowAddMenu, state.setShowBroadcast, crmAi.panelOpen, crmAi.setOpen, crmAi.togglePanel, crmAi.hubMode, crmAi.clearToolResult]);
 
   useKeyboardShortcuts(crmShortcuts, !workspaceLoading);
 
@@ -153,10 +147,6 @@ export default function ContactsPage() {
   }, [setStatusFilter, setCrmViewTab, state.setActiveSegment]);
   const handleViewEngageContact = useCallback((id: string) => { selectContact(id); setCrmViewTab("contacts"); }, [selectContact, setCrmViewTab]);
   const handleToggleAutopilotPause = useCallback(() => setAutopilotPaused((prev: boolean) => !prev), [setAutopilotPaused]);
-  const handleToggleGuide = useCallback(() => setShowGuide((prev: boolean) => !prev), [setShowGuide]);
-  const handleGuideAddContact = useCallback(() => state.setShowAddMenu(true), [state.setShowAddMenu]);
-  const handleGuideSegment = useCallback((segment: string) => { state.setActiveSegment(segment as SmartSegment); setCrmViewTab("contacts"); }, [state.setActiveSegment, setCrmViewTab]);
-  const handleGuideSelectMode = useCallback(() => { state.handleToggleSelectMode(); setCrmViewTab("contacts"); }, [state.handleToggleSelectMode, setCrmViewTab]);
   const handleTabChange = useCallback((t: string) => {
     if (t === crmViewTab) return;
     const oldIndex = CRM_TABS.indexOf(crmViewTab);
@@ -171,177 +161,6 @@ export default function ContactsPage() {
     activeTab: crmViewTab,
     onTabChange: handleTabChange,
   });
-
-  const handleAiCommand = useCallback((cmd: CrmCommand) => {
-    switch (cmd.type) {
-      case "add_contact":
-        state.setShowAddForm(true);
-        toast.success("Opening add contact form...");
-        break;
-      case "edit_contact":
-        selectContact(cmd.contactId);
-        setCrmViewTab("contacts");
-        setTimeout(() => state.handleEditContact(), 300);
-        toast.success("Opening contact for editing...");
-        break;
-      case "delete_contact":
-        selectContact(cmd.contactId);
-        setCrmViewTab("contacts");
-        setTimeout(() => state.handleDeleteContact(), 300);
-        break;
-      case "view_contact":
-        selectContact(cmd.contactId);
-        setCrmViewTab("contacts");
-        toast.success("Navigating to contact...");
-        break;
-      case "change_status":
-        selectContact(cmd.contactId);
-        setCrmViewTab("contacts");
-        state.handleUpdateStatus(cmd.status);
-        toast.success(`Status updated to ${cmd.status}`);
-        break;
-      case "add_note":
-        selectContact(cmd.contactId);
-        setCrmViewTab("contacts");
-        if (cmd.body) {
-          setTimeout(() => {
-            state.handleAddNote(cmd.body!);
-            toast.success("Note added");
-          }, 400);
-        } else {
-          toast.success("Opening contact — add your note in the Notes tab");
-        }
-        break;
-      case "add_task":
-        selectContact(cmd.contactId);
-        setCrmViewTab("contacts");
-        if (cmd.title) {
-          setTimeout(() => {
-            state.handleAddTask(cmd.title!);
-            toast.success("Task created");
-          }, 400);
-        } else {
-          toast.success("Opening contact — add your task in the Tasks tab");
-        }
-        break;
-      case "log_communication":
-        selectContact(cmd.contactId);
-        setCrmViewTab("contacts");
-        toast.success("Opening contact — use the Log Interaction button");
-        break;
-      case "switch_tab":
-        setCrmViewTab(cmd.tab as "contacts" | "insights" | "studio");
-        toast.success(`Switched to ${cmd.tab} view`);
-        break;
-      case "filter_status":
-        if (cmd.status === "all") {
-          setStatusFilter("");
-        } else {
-          setStatusFilter(cmd.status);
-        }
-        setCrmViewTab("contacts");
-        toast.success(cmd.status === "all" ? "Showing all contacts" : `Filtered to ${cmd.status} contacts`);
-        break;
-      case "open_broadcast":
-        state.setShowBroadcast(true);
-        toast.success("Opening broadcast tool...");
-        break;
-      case "import_contacts":
-        state.setShowAddMenu(true);
-        toast.success("Opening contact import...");
-        break;
-      case "show_favorites":
-        state.setActiveSegment("favorites" as any);
-        setCrmViewTab("contacts");
-        toast.success("Showing favorite contacts");
-        break;
-      case "toggle_favorite":
-        state.handleToggleFavorite(cmd.contactId);
-        break;
-      case "bulk_tag":
-        if (state.selectedIds.size > 0) {
-          cmd.tags.forEach(tag => state.handleBulkTag(tag));
-          toast.success(`Tags applied to ${state.selectedIds.size} contacts`);
-        } else {
-          toast.info("Select contacts first, then try again");
-        }
-        break;
-      case "generate_ai_summary":
-      case "generate_ai_score":
-      case "generate_prep_brief":
-      case "suggest_tags":
-        selectContact(cmd.contactId);
-        setCrmViewTab("contacts");
-        toast.success("Opening contact — use the AI tools in the detail panel");
-        break;
-      case "search_contacts":
-        state.setSearchInput(cmd.query);
-        setCrmViewTab("contacts");
-        break;
-      case "find_duplicates":
-        setCrmViewTab("insights");
-        toast.success("Switching to Insights — use the Duplicate Finder AI tool");
-        break;
-      case "data_cleanup":
-        setCrmViewTab("insights");
-        toast.success("Switching to Insights — use the Data Quality AI tool");
-        break;
-      case "merge_contacts": {
-        const sourceId = cmd.params?.sourceId as string;
-        const targetId = cmd.params?.targetId as string;
-        if (sourceId && targetId) {
-          selectContact(targetId);
-          setCrmViewTab("contacts");
-          toast.success("Opening target contact — use the merge option in the detail panel");
-        } else {
-          toast.info("Specify the two contacts to merge");
-        }
-        break;
-      }
-      case "bulk_delete":
-        toast.warning("Bulk delete must be confirmed manually for safety");
-        break;
-      case "create_quote":
-        selectContact(cmd.contactId);
-        setCrmViewTab("contacts");
-        toast.success("Opening contact — create a quote from the Quick Actions menu");
-        break;
-      case "create_invoice":
-        selectContact(cmd.contactId);
-        setCrmViewTab("contacts");
-        toast.success("Opening contact — create an invoice from the Quick Actions menu");
-        break;
-      case "generate_follow_up":
-        selectContact(cmd.contactId);
-        setCrmViewTab("contacts");
-        toast.success("Opening contact — use the Follow-up Drafter AI tool");
-        break;
-      case "revenue_scan":
-        setCrmViewTab("insights");
-        toast.success("Switching to Insights — use the Revenue Opportunity AI tool");
-        break;
-      case "reengagement_scan":
-        setCrmViewTab("contacts");
-        toast.success("Check re-engagement suggestions in the Next Actions queue");
-        break;
-      case "ai_execute": {
-        const executing = toast.loading("Executing AI command...");
-        aiExecuteCommand(cmd.action, cmd.params, cmd.contactId).then(result => {
-          toast.dismiss(executing);
-          if (result.data?.success) {
-            toast.success(result.data.message);
-            loadContacts();
-          } else {
-            toast.error(result.data?.message ?? result.error ?? "Command failed");
-          }
-        }).catch(() => {
-          toast.dismiss(executing);
-          toast.error("Command execution failed");
-        });
-        break;
-      }
-    }
-  }, [selectContact, setCrmViewTab, setStatusFilter, state]);
 
   const databaseContacts = useMemo(() => contacts.map((c) => ({
     id: c.id,
@@ -381,20 +200,20 @@ export default function ContactsPage() {
         title="Contacts"
         subtitle="Your AI-powered contact management hub"
         titleExtra={
-          <GettingStartedGuide
-            isOpen={showGuide}
-            onToggle={handleToggleGuide}
-            onAddContact={handleGuideAddContact}
-            onSegmentChange={handleGuideSegment}
-            onToggleSelectMode={handleGuideSelectMode}
-            onTabChange={handleTabChange}
+          <FeatureGuide
+            featureKey="crm-pipeline"
+            title="Getting Started with CRM"
+            description="Manage your contacts, track relationships, and grow your business."
+            steps={[
+              { title: "Add Contacts", description: "Create manually, scan business cards, import CSV/VCF, or sync from Google Contacts." },
+              { title: "Smart Segments", description: "Filter with one-tap segments like High Value, New This Week, and At Risk." },
+              { title: "Communicate", description: "Reach out via WhatsApp, email, or phone directly from any contact card." },
+              { title: "Bulk Actions", description: "Select multiple contacts for broadcast messages, tagging, or status updates." },
+              { title: "Insights & AI", description: "Track pipeline health, revenue data, and use AI tools for summaries and scoring." },
+              { title: "Studio", description: "Use the database view for bulk operations, smart lists, and data cleanup." },
+            ]}
           />
         }
-      />
-
-      <AiSearchBar
-        onSelectContact={(id) => { selectContact(id); setCrmViewTab("contacts"); }}
-        onExecuteCommand={handleAiCommand}
       />
 
       <AnimatePresence>

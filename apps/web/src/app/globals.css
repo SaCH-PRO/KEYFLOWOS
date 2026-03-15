@@ -314,14 +314,14 @@
     border-radius: 9999px;
     overflow: hidden;
   }
-  
+
   .kf-momentum-fill {
     height: 100%;
     background: linear-gradient(90deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)));
     border-radius: 9999px;
     transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
   }
-  
+
   .kf-nav-item {
     display: flex;
     align-items: center;
