@@ -287,6 +287,15 @@ export default function CatalogCapacityTab({
           </div>
         </div>
 
+        {staff.length === 0 && !loading && (
+          <EmptyState
+            icon={Users}
+            title="No staff members"
+            description="Add your first team member above to manage bookings and schedules."
+            tip="Staff members can be assigned to services for appointment scheduling."
+          />
+        )}
+
         {staff.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
             {staff.map((s) => (
