@@ -7,6 +7,7 @@ type TrendDirection = "up" | "down" | "stable";
 interface MetricCardProps {
   label: string;
   value: string | number;
+  sub?: React.ReactNode;
   trend?: {
     direction: TrendDirection;
     value: string;
@@ -26,6 +27,7 @@ const TREND_CONFIG: Record<TrendDirection, { icon: React.ElementType; color: str
 export function MetricCard({
   label,
   value,
+  sub,
   trend,
   icon: Icon,
   iconColor,
@@ -50,6 +52,11 @@ export function MetricCard({
             {label}
           </p>
           <p className="text-xl font-bold truncate">{value}</p>
+          {sub && (
+            <p className="kf-text-caption" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+              {sub}
+            </p>
+          )}
           {trend && TrendIcon && (
             <div
               className="flex items-center gap-1 kf-text-micro font-medium"

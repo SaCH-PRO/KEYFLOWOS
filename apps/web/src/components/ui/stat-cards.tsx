@@ -48,6 +48,7 @@ export function StatCards({ items, columns = 4 }: StatCardsProps) {
           <MetricCard
             label={kpi.label}
             value={kpi.value}
+            sub={kpi.sub}
             icon={kpi.icon}
             iconColor={kpi.color}
           />
