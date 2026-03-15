@@ -38,7 +38,7 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, onClo
 
   const handleSubmit = async () => {
     if (!formData.description.trim() || !formData.amount) return;
-    const payload: any = {
+    const payload: Partial<Expense> = {
       description: formData.description.trim(), amount: parseFloat(formData.amount),
       date: formData.date, vendor: formData.vendor.trim() || undefined,
       categoryId: formData.categoryId || undefined, notes: formData.notes.trim() || undefined,
