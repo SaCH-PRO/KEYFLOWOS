@@ -44,6 +44,7 @@ import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
 import { useBookingsAiHub } from "./hooks/use-bookings-ai-hub";
 import { renderBookingsToolResult } from "./components/bookings-tool-results";
 import { BookingsSkeleton } from "./components/bookings-skeleton";
+import { WorkspaceError } from "@/components/ui/workspace-error";
 import { moduleEvents } from "@/lib/module-events";
 import { useProducts } from "../commerce/hooks/use-products";
 import { ProductsPanel } from "../commerce/products/products-panel";
@@ -311,16 +312,7 @@ export default function BookingsPage() {
   }, [router]);
 
   if (!businessId && !loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center space-y-3">
-          <p className="text-lg font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>
-            We could not find your workspace. Please sign in again.
-          </p>
-          <p className="text-muted-foreground">Try logging in again to create your workspace.</p>
-        </div>
-      </div>
-    );
+    return <WorkspaceError />;
   }
 
   if (loading && bookings.length === 0) {

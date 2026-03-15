@@ -1,0 +1,554 @@
+I explored the current Contacts/CRM implementation and there is already a strong foundation, but it is carrying too many parallel surfaces, state branches, and modal-style entry points. The code suggests the module is trying to be four things at once: CRM cockpit, contact database, communication launcher, and import hub. That is powerful, but it also explains why it feels cluttered. The current pipeline exposes many top-level states and actions at once, including pipeline, insights, engage, database, add menu, guide, broadcast, mobile detail, select mode, autopilot, next actions, AI insights, bulk actions, imports, and more .
+
+Here is a comprehensive optimization plan.
+
+## 1. Product direction: simplify the Contacts module into one primary workflow
+
+The internal CRM spec is already pointing in the right direction: the CRM should feel like an always-on profiler, action hub, and intelligence layer, with command-style search, next actions, highlights, segments, and a unified contact detail contract .
+So the redesign should not add more features. It should reorganize existing features into one clearer operating model:
+
+### New structure
+
+Use only 3 primary surfaces:
+
+1. **Contacts Home**
+
+   * searchable contact list
+   * smart filters
+   * segment chips
+   * pinned/recent/highlighted contacts
+   * next-action queue
+
+2. **Contact Workspace**
+
+   * one selected contact
+   * overview, activity, tasks, notes, invoices/bookings, AI/context
+   * quick actions always visible
+
+3. **Contacts Studio**
+
+   * database/list management
+   * imports/exports
+   * merge/dedupe
+   * bulk actions
+   * admin-level operations
+
+That means:
+
+* move “database” out of the everyday CRM cockpit
+* reduce “engage / insights / pipeline / database” as competing top tabs
+* make “workspace” contact-centric and “studio” admin-centric
+
+The current state machine exposes `crmViewTab: "pipeline" | "insights" | "engage" | "database"` . That is a clear sign the IA is too fragmented for users. Replace this with:
+
+* `home`
+* `contact`
+* `studio`
+
+## 2. Declutter all menus: reduce choice at the wrong time
+
+### Current problem
+
+The module currently spreads actions across:
+
+* top-level view tabs
+* contact cards
+* detail panel
+* add contact popup
+* database bulk bar
+* contact picker drawer
+* merge modal
+* various toasts and sub-actions
+
+This creates decision fatigue.
+
+### Redesign rule
+
+Every action should belong to one of only three action levels:
+
+#### Level A: Always-visible quick actions
+
+Only the actions users need constantly:
+
+* Add contact
+* Search
+* Filter
+* New task / note
+* Call / message / email
+* Bulk select
+
+#### Level B: Secondary actions in overflow menu
+
+Actions used less often:
+
+* Pin / favorite
+* Merge
+* Export
+* Move to list
+* Change status
+* Tag actions
+
+#### Level C: Setup/admin actions
+
+Only inside Contacts Studio:
+
+* import methods
+* saved views
+* column picker
+* dedupe rules
+* export settings
+* smart list builder
+
+Do not let setup/admin actions sit beside daily-contacting actions.
+
+## 3. Redesign cards: fewer cards, denser meaning
+
+### Current problem
+
+Too many card-like fragments compete for attention:
+
+* contact cards
+* next-action cards
+* spotlight cards
+* mobile drawers
+* detail widgets
+* import mode cards
+* list panels
+* database controls
+
+The CRM spec itself asks for spotlight cards, next actions, and integration cues , but if all are shown equally, the screen becomes noisy.
+
+### New card system
+
+Create only 4 card types across the module:
+
+#### A. Contact row card
+
+For lists and search results:
+
+* avatar
+* name
+* company
+* status
+* 1–2 key meta indicators only:
+
+  * lead score
+  * unpaid balance or last interaction
+* one primary CTA
+* overflow menu
+
+No stacked badges unless critical.
+
+#### B. Priority card
+
+For next actions / alerts:
+
+* one sentence headline
+* why it matters
+* one action button
+* one snooze/dismiss affordance
+
+The CRM spec already favors this next-action pattern rather than making users hunt across notes, tasks, bookings, and invoices .
+
+#### C. Insight card
+
+For AI / segment / revenue / service affinity:
+
+* summary metric
+* trend
+* drill-in link
+* never more than 2 metrics per card
+
+#### D. Task sheet / form sheet
+
+Instead of huge popups for edit/add/import. Use side sheets or bottom sheets.
+
+## 4. Replace most popups with sheets and inline states
+
+### Current problem
+
+The add contacts flow is a large modal with many modes:
+
+* manual
+* scan
+* file
+* device
+* google
+* url
+  and each mode branches into more screens and sub-states .
+
+This is functionally rich, but the modal is overloaded.
+
+### Better pattern
+
+Use one **Add Contact sheet** with:
+
+* top section: “Create one”
+* middle section: “Import many”
+* bottom section: “Connect source”
+
+#### Proposed structure
+
+**Create one**
+
+* Manual
+* Scan card/business card
+
+**Import many**
+
+* CSV / Excel / vCard
+* Paste spreadsheet link
+
+**Connect source**
+
+* Google Contacts
+* Device contacts
+
+This removes the “choose a mode first, then enter another nested screen” feeling.
+Instead, the first screen should already show the final user intention.
+
+### Popup policy
+
+* Confirmation dialogs only for destructive actions
+* Merge should become a full-page or wide side-sheet compare experience, not a modal
+* Tag filter pickers and column pickers should be dropdown panels, not detached modal experiences
+
+## 5. Modernize information architecture
+
+### New left-to-right flow
+
+**Left rail**
+
+* All contacts
+* Segments
+* Lists
+* Favorites
+* Recent
+* Studio
+
+**Center pane**
+
+* search + smart filters
+* list/feed/table depending on context
+
+**Right pane**
+
+* selected contact workspace
+
+This matches the existing logic of selected contact, recent tracking, pinned contacts, segment counts, and detail panel behavior already present in the pipeline hooks .
+
+### Why this works
+
+It removes page switching. Users stay in one operating space:
+
+* browse in center
+* inspect/action in right pane
+* navigate scope in left rail
+
+## 6. Simplify filters and search
+
+The CRM spec explicitly calls for command-style search across name, email, phone, tags, and segments, including things like `/leadScore>70` and `#segment:silver` . That should become the core interaction model.
+
+### Proposed search redesign
+
+Replace scattered status chips, tag toggles, list tabs, and segment tabs with:
+
+**One smart search bar** supporting:
+
+* text search
+* filter tokens
+* saved views
+
+Example:
+
+* `john`
+* `status:client`
+* `tag:vip`
+* `score:>70`
+* `invoice:overdue`
+* `last_contacted:<30d`
+
+### Visible filters
+
+Keep only 4 quick chips under the search bar:
+
+* Status
+* Segment
+* Tag
+* More
+
+The current picker drawer uses search + status pills + tags toggle panel . Good idea, but it should be generalized across the whole module instead of reinvented per surface.
+
+## 7. Fix the detail panel: make one contact workspace, not a dumping ground
+
+### Current problem
+
+The detail hook loads:
+
+* contact detail
+* health metrics
+* journey milestones
+* conversation context
+* AI insight
+  all in parallel .
+
+That is good for data richness, but the UI likely risks becoming a stack of widgets.
+
+### New contact workspace sections
+
+Use a fixed section hierarchy:
+
+1. **Header**
+
+   * name, status, company
+   * phone/email
+   * lead score
+   * primary CTAs
+
+2. **Overview**
+
+   * outstanding balance
+   * last interaction
+   * next due task
+   * service affinity
+   * lifecycle stage
+
+3. **Timeline**
+
+   * unified events, notes, tasks, bookings, invoices
+     This is directly aligned with the CRM spec’s shared timeline requirement .
+
+4. **Action lane**
+
+   * add task
+   * add note
+   * send reminder
+   * generate AI summary
+   * change status
+
+5. **Context panels**
+
+   * AI insight
+   * conversation context
+   * related contacts
+   * journey milestones
+
+Only the first 3 sections should be visible by default. Context panels should be collapsible.
+
+## 8. Rationalize tabs: too many views means users lose their place
+
+### Current problem
+
+The code exposes multiple sub-views and control modes, and the user has to mentally model where they are inside pipeline/insights/engage/database plus selection mode and mobile detail mode .
+
+### Fix
+
+Use tabs only inside a selected contact, not across the entire module.
+
+#### Allowed tabs
+
+Within contact workspace only:
+
+* Overview
+* Activity
+* Tasks
+* Financials
+
+Everything else should be sections or expandable panels.
+
+No more global tabs for pipeline/engage/insights/database.
+
+## 9. Make import flow truly effective, not just feature-rich
+
+The current add flow supports manual, scan, file, device, Google, and URL import, including CSV template download, vCard, mobile device contact picker, and contact scan from image . That is impressive, but it needs orchestration.
+
+### Optimized import strategy
+
+#### For most users
+
+Default CTA should be:
+
+* Add one contact
+* Import file
+* Connect Google
+
+Hide scan, URL, and device under “More import options”.
+
+#### Add an import review step
+
+After any import:
+
+* preview rows
+* show duplicates found
+* show normalization fixes
+* choose status/tag defaults
+* confirm merge rules
+
+This is essential because the CRM spec already emphasizes normalized emails, phones, source tagging, and updated meta fields during import .
+
+## 10. Improve bulk actions and database mode
+
+The database view currently has pagination, bulk bar, export dialog, column picker, views picker, contact lists, and table operations  . This is valuable, but it should feel like an advanced workspace.
+
+### Proposed Contacts Studio modules
+
+* **Table**
+* **Lists**
+* **Imports**
+* **Duplicates**
+* **Exports**
+
+### Bulk action principles
+
+Only show the bulk bar when selection starts.
+Bulk actions should be limited to:
+
+* change status
+* add tags
+* add to list
+* assign owner
+* export
+* delete
+
+No hidden mode shifts. No persistent bulk chrome when nothing is selected.
+
+## 11. Merge and dedupe need a serious UX upgrade
+
+The merge modal currently compares two contacts and lets users choose per conflicting field which value to keep . Good logic, but the form factor is too cramped for something high-risk.
+
+### Better merge experience
+
+Move merge into a dedicated compare sheet:
+
+* left record
+* right record
+* system recommendation
+* conflict rows
+* preview final merged record
+* confidence label
+
+Also add auto-dedupe suggestions:
+
+* same email
+* same phone
+* same normalized name + company
+
+## 12. Mobile optimization
+
+The code already has `showMobileDetail` and responsive handling, plus drawer-based flows  .
+That means mobile support exists but likely inherits desktop complexity.
+
+### Mobile redesign
+
+* bottom tab bar only for Home, Search, Studio
+* contact detail opens full screen
+* action bar pinned to bottom: Call, Message, Note, Task
+* filters become bottom sheets
+* import options become a single “Add” sheet
+
+Do not bring desktop-style right panels and stacked cards to mobile.
+
+## 13. AI should become assistive, not decorative
+
+The CRM spec says AI features remain placeholders and should log intended hook points until signals are mature . That is good discipline.
+
+### Recommendation
+
+Only ship 3 AI functions visibly:
+
+* summarize contact
+* suggest next action
+* draft follow-up
+
+Do not expose too many “AI cards” yet.
+If AI is immature, it should appear as a small assistive strip inside the workspace, not a separate noisy section.
+
+## 14. Performance and state cleanup
+
+The current pipeline hook is carrying a very large amount of state and actions in one return object . This is a maintainability smell.
+
+### Refactor plan
+
+Split state into:
+
+* `useContactsShellState`
+* `useContactsListState`
+* `useContactWorkspaceState`
+* `useContactsStudioState`
+* `useContactsImportState`
+
+### Benefits
+
+* less rerender churn
+* easier menu ownership
+* clearer responsibility boundaries
+* easier testing
+* easier progressive loading
+
+## 15. Design system rules for a modernized module
+
+Adopt these hard rules:
+
+* maximum 2 accent colors per screen
+* one primary button per area
+* no card should contain more than 3 actions
+* no modal should exceed one user job
+* destructive actions always separated
+* counts, score, and status use consistent badge system
+* timeline entries use a single visual grammar
+* every empty state gives one recommended next step
+
+## 16. Recommended phased rollout
+
+### Phase 1: declutter without changing backend
+
+* collapse top-level tabs into Home / Studio
+* simplify header actions
+* reduce filter clutter
+* redesign add-contact sheet
+* make detail panel sectioned and collapsible
+
+### Phase 2: structural improvement
+
+* unified contact workspace
+* unified timeline
+* priority cards for next actions
+* advanced Studio for imports/exports/lists
+
+### Phase 3: intelligence layer
+
+* lead score surfaced consistently
+* segments and saved views
+* service affinity
+* overdue reminders
+* AI next actions based on stable event hooks
+
+This sequence aligns well with the CRM spec’s emphasis on normalized data, hooks/events, lead score, next-action queue, segment intelligence, and unified data contract .
+
+## 17. Final recommended end-state
+
+The ideal Contacts module should feel like this:
+
+* one command center, not four mini-products
+* one selected contact workspace, not many detached panels
+* one import system, not many nested popups
+* one intelligent search/filter model, not scattered chips and menus
+* one admin studio for heavy operations
+* fewer cards, fewer tabs, fewer popups, stronger hierarchy
+
+## 18. Concrete redesign brief
+
+Here is the brief I would use with product/design/dev:
+
+**Goal:** Transform Contacts into a clean, modern CRM workspace that prioritizes action, clarity, and intelligent context.
+**Primary jobs:** find a contact, understand the relationship, take the next best action, manage contact data at scale.
+**Remove clutter by:** collapsing redundant tabs, reducing popup nesting, moving admin tasks into Studio, simplifying cards, and unifying filters into command search.
+**Keep and strengthen:** lead score, timeline, next actions, segment intelligence, imports, merge, favorites/recent, related contacts, AI assistive actions.
+**Success metrics:** faster time-to-contact, fewer clicks to add or update a contact, fewer abandoned imports, better bulk-action completion, higher usage of next actions and saved views.
+
+If you want, I can turn this into a **screen-by-screen redesign spec** with:
+
+* exact layout for each page
+* component hierarchy
+* menu cleanup map
+* and a feature-by-feature keep / merge / remove table.

@@ -12,6 +12,7 @@ import {
   BroadcastDrawer,
 } from "@/components/contacts";
 import { KanbanSkeleton } from "@/components/ui/skeleton";
+import { WorkspaceError } from "@/components/ui/workspace-error";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
@@ -372,14 +373,7 @@ export default function ContactsPage() {
   if (workspaceLoading) return <KanbanSkeleton />;
 
   if (workspaceError) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center space-y-3">
-          <p className="text-lg font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>{workspaceError}</p>
-          <p className="text-muted-foreground">Try logging in again to create your workspace.</p>
-        </div>
-      </div>
-    );
+    return <WorkspaceError />;
   }
 
   return (

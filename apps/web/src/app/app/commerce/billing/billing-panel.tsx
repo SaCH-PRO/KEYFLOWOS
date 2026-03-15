@@ -437,8 +437,8 @@ export type BillingSegment = "quotes" | "invoices" | "schedules";
 
 const SEGMENTS: { key: BillingSegment; label: string; icon: React.ElementType; accent: string; accentMuted: string }[] = [
   { key: "quotes", label: "Quotes", icon: FileText, accent: "hsl(var(--kf-accent1))", accentMuted: "hsl(var(--kf-accent1) / 0.15)" },
-  { key: "invoices", label: "Invoices", icon: CreditCard, accent: "#10b981", accentMuted: "rgba(16,185,129,0.15)" },
-  { key: "schedules", label: "Schedules", icon: RefreshCw, accent: "#a78bfa", accentMuted: "rgba(167,139,250,0.15)" },
+  { key: "invoices", label: "Invoices", icon: CreditCard, accent: "hsl(var(--kf-success))", accentMuted: "hsl(var(--kf-success) / 0.15)" },
+  { key: "schedules", label: "Schedules", icon: RefreshCw, accent: "hsl(var(--kf-info))", accentMuted: "hsl(var(--kf-info) / 0.15)" },
 ];
 
 interface BillingPanelProps {
@@ -586,11 +586,11 @@ export function BillingPanel({
   }, [invoices]);
 
   const kpiChips = useMemo(() => [
-    { icon: DollarSign, label: "Revenue", value: formatCurrencyCompact(stats.totalRevenue, currency), color: "#10b981" },
-    { icon: Clock, label: "Owed", value: formatCurrencyCompact(stats.outstanding, currency), color: "#f59e0b" },
+    { icon: DollarSign, label: "Revenue", value: formatCurrencyCompact(stats.totalRevenue, currency), color: "hsl(var(--kf-success))" },
+    { icon: Clock, label: "Owed", value: formatCurrencyCompact(stats.outstanding, currency), color: "hsl(var(--kf-warning))" },
     { icon: TrendingUp, label: "Conversion", value: `${stats.conversionRate}%`, color: "hsl(142 76% 36%)" },
     { icon: FileText, label: "Pending", value: `${pendingQuotesCount}`, color: "hsl(var(--kf-accent1))" },
-    { icon: CheckCircle2, label: "Collected", value: `${collectionRate}%`, color: "#10b981" },
+    { icon: CheckCircle2, label: "Collected", value: `${collectionRate}%`, color: "hsl(var(--kf-success))" },
   ], [stats, currency, pendingQuotesCount, collectionRate]);
 
   const hasOverdue = agingBuckets.slice(1).some(b => b.count > 0);
@@ -646,7 +646,7 @@ export function BillingPanel({
             role="status"
             aria-label={hasOverdue ? `Overdue: ${formatCurrencyCompact(totalOverdueAmount, currency)}` : "No overdue invoices"}
           >
-            <AlertTriangle className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" style={{ color: hasOverdue ? "#ef4444" : "#6b7280" }} />
+            <AlertTriangle className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" style={{ color: hasOverdue ? "hsl(var(--kf-error))" : "hsl(var(--kf-neutral))" }} />
             <span className="font-semibold text-[11px] sm:text-xs">
               {hasOverdue ? formatCurrencyCompact(totalOverdueAmount, currency) : "—"}
             </span>

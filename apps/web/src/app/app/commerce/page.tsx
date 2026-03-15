@@ -9,6 +9,7 @@ import { TabNav } from "@/components/ui/tab-nav";
 import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
 
 import { ListPageSkeleton } from "@/components/ui/skeleton";
+import { WorkspaceError } from "@/components/ui/workspace-error";
 import { useCommerce } from "./hooks/use-commerce";
 import { CommerceGuide } from "./components/commerce-guide";
 import { BillingPanel } from "./billing/billing-panel";
@@ -285,15 +286,7 @@ export default function CommercePage() {
   if (workspaceLoading) return <ListPageSkeleton />;
 
   if (workspaceError) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center space-y-3">
-          <CreditCard className="w-12 h-12 text-muted-foreground/50 mx-auto" />
-          <p className="text-lg font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>{workspaceError}</p>
-          <p className="text-muted-foreground">Try logging in again to create your workspace.</p>
-        </div>
-      </div>
-    );
+    return <WorkspaceError />;
   }
 
   return (

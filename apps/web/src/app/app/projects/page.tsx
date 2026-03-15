@@ -51,8 +51,8 @@ import { ContactPickerDrawer } from "@/components/contacts";
 const STATUS_COLUMNS = [
   { key: "ACTIVE", label: "Active", color: "hsl(var(--kf-accent2))" },
   { key: "IN_PROGRESS", label: "In Progress", color: "hsl(var(--kf-accent1))" },
-  { key: "COMPLETED", label: "Completed", color: "#22c55e" },
-  { key: "ON_HOLD", label: "On Hold", color: "#94a3b8" },
+  { key: "COMPLETED", label: "Completed", color: "hsl(var(--kf-success))" },
+  { key: "ON_HOLD", label: "On Hold", color: "hsl(var(--kf-neutral))" },
 ];
 
 const PROJECT_COLORS = [
@@ -502,8 +502,11 @@ function ProjectsTab({ businessId }: { businessId: string | null }) {
               </AnimatePresence>
 
               {column.projects.length === 0 && (
-                <div className="border border-dashed border-border/40 rounded-xl p-4 text-center text-xs text-muted-foreground">
-                  No projects
+                <div className="rounded-xl p-6 text-center" style={{ background: "hsl(var(--kf-muted) / 0.3)" }}>
+                  <div className="w-8 h-8 rounded-lg mx-auto mb-2 flex items-center justify-center" style={{ background: "hsl(var(--kf-muted) / 0.5)" }}>
+                    <FolderKanban className="w-4 h-4 text-muted-foreground" />
+                  </div>
+                  <p className="text-xs text-muted-foreground">No projects</p>
                 </div>
               )}
             </div>
@@ -911,8 +914,12 @@ function PlaybooksTab() {
         {loading ? (
           <div className="text-sm text-muted-foreground py-4">Loading playbooks...</div>
         ) : playbooks.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-border/60 p-6 text-center text-sm text-muted-foreground">
-            No playbooks yet. Create one to start automating your business flows.
+          <div className="rounded-xl p-8 text-center" style={{ background: "hsl(var(--kf-muted) / 0.3)" }}>
+            <div className="w-10 h-10 rounded-xl mx-auto mb-3 flex items-center justify-center" style={{ background: "hsl(var(--kf-accent1) / 0.1)" }}>
+              <Zap className="w-5 h-5" style={{ color: "hsl(var(--kf-accent1))" }} />
+            </div>
+            <p className="text-sm font-medium mb-1">No automations yet</p>
+            <p className="text-xs text-muted-foreground">Create a playbook to start automating your business flows.</p>
           </div>
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
@@ -952,7 +959,8 @@ function PlaybooksTab() {
           </div>
         )}
 
-        <div className="rounded-2xl border border-dashed border-border/60 p-3 text-xs text-muted-foreground">
+        <div className="kf-card-accent p-3 text-xs text-muted-foreground flex items-center gap-2">
+          <Lightbulb className="w-3.5 h-3.5 shrink-0" style={{ color: "hsl(var(--kf-accent1))" }} />
           Coming soon: Visual flow builder with conditions, delays, and multi-step actions.
         </div>
       </div>

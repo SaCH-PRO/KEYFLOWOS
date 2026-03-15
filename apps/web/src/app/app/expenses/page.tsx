@@ -22,6 +22,7 @@ import {
 import { API_BASE, getAuthHeaders } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
+import { TabNav } from "@/components/ui/tab-nav";
 import { StatCards } from "@/components/ui/stat-cards";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 
@@ -56,7 +57,7 @@ function ChangeIndicator({ value, suffix = "%" }: { value: number; suffix?: stri
   if (value === 0) return <span className="text-xs text-muted-foreground flex items-center gap-0.5"><Minus className="w-3 h-3" /> No change</span>;
   const isUp = value > 0;
   return (
-    <span className={`text-xs flex items-center gap-0.5 ${isUp ? "text-red-400" : "text-green-400"}`}>
+    <span className="text-xs flex items-center gap-0.5" style={{ color: isUp ? "hsl(var(--kf-error))" : "hsl(var(--kf-success))" }}>
       {isUp ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
       {Math.abs(value).toFixed(1)}{suffix} vs prev
     </span>
@@ -381,11 +382,23 @@ export default function ExpensesPage() {
 
       <StatCards
         items={[
-          { label: "Total Spent", value: formatCurrency(summary?.total ?? 0), sub: <ChangeIndicator value={summary?.comparison?.changePercent ?? 0} />, icon: DollarSign, color: "#ef4444" },
-          { label: "Transactions", value: String(summary?.count ?? 0), sub: `Avg ${formatCurrency(summary?.averageExpense ?? 0)}`, icon: Receipt, color: "#8b5cf6" },
-          { label: "Budgets", value: budgets.length > 0 ? `${budgets.length} active` : "None set", sub: overBudgetCount > 0 ? <span className="text-red-400">{overBudgetCount} over budget</span> : nearAlertCount > 0 ? <span className="text-amber-400">{nearAlertCount} near limit</span> : "All on track", icon: Target, color: "#06b6d4" },
-          { label: "Top Vendor", value: vendors[0]?.name ?? "---", sub: vendors[0] ? formatCurrency(vendors[0].total) : "No vendor data", icon: Store, color: "#22c55e" },
+          { label: "Total Spent", value: formatCurrency(summary?.total ?? 0), sub: <ChangeIndicator value={summary?.comparison?.changePercent ?? 0} />, icon: DollarSign, color: "hsl(var(--kf-error))" },
+          { label: "Transactions", value: String(summary?.count ?? 0), sub: `Avg ${formatCurrency(summary?.averageExpense ?? 0)}`, icon: Receipt, color: "hsl(var(--kf-accent1))" },
+          { label: "Budgets", value: budgets.length > 0 ? `${budgets.length} active` : "None set", sub: overBudgetCount > 0 ? <span style={{ color: "hsl(var(--kf-error))" }}>{overBudgetCount} over budget</span> : nearAlertCount > 0 ? <span style={{ color: "hsl(var(--kf-warning))" }}>{nearAlertCount} near limit</span> : "All on track", icon: Target, color: "hsl(var(--kf-info))" },
+          { label: "Top Vendor", value: vendors[0]?.name ?? "---", sub: vendors[0] ? formatCurrency(vendors[0].total) : "No vendor data", icon: Store, color: "hsl(var(--kf-success))" },
         ]}
+      />
+
+      <TabNav
+        tabs={[
+          { key: "overview", label: "Overview", icon: PieChart },
+          { key: "budgets", label: "Budgets", icon: Target },
+          { key: "vendors", label: "Vendors", icon: Store },
+          { key: "categories", label: "Categories", icon: Tag },
+        ]}
+        activeTab={activeTab}
+        onTabChange={(key) => setActiveTab(key as Tab)}
+        layoutId="expenses-tab-underline"
       />
 
       <div className="flex items-center gap-2 flex-wrap">
@@ -403,13 +416,6 @@ export default function ExpensesPage() {
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search expenses..." aria-label="Search expenses" className="w-full bg-white/5 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]" />
-        </div>
-        <div className="flex rounded-lg border border-white/10 overflow-hidden" role="tablist" aria-label="Expense views">
-          {(["overview", "budgets", "vendors", "categories"] as Tab[]).map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)} role="tab" aria-selected={activeTab === tab} className={`px-3 py-2 text-xs font-medium capitalize transition-colors ${activeTab === tab ? "bg-[hsl(var(--kf-accent1))] text-white" : "bg-white/5 text-muted-foreground hover:text-white hover:bg-white/10"}`}>
-              {tab}
-            </button>
-          ))}
         </div>
       </div>
 
