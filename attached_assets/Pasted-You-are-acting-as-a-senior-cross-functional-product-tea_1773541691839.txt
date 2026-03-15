@@ -1,0 +1,240 @@
+You are acting as a senior cross-functional product team composed of:
+
+• Principal Software Engineer
+• Senior UX Architect
+• Product Designer
+• Product Manager
+• Frontend Performance Engineer
+
+Your task is to perform a deep critical audit and redesign of this entire application as if it is preparing for a world-class production launch.
+
+Do NOT make superficial changes. Perform deep product introspection and evolve the application into a clean, modern, intuitive, highly optimized product that follows the standards of the best companies in the world.
+
+The redesign should follow principles used by products such as:
+
+Stripe
+Linear
+Notion
+Apple
+Vercel
+Airbnb
+Figma
+Superhuman
+
+Focus on clarity, simplicity, visual hierarchy, efficiency, and elegant interaction design.
+
+---
+
+PHASE 1 — FULL APPLICATION SCAN
+
+Before making any changes:
+
+Scan the entire codebase and build a full understanding of:
+
+• project architecture
+• folder structure
+• component hierarchy
+• routing/navigation system
+• state management patterns
+• API interactions
+• reusable UI components
+• styling system
+• layout patterns
+
+Identify:
+
+• redundant components
+• architectural weaknesses
+• code duplication
+• unnecessary complexity
+• poor separation of concerns
+• UI inconsistencies.
+
+Explain the current architecture briefly.
+
+---
+
+PHASE 2 — USER FLOW AND PRODUCT EXPERIENCE ANALYSIS
+
+Map the entire user experience including:
+
+• entry points
+• onboarding
+• main workflows
+• navigation paths
+• decision points
+• completion states.
+
+Critically evaluate:
+
+• friction in user journeys
+• cognitive overload
+• unnecessary steps
+• unclear UI affordances
+• lack of feedback or state communication
+• broken or awkward flows.
+
+Redesign the flows where necessary so they become smooth, intuitive, and minimal.
+
+---
+
+PHASE 3 — UI / UX DESIGN CRITIQUE
+
+Perform a deep UI critique including:
+
+• layout structure
+• spacing
+• alignment
+• component hierarchy
+• typography scale
+• color usage
+• card design
+• button design
+• visual density
+• interaction feedback.
+
+Identify where the interface:
+
+• feels cluttered
+• lacks visual hierarchy
+• has inconsistent components
+• lacks clarity of primary actions
+• has weak interaction affordances.
+
+---
+
+PHASE 4 — DESIGN SYSTEM CREATION
+
+Create or refine a clean modern design system for the application.
+
+Define standardized systems for:
+
+Typography
+• clear hierarchy
+• readable scales
+
+Buttons
+• primary
+• secondary
+• tertiary
+• destructive
+• loading states
+
+Cards
+• consistent structure
+• proper padding and spacing
+• strong hierarchy
+
+Layout
+• grid system
+• spacing scale
+• responsive behavior
+
+Interaction states
+• hover
+• focus
+• active
+• loading
+• empty states
+• error states.
+
+Ensure the design language feels professional, consistent, and modern.
+
+---
+
+PHASE 5 — BRAND AND VISUAL IDENTITY
+
+Evaluate the product's visual identity.
+
+Improve:
+
+• color palette
+• visual balance
+• branding tone
+• interface personality
+• consistency across screens.
+
+The final design should feel:
+
+• premium
+• modern
+• clean
+• focused
+• intuitive.
+
+---
+
+PHASE 6 — COMPONENT REFACTORING
+
+Where necessary:
+
+• consolidate duplicate components
+• improve component reuse
+• simplify component logic
+• improve maintainability
+• improve readability.
+
+Refactor inefficient UI patterns.
+
+---
+
+PHASE 7 — PERFORMANCE AND STRUCTURAL OPTIMIZATION
+
+Evaluate:
+
+• rendering efficiency
+• component re-renders
+• state management inefficiencies
+• unnecessary API calls
+• layout thrashing
+• bundle size problems.
+
+Optimize where possible.
+
+---
+
+PHASE 8 — IMPLEMENT THE REDESIGN
+
+Do not only suggest improvements.
+
+Begin implementing the improvements directly in the codebase, including:
+
+• redesigned layouts
+• improved card systems
+• improved button systems
+• cleaner page structures
+• clearer hierarchy
+• improved navigation flows
+• better component composition.
+
+Focus especially on improving:
+
+• dashboards
+• cards
+• buttons
+• menus
+• forms
+• navigation.
+
+---
+
+PHASE 9 — SELF CRITIQUE AND SECOND PASS
+
+After implementing improvements:
+
+Perform a second deep review of the entire application and identify:
+
+• any remaining UX friction
+• layout inconsistencies
+• visual hierarchy problems
+• design system violations
+• responsiveness issues
+• accessibility concerns.
+
+Then refine the design again.
+
+---
+
+Your goal is to evolve this application into a best-in-class product experience.
+
+Every change should move the product closer to the level of quality seen in the most respected modern software products.

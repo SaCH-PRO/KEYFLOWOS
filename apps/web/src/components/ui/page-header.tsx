@@ -1,6 +1,5 @@
 "use client";
 
-import { motion } from "framer-motion";
 import { Plus } from "lucide-react";
 import { MissionsButton } from "./missions-button";
 
@@ -26,41 +25,37 @@ export function PageHeader({
   titleExtra,
 }: PageHeaderProps) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: -10 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="flex flex-col md:flex-row md:items-center md:justify-between gap-4"
-    >
-      <div>
-        <h1 className="text-2xl md:text-3xl font-bold tracking-tight flex items-center gap-3">
-          <div
-            className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{
-              background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
-            }}
-          >
-            <Icon className="w-5 h-5 text-white" />
+    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
+      <div className="flex items-center gap-2.5 min-w-0">
+        <div
+          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+          style={{ background: "hsl(var(--kf-accent1) / 0.1)" }}
+        >
+          <Icon className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+        </div>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-semibold tracking-tight truncate">{title}</h1>
+            {titleExtra}
+            <MissionsButton />
           </div>
-          {title}
-          {titleExtra}
-          <MissionsButton />
-        </h1>
-        {subtitle && (
-          <p className="text-sm text-muted-foreground mt-1">{subtitle}</p>
-        )}
+          {subtitle && (
+            <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>
+          )}
+        </div>
       </div>
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-2 flex-shrink-0">
         {rightSlot}
         {actionLabel && onAction && (
           <button
             onClick={onAction}
-            className="kf-btn-primary inline-flex items-center gap-2 text-sm"
+            className="kf-btn-primary inline-flex items-center gap-1.5 !text-xs !py-1.5 !px-3"
           >
-            <ActionIcon className="w-4 h-4" />
+            <ActionIcon className="w-3.5 h-3.5" />
             {actionLabel}
           </button>
         )}
       </div>
-    </motion.div>
+    </div>
   );
 }

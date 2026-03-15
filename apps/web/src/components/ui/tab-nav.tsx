@@ -17,7 +17,7 @@ interface TabNavProps {
   layoutId?: string;
 }
 
-export function TabNav({ tabs, activeTab, onTabChange, layoutId = "tab-folder" }: TabNavProps) {
+export function TabNav({ tabs, activeTab, onTabChange, layoutId = "tab-underline" }: TabNavProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const activeIndex = tabs.findIndex((t) => t.key === activeTab);
@@ -52,15 +52,15 @@ export function TabNav({ tabs, activeTab, onTabChange, layoutId = "tab-folder" }
   }, [activeTab]);
 
   return (
-    <div className="relative">
+    <div className="relative border-b border-border mb-4">
       <div
         ref={containerRef}
         role="tablist"
         aria-label="Navigation tabs"
         onKeyDown={handleKeyDown}
-        className="flex overflow-x-auto scrollbar-hide -mb-px"
+        className="flex overflow-x-auto scrollbar-hide gap-0"
       >
-        {tabs.map((t, i) => {
+        {tabs.map((t) => {
           const Icon = t.icon;
           const isActive = activeTab === t.key;
           return (
@@ -71,55 +71,39 @@ export function TabNav({ tabs, activeTab, onTabChange, layoutId = "tab-folder" }
               aria-selected={isActive}
               tabIndex={isActive ? 0 : -1}
               onClick={() => onTabChange(t.key)}
-              style={{ zIndex: isActive ? 10 : tabs.length - i }}
-              className={`group relative flex items-center gap-1.5 sm:gap-2 whitespace-nowrap flex-shrink-0
-                transition-colors duration-200 outline-none
-                focus-visible:ring-2 focus-visible:ring-[hsl(var(--kf-accent1)/0.5)] focus-visible:ring-offset-1 focus-visible:ring-offset-background
-                px-4 sm:px-5 py-2.5 sm:py-3
-                text-xs sm:text-sm font-semibold
-                rounded-t-xl
-                border-x border-t border-b-0
+              className={`group relative flex items-center gap-1.5 whitespace-nowrap flex-shrink-0
+                transition-colors duration-150 outline-none
+                focus-visible:ring-2 focus-visible:ring-[hsl(var(--kf-accent1)/0.4)] focus-visible:ring-inset
+                px-3 py-2
+                text-[13px] font-medium
                 ${isActive
-                  ? "bg-card/80 backdrop-blur-sm text-foreground border-border/40"
-                  : "bg-transparent text-muted-foreground/50 border-transparent hover:text-muted-foreground/80 hover:bg-white/[0.03]"
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
                 }`}
             >
               {isActive && (
                 <motion.div
                   layoutId={layoutId}
-                  className="absolute inset-x-0 top-0 h-[2px] rounded-t-xl"
-                  style={{
-                    background: "linear-gradient(90deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
-                  }}
-                  transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
-                />
-              )}
-
-              {isActive && (
-                <motion.div
-                  layoutId={`${layoutId}-bg`}
-                  className="absolute inset-0 rounded-t-xl"
-                  style={{
-                    background: "linear-gradient(180deg, hsl(var(--kf-accent1) / 0.06) 0%, transparent 100%)",
-                  }}
-                  transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
+                  className="absolute inset-x-0 bottom-0 h-[2px]"
+                  style={{ background: "hsl(var(--kf-accent1))" }}
+                  transition={{ type: "spring", bounce: 0.15, duration: 0.35 }}
                 />
               )}
 
               {Icon && (
                 <Icon
-                  className={`relative z-10 w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0 transition-colors duration-200 ${
-                    isActive ? "" : "group-hover:text-muted-foreground/70"
+                  className={`w-3.5 h-3.5 flex-shrink-0 transition-colors ${
+                    isActive ? "" : "opacity-60 group-hover:opacity-80"
                   }`}
                   style={isActive ? { color: "hsl(var(--kf-accent1))" } : undefined}
                 />
               )}
-              <span className="relative z-10">{t.label}</span>
+              <span>{t.label}</span>
               {t.count !== undefined && (
                 <span
-                  className={`relative z-10 text-[10px] sm:text-xs tabular-nums rounded-full px-1.5 py-px ${
+                  className={`text-[10px] tabular-nums rounded-full px-1.5 py-px ${
                     isActive
-                      ? "bg-[hsl(var(--kf-accent1)/0.15)] text-[hsl(var(--kf-accent1))]"
+                      ? "bg-[hsl(var(--kf-accent1)/0.1)] text-[hsl(var(--kf-accent1))]"
                       : "opacity-50"
                   }`}
                 >
@@ -129,21 +113,6 @@ export function TabNav({ tabs, activeTab, onTabChange, layoutId = "tab-folder" }
             </button>
           );
         })}
-      </div>
-
-      <div className="h-px bg-border/40" />
-
-      <div className="absolute bottom-0 left-0 right-0 h-px pointer-events-none">
-        {activeIndex >= 0 && (
-          <motion.div
-            className="absolute bottom-0 h-px bg-card/80"
-            animate={{
-              left: `${(activeIndex / tabs.length) * 100}%`,
-              width: `${100 / tabs.length}%`,
-            }}
-            transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
-          />
-        )}
       </div>
     </div>
   );

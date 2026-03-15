@@ -5,7 +5,7 @@ KEYFLOWOS is an AI-powered operating system designed to automate operations for 
 
 ## User Preferences
 - Caribbean localization (TTD currency, Trinidad timezone)
-- Glassmorphism UI with dark theme
+- Refined dark theme with selective glassmorphism (Linear/Stripe/Notion-inspired)
 - Event-driven architecture for automation
 - Pre-opinionated flows (Playbooks)
 
@@ -13,9 +13,10 @@ KEYFLOWOS is an AI-powered operating system designed to automate operations for 
 The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a NestJS backend API (`apps/server`), with PostgreSQL managed by Prisma. The backend uses SWC for transpilation, requiring explicit `@Inject(Token)` decorators for NestJS constructor injection.
 
 **UI/UX Decisions:**
-- Custom design system with a warm Caribbean-inspired color palette, Glassmorphism elements, and a dark theme, including PWA capabilities (custom install prompt with `beforeinstallprompt`, service worker, offline fallback) and mobile-optimized navigation.
-- Unified Design Language across all modules: TabNav with folder-tab styling, `useSwipeTabs` hook, `useKeyboardShortcuts`, framer-motion directional slide transitions, error boundaries, and bespoke skeleton loaders.
-- Consistent module patterns: PageHeader, TabNav, keyboard shortcuts, mobile swipe navigation, and EmptyState components.
+- Redesigned design system (Stripe/Linear/Notion-caliber): warm Caribbean color palette (orange `#F97316` primary, teal `#14B8A6` secondary) defined as HSL triplets in `globals.css`, selective glassmorphism (not over-applied), clean elevation system (`--kf-elevation-1/2/3`), PWA capabilities (custom install prompt, service worker, offline fallback), and mobile-optimized navigation.
+- Compact sidebar (w-56, 18px icons, left-border active indicator), compact header (h-12), inline underline TabNav (replaces folder-tab styling), smaller PageHeader with tinted icon container.
+- Unified Design Language across all modules: TabNav with underline styling, `useSwipeTabs` hook, `useKeyboardShortcuts`, framer-motion directional slide transitions, error boundaries, and bespoke skeleton loaders.
+- Consistent module patterns: PageHeader (icon + title + subtitle + action slot), TabNav, keyboard shortcuts, mobile swipe navigation, and EmptyState components.
 - Pipeline Kanban Board View with HTML5 drag-and-drop and persistent view preferences.
 - Enhanced database tables with column visibility, responsive auto-hiding, multi-word search, and "Saved Views".
 - Product detail and form components emphasize inline editing, real-time previews, validation, and performance optimizations.
