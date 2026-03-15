@@ -7,7 +7,7 @@ export default function AutomationsRedirect() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace("/app/projects?tab=automations");
+    router.replace("/app/projects?tab=playbooks");
   }, [router]);
 
   return (
