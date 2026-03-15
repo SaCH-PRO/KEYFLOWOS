@@ -54,7 +54,24 @@ export default function BusinessSettingsPage() {
     business, handleSave, handleLogoUpload, fileInputRef, logoUrl,
     isDirty,
   } = useBusinessSettings();
-  const [activeTab, setActiveTab] = useState<TabKey>("basic");
+  const [activeTab, setActiveTab] = useState<TabKey>(() => {
+    if (typeof window === "undefined") return "basic";
+    const params = new URLSearchParams(window.location.search);
+    const urlTab = params.get("tab");
+    const validKeys = tabs.map((t) => t.key) as readonly string[];
+    if (urlTab && validKeys.includes(urlTab)) return urlTab as TabKey;
+    return "basic";
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("tab")) {
+      params.delete("tab");
+      const clean = `${window.location.pathname}${params.toString() ? `?${params}` : ""}`;
+      window.history.replaceState({}, "", clean);
+    }
+  }, []);
 
   if (loading) return <SkeletonBusiness />;
 

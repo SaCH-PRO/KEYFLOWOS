@@ -608,7 +608,7 @@ export default function PaymentsTab({
       </div>
 
       <Link
-        href="/app/settings/business"
+        href="/app/settings/business?tab=payments"
         className="flex items-center justify-between p-3 rounded-xl border border-border/40 bg-muted/5 hover:bg-muted/10 transition-colors group"
       >
         <div className="flex items-center gap-2.5">
