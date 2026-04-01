@@ -27,9 +27,14 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
     const results = await Promise.all(
       AUTOMATION_MODULES.map((mod) => fetchActivityFeed(businessId, { module: mod, limit: 30 }))
     );
+    const executionActions = new Set(["executed", "failed", "skipped"]);
     const allItems: ActivityItem[] = [];
     for (const r of results) {
-      if (r.data) allItems.push(...r.data);
+      if (r.data) {
+        for (const item of r.data) {
+          if (executionActions.has(item.action)) allItems.push(item);
+        }
+      }
     }
     allItems.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     setItems(allItems.slice(0, 50));
