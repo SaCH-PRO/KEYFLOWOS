@@ -27,6 +27,7 @@ export class AutomationController {
       id: r.id,
       name: r.name,
       triggerEvent: r.trigger,
+      condition: r.condition ?? null,
       actions: r.actionData ?? [],
       enabled: r.enabled ?? true,
       lastRunAt: r.lastRunAt,
@@ -40,7 +41,7 @@ export class AutomationController {
   @Post('businesses/:businessId/playbooks')
   async createPlaybook(
     @Param('businessId') businessId: string,
-    @Body() body: { name: string; triggerEvent?: string; trigger?: string; actions?: any; actionData?: any },
+    @Body() body: { name: string; triggerEvent?: string; trigger?: string; actions?: any; actionData?: any; condition?: string | null },
   ) {
     const row = await this.prisma.client.automation.create({
       data: {
@@ -48,16 +49,18 @@ export class AutomationController {
         name: body.name,
         trigger: body.triggerEvent || body.trigger || '',
         actionData: body.actions || body.actionData || null,
+        condition: body.condition || null,
       },
     });
     return {
       id: row.id,
       name: row.name,
       triggerEvent: row.trigger,
+      condition: row.condition ?? null,
       actions: row.actionData ?? [],
-      enabled: (row as any).enabled ?? true,
-      lastRunAt: (row as any).lastRunAt,
-      runCount: (row as any).runCount ?? 0,
+      enabled: row.enabled ?? true,
+      lastRunAt: row.lastRunAt,
+      runCount: row.runCount ?? 0,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -68,12 +71,13 @@ export class AutomationController {
   async updatePlaybook(
     @Param('businessId') businessId: string,
     @Param('playbookId') playbookId: string,
-    @Body() body: { name?: string; triggerEvent?: string; trigger?: string; actions?: any; actionData?: any; enabled?: boolean },
+    @Body() body: { name?: string; triggerEvent?: string; trigger?: string; actions?: any; actionData?: any; condition?: string | null; enabled?: boolean },
   ) {
     const updateData: any = {};
     if (body.name !== undefined) updateData.name = body.name;
     if (body.triggerEvent !== undefined || body.trigger !== undefined) updateData.trigger = body.triggerEvent || body.trigger;
     if (body.actions !== undefined || body.actionData !== undefined) updateData.actionData = body.actions || body.actionData;
+    if (body.condition !== undefined) updateData.condition = body.condition;
     if (body.enabled !== undefined) updateData.enabled = body.enabled;
 
     const row = await this.prisma.client.automation.update({
@@ -84,10 +88,11 @@ export class AutomationController {
       id: row.id,
       name: row.name,
       triggerEvent: row.trigger,
+      condition: row.condition ?? null,
       actions: row.actionData ?? [],
-      enabled: (row as any).enabled ?? true,
-      lastRunAt: (row as any).lastRunAt,
-      runCount: (row as any).runCount ?? 0,
+      enabled: row.enabled ?? true,
+      lastRunAt: row.lastRunAt,
+      runCount: row.runCount ?? 0,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

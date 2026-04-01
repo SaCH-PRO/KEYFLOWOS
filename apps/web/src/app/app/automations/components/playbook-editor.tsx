@@ -45,8 +45,7 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
       const actions = Array.isArray(editingPlaybook.actions)
         ? (editingPlaybook.actions as ActionStep[])
         : [{ type: "" }];
-      const existingCondition = (editingPlaybook as any).condition ?? "";
-      setForm({ name: editingPlaybook.name, triggerEvent: editingPlaybook.triggerEvent, condition: existingCondition });
+      setForm({ name: editingPlaybook.name, triggerEvent: editingPlaybook.triggerEvent, condition: editingPlaybook.condition ?? "" });
       setActionSteps(actions.length ? [...actions] : [{ type: "" }]);
       setError(null);
     } else if (template) {
@@ -79,6 +78,7 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
         playbookId: editingPlaybook!.id,
         name: form.name,
         triggerEvent: form.triggerEvent,
+        condition: form.condition || null,
         actions: validSteps,
         businessId: businessId ?? undefined,
       });
@@ -93,6 +93,7 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
       const { data, error: apiError } = await createPlaybook({
         name: form.name,
         triggerEvent: form.triggerEvent,
+        condition: form.condition || undefined,
         actions: validSteps,
         businessId: businessId ?? undefined,
       });

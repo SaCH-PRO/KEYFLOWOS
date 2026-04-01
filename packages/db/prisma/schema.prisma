@@ -764,6 +764,7 @@ model Automation {
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   actionData Json? @map("action_data")
+  condition  String?   @map("condition")
   lastRunAt  DateTime? @map("last_run_at")
   runCount   Int       @default(0) @map("run_count")
 
