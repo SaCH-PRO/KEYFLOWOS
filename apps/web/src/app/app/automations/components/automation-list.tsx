@@ -9,7 +9,7 @@ import {
   Playbook, fetchPlaybooks, updatePlaybook,
   CrossModuleWorkflow, fetchCrossModuleWorkflows, updateCrossModuleWorkflow,
 } from "@/lib/client";
-import { getTriggerLabel, getActionLabels } from "./automation-constants";
+import { getTriggerLabel, getActionLabels, getWorkflowActionSummary } from "./automation-constants";
 import { PlaybookEditor } from "./playbook-editor";
 import type { AutomationTemplate } from "./automation-constants";
 
@@ -65,7 +65,7 @@ export function AutomationList({ businessId, templateToUse, onTemplateClear }: A
 
   const filtered = search.trim()
     ? unified.filter((item) => {
-        const name = item.kind === "playbook" ? item.data.name : item.data.name;
+        const name = item.data.name;
         return name.toLowerCase().includes(search.toLowerCase());
       })
     : unified;
@@ -297,10 +297,18 @@ export function AutomationList({ businessId, templateToUse, onTemplateClear }: A
 
                 <p className="text-[12px] text-muted-foreground leading-relaxed">{wf.description}</p>
 
+                <div className="text-[12px] text-muted-foreground space-y-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-primary">Trigger:</span> {getTriggerLabel(wf.triggerEvent)}
+                  </div>
+                  {getWorkflowActionSummary(wf.key).map((label, i) => (
+                    <div key={i} className="flex items-center gap-1.5">
+                      <span className="text-primary">{i === 0 ? "Action:" : "Then:"}</span> {label}
+                    </div>
+                  ))}
+                </div>
+
                 <div className="flex items-center gap-3 text-[11px] text-muted-foreground/60 flex-wrap">
-                  <span className="inline-flex items-center gap-1">
-                    <Zap className="w-3 h-3" /> {wf.triggerEvent}
-                  </span>
                   {wf.runCount > 0 && (
                     <span className="inline-flex items-center gap-1">
                       <Clock className="w-3 h-3" /> {wf.runCount} runs
