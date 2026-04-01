@@ -11,7 +11,9 @@ import {
   Mail,
   Link2,
   CalendarDays,
+  ExternalLink,
 } from "lucide-react";
+import NextLink from "next/link";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SetupModeBanner } from "@/components/ui/setup-mode-banner";
 import type { Service, StaffMember, Booking } from "./bookings-types";
@@ -174,6 +176,14 @@ export default function CatalogCapacityTab({
             <h3 className="text-sm font-semibold">Services</h3>
             <span className="text-xs text-muted-foreground">({services.length})</span>
           </div>
+          <NextLink
+            href="/app/store?tab=products"
+            className="inline-flex items-center gap-1 text-[11px] hover:underline min-w-[44px] min-h-[44px] justify-center"
+            style={{ color: "hsl(var(--kf-accent2))" }}
+          >
+            <ExternalLink className="w-3 h-3" />
+            Manage in Store
+          </NextLink>
         </div>
 
         {services.length === 0 ? (
