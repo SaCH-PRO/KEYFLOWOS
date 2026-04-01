@@ -14,6 +14,10 @@ import {
   Circle,
   ArrowRight,
   Zap,
+  Shield,
+  Link2,
+  Webhook,
+  Bell,
 } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import {
@@ -39,6 +43,9 @@ interface SetupContext {
   hasProducts: boolean;
   hasHours: boolean;
   hasLogo: boolean;
+  hasPaymentGateways: boolean;
+  hasComplianceChecked: boolean;
+  hasIntegrations: boolean;
 }
 
 const SETUP_ITEMS: SetupItem[] = [
@@ -75,6 +82,14 @@ const SETUP_ITEMS: SetupItem[] = [
     category: "essential",
   },
   {
+    label: "Payment Gateways",
+    description: "Configure WiPay, PayPal, or bank transfer",
+    icon: CreditCard,
+    href: "/app/settings/business?tab=payments",
+    checkFn: (c) => c.hasPaymentGateways,
+    category: "essential",
+  },
+  {
     label: "Online Store",
     description: "Customize your public storefront",
     icon: Store,
@@ -93,6 +108,34 @@ const SETUP_ITEMS: SetupItem[] = [
     description: "Set up event-driven workflows",
     icon: Zap,
     href: "/app/projects?tab=playbooks",
+    category: "growth",
+  },
+  {
+    label: "Integrations",
+    description: "Connect Google Calendar, Gmail, and more",
+    icon: Link2,
+    href: "/app/settings/connections",
+    category: "growth",
+  },
+  {
+    label: "Compliance & Tax",
+    description: "Legal registration, tax rates, and policies",
+    icon: Shield,
+    href: "/app/settings/compliance",
+    category: "growth",
+  },
+  {
+    label: "Webhooks",
+    description: "Send event data to external systems",
+    icon: Webhook,
+    href: "/app/settings/webhooks",
+    category: "growth",
+  },
+  {
+    label: "Notifications",
+    description: "Configure customer email notifications",
+    icon: Bell,
+    href: "/app/settings/notifications",
     category: "growth",
   },
 ];
@@ -116,6 +159,7 @@ export default function StudioPage() {
           fetchProducts(businessId),
         ]);
         const biz = bizRes.data;
+        const paySettings = biz as Record<string, unknown> | undefined;
         setCtx({
           hasProfile: !!(biz?.name && biz?.name !== "My Business"),
           hasLogo: !!biz?.logoUrl,
@@ -123,6 +167,9 @@ export default function StudioPage() {
           hasContacts: (contactRes.data?.length ?? 0) > 0,
           hasProducts: (prodRes.data?.length ?? 0) > 0,
           hasHours: !!(biz?.businessHours && Object.values(biz.businessHours as Record<string, { enabled?: boolean }>).some((h) => h?.enabled)),
+          hasPaymentGateways: !!(paySettings?.wipayApiKey || paySettings?.paypalClientId),
+          hasComplianceChecked: !!paySettings?.complianceStatus,
+          hasIntegrations: !!(paySettings?.gmailEmail || paySettings?.calendarEmail),
         });
       } catch {
         setCtx({
@@ -132,6 +179,9 @@ export default function StudioPage() {
           hasContacts: false,
           hasProducts: false,
           hasHours: false,
+          hasPaymentGateways: false,
+          hasComplianceChecked: false,
+          hasIntegrations: false,
         });
       }
       setLoading(false);
@@ -189,7 +239,7 @@ export default function StudioPage() {
           </div>
           {progressPct === 100 && (
             <p className="text-xs" style={{ color: "hsl(var(--kf-success))" }}>
-              All essentials configured — you're ready to operate!
+              All essentials configured — you&apos;re ready to operate!
             </p>
           )}
         </div>
