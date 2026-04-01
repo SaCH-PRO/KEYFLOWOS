@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { TrendingUp, RefreshCw, ShieldCheck } from "lucide-react";
 import { Card } from "@keyflow/ui";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
 import { fetchCashFlowForecast, type CashFlowForecast } from "@/lib/client";
 import { formatCurrency } from "./report-types";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -12,24 +12,29 @@ interface RevenueProjectionChartProps {
   businessId?: string | null;
   currency?: string;
   currentRevenue?: number;
+  periodStart?: string;
+  periodEnd?: string;
+  invoiceCount?: number;
 }
 
 interface ChartPoint {
-  day: string;
-  actual: number | null;
+  label: string;
+  historical: number | null;
   projected: number | null;
 }
 
-function computeConfidence(forecast: CashFlowForecast): { level: string; pct: number; color: string } {
+function computeConfidence(forecast: CashFlowForecast, historicalDays: number): { level: string; pct: number; color: string } {
   const rate = forecast.dailyRevenueRate ?? 0;
   const alerts = forecast.alerts?.length ?? 0;
   const negDays = forecast.daysUntilNegative;
 
-  let score = 70;
+  let score = 55;
   if (rate > 0) score += 10;
-  if (alerts === 0) score += 10;
-  if (negDays === null || negDays > 60) score += 10;
-  else if (negDays <= 14) score -= 20;
+  if (alerts === 0) score += 8;
+  if (negDays === null || negDays > 60) score += 7;
+  else if (negDays <= 14) score -= 15;
+  if (historicalDays >= 30) score += 10;
+  else if (historicalDays >= 14) score += 5;
 
   score = Math.max(20, Math.min(95, score));
 
@@ -38,7 +43,14 @@ function computeConfidence(forecast: CashFlowForecast): { level: string; pct: nu
   return { level: "Low", pct: score, color: "--kf-error" };
 }
 
-export function RevenueProjectionChart({ businessId: propBusinessId, currency = "TTD", currentRevenue = 0 }: RevenueProjectionChartProps) {
+export function RevenueProjectionChart({
+  businessId: propBusinessId,
+  currency = "TTD",
+  currentRevenue = 0,
+  periodStart,
+  periodEnd,
+  invoiceCount,
+}: RevenueProjectionChartProps) {
   const [forecast, setForecast] = useState<CashFlowForecast | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -57,20 +69,38 @@ export function RevenueProjectionChart({ businessId: propBusinessId, currency = 
 
   useEffect(() => { load(); }, [load]);
 
-  const { chartData, milestones, confidence } = useMemo(() => {
-    if (!forecast) return { chartData: [] as ChartPoint[], milestones: [] as { label: string; value: number }[], confidence: null };
+  const { chartData, milestones, confidence, historicalDays } = useMemo(() => {
+    if (!forecast) return { chartData: [] as ChartPoint[], milestones: [] as { label: string; value: number }[], confidence: null, historicalDays: 0 };
 
     const dailyRate = forecast.dailyRevenueRate ?? 0;
+
+    let hDays = 30;
+    if (periodStart && periodEnd) {
+      const start = new Date(periodStart);
+      const end = new Date(periodEnd);
+      hDays = Math.max(7, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+    }
+    hDays = Math.min(hDays, 90);
+
+    const historicalDailyRate = hDays > 0 ? currentRevenue / hDays : 0;
     const points: ChartPoint[] = [];
 
-    points.push({ day: "Now", actual: currentRevenue, projected: currentRevenue });
+    for (let d = 0; d <= hDays; d++) {
+      const rev = Math.round(historicalDailyRate * d * 100) / 100;
+      const dayLabel = d === 0 ? `-${hDays}d` : d === hDays ? "Today" : d % Math.max(1, Math.round(hDays / 4)) === 0 ? `-${hDays - d}d` : "";
+      points.push({
+        label: dayLabel || `h${d}`,
+        historical: rev,
+        projected: d === hDays ? rev : null,
+      });
+    }
 
     for (let d = 1; d <= 90; d++) {
       const projected = currentRevenue + dailyRate * d;
-      const label = d % 30 === 0 ? `${d}d` : d % 10 === 0 ? `${d}d` : "";
+      const dayLabel = d % 30 === 0 ? `+${d}d` : d % 15 === 0 ? `+${d}d` : "";
       points.push({
-        day: label || `${d}`,
-        actual: null,
+        label: dayLabel || `p${d}`,
+        historical: null,
         projected: Math.round(projected * 100) / 100,
       });
     }
@@ -81,8 +111,8 @@ export function RevenueProjectionChart({ businessId: propBusinessId, currency = 
       { label: "90-Day", value: Math.round(currentRevenue + dailyRate * 90) },
     ];
 
-    return { chartData: points, milestones: ms, confidence: computeConfidence(forecast) };
-  }, [forecast, currentRevenue]);
+    return { chartData: points, milestones: ms, confidence: computeConfidence(forecast, hDays), historicalDays: hDays };
+  }, [forecast, currentRevenue, periodStart, periodEnd]);
 
   if (!forecast && !loading) return null;
 
@@ -91,7 +121,7 @@ export function RevenueProjectionChart({ businessId: propBusinessId, currency = 
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <TrendingUp className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
-          <h3 className="text-sm font-semibold">Revenue Projections</h3>
+          <h3 className="text-sm font-semibold">Revenue Trend & Projections</h3>
           {confidence && (
             <span
               className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full font-medium"
@@ -115,11 +145,11 @@ export function RevenueProjectionChart({ businessId: propBusinessId, currency = 
         <div className="h-[220px] rounded-lg bg-muted/20 animate-pulse" />
       ) : (
         <>
-          <div className="h-[220px]">
+          <div className="h-[240px]">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
                 <XAxis
-                  dataKey="day"
+                  dataKey="label"
                   tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }}
                   tickLine={false}
                   axisLine={{ stroke: "hsl(var(--border) / 0.3)" }}
@@ -139,17 +169,43 @@ export function RevenueProjectionChart({ businessId: propBusinessId, currency = 
                     borderRadius: 8,
                     fontSize: 12,
                   }}
-                  formatter={(value: number) => [formatCurrency(value, currency), "Revenue"]}
-                  labelFormatter={(label) => `Day: ${label}`}
+                  formatter={(value: number, name: string) => [
+                    formatCurrency(value, currency),
+                    name === "historical" ? "Historical" : "Projected",
+                  ]}
+                  labelFormatter={(label) => {
+                    if (label === "Today") return "Today (current)";
+                    if (label.startsWith("-")) return `${label} ago`;
+                    if (label.startsWith("+")) return `${label} ahead`;
+                    return label;
+                  }}
                 />
-                <ReferenceLine y={currentRevenue} stroke="hsl(var(--kf-accent1) / 0.4)" strokeDasharray="4 4" />
+                <Legend
+                  formatter={(value: string) => (
+                    <span style={{ fontSize: 10, color: "hsl(var(--muted-foreground))" }}>
+                      {value === "historical" ? "Historical Revenue" : "Projected Revenue"}
+                    </span>
+                  )}
+                />
+                <ReferenceLine y={currentRevenue} stroke="hsl(var(--kf-accent1) / 0.4)" strokeDasharray="4 4" label="" />
+                <Line
+                  type="monotone"
+                  dataKey="historical"
+                  stroke="hsl(var(--kf-accent1))"
+                  strokeWidth={2}
+                  dot={false}
+                  connectNulls
+                  name="historical"
+                />
                 <Line
                   type="monotone"
                   dataKey="projected"
                   stroke="hsl(var(--kf-accent2))"
                   strokeWidth={2}
+                  strokeDasharray="6 3"
                   dot={false}
                   connectNulls
+                  name="projected"
                 />
               </LineChart>
             </ResponsiveContainer>

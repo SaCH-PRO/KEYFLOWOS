@@ -27,7 +27,14 @@ export function RevenueView({ report, businessId }: { report: GeneratedReport; b
         <NarrativeSection content={report.aiNarrative} />
       </Card>
 
-      <RevenueProjectionChart businessId={businessId} currency={m.currency} currentRevenue={m.revenue.total} />
+      <RevenueProjectionChart
+        businessId={businessId}
+        currency={m.currency}
+        currentRevenue={m.revenue.total}
+        periodStart={m.period.start}
+        periodEnd={m.period.end}
+        invoiceCount={m.revenue.invoiceCount}
+      />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="p-4 backdrop-blur border-border/60" style={{ background: "hsl(var(--kf-card) / 0.6)" }}>
