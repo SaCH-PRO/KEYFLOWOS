@@ -18,10 +18,8 @@ import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useSearchParams } from "next/navigation";
 import { useModuleEvent } from "@/hooks/use-module-events";
-import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
 import { useMarketingAiHub } from "./hooks/use-marketing-ai-hub";
 import { useMarketing } from "./hooks/use-marketing";
-import { renderMarketingToolResult } from "./components/marketing-tool-results";
 import { MarketingSkeleton } from "./components/marketing-skeleton";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { CampaignsPanel } from "./components/campaigns-panel";
@@ -150,7 +148,6 @@ export default function MarketingPage() {
   }, []);
 
   const handleAiAction = useCallback((toolId: string) => {
-    if (!marketingAi.panelOpen) marketingAi.setOpen(true);
     marketingAi.executeTool(toolId);
   }, [marketingAi]);
 
@@ -165,15 +162,12 @@ export default function MarketingPage() {
         { key: "n", description: "New item", action: handleNewItem },
         { key: "r", description: "Refresh", action: () => { void mk.loadData(); } },
         { key: "/", description: "Search", action: () => setShowSearch(true) },
-        { key: "a", shift: true, description: "AI Hub", action: () => marketingAi.togglePanel() },
         { key: "Escape", description: "Close panels", action: () => {
           if (showSearch) { setShowSearch(false); setSearchQuery(""); }
-          else if (marketingAi.hubMode === "tool-result") marketingAi.clearToolResult();
-          else if (marketingAi.panelOpen) marketingAi.setOpen(false);
         } },
       ],
     },
-  ], [handleTabChange, handleNewItem, mk.loadData, marketingAi, showSearch]);
+  ], [handleTabChange, handleNewItem, mk.loadData, showSearch]);
 
   useKeyboardShortcuts(shortcuts, !mk.loading);
 
@@ -233,19 +227,10 @@ export default function MarketingPage() {
                 <Search className="w-4 h-4 text-muted-foreground" />
               </button>
             )}
-            <AiHubTrigger ai={marketingAi} moduleName="Marketing" />
           </div>
         }
       />
 
-      <AnimatePresence>
-        {marketingAi.panelOpen && (
-          <AiCommandHub ai={marketingAi} moduleName="Marketing" onAction={(key: string) => {
-            if (key.startsWith("switch_tab:")) handleTabChange(key.split(":")[1]);
-            else if (key.startsWith("tool:")) handleAiAction(key.split(":")[1]);
-          }} toolResultRenderer={renderMarketingToolResult} />
-        )}
-      </AnimatePresence>
 
       <TabNav tabs={TABS} activeTab={activeTab} onTabChange={handleTabChange} layoutId="marketing-tab-pill" />
 

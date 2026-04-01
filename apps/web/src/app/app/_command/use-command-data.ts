@@ -211,6 +211,49 @@ export function useCommandData() {
 
   const displayName = getUserDisplayName();
 
+  const aiNudges = useMemo<NudgeItem[]>(() => {
+    const items: NudgeItem[] = [];
+    if (pendingInvoices > 3) {
+      items.push({
+        id: "ai-nudge-overdue-invoices",
+        type: "ai-suggestion",
+        title: "Revenue at risk",
+        body: `You have ${pendingInvoices} pending invoices. Ask AI for a recovery strategy.`,
+        ctaLabel: "Ask AI",
+        ctaHref: "/app/commerce",
+        snoozable: true,
+      });
+    }
+    if (momentumRecs.length > 2) {
+      items.push({
+        id: "ai-nudge-momentum",
+        type: "ai-suggestion",
+        title: "Client momentum dropping",
+        body: `${momentumRecs.length} contacts need attention. Ask AI for prioritised next steps.`,
+        ctaLabel: "Ask AI",
+        ctaHref: "/app/crm/pipeline",
+        snoozable: true,
+      });
+    }
+    if (campaignBriefings.length > 0) {
+      const recent = campaignBriefings[0];
+      if (recent && (recent as CampaignBriefing & { metrics?: { openRate?: number } }).metrics?.openRate !== undefined) {
+        items.push({
+          id: "ai-nudge-campaign",
+          type: "ai-suggestion",
+          title: "Campaign insights ready",
+          body: "AI has analysed your latest campaign performance. Review recommendations.",
+          ctaLabel: "View Insights",
+          ctaHref: "/app/marketing",
+          snoozable: true,
+        });
+      }
+    }
+    return items;
+  }, [pendingInvoices, momentumRecs.length, campaignBriefings]);
+
+  const allNudges = useMemo(() => [...nudges, ...aiNudges], [nudges, aiNudges]);
+
   return {
     businessId,
     loading,
@@ -227,7 +270,7 @@ export function useCommandData() {
     priorities,
     tasks,
     momentumRecs,
-    nudges,
+    nudges: allNudges,
     financialAlerts,
     financialPulse,
     campaignBriefings,

@@ -11,7 +11,6 @@ import { TabNav } from "@/components/ui/tab-nav";
 import { StatCards } from "@/components/ui/stat-cards";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { FeatureGuide } from "@/components/ui/feature-guide";
-import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
 import { formatCurrency } from "./components/expense-utils";
 import { useExpensesData } from "./components/use-expenses-data";
 import { useExpensesAiHub } from "./hooks/use-expenses-ai-hub";
@@ -59,7 +58,7 @@ export default function ExpensesPage() {
     categories: d.categories,
     summary: d.summary as Record<string, unknown> | null,
   }), [d.expenses, d.totalExpenses, d.categories, d.summary]);
-  const { ai, handleAction: handleAiAction } = useExpensesAiHub(d.businessId, aiCustomData);
+  useExpensesAiHub(d.businessId, aiCustomData);
 
   const openEditModal = (exp: Expense) => { setEditingExpense(exp); setShowModal(true); };
   const openAddModal = () => { setEditingExpense(null); setShowModal(true); };
@@ -113,8 +112,6 @@ export default function ExpensesPage() {
       </AnimatePresence>
       <AnimatePresence>{showModal && d.businessId && <ExpenseFormModal businessId={d.businessId} categories={d.categories} editingExpense={editingExpense} onClose={() => setShowModal(false)} onSaved={d.loadData} />}</AnimatePresence>
       <AnimatePresence>{detailExpense && <ExpenseDetailModal expense={detailExpense} onClose={() => setDetailExpense(null)} onEdit={openEditModal} />}</AnimatePresence>
-      <AnimatePresence>{ai.panelOpen && <AiCommandHub ai={ai} moduleName="Expenses" onAction={handleAiAction} />}</AnimatePresence>
-      <AiHubTrigger ai={ai} moduleName="Expenses" />
     </div>
   );
 }

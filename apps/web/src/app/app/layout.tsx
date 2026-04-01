@@ -35,6 +35,7 @@ import {
   Globe,
   Link2,
 } from "lucide-react";
+import { AiCopilotTrigger } from "./_command/ai-command-bar";
 
 interface NavItem {
   label: string;
@@ -487,6 +488,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
           <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 md:p-6 pb-24 md:pb-6">{children}</div>
         </main>
+        <AiCopilotTrigger />
       </div>
 
       {mobileDrawerOpen && (

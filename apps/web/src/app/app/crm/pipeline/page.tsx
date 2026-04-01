@@ -15,14 +15,12 @@ import { WorkspaceError } from "@/components/ui/workspace-error";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
-import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { ContactsDatabase } from "./contacts-database";
 import { InsightsTab } from "./insights-tab";
 import { PipelineTabContent } from "./pipeline-tab-content";
 import { useContactsPipeline } from "./use-contacts-pipeline";
 import { useCrmAiHub } from "./hooks/use-crm-ai-hub";
-import { renderCrmToolResult } from "./components/crm-tool-results";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useModuleEmit } from "@/hooks/use-module-events";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
@@ -69,18 +67,6 @@ export default function ContactsPage() {
     }
   }, [businessId, crmViewTab, contacts.length, state.selectedContact?.id, crmAi.updateCrmContext]);
 
-  const handleAiAssistantAction = useCallback((actionKey: string) => {
-    const { type, contactId } = crmAi.parseActionKey(actionKey);
-    if (contactId) {
-      selectContact(contactId);
-      setCrmViewTab("contacts");
-    }
-    if (type === "follow_up" || type === "check_in" || type === "re_engage") {
-      toast.success("Opening contact for follow-up...");
-    } else if (type === "send_quote") {
-      toast.success("Opening contact to create a quote...");
-    }
-  }, [crmAi.parseActionKey, selectContact, setCrmViewTab]);
 
   const crmShortcuts = useMemo<ShortcutGroup[]>(() => [
     {
@@ -93,11 +79,9 @@ export default function ContactsPage() {
         { key: "3", description: "Studio tab", action: () => setCrmViewTab("studio") },
         { key: "r", description: "Refresh contacts", action: () => { void loadContacts(); void loadFlowData(); } },
         { key: "b", description: "Open broadcast", action: () => state.setShowBroadcast(true) },
-        { key: "a", shift: true, description: "Toggle AI Hub", action: () => crmAi.togglePanel() },
-        { key: "Escape", description: "Close panels", action: () => { if (crmAi.hubMode === "tool-result") crmAi.clearToolResult(); else if (crmAi.panelOpen) crmAi.setOpen(false); } },
       ],
     },
-  ], [setCrmViewTab, loadContacts, loadFlowData, state.setShowAddMenu, state.setShowBroadcast, crmAi.panelOpen, crmAi.setOpen, crmAi.togglePanel, crmAi.hubMode, crmAi.clearToolResult]);
+  ], [setCrmViewTab, loadContacts, loadFlowData, state.setShowAddMenu, state.setShowBroadcast]);
 
   useKeyboardShortcuts(crmShortcuts, !workspaceLoading);
 
@@ -221,17 +205,6 @@ export default function ContactsPage() {
         }
       />
 
-      <AnimatePresence>
-        {crmAi.panelOpen && (
-          <AiCommandHub
-            ai={crmAi}
-            moduleName="CRM"
-            onAction={handleAiAssistantAction}
-            toolResultRenderer={renderCrmToolResult}
-          />
-        )}
-      </AnimatePresence>
-      <AiHubTrigger ai={crmAi} moduleName="CRM" />
 
       <TabNav
         tabs={[

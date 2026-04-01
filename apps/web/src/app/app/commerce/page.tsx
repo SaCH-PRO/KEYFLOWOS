@@ -9,9 +9,6 @@ import {
   RefreshCw,
   Plus,
   Search,
-  Sparkles,
-  Terminal,
-  Lightbulb,
   Zap,
   BookOpen,
   Clock,
@@ -23,7 +20,6 @@ import { toast } from "sonner";
 import Link from "next/link";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
-import { AiCommandHub } from "@/components/ai/ai-command-hub";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { useCommerceShell } from "./hooks/use-commerce-shell";
@@ -31,14 +27,12 @@ import { useBillingWorkspace } from "./hooks/use-billing-workspace";
 import { useCommerceOverview } from "./hooks/use-commerce-overview";
 import { useCommerceCopilot } from "./hooks/use-commerce-copilot";
 import { useCommerceComposer } from "./hooks/use-commerce-composer";
-import { useCommerceAiHub, type CopilotMode } from "./hooks/use-commerce-ai-hub";
+import { useCommerceAiHub } from "./hooks/use-commerce-ai-hub";
 import { SearchableHelpDrawer } from "./components/contextual-onboarding";
-import { renderCommerceToolResult } from "./components/commerce-tool-results";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useModuleEmit, useModuleEvent } from "@/hooks/use-module-events";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { useRouter } from "next/navigation";
-import { commerceAiExecute } from "@/lib/client";
 import { formatCurrencyCompact } from "@/lib/currency";
 import type { BillingSlots } from "./utils/commerce-slots";
 import InvoicesPanel from "./invoices/invoices-panel";
@@ -133,27 +127,6 @@ export default function CommercePage() {
     }
   }, [businessId, tab, invoices.length, quotes.length, commerceAi.updateCommerceContext]);
 
-  const handleAiAssistantAction = useCallback((actionKey: string) => {
-    if (actionKey.startsWith("filter_status:")) {
-      handleTabChange("invoices");
-      toast.success(`Filtering by ${actionKey.split(":")[1]}`);
-    } else if (actionKey.startsWith("switch_tab:")) {
-      const t = actionKey.split(":")[1];
-      if (t === "quotes") handleTabChange("quotes");
-      else if (t === "invoices") handleTabChange("invoices");
-      else if (t === "schedules" || t === "recurring") handleTabChange("recurring");
-      else if (t === "payments" || t === "collections") handleTabChange("payments");
-      else if (t === "insights" || t === "catalog") handleTabChange("payments");
-      else handleTabChange(t);
-    } else if (actionKey.startsWith("send_reminders:")) {
-      handleTabChange("invoices");
-      toast.success("Opening invoices for reminders...");
-    } else if (actionKey.startsWith("tool:")) {
-      const toolId = actionKey.split(":")[1];
-      if (!commerceAi.panelOpen) commerceAi.setOpen(true);
-      commerceAi.executeTool(toolId);
-    }
-  }, [handleTabChange, commerceAi]);
 
   const handleWrappedTabChange = useCallback((t: string) => {
     handleTabChange(t);
@@ -196,19 +169,15 @@ export default function CommercePage() {
       groupName: "Commerce Navigation",
       shortcuts: [
         { key: "n", description: "New item", action: () => composer.handleNewItem() },
-        { key: "f", description: "Focus search", action: () => { if (!commerceAi.panelOpen) commerceAi.setOpen(true); } },
-        { key: "/", description: "Focus search", action: () => { if (!commerceAi.panelOpen) commerceAi.setOpen(true); } },
         { key: "1", description: "Invoices tab", action: () => handleTabChange("invoices") },
         { key: "2", description: "Quotes tab", action: () => handleTabChange("quotes") },
         { key: "3", description: "Payments tab", action: () => handleTabChange("payments") },
         { key: "4", description: "Recurring tab", action: () => handleTabChange("recurring") },
         { key: "r", description: "Refresh data", action: () => { shell.refreshProducts(); } },
-        { key: "a", shift: true, description: "Toggle AI Copilot", action: () => commerceAi.togglePanel() },
         { key: "?", description: "Help", action: () => setHelpOpen(true) },
-        { key: "Escape", description: "Close panels", action: () => { if (commerceAi.hubMode === "tool-result") commerceAi.clearToolResult(); else if (commerceAi.panelOpen) commerceAi.setOpen(false); } },
       ],
     },
-  ], [composer.handleNewItem, handleTabChange, shell.refreshProducts, commerceAi.togglePanel, commerceAi.panelOpen, commerceAi.setOpen, commerceAi.hubMode, commerceAi.clearToolResult]);
+  ], [composer.handleNewItem, handleTabChange, shell.refreshProducts]);
 
   useKeyboardShortcuts(commerceShortcuts, !shell.workspaceLoading);
 
@@ -218,17 +187,8 @@ export default function CommercePage() {
   }, []);
 
   const billingSlots = useMemo<BillingSlots>(() => ({
-    renderHeaderExtra: () => (
-      <button
-        onClick={() => { if (!commerceAi.panelOpen) commerceAi.setOpen(true); }}
-        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-[hsl(var(--kf-accent1))]/20 bg-[hsl(var(--kf-accent1))]/5 hover:bg-[hsl(var(--kf-accent1))]/10 transition-colors text-xs font-medium text-[hsl(var(--kf-accent1))]"
-      >
-        <Sparkles className="w-3 h-3" />
-        Ask AI
-      </button>
-    ),
     renderTimelineBadge,
-  }), [commerceAi.panelOpen, commerceAi.setOpen, renderTimelineBadge]);
+  }), [renderTimelineBadge]);
 
   if (shell.workspaceLoading) return <ListPageSkeleton />;
 
@@ -266,14 +226,6 @@ export default function CommercePage() {
               >
                 <BookOpen className="w-4 h-4 text-muted-foreground/60" />
               </button>
-              <button
-                onClick={() => commerceAi.togglePanel()}
-                className="min-w-[44px] min-h-[44px] rounded-lg flex items-center justify-center hover:bg-white/[0.06] transition-colors"
-                aria-label="AI Copilot"
-                title="AI Copilot (Shift+A)"
-              >
-                <Sparkles className="w-4 h-4 text-[hsl(var(--kf-accent1))]/60" />
-              </button>
             </div>
           </div>
         }
@@ -282,40 +234,6 @@ export default function CommercePage() {
         onAction={composer.handleNewItem}
       />
 
-      <AnimatePresence>
-        {commerceAi.panelOpen && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-1 px-1">
-              {(["command", "recommend", "assist"] as CopilotMode[]).map((mode) => {
-                const isActive = commerceAi.copilotMode === mode;
-                const ModeIcon = mode === "command" ? Terminal : mode === "recommend" ? Lightbulb : Zap;
-                const cfg = commerceAi.copilotModeConfig[mode];
-                return (
-                  <button
-                    key={mode}
-                    onClick={() => commerceAi.setCopilotMode(mode)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                      isActive
-                        ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] border border-[hsl(var(--kf-accent1))]/30"
-                        : "text-muted-foreground/60 hover:text-muted-foreground hover:bg-white/[0.04] border border-transparent"
-                    }`}
-                    title={cfg.description}
-                  >
-                    <ModeIcon className="w-3 h-3" />
-                    {cfg.label}
-                  </button>
-                );
-              })}
-            </div>
-            <AiCommandHub
-              ai={commerceAi}
-              moduleName="Commerce"
-              onAction={handleAiAssistantAction}
-              toolResultRenderer={renderCommerceToolResult}
-            />
-          </div>
-        )}
-      </AnimatePresence>
 
       <TabNav
         tabs={TABS}
