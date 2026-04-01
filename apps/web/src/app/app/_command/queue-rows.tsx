@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { AlertCircle, Clock, Check, X, CheckCircle2, Sparkles, Loader2, HeartPulse, MessageCircle, TrendingUp, TrendingDown, Package, Send, Award, Clock3, ShieldAlert, FileWarning, Bell, MoreHorizontal } from "lucide-react";
+import { AlertCircle, Clock, Check, X, CheckCircle2, Sparkles, Loader2, HeartPulse, MessageCircle, TrendingUp, TrendingDown, Package, Send, Award, Clock3, ShieldAlert, FileWarning, Bell, MoreHorizontal, ShieldCheck } from "lucide-react";
 import type { PriorityItem, AutopilotTask, MomentumRecommendation, NudgeItem, FinancialAlert } from "./types";
 import { formatTTD } from "./types";
 
@@ -12,7 +12,7 @@ function OverflowMenu({ children }: { children: React.ReactNode }) {
     <div className="relative flex-shrink-0">
       <button
         onClick={(e) => { e.stopPropagation(); setOpen((p) => !p); }}
-        className="w-7 h-7 flex items-center justify-center kf-radius-sm text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
+        className="w-7 h-7 min-w-[44px] min-h-[44px] flex items-center justify-center kf-radius-sm text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
         title="More actions"
       >
         <MoreHorizontal className="w-3.5 h-3.5" />
@@ -38,7 +38,7 @@ function OverflowAction({ label, onClick, color, disabled }: { label: string; on
     <button
       onClick={(e) => { e.stopPropagation(); onClick(); }}
       disabled={disabled}
-      className="w-full text-left px-3 py-2 text-xs font-medium hover:bg-muted/20 transition-colors disabled:opacity-40"
+      className="w-full text-left px-3 py-2 min-h-[44px] text-xs font-medium hover:bg-muted/20 transition-colors disabled:opacity-40 flex items-center"
       style={color ? { color } : undefined}
     >
       {label}
@@ -226,26 +226,31 @@ export function RetentionAlertRow({ rec, onAction, onDismiss, loading }: { rec: 
     ? `${rec.contact.firstName ?? ""} ${rec.contact.lastName ?? ""}`.trim() || "Contact"
     : "Contact";
   const isChurn = rec.type?.toLowerCase().includes("churn");
-  const color = isChurn ? "--kf-error" : "--kf-warning";
+
+  const confPct = (() => {
+    const raw = rec.momentumScore ?? 50;
+    return Math.max(10, Math.min(95, Math.round(raw)));
+  })();
+  const confColor = confPct >= 60 ? "--kf-success" : confPct >= 35 ? "--kf-warning" : "--kf-error";
+  const borderColor = isChurn ? "--kf-error" : "--kf-warning";
 
   return (
     <div
       className="flex items-center gap-3 p-3 kf-radius-md border transition-all hover:bg-muted/10"
-      style={{ borderColor: `hsl(var(${color}) / 0.3)` }}
+      style={{ borderColor: `hsl(var(${borderColor}) / 0.3)` }}
     >
-      <HeartPulse className="w-3.5 h-3.5 shrink-0" style={{ color: `hsl(var(${color}))` }} />
+      <HeartPulse className="w-3.5 h-3.5 shrink-0" style={{ color: `hsl(var(${borderColor}))` }} />
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">{contactLabel}</p>
         <p className="text-[10px] text-muted-foreground truncate">{rec.title}</p>
       </div>
-      {rec.momentumScore !== null && rec.momentumScore !== undefined && (
-        <span
-          className="text-[9px] px-1.5 py-0.5 rounded-full font-medium shrink-0"
-          style={{ background: `hsl(var(${color}) / 0.1)`, color: `hsl(var(${color}))` }}
-        >
-          {Math.round(rec.momentumScore)}%
-        </span>
-      )}
+      <span
+        className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full font-medium shrink-0"
+        style={{ background: `hsl(var(${confColor}) / 0.1)`, color: `hsl(var(${confColor}))` }}
+      >
+        <ShieldCheck className="w-2.5 h-2.5" />
+        {confPct}%
+      </span>
       <button
         onClick={onAction}
         disabled={loading}

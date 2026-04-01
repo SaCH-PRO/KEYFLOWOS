@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, ShieldCheck } from "lucide-react";
 import { fetchCashFlowForecast, type CashFlowForecast } from "@/lib/client";
 import { formatTTD } from "./types";
 
@@ -41,6 +41,20 @@ export function CashFlowWidget({ businessId }: CashFlowWidgetProps) {
   const hasWarning = forecast?.daysUntilNegative !== null && forecast?.daysUntilNegative !== undefined && forecast.daysUntilNegative <= 30;
   const alertCount = forecast?.alerts?.length ?? 0;
 
+  const confidence = (() => {
+    if (!forecast) return null;
+    let score = 70;
+    if ((forecast.dailyRevenueRate ?? 0) > 0) score += 10;
+    if (alertCount === 0) score += 10;
+    const neg = forecast.daysUntilNegative;
+    if (neg === null || neg === undefined || neg > 60) score += 10;
+    else if (neg <= 14) score -= 20;
+    score = Math.max(20, Math.min(95, score));
+    if (score >= 75) return { pct: score, color: "--kf-success", label: "High" };
+    if (score >= 50) return { pct: score, color: "--kf-warning", label: "Medium" };
+    return { pct: score, color: "--kf-error", label: "Low" };
+  })();
+
   return (
     <div className="kf-card rounded-xl p-4 space-y-3">
       <div className="flex items-center justify-between">
@@ -55,6 +69,15 @@ export function CashFlowWidget({ businessId }: CashFlowWidgetProps) {
             <h3 className="text-sm font-semibold">30-Day Cash Flow</h3>
             <p className="text-[10px] text-muted-foreground">Projected from invoices & expenses</p>
           </div>
+          {confidence && (
+            <span
+              className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full font-medium"
+              style={{ background: `hsl(var(${confidence.color}) / 0.1)`, color: `hsl(var(${confidence.color}))` }}
+            >
+              <ShieldCheck className="w-2.5 h-2.5" />
+              {confidence.pct}%
+            </span>
+          )}
         </div>
         <button
           onClick={load}

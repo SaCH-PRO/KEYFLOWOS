@@ -1,6 +1,6 @@
 "use client";
 
-import { Lightbulb, CalendarPlus, Users, TrendingUp } from "lucide-react";
+import { Lightbulb, CalendarPlus, Users, TrendingUp, ShieldCheck } from "lucide-react";
 import type { ScheduleHealth } from "@/lib/client";
 
 interface ScheduleHintsProps {
@@ -17,6 +17,14 @@ export function ScheduleHints({ scheduleHealth }: ScheduleHintsProps) {
   const hasContent = promos.length > 0 || rebookings.length > 0 || recommendations.length > 0;
   if (!hasContent) return null;
 
+  const utilization = scheduleHealth.weeklyUtilization ?? [];
+  const avgUtil = utilization.length > 0
+    ? utilization.reduce((s, d) => s + (d.utilizationRate ?? 0), 0) / utilization.length
+    : 0;
+  const confPct = Math.min(95, Math.max(30, Math.round(50 + avgUtil * 0.5)));
+  const confColor = confPct >= 70 ? "--kf-success" : confPct >= 45 ? "--kf-warning" : "--kf-error";
+  const confLabel = confPct >= 70 ? "High" : confPct >= 45 ? "Medium" : "Low";
+
   return (
     <div className="kf-card rounded-xl p-3 space-y-3">
       <div className="flex items-center gap-2">
@@ -27,6 +35,13 @@ export function ScheduleHints({ scheduleHealth }: ScheduleHintsProps) {
           <Lightbulb className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent2))" }} />
         </div>
         <span className="text-xs font-semibold">Schedule Optimisation</span>
+        <span
+          className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full font-medium"
+          style={{ background: `hsl(var(${confColor}) / 0.1)`, color: `hsl(var(${confColor}))` }}
+        >
+          <ShieldCheck className="w-2.5 h-2.5" />
+          {confPct}% {confLabel}
+        </span>
       </div>
 
       {promos.length > 0 && (
