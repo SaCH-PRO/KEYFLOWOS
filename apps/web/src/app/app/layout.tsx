@@ -35,7 +35,7 @@ import {
   Globe,
   Link2,
 } from "lucide-react";
-import { AiCopilotTrigger } from "./_command/ai-command-bar";
+import { AiCommandBar, AiCopilotTrigger } from "./_command/ai-command-bar";
 
 interface NavItem {
   label: string;
@@ -338,13 +338,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <span className="text-sm font-bold tracking-tight truncate">KEYFLOWOS</span>
               </div>
 
+              <div className="hidden md:flex flex-1 min-w-0 max-w-lg">
+                <AiCommandBar />
+              </div>
               <button
                 onClick={() => setPaletteOpen(true)}
-                className="hidden lg:flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:border-muted-foreground/30 transition-colors w-56"
+                className="hidden md:flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:border-muted-foreground/30 transition-colors shrink-0"
+                title="Search (⌘K)"
               >
                 <Search className="w-3.5 h-3.5" />
-                <span>Search...</span>
-                <kbd className="ml-auto px-1.5 py-0.5 rounded bg-muted text-[10px] font-mono">⌘K</kbd>
+                <kbd className="px-1 py-0.5 rounded bg-muted text-[10px] font-mono">⌘K</kbd>
               </button>
             </div>
 
