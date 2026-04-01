@@ -161,7 +161,7 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
             <a
               href={`mailto:${contact.email}`}
               onClick={(e) => e.stopPropagation()}
-              className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-blue-500/10 transition-colors"
+              className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] sm:w-7 sm:h-7 sm:min-w-0 sm:min-h-0 rounded-lg hover:bg-blue-500/10 transition-colors"
               title={`Email ${contact.email}`}
               aria-label={`Email ${contact.email}`}
             >
@@ -172,7 +172,7 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
             <a
               href={`tel:${contact.phone}`}
               onClick={(e) => e.stopPropagation()}
-              className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-violet-500/10 transition-colors md:opacity-0 md:group-hover:opacity-100"
+              className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] sm:w-7 sm:h-7 sm:min-w-0 sm:min-h-0 rounded-lg hover:bg-violet-500/10 transition-colors md:opacity-0 md:group-hover:opacity-100"
               title={`Call ${contact.phone}`}
               aria-label={`Call ${contact.phone}`}
             >
@@ -185,7 +185,7 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
               target="_blank"
               rel="noopener noreferrer"
               onClick={(e) => e.stopPropagation()}
-              className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-emerald-500/10 transition-colors md:opacity-0 md:group-hover:opacity-100"
+              className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] sm:w-7 sm:h-7 sm:min-w-0 sm:min-h-0 rounded-lg hover:bg-emerald-500/10 transition-colors md:opacity-0 md:group-hover:opacity-100"
               title="WhatsApp"
               aria-label="Message on WhatsApp"
             >
@@ -197,7 +197,7 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
             <div className="relative flex-shrink-0" ref={actionsRef}>
               <button
                 onClick={(e) => { e.stopPropagation(); setShowActions(!showActions); }}
-                className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-white/[0.06] text-muted-foreground/50 hover:text-muted-foreground transition-colors md:opacity-0 md:group-hover:opacity-100"
+                className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] sm:w-7 sm:h-7 sm:min-w-0 sm:min-h-0 rounded-lg hover:bg-white/[0.06] text-muted-foreground/50 hover:text-muted-foreground transition-colors md:opacity-0 md:group-hover:opacity-100"
                 title="Quick actions"
                 aria-haspopup="menu"
                 aria-expanded={showActions}
@@ -230,7 +230,7 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
           {!onQuickAction && onDelete && (
             <button
               onClick={handleDelete}
-              className="inline-flex items-center justify-center w-7 h-7 rounded-lg hover:bg-red-500/10 text-muted-foreground/40 hover:text-red-400 transition-colors md:opacity-0 md:group-hover:opacity-100 flex-shrink-0"
+              className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] sm:w-7 sm:h-7 sm:min-w-0 sm:min-h-0 rounded-lg hover:bg-red-500/10 text-muted-foreground/40 hover:text-red-400 transition-colors md:opacity-0 md:group-hover:opacity-100 flex-shrink-0"
               title="Delete contact"
               aria-label="Delete contact"
             >

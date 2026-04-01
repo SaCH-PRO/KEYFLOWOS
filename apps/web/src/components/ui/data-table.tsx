@@ -150,7 +150,7 @@ export function DataTable<T extends Record<string, unknown>>({
                 value={search}
                 onChange={(e) => { setSearch(e.target.value); setPage(0); }}
                 placeholder={searchPlaceholder}
-                className="w-full pl-8 pr-3 py-1.5 kf-radius-sm kf-text-caption"
+                className="w-full pl-8 pr-3 min-h-[44px] kf-radius-sm kf-text-caption"
                 style={{
                   background: "hsl(var(--kf-muted))",
                   color: "hsl(var(--kf-foreground))",
@@ -183,7 +183,7 @@ export function DataTable<T extends Record<string, unknown>>({
                   <button
                     key={col.key}
                     onClick={() => toggleCol(col.key)}
-                    className="w-full flex items-center gap-2 px-2.5 py-1.5 kf-radius-sm kf-text-caption text-left transition-colors"
+                    className="w-full flex items-center gap-2 px-2.5 min-h-[44px] kf-radius-sm kf-text-caption text-left transition-colors"
                     style={{ color: "hsl(var(--kf-foreground))" }}
                   >
                     <span
