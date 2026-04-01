@@ -62,7 +62,12 @@ export default function ReportsPage() {
 
   const generateReport = useCallback(async (overrideTab?: ReportType) => {
     const tab = overrideTab || activeTab;
-    if (!businessId || tab === "cash-flow") return;
+    if (!businessId) return;
+    if (tab === "cash-flow") {
+      setLoading(false);
+      setGenerating(false);
+      return;
+    }
     setLoading(true);
     setGenerating(true);
 
