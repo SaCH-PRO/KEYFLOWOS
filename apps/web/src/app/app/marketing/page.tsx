@@ -12,6 +12,7 @@ import {
   Search,
   X,
 } from "lucide-react";
+import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
@@ -147,8 +148,15 @@ export default function MarketingPage() {
     document.querySelector<HTMLButtonElement>(`[data-form-edit="${form.id}"]`)?.click();
   }, []);
 
-  const handleAiAction = useCallback((toolId: string) => {
-    marketingAi.executeTool(toolId);
+  const handleAiAction = useCallback(async (toolId: string) => {
+    const toolName = toolId.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+    toast.info(`Running ${toolName}...`);
+    try {
+      await marketingAi.executeTool(toolId);
+      toast.success(`${toolName} complete`);
+    } catch {
+      toast.error(`${toolName} failed. Try again.`);
+    }
   }, [marketingAi]);
 
   const shortcuts = useMemo<ShortcutGroup[]>(() => [
