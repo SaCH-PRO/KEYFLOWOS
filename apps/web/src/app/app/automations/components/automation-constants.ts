@@ -165,6 +165,22 @@ export const AUTOMATION_TEMPLATES: AutomationTemplate[] = [
   },
 ];
 
+export const WORKFLOW_ACTION_SUMMARIES: Record<string, string[]> = {
+  quote_followup: ["Create Follow-up Task", "Send Reminder Email"],
+  lead_form_pipeline: ["Create CRM Contact", "Tag Lead", "Enroll in Campaign"],
+  booking_completed_followup: ["Schedule Feedback Request", "Create Follow-up Task"],
+  booking_cancelled_reengagement: ["Create Re-engagement Task", "Tag Contact"],
+  booking_rescheduled_tracking: ["Log Reschedule Event", "Update Contact"],
+  new_product_marketing: ["Generate Marketing Suggestions", "Send Notification"],
+  quote_conversion_tracking: ["Cancel Follow-up Tasks", "Log Conversion"],
+  product_update_tracking: ["Log Product Change", "Notify Impact"],
+  campaign_engagement_scoring: ["Update Engagement Scores"],
+};
+
+export function getWorkflowActionSummary(workflowKey: string): string[] {
+  return WORKFLOW_ACTION_SUMMARIES[workflowKey] ?? ["Automated action"];
+}
+
 export function getTriggerLabel(trigger: string): string {
   return TRIGGER_OPTIONS.find((t) => t.value === trigger)?.label ?? trigger;
 }

@@ -12,6 +12,17 @@ import {
   type AutomationTemplate,
 } from "./automation-constants";
 
+const CONDITION_OPTIONS = [
+  { value: "", label: "No condition (always run)" },
+  { value: "contact.has_email", label: "Contact has email" },
+  { value: "contact.has_phone", label: "Contact has phone number" },
+  { value: "contact.is_active", label: "Contact is active" },
+  { value: "contact.is_new", label: "Contact was created in last 7 days" },
+  { value: "invoice.above_threshold", label: "Invoice total above threshold" },
+  { value: "booking.is_first", label: "First booking for contact" },
+  { value: "time.business_hours", label: "During business hours only" },
+];
+
 interface PlaybookEditorProps {
   open: boolean;
   onClose: () => void;
@@ -22,7 +33,7 @@ interface PlaybookEditorProps {
 }
 
 export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybook, businessId }: PlaybookEditorProps) {
-  const [form, setForm] = useState({ name: "", triggerEvent: "" });
+  const [form, setForm] = useState({ name: "", triggerEvent: "", condition: "" });
   const [actionSteps, setActionSteps] = useState<ActionStep[]>([{ type: "" }]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -31,18 +42,19 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
 
   useEffect(() => {
     if (editingPlaybook) {
-      setForm({ name: editingPlaybook.name, triggerEvent: editingPlaybook.triggerEvent });
       const actions = Array.isArray(editingPlaybook.actions)
         ? (editingPlaybook.actions as ActionStep[])
         : [{ type: "" }];
+      const existingCondition = (editingPlaybook as any).condition ?? "";
+      setForm({ name: editingPlaybook.name, triggerEvent: editingPlaybook.triggerEvent, condition: existingCondition });
       setActionSteps(actions.length ? [...actions] : [{ type: "" }]);
       setError(null);
     } else if (template) {
-      setForm({ name: template.name, triggerEvent: template.trigger });
+      setForm({ name: template.name, triggerEvent: template.trigger, condition: "" });
       setActionSteps(template.actions.length ? [...template.actions] : [{ type: "" }]);
       setError(null);
     } else {
-      setForm({ name: "", triggerEvent: "" });
+      setForm({ name: "", triggerEvent: "", condition: "" });
       setActionSteps([{ type: "" }]);
       setError(null);
     }
@@ -89,7 +101,7 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
         setError(apiError);
       } else if (data) {
         onSaved(data);
-        setForm({ name: "", triggerEvent: "" });
+        setForm({ name: "", triggerEvent: "", condition: "" });
         setActionSteps([{ type: "" }]);
         onClose();
       }
@@ -149,6 +161,19 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
                   ))}
                 </select>
               </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Only if... (optional condition)</label>
+              <select
+                className="w-full rounded-lg border border-border/60 bg-input px-3 py-2 text-sm"
+                value={form.condition}
+                onChange={(e) => setForm((f) => ({ ...f, condition: e.target.value }))}
+              >
+                {CONDITION_OPTIONS.map((c) => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
+                ))}
+              </select>
             </div>
 
             <div className="space-y-2">

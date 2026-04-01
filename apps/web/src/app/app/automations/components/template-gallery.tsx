@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Zap, Play } from "lucide-react";
-import { createPlaybook, Playbook } from "@/lib/client";
+import { createPlaybook } from "@/lib/client";
 import { AUTOMATION_TEMPLATES, getTriggerLabel, getActionLabel, type AutomationTemplate } from "./automation-constants";
 
 const CATEGORY_STYLES: Record<string, string> = {
@@ -56,6 +56,7 @@ export function TemplateGallery({ onSelect, businessId }: TemplateGalleryProps) 
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
             {AUTOMATION_TEMPLATES.filter((t) => t.category === category).map((template) => {
               const isActivated = activated.has(template.id);
+              const catColor = CATEGORY_STYLES[category] ?? "hsl(var(--kf-accent1))";
               return (
                 <div
                   key={template.id}
@@ -68,9 +69,9 @@ export function TemplateGallery({ onSelect, businessId }: TemplateGalleryProps) 
                   <div className="flex items-start gap-3">
                     <div
                       className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
-                      style={{ background: `${CATEGORY_STYLES[category] ?? "hsl(var(--kf-accent1))"} / 0.15)`.replace(")", "") }}
+                      style={{ background: "hsl(var(--muted) / 0.5)" }}
                     >
-                      <Zap className="w-4 h-4" style={{ color: CATEGORY_STYLES[category] ?? "hsl(var(--kf-accent1))" }} />
+                      <Zap className="w-4 h-4" style={{ color: catColor }} />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-semibold group-hover:text-primary transition-colors">{template.name}</div>
