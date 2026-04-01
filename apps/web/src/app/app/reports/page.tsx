@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   BarChart3, Download, Loader2, RefreshCw, ChevronDown, Send, Clock, Lightbulb, X
 } from "lucide-react";
@@ -22,7 +23,10 @@ import { BookingsView } from "./components/bookings-view";
 import { MarketingView } from "./components/marketing-view";
 import { exportReportPDF } from "./components/export-pdf";
 
+const REPORT_TAB_KEYS = REPORT_TABS.map((t) => t.id);
+
 export default function ReportsPage() {
+  const searchParams = useSearchParams();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ReportType>("executive");
   const [datePreset, setDatePreset] = useState("this-month");
@@ -37,6 +41,13 @@ export default function ReportsPage() {
   const [exporting, setExporting] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    if (tabParam && REPORT_TAB_KEYS.includes(tabParam as ReportType)) {
+      setActiveTab(tabParam as ReportType);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     const initWorkspace = async () => {

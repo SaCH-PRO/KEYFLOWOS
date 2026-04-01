@@ -63,7 +63,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 | Projects / Tasks | Projects (tab: Projects) | CRM (journey timeline) | Projects owns kanban; cross-module read |
 | Automations / Playbooks | Projects (tab: Playbooks, nav: Automations) | Cross-Module Intelligence Agent | Projects owns config; agent executes |
 | Settings (Tax, Payments, Branding) | Settings (`/app/settings`) | Commerce, Bookings, Store (deep-link cards) | Settings owns config; modules link to it |
-| Analytics / KPIs | Reports | All modules (summary cards only) | Reports is single analytics source |
+| Analytics / KPIs | Reports (`/app/reports`) | All modules (compact KPI cards + "View Full Report" links) | Reports is single analytics source; module tabs show operational summaries only |
 
 **Navigation Structure:**
 - OPERATE: Command, Contacts, Commerce, Bookings
