@@ -555,21 +555,21 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
               </div>
             </div>
             <div className="flex items-center gap-6">
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <label className="flex items-center gap-2 text-sm cursor-pointer min-h-[44px]">
                 <input
                   type="checkbox"
                   checked={form.marketingOptIn}
                   onChange={(e) => setForm((p) => ({ ...p, marketingOptIn: e.target.checked }))}
-                  className="w-4 h-4 rounded border-border accent-primary"
+                  className="w-5 h-5 rounded border-border accent-primary"
                 />
                 Marketing Opt-In
               </label>
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <label className="flex items-center gap-2 text-sm cursor-pointer min-h-[44px]">
                 <input
                   type="checkbox"
                   checked={form.doNotContact}
                   onChange={(e) => setForm((p) => ({ ...p, doNotContact: e.target.checked }))}
-                  className="w-4 h-4 rounded border-border accent-destructive"
+                  className="w-5 h-5 rounded border-border accent-destructive"
                 />
                 Do Not Contact
               </label>
