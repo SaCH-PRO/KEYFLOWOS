@@ -441,7 +441,7 @@ export default function CommercePage() {
         {[
           { label: "Billing & Tax", desc: "Tax rates, default terms, and invoice preferences", href: "/app/settings/business?tab=billing" },
           { label: "Payment Gateways", desc: "WiPay, PayPal, and payment methods", href: "/app/settings/business?tab=payments" },
-          { label: "Invoice Templates", desc: "Customize branding and layout", href: "/app/settings/business?tab=templates" },
+          { label: "Branding & Templates", desc: "Customize invoice branding and layout", href: "/app/settings/business?tab=branding" },
         ].map((link) => (
           <Link
             key={link.label}
