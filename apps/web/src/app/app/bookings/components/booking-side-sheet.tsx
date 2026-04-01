@@ -1,23 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { X, CalendarDays } from "lucide-react";
 import type { Service, StaffMember, Contact } from "./bookings-types";
 import BookingForm from "./booking-form";
-
-const MOBILE_BP = 640;
-function useIsMobile() {
-  const [m, setM] = useState(false);
-  useEffect(() => {
-    const mql = window.matchMedia(`(max-width: ${MOBILE_BP - 1}px)`);
-    setM(mql.matches);
-    const h = (e: MediaQueryListEvent) => setM(e.matches);
-    mql.addEventListener("change", h);
-    return () => mql.removeEventListener("change", h);
-  }, []);
-  return m;
-}
+import { useIsMobile } from "@/hooks/use-is-mobile";
 
 interface BookingSideSheetProps {
   open: boolean;

@@ -1,21 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useCallback, useState, type ReactNode } from "react";
+import { useEffect, useRef, useCallback, type ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
-
-const MOBILE_BP = 640;
-function useIsMobile() {
-  const [m, setM] = useState(false);
-  useEffect(() => {
-    const mql = window.matchMedia(`(max-width: ${MOBILE_BP - 1}px)`);
-    setM(mql.matches);
-    const h = (e: MediaQueryListEvent) => setM(e.matches);
-    mql.addEventListener("change", h);
-    return () => mql.removeEventListener("change", h);
-  }, []);
-  return m;
-}
+import { useIsMobile } from "@/hooks/use-is-mobile";
 
 interface SideSheetProps {
   open: boolean;
