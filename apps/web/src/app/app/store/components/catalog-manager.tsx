@@ -13,7 +13,9 @@ import {
   X,
   CheckCircle2,
   AlertTriangle,
+  ExternalLink,
 } from "lucide-react";
+import Link from "next/link";
 import { Product } from "@/lib/client";
 import { formatPrice } from "@/lib/format";
 
@@ -133,6 +135,14 @@ export function CatalogManager({
           <div>
             <h3 className="text-sm font-semibold">Store Catalog</h3>
             <p className="text-[11px] text-muted-foreground mt-0.5">Toggle items from Commerce to display in your store</p>
+            <Link
+              href="/app/commerce/products"
+              className="inline-flex items-center gap-1 text-[10px] mt-0.5 hover:underline"
+              style={{ color: "hsl(var(--kf-accent2))" }}
+            >
+              <ExternalLink className="w-3 h-3" />
+              Manage products in Commerce
+            </Link>
           </div>
         </div>
         <div className="flex items-center gap-2">
