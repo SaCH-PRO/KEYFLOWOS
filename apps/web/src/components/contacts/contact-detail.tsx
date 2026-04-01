@@ -14,6 +14,7 @@ import { AiLeadScorePanel } from "./ai-lead-score";
 import { AiPrepBriefPanel } from "./ai-prep-brief";
 import { AiTagSuggestionsPanel } from "./ai-tag-suggestions";
 import { CommunicationLogger } from "./communication-logger";
+import { NextBestActionCard } from "./next-best-action-card";
 
 export type ContactDetailData = {
   id: string;
@@ -299,6 +300,16 @@ export function ContactDetail({
         <div className="shrink-0">
           <ContactDetailInfo contact={contact} relatedContacts={relatedContacts} onSelectRelatedContact={onSelectRelatedContact} />
         </div>
+
+        {(aiInsight || onGenerateAiInsight) && (
+          <div className="shrink-0">
+            <NextBestActionCard
+              aiInsight={aiInsight}
+              loading={aiInsightLoading}
+              onGenerate={onGenerateAiInsight}
+            />
+          </div>
+        )}
 
         <div className="flex-1 min-h-0 flex flex-col">
           <ContactDetailTabs

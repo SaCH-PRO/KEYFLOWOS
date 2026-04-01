@@ -221,6 +221,51 @@ export function NudgeRow({ nudge, onSnooze, dismissing }: {
   );
 }
 
+export function RetentionAlertRow({ rec, onAction, onDismiss, loading }: { rec: MomentumRecommendation; onAction: () => void; onDismiss: () => void; loading?: boolean }) {
+  const contactLabel = rec.contact
+    ? `${rec.contact.firstName ?? ""} ${rec.contact.lastName ?? ""}`.trim() || "Contact"
+    : "Contact";
+  const isChurn = rec.type?.toLowerCase().includes("churn");
+  const color = isChurn ? "--kf-error" : "--kf-warning";
+
+  return (
+    <div
+      className="flex items-center gap-3 p-3 kf-radius-md border transition-all hover:bg-muted/10"
+      style={{ borderColor: `hsl(var(${color}) / 0.3)` }}
+    >
+      <HeartPulse className="w-3.5 h-3.5 shrink-0" style={{ color: `hsl(var(${color}))` }} />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium truncate">{contactLabel}</p>
+        <p className="text-[10px] text-muted-foreground truncate">{rec.title}</p>
+      </div>
+      {rec.momentumScore !== null && rec.momentumScore !== undefined && (
+        <span
+          className="text-[9px] px-1.5 py-0.5 rounded-full font-medium shrink-0"
+          style={{ background: `hsl(var(${color}) / 0.1)`, color: `hsl(var(${color}))` }}
+        >
+          {Math.round(rec.momentumScore)}%
+        </span>
+      )}
+      <button
+        onClick={onAction}
+        disabled={loading}
+        className="px-2.5 py-1 rounded-lg text-[11px] font-medium shrink-0 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+        style={{
+          background: `hsl(var(${color}) / 0.1)`,
+          color: `hsl(var(${color}))`,
+          borderWidth: 1,
+          borderColor: `hsl(var(${color}) / 0.25)`,
+        }}
+      >
+        {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : "Re-engage"}
+      </button>
+      <OverflowMenu>
+        <OverflowAction label="Dismiss" onClick={onDismiss} />
+      </OverflowMenu>
+    </div>
+  );
+}
+
 export function AlertRow({ alert, onDismiss }: { alert: FinancialAlert; onDismiss?: () => void }) {
   const alertIcons: Record<string, React.ReactNode> = {
     COMPLIANCE: <ShieldAlert className="w-3.5 h-3.5" />,
