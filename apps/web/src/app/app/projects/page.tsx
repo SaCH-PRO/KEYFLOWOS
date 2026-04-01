@@ -1,45 +1,27 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
-import { FolderKanban, Send, Zap } from "lucide-react";
+import { FolderKanban, Send } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
-import { TabNav } from "@/components/ui/tab-nav";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { ContactPickerDrawer } from "@/components/contacts";
 import { ProjectBoard } from "./components/project-board";
-import { WorkflowConfig } from "./components/workflow-config";
-import { PlaybookPanel } from "./components/playbook-panel";
 import { useProjectsAiHub } from "./hooks/use-projects-ai-hub";
 
-const TABS = [
-  { key: "projects", label: "Projects", icon: FolderKanban },
-  { key: "playbooks", label: "Automations", icon: Zap },
-];
-
 export default function ProjectsPage() {
-  const searchParams = useSearchParams();
-  const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [showContactPicker, setShowContactPicker] = useState(false);
   useProjectsAiHub(businessId);
 
-  const tabParam = searchParams.get("tab");
-  const activeTab = tabParam === "playbooks" || tabParam === "automations" || tabParam === "intelligence" ? "playbooks" : "projects";
-
   useEffect(() => { const bid = getStoredBusinessId(); if (bid) setBusinessId(bid); }, []);
-
-  const handleTabChange = (tab: string) => {
-    router.push(`/app/projects${tab !== "projects" ? `?tab=${tab}` : ""}`, { scroll: false });
-  };
 
   return (
     <div className="space-y-4">
       <PageHeader
         icon={FolderKanban}
-        title="Projects & Automations"
-        subtitle="Manage work and automate your business flows"
+        title="Projects"
+        subtitle="Organize and track your work"
         rightSlot={
           <button
             onClick={() => setShowContactPicker(true)}
@@ -54,39 +36,16 @@ export default function ProjectsPage() {
       <FeatureGuide
         featureKey="projects"
         title="Getting Started with Projects"
-        description="Organize work and automate business flows"
+        description="Organize work with kanban boards and task tracking"
         steps={[
           { title: "Create Projects", description: "Click '+ New Project' to set up a project with a name and color for organizing work." },
           { title: "Add Tasks", description: "Expand a project and add tasks — check them off as you complete each action item." },
           { title: "Use Kanban Board", description: "Projects are displayed in columns by status: Active, In Progress, Completed, and On Hold." },
-          { title: "Set Up Playbooks", description: "Create automation playbooks that trigger actions based on business events." },
-          { title: "Automate Workflows", description: "Connect triggers like invoice paid or booking created to automatic actions." },
           { title: "Track Progress", description: "Monitor task completion with progress bars and move projects between statuses." },
         ]}
       />
 
-      <TabNav
-        tabs={TABS}
-        activeTab={activeTab}
-        onTabChange={handleTabChange}
-        layoutId="projects-tab"
-      />
-
-      {activeTab === "projects" ? (
-        <ProjectBoard businessId={businessId} />
-      ) : (
-        <div className="space-y-6">
-          <PlaybookPanel />
-          <div>
-            <h3 className="kf-text-heading font-semibold mb-3 flex items-center gap-2">
-              <span className="w-1.5 h-4 rounded-full" style={{ background: "hsl(var(--kf-accent2))" }} />
-              Automations
-            </h3>
-            <p className="kf-text-caption text-muted-foreground mb-4">Cross-module workflow triggers that run automatically when business events occur.</p>
-            <WorkflowConfig businessId={businessId} />
-          </div>
-        </div>
-      )}
+      <ProjectBoard businessId={businessId} />
 
       <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
     </div>

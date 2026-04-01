@@ -66,8 +66,8 @@ const navGroups: { label: string; items: NavItem[] }[] = [
     label: "MANAGE",
     items: [
       { label: "Expenses", href: "/app/expenses", icon: Receipt },
-      { label: "Projects", href: "/app/projects", icon: FolderKanban, exactMatch: true },
-      { label: "Automations", href: "/app/projects?tab=playbooks", icon: Zap, matchTab: "playbooks" },
+      { label: "Projects", href: "/app/projects", icon: FolderKanban },
+      { label: "Automations", href: "/app/automations", icon: Zap },
       { label: "Reports", href: "/app/reports", icon: BarChart3 },
     ],
   },
