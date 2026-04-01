@@ -7,8 +7,6 @@ import {
   Briefcase,
   BarChart3,
   X,
-  Search,
-  Sparkles,
   Share2,
   Link2,
 } from "lucide-react";
@@ -40,9 +38,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
-import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
 import { useBookingsAiHub } from "./hooks/use-bookings-ai-hub";
-import { renderBookingsToolResult } from "./components/bookings-tool-results";
 import { BookingsSkeleton } from "./components/bookings-skeleton";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { moduleEvents } from "@/lib/module-events";
@@ -132,11 +128,9 @@ export default function BookingsPage() {
         { key: "3", action: () => handleTabChange("performance"), description: "Performance tab" },
         { key: "n", action: () => setShowCreateBooking(true), description: "New booking" },
         { key: "r", action: () => void loadData(), description: "Refresh data" },
-        { key: "a", shift: true, action: () => ai.togglePanel(), description: "AI Hub" },
         { key: "Escape", action: () => {
           if (showCreateBooking) setShowCreateBooking(false);
           else if (selectedBooking) setSelectedBooking(null);
-          else if (ai.panelOpen) ai.setOpen(false);
         }, description: "Close panel" },
       ],
     },
@@ -434,20 +428,6 @@ export default function BookingsPage() {
               <Link2 className="w-4 h-4" />
               {calendarConnected && <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-success))" }} />}
             </a>
-            <button
-              onClick={() => ai.executeTool("bookings-nl-search")}
-              className="min-w-[44px] min-h-[44px] rounded-lg flex items-center justify-center hover:bg-muted/30 transition-colors"
-              title="Search bookings"
-            >
-              <Search className="w-4 h-4 text-muted-foreground" />
-            </button>
-            <button
-              onClick={() => ai.togglePanel()}
-              className="min-w-[44px] min-h-[44px] rounded-lg flex items-center justify-center hover:bg-muted/30 transition-colors"
-              title="AI Hub (Shift+A)"
-            >
-              <Sparkles className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-            </button>
           </div>
         }
         actionLabel="New Booking"
@@ -589,21 +569,6 @@ export default function BookingsPage() {
         )}
       </AnimatePresence>
 
-      <AiCommandHub
-        ai={ai}
-        moduleName="Bookings"
-        toolResultRenderer={renderBookingsToolResult}
-        onAction={(actionKey) => {
-          if (actionKey.startsWith("tool:")) {
-            ai.executeTool(actionKey.replace("tool:", ""));
-          } else if (actionKey.startsWith("filter_status:")) {
-            handleTabChange("schedule");
-          } else if (actionKey.startsWith("switch_tab:")) {
-            handleTabChange(actionKey.replace("switch_tab:", ""));
-          }
-        }}
-      />
-      <AiHubTrigger ai={ai} moduleName="Bookings" />
 
       {businessSlug && (
         <ShareLinkModal

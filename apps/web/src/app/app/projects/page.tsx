@@ -2,13 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { AnimatePresence } from "framer-motion";
-import { FolderKanban, Send, BookOpen, Zap } from "lucide-react";
+import { FolderKanban, Send, Zap } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { FeatureGuide } from "@/components/ui/feature-guide";
-import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
 import { ContactPickerDrawer } from "@/components/contacts";
 import { ProjectBoard } from "./components/project-board";
 import { WorkflowConfig } from "./components/workflow-config";
@@ -25,7 +23,7 @@ export default function ProjectsPage() {
   const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [showContactPicker, setShowContactPicker] = useState(false);
-  const { ai, handleAction: handleAiAction } = useProjectsAiHub(businessId);
+  useProjectsAiHub(businessId);
 
   const tabParam = searchParams.get("tab");
   const activeTab = tabParam === "playbooks" || tabParam === "automations" || tabParam === "intelligence" ? "playbooks" : "projects";
@@ -91,8 +89,6 @@ export default function ProjectsPage() {
       )}
 
       <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
-      <AnimatePresence>{ai.panelOpen && <AiCommandHub ai={ai} moduleName="Projects" onAction={handleAiAction} />}</AnimatePresence>
-      <AiHubTrigger ai={ai} moduleName="Projects" />
     </div>
   );
 }

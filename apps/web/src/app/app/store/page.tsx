@@ -8,13 +8,11 @@ import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
-import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { SetupModeBanner } from "@/components/ui/setup-mode-banner";
 import { useStoreAiHub } from "./hooks/use-store-ai-hub";
 import { useStoreData } from "./hooks/use-store-data";
-import { renderStoreToolResult } from "./components/store-tool-results";
 import { StoreSkeleton } from "./components/store-skeleton";
 import { StoreHeaderActions } from "./components/store-header-actions";
 import { StorefrontTab } from "./components/storefront-tab";
@@ -78,21 +76,14 @@ export default function StorePage() {
 
   const { swipeHandlers } = useSwipeTabs({ tabs: TAB_KEYS, activeTab, onTabChange: handleTabChange });
 
-  const handleAiAction = useCallback((k: string) => {
-    if (k.startsWith("switch_tab:")) handleTabChange(k.split(":")[1]);
-    else if (k.startsWith("tool:")) { if (!ai.panelOpen) ai.setOpen(true); ai.executeTool(k.split(":")[1]); }
-  }, [handleTabChange, ai]);
-
   const shortcuts = useMemo<ShortcutGroup[]>(() => [{ groupName: "Store",
     shortcuts: [
       { key: "1", description: "Storefront", action: () => handleTabChange("storefront") },
       { key: "2", description: "Products & Hours", action: () => handleTabChange("products") },
       { key: "3", description: "Performance", action: () => handleTabChange("performance") },
       { key: "r", description: "Refresh", action: () => { void s.loadData(); } },
-      { key: "a", shift: true, description: "AI Hub", action: () => ai.togglePanel() },
-      { key: "Escape", description: "Close", action: () => { ai.hubMode === "tool-result" ? ai.clearToolResult() : ai.panelOpen && ai.setOpen(false); } },
     ],
-  }], [handleTabChange, s.loadData, ai]);
+  }], [handleTabChange, s.loadData]);
   useKeyboardShortcuts(shortcuts, !s.loading);
 
   if (s.loading) return <div className="space-y-6"><PageHeader icon={Store} title="Store Setup" subtitle="Configure your public storefront" /><StoreSkeleton /></div>;
@@ -107,8 +98,6 @@ export default function StorePage() {
         titleExtra={<FeatureGuide featureKey="store" title="Getting Started with Your Store" description="Set up your online storefront to accept bookings and sell products." steps={GUIDE_STEPS} />}
         rightSlot={<StoreHeaderActions storeEnabled={s.storeEnabled} publicUrl={s.getPublicBookingUrl()} onToggleEnabled={s.toggleStoreEnabled} />}
       />
-      <AnimatePresence>{ai.panelOpen && <AiCommandHub ai={ai} moduleName="Store" onAction={handleAiAction} toolResultRenderer={renderStoreToolResult} />}</AnimatePresence>
-      <AiHubTrigger ai={ai} moduleName="Store" />
       <TabNav tabs={VIEW_TABS} activeTab={activeTab} onTabChange={handleTabChange} layoutId="store-tab-pill" />
       <div {...swipeHandlers} className="touch-pan-y">
         <AnimatePresence mode="wait" custom={dirRef.current}>
