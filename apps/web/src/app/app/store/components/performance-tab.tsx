@@ -18,8 +18,6 @@ import {
   BarChart3,
 } from "lucide-react";
 import { useState, useMemo } from "react";
-import { ConversionInsightsPanel } from "./conversion-insights";
-import { StoreAnalyticsDashboard } from "./store-analytics";
 import type { StoreAnalytics } from "@/lib/client";
 
 type Props = {
@@ -78,10 +76,11 @@ export function PerformanceTab({
         <div className="flex items-center gap-2">
           <BarChart3 className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
           <span className="text-xs font-medium">View Full Store &amp; Revenue Report</span>
-          <span className="text-xs text-muted-foreground">— deep analytics, trends, and AI insights</span>
+          <span className="text-xs text-muted-foreground">— deep analytics, trends &amp; AI insights</span>
         </div>
         <ArrowUpRight className="w-3.5 h-3.5 text-muted-foreground" />
       </Link>
+
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
@@ -249,9 +248,6 @@ export function PerformanceTab({
           );
         })}
       </div>
-
-      <ConversionInsightsPanel businessId={businessId} onTabChange={onTabChange} />
-      <StoreAnalyticsDashboard businessId={businessId} />
     </div>
   );
 }
