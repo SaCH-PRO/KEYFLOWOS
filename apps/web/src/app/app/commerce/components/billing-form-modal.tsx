@@ -82,7 +82,7 @@ function SectionHeader({ label, icon: Icon, open, onToggle, accentColor }: {
     <button
       type="button"
       onClick={onToggle}
-      className="w-full flex items-center gap-2 py-2.5 text-xs font-semibold uppercase tracking-wider hover:text-foreground transition-colors text-muted-foreground"
+      className="w-full flex items-center gap-2 min-h-[44px] text-xs font-semibold uppercase tracking-wider hover:text-foreground transition-colors text-muted-foreground"
     >
       <Icon className="w-3.5 h-3.5" style={{ color: accentColor }} />
       {label}
@@ -301,7 +301,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
                               key={t.value}
                               type="button"
                               onClick={() => onPaymentTermsChange(t.value)}
-                              className="px-3 py-1.5 text-xs rounded-lg border border-border/50 bg-white/[0.03] hover:bg-white/[0.08] text-muted-foreground hover:text-foreground transition-all"
+                              className="px-3 min-h-[44px] text-xs rounded-lg border border-border/50 bg-white/[0.03] hover:bg-white/[0.08] text-muted-foreground hover:text-foreground transition-all"
                             >
                               {t.label}
                             </button>
@@ -339,7 +339,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
                             <button
                               type="button"
                               onClick={() => onRemoveItem(lineItem.id)}
-                              className="p-1 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                              className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
                             >
                               <Minus className="w-3.5 h-3.5" />
                             </button>
@@ -457,7 +457,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
                     <button
                       type="button"
                       onClick={onAddItem}
-                      className="w-full py-2.5 rounded-xl border border-dashed border-border/50 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-border hover:bg-white/[0.03] transition-all flex items-center justify-center gap-1.5"
+                      className="w-full min-h-[44px] rounded-xl border border-dashed border-border/50 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-border hover:bg-white/[0.03] transition-all flex items-center justify-center gap-1.5"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       Add Line Item
@@ -504,7 +504,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
                           <button
                             type="button"
                             onClick={() => onDiscountTypeChange("PERCENT")}
-                            className={`flex-1 py-2 text-xs font-medium transition-all ${
+                            className={`flex-1 min-h-[44px] text-xs font-medium transition-all ${
                               discountType === "PERCENT"
                                 ? "bg-white/[0.1] text-foreground"
                                 : "text-muted-foreground hover:bg-white/[0.04]"
@@ -515,7 +515,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
                           <button
                             type="button"
                             onClick={() => onDiscountTypeChange("FIXED")}
-                            className={`flex-1 py-2 text-xs font-medium transition-all ${
+                            className={`flex-1 min-h-[44px] text-xs font-medium transition-all ${
                               discountType === "FIXED"
                                 ? "bg-white/[0.1] text-foreground"
                                 : "text-muted-foreground hover:bg-white/[0.04]"
