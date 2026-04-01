@@ -25,33 +25,57 @@ export class AutomationExecutorService {
     @Inject(TransactionalEmailService) private readonly transactionalEmail: TransactionalEmailService,
   ) {}
 
-  private evaluateCondition(condition: string | null | undefined, context: Record<string, any>): boolean {
+  private async loadContactData(businessId: string, contactId: string): Promise<Record<string, any> | null> {
+    try {
+      const result = await this.crm.contactDetail({ businessId, contactId });
+      return result.contact ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async evaluateCondition(condition: string | null | undefined, businessId: string, context: Record<string, any>): Promise<boolean> {
     if (!condition) return true;
 
     switch (condition) {
-      case 'contact.has_email':
-        return !!context.contactEmail || !!context.contactId;
-      case 'contact.has_phone':
-        return !!context.contactPhone;
-      case 'contact.is_active':
-        return context.contactStatus === 'ACTIVE' || !context.contactStatus;
-      case 'contact.is_new':
-        if (context.contactCreatedAt) {
-          const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-          return new Date(context.contactCreatedAt).getTime() > sevenDaysAgo;
-        }
-        return true;
+      case 'contact.has_email': {
+        if (!context.contactId) return false;
+        const contact = await this.loadContactData(businessId, context.contactId);
+        return !!contact?.email;
+      }
+      case 'contact.has_phone': {
+        if (!context.contactId) return false;
+        const contact = await this.loadContactData(businessId, context.contactId);
+        return !!contact?.phone;
+      }
+      case 'contact.is_active': {
+        if (!context.contactId) return false;
+        const contact = await this.loadContactData(businessId, context.contactId);
+        return contact?.status === 'ACTIVE';
+      }
+      case 'contact.is_new': {
+        if (!context.contactId) return false;
+        const contact = await this.loadContactData(businessId, context.contactId);
+        if (!contact?.createdAt) return false;
+        const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        return new Date(contact.createdAt).getTime() > sevenDaysAgo;
+      }
       case 'invoice.above_threshold':
-        return (context.total ?? 0) > (context.threshold ?? 500);
-      case 'booking.is_first':
-        return context.isFirstBooking !== false;
+        return typeof context.total === 'number' && context.total > (context.threshold ?? 500);
+      case 'booking.is_first': {
+        if (!context.contactId) return false;
+        const bookingCount = await this.prisma.client.booking.count({
+          where: { contactId: context.contactId, businessId },
+        });
+        return bookingCount <= 1;
+      }
       case 'time.business_hours': {
         const hour = new Date().getHours();
         return hour >= 8 && hour < 18;
       }
       default:
-        this.logger.warn(`Unknown condition "${condition}", defaulting to true`);
-        return true;
+        this.logger.warn(`Unknown condition "${condition}", treating as unmet`);
+        return false;
     }
   }
 
@@ -69,7 +93,7 @@ export class AutomationExecutorService {
 
     for (const playbook of playbooks) {
       try {
-        if (!this.evaluateCondition(playbook.condition, context)) {
+        if (!(await this.evaluateCondition(playbook.condition, businessId, context))) {
           await this.activity.log({
             businessId,
             module: 'automation',
