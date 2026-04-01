@@ -37,7 +37,8 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Data Integrity:** Ensures atomic operations for campaign sending, lead form submissions, and valid tax/discount bounds.
 - **Store Module:** Redesigned with Storefront, Products & Hours, and Performance tabs. Features a consolidated setup surface for the storefront, detailed product and hour management, and comprehensive performance analytics with AI Command Hub capabilities.
 - **Expenses Module:** Decomposed into a modular structure with dedicated components for filters, stats, list, forms, budgets, vendors, categories, and analytics, organized into three tabs: Expenses, Budgets, and Analytics.
-- **Projects Module:** Decomposed into a modular structure with components for project board (kanban), task list, playbook panel, and workflow configuration, organized into two tabs: Projects and Playbooks.
+- **Projects Module:** Focused kanban board for project management with task tracking and status columns.
+- **Automations Module:** Dedicated `/app/automations` page with three tabs: My Automations (unified list of playbooks + cross-module intelligence workflows with search, toggle, and config), Templates (pre-built automation recipes across Commerce, Bookings, CRM, Marketing, and Time-Based categories), and Activity Log (execution history from activity feed). Form-based trigger→action editor for creating custom playbooks.
 - **Settings Consolidation:** All configuration settings are centralized in a dedicated Settings section, with deep-links from other modules to avoid duplication.
 - **Cross-Module Contact Journey:** Enhanced `ContactJourneyTimeline` component provides a unified lifecycle timeline for contacts, merging events, notes, tasks, invoices, and bookings into chronological entries with cross-module CTAs.
 - **Financial Copilot Agent:** Monitors revenue, expenses, and cash flow with anomaly detection, providing a Financial Pulse dashboard and weekly AI-powered briefings.
@@ -61,7 +62,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 | Campaigns / Social | Marketing | Reports (analytics) | Marketing owns content; social absorbed into Marketing |
 | Expenses / Budgets | Expenses | Reports (analytics), Financial Copilot | Expenses owns CRUD; cross-module read |
 | Projects / Tasks | Projects (tab: Projects) | CRM (journey timeline) | Projects owns kanban; cross-module read |
-| Automations / Playbooks | Projects (tab: Playbooks, nav: Automations) | Cross-Module Intelligence Agent | Projects owns config; agent executes |
+| Automations / Playbooks | Automations (`/app/automations`) | Cross-Module Intelligence Agent | Automations owns config; agent executes |
 | Settings (Tax, Payments, Branding) | Settings (`/app/settings`) | Commerce, Bookings, Store (deep-link cards) | Settings owns config; modules link to it |
 | Analytics / KPIs | Reports (`/app/reports`) | All modules (compact KPI cards + "View Full Report" links) | Reports is single analytics source; module tabs show operational summaries only |
 
