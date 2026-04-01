@@ -331,11 +331,13 @@ export default function ReportsPage() {
               {activeTab === "bookings" && <BookingsView report={report} />}
               {activeTab === "marketing" && <MarketingView report={report} />}
 
-              <div className="mt-6 text-center">
-                <p className="text-xs text-muted-foreground/60">
-                  Report generated on {formatDate(report.generatedAt)} | Period: {formatDate(report.metrics.period.start)} — {formatDate(report.metrics.period.end)} | All amounts in {report.metrics.currency}
-                </p>
-              </div>
+              {activeTab !== "cash-flow" && (
+                <div className="mt-6 text-center">
+                  <p className="text-xs text-muted-foreground/60">
+                    Report generated on {formatDate(report.generatedAt)} | Period: {formatDate(report.metrics.period.start)} — {formatDate(report.metrics.period.end)} | All amounts in {report.metrics.currency}
+                  </p>
+                </div>
+              )}
             </motion.div>
           </AnimatePresence>
         ) : (
