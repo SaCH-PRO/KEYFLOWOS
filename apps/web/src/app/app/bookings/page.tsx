@@ -55,6 +55,7 @@ import CatalogCapacityTab from "./components/catalog-capacity-tab";
 import PerformanceTab from "./components/performance-tab";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { ShareLinkModal } from "@/components/ui/share-link-modal";
+import { SetupModeBanner } from "@/components/ui/setup-mode-banner";
 
 const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
   { key: "schedule", label: "Schedule", icon: Calendar },
@@ -474,6 +475,13 @@ export default function BookingsPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {tab === "catalog" && (
+        <SetupModeBanner
+          label="You're in Setup Mode — configuring services, staff, and availability"
+          settingsHref="/app/settings/business"
+        />
+      )}
 
       <TabNav
         tabs={TABS}

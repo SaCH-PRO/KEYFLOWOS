@@ -101,7 +101,7 @@ export default function StorePage() {
   const cfg = s.storefrontConfig;
   return (
     <div className="space-y-6" aria-label="Store Setup">
-      <SetupModeBanner label="Store Setup — configure your storefront, products, and hours" settingsHref="/app/settings/business" />
+      <SetupModeBanner label="You're in Setup Mode — configure your storefront, products, and hours" settingsHref="/app/settings/business" />
       <PageHeader icon={Store} title="Store Setup"
         subtitle={`${s.services.length} services · ${s.commerceProducts.length} products · ${s.storeEnabled ? "Live" : "Draft"}`}
         titleExtra={<FeatureGuide featureKey="store" title="Getting Started with Your Store" description="Set up your online storefront to accept bookings and sell products." steps={GUIDE_STEPS} />}
