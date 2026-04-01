@@ -13,7 +13,6 @@ import { DashboardSkeleton } from "@/components/ui/skeleton";
 import { formatTTD } from "./_command/types";
 import { useCommandData } from "./_command/use-command-data";
 import { QuickActionBar } from "./_command/quick-action-bar";
-import { AiCommandBar } from "./_command/ai-command-bar";
 import { BriefingCard } from "./_command/briefing-card";
 import { PriorityQueue } from "./_command/priority-queue";
 import { SimulationDrawer } from "./_command/simulation-drawer";
@@ -104,10 +103,6 @@ export default function CommandPage() {
                   <div className="px-2 py-1 flex flex-col gap-1">
                     <SimulationDrawer businessId={d.businessId} />
                     <ProgressDrawer gamification={d.gamification} momentum={d.momentum} />
-                  </div>
-                  <div className="mx-2 my-1" style={{ borderTop: "1px solid hsl(var(--kf-border) / 0.2)" }} />
-                  <div className="px-2 py-1">
-                    <AiCommandBar businessId={d.businessId} />
                   </div>
                 </div>
               </>
