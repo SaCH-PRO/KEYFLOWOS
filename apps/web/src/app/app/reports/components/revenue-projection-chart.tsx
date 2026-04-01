@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { TrendingUp, RefreshCw } from "lucide-react";
+import { TrendingUp, RefreshCw, ShieldCheck } from "lucide-react";
 import { Card } from "@keyflow/ui";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 import { fetchCashFlowForecast, type CashFlowForecast } from "@/lib/client";
 import { formatCurrency } from "./report-types";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -13,10 +14,28 @@ interface RevenueProjectionChartProps {
   currentRevenue?: number;
 }
 
-interface ProjectionPoint {
-  label: string;
-  projected: number;
-  color: string;
+interface ChartPoint {
+  day: string;
+  actual: number | null;
+  projected: number | null;
+}
+
+function computeConfidence(forecast: CashFlowForecast): { level: string; pct: number; color: string } {
+  const rate = forecast.dailyRevenueRate ?? 0;
+  const alerts = forecast.alerts?.length ?? 0;
+  const negDays = forecast.daysUntilNegative;
+
+  let score = 70;
+  if (rate > 0) score += 10;
+  if (alerts === 0) score += 10;
+  if (negDays === null || negDays > 60) score += 10;
+  else if (negDays <= 14) score -= 20;
+
+  score = Math.max(20, Math.min(95, score));
+
+  if (score >= 75) return { level: "High", pct: score, color: "--kf-success" };
+  if (score >= 50) return { level: "Medium", pct: score, color: "--kf-warning" };
+  return { level: "Low", pct: score, color: "--kf-error" };
 }
 
 export function RevenueProjectionChart({ businessId: propBusinessId, currency = "TTD", currentRevenue = 0 }: RevenueProjectionChartProps) {
@@ -38,19 +57,34 @@ export function RevenueProjectionChart({ businessId: propBusinessId, currency = 
 
   useEffect(() => { load(); }, [load]);
 
-  const projections = useMemo<ProjectionPoint[]>(() => {
-    if (!forecast) return [];
+  const { chartData, milestones, confidence } = useMemo(() => {
+    if (!forecast) return { chartData: [] as ChartPoint[], milestones: [] as { label: string; value: number }[], confidence: null };
+
     const dailyRate = forecast.dailyRevenueRate ?? 0;
-    return [
-      { label: "30-Day", projected: currentRevenue + dailyRate * 30, color: "--kf-success" },
-      { label: "60-Day", projected: currentRevenue + dailyRate * 60, color: "--kf-info" },
-      { label: "90-Day", projected: currentRevenue + dailyRate * 90, color: "--kf-accent2" },
+    const points: ChartPoint[] = [];
+
+    points.push({ day: "Now", actual: currentRevenue, projected: currentRevenue });
+
+    for (let d = 1; d <= 90; d++) {
+      const projected = currentRevenue + dailyRate * d;
+      const label = d % 30 === 0 ? `${d}d` : d % 10 === 0 ? `${d}d` : "";
+      points.push({
+        day: label || `${d}`,
+        actual: null,
+        projected: Math.round(projected * 100) / 100,
+      });
+    }
+
+    const ms = [
+      { label: "30-Day", value: Math.round(currentRevenue + dailyRate * 30) },
+      { label: "60-Day", value: Math.round(currentRevenue + dailyRate * 60) },
+      { label: "90-Day", value: Math.round(currentRevenue + dailyRate * 90) },
     ];
+
+    return { chartData: points, milestones: ms, confidence: computeConfidence(forecast) };
   }, [forecast, currentRevenue]);
 
   if (!forecast && !loading) return null;
-
-  const maxVal = Math.max(currentRevenue, ...projections.map((p) => p.projected), 1);
 
   return (
     <Card className="p-4 backdrop-blur border-border/60" style={{ background: "hsl(var(--kf-card) / 0.6)" }}>
@@ -58,6 +92,15 @@ export function RevenueProjectionChart({ businessId: propBusinessId, currency = 
         <div className="flex items-center gap-2">
           <TrendingUp className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
           <h3 className="text-sm font-semibold">Revenue Projections</h3>
+          {confidence && (
+            <span
+              className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full font-medium"
+              style={{ background: `hsl(var(${confidence.color}) / 0.1)`, color: `hsl(var(${confidence.color}))` }}
+            >
+              <ShieldCheck className="w-2.5 h-2.5" />
+              {confidence.pct}% {confidence.level}
+            </span>
+          )}
         </div>
         <button
           onClick={load}
@@ -69,92 +112,82 @@ export function RevenueProjectionChart({ businessId: propBusinessId, currency = 
       </div>
 
       {loading && !forecast ? (
-        <div className="space-y-3">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-10 rounded-lg bg-muted/20 animate-pulse" />
-          ))}
-        </div>
+        <div className="h-[220px] rounded-lg bg-muted/20 animate-pulse" />
       ) : (
-        <div className="space-y-3">
-          <ProjectionBar
-            label="Current"
-            value={currentRevenue}
-            max={maxVal}
-            color="--kf-accent1"
-            currency={currency}
-          />
-          {projections.map((p) => (
-            <ProjectionBar
-              key={p.label}
-              label={p.label}
-              value={p.projected}
-              max={maxVal}
-              color={p.color}
-              currency={currency}
-            />
-          ))}
-
-          {forecast && (
-            <div className="pt-2 border-t border-border/30 flex items-center justify-between text-[10px] text-muted-foreground">
-              <span>Based on {formatCurrency(forecast.dailyRevenueRate, currency)}/day revenue rate</span>
-              {forecast.trend && (
-                <span
-                  className="px-1.5 py-0.5 rounded-full font-medium"
-                  style={{
-                    background: forecast.trend === "growing"
-                      ? "hsl(var(--kf-success) / 0.1)"
-                      : forecast.trend === "declining"
-                        ? "hsl(var(--kf-error) / 0.1)"
-                        : "hsl(var(--kf-info) / 0.1)",
-                    color: forecast.trend === "growing"
-                      ? "hsl(var(--kf-success))"
-                      : forecast.trend === "declining"
-                        ? "hsl(var(--kf-error))"
-                        : "hsl(var(--kf-info))",
+        <>
+          <div className="h-[220px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+                <XAxis
+                  dataKey="day"
+                  tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }}
+                  tickLine={false}
+                  axisLine={{ stroke: "hsl(var(--border) / 0.3)" }}
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(v) => `${Math.round(v / 1000)}k`}
+                  width={45}
+                />
+                <Tooltip
+                  contentStyle={{
+                    background: "hsl(var(--kf-card))",
+                    border: "1px solid hsl(var(--kf-border) / 0.4)",
+                    borderRadius: 8,
+                    fontSize: 12,
                   }}
-                >
-                  {forecast.trend}
-                </span>
-              )}
+                  formatter={(value: number) => [formatCurrency(value, currency), "Revenue"]}
+                  labelFormatter={(label) => `Day: ${label}`}
+                />
+                <ReferenceLine y={currentRevenue} stroke="hsl(var(--kf-accent1) / 0.4)" strokeDasharray="4 4" />
+                <Line
+                  type="monotone"
+                  dataKey="projected"
+                  stroke="hsl(var(--kf-accent2))"
+                  strokeWidth={2}
+                  dot={false}
+                  connectNulls
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="flex items-center justify-between pt-3 border-t border-border/30">
+            <div className="flex gap-4">
+              {milestones.map((m) => (
+                <div key={m.label} className="text-center">
+                  <p className="text-[10px] text-muted-foreground">{m.label}</p>
+                  <p className="text-xs font-semibold" style={{ color: "hsl(var(--kf-accent2))" }}>
+                    {formatCurrency(m.value, currency)}
+                  </p>
+                </div>
+              ))}
             </div>
-          )}
-        </div>
+            {forecast?.trend && (
+              <span
+                className="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
+                style={{
+                  background: forecast.trend === "growing"
+                    ? "hsl(var(--kf-success) / 0.1)"
+                    : forecast.trend === "declining"
+                      ? "hsl(var(--kf-error) / 0.1)"
+                      : "hsl(var(--kf-info) / 0.1)",
+                  color: forecast.trend === "growing"
+                    ? "hsl(var(--kf-success))"
+                    : forecast.trend === "declining"
+                      ? "hsl(var(--kf-error))"
+                      : "hsl(var(--kf-info))",
+                }}
+              >
+                {forecast.trend}
+              </span>
+            )}
+          </div>
+        </>
       )}
     </Card>
-  );
-}
-
-function ProjectionBar({
-  label,
-  value,
-  max,
-  color,
-  currency,
-}: {
-  label: string;
-  value: number;
-  max: number;
-  color: string;
-  currency: string;
-}) {
-  const pct = Math.min((value / max) * 100, 100);
-  return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between text-xs">
-        <span className="text-muted-foreground font-medium">{label}</span>
-        <span className="font-semibold" style={{ color: `hsl(var(${color}))` }}>
-          {formatCurrency(value, currency)}
-        </span>
-      </div>
-      <div className="h-2 rounded-full bg-muted/20 overflow-hidden">
-        <div
-          className="h-full rounded-full transition-all duration-700"
-          style={{
-            width: `${pct}%`,
-            background: `hsl(var(${color}))`,
-          }}
-        />
-      </div>
-    </div>
   );
 }

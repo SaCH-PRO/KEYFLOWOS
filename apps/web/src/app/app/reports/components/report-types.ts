@@ -1,11 +1,12 @@
 import { Briefcase, Wallet, TrendingUp, PieChart, Users, Calendar, Megaphone } from "lucide-react";
 
-export type ReportType = "executive" | "pnl" | "revenue" | "expenses" | "clients" | "bookings" | "marketing";
+export type ReportType = "executive" | "pnl" | "revenue" | "cash-flow" | "expenses" | "clients" | "bookings" | "marketing";
 
 export const REPORT_TABS: Array<{ id: ReportType; label: string; icon: React.ElementType }> = [
   { id: "executive", label: "Executive Summary", icon: Briefcase },
   { id: "pnl", label: "Profit & Loss", icon: Wallet },
   { id: "revenue", label: "Revenue & Collections", icon: TrendingUp },
+  { id: "cash-flow", label: "Cash Flow Forecast", icon: Wallet },
   { id: "expenses", label: "Expenses & Profitability", icon: PieChart },
   { id: "clients", label: "Client Portfolio", icon: Users },
   { id: "bookings", label: "Bookings Performance", icon: Calendar },

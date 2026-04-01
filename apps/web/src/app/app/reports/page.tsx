@@ -21,6 +21,7 @@ import { ExpensesView } from "./components/expenses-view";
 import { ClientsView } from "./components/clients-view";
 import { BookingsView } from "./components/bookings-view";
 import { MarketingView } from "./components/marketing-view";
+import { CashFlowForecastView } from "./components/cash-flow-forecast-view";
 import { exportReportPDF } from "./components/export-pdf";
 
 const REPORT_TAB_KEYS = REPORT_TABS.map((t) => t.id);
@@ -280,11 +281,13 @@ export default function ReportsPage() {
 
       <div ref={reportRef}>
         {error && (
-          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300 mb-4">
+          <div className="rounded-xl border p-4 text-sm mb-4" style={{ borderColor: "hsl(var(--kf-error) / 0.3)", background: "hsl(var(--kf-error) / 0.1)", color: "hsl(var(--kf-error))" }}>
             {error}
           </div>
         )}
-        {loading && !report ? (
+        {activeTab === "cash-flow" && !report && !loading ? (
+          <CashFlowForecastView businessId={businessId} />
+        ) : loading && !report ? (
           <div className="space-y-6">
             <div className="flex items-center gap-3 py-4">
               <Loader2 className="w-5 h-5 animate-spin" style={{ color: "hsl(var(--kf-accent1))" }} />
@@ -315,7 +318,8 @@ export default function ReportsPage() {
               )}
               {activeTab === "executive" && <ExecutiveView report={report} />}
               {activeTab === "pnl" && <PnlView report={report} />}
-              {activeTab === "revenue" && <RevenueView report={report} />}
+              {activeTab === "revenue" && <RevenueView report={report} businessId={businessId} />}
+              {activeTab === "cash-flow" && <CashFlowForecastView businessId={businessId} currency={report.metrics.currency} />}
               {activeTab === "expenses" && <ExpensesView report={report} />}
               {activeTab === "clients" && <ClientsView report={report} />}
               {activeTab === "bookings" && <BookingsView report={report} />}
