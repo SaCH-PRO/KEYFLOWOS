@@ -1,21 +1,9 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { Search, ArrowUpDown, ArrowUp, ArrowDown, Columns3, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-const MOBILE_BP = 640;
-function useIsMobileTable() {
-  const [m, setM] = useState(false);
-  useEffect(() => {
-    const mql = window.matchMedia(`(max-width: ${MOBILE_BP - 1}px)`);
-    setM(mql.matches);
-    const h = (e: MediaQueryListEvent) => setM(e.matches);
-    mql.addEventListener("change", h);
-    return () => mql.removeEventListener("change", h);
-  }, []);
-  return m;
-}
+import { useIsMobile } from "@/hooks/use-is-mobile";
 
 type SortDirection = "asc" | "desc" | null;
 
@@ -60,7 +48,7 @@ export function DataTable<T extends Record<string, unknown>>({
   emptyState,
   headerExtra,
 }: DataTableProps<T>) {
-  const isMobile = useIsMobileTable();
+  const isMobile = useIsMobile();
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDirection>(null);

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
+import { useIsMobile } from "@/hooks/use-is-mobile";
 
 type SheetWidth = "sm" | "md" | "lg";
 
@@ -11,20 +12,6 @@ const WIDTH_MAP: Record<SheetWidth, string> = {
   md: "480px",
   lg: "640px",
 };
-
-const MOBILE_BREAKPOINT = 640;
-
-function useIsMobile() {
-  const [isMobile, setIsMobile] = useState(false);
-  useEffect(() => {
-    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`);
-    setIsMobile(mql.matches);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mql.addEventListener("change", handler);
-    return () => mql.removeEventListener("change", handler);
-  }, []);
-  return isMobile;
-}
 
 interface SideSheetProps {
   open: boolean;
