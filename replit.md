@@ -73,7 +73,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - Bottom: Learn, Community, Settings
 
 **Removed Routes:**
-- `/app/social` — absorbed into Marketing module (social tab)
+- `/app/social` — redirects to Marketing module (social tab); OAuth callback route (`/app/social/oauth/[platform]/callback`) retained for backend compatibility
 
 ## External Dependencies
 - **Database:** PostgreSQL
