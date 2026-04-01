@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -36,7 +36,15 @@ import {
   Link2,
 } from "lucide-react";
 
-const navGroups = [
+interface NavItem {
+  label: string;
+  href: string;
+  icon: typeof Zap;
+  matchTab?: string;
+  exactMatch?: boolean;
+}
+
+const navGroups: { label: string; items: NavItem[] }[] = [
   {
     label: "OPERATE",
     items: [
@@ -57,7 +65,8 @@ const navGroups = [
     label: "MANAGE",
     items: [
       { label: "Expenses", href: "/app/expenses", icon: Receipt },
-      { label: "Projects", href: "/app/projects", icon: FolderKanban },
+      { label: "Projects", href: "/app/projects", icon: FolderKanban, exactMatch: true },
+      { label: "Automations", href: "/app/projects?tab=playbooks", icon: Zap, matchTab: "playbooks" },
       { label: "Reports", href: "/app/reports", icon: BarChart3 },
     ],
   },
@@ -85,7 +94,19 @@ const mobileBottomNav = [
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const router = useRouter();
+
+  const isNavActive = useCallback((item: NavItem) => {
+    const basePath = item.href.split("?")[0];
+    if (item.matchTab) {
+      return pathname === basePath && searchParams.get("tab") === item.matchTab;
+    }
+    if (item.exactMatch) {
+      return pathname === basePath && !searchParams.get("tab");
+    }
+    return pathname === item.href || (item.href !== "/app" && pathname.startsWith(item.href));
+  }, [pathname, searchParams]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -237,14 +258,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <div className="flex flex-col gap-px">
                   {group.items.map((item) => {
                     const Icon = item.icon;
-                    const isActive = pathname === item.href || (item.href !== "/app" && pathname.startsWith(item.href));
+                    const active = isNavActive(item);
                     return (
                       <Link
                         key={item.href}
                         href={item.href}
                         className={cn(
                           "kf-nav-item",
-                          isActive && "active",
+                          active && "active",
                           sidebarCollapsed && "justify-center px-2"
                         )}
                         title={sidebarCollapsed ? item.label : undefined}
@@ -520,7 +541,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   <div className="flex flex-col gap-px">
                     {group.items.map((item) => {
                       const Icon = item.icon;
-                      const isActive = pathname === item.href || (item.href !== "/app" && pathname.startsWith(item.href));
+                      const active = isNavActive(item);
                       return (
                         <Link
                           key={item.href}
@@ -528,7 +549,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                           onClick={() => setMobileDrawerOpen(false)}
                           className={cn(
                             "kf-nav-item py-2.5 active:scale-[0.98]",
-                            isActive && "active"
+                            active && "active"
                           )}
                         >
                           <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />

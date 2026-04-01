@@ -50,6 +50,31 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Community Module:** Features Feed and Cohorts with social functionalities.
 - **Error Boundaries:** Dedicated `error.tsx` boundaries for all core modules.
 
+## Module Entity Ownership
+
+| Entity / Data | Authoritative Module | Other Modules | Relationship |
+|---|---|---|---|
+| Products & Services | Commerce (`products-panel.tsx`) | Store (read-only toggle), Bookings (read-only list + "Go to Store" link) | Single CRUD surface; others display only |
+| Contacts | CRM (`pipeline/page.tsx`) | All modules via `contactId` FK | CRM owns lifecycle; modules reference |
+| Invoices / Quotes | Commerce | CRM (journey timeline), Reports (analytics) | Commerce owns CRUD; cross-module read |
+| Bookings | Bookings | CRM (journey timeline), Reports (analytics) | Bookings owns schedule; cross-module read |
+| Campaigns / Social | Marketing | Reports (analytics) | Marketing owns content; social absorbed into Marketing |
+| Expenses / Budgets | Expenses | Reports (analytics), Financial Copilot | Expenses owns CRUD; cross-module read |
+| Projects / Tasks | Projects (tab: Projects) | CRM (journey timeline) | Projects owns kanban; cross-module read |
+| Automations / Playbooks | Projects (tab: Playbooks, nav: Automations) | Cross-Module Intelligence Agent | Projects owns config; agent executes |
+| Settings (Tax, Payments, Branding) | Settings (`/app/settings`) | Commerce, Bookings, Store (deep-link cards) | Settings owns config; modules link to it |
+| Analytics / KPIs | Reports | All modules (summary cards only) | Reports is single analytics source |
+
+**Navigation Structure:**
+- OPERATE: Command, Contacts, Commerce, Bookings
+- GROW: Marketing, Marketplace
+- MANAGE: Expenses, Projects, Automations, Reports
+- SETUP: Store Setup
+- Bottom: Learn, Community, Settings
+
+**Removed Routes:**
+- `/app/social` — absorbed into Marketing module (social tab)
+
 ## External Dependencies
 - **Database:** PostgreSQL
 - **Authentication:** Supabase Auth
