@@ -1536,6 +1536,7 @@ export type Playbook = {
   id: string;
   name: string;
   triggerEvent: string;
+  condition?: string | null;
   actions?: unknown;
   enabled: boolean;
   lastRunAt?: string | null;
@@ -1824,6 +1825,7 @@ export async function fetchPlaybooks(businessId: string = DEFAULT_BUSINESS_ID) {
       id: z.string(),
       name: z.string(),
       triggerEvent: z.string(),
+      condition: z.string().nullable().optional(),
       actions: z.unknown().optional(),
       enabled: z.boolean(),
       lastRunAt: z.string().nullable().optional(),
@@ -1834,21 +1836,21 @@ export async function fetchPlaybooks(businessId: string = DEFAULT_BUSINESS_ID) {
   );
 }
 
-export async function createPlaybook(input: { businessId?: string; name: string; triggerEvent: string; actions: unknown }) {
+export async function createPlaybook(input: { businessId?: string; name: string; triggerEvent: string; actions: unknown; condition?: string }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<Playbook>({
     path: `/automation/businesses/${encodeURIComponent(businessId)}/playbooks`,
-    body: { name: input.name, triggerEvent: input.triggerEvent, actions: input.actions },
+    body: { name: input.name, triggerEvent: input.triggerEvent, actions: input.actions, condition: input.condition || null },
   });
 }
 
-export async function updatePlaybook(input: { businessId?: string; playbookId: string; name?: string; triggerEvent?: string; actions?: unknown; enabled?: boolean }) {
+export async function updatePlaybook(input: { businessId?: string; playbookId: string; name?: string; triggerEvent?: string; condition?: string | null; actions?: unknown; enabled?: boolean }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   try {
     const res = await fetch(`${API_BASE}/automation/businesses/${encodeURIComponent(businessId)}/playbooks/${encodeURIComponent(input.playbookId)}`, {
       method: "PATCH",
       headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify({ name: input.name, triggerEvent: input.triggerEvent, actions: input.actions, enabled: input.enabled }),
+      body: JSON.stringify({ name: input.name, triggerEvent: input.triggerEvent, condition: input.condition, actions: input.actions, enabled: input.enabled }),
     });
     const json = await res.json().catch(() => null);
     if (!res.ok) return { data: null, error: res.statusText };
