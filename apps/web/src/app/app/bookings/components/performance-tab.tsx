@@ -30,6 +30,7 @@ import {
   Pie,
   Cell,
 } from "recharts";
+import Link from "next/link";
 import type { Booking, Service, BookingStats } from "@/lib/client";
 import type { ScheduleHealth } from "@/lib/client";
 
@@ -179,6 +180,17 @@ export default function PerformanceTab({
       animate="visible"
       className="space-y-4"
     >
+      <Link
+        href="/app/reports?tab=bookings"
+        className="kf-card p-3 flex items-center justify-between gap-3 transition-all hover:border-[hsl(var(--kf-accent1)_/_0.4)]"
+      >
+        <div className="flex items-center gap-2">
+          <BarChart3 className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+          <span className="text-xs font-medium">View Full Bookings Report</span>
+          <span className="text-xs text-muted-foreground">— deep analytics, trends, and AI insights</span>
+        </div>
+        <ArrowUpRight className="w-3.5 h-3.5 text-muted-foreground" />
+      </Link>
       <motion.div variants={stagger.item} className="grid grid-cols-2 lg:grid-cols-4 gap-2">
         {kpiCards.map((card) => (
           <div

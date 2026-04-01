@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import { AnimatePresence } from "framer-motion";
 import { Receipt, DollarSign, Target, Store, Download, ArrowUp, ArrowDown, Minus, BarChart3 } from "lucide-react";
@@ -11,8 +11,10 @@ import { TabNav } from "@/components/ui/tab-nav";
 import { StatCards } from "@/components/ui/stat-cards";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { FeatureGuide } from "@/components/ui/feature-guide";
+import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
 import { formatCurrency } from "./components/expense-utils";
 import { useExpensesData } from "./components/use-expenses-data";
+import { useExpensesAiHub } from "./hooks/use-expenses-ai-hub";
 import { ExpenseFilters } from "./components/expense-filters";
 import { ExpenseList } from "./components/expense-list";
 import { ExpenseFormModal } from "./components/expense-form-modal";
@@ -50,6 +52,14 @@ export default function ExpensesPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
+
+  const aiCustomData = useMemo(() => ({
+    expenses: d.expenses,
+    totalExpenses: d.totalExpenses,
+    categories: d.categories,
+    summary: d.summary as Record<string, unknown> | null,
+  }), [d.expenses, d.totalExpenses, d.categories, d.summary]);
+  const { ai, handleAction: handleAiAction } = useExpensesAiHub(d.businessId, aiCustomData);
 
   const openEditModal = (exp: Expense) => { setEditingExpense(exp); setShowModal(true); };
   const openAddModal = () => { setEditingExpense(null); setShowModal(true); };
@@ -103,6 +113,8 @@ export default function ExpensesPage() {
       </AnimatePresence>
       <AnimatePresence>{showModal && d.businessId && <ExpenseFormModal businessId={d.businessId} categories={d.categories} editingExpense={editingExpense} onClose={() => setShowModal(false)} onSaved={d.loadData} />}</AnimatePresence>
       <AnimatePresence>{detailExpense && <ExpenseDetailModal expense={detailExpense} onClose={() => setDetailExpense(null)} onEdit={openEditModal} />}</AnimatePresence>
+      <AnimatePresence>{ai.panelOpen && <AiCommandHub ai={ai} moduleName="Expenses" onAction={handleAiAction} />}</AnimatePresence>
+      <AiHubTrigger ai={ai} moduleName="Expenses" />
     </div>
   );
 }

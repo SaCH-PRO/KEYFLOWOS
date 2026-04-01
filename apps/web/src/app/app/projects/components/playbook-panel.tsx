@@ -7,31 +7,104 @@ import { Button, Input } from "@keyflow/ui";
 import { Playbook, fetchPlaybooks, createPlaybook, updatePlaybook } from "@/lib/client";
 import { ExplainerButton } from "./explainer-button";
 
-const TRIGGER_OPTIONS = [
-  { value: "invoice.paid", label: "Invoice Paid" },
-  { value: "invoice.sent", label: "Invoice Sent" },
-  { value: "invoice.overdue", label: "Invoice Overdue" },
-  { value: "booking.created", label: "Booking Created" },
-  { value: "booking.confirmed", label: "Booking Confirmed" },
-  { value: "booking.cancelled", label: "Booking Cancelled" },
-  { value: "contact.created", label: "Contact Created" },
-  { value: "contact.updated", label: "Contact Updated" },
+const TRIGGER_GROUPS = [
+  {
+    group: "Commerce",
+    options: [
+      { value: "invoice.paid", label: "Invoice Paid" },
+      { value: "invoice.sent", label: "Invoice Sent" },
+      { value: "invoice.overdue", label: "Invoice Overdue" },
+      { value: "quote.accepted", label: "Quote Accepted" },
+      { value: "payment.received", label: "Payment Received" },
+    ],
+  },
+  {
+    group: "Bookings",
+    options: [
+      { value: "booking.created", label: "Booking Created" },
+      { value: "booking.confirmed", label: "Booking Confirmed" },
+      { value: "booking.completed", label: "Booking Completed" },
+      { value: "booking.cancelled", label: "Booking Cancelled" },
+      { value: "booking.reminder", label: "Booking Reminder (24h)" },
+    ],
+  },
+  {
+    group: "CRM",
+    options: [
+      { value: "contact.created", label: "Contact Created" },
+      { value: "contact.updated", label: "Contact Updated" },
+      { value: "contact.inactive", label: "Contact Inactive (30d)" },
+      { value: "lead.scored", label: "Lead Score Changed" },
+    ],
+  },
+  {
+    group: "Marketing",
+    options: [
+      { value: "campaign.sent", label: "Campaign Sent" },
+      { value: "form.submitted", label: "Form Submitted" },
+      { value: "subscriber.joined", label: "New Subscriber" },
+    ],
+  },
+  {
+    group: "Time-Based",
+    options: [
+      { value: "schedule.daily", label: "Daily (9 AM)" },
+      { value: "schedule.weekly", label: "Weekly (Monday)" },
+      { value: "schedule.monthly", label: "Monthly (1st)" },
+    ],
+  },
 ];
 
-const ACTION_OPTIONS = [
-  { value: "send_email", label: "Send Email" },
-  { value: "send_whatsapp", label: "Send WhatsApp" },
-  { value: "create_task", label: "Create Task" },
-  { value: "add_tag", label: "Add Tag" },
-  { value: "update_status", label: "Update Status" },
+const TRIGGER_OPTIONS = TRIGGER_GROUPS.flatMap((g) => g.options);
+
+const ACTION_GROUPS = [
+  {
+    group: "Communication",
+    options: [
+      { value: "send_email", label: "Send Email" },
+      { value: "send_whatsapp", label: "Send WhatsApp" },
+      { value: "send_sms", label: "Send SMS" },
+      { value: "send_notification", label: "In-App Notification" },
+    ],
+  },
+  {
+    group: "Operations",
+    options: [
+      { value: "create_task", label: "Create Task" },
+      { value: "create_invoice", label: "Create Invoice" },
+      { value: "update_status", label: "Update Status" },
+      { value: "assign_staff", label: "Assign Staff Member" },
+    ],
+  },
+  {
+    group: "CRM",
+    options: [
+      { value: "add_tag", label: "Add Tag" },
+      { value: "update_contact", label: "Update Contact" },
+      { value: "add_note", label: "Add Note" },
+      { value: "move_pipeline", label: "Move Pipeline Stage" },
+    ],
+  },
+  {
+    group: "Scheduling",
+    options: [
+      { value: "delay", label: "Wait / Delay" },
+      { value: "schedule_followup", label: "Schedule Follow-up" },
+    ],
+  },
 ];
+
+const ACTION_OPTIONS = ACTION_GROUPS.flatMap((g) => g.options);
+
+type ActionStep = { type: string; config?: Record<string, string> };
 
 export function PlaybookPanel() {
   const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showBuilder, setShowBuilder] = useState(false);
-  const [form, setForm] = useState({ name: "", triggerEvent: "", actionType: "" });
+  const [form, setForm] = useState({ name: "", triggerEvent: "" });
+  const [actionSteps, setActionSteps] = useState<ActionStep[]>([{ type: "" }]);
   const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -45,21 +118,27 @@ export function PlaybookPanel() {
     void load();
   }, []);
 
+  const addStep = () => setActionSteps((s) => [...s, { type: "" }]);
+  const removeStep = (i: number) => setActionSteps((s) => s.filter((_, idx) => idx !== i));
+  const updateStep = (i: number, type: string) => setActionSteps((s) => s.map((st, idx) => idx === i ? { ...st, type } : st));
+
   async function handleCreate() {
     setFormError(null);
-    if (!form.name.trim() || !form.triggerEvent || !form.actionType) {
-      setFormError("All fields are required");
+    const validSteps = actionSteps.filter((s) => s.type);
+    if (!form.name.trim() || !form.triggerEvent || validSteps.length === 0) {
+      setFormError("Name, trigger, and at least one action are required");
       return;
     }
     const { data, error } = await createPlaybook({
       name: form.name,
       triggerEvent: form.triggerEvent,
-      actions: [{ type: form.actionType }],
+      actions: validSteps,
     });
     if (error) setFormError(error);
     if (data) {
       setPlaybooks((prev) => [data, ...prev]);
-      setForm({ name: "", triggerEvent: "", actionType: "" });
+      setForm({ name: "", triggerEvent: "" });
+      setActionSteps([{ type: "" }]);
       setShowBuilder(false);
     }
   }
@@ -80,10 +159,11 @@ export function PlaybookPanel() {
     return TRIGGER_OPTIONS.find((t) => t.value === trigger)?.label ?? trigger;
   }
 
-  function getActionLabel(actions: unknown) {
-    if (!Array.isArray(actions) || actions.length === 0) return "No actions";
-    const action = actions[0] as { type?: string };
-    return ACTION_OPTIONS.find((a) => a.value === action.type)?.label ?? action.type ?? "Custom action";
+  function getActionLabels(actions: unknown): string[] {
+    if (!Array.isArray(actions) || actions.length === 0) return ["No actions"];
+    return actions.map((a: { type?: string }) =>
+      ACTION_OPTIONS.find((opt) => opt.value === a.type)?.label ?? a.type ?? "Custom action"
+    );
   }
 
   return (
@@ -121,11 +201,11 @@ export function PlaybookPanel() {
             exit={{ opacity: 0, height: 0 }}
             className="overflow-hidden"
           >
-            <div className="rounded-2xl border border-primary/40 bg-slate-950/80 p-4 space-y-3">
+            <div className="rounded-2xl border border-primary/40 bg-slate-950/80 p-4 space-y-4">
               <h3 className="text-sm font-medium flex items-center gap-2">
                 <Zap className="w-4 h-4" /> Create Playbook
               </h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <Input
                   label="Playbook Name"
                   placeholder="Send receipt on payment"
@@ -140,24 +220,56 @@ export function PlaybookPanel() {
                     onChange={(e) => setForm((f) => ({ ...f, triggerEvent: e.target.value }))}
                   >
                     <option value="">Select trigger...</option>
-                    {TRIGGER_OPTIONS.map((t) => (
-                      <option key={t.value} value={t.value}>{t.label}</option>
+                    {TRIGGER_GROUPS.map((g) => (
+                      <optgroup key={g.group} label={g.group}>
+                        {g.options.map((t) => (
+                          <option key={t.value} value={t.value}>{t.label}</option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
                 </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Do this...</label>
-                  <select
-                    className="w-full rounded-lg border border-border/60 bg-slate-900 px-3 py-2 text-sm"
-                    value={form.actionType}
-                    onChange={(e) => setForm((f) => ({ ...f, actionType: e.target.value }))}
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs text-muted-foreground">Then do these actions (in order)...</label>
+                  <button
+                    type="button"
+                    onClick={addStep}
+                    className="text-[11px] font-medium px-2 py-1 rounded-lg transition-colors"
+                    style={{ color: "hsl(var(--kf-accent1))", background: "hsl(var(--kf-accent1) / 0.1)" }}
                   >
-                    <option value="">Select action...</option>
-                    {ACTION_OPTIONS.map((a) => (
-                      <option key={a.value} value={a.value}>{a.label}</option>
-                    ))}
-                  </select>
+                    + Add Step
+                  </button>
                 </div>
+                {actionSteps.map((step, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-muted-foreground/40 w-5 shrink-0 text-center">{i + 1}</span>
+                    <select
+                      className="flex-1 rounded-lg border border-border/60 bg-slate-900 px-3 py-2 text-sm"
+                      value={step.type}
+                      onChange={(e) => updateStep(i, e.target.value)}
+                    >
+                      <option value="">Select action...</option>
+                      {ACTION_GROUPS.map((g) => (
+                        <optgroup key={g.group} label={g.group}>
+                          {g.options.map((a) => (
+                            <option key={a.value} value={a.value}>{a.label}</option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                    {actionSteps.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeStep(i)}
+                        className="text-muted-foreground/50 hover:text-red-400 text-xs min-w-[44px] min-h-[44px] flex items-center justify-center"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
               <div className="flex gap-2">
                 <Button variant="outline" onClick={() => setShowBuilder(false)}>Cancel</Button>
@@ -216,8 +328,12 @@ export function PlaybookPanel() {
                 <div className="text-[12px] text-muted-foreground">
                   <span className="text-primary">Trigger:</span> {getTriggerLabel(pb.triggerEvent)}
                 </div>
-                <div className="text-[12px] text-muted-foreground">
-                  <span className="text-primary">Action:</span> {getActionLabel(pb.actions)}
+                <div className="text-[12px] text-muted-foreground space-y-0.5">
+                  {getActionLabels(pb.actions).map((label, i) => (
+                    <div key={i} className="flex items-center gap-1.5">
+                      <span className="text-primary">{i === 0 ? "Action:" : `Then:`}</span> {label}
+                    </div>
+                  ))}
                 </div>
                 <div className="text-[11px] text-muted-foreground/60">
                   Created: {new Date(pb.createdAt).toLocaleDateString()}
@@ -229,7 +345,7 @@ export function PlaybookPanel() {
 
         <div className="kf-card-accent p-3 text-xs text-muted-foreground flex items-center gap-2">
           <Lightbulb className="w-3.5 h-3.5 shrink-0" style={{ color: "hsl(var(--kf-accent1))" }} />
-          Coming soon: Visual flow builder with conditions, delays, and multi-step actions.
+          Playbooks support multi-step actions with grouped triggers. Visual flow builder with conditions coming soon.
         </div>
       </div>
     </div>

@@ -19,6 +19,7 @@ import { PriorityQueue } from "./_command/priority-queue";
 import { SimulationDrawer } from "./_command/simulation-drawer";
 import { ProgressDrawer } from "./_command/progress-section";
 import { ShareLinkModal } from "@/components/ui/share-link-modal";
+import { NextBestActionWidget } from "@/components/ai/next-best-action-widget";
 import { getBusinessById, fetchServices } from "@/lib/client";
 
 export default function CommandPage() {
@@ -181,7 +182,8 @@ export default function CommandPage() {
         />
       </div>
 
-      <div className="order-3">
+      <div className="order-3 space-y-4">
+        <NextBestActionWidget businessId={d.businessId} />
         <BriefingCard
           businessId={d.businessId}
           initialFinancialPulse={d.financialPulse}

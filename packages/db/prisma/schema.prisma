@@ -135,6 +135,7 @@ model Business {
   crossModuleWorkflows CrossModuleWorkflow[]
   scheduledAgentJobs   ScheduledAgentJob[]
   customerNotificationLogs CustomerNotificationLog[]
+  apiKeys              ApiKey[]
 
   // Customer notification preferences (JSON: { booking_confirmed: true, ... })
   notificationPreferences Json? @default("{}") @map("notification_preferences")
@@ -1920,4 +1921,23 @@ model MomentumRecommendation {
   @@index([businessId, scheduledFor])
   @@index([businessId, createdAt])
   @@map("momentum_recommendations")
+}
+
+model ApiKey {
+  id         String   @id @default(uuid())
+  businessId String   @map("business_id")
+  name       String
+  prefix     String
+  hashedKey  String   @map("hashed_key")
+  scopes     String[]
+  lastUsedAt DateTime? @map("last_used_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([prefix])
+  @@map("api_keys")
 }

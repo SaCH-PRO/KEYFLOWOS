@@ -11,6 +11,7 @@ import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-s
 import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { FeatureGuide } from "@/components/ui/feature-guide";
+import { SetupModeBanner } from "@/components/ui/setup-mode-banner";
 import { useStoreAiHub } from "./hooks/use-store-ai-hub";
 import { useStoreData } from "./hooks/use-store-data";
 import { renderStoreToolResult } from "./components/store-tool-results";
@@ -94,13 +95,14 @@ export default function StorePage() {
   }], [handleTabChange, s.loadData, ai]);
   useKeyboardShortcuts(shortcuts, !s.loading);
 
-  if (s.loading) return <div className="space-y-6"><PageHeader icon={Store} title="Store" subtitle="Your public storefront" /><StoreSkeleton /></div>;
+  if (s.loading) return <div className="space-y-6"><PageHeader icon={Store} title="Store Setup" subtitle="Configure your public storefront" /><StoreSkeleton /></div>;
   if (!s.businessId) return <WorkspaceError />;
 
   const cfg = s.storefrontConfig;
   return (
-    <div className="space-y-6" aria-label="Store">
-      <PageHeader icon={Store} title="Store"
+    <div className="space-y-6" aria-label="Store Setup">
+      <SetupModeBanner label="Store Setup — configure your storefront, products, and hours" settingsHref="/app/settings/business" />
+      <PageHeader icon={Store} title="Store Setup"
         subtitle={`${s.services.length} services · ${s.commerceProducts.length} products · ${s.storeEnabled ? "Live" : "Draft"}`}
         titleExtra={<FeatureGuide featureKey="store" title="Getting Started with Your Store" description="Set up your online storefront to accept bookings and sell products." steps={GUIDE_STEPS} />}
         rightSlot={<StoreHeaderActions storeEnabled={s.storeEnabled} publicUrl={s.getPublicBookingUrl()} onToggleEnabled={s.toggleStoreEnabled} />}

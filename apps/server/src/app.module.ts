@@ -17,6 +17,7 @@ import { AiModule } from './modules/ai/ai.module';
 import { FlowModule } from './modules/flow/flow.module';
 import { GamificationModule } from './modules/gamification/gamification.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
+import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { AuthMiddleware } from './core/auth/auth.middleware';
 import { CorrelationIdMiddleware } from './core/middleware/correlation-id.middleware';
 import { LoggingInterceptor } from './core/interceptors/logging.interceptor';
@@ -59,6 +60,7 @@ import { OnboardingConciergeModule } from './modules/onboarding-concierge/onboar
     FlowModule,
     GamificationModule,
     WebhooksModule,
+    ApiKeysModule,
     ActionsModule,
     UploadsModule,
     AutopilotModule,

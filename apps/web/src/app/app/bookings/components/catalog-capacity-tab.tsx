@@ -13,6 +13,7 @@ import {
   CalendarDays,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
+import { SetupModeBanner } from "@/components/ui/setup-mode-banner";
 import type { Service, StaffMember, Booking } from "./bookings-types";
 import { formatAmount } from "../../commerce/utils/commerce-utils";
 
@@ -165,6 +166,7 @@ export default function CatalogCapacityTab({
       animate="visible"
       className="space-y-6"
     >
+      <SetupModeBanner label="Catalog & Capacity — manage services, staff, and availability" settingsHref="/app/settings/business" />
       <motion.div variants={stagger.item} className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">

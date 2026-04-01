@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState, useCallback, useEffect } from "react";
 import { motion } from "framer-motion";
+import Link from "next/link";
 import {
   BarChart3, DollarSign, Clock, TrendingUp, AlertTriangle,
   CheckCircle2, ArrowRight, RefreshCw, Calendar, ChevronDown,
@@ -630,6 +631,17 @@ function CommerceInsightsInner({
 
   return (
     <motion.div initial="hidden" animate="visible" variants={stagger.container} className="space-y-3">
+      <Link
+        href="/app/reports?tab=revenue"
+        className="kf-card p-3 flex items-center justify-between gap-3 transition-all hover:border-[hsl(var(--kf-accent1)_/_0.4)]"
+      >
+        <div className="flex items-center gap-2">
+          <BarChart3 className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+          <span className="text-xs font-medium">View Full Revenue &amp; Commerce Report</span>
+          <span className="text-xs text-muted-foreground">— deep analytics, trends, and AI insights</span>
+        </div>
+        <ArrowUpRight className="w-3.5 h-3.5 text-muted-foreground" />
+      </Link>
       <motion.div variants={stagger.item} className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <div className="w-1 h-5 rounded-full bg-gradient-to-b from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))]" />
