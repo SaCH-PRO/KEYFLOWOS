@@ -4,11 +4,11 @@ import { useEffect, useState, useCallback } from "react";
 import { Clock, Zap, RefreshCw, AlertTriangle, CheckCircle, Info } from "lucide-react";
 import { fetchActivityFeed, ActivityItem } from "@/lib/client";
 
-const TONE_STYLES: Record<string, { icon: typeof Zap; color: string }> = {
-  success: { icon: CheckCircle, color: "hsl(var(--kf-success))" },
-  warning: { icon: AlertTriangle, color: "hsl(var(--kf-warning))" },
-  error: { icon: AlertTriangle, color: "hsl(var(--kf-error))" },
-  info: { icon: Info, color: "hsl(var(--kf-info))" },
+const TONE_STYLES: Record<string, { icon: typeof Zap; color: string; bg: string; label: string }> = {
+  success: { icon: CheckCircle, color: "hsl(var(--kf-success))", bg: "hsl(var(--kf-success) / 0.15)", label: "Success" },
+  warning: { icon: AlertTriangle, color: "hsl(var(--kf-warning))", bg: "hsl(var(--kf-warning) / 0.15)", label: "Warning" },
+  error: { icon: AlertTriangle, color: "hsl(var(--kf-error))", bg: "hsl(var(--kf-error) / 0.15)", label: "Failed" },
+  info: { icon: Info, color: "hsl(var(--kf-info))", bg: "hsl(var(--kf-info) / 0.15)", label: "Info" },
 };
 
 const AUTOMATION_MODULES = ["automation", "agent"];
@@ -85,12 +85,20 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
                 <div key={item.id} className="px-4 py-3 flex items-start gap-3 hover:bg-muted/20 transition-colors">
                   <div
                     className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
-                    style={{ background: `${toneStyle.color.replace(")", " / 0.15)")}` }}
+                    style={{ background: toneStyle.bg }}
                   >
                     <ToneIcon className="w-3.5 h-3.5" style={{ color: toneStyle.color }} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium">{item.title}</div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{item.title}</span>
+                      <span
+                        className="text-[10px] px-1.5 py-0.5 rounded-md font-medium"
+                        style={{ background: toneStyle.bg, color: toneStyle.color }}
+                      >
+                        {toneStyle.label}
+                      </span>
+                    </div>
                     {item.detail && (
                       <p className="text-[12px] text-muted-foreground mt-0.5">{item.detail}</p>
                     )}
