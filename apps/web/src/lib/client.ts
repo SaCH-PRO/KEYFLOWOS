@@ -1538,6 +1538,8 @@ export type Playbook = {
   triggerEvent: string;
   actions?: unknown;
   enabled: boolean;
+  lastRunAt?: string | null;
+  runCount?: number;
   createdAt: string;
 };
 
@@ -1824,6 +1826,8 @@ export async function fetchPlaybooks(businessId: string = DEFAULT_BUSINESS_ID) {
       triggerEvent: z.string(),
       actions: z.unknown().optional(),
       enabled: z.boolean(),
+      lastRunAt: z.string().nullable().optional(),
+      runCount: z.number().optional(),
       createdAt: z.string(),
     })),
     [],

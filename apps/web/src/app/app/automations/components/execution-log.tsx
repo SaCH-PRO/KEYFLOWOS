@@ -11,6 +11,8 @@ const TONE_STYLES: Record<string, { icon: typeof Zap; color: string }> = {
   info: { icon: Info, color: "hsl(var(--kf-info))" },
 };
 
+const AUTOMATION_MODULES = ["automation", "agent"];
+
 interface ExecutionLogProps {
   businessId: string | null;
 }
@@ -22,8 +24,15 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
 
   const load = useCallback(async () => {
     if (!businessId) return;
-    const { data } = await fetchActivityFeed(businessId, { module: "automation", limit: 50 });
-    setItems(data ?? []);
+    const results = await Promise.all(
+      AUTOMATION_MODULES.map((mod) => fetchActivityFeed(businessId, { module: mod, limit: 30 }))
+    );
+    const allItems: ActivityItem[] = [];
+    for (const r of results) {
+      if (r.data) allItems.push(...r.data);
+    }
+    allItems.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    setItems(allItems.slice(0, 50));
     setLoading(false);
   }, [businessId]);
 
@@ -38,30 +47,11 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
     setRefreshing(false);
   }
 
-  const agentItems = items.length === 0 && businessId
-    ? []
-    : items;
-
-  useEffect(() => {
-    if (items.length === 0 && businessId && !loading) {
-      fetchActivityFeed(businessId, { module: "agent", limit: 30 }).then(({ data }) => {
-        if (data && data.length > 0) {
-          setItems((prev) => {
-            const existing = new Set(prev.map((i) => i.id));
-            const merged = [...prev, ...data.filter((d) => !existing.has(d.id))];
-            merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-            return merged;
-          });
-        }
-      });
-    }
-  }, [items.length, businessId, loading]);
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
-          Recent automation and workflow execution history.
+          Execution history for playbooks and cross-module workflows.
         </p>
         <button
           onClick={handleRefresh}
@@ -75,7 +65,7 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
 
       {loading ? (
         <div className="text-sm text-muted-foreground py-8 text-center">Loading execution log...</div>
-      ) : agentItems.length === 0 ? (
+      ) : items.length === 0 ? (
         <div className="rounded-2xl border border-border/60 bg-card p-8 text-center">
           <div className="w-10 h-10 rounded-xl mx-auto mb-3 flex items-center justify-center" style={{ background: "hsl(var(--kf-accent1) / 0.1)" }}>
             <Clock className="w-5 h-5" style={{ color: "hsl(var(--kf-accent1))" }} />
@@ -88,7 +78,7 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
       ) : (
         <div className="rounded-2xl border border-border/60 bg-card overflow-hidden">
           <div className="divide-y divide-border/40">
-            {agentItems.map((item) => {
+            {items.map((item) => {
               const toneStyle = TONE_STYLES[item.tone ?? "info"] ?? TONE_STYLES.info;
               const ToneIcon = toneStyle.icon;
               return (

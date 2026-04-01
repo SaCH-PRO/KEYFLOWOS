@@ -69,7 +69,7 @@ export default function AutomationsPage() {
       )}
 
       {activeTab === "templates" && (
-        <TemplateGallery onSelect={handleTemplateSelect} />
+        <TemplateGallery onSelect={handleTemplateSelect} businessId={businessId} />
       )}
 
       {activeTab === "log" && (
