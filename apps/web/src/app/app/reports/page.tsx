@@ -18,6 +18,8 @@ import { PnlView } from "./components/pnl-view";
 import { RevenueView } from "./components/revenue-view";
 import { ExpensesView } from "./components/expenses-view";
 import { ClientsView } from "./components/clients-view";
+import { BookingsView } from "./components/bookings-view";
+import { MarketingView } from "./components/marketing-view";
 import { exportReportPDF } from "./components/export-pdf";
 
 export default function ReportsPage() {
@@ -305,6 +307,8 @@ export default function ReportsPage() {
               {activeTab === "revenue" && <RevenueView report={report} />}
               {activeTab === "expenses" && <ExpensesView report={report} />}
               {activeTab === "clients" && <ClientsView report={report} />}
+              {activeTab === "bookings" && <BookingsView report={report} />}
+              {activeTab === "marketing" && <MarketingView report={report} />}
 
               <div className="mt-6 text-center">
                 <p className="text-xs text-muted-foreground/60">

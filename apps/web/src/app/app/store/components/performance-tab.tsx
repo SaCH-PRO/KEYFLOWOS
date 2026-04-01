@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import Link from "next/link";
 import {
   Globe,
   Copy,
@@ -13,6 +14,8 @@ import {
   CheckCircle,
   Eye,
   ArrowRight,
+  ArrowUpRight,
+  BarChart3,
 } from "lucide-react";
 import { useState, useMemo } from "react";
 import { ConversionInsightsPanel } from "./conversion-insights";
@@ -68,6 +71,17 @@ export function PerformanceTab({
 
   return (
     <div className="space-y-6">
+      <Link
+        href="/app/reports?tab=revenue"
+        className="kf-card p-3 flex items-center justify-between gap-3 transition-all hover:border-[hsl(var(--kf-accent1)_/_0.4)]"
+      >
+        <div className="flex items-center gap-2">
+          <BarChart3 className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+          <span className="text-xs font-medium">View Full Store &amp; Revenue Report</span>
+          <span className="text-xs text-muted-foreground">— deep analytics, trends, and AI insights</span>
+        </div>
+        <ArrowUpRight className="w-3.5 h-3.5 text-muted-foreground" />
+      </Link>
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}

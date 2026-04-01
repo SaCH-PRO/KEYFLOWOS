@@ -1,13 +1,15 @@
-import { Briefcase, Wallet, TrendingUp, PieChart, Users } from "lucide-react";
+import { Briefcase, Wallet, TrendingUp, PieChart, Users, Calendar, Megaphone } from "lucide-react";
 
-export type ReportType = "executive" | "pnl" | "revenue" | "expenses" | "clients";
+export type ReportType = "executive" | "pnl" | "revenue" | "expenses" | "clients" | "bookings" | "marketing";
 
 export const REPORT_TABS: Array<{ id: ReportType; label: string; icon: React.ElementType }> = [
   { id: "executive", label: "Executive Summary", icon: Briefcase },
   { id: "pnl", label: "Profit & Loss", icon: Wallet },
-  { id: "revenue", label: "Revenue", icon: TrendingUp },
-  { id: "expenses", label: "Expenses", icon: PieChart },
+  { id: "revenue", label: "Revenue & Collections", icon: TrendingUp },
+  { id: "expenses", label: "Expenses & Profitability", icon: PieChart },
   { id: "clients", label: "Client Portfolio", icon: Users },
+  { id: "bookings", label: "Bookings Performance", icon: Calendar },
+  { id: "marketing", label: "Marketing ROI", icon: Megaphone },
 ];
 
 export const DATE_PRESETS = [

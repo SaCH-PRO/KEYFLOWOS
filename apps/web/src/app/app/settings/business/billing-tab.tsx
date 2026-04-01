@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { apiGet, apiPost } from "@/lib/api";
 import { fetchAiUsageHistory, type AiUsageHistoryResponse } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { PlanComparison as PlanComparisonGrid } from "./plan-comparison";
 import {
   Crown, Zap, Check, Sparkles, ArrowUpRight, Clock,
   AlertTriangle, CreditCard, Shield, Star, Brain,
@@ -175,6 +176,7 @@ export function BillingTab() {
   const [upgrading, setUpgrading] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [selectedCurrency, setSelectedCurrency] = useState<"TTD" | "USD">("TTD");
+  const [showComparison, setShowComparison] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [usageHistory, setUsageHistory] = useState<AiUsageHistoryResponse | null>(null);
   const [showHistory, setShowHistory] = useState(false);
@@ -730,6 +732,23 @@ export function BillingTab() {
                   </div>
                 </motion.div>
               )}
+
+              <motion.div variants={fadeUp}>
+                <button
+                  onClick={() => setShowComparison((p) => !p)}
+                  className="w-full text-center text-xs font-medium py-2 rounded-xl border border-border/40 hover:bg-muted/10 transition-colors"
+                  style={{ color: "hsl(var(--kf-accent1))" }}
+                >
+                  {showComparison ? "Hide Plan Comparison" : "Compare All Plans →"}
+                </button>
+                <AnimatePresence>
+                  {showComparison && (
+                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden mt-3">
+                      <PlanComparisonGrid currentPlan={currentPlan as "FREE" | "FLOW" | "KEYFLOW"} currency={selectedCurrency} onSelectPlan={(p) => { handleStartTrial(p); }} />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
 
               {currentPlan !== "FREE" && (
                 <div className="flex items-center justify-between border-t border-border/40 pt-4">

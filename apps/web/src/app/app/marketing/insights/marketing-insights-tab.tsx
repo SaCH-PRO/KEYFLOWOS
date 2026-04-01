@@ -2,6 +2,7 @@
 
 import React, { useMemo } from "react";
 import { motion } from "framer-motion";
+import Link from "next/link";
 import {
   BarChart3,
   TrendingUp,
@@ -13,6 +14,7 @@ import {
   Users,
   Trophy,
   ArrowRight,
+  ArrowUpRight,
   Filter,
   DollarSign,
   Share2,
@@ -388,6 +390,17 @@ function MarketingInsightsTabInner({ campaigns, forms, submissions, socialPosts 
       animate="visible"
       className="space-y-5"
     >
+      <Link
+        href="/app/reports?tab=marketing"
+        className="kf-card p-3 flex items-center justify-between gap-3 transition-all hover:border-[hsl(var(--kf-accent1)_/_0.4)]"
+      >
+        <div className="flex items-center gap-2">
+          <BarChart3 className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+          <span className="text-xs font-medium">View Full Marketing Report</span>
+          <span className="text-xs text-muted-foreground">— deep analytics, trends, and AI insights</span>
+        </div>
+        <ArrowUpRight className="w-3.5 h-3.5 text-muted-foreground" />
+      </Link>
       <motion.div variants={stagger.item} className={`grid grid-cols-2 ${socialStats ? 'lg:grid-cols-6' : 'lg:grid-cols-4'} gap-3`}>
         {kpiCards.map((card) => (
           <div

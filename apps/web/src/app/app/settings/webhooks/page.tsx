@@ -20,14 +20,64 @@ import {
 import type { WebhookConfig } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 
-const AVAILABLE_EVENTS = [
-  "invoice.paid",
-  "invoice.created",
-  "contact.created",
-  "booking.created",
-  "payment.received",
-  "expense.created",
+const EVENT_GROUPS: { group: string; events: string[] }[] = [
+  {
+    group: "Commerce",
+    events: [
+      "invoice.created",
+      "invoice.sent",
+      "invoice.paid",
+      "invoice.overdue",
+      "quote.created",
+      "quote.accepted",
+      "quote.rejected",
+      "payment.received",
+      "payment.refunded",
+    ],
+  },
+  {
+    group: "Bookings",
+    events: [
+      "booking.created",
+      "booking.confirmed",
+      "booking.completed",
+      "booking.cancelled",
+      "booking.rescheduled",
+    ],
+  },
+  {
+    group: "CRM",
+    events: [
+      "contact.created",
+      "contact.updated",
+      "contact.deleted",
+      "lead.scored",
+      "note.created",
+    ],
+  },
+  {
+    group: "Marketing",
+    events: [
+      "campaign.sent",
+      "campaign.opened",
+      "campaign.clicked",
+      "form.submitted",
+      "subscriber.created",
+    ],
+  },
+  {
+    group: "Operations",
+    events: [
+      "expense.created",
+      "project.created",
+      "task.completed",
+      "playbook.triggered",
+      "store.order_placed",
+    ],
+  },
 ];
+
+const AVAILABLE_EVENTS = EVENT_GROUPS.flatMap((g) => g.events);
 
 export default function WebhooksSettingsPage() {
   const [businessId, setBusinessId] = useState<string | null>(null);
@@ -286,28 +336,38 @@ export default function WebhooksSettingsPage() {
                     className="w-full bg-transparent border border-border/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))] mt-1"
                     placeholder="invoice.paid, contact.created"
                   />
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    {AVAILABLE_EVENTS.map((event) => (
-                      <button
-                        key={event}
-                        type="button"
-                        onClick={() => {
-                          setWebhookForm((f) => {
-                            const existing = f.events
-                              .split(",")
-                              .map((e) => e.trim())
-                              .filter(Boolean);
-                            if (existing.includes(event)) return f;
-                            return {
-                              ...f,
-                              events: [...existing, event].join(", "),
-                            };
-                          });
-                        }}
-                        className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/5 border border-white/10 text-muted-foreground hover:bg-white/10 hover:text-foreground transition-colors"
-                      >
-                        + {event}
-                      </button>
+                  <div className="space-y-2 mt-2">
+                    {EVENT_GROUPS.map((g) => (
+                      <div key={g.group}>
+                        <span className="text-[9px] uppercase tracking-wider text-muted-foreground/60 font-semibold">{g.group}</span>
+                        <div className="flex flex-wrap gap-1 mt-0.5">
+                          {g.events.map((event) => {
+                            const selected = webhookForm.events.split(",").map((e) => e.trim()).includes(event);
+                            return (
+                              <button
+                                key={event}
+                                type="button"
+                                onClick={() => {
+                                  setWebhookForm((f) => {
+                                    const existing = f.events.split(",").map((e) => e.trim()).filter(Boolean);
+                                    if (existing.includes(event)) {
+                                      return { ...f, events: existing.filter((e) => e !== event).join(", ") };
+                                    }
+                                    return { ...f, events: [...existing, event].join(", ") };
+                                  });
+                                }}
+                                className={`text-[10px] font-mono px-2 py-0.5 rounded border transition-colors ${
+                                  selected
+                                    ? "bg-[hsl(var(--kf-accent1)_/_0.15)] border-[hsl(var(--kf-accent1)_/_0.4)] text-foreground"
+                                    : "bg-white/5 border-white/10 text-muted-foreground hover:bg-white/10 hover:text-foreground"
+                                }`}
+                              >
+                                {selected ? "✓" : "+"} {event}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </div>

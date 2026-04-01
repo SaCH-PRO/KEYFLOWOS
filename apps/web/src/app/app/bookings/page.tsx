@@ -58,7 +58,7 @@ import { ShareLinkModal } from "@/components/ui/share-link-modal";
 
 const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
   { key: "schedule", label: "Schedule", icon: Calendar },
-  { key: "catalog", label: "Catalog & Capacity", icon: Briefcase },
+  { key: "catalog", label: "Setup: Catalog & Capacity", icon: Briefcase },
   { key: "performance", label: "Performance", icon: BarChart3 },
 ];
 

@@ -2,19 +2,22 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { FolderKanban, Send, BookOpen } from "lucide-react";
+import { AnimatePresence } from "framer-motion";
+import { FolderKanban, Send, BookOpen, Zap } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { FeatureGuide } from "@/components/ui/feature-guide";
+import { AiCommandHub, AiHubTrigger } from "@/components/ai/ai-command-hub";
 import { ContactPickerDrawer } from "@/components/contacts";
 import { ProjectBoard } from "./components/project-board";
 import { WorkflowConfig } from "./components/workflow-config";
 import { PlaybookPanel } from "./components/playbook-panel";
+import { useProjectsAiHub } from "./hooks/use-projects-ai-hub";
 
 const TABS = [
   { key: "projects", label: "Projects", icon: FolderKanban },
-  { key: "playbooks", label: "Playbooks", icon: BookOpen },
+  { key: "playbooks", label: "Automations", icon: Zap },
 ];
 
 export default function ProjectsPage() {
@@ -22,6 +25,7 @@ export default function ProjectsPage() {
   const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [showContactPicker, setShowContactPicker] = useState(false);
+  const { ai, handleAction: handleAiAction } = useProjectsAiHub(businessId);
 
   const tabParam = searchParams.get("tab");
   const activeTab = tabParam === "playbooks" || tabParam === "automations" || tabParam === "intelligence" ? "playbooks" : "projects";
@@ -36,7 +40,7 @@ export default function ProjectsPage() {
     <div className="space-y-4">
       <PageHeader
         icon={FolderKanban}
-        title="Projects & Playbooks"
+        title="Projects & Automations"
         subtitle="Manage work and automate your business flows"
         rightSlot={
           <button
@@ -87,6 +91,8 @@ export default function ProjectsPage() {
       )}
 
       <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
+      <AnimatePresence>{ai.panelOpen && <AiCommandHub ai={ai} moduleName="Projects" onAction={handleAiAction} />}</AnimatePresence>
+      <AiHubTrigger ai={ai} moduleName="Projects" />
     </div>
   );
 }

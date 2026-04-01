@@ -38,7 +38,7 @@ import {
 
 const navGroups = [
   {
-    label: "CORE",
+    label: "OPERATE",
     items: [
       { label: "Command", href: "/app", icon: Zap },
       { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
@@ -51,7 +51,6 @@ const navGroups = [
     items: [
       { label: "Marketing", href: "/app/marketing", icon: Megaphone },
       { label: "Marketplace", href: "/app/marketplace", icon: Globe },
-      { label: "Store", href: "/app/store", icon: Store },
     ],
   },
   {
@@ -60,6 +59,12 @@ const navGroups = [
       { label: "Expenses", href: "/app/expenses", icon: Receipt },
       { label: "Projects", href: "/app/projects", icon: FolderKanban },
       { label: "Reports", href: "/app/reports", icon: BarChart3 },
+    ],
+  },
+  {
+    label: "SETUP",
+    items: [
+      { label: "Store Setup", href: "/app/store", icon: Store },
     ],
   },
 ];

@@ -43,7 +43,8 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Financial Copilot Agent:** Monitors revenue, expenses, and cash flow with anomaly detection, providing a Financial Pulse dashboard and weekly AI-powered briefings.
 - **Customer Notification System:** Transactional email system for sending branded customer-facing emails via connected Gmail. Supports 6 notification types with event-driven triggers, cron jobs, and customizable preferences.
 - **Cross-Module Intelligence Agent:** An event-driven workflow engine that listens to key module events and triggers cross-module actions.
-- **Platform Features:** Gamification system, online store & public booking page, module event bus, reusable keyboard shortcuts, and a webhook dispatcher system.
+- **Platform Features:** Gamification system, online store & public booking page, module event bus, reusable keyboard shortcuts, and a webhook dispatcher system. Developer settings with API key management (scoped permissions, HMAC-signed keys) and expanded webhook events (29 events across Commerce, Bookings, CRM, Marketing, and Operations groups).
+- **Tiered Monetization:** Plan comparison grid (Free/Flow/KeyFlow) with feature-by-feature breakdown across 7 categories, integrated into billing settings.
 - **Observability:** Request correlation ID middleware, global logging interceptor, and health check endpoints.
 - **Learn Module:** MasterClass functionality with My Learning, Catalog, and Certificates.
 - **Community Module:** Features Feed and Cohorts with social functionalities.
