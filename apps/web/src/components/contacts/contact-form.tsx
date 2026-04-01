@@ -74,7 +74,7 @@ function SectionHeader({ label, icon: Icon, open, onToggle }: { label: string; i
     <button
       type="button"
       onClick={onToggle}
-      className="w-full flex items-center gap-2 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
+      className="w-full flex items-center gap-2 min-h-[44px] text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
     >
       <Icon className="w-3.5 h-3.5" />
       {label}
@@ -332,7 +332,7 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
                     key={s}
                     type="button"
                     onClick={() => setForm((p) => ({ ...p, status: s }))}
-                    className={`px-3 py-1.5 text-sm rounded-lg transition-all ${
+                    className={`px-3 min-h-[44px] text-sm rounded-lg transition-all ${
                       form.status === s ? "kf-btn-primary" : "kf-btn-secondary"
                     }`}
                   >
@@ -352,7 +352,7 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
                     key={ch}
                     type="button"
                     onClick={() => setForm((p) => ({ ...p, preferredChannel: ch }))}
-                    className={`px-3 py-1.5 text-sm rounded-lg transition-all ${
+                    className={`px-3 min-h-[44px] text-sm rounded-lg transition-all ${
                       form.preferredChannel === ch
                         ? "bg-[hsl(var(--kf-accent2))] text-white"
                         : "kf-btn-secondary"
@@ -610,7 +610,7 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
                     const updated = form.customFields.filter((_, i) => i !== idx);
                     setForm((p) => ({ ...p, customFields: updated }));
                   }}
-                  className="p-1.5 hover:bg-red-500/20 rounded-lg transition-colors text-red-400"
+                  className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-red-500/20 rounded-lg transition-colors text-red-400"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -619,7 +619,7 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
             <button
               type="button"
               onClick={() => setForm((p) => ({ ...p, customFields: [...p.customFields, { key: "", value: "" }] }))}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1.5 rounded-lg hover:bg-muted"
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 min-h-[44px] rounded-lg hover:bg-muted"
             >
               <Plus className="w-3.5 h-3.5" />
               Add Custom Field

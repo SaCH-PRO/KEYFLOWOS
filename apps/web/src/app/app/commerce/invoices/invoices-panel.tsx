@@ -647,7 +647,7 @@ export default function InvoicesPanel({
               placeholder="Search invoices..."
               value={invoiceSearch}
               onChange={(e) => setInvoiceSearch(e.target.value)}
-              className="w-full pl-9 pr-8 py-1.5 text-sm bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 focus:border-[hsl(var(--kf-accent1))]/40 placeholder:text-muted-foreground/40 transition-all"
+              className="w-full pl-9 pr-8 min-h-[44px] text-sm bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 focus:border-[hsl(var(--kf-accent1))]/40 placeholder:text-muted-foreground/40 transition-all"
               aria-label="Search invoices"
             />
             {invoiceSearch && (
