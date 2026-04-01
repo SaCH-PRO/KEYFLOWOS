@@ -437,6 +437,29 @@ export default function CommercePage() {
         </AnimatePresence>
       </div>
 
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
+        {[
+          { label: "Billing & Tax", desc: "Tax rates, default terms, and invoice preferences", href: "/app/settings/business?tab=billing" },
+          { label: "Payment Gateways", desc: "WiPay, PayPal, and payment methods", href: "/app/settings/business?tab=payments" },
+          { label: "Invoice Templates", desc: "Customize branding and layout", href: "/app/settings/business?tab=templates" },
+        ].map((link) => (
+          <Link
+            key={link.label}
+            href={link.href}
+            className="flex items-center gap-2.5 p-3 rounded-xl border border-border/40 bg-muted/5 hover:bg-muted/10 transition-colors group"
+          >
+            <div className="p-1.5 rounded-lg bg-muted/20">
+              <Settings className="w-3.5 h-3.5 text-muted-foreground" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium">{link.label}</p>
+              <p className="text-[10px] text-muted-foreground/60 truncate">{link.desc}</p>
+            </div>
+            <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors shrink-0" />
+          </Link>
+        ))}
+      </div>
+
       <SearchableHelpDrawer
         isOpen={helpOpen}
         onClose={() => setHelpOpen(false)}

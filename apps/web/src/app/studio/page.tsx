@@ -43,9 +43,7 @@ interface SetupContext {
   hasProducts: boolean;
   hasHours: boolean;
   hasLogo: boolean;
-  hasPaymentGateways: boolean;
   hasComplianceChecked: boolean;
-  hasIntegrations: boolean;
 }
 
 const SETUP_ITEMS: SetupItem[] = [
@@ -82,11 +80,11 @@ const SETUP_ITEMS: SetupItem[] = [
     category: "essential",
   },
   {
-    label: "Payment Gateways",
-    description: "Configure WiPay, PayPal, or bank transfer",
-    icon: CreditCard,
-    href: "/app/settings/business?tab=payments",
-    checkFn: (c) => c.hasPaymentGateways,
+    label: "Compliance & Tax",
+    description: "Legal registration, tax rates, and policies",
+    icon: Shield,
+    href: "/app/settings/compliance",
+    checkFn: (c) => c.hasComplianceChecked,
     category: "essential",
   },
   {
@@ -111,6 +109,13 @@ const SETUP_ITEMS: SetupItem[] = [
     category: "growth",
   },
   {
+    label: "Payment Gateways",
+    description: "Configure WiPay, PayPal, or bank transfer",
+    icon: CreditCard,
+    href: "/app/settings/business?tab=payments",
+    category: "growth",
+  },
+  {
     label: "Integrations",
     description: "Connect Google Calendar, Gmail, and more",
     icon: Link2,
@@ -118,17 +123,10 @@ const SETUP_ITEMS: SetupItem[] = [
     category: "growth",
   },
   {
-    label: "Compliance & Tax",
-    description: "Legal registration, tax rates, and policies",
-    icon: Shield,
-    href: "/app/settings/compliance",
-    category: "growth",
-  },
-  {
-    label: "Webhooks",
-    description: "Send event data to external systems",
+    label: "Webhooks & API",
+    description: "Developer tools and event data to external systems",
     icon: Webhook,
-    href: "/app/settings/webhooks",
+    href: "/app/settings/developers",
     category: "growth",
   },
   {
@@ -159,7 +157,6 @@ export default function StudioPage() {
           fetchProducts(businessId),
         ]);
         const biz = bizRes.data;
-        const paySettings = biz as Record<string, unknown> | undefined;
         setCtx({
           hasProfile: !!(biz?.name && biz?.name !== "My Business"),
           hasLogo: !!biz?.logoUrl,
@@ -167,9 +164,7 @@ export default function StudioPage() {
           hasContacts: (contactRes.data?.length ?? 0) > 0,
           hasProducts: (prodRes.data?.length ?? 0) > 0,
           hasHours: !!(biz?.businessHours && Object.values(biz.businessHours as Record<string, { enabled?: boolean }>).some((h) => h?.enabled)),
-          hasPaymentGateways: !!(paySettings?.wipayApiKey || paySettings?.paypalClientId),
-          hasComplianceChecked: !!paySettings?.complianceStatus,
-          hasIntegrations: !!(paySettings?.gmailEmail || paySettings?.calendarEmail),
+          hasComplianceChecked: !!biz?.complianceStatus,
         });
       } catch {
         setCtx({
@@ -179,9 +174,7 @@ export default function StudioPage() {
           hasContacts: false,
           hasProducts: false,
           hasHours: false,
-          hasPaymentGateways: false,
           hasComplianceChecked: false,
-          hasIntegrations: false,
         });
       }
       setLoading(false);
