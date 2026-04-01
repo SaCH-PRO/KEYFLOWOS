@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { validateEmail, validatePhone } from "@/lib/validators";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
+import { useIsMobile } from "@/hooks/use-is-mobile";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { CONTACT_STATUSES } from "@/lib/crm-constants";
 
@@ -89,6 +90,7 @@ function FieldError({ error }: { error?: string }) {
 
 export function ContactForm({ onSubmit, onCancel, loading, initialValues }: ContactFormProps) {
   const isEditing = !!initialValues;
+  const isMobile = useIsMobile();
 
   const defaults: ContactFormData = {
     firstName: "",
@@ -240,18 +242,24 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-6 sm:pt-8 overflow-y-auto"
+      className={`fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex ${isMobile ? "items-end" : "items-start justify-center p-4 pt-6 sm:pt-8"} overflow-y-auto`}
       onClick={(e) => e.target === e.currentTarget && handleCancel()}
       role="dialog"
       aria-modal="true"
       aria-labelledby="contact-form-title"
     >
       <motion.div
-        initial={{ scale: 0.95, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.95, opacity: 0 }}
-        className="w-full max-w-lg bg-card rounded-2xl border border-border shadow-2xl flex flex-col max-h-[85vh] mb-4"
+        initial={isMobile ? { y: "100%" } : { scale: 0.95, opacity: 0 }}
+        animate={isMobile ? { y: 0 } : { scale: 1, opacity: 1 }}
+        exit={isMobile ? { y: "100%" } : { scale: 0.95, opacity: 0 }}
+        transition={isMobile ? { type: "spring", damping: 30, stiffness: 300 } : undefined}
+        className={`w-full bg-card border border-border shadow-2xl flex flex-col ${isMobile ? "rounded-t-2xl max-h-[90vh]" : "max-w-lg rounded-2xl max-h-[85vh] mb-4"}`}
       >
+      {isMobile && (
+        <div className="flex justify-center pt-3 pb-1 shrink-0">
+          <div className="w-10 h-1 rounded-full bg-muted-foreground/30" />
+        </div>
+      )}
       <div className="p-5 border-b border-border flex items-center justify-between shrink-0">
         <h3 id="contact-form-title" className="text-lg font-semibold flex items-center gap-2">
           <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/30 to-secondary/30 flex items-center justify-center">
@@ -259,7 +267,7 @@ export function ContactForm({ onSubmit, onCancel, loading, initialValues }: Cont
           </div>
           {isEditing ? "Edit Contact" : "Add New Contact"}
         </h3>
-        <button onClick={handleCancel} className="p-1.5 hover:bg-muted rounded-lg transition-colors">
+        <button onClick={handleCancel} className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-muted rounded-lg transition-colors">
           <X className="w-5 h-5 text-muted-foreground" />
         </button>
       </div>
