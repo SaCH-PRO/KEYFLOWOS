@@ -941,29 +941,29 @@ export default function InvoicesPanel({
               <>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-0.5">
-                    <button onClick={() => copyPaymentLink(selectedInvoice.id)} className="p-2 rounded-lg hover:bg-white/[0.06] transition-colors" title={copiedLink === selectedInvoice.id ? "Copied!" : "Copy payment link"}>
+                    <button onClick={() => copyPaymentLink(selectedInvoice.id)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-white/[0.06] transition-colors" title={copiedLink === selectedInvoice.id ? "Copied!" : "Copy payment link"}>
                       <Link className={`w-4 h-4 ${copiedLink === selectedInvoice.id ? "text-emerald-400" : "text-slate-400"}`} />
                     </button>
-                    <button onClick={() => duplicateInvoice(selectedInvoice)} className="p-2 rounded-lg hover:bg-white/[0.06] transition-colors" title="Duplicate invoice">
+                    <button onClick={() => duplicateInvoice(selectedInvoice)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-white/[0.06] transition-colors" title="Duplicate invoice">
                       <Files className="w-4 h-4 text-slate-400" />
                     </button>
                     <div className="w-px h-4 bg-border/30 mx-0.5" />
-                    <button onClick={() => shareViaWhatsApp(selectedInvoice)} className="p-2 rounded-lg hover:bg-emerald-500/10 transition-colors" title="Share via WhatsApp">
+                    <button onClick={() => shareViaWhatsApp(selectedInvoice)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-emerald-500/10 transition-colors" title="Share via WhatsApp">
                       <MessageCircle className="w-4 h-4 text-emerald-400" />
                     </button>
                     {gmailStatus?.connected && (
-                      <button onClick={() => setShowEmailModal(true)} className="p-2 rounded-lg hover:bg-blue-500/10 transition-colors" title="Send via email">
+                      <button onClick={() => setShowEmailModal(true)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-blue-500/10 transition-colors" title="Send via email">
                         <Mail className="w-4 h-4 text-blue-400" />
                       </button>
                     )}
                     {(selectedInvoice.status === "SENT" || selectedInvoice.status === "OVERDUE") && gmailStatus?.connected && (
-                      <button onClick={() => openReminderEmail(selectedInvoice)} className="p-2 rounded-lg hover:bg-amber-500/10 transition-colors" title="Send payment reminder">
+                      <button onClick={() => openReminderEmail(selectedInvoice)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-amber-500/10 transition-colors" title="Send payment reminder">
                         <Bell className="w-4 h-4 text-amber-400" />
                       </button>
                     )}
                   </div>
                   {(selectedInvoice.status === "DRAFT" || selectedInvoice.status === "SENT" || selectedInvoice.status === "OVERDUE" || selectedInvoice.status === "PARTIALLY_PAID") && (
-                    <button onClick={() => handleVoidInvoice(selectedInvoice.id)} disabled={!!actionLoading[selectedInvoice.id]} className="p-2 rounded-lg hover:bg-red-500/10 transition-colors" title="Void invoice">
+                    <button onClick={() => handleVoidInvoice(selectedInvoice.id)} disabled={!!actionLoading[selectedInvoice.id]} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-red-500/10 transition-colors" title="Void invoice">
                       {actionLoading[selectedInvoice.id] === "void" ? <Loader2 className="w-4 h-4 animate-spin text-slate-500" /> : <Ban className="w-4 h-4 text-slate-500" />}
                     </button>
                   )}
@@ -1011,7 +1011,7 @@ export default function InvoicesPanel({
                 <h3 className="text-lg font-semibold flex items-center gap-2">
                   <Mail className="w-5 h-5 text-blue-400" /> Send Invoice via Email
                 </h3>
-                <button onClick={() => setShowEmailModal(false)} className="p-1.5 rounded-lg hover:bg-muted">
+                <button onClick={() => setShowEmailModal(false)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -1066,7 +1066,7 @@ export default function InvoicesPanel({
               <h3 className="text-lg font-semibold flex items-center gap-2">
                 <CreditCard className="w-5 h-5 text-amber-400" /> Record Payment
               </h3>
-              <button onClick={() => setPaymentModal(null)} className="p-1.5 rounded-lg hover:bg-muted">
+              <button onClick={() => setPaymentModal(null)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted">
                 <X className="w-4 h-4" />
               </button>
             </div>

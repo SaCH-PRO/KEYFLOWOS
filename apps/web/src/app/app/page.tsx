@@ -54,7 +54,7 @@ export default function CommandPage() {
   if (d.loading) return <DashboardSkeleton />;
 
   return (
-    <div className="flex flex-col gap-5 max-w-3xl mx-auto pb-10" aria-label="Today View">
+    <div className="flex flex-col gap-5 max-w-3xl mx-auto px-4 sm:px-0 pb-10" aria-label="Today View">
       {d.error && (
         <div
           className="p-4 kf-radius-lg"
@@ -118,7 +118,7 @@ export default function CommandPage() {
 
       {businessSlug && hasServices && (
         <div
-          className="order-2 sm:order-1 kf-radius-lg p-4 flex items-center justify-between gap-3 cursor-pointer transition-all duration-200 hover:scale-[1.005]"
+          className="order-2 sm:order-1 kf-radius-lg p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 cursor-pointer transition-all duration-200 hover:scale-[1.005]"
           style={{
             background: "hsl(var(--kf-accent2) / 0.06)",
             border: "1px solid hsl(var(--kf-accent2) / 0.15)",

@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { motion } from "framer-motion";
 import { X, CalendarDays } from "lucide-react";
 import type { Service, StaffMember, Contact } from "./bookings-types";
