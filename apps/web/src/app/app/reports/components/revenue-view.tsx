@@ -6,6 +6,7 @@ import { GeneratedReport } from "@/lib/client";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatCurrency } from "./report-types";
 import { MetricCard, DataTable, NarrativeSection, StatusBadge, ProgressBar } from "./shared-components";
+import { RevenueProjectionChart } from "./revenue-projection-chart";
 
 export function RevenueView({ report }: { report: GeneratedReport }) {
   const m = report.metrics;
@@ -25,6 +26,8 @@ export function RevenueView({ report }: { report: GeneratedReport }) {
         </div>
         <NarrativeSection content={report.aiNarrative} />
       </Card>
+
+      <RevenueProjectionChart currency={m.currency} currentRevenue={m.revenue.total} />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="p-4 bg-slate-950/60 backdrop-blur border-border/60">

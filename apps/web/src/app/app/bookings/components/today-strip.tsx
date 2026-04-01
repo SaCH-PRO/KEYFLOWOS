@@ -14,6 +14,7 @@ import type { Booking, BookingStats } from "./bookings-types";
 import type { ScheduleHealth } from "@/lib/client";
 import { formatTime, contactName } from "./bookings-types";
 import { formatAmount } from "../../commerce/utils/commerce-utils";
+import { ScheduleHints } from "./schedule-hints";
 
 interface TodayStripProps {
   bookings: Booking[];
@@ -308,6 +309,8 @@ export default function TodayStrip({
           )}
         </div>
       )}
+
+      <ScheduleHints scheduleHealth={scheduleHealth} />
     </div>
   );
 }

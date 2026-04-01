@@ -19,6 +19,7 @@ import { SimulationDrawer } from "./_command/simulation-drawer";
 import { ProgressDrawer } from "./_command/progress-section";
 import { ShareLinkModal } from "@/components/ui/share-link-modal";
 import { NextBestActionWidget } from "@/components/ai/next-best-action-widget";
+import { CashFlowWidget } from "./_command/cash-flow-widget";
 import { getBusinessById, fetchServices } from "@/lib/client";
 
 export default function CommandPage() {
@@ -152,7 +153,8 @@ export default function CommandPage() {
         description="Clients can browse services and book directly from this link."
       />
 
-      <div className="order-1 sm:order-2">
+      <div className="order-1 sm:order-2 space-y-4">
+        <CashFlowWidget businessId={d.businessId} />
         <PriorityQueue
           priorities={d.priorities}
           tasks={d.tasks}

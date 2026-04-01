@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Zap, CheckCircle2, ChevronDown, ChevronUp } from "lucide-react";
 import type { PriorityItem, AutopilotTask, MomentumRecommendation, NudgeItem, FinancialAlert, TimeBucket } from "./types";
-import { PriorityRow, TaskRow, MomentumRow, NudgeRow, AlertRow } from "./queue-rows";
+import { PriorityRow, TaskRow, MomentumRow, NudgeRow, AlertRow, RetentionAlertRow } from "./queue-rows";
 
 interface PriorityQueueProps {
   priorities: PriorityItem[];
@@ -74,10 +74,18 @@ export function PriorityQueue(props: PriorityQueueProps) {
     });
 
     props.momentumRecs.forEach((rec) => {
-      const target = rec.priority === "urgent" || rec.priority === "high" ? today : week;
-      target.push(
-        <MomentumRow key={`mom-${rec.id}`} rec={rec} onAction={() => props.onMomentumAction(rec)} onSnooze={() => props.onMomentumSnooze(rec.id)} onDismiss={() => props.onMomentumDismiss(rec.id)} loading={props.momentumActionId === rec.id} />,
-      );
+      const isRetention = rec.type?.toLowerCase().includes("churn") || rec.type?.toLowerCase().includes("retention") || (rec.momentumScore !== null && rec.momentumScore !== undefined && rec.momentumScore < 30);
+      if (isRetention) {
+        const target = rec.priority === "urgent" || rec.priority === "high" ? now : today;
+        target.push(
+          <RetentionAlertRow key={`ret-${rec.id}`} rec={rec} onAction={() => props.onMomentumAction(rec)} onDismiss={() => props.onMomentumDismiss(rec.id)} loading={props.momentumActionId === rec.id} />,
+        );
+      } else {
+        const target = rec.priority === "urgent" || rec.priority === "high" ? today : week;
+        target.push(
+          <MomentumRow key={`mom-${rec.id}`} rec={rec} onAction={() => props.onMomentumAction(rec)} onSnooze={() => props.onMomentumSnooze(rec.id)} onDismiss={() => props.onMomentumDismiss(rec.id)} loading={props.momentumActionId === rec.id} />,
+        );
+      }
     });
 
     return { now, today, week };
