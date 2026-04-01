@@ -36,6 +36,16 @@ export function useCommerceCopilot(deps: CopilotDeps) {
     }
   }, [businessId, tab, invoiceCount, quoteCount, commerceAi.updateCommerceContext]);
 
+  const runToolWithToast = useCallback(async (toolId: string, label: string) => {
+    toast.info(`Running ${label}...`);
+    try {
+      await commerceAi.executeTool(toolId);
+      toast.success(`${label} complete — check results in AI copilot`);
+    } catch {
+      toast.error(`${label} failed. Try again.`);
+    }
+  }, [commerceAi]);
+
   const handleViewContact = useCallback((contactId: string) => {
     if (contactId) {
       emitEvent("contact:selected", "commerce", { contactId });
@@ -46,26 +56,22 @@ export function useCommerceCopilot(deps: CopilotDeps) {
   const handleViewClientIntel = useCallback((contactId: string) => {
     if (contactId) {
       emitEvent("commerce:view_client_intel", "commerce", { contactId });
-      if (!commerceAi.panelOpen) commerceAi.setOpen(true);
-      commerceAi.executeTool("client-intelligence");
+      runToolWithToast("client-intelligence", "Client Intelligence");
     }
-  }, [emitEvent, commerceAi]);
+  }, [emitEvent, runToolWithToast]);
 
   const handleAiRecoveryPlan = useCallback(() => {
-    if (!commerceAi.panelOpen) commerceAi.setOpen(true);
-    commerceAi.executeTool("overdue-recovery");
-  }, [commerceAi]);
+    runToolWithToast("overdue-recovery", "Recovery Plan");
+  }, [runToolWithToast]);
 
   const handleAiForecast = useCallback(() => {
-    if (!commerceAi.panelOpen) commerceAi.setOpen(true);
-    commerceAi.executeTool("cashflow-forecast");
-  }, [commerceAi]);
+    runToolWithToast("cashflow-forecast", "Cash Flow Forecast");
+  }, [runToolWithToast]);
 
   const handleAiDraftReminder = useCallback((invoiceId: string) => {
     commerceAi.updateCommerceContext({ businessId: businessId!, activeView: "invoices", selectedItemId: invoiceId });
-    if (!commerceAi.panelOpen) commerceAi.setOpen(true);
-    commerceAi.executeTool("invoice-reminder");
-  }, [businessId, commerceAi]);
+    runToolWithToast("invoice-reminder", "Invoice Reminder");
+  }, [businessId, commerceAi, runToolWithToast]);
 
   const handleAiAssistantAction = useCallback((actionKey: string) => {
     if (actionKey.startsWith("filter_status:")) {
@@ -81,10 +87,10 @@ export function useCommerceCopilot(deps: CopilotDeps) {
       toast.success("Opening invoices for reminders...");
     } else if (actionKey.startsWith("tool:")) {
       const toolId = actionKey.split(":")[1];
-      if (!commerceAi.panelOpen) commerceAi.setOpen(true);
-      commerceAi.executeTool(toolId);
+      const toolName = toolId.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+      runToolWithToast(toolId, toolName);
     }
-  }, [handleTabChange, commerceAi]);
+  }, [handleTabChange, runToolWithToast]);
 
   return {
     commerceAi,
