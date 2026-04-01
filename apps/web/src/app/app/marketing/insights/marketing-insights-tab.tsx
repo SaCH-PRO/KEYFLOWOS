@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 import type { EmailCampaign, LeadForm, LeadFormSubmission, SocialPost } from "@/lib/client";
 import type { MarketingStats } from "../hooks/use-marketing";
-import { CampaignBriefingsSection, AudienceHealthSection, SendTimeSection } from "../components/campaign-intelligence-cards";
 
 interface MarketingInsightsTabProps {
   campaigns: EmailCampaign[];
@@ -34,7 +33,7 @@ const stagger = {
   },
 };
 
-function MarketingInsightsTabInner({ campaigns, forms, submissions, socialPosts = [], stats: parentStats, businessId }: MarketingInsightsTabProps) {
+function MarketingInsightsTabInner({ campaigns, forms, socialPosts = [], stats: parentStats }: MarketingInsightsTabProps) {
   const sentCampaigns = useMemo(
     () => campaigns.filter((c) => c.status === "SENT"),
     [campaigns]
@@ -156,17 +155,6 @@ function MarketingInsightsTabInner({ campaigns, forms, submissions, socialPosts 
           </div>
         ))}
       </motion.div>
-
-      {businessId && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <AudienceHealthSection businessId={businessId} />
-          <SendTimeSection businessId={businessId} />
-        </div>
-      )}
-
-      {businessId && (
-        <CampaignBriefingsSection businessId={businessId} />
-      )}
     </motion.div>
   );
 }
