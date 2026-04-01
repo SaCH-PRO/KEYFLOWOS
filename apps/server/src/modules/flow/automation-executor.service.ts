@@ -25,6 +25,36 @@ export class AutomationExecutorService {
     @Inject(TransactionalEmailService) private readonly transactionalEmail: TransactionalEmailService,
   ) {}
 
+  private evaluateCondition(condition: string | null | undefined, context: Record<string, any>): boolean {
+    if (!condition) return true;
+
+    switch (condition) {
+      case 'contact.has_email':
+        return !!context.contactEmail || !!context.contactId;
+      case 'contact.has_phone':
+        return !!context.contactPhone;
+      case 'contact.is_active':
+        return context.contactStatus === 'ACTIVE' || !context.contactStatus;
+      case 'contact.is_new':
+        if (context.contactCreatedAt) {
+          const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+          return new Date(context.contactCreatedAt).getTime() > sevenDaysAgo;
+        }
+        return true;
+      case 'invoice.above_threshold':
+        return (context.total ?? 0) > (context.threshold ?? 500);
+      case 'booking.is_first':
+        return context.isFirstBooking !== false;
+      case 'time.business_hours': {
+        const hour = new Date().getHours();
+        return hour >= 8 && hour < 18;
+      }
+      default:
+        this.logger.warn(`Unknown condition "${condition}", defaulting to true`);
+        return true;
+    }
+  }
+
   private async executePlaybooks(businessId: string, triggerEvent: string, context: Record<string, any>) {
     const playbooks = await this.prisma.client.automation.findMany({
       where: {
@@ -39,6 +69,24 @@ export class AutomationExecutorService {
 
     for (const playbook of playbooks) {
       try {
+        if (!this.evaluateCondition(playbook.condition, context)) {
+          await this.activity.log({
+            businessId,
+            module: 'automation',
+            action: 'skipped',
+            entityType: 'playbook',
+            entityId: playbook.id,
+            title: `Playbook "${playbook.name}" skipped`,
+            detail: `Condition "${playbook.condition}" not met for trigger ${triggerEvent}`,
+            icon: 'Zap',
+            tone: 'info',
+            data: { trigger: triggerEvent, playbookId: playbook.id, condition: playbook.condition, outcome: 'skipped' },
+            contactId: context.contactId,
+          });
+          this.logger.log(`Playbook "${playbook.name}" skipped: condition "${playbook.condition}" not met`);
+          continue;
+        }
+
         const actionData = playbook.actionData;
         if (!actionData) continue;
 
@@ -62,14 +110,29 @@ export class AutomationExecutorService {
           title: `Playbook "${playbook.name}" executed`,
           detail: `Triggered by ${triggerEvent}`,
           icon: 'Zap',
-          tone: 'info',
-          data: { trigger: triggerEvent, playbookId: playbook.id },
+          tone: 'success',
+          data: { trigger: triggerEvent, playbookId: playbook.id, outcome: 'success' },
           contactId: context.contactId,
         });
 
         this.logger.log(`Playbook "${playbook.name}" executed for trigger "${triggerEvent}"`);
       } catch (e) {
-        this.logger.error(`Playbook "${playbook.name}" failed: ${(e as Error).message}`);
+        const errorMessage = (e as Error).message;
+        this.logger.error(`Playbook "${playbook.name}" failed: ${errorMessage}`);
+
+        await this.activity.log({
+          businessId,
+          module: 'automation',
+          action: 'failed',
+          entityType: 'playbook',
+          entityId: playbook.id,
+          title: `Playbook "${playbook.name}" failed`,
+          detail: `Error: ${errorMessage}`,
+          icon: 'Zap',
+          tone: 'error',
+          data: { trigger: triggerEvent, playbookId: playbook.id, outcome: 'failed', error: errorMessage },
+          contactId: context.contactId,
+        });
       }
     }
   }
