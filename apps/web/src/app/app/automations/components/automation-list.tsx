@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Zap, Power, PowerOff, Brain, Settings2, Clock, Plus, Search,
+  Zap, Power, PowerOff, Brain, Settings2, Clock, Plus, Search, Pencil,
 } from "lucide-react";
 import {
   Playbook, fetchPlaybooks, updatePlaybook,
@@ -29,6 +29,7 @@ export function AutomationList({ businessId, templateToUse, onTemplateClear }: A
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showEditor, setShowEditor] = useState(false);
+  const [editingPlaybook, setEditingPlaybook] = useState<Playbook | null>(null);
   const [search, setSearch] = useState("");
   const [expandedWf, setExpandedWf] = useState<string | null>(null);
   const [updatingWf, setUpdatingWf] = useState<string | null>(null);
@@ -52,6 +53,7 @@ export function AutomationList({ businessId, templateToUse, onTemplateClear }: A
 
   useEffect(() => {
     if (templateToUse) {
+      setEditingPlaybook(null);
       setShowEditor(true);
     }
   }, [templateToUse]);
@@ -107,7 +109,39 @@ export function AutomationList({ businessId, templateToUse, onTemplateClear }: A
 
   function handleEditorClose() {
     setShowEditor(false);
+    setEditingPlaybook(null);
     onTemplateClear();
+  }
+
+  function handleEditPlaybook(pb: Playbook) {
+    setEditingPlaybook(pb);
+    setShowEditor(true);
+  }
+
+  function handlePlaybookSaved(pb: Playbook) {
+    setPlaybooks((prev) => {
+      const exists = prev.find((p) => p.id === pb.id);
+      if (exists) return prev.map((p) => (p.id === pb.id ? pb : p));
+      return [pb, ...prev];
+    });
+  }
+
+  function renderRunMeta(lastRunAt: string | null | undefined, runCount: number | undefined) {
+    return (
+      <div className="flex items-center gap-3 text-[11px] text-muted-foreground/60 flex-wrap">
+        {(runCount ?? 0) > 0 && (
+          <span className="inline-flex items-center gap-1">
+            <Clock className="w-3 h-3" /> {runCount} runs
+          </span>
+        )}
+        {lastRunAt && (
+          <span>Last: {new Date(lastRunAt).toLocaleDateString()}</span>
+        )}
+        {!(runCount ?? 0) && !lastRunAt && (
+          <span className="text-muted-foreground/40">Never run</span>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -129,7 +163,7 @@ export function AutomationList({ businessId, templateToUse, onTemplateClear }: A
           </div>
         </div>
         <button
-          onClick={() => setShowEditor(true)}
+          onClick={() => { setEditingPlaybook(null); setShowEditor(true); }}
           className="kf-btn-primary px-4 py-2.5 rounded-xl text-sm font-medium inline-flex items-center gap-2 min-h-[44px]"
         >
           <Plus className="w-4 h-4" />
@@ -146,8 +180,9 @@ export function AutomationList({ businessId, templateToUse, onTemplateClear }: A
       <PlaybookEditor
         open={showEditor}
         onClose={handleEditorClose}
-        onCreated={(pb) => setPlaybooks((prev) => [pb, ...prev])}
+        onSaved={handlePlaybookSaved}
         template={templateToUse}
+        editingPlaybook={editingPlaybook}
         businessId={businessId}
       />
 
@@ -166,199 +201,188 @@ export function AutomationList({ businessId, templateToUse, onTemplateClear }: A
           </p>
         </div>
       ) : (
-        <div className="space-y-6">
-          {playbooks.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 px-1">
-                <Zap className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
-                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">My Playbooks</span>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                {filtered
-                  .filter((item) => item.kind === "playbook")
-                  .map((item) => {
-                    const pb = item.data as Playbook;
-                    return (
-                      <div
-                        key={pb.id}
-                        className="rounded-2xl border p-3 flex flex-col gap-2 text-sm transition-colors"
+        <div className="grid gap-3 md:grid-cols-2">
+          {filtered.map((item) => {
+            if (item.kind === "playbook") {
+              const pb = item.data;
+              return (
+                <div
+                  key={`pb-${pb.id}`}
+                  className="rounded-2xl border p-3 flex flex-col gap-2 text-sm transition-colors"
+                  style={{
+                    borderColor: pb.enabled ? "hsl(var(--kf-success) / 0.4)" : "hsl(var(--border) / 0.6)",
+                    background: pb.enabled ? "hsl(var(--kf-success) / 0.05)" : "hsl(var(--muted) / 0.3)",
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="font-semibold flex items-center gap-2">
+                      <Zap className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+                      {pb.name}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleEditPlaybook(pb)}
+                        className="rounded-full p-1.5 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+                        style={{ background: "hsl(var(--muted) / 0.5)", color: "hsl(var(--muted-foreground))" }}
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => handleTogglePlaybook(pb)}
+                        className="rounded-full p-1.5 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
                         style={{
-                          borderColor: pb.enabled ? "hsl(var(--kf-success) / 0.4)" : "hsl(var(--border) / 0.6)",
-                          background: pb.enabled ? "hsl(var(--kf-success) / 0.05)" : "hsl(var(--muted) / 0.3)",
+                          background: pb.enabled ? "hsl(var(--kf-success) / 0.2)" : "hsl(var(--muted) / 0.5)",
+                          color: pb.enabled ? "hsl(var(--kf-success))" : "hsl(var(--muted-foreground))",
                         }}
                       >
-                        <div className="flex items-center justify-between">
-                          <div className="font-semibold">{pb.name}</div>
-                          <button
-                            onClick={() => handleTogglePlaybook(pb)}
-                            className="rounded-full p-1.5 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
-                            style={{
-                              background: pb.enabled ? "hsl(var(--kf-success) / 0.2)" : "hsl(var(--muted) / 0.5)",
-                              color: pb.enabled ? "hsl(var(--kf-success))" : "hsl(var(--muted-foreground))",
-                            }}
-                          >
-                            {pb.enabled ? <Power className="w-4 h-4" /> : <PowerOff className="w-4 h-4" />}
-                          </button>
-                        </div>
-                        <div className="text-[12px] text-muted-foreground">
-                          <span className="text-primary">Trigger:</span> {getTriggerLabel(pb.triggerEvent)}
-                        </div>
-                        <div className="text-[12px] text-muted-foreground space-y-0.5">
-                          {getActionLabels(pb.actions).map((label, i) => (
-                            <div key={i} className="flex items-center gap-1.5">
-                              <span className="text-primary">{i === 0 ? "Action:" : "Then:"}</span> {label}
-                            </div>
-                          ))}
-                        </div>
-                        <div className="text-[11px] text-muted-foreground/60">
-                          Created: {new Date(pb.createdAt).toLocaleDateString()}
-                        </div>
+                        {pb.enabled ? <Power className="w-4 h-4" /> : <PowerOff className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="text-[12px] text-muted-foreground">
+                    <span className="text-primary">Trigger:</span> {getTriggerLabel(pb.triggerEvent)}
+                  </div>
+                  <div className="text-[12px] text-muted-foreground space-y-0.5">
+                    {getActionLabels(pb.actions).map((label, i) => (
+                      <div key={i} className="flex items-center gap-1.5">
+                        <span className="text-primary">{i === 0 ? "Action:" : "Then:"}</span> {label}
                       </div>
-                    );
-                  })}
-              </div>
-            </div>
-          )}
+                    ))}
+                  </div>
+                  {renderRunMeta(pb.lastRunAt, pb.runCount)}
+                </div>
+              );
+            }
 
-          {workflows.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 px-1">
-                <Brain className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent2))" }} />
-                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Cross-Module Intelligence</span>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                {filtered
-                  .filter((item) => item.kind === "workflow")
-                  .map((item) => {
-                    const wf = item.data as CrossModuleWorkflow;
-                    return (
-                      <motion.div
-                        key={wf.key}
-                        layout
-                        className="rounded-2xl border p-3 flex flex-col gap-2 text-sm transition-colors"
-                        style={{
-                          borderColor: wf.enabled ? "hsl(var(--kf-success) / 0.4)" : "hsl(var(--border) / 0.6)",
-                          background: wf.enabled ? "hsl(var(--kf-success) / 0.05)" : "hsl(var(--muted) / 0.3)",
-                        }}
+            const wf = item.data as CrossModuleWorkflow;
+            return (
+              <motion.div
+                key={`wf-${wf.key}`}
+                layout
+                className="rounded-2xl border p-3 flex flex-col gap-2 text-sm transition-colors"
+                style={{
+                  borderColor: wf.enabled ? "hsl(var(--kf-success) / 0.4)" : "hsl(var(--border) / 0.6)",
+                  background: wf.enabled ? "hsl(var(--kf-success) / 0.05)" : "hsl(var(--muted) / 0.3)",
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="font-semibold flex items-center gap-2">
+                    <Brain className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
+                    {wf.name}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {wf.configSchema.length > 0 && (
+                      <button
+                        onClick={() => setExpandedWf(expandedWf === wf.key ? null : wf.key)}
+                        className="rounded-full p-1.5 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+                        style={{ background: "hsl(var(--muted) / 0.5)", color: "hsl(var(--muted-foreground))" }}
                       >
-                        <div className="flex items-center justify-between">
-                          <div className="font-semibold flex items-center gap-2">
-                            <Brain className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
-                            {wf.name}
-                          </div>
-                          <div className="flex items-center gap-1">
-                            {wf.configSchema.length > 0 && (
+                        <Settings2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleToggleWorkflow(wf)}
+                      disabled={updatingWf === wf.key}
+                      className="rounded-full p-1.5 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+                      style={{
+                        background: wf.enabled ? "hsl(var(--kf-success) / 0.2)" : "hsl(var(--muted) / 0.5)",
+                        color: wf.enabled ? "hsl(var(--kf-success))" : "hsl(var(--muted-foreground))",
+                        opacity: updatingWf === wf.key ? 0.5 : 1,
+                      }}
+                    >
+                      {wf.enabled ? <Power className="w-4 h-4" /> : <PowerOff className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <p className="text-[12px] text-muted-foreground leading-relaxed">{wf.description}</p>
+
+                <div className="flex items-center gap-3 text-[11px] text-muted-foreground/60 flex-wrap">
+                  <span className="inline-flex items-center gap-1">
+                    <Zap className="w-3 h-3" /> {wf.triggerEvent}
+                  </span>
+                  {wf.runCount > 0 && (
+                    <span className="inline-flex items-center gap-1">
+                      <Clock className="w-3 h-3" /> {wf.runCount} runs
+                    </span>
+                  )}
+                  {wf.lastRunAt && (
+                    <span>Last: {new Date(wf.lastRunAt).toLocaleDateString()}</span>
+                  )}
+                  {!wf.runCount && !wf.lastRunAt && (
+                    <span className="text-muted-foreground/40">Never run</span>
+                  )}
+                </div>
+
+                <AnimatePresence>
+                  {expandedWf === wf.key && wf.configSchema.length > 0 && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="border-t border-border/40 pt-2 mt-1 space-y-2">
+                        <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Configuration</div>
+                        {wf.configSchema.map((field) => (
+                          <div key={field.key} className="flex items-center gap-2">
+                            <label className="text-xs text-muted-foreground flex-1">{field.label}</label>
+                            {field.type === "boolean" ? (
                               <button
-                                onClick={() => setExpandedWf(expandedWf === wf.key ? null : wf.key)}
-                                className="rounded-full p-1.5 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
-                                style={{ background: "hsl(var(--muted) / 0.5)", color: "hsl(var(--muted-foreground))" }}
+                                onClick={() =>
+                                  handleConfigUpdate(wf, {
+                                    ...wf.config,
+                                    [field.key]: !(wf.config[field.key] ?? field.default),
+                                  })
+                                }
+                                className="w-8 h-5 rounded-full transition-colors relative"
+                                style={{
+                                  background: (wf.config[field.key] ?? field.default)
+                                    ? "hsl(var(--kf-success))"
+                                    : "hsl(var(--muted))",
+                                }}
                               >
-                                <Settings2 className="w-3.5 h-3.5" />
+                                <div
+                                  className={`absolute top-0.5 w-4 h-4 rounded-full transition-transform ${
+                                    (wf.config[field.key] ?? field.default) ? "translate-x-3.5" : "translate-x-0.5"
+                                  }`}
+                                  style={{ background: "hsl(var(--foreground))" }}
+                                />
                               </button>
+                            ) : field.type === "number" ? (
+                              <input
+                                type="number"
+                                className="w-20 rounded-lg border border-border/60 bg-input px-2 py-1 text-xs text-right"
+                                value={String(wf.config[field.key] ?? field.default)}
+                                onChange={(e) =>
+                                  handleConfigUpdate(wf, {
+                                    ...wf.config,
+                                    [field.key]: parseInt(e.target.value, 10) || field.default,
+                                  })
+                                }
+                              />
+                            ) : (
+                              <input
+                                type="text"
+                                className="w-32 rounded-lg border border-border/60 bg-input px-2 py-1 text-xs"
+                                value={String(wf.config[field.key] ?? field.default)}
+                                onChange={(e) =>
+                                  handleConfigUpdate(wf, {
+                                    ...wf.config,
+                                    [field.key]: e.target.value,
+                                  })
+                                }
+                              />
                             )}
-                            <button
-                              onClick={() => handleToggleWorkflow(wf)}
-                              disabled={updatingWf === wf.key}
-                              className="rounded-full p-1.5 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
-                              style={{
-                                background: wf.enabled ? "hsl(var(--kf-success) / 0.2)" : "hsl(var(--muted) / 0.5)",
-                                color: wf.enabled ? "hsl(var(--kf-success))" : "hsl(var(--muted-foreground))",
-                                opacity: updatingWf === wf.key ? 0.5 : 1,
-                              }}
-                            >
-                              {wf.enabled ? <Power className="w-4 h-4" /> : <PowerOff className="w-4 h-4" />}
-                            </button>
                           </div>
-                        </div>
-
-                        <p className="text-[12px] text-muted-foreground leading-relaxed">{wf.description}</p>
-
-                        <div className="flex items-center gap-3 text-[11px] text-muted-foreground/60 flex-wrap">
-                          <span className="inline-flex items-center gap-1">
-                            <Zap className="w-3 h-3" /> {wf.triggerEvent}
-                          </span>
-                          {wf.runCount > 0 && (
-                            <span className="inline-flex items-center gap-1">
-                              <Clock className="w-3 h-3" /> {wf.runCount} runs
-                            </span>
-                          )}
-                          {wf.lastRunAt && (
-                            <span>Last: {new Date(wf.lastRunAt).toLocaleDateString()}</span>
-                          )}
-                        </div>
-
-                        <AnimatePresence>
-                          {expandedWf === wf.key && wf.configSchema.length > 0 && (
-                            <motion.div
-                              initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: "auto" }}
-                              exit={{ opacity: 0, height: 0 }}
-                              className="overflow-hidden"
-                            >
-                              <div className="border-t border-border/40 pt-2 mt-1 space-y-2">
-                                <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Configuration</div>
-                                {wf.configSchema.map((field) => (
-                                  <div key={field.key} className="flex items-center gap-2">
-                                    <label className="text-xs text-muted-foreground flex-1">{field.label}</label>
-                                    {field.type === "boolean" ? (
-                                      <button
-                                        onClick={() =>
-                                          handleConfigUpdate(wf, {
-                                            ...wf.config,
-                                            [field.key]: !(wf.config[field.key] ?? field.default),
-                                          })
-                                        }
-                                        className="w-8 h-5 rounded-full transition-colors relative"
-                                        style={{
-                                          background: (wf.config[field.key] ?? field.default)
-                                            ? "hsl(var(--kf-success))"
-                                            : "hsl(var(--muted))",
-                                        }}
-                                      >
-                                        <div
-                                          className={`absolute top-0.5 w-4 h-4 rounded-full transition-transform ${
-                                            (wf.config[field.key] ?? field.default) ? "translate-x-3.5" : "translate-x-0.5"
-                                          }`}
-                                          style={{ background: "hsl(var(--foreground))" }}
-                                        />
-                                      </button>
-                                    ) : field.type === "number" ? (
-                                      <input
-                                        type="number"
-                                        className="w-20 rounded-lg border border-border/60 bg-input px-2 py-1 text-xs text-right"
-                                        value={String(wf.config[field.key] ?? field.default)}
-                                        onChange={(e) =>
-                                          handleConfigUpdate(wf, {
-                                            ...wf.config,
-                                            [field.key]: parseInt(e.target.value, 10) || field.default,
-                                          })
-                                        }
-                                      />
-                                    ) : (
-                                      <input
-                                        type="text"
-                                        className="w-32 rounded-lg border border-border/60 bg-input px-2 py-1 text-xs"
-                                        value={String(wf.config[field.key] ?? field.default)}
-                                        onChange={(e) =>
-                                          handleConfigUpdate(wf, {
-                                            ...wf.config,
-                                            [field.key]: e.target.value,
-                                          })
-                                        }
-                                      />
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </motion.div>
-                    );
-                  })}
-              </div>
-            </div>
-          )}
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+            );
+          })}
         </div>
       )}
     </div>

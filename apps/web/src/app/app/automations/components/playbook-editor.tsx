@@ -2,9 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Zap, X } from "lucide-react";
+import { Zap, X } from "lucide-react";
 import { Button, Input } from "@keyflow/ui";
-import { createPlaybook, Playbook } from "@/lib/client";
+import { createPlaybook, updatePlaybook, Playbook } from "@/lib/client";
 import {
   TRIGGER_GROUPS,
   ACTION_GROUPS,
@@ -15,35 +15,45 @@ import {
 interface PlaybookEditorProps {
   open: boolean;
   onClose: () => void;
-  onCreated: (playbook: Playbook) => void;
+  onSaved: (playbook: Playbook) => void;
   template?: AutomationTemplate | null;
+  editingPlaybook?: Playbook | null;
   businessId?: string | null;
 }
 
-export function PlaybookEditor({ open, onClose, onCreated, template, businessId }: PlaybookEditorProps) {
-  const [form, setForm] = useState({
-    name: template?.name ?? "",
-    triggerEvent: template?.trigger ?? "",
-  });
-  const [actionSteps, setActionSteps] = useState<ActionStep[]>(
-    template?.actions?.length ? template.actions : [{ type: "" }]
-  );
+export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybook, businessId }: PlaybookEditorProps) {
+  const [form, setForm] = useState({ name: "", triggerEvent: "" });
+  const [actionSteps, setActionSteps] = useState<ActionStep[]>([{ type: "" }]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  const isEditing = !!editingPlaybook;
+
   useEffect(() => {
-    if (template) {
+    if (editingPlaybook) {
+      setForm({ name: editingPlaybook.name, triggerEvent: editingPlaybook.triggerEvent });
+      const actions = Array.isArray(editingPlaybook.actions)
+        ? (editingPlaybook.actions as ActionStep[])
+        : [{ type: "" }];
+      setActionSteps(actions.length ? [...actions] : [{ type: "" }]);
+      setError(null);
+    } else if (template) {
       setForm({ name: template.name, triggerEvent: template.trigger });
       setActionSteps(template.actions.length ? [...template.actions] : [{ type: "" }]);
+      setError(null);
+    } else {
+      setForm({ name: "", triggerEvent: "" });
+      setActionSteps([{ type: "" }]);
+      setError(null);
     }
-  }, [template]);
+  }, [editingPlaybook, template]);
 
   const addStep = () => setActionSteps((s) => [...s, { type: "" }]);
   const removeStep = (i: number) => setActionSteps((s) => s.filter((_, idx) => idx !== i));
   const updateStep = (i: number, type: string) =>
     setActionSteps((s) => s.map((st, idx) => (idx === i ? { ...st, type } : st)));
 
-  async function handleCreate() {
+  async function handleSave() {
     setError(null);
     const validSteps = actionSteps.filter((s) => s.type);
     if (!form.name.trim() || !form.triggerEvent || validSteps.length === 0) {
@@ -51,20 +61,38 @@ export function PlaybookEditor({ open, onClose, onCreated, template, businessId 
       return;
     }
     setSaving(true);
-    const { data, error: apiError } = await createPlaybook({
-      name: form.name,
-      triggerEvent: form.triggerEvent,
-      actions: validSteps,
-      businessId: businessId ?? undefined,
-    });
-    setSaving(false);
-    if (apiError) {
-      setError(apiError);
-    } else if (data) {
-      onCreated(data);
-      setForm({ name: "", triggerEvent: "" });
-      setActionSteps([{ type: "" }]);
-      onClose();
+
+    if (isEditing) {
+      const { data, error: apiError } = await updatePlaybook({
+        playbookId: editingPlaybook!.id,
+        name: form.name,
+        triggerEvent: form.triggerEvent,
+        actions: validSteps,
+        businessId: businessId ?? undefined,
+      });
+      setSaving(false);
+      if (apiError) {
+        setError(apiError);
+      } else if (data) {
+        onSaved(data);
+        onClose();
+      }
+    } else {
+      const { data, error: apiError } = await createPlaybook({
+        name: form.name,
+        triggerEvent: form.triggerEvent,
+        actions: validSteps,
+        businessId: businessId ?? undefined,
+      });
+      setSaving(false);
+      if (apiError) {
+        setError(apiError);
+      } else if (data) {
+        onSaved(data);
+        setForm({ name: "", triggerEvent: "" });
+        setActionSteps([{ type: "" }]);
+        onClose();
+      }
     }
   }
 
@@ -81,7 +109,7 @@ export function PlaybookEditor({ open, onClose, onCreated, template, businessId 
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold flex items-center gap-2">
                 <Zap className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-                {template ? `Create from: ${template.name}` : "New Automation"}
+                {isEditing ? `Edit: ${editingPlaybook!.name}` : template ? `Create from: ${template.name}` : "New Automation"}
               </h3>
               <button
                 onClick={onClose}
@@ -167,8 +195,8 @@ export function PlaybookEditor({ open, onClose, onCreated, template, businessId 
 
             <div className="flex gap-2 pt-1">
               <Button variant="outline" onClick={onClose}>Cancel</Button>
-              <Button onClick={handleCreate} disabled={saving}>
-                {saving ? "Creating..." : "Create Automation"}
+              <Button onClick={handleSave} disabled={saving}>
+                {saving ? "Saving..." : isEditing ? "Save Changes" : "Create Automation"}
               </Button>
             </div>
           </div>
