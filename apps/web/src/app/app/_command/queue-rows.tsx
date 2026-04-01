@@ -256,10 +256,10 @@ export function RetentionAlertRow({ rec, onAction, onDismiss, loading }: { rec: 
         disabled={loading}
         className="px-2.5 py-1 rounded-lg text-[11px] font-medium shrink-0 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
         style={{
-          background: `hsl(var(${color}) / 0.1)`,
-          color: `hsl(var(${color}))`,
+          background: `hsl(var(${borderColor}) / 0.1)`,
+          color: `hsl(var(${borderColor}))`,
           borderWidth: 1,
-          borderColor: `hsl(var(${color}) / 0.25)`,
+          borderColor: `hsl(var(${borderColor}) / 0.25)`,
         }}
       >
         {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : "Re-engage"}
