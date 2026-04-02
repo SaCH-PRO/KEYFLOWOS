@@ -48,7 +48,7 @@ interface UsePlanResult {
   isFreePlan: boolean;
   trialExpired: boolean;
   checkFeature: (featureKey: string) => { hasAccess: boolean; availableFrom: string };
-  checkLimit: (resourceKey: string) => { atLimit: boolean; nearLimit: boolean; current: number; limit: number; isUnlimited: boolean; percent: number };
+  checkLimit: (resourceKey: string) => { atLimit: boolean; nearLimit: boolean; current: number; limit: number; isUnlimited: boolean; percent: number; upgradeTo: string | null };
   resourceUsage: ResourceUsage[];
   featureAccess: FeatureAccess[];
   refresh: () => Promise<void>;
