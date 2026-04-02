@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Building2, Users, User, Link2, Shield, Settings, Webhook, Bell, Code2 } from "lucide-react";
+import { Building2, Users, User, Link2, Shield, Settings, Webhook, Bell, Code2, Palette } from "lucide-react";
 
 const navItems = [
   { href: "/app/settings/profile", label: "Profile", icon: User, description: "Your account" },
@@ -13,6 +13,7 @@ const navItems = [
   { href: "/app/settings/notifications", label: "Notifications", icon: Bell, description: "Customer emails" },
   { href: "/app/settings/compliance", label: "Compliance", icon: Shield, description: "Legal & tax" },
   { href: "/app/settings/webhooks", label: "Webhooks", icon: Webhook, description: "Event hooks" },
+  { href: "/app/settings/templates", label: "Templates", icon: Palette, description: "Gallery" },
   { href: "/app/settings/developers", label: "Developers", icon: Code2, description: "API & extensions" },
 ];
 

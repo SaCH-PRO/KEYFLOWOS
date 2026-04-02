@@ -4005,6 +4005,28 @@ export async function createWebhook(businessId: string, data: { url: string; eve
 export async function deleteWebhook(businessId: string, webhookId: string): Promise<ApiResult<void>> {
   return apiDelete<void>(`/businesses/${encodeURIComponent(businessId)}/webhooks/${webhookId}`);
 }
+export interface WebhookDeliveryLog {
+  id: string;
+  webhookId: string;
+  businessId: string;
+  event: string;
+  url: string;
+  status: 'success' | 'failed';
+  statusCode: number | null;
+  attempts: number;
+  duration: number;
+  error: string | null;
+  timestamp: string;
+}
+export async function testWebhook(businessId: string, webhookId: string): Promise<ApiResult<WebhookDeliveryLog>> {
+  return apiPost<WebhookDeliveryLog>({ path: `/businesses/${encodeURIComponent(businessId)}/webhooks/${webhookId}/test`, body: {} });
+}
+export async function fetchWebhookDeliveries(businessId: string, webhookId: string, limit = 20): Promise<ApiResult<WebhookDeliveryLog[]>> {
+  return apiGetSimple<WebhookDeliveryLog[]>(`/businesses/${encodeURIComponent(businessId)}/webhooks/${webhookId}/deliveries?limit=${limit}`);
+}
+export async function toggleWebhook(businessId: string, webhookId: string, isActive: boolean): Promise<ApiResult<{ success: boolean; isActive: boolean }>> {
+  return apiPost<{ success: boolean; isActive: boolean }>({ path: `/businesses/${encodeURIComponent(businessId)}/webhooks/${webhookId}/toggle`, body: { isActive } });
+}
 
 // ---
 // CONTACT LISTS

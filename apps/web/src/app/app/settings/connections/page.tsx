@@ -636,7 +636,7 @@ export default function ConnectionsSettingsPage() {
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: "auto" }}
                         exit={{ opacity: 0, height: 0 }}
-                        className="mt-3"
+                        className="mt-3 space-y-2"
                       >
                         <div
                           className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs"
@@ -658,6 +658,17 @@ export default function ConnectionsSettingsPage() {
                             </>
                           )}
                         </div>
+                        {!testResult.success && (
+                          <div className="px-3 py-2 rounded-lg bg-white/[0.02] border border-white/[0.06] text-[11px] text-muted-foreground space-y-1">
+                            <p className="font-medium text-foreground/70">Troubleshooting:</p>
+                            <ul className="list-disc list-inside space-y-0.5 text-muted-foreground/80">
+                              <li>Verify your access token has not expired</li>
+                              <li>Check that the token has the required permissions/scopes</li>
+                              <li>For page tokens, ensure the page is published and accessible</li>
+                              <li>Try disconnecting and reconnecting the account</li>
+                            </ul>
+                          </div>
+                        )}
                       </motion.div>
                     )}
                   </AnimatePresence>

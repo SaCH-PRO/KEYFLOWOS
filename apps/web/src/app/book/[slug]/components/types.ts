@@ -18,6 +18,10 @@ export type Business = {
   secondaryColor?: string | null;
   businessHours?: BusinessHours | null;
   storeEnabled?: boolean;
+  facebook?: string | null;
+  instagram?: string | null;
+  twitter?: string | null;
+  whatsapp?: string | null;
 };
 
 export type Service = {

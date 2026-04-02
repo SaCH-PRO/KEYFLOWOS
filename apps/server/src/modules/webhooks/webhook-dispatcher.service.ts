@@ -22,11 +22,78 @@ interface WebhookRecord {
   isActive: boolean;
 }
 
+export interface WebhookDeliveryLog {
+  id: string;
+  webhookId: string;
+  businessId: string;
+  event: string;
+  url: string;
+  status: 'success' | 'failed';
+  statusCode: number | null;
+  attempts: number;
+  duration: number;
+  error: string | null;
+  timestamp: string;
+}
+
 @Injectable()
 export class WebhookDispatcherService {
   private readonly logger = new Logger(WebhookDispatcherService.name);
+  private readonly deliveryLogs: WebhookDeliveryLog[] = [];
+  private static readonly MAX_LOG_SIZE = 200;
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  getDeliveryLogs(businessId: string, webhookId?: string, limit = 50): WebhookDeliveryLog[] {
+    let logs = this.deliveryLogs.filter((l) => l.businessId === businessId);
+    if (webhookId) {
+      logs = logs.filter((l) => l.webhookId === webhookId);
+    }
+    return logs.slice(-limit).reverse();
+  }
+
+  async sendTestEvent(webhookId: string, businessId: string): Promise<WebhookDeliveryLog> {
+    const webhook = await this.prisma.client.webhook.findFirst({
+      where: { id: webhookId, businessId, isActive: true },
+    });
+
+    if (!webhook) {
+      return {
+        id: `test-${Date.now()}`,
+        webhookId,
+        businessId,
+        event: 'test.ping',
+        url: '',
+        status: 'failed',
+        statusCode: null,
+        attempts: 0,
+        duration: 0,
+        error: 'Webhook not found or inactive',
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    const testPayload = {
+      event: 'test.ping',
+      timestamp: new Date().toISOString(),
+      businessId,
+      data: {
+        message: 'This is a test webhook delivery from KeyFlowOS',
+        webhookId: webhook.id,
+        webhookName: (webhook as any).name || 'Webhook',
+      },
+    };
+
+    const body = JSON.stringify(testPayload);
+    const logEntry = await this.sendWithLogging(
+      webhook as unknown as WebhookRecord,
+      'test.ping',
+      testPayload.timestamp,
+      body,
+      businessId,
+    );
+    return logEntry;
+  }
 
   @OnEvent('contact.created')
   async onContactCreated(payload: ContactCreatedPayload) {
@@ -127,7 +194,7 @@ export class WebhookDispatcherService {
       const body = JSON.stringify(payload);
 
       await Promise.allSettled(
-        webhooks.map((wh: WebhookRecord) => this.send(wh, event, payload.timestamp, body)),
+        webhooks.map((wh: WebhookRecord) => this.sendWithLogging(wh, event, payload.timestamp, body, businessId)),
       );
     } catch (err) {
       this.logger.error(`Webhook dispatch error for ${event}: ${(err as Error).message}`);
@@ -137,8 +204,19 @@ export class WebhookDispatcherService {
   private static readonly MAX_RETRIES = 3;
   private static readonly BACKOFF_BASE_MS = 1000;
 
-  private async send(webhook: WebhookRecord, event: string, timestamp: string, body: string) {
+  private addLog(log: WebhookDeliveryLog) {
+    this.deliveryLogs.push(log);
+    if (this.deliveryLogs.length > WebhookDispatcherService.MAX_LOG_SIZE) {
+      this.deliveryLogs.splice(0, this.deliveryLogs.length - WebhookDispatcherService.MAX_LOG_SIZE);
+    }
+  }
+
+  private async sendWithLogging(webhook: WebhookRecord, event: string, timestamp: string, body: string, businessId: string): Promise<WebhookDeliveryLog> {
+    const startTime = Date.now();
     const signature = createHmac('sha256', webhook.secret).update(body).digest('hex');
+    let lastStatusCode: number | null = null;
+    let lastError: string | null = null;
+    let succeeded = false;
 
     for (let attempt = 1; attempt <= WebhookDispatcherService.MAX_RETRIES; attempt++) {
       try {
@@ -159,20 +237,38 @@ export class WebhookDispatcherService {
         });
 
         clearTimeout(timeout);
+        lastStatusCode = response.status;
 
         if (response.ok) {
           if (attempt > 1) {
             this.logger.log(`Webhook ${webhook.id} succeeded on attempt ${attempt}`);
           }
-          return;
+          succeeded = true;
+          const log: WebhookDeliveryLog = {
+            id: `del-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            webhookId: webhook.id,
+            businessId,
+            event,
+            url: webhook.url,
+            status: 'success',
+            statusCode: lastStatusCode,
+            attempts: attempt,
+            duration: Date.now() - startTime,
+            error: null,
+            timestamp: new Date().toISOString(),
+          };
+          this.addLog(log);
+          return log;
         }
 
+        lastError = `HTTP ${response.status}`;
         this.logger.warn(
           `Webhook ${webhook.id} returned ${response.status} (attempt ${attempt}/${WebhookDispatcherService.MAX_RETRIES})`,
         );
       } catch (err) {
+        lastError = (err as Error).message;
         this.logger.warn(
-          `Webhook ${webhook.id} failed (attempt ${attempt}/${WebhookDispatcherService.MAX_RETRIES}): ${(err as Error).message}`,
+          `Webhook ${webhook.id} failed (attempt ${attempt}/${WebhookDispatcherService.MAX_RETRIES}): ${lastError}`,
         );
       }
 
@@ -185,6 +281,22 @@ export class WebhookDispatcherService {
     this.logger.error(
       `Webhook ${webhook.id} delivery failed after ${WebhookDispatcherService.MAX_RETRIES} attempts for ${event} → ${webhook.url}`,
     );
+
+    const log: WebhookDeliveryLog = {
+      id: `del-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      webhookId: webhook.id,
+      businessId,
+      event,
+      url: webhook.url,
+      status: 'failed',
+      statusCode: lastStatusCode,
+      attempts: WebhookDispatcherService.MAX_RETRIES,
+      duration: Date.now() - startTime,
+      error: lastError,
+      timestamp: new Date().toISOString(),
+    };
+    this.addLog(log);
+    return log;
   }
 
   private sanitizeContact(contact: any) {
