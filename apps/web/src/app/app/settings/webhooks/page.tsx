@@ -221,6 +221,25 @@ export default function WebhooksSettingsPage() {
     navigator.clipboard.writeText(text).catch(() => {});
   };
 
+  if (loading) {
+    return (
+      <div className="space-y-6 animate-pulse">
+        <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <div className="h-5 w-28 bg-muted/40 rounded-lg" />
+            <div className="h-3 w-56 bg-muted/30 rounded-lg" />
+          </div>
+          <div className="h-10 w-32 bg-muted/30 rounded-xl" />
+        </div>
+        <div className="kf-card p-6 space-y-4">
+          {[1, 2].map((i) => (
+            <div key={i} className="h-16 bg-muted/20 rounded-xl" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
