@@ -11,7 +11,7 @@ import { TabNav } from "@/components/ui/tab-nav";
 
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { FeatureGuide } from "@/components/ui/feature-guide";
-import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { ModuleWalkthrough, WalkthroughTrigger } from "@/components/ui/module-walkthrough";
 import { MetricExplainer } from "@/components/ui/metric-explainer";
 import { EXPENSES_WALKTHROUGH, METRIC_DEFINITIONS } from "@/lib/walkthrough-definitions";
 import { formatCurrency } from "./components/expense-utils";
@@ -81,7 +81,10 @@ export default function ExpensesPage() {
     <div className="space-y-6">
       <PageHeader icon={Receipt} title="Expenses" subtitle="Track, analyze, and optimize your business spending" actionLabel="Add Expense" onAction={openAddModal} actionDataAttr="expenses-add"
         rightSlot={<button onClick={handleExport} className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"><Download className="w-4 h-4" /> Export CSV</button>} />
-      <FeatureGuide featureKey="expenses" title="Getting Started with Expenses" description="Track spending, set budgets, and manage vendors" steps={GUIDE_STEPS} />
+      <div className="flex items-center gap-2">
+        <FeatureGuide featureKey="expenses" title="Getting Started with Expenses" description="Track spending, set budgets, and manage vendors" steps={GUIDE_STEPS} />
+        <WalkthroughTrigger moduleKey="expenses" />
+      </div>
       <div data-walkthrough="expenses-kpi">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
           <MetricExplainer label={METRIC_DEFINITIONS.budget_utilization.label} explanation="Total amount spent across all tracked expenses for the selected period." formula="Sum of all expense amounts" goodValue="Compare month-over-month to spot spending trends.">

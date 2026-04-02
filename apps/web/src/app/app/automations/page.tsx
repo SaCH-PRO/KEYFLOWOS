@@ -6,7 +6,7 @@ import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { FeatureGuide } from "@/components/ui/feature-guide";
-import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { ModuleWalkthrough, WalkthroughTrigger } from "@/components/ui/module-walkthrough";
 import { AiBadge } from "@/components/ui/ai-badge";
 import { InfoBadge } from "@/components/ui/info-badge";
 import { AUTOMATIONS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
@@ -47,18 +47,21 @@ export default function AutomationsPage() {
         subtitle={<span className="inline-flex items-center gap-1.5">Build workflows that run your business on autopilot <AiBadge label="AI-Powered" compact /></span>}
       />
 
-      <FeatureGuide
-        featureKey="automations"
-        title="Getting Started with Automations"
-        description="Automate repetitive tasks and connect your business modules"
-        steps={[
-          { title: "Create an Automation", description: "Click 'New Automation' or use a template to set up trigger-to-action workflows." },
-          { title: "Pick a Trigger", description: "Choose what starts the automation — like a paid invoice, new booking, or form submission." },
-          { title: "Add Actions", description: "Define what happens next — send an email, create a task, tag a contact, or more." },
-          { title: "Toggle On/Off", description: "Enable or disable automations anytime without losing your configuration." },
-          { title: "Monitor Activity", description: "Check the Activity Log tab to see when automations ran and what they did." },
-        ]}
-      />
+      <div className="flex items-center gap-2">
+        <FeatureGuide
+          featureKey="automations"
+          title="Getting Started with Automations"
+          description="Automate repetitive tasks and connect your business modules"
+          steps={[
+            { title: "Create an Automation", description: "Click 'New Automation' or use a template to set up trigger-to-action workflows." },
+            { title: "Pick a Trigger", description: "Choose what starts the automation — like a paid invoice, new booking, or form submission." },
+            { title: "Add Actions", description: "Define what happens next — send an email, create a task, tag a contact, or more." },
+            { title: "Toggle On/Off", description: "Enable or disable automations anytime without losing your configuration." },
+            { title: "Monitor Activity", description: "Check the Activity Log tab to see when automations ran and what they did." },
+          ]}
+        />
+        <WalkthroughTrigger moduleKey="automations" />
+      </div>
 
       {isFreePlan && (
         <UpgradePrompt

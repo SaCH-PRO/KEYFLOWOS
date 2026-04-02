@@ -16,11 +16,11 @@ import {
   ChevronDown,
   MapPin,
   Info,
-  HelpCircle,
 } from "lucide-react";
 import { Button } from "@keyflow/ui";
 import { apiGet, apiPatch } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { InfoBadge } from "@/components/ui/info-badge";
 
 type PaymentSettings = {
   wipayApiKey: string;
@@ -50,25 +50,6 @@ const defaultSettings: PaymentSettings = {
   cashEnabled: false,
 };
 
-function FieldHint({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <button
-      type="button"
-      onClick={() => setOpen(!open)}
-      className="relative ml-1 inline-flex items-center"
-      aria-label="Field help"
-    >
-      <HelpCircle className="w-3 h-3 text-muted-foreground/50 hover:text-muted-foreground transition-colors" />
-      {open && (
-        <span className="absolute left-5 top-1/2 -translate-y-1/2 z-50 w-52 px-2.5 py-2 rounded-lg text-[11px] text-muted-foreground leading-relaxed shadow-xl" style={{ background: "hsl(var(--kf-bg))", border: "1px solid hsl(var(--kf-border) / 0.4)" }}>
-          {text}
-        </span>
-      )}
-    </button>
-  );
-}
-
 function SecretField({
   label,
   value,
@@ -88,8 +69,10 @@ function SecretField({
   return (
     <div>
       <label className="text-xs text-[hsl(var(--kf-text-muted))] block mb-1.5 font-medium">
-        {label}
-        {hint && <FieldHint text={hint} />}
+        <span className="inline-flex items-center gap-1">
+          {label}
+          {hint && <InfoBadge title={label} body={hint} side="right" iconSize={11} />}
+        </span>
       </label>
       <div className="relative">
         <input
@@ -131,8 +114,10 @@ function TextField({
   return (
     <div>
       <label className="text-xs text-[hsl(var(--kf-text-muted))] block mb-1.5 font-medium">
-        {label}
-        {hint && <FieldHint text={hint} />}
+        <span className="inline-flex items-center gap-1">
+          {label}
+          {hint && <InfoBadge title={label} body={hint} side="right" iconSize={11} />}
+        </span>
       </label>
       {multiline ? (
         <textarea
