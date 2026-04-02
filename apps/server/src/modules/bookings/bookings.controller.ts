@@ -101,6 +101,7 @@ export class BookingsController {
         resource: 'bookings',
         current: limitCheck.current,
         limit: limitCheck.limit,
+        upgradeTo: limitCheck.upgradeTo,
       });
     }
     return this.bookings.publicCreateBooking({

@@ -168,8 +168,9 @@ export class SubscriptionsService {
     });
   }
 
-  async checkLimit(businessId: string, resource: string): Promise<{ allowed: boolean; limit: number; current: number }> {
-    const { limits } = await this.getActiveSubscription(businessId);
+  async checkLimit(businessId: string, resource: string): Promise<{ allowed: boolean; limit: number; current: number; upgradeTo: string }> {
+    const { plan, limits } = await this.getActiveSubscription(businessId);
+    const upgradeTo = plan === 'FREE' ? 'FLOW' : plan === 'FLOW' ? 'KEYFLOW' : 'KEYFLOW';
 
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
@@ -179,87 +180,87 @@ export class SubscriptionsService {
       case 'contacts': {
         const count = await this.db.contact.count({ where: { businessId, deletedAt: null } });
         const limit = limits.contacts;
-        return { allowed: limit === -1 || count < limit, limit, current: count };
+        return { allowed: limit === -1 || count < limit, limit, current: count, upgradeTo };
       }
       case 'staff': {
         const count = await this.db.staffMember.count({ where: { businessId, deletedAt: null } });
         const limit = limits.staffMembers;
-        return { allowed: limit === -1 || count < limit, limit, current: count };
+        return { allowed: limit === -1 || count < limit, limit, current: count, upgradeTo };
       }
       case 'products': {
         const count = await this.db.product.count({ where: { businessId, deletedAt: null } });
         const limit = limits.products;
-        return { allowed: limit === -1 || count < limit, limit, current: count };
+        return { allowed: limit === -1 || count < limit, limit, current: count, upgradeTo };
       }
       case 'bookings': {
         const count = await this.db.booking.count({
           where: { businessId, deletedAt: null, createdAt: { gte: startOfMonth } },
         });
         const limit = limits.bookingsPerMonth;
-        return { allowed: limit === -1 || count < limit, limit, current: count };
+        return { allowed: limit === -1 || count < limit, limit, current: count, upgradeTo };
       }
       case 'invoices': {
         const count = await this.db.invoice.count({
           where: { businessId, createdAt: { gte: startOfMonth } },
         });
         const limit = limits.invoicesPerMonth;
-        return { allowed: limit === -1 || count < limit, limit, current: count };
+        return { allowed: limit === -1 || count < limit, limit, current: count, upgradeTo };
       }
       case 'marketplace_listings': {
         const count = await this.db.marketplaceListing.count({ where: { businessId } });
         const limit = (limits as any).marketplaceListings ?? 0;
-        return { allowed: limit === -1 || count < limit, limit, current: count };
+        return { allowed: limit === -1 || count < limit, limit, current: count, upgradeTo };
       }
       case 'warehouses': {
         const count = await this.db.warehouse.count({ where: { businessId } });
         const limit = (limits as any).warehouses ?? 0;
-        return { allowed: limit === -1 || count < limit, limit, current: count };
+        return { allowed: limit === -1 || count < limit, limit, current: count, upgradeTo };
       }
       case 'automations': {
         const count = await this.db.automation.count({ where: { businessId } });
         const limit = limits.automations;
-        return { allowed: limit === -1 || count < limit, limit, current: count };
+        return { allowed: limit === -1 || count < limit, limit, current: count, upgradeTo };
       }
       case 'social_posts': {
         const count = await this.db.socialPost.count({
           where: { businessId, createdAt: { gte: startOfMonth } },
         });
         const limit = limits.socialPosts;
-        return { allowed: limit === -1 || count < limit, limit, current: count };
+        return { allowed: limit === -1 || count < limit, limit, current: count, upgradeTo };
       }
       case 'email_campaigns': {
         const count = await this.db.emailCampaign.count({
           where: { businessId, createdAt: { gte: startOfMonth } },
         });
         const limit = (limits as any).emailCampaigns ?? 0;
-        return { allowed: limit === -1 || count < limit, limit, current: count };
+        return { allowed: limit === -1 || count < limit, limit, current: count, upgradeTo };
       }
       case 'lead_forms': {
         const count = await this.db.leadForm.count({ where: { businessId } });
         const limit = (limits as any).leadForms ?? 1;
-        return { allowed: limit === -1 || count < limit, limit, current: count };
+        return { allowed: limit === -1 || count < limit, limit, current: count, upgradeTo };
       }
       case 'expenses': {
         const count = await this.db.expense.count({
           where: { businessId, createdAt: { gte: startOfMonth } },
         });
         const limit = (limits as any).expenses ?? 10;
-        return { allowed: limit === -1 || count < limit, limit, current: count };
+        return { allowed: limit === -1 || count < limit, limit, current: count, upgradeTo };
       }
       case 'webhooks': {
         const count = await this.db.webhook.count({ where: { businessId } });
         const limit = (limits as any).webhooks ?? 0;
-        return { allowed: limit === -1 || count < limit, limit, current: count };
+        return { allowed: limit === -1 || count < limit, limit, current: count, upgradeTo };
       }
       case 'reports': {
         const count = await this.db.aiUsageLog.count({
           where: { businessId, feature: 'report_narrative', createdAt: { gte: startOfMonth } },
         });
         const limit = (limits as any).reports ?? 2;
-        return { allowed: limit === -1 || count < limit, limit, current: count };
+        return { allowed: limit === -1 || count < limit, limit, current: count, upgradeTo };
       }
       default:
-        return { allowed: true, limit: -1, current: 0 };
+        return { allowed: true, limit: -1, current: 0, upgradeTo };
     }
   }
 

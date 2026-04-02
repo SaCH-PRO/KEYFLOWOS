@@ -32,6 +32,7 @@ export class PlanLimitGuard implements CanActivate {
         resource,
         current: result.current,
         limit: result.limit,
+        upgradeTo: result.upgradeTo,
       });
     }
 

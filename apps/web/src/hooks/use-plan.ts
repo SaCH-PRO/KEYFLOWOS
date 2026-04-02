@@ -144,6 +144,7 @@ export interface PlanLimitState {
   message: string;
   current: number;
   limit: number;
+  upgradeTo?: string;
 }
 
 export function usePlanLimitHandler() {
@@ -161,6 +162,7 @@ export function usePlanLimitHandler() {
           message: detail.message,
           current: detail.current,
           limit: detail.limit,
+          upgradeTo: detail.upgradeTo,
         });
       }
     };
