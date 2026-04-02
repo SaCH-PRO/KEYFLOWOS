@@ -207,7 +207,7 @@ export function PlanLimitBanner({
   isUnlimited,
   nearLimit,
   atLimit,
-  requiredPlan = "FLOW",
+  upgradeTo,
 }: {
   resourceKey: string;
   label: string;
@@ -216,7 +216,7 @@ export function PlanLimitBanner({
   isUnlimited: boolean;
   nearLimit: boolean;
   atLimit: boolean;
-  requiredPlan?: string;
+  upgradeTo?: string | null;
 }) {
   if (isUnlimited || (!nearLimit && !atLimit)) return null;
 
@@ -224,7 +224,7 @@ export function PlanLimitBanner({
     <UpgradePrompt
       feature={label}
       variant="banner"
-      requiredPlan={requiredPlan}
+      requiredPlan={upgradeTo ?? "FLOW"}
       currentUsage={currentUsage}
       limit={limit}
     />

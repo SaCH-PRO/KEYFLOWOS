@@ -7,7 +7,24 @@ type FetchOptions = {
   init?: RequestInit;
 };
 
-type ApiResponse<T> = { data: T | null; error: string | null };
+type ApiResponse<T> = { data: T | null; error: string | null; planLimitReached?: PlanLimitError | null };
+
+export interface PlanLimitError {
+  resource: string;
+  current: number;
+  limit: number;
+  message: string;
+}
+
+function parsePlanLimitError(parsed: Record<string, unknown> | null): PlanLimitError | null {
+  if (!parsed || parsed.error !== "PLAN_LIMIT_REACHED") return null;
+  return {
+    resource: (parsed.resource as string) ?? "",
+    current: (parsed.current as number) ?? 0,
+    limit: (parsed.limit as number) ?? 0,
+    message: (parsed.message as string) ?? "Plan limit reached",
+  };
+}
 
 function buildHeaders(initHeaders?: HeadersInit) {
   const headers = new Headers({
@@ -42,9 +59,10 @@ export async function apiPost<T>({ path, body, init }: FetchOptions): Promise<Ap
     const data: unknown = await res.json().catch(() => null);
     if (!res.ok) {
       const parsed = (typeof data === "object" && data !== null ? (data as Record<string, unknown>) : null);
+      const planLimit = parsePlanLimitError(parsed);
       const message =
         parsed && typeof parsed.message === "string" ? parsed.message : res.statusText || "Request failed";
-      return { data: null, error: message };
+      return { data: null, error: message, planLimitReached: planLimit };
     }
     return { data: data as T, error: null };
   } catch (error: unknown) {
@@ -121,6 +139,10 @@ export async function apiDelete<T>(path: string, body?: unknown): Promise<ApiRes
 
 export async function apiPostSimple<T>(path: string, body: unknown): Promise<ApiResponse<T>> {
   return apiPost<T>({ path, body });
+}
+
+export function isPlanLimitError<T>(res: ApiResponse<T>): res is ApiResponse<T> & { planLimitReached: PlanLimitError } {
+  return res.planLimitReached != null;
 }
 
 export { API_BASE, getAuthHeaders, AI_SUGGEST_URL };
