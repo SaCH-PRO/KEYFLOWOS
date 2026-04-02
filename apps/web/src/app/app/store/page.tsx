@@ -10,7 +10,7 @@ import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { FeatureGuide } from "@/components/ui/feature-guide";
-import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { ModuleWalkthrough, WalkthroughTrigger } from "@/components/ui/module-walkthrough";
 import { InfoBadge } from "@/components/ui/info-badge";
 import { STORE_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { SetupModeBanner } from "@/components/ui/setup-mode-banner";
@@ -98,7 +98,7 @@ export default function StorePage() {
       <SetupModeBanner label="You're in Setup Mode — configure your storefront, products, and hours" settingsHref="/app/settings/business" />
       <PageHeader icon={Store} title="Store Setup"
         subtitle={<span className="inline-flex items-center gap-1.5">{s.services.length} services · {s.commerceProducts.length} products · {s.storeEnabled ? "Live" : "Draft"} <InfoBadge title="Store Status" body={s.storeEnabled ? "Your store is live and visible to the public. Customers can browse and book." : "Your store is in draft mode. Publish it from the toggle above to make it visible."} iconSize={12} /></span>}
-        titleExtra={<FeatureGuide featureKey="store" title="Getting Started with Your Store" description="Set up your online storefront to accept bookings and sell products." steps={GUIDE_STEPS} />}
+        titleExtra={<div className="flex items-center gap-2"><FeatureGuide featureKey="store" title="Getting Started with Your Store" description="Set up your online storefront to accept bookings and sell products." steps={GUIDE_STEPS} /><WalkthroughTrigger moduleKey="store" /></div>}
         rightSlot={<StoreHeaderActions storeEnabled={s.storeEnabled} publicUrl={s.getPublicBookingUrl()} onToggleEnabled={s.toggleStoreEnabled} />}
       />
       <div data-walkthrough="store-setup">
