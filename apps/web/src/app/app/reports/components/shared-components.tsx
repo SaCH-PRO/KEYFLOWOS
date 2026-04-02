@@ -162,14 +162,28 @@ export function ProgressBar({ value, max, color }: { value: number; max: number;
   );
 }
 
-export function CollapsibleSection({ title, icon: Icon, children, defaultOpen = false }: {
-  title: string; icon?: React.ElementType; children: React.ReactNode; defaultOpen?: boolean;
+export function CollapsibleSection({ title, icon: Icon, children, defaultOpen = false, persistKey }: {
+  title: string; icon?: React.ElementType; children: React.ReactNode; defaultOpen?: boolean; persistKey?: string;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const storageKey = persistKey ? `kf-section-${persistKey}` : null;
+  const [open, setOpen] = useState(() => {
+    if (storageKey && typeof window !== "undefined") {
+      const stored = localStorage.getItem(storageKey);
+      if (stored !== null) return stored === "1";
+    }
+    return defaultOpen;
+  });
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (storageKey && typeof window !== "undefined") {
+      localStorage.setItem(storageKey, next ? "1" : "0");
+    }
+  };
   return (
     <Card className="backdrop-blur border-border/60 overflow-hidden" style={{ background: "hsl(var(--kf-card) / 0.6)" }}>
       <button
-        onClick={() => setOpen(!open)}
+        onClick={toggle}
         className="w-full flex items-center gap-2 p-4 min-h-[44px] text-left hover:bg-[hsl(var(--kf-muted))]/10 transition-colors"
       >
         {Icon && <Icon className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />}

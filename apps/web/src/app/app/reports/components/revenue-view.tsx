@@ -57,7 +57,7 @@ export function RevenueView({ report, businessId }: { report: GeneratedReport; b
         />
       </div>
 
-      <CollapsibleSection title="Revenue Analysis" icon={TrendingUp} defaultOpen>
+      <CollapsibleSection title="Revenue Analysis" icon={TrendingUp} defaultOpen persistKey="rev-analysis">
         <NarrativeSection content={report.aiNarrative} />
       </CollapsibleSection>
 
@@ -71,7 +71,7 @@ export function RevenueView({ report, businessId }: { report: GeneratedReport; b
       />
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <CollapsibleSection title="Invoice Status Breakdown" defaultOpen>
+        <CollapsibleSection title="Invoice Status Breakdown" defaultOpen persistKey="rev-status-breakdown">
           <div className="space-y-3">
             {Object.entries(m.revenue.byStatus).map(([status, data]) => (
               <div key={status} className="space-y-1">
@@ -89,7 +89,7 @@ export function RevenueView({ report, businessId }: { report: GeneratedReport; b
           </div>
         </CollapsibleSection>
 
-        <CollapsibleSection title="Top Clients by Revenue" defaultOpen>
+        <CollapsibleSection title="Top Clients by Revenue" defaultOpen persistKey="rev-top-clients">
           <DataTable
             headers={["Client", "Revenue"]}
             rows={m.revenue.topClients.map(cl => [cl.name, formatCurrency(cl.total, m.currency)])}

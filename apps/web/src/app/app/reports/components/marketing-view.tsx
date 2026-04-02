@@ -59,13 +59,13 @@ export function MarketingView({ report }: MarketingViewProps) {
       </div>
 
       {(report.aiNarrative || report.narrative) && (
-        <CollapsibleSection title="AI Marketing Analysis" icon={CheckCircle2} defaultOpen>
+        <CollapsibleSection title="AI Marketing Analysis" icon={CheckCircle2} defaultOpen persistKey="mkt-ai-analysis">
           <NarrativeSection content={report.aiNarrative} narrative={report.narrative} />
         </CollapsibleSection>
       )}
 
       <div className="grid lg:grid-cols-2 gap-4">
-        <CollapsibleSection title="Top Campaigns by Engagement" icon={TrendingUp} defaultOpen>
+        <CollapsibleSection title="Top Campaigns by Engagement" icon={TrendingUp} defaultOpen persistKey="mkt-top-campaigns">
           {topCampaigns.length > 0 ? (
             <div className="space-y-2">
               {topCampaigns.slice(0, 5).map((c: { name: string; openRate: number; clickRate: number; sent: number }, i: number) => (
@@ -92,7 +92,7 @@ export function MarketingView({ report }: MarketingViewProps) {
           )}
         </CollapsibleSection>
 
-        <CollapsibleSection title="Lead Sources" icon={Users} defaultOpen>
+        <CollapsibleSection title="Lead Sources" icon={Users} defaultOpen persistKey="mkt-lead-sources">
           {leadSources.length > 0 ? (
             <div className="space-y-2">
               {leadSources.slice(0, 5).map((src: { name: string; count: number; conversionRate: number }, i: number) => (

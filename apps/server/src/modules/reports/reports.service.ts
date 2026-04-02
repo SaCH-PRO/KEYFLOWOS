@@ -234,13 +234,20 @@ Use ${currency} for all monetary values. Be specific with numbers. Keep each sec
       aiNarrative = 'AI analysis is temporarily unavailable. Please review the data metrics below.';
     }
 
-    let comparison: Record<string, any> | null = null;
+    let comparison: {
+      period: { start: string; end: string };
+      revenue: { total: number; invoiceCount: number; changePct: number };
+      expenses: { total: number; count: number; changePct: number };
+      profitability: { netProfit: number; profitMargin: number; changePct: number };
+      bookings: { total: number; changePct: number };
+      clients: { totalContacts: number; changePct: number };
+    } | null = null;
     if (compare) {
       const periodMs = end.getTime() - start.getTime();
       const prevEnd = new Date(start.getTime() - 1);
       const prevStart = new Date(prevEnd.getTime() - periodMs);
 
-      const [prevPaid, prevExpenses, prevBookings, prevContacts] = await Promise.all([
+      const [prevPaid, prevExpenses, prevBookings, prevContacts, currentPeriodContacts] = await Promise.all([
         this.prisma.client.invoice.aggregate({
           where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: prevStart, lte: prevEnd } },
           _sum: { total: true },
@@ -255,7 +262,10 @@ Use ${currency} for all monetary values. Be specific with numbers. Keep each sec
           where: { businessId, deletedAt: null, startTime: { gte: prevStart, lte: prevEnd } },
         }),
         this.prisma.client.contact.count({
-          where: { businessId, deletedAt: null, createdAt: { lte: prevEnd } },
+          where: { businessId, deletedAt: null, createdAt: { gte: prevStart, lte: prevEnd } },
+        }),
+        this.prisma.client.contact.count({
+          where: { businessId, deletedAt: null, createdAt: { gte: start, lte: end } },
         }),
       ]);
 
@@ -290,7 +300,7 @@ Use ${currency} for all monetary values. Be specific with numbers. Keep each sec
         },
         clients: {
           totalContacts: prevContacts,
-          changePct: pctChange(contacts, prevContacts),
+          changePct: pctChange(currentPeriodContacts, prevContacts),
         },
       };
     }

@@ -3602,13 +3602,30 @@ export interface ReportComparison {
   bookings: { total: number; changePct: number };
   clients: { totalContacts: number; changePct: number };
 }
+export interface ReportModuleData {
+  totalBookings?: number;
+  completedBookings?: number;
+  cancelledBookings?: number;
+  noShowRate?: number;
+  avgBookingValue?: number;
+  utilizationRate?: number;
+  topServices?: Array<{ name: string; count: number; revenue: number }>;
+  topStaff?: Array<{ name: string; bookings: number; completionRate: number }>;
+  campaignsSent?: number;
+  avgOpenRate?: number;
+  totalClicks?: number;
+  formSubmissions?: number;
+  topCampaigns?: Array<{ name: string; openRate: number; clickRate: number; sent: number }>;
+  leadSources?: Array<{ name: string; count: number; conversionRate: number }>;
+  [key: string]: unknown;
+}
 export interface GeneratedReport {
   type: string;
   generatedAt: string;
   metrics: ReportMetrics;
   aiNarrative: string;
   comparison?: ReportComparison | null;
-  data?: Record<string, any>;
+  data?: ReportModuleData;
   narrative?: string;
 }
 export async function fetchReport(businessId: string, type = 'executive', startDate?: string, endDate?: string, compare?: boolean): Promise<ApiResult<GeneratedReport>> {

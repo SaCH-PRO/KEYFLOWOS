@@ -44,6 +44,8 @@ function computeConfidence(forecast: CashFlowForecast, historicalDays: number): 
   return { level: "Low", pct: score, color: "--kf-error" };
 }
 
+type Granularity = "daily" | "weekly" | "monthly";
+
 export function RevenueProjectionChart({
   businessId: propBusinessId,
   currency = "TTD",
@@ -54,6 +56,7 @@ export function RevenueProjectionChart({
 }: RevenueProjectionChartProps) {
   const [forecast, setForecast] = useState<CashFlowForecast | null>(null);
   const [loading, setLoading] = useState(false);
+  const [granularity, setGranularity] = useState<Granularity>("daily");
 
   const load = useCallback(async () => {
     const bId = propBusinessId ?? getStoredBusinessId();
@@ -83,24 +86,28 @@ export function RevenueProjectionChart({
     }
     hDays = Math.min(hDays, 90);
 
+    const step = granularity === "monthly" ? 30 : granularity === "weekly" ? 7 : 1;
     const historicalDailyRate = hDays > 0 ? currentRevenue / hDays : 0;
     const points: ChartPoint[] = [];
 
-    for (let d = 0; d <= hDays; d++) {
+    for (let d = 0; d <= hDays; d += step) {
       const rev = Math.round(historicalDailyRate * d * 100) / 100;
-      const dayLabel = d === 0 ? `-${hDays}d` : d === hDays ? "Today" : d % Math.max(1, Math.round(hDays / 4)) === 0 ? `-${hDays - d}d` : "";
+      const dayLabel = d === 0 ? `-${hDays}d` : d >= hDays ? "Today" : `-${hDays - d}d`;
       points.push({
-        label: dayLabel || `h${d}`,
+        label: dayLabel,
         historical: rev,
-        projected: d === hDays ? rev : null,
+        projected: d >= hDays ? rev : null,
       });
     }
+    if (points.length > 0 && points[points.length - 1].label !== "Today") {
+      const rev = Math.round(historicalDailyRate * hDays * 100) / 100;
+      points.push({ label: "Today", historical: rev, projected: rev });
+    }
 
-    for (let d = 1; d <= 90; d++) {
+    for (let d = step; d <= 90; d += step) {
       const projected = currentRevenue + dailyRate * d;
-      const dayLabel = d % 30 === 0 ? `+${d}d` : d % 15 === 0 ? `+${d}d` : "";
       points.push({
-        label: dayLabel || `p${d}`,
+        label: `+${d}d`,
         historical: null,
         projected: Math.round(projected * 100) / 100,
       });
@@ -113,7 +120,7 @@ export function RevenueProjectionChart({
     ];
 
     return { chartData: points, milestones: ms, confidence: computeConfidence(forecast, hDays), historicalDays: hDays };
-  }, [forecast, currentRevenue, periodStart, periodEnd]);
+  }, [forecast, currentRevenue, periodStart, periodEnd, granularity]);
 
   if (!forecast && !loading) return null;
 
@@ -133,13 +140,30 @@ export function RevenueProjectionChart({
             </span>
           )}
         </div>
-        <button
-          onClick={load}
-          disabled={loading}
-          className="text-[10px] flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 min-w-[44px] min-h-[44px] justify-center"
-        >
-          <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center rounded-lg overflow-hidden border border-border/40">
+            {(["daily", "weekly", "monthly"] as Granularity[]).map(g => (
+              <button
+                key={g}
+                onClick={() => setGranularity(g)}
+                className={`text-[10px] px-2 min-h-[28px] transition-colors capitalize ${
+                  granularity === g
+                    ? "bg-[hsl(var(--kf-accent1))]/20 text-[hsl(var(--kf-accent1))] font-medium"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/20"
+                }`}
+              >
+                {g.charAt(0).toUpperCase() + g.slice(1, 3)}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={load}
+            disabled={loading}
+            className="text-[10px] flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 min-w-[44px] min-h-[44px] justify-center"
+          >
+            <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
+          </button>
+        </div>
       </div>
 
       {loading && !forecast ? (

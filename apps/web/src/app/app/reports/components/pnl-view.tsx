@@ -57,7 +57,7 @@ export function PnlView({ report }: { report: GeneratedReport }) {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <CollapsibleSection title="Revenue Breakdown" icon={TrendingUp} defaultOpen>
+        <CollapsibleSection title="Revenue Breakdown" icon={TrendingUp} defaultOpen persistKey="pnl-revenue-breakdown">
           <DataTable
             headers={["Status", "Count", "Amount"]}
             rows={revenueItems.map(r => [
@@ -68,7 +68,7 @@ export function PnlView({ report }: { report: GeneratedReport }) {
           />
         </CollapsibleSection>
 
-        <CollapsibleSection title="Expense Breakdown" icon={PieChart} defaultOpen>
+        <CollapsibleSection title="Expense Breakdown" icon={PieChart} defaultOpen persistKey="pnl-expense-breakdown">
           <DataTable
             headers={["Category", "Count", "Amount"]}
             rows={m.expenses.byCategory.map(e => [
@@ -90,7 +90,7 @@ export function PnlView({ report }: { report: GeneratedReport }) {
         </CollapsibleSection>
       </div>
 
-      <CollapsibleSection title="P&L Analysis" icon={FileText} defaultOpen>
+      <CollapsibleSection title="P&L Analysis" icon={FileText} defaultOpen persistKey="pnl-analysis">
         <NarrativeSection content={report.aiNarrative} />
       </CollapsibleSection>
 
