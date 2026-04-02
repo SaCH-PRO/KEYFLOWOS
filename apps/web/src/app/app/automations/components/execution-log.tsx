@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { Clock, Zap, RefreshCw, AlertTriangle, CheckCircle, Info, Search, SkipForward } from "lucide-react";
+import { Clock, Zap, RefreshCw, AlertTriangle, CheckCircle, Info, Search, SkipForward, ChevronDown, ChevronRight, FileText } from "lucide-react";
 import { fetchActivityFeed, ActivityItem } from "@/lib/client";
 
 const TONE_STYLES: Record<string, { icon: typeof Zap; color: string; bg: string; label: string }> = {
@@ -32,6 +32,7 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilterKey>("all");
+  const [expandedItem, setExpandedItem] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!businessId) return;
@@ -172,42 +173,140 @@ export function ExecutionLog({ businessId }: ExecutionLogProps) {
             {filteredItems.map((item) => {
               const toneStyle = TONE_STYLES[item.tone ?? "info"] ?? TONE_STYLES.info;
               const ToneIcon = toneStyle.icon;
+              const isExpanded = expandedItem === item.id;
               return (
-                <div key={item.id} className="px-4 py-3 flex items-start gap-3 hover:bg-muted/20 transition-colors">
-                  <div
-                    className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
-                    style={{ background: toneStyle.bg }}
+                <div key={item.id}>
+                  <button
+                    onClick={() => setExpandedItem(isExpanded ? null : item.id)}
+                    className="w-full px-4 py-3 flex items-start gap-3 hover:bg-muted/20 transition-colors text-left min-h-[44px]"
                   >
-                    <ToneIcon className="w-3.5 h-3.5" style={{ color: toneStyle.color }} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium">{item.title}</span>
-                      <span
-                        className="text-[10px] px-1.5 py-0.5 rounded-md font-medium"
-                        style={{ background: toneStyle.bg, color: toneStyle.color }}
-                      >
-                        {toneStyle.label}
-                      </span>
+                    <div
+                      className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+                      style={{ background: toneStyle.bg }}
+                    >
+                      <ToneIcon className="w-3.5 h-3.5" style={{ color: toneStyle.color }} />
                     </div>
-                    {item.detail && (
-                      <p className="text-[12px] text-muted-foreground mt-0.5">{item.detail}</p>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">{item.title}</span>
+                        <span
+                          className="text-[10px] px-1.5 py-0.5 rounded-md font-medium"
+                          style={{ background: toneStyle.bg, color: toneStyle.color }}
+                        >
+                          {toneStyle.label}
+                        </span>
+                      </div>
+                      {item.detail && (
+                        <p className="text-[12px] text-muted-foreground mt-0.5">{item.detail}</p>
+                      )}
+                      <div className="flex items-center gap-3 mt-1 text-[11px] text-muted-foreground/60">
+                        <span className="inline-flex items-center gap-1">
+                          <Zap className="w-3 h-3" />
+                          {item.entityType}
+                        </span>
+                        <span>{item.action}</span>
+                        <span>{new Date(item.createdAt).toLocaleString()}</span>
+                      </div>
+                    </div>
+                    {isExpanded ? (
+                      <ChevronDown className="w-4 h-4 shrink-0 mt-1 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="w-4 h-4 shrink-0 mt-1 text-muted-foreground" />
                     )}
-                    <div className="flex items-center gap-3 mt-1 text-[11px] text-muted-foreground/60">
-                      <span className="inline-flex items-center gap-1">
-                        <Zap className="w-3 h-3" />
-                        {item.entityType}
-                      </span>
-                      <span>{item.action}</span>
-                      <span>{new Date(item.createdAt).toLocaleString()}</span>
+                  </button>
+                  {isExpanded && (
+                    <div
+                      className="px-4 pb-3 ml-10 space-y-3"
+                      style={{ borderTop: "1px solid hsl(var(--kf-border) / 0.3)" }}
+                    >
+                      <div className="pt-3 space-y-2">
+                        <div className="flex items-center gap-2 text-xs font-medium" style={{ color: "hsl(var(--kf-accent1))" }}>
+                          <FileText className="w-3.5 h-3.5" />
+                          Execution Trace
+                        </div>
+                        <div className="space-y-1.5">
+                          <TraceStep
+                            label="Trigger"
+                            value={item.entityType || "Unknown trigger"}
+                            status="completed"
+                          />
+                          <TraceConnector />
+                          <TraceStep
+                            label="Action"
+                            value={item.action}
+                            status={item.tone === "error" ? "failed" : item.action === "skipped" ? "skipped" : "completed"}
+                          />
+                          <TraceConnector />
+                          <TraceStep
+                            label="Result"
+                            value={item.detail || (item.tone === "error" ? "Execution failed" : "Completed successfully")}
+                            status={item.tone === "error" ? "failed" : "completed"}
+                          />
+                        </div>
+                      </div>
+                      <div
+                        className="rounded-lg p-3 text-[11px] space-y-1"
+                        style={{ background: "hsl(var(--kf-muted) / 0.2)", border: "1px solid hsl(var(--kf-border) / 0.3)" }}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Run ID</span>
+                          <span className="font-mono">{item.id.slice(0, 12)}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Timestamp</span>
+                          <span>{new Date(item.createdAt).toLocaleString()}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Module</span>
+                          <span>{item.module || "automation"}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Status</span>
+                          <span
+                            className="px-1.5 py-0.5 rounded text-[10px] font-medium"
+                            style={{ background: toneStyle.bg, color: toneStyle.color }}
+                          >
+                            {toneStyle.label}
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               );
             })}
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function TraceStep({ label, value, status }: { label: string; value: string; status: "completed" | "failed" | "skipped" }) {
+  const statusColors = {
+    completed: { bg: "hsl(var(--kf-success) / 0.15)", color: "hsl(var(--kf-success))", dot: "hsl(var(--kf-success))" },
+    failed: { bg: "hsl(var(--kf-error) / 0.15)", color: "hsl(var(--kf-error))", dot: "hsl(var(--kf-error))" },
+    skipped: { bg: "hsl(var(--kf-warning) / 0.15)", color: "hsl(var(--kf-warning))", dot: "hsl(var(--kf-warning))" },
+  };
+  const s = statusColors[status];
+  return (
+    <div
+      className="flex items-center gap-3 rounded-lg px-3 py-2"
+      style={{ background: s.bg, border: `1px solid ${s.color}20` }}
+    >
+      <div className="w-2 h-2 rounded-full shrink-0" style={{ background: s.dot }} />
+      <div className="flex-1 min-w-0">
+        <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: s.color }}>{label}</span>
+        <p className="text-xs truncate">{value}</p>
+      </div>
+    </div>
+  );
+}
+
+function TraceConnector() {
+  return (
+    <div className="flex justify-center">
+      <div className="w-px h-3" style={{ background: "hsl(var(--kf-border) / 0.5)" }} />
     </div>
   );
 }

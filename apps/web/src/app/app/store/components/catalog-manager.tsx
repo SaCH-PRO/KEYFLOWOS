@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useState, useCallback, useRef } from "react";
+import { motion, AnimatePresence, Reorder } from "framer-motion";
 import {
   Store,
   Briefcase,
@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   ExternalLink,
+  GripVertical,
 } from "lucide-react";
 import Link from "next/link";
 import { Product } from "@/lib/client";
@@ -47,6 +48,7 @@ type Props = {
   onConfirmRemoveChange: (id: string | null) => void;
   onDeleteFromStore: (serviceId: string, productName?: string) => void;
   services: { id: string; name: string }[];
+  onReorder?: (orderedIds: string[]) => void;
 };
 
 const CATEGORY_ICONS: Record<string, React.ElementType> = {
@@ -69,16 +71,49 @@ export function CatalogManager({
   onConfirmRemoveChange,
   onDeleteFromStore,
   services,
+  onReorder,
 }: Props) {
   const [searchInput, setSearchInput] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
   const [showFilters, setShowFilters] = useState(false);
   const [bulkConfirm, setBulkConfirm] = useState<"add" | "remove" | null>(null);
+  const [orderedProducts, setOrderedProducts] = useState<Product[]>(products);
+  const [isDragging, setIsDragging] = useState(false);
+  const orderDirty = useRef(false);
+
+  const syncOrder = useCallback(() => {
+    setOrderedProducts((prev) => {
+      const prevIds = new Set(prev.map((p) => p.id));
+      const productIds = new Set(products.map((p) => p.id));
+      const kept = prev.filter((p) => productIds.has(p.id));
+      const added = products.filter((p) => !prevIds.has(p.id));
+      return [...kept, ...added];
+    });
+  }, [products]);
+
+  if (!orderDirty.current && products.length !== orderedProducts.length) {
+    syncOrder();
+  }
+
+  const handleReorder = useCallback((newOrder: Product[]) => {
+    orderDirty.current = true;
+    setOrderedProducts(newOrder);
+  }, []);
+
+  const handleReorderComplete = useCallback(() => {
+    setIsDragging(false);
+    if (onReorder && orderDirty.current) {
+      onReorder(orderedProducts.map((p) => p.id));
+    }
+    orderDirty.current = false;
+  }, [onReorder, orderedProducts]);
 
   const notAddedCount = products.filter((p) => !storeServiceNames.has(p.name)).length;
   const inStoreCount = storeItemCount;
 
-  const filteredProducts = products.filter((p) => {
+  const isFiltering = categoryFilter !== "ALL" || searchInput.trim() !== "";
+
+  const filteredProducts = (isFiltering ? products : orderedProducts).filter((p) => {
     if (categoryFilter !== "ALL" && p.category !== categoryFilter) return false;
     if (searchInput.trim()) {
       const q = searchInput.toLowerCase();
@@ -264,148 +299,34 @@ export function CatalogManager({
 
       {filteredProducts.length > 0 ? (
         <div className="p-3 space-y-2">
-          {filteredProducts.map((p, idx) => {
-            const isOnStore = storeServiceNames.has(p.name);
-            const isProcessing = processingItems.has(p.id);
-            const isConfirming = confirmRemove === p.id;
-            const Icon = CATEGORY_ICONS[p.category] || Briefcase;
-
-            return (
-              <motion.div
+          {!isFiltering && (
+            <p className="text-[10px] text-muted-foreground/50 px-1 flex items-center gap-1">
+              <GripVertical className="w-3 h-3" /> Drag to reorder display order on your storefront
+            </p>
+          )}
+          <Reorder.Group
+            axis="y"
+            values={filteredProducts}
+            onReorder={isFiltering ? () => {} : handleReorder}
+            className="space-y-2"
+          >
+            {filteredProducts.map((p) => (
+              <CatalogItem
                 key={p.id}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: idx * 0.03 }}
-                className={`relative w-full flex items-center gap-3 rounded-xl px-4 py-3.5 text-left text-sm cursor-pointer transition-all ${
-                  isProcessing ? "opacity-60 pointer-events-none" : ""
-                }`}
-                style={{
-                  backgroundColor: isOnStore ? "hsl(var(--kf-accent1) / 0.08)" : "hsl(var(--kf-muted) / 0.3)",
-                  border: isOnStore
-                    ? "1px solid hsl(var(--kf-accent1) / 0.25)"
-                    : "1px solid hsl(var(--kf-border) / 0.5)",
-                }}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    if (!isProcessing) onToggleItem(p);
-                  }
-                }}
-                onClick={() => !isProcessing && !isConfirming && onToggleItem(p)}
-              >
-                {isConfirming && (
-                  <div
-                    className="absolute inset-0 rounded-xl flex items-center justify-center gap-3 z-10"
-                    style={{
-                      background: "hsl(var(--kf-background) / 0.95)",
-                      backdropFilter: "blur(8px)",
-                      border: "1px solid hsl(0 70% 50% / 0.3)",
-                    }}
-                  >
-                    <span className="text-sm font-medium text-red-400">Remove from store?</span>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onConfirmRemoveChange(null); }}
-                      className="kf-btn-secondary text-xs"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const matched = services.find((s) => s.name === p.name);
-                        if (matched) onDeleteFromStore(matched.id, p.name);
-                      }}
-                      className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/20 border border-red-500/30 text-red-400 hover:bg-red-500/30 transition-colors"
-                    >
-                      Confirm
-                    </button>
-                  </div>
-                )}
-
-                <div
-                  className={`h-5 w-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${
-                    isOnStore ? "" : "border-[hsl(var(--kf-muted-foreground)/0.3)]"
-                  }`}
-                  style={
-                    isOnStore
-                      ? { backgroundColor: "hsl(var(--kf-accent1))", borderColor: "hsl(var(--kf-accent1))" }
-                      : {}
-                  }
-                >
-                  {isProcessing ? (
-                    <div className="w-3 h-3 border-2 border-[hsl(var(--kf-accent1)/0.4)] border-t-[hsl(var(--kf-accent1))] rounded-full animate-spin" />
-                  ) : isOnStore ? (
-                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                    </svg>
-                  ) : null}
-                </div>
-
-                {p.imageUrl ? (
-                  <div
-                    className="h-10 w-10 rounded-xl overflow-hidden flex-shrink-0"
-                    style={{
-                      border: isOnStore
-                        ? "1px solid hsl(var(--kf-accent1) / 0.3)"
-                        : "1px solid hsl(var(--kf-border))",
-                    }}
-                  >
-                    <img src={p.imageUrl} alt={p.name} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                  </div>
-                ) : (
-                  <div
-                    className="h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0 text-sm font-bold"
-                    style={{
-                      background: isOnStore
-                        ? `linear-gradient(135deg, hsl(var(--kf-accent1) / 0.2), hsl(var(--kf-accent2) / 0.1))`
-                        : "hsl(var(--kf-muted))",
-                      border: isOnStore
-                        ? "1px solid hsl(var(--kf-accent1) / 0.3)"
-                        : "1px solid hsl(var(--kf-border))",
-                      color: isOnStore ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-muted-foreground))",
-                    }}
-                  >
-                    {p.name.charAt(0).toUpperCase()}
-                  </div>
-                )}
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className={`font-medium truncate ${isOnStore ? "" : "text-muted-foreground"}`}>{p.name}</span>
-                    <span
-                      className="text-[10px] px-1.5 py-0.5 rounded-full uppercase flex-shrink-0 border"
-                      style={{ borderColor: "hsl(var(--kf-accent1) / 0.2)", color: "hsl(var(--kf-accent1) / 0.7)" }}
-                    >
-                      {p.category}
-                    </span>
-                    {p.sku && (
-                      <span className="text-[10px] text-muted-foreground/50 flex-shrink-0">
-                        SKU: {p.sku}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span className={`text-[11px] font-medium ${isOnStore ? "text-emerald-400" : "text-muted-foreground/60"}`}>
-                      {isProcessing ? "Processing..." : isOnStore ? "\u2713 On store" : "Not on store"}
-                    </span>
-                    {(() => {
-                      const updated = formatRelativeTime((p as Record<string, unknown>).updatedAt as string | undefined);
-                      return updated ? <span className="text-[10px] text-muted-foreground/40">&middot; {updated}</span> : null;
-                    })()}
-                    {p.description && (
-                      <span className="text-[10px] text-muted-foreground/40 truncate max-w-[200px]">&middot; {p.description}</span>
-                    )}
-                  </div>
-                </div>
-
-                <span className="text-xs font-semibold flex-shrink-0" style={{ color: "hsl(var(--kf-accent1))" }}>
-                  {formatPrice(p.price, p.currency)}
-                </span>
-              </motion.div>
-            );
-          })}
+                product={p}
+                isOnStore={storeServiceNames.has(p.name)}
+                isProcessing={processingItems.has(p.id)}
+                isConfirming={confirmRemove === p.id}
+                isDraggable={!isFiltering}
+                onToggle={() => onToggleItem(p)}
+                onConfirmRemoveChange={onConfirmRemoveChange}
+                onDeleteFromStore={onDeleteFromStore}
+                services={services}
+                onDragStart={() => setIsDragging(true)}
+                onDragEnd={handleReorderComplete}
+              />
+            ))}
+          </Reorder.Group>
 
           <div className="flex items-center justify-between pt-2 px-1">
             <span className="text-xs text-muted-foreground">
@@ -432,5 +353,173 @@ export function CatalogManager({
         </div>
       )}
     </motion.div>
+  );
+}
+
+function CatalogItem({
+  product: p,
+  isOnStore,
+  isProcessing,
+  isConfirming,
+  isDraggable,
+  onToggle,
+  onConfirmRemoveChange,
+  onDeleteFromStore,
+  services,
+  onDragStart,
+  onDragEnd,
+}: {
+  product: Product;
+  isOnStore: boolean;
+  isProcessing: boolean;
+  isConfirming: boolean;
+  isDraggable: boolean;
+  onToggle: () => void;
+  onConfirmRemoveChange: (id: string | null) => void;
+  onDeleteFromStore: (serviceId: string, productName?: string) => void;
+  services: { id: string; name: string }[];
+  onDragStart: () => void;
+  onDragEnd: () => void;
+}) {
+  return (
+    <Reorder.Item
+      value={p}
+      dragListener={isDraggable}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      className={`relative w-full flex items-center gap-3 rounded-xl px-4 py-3.5 text-left text-sm transition-all ${
+        isProcessing ? "opacity-60 pointer-events-none" : ""
+      }`}
+      style={{
+        backgroundColor: isOnStore ? "hsl(var(--kf-accent1) / 0.08)" : "hsl(var(--kf-muted) / 0.3)",
+        border: isOnStore
+          ? "1px solid hsl(var(--kf-accent1) / 0.25)"
+          : "1px solid hsl(var(--kf-border) / 0.5)",
+        cursor: isDraggable ? "grab" : "pointer",
+      }}
+    >
+      {isConfirming && (
+        <div
+          className="absolute inset-0 rounded-xl flex items-center justify-center gap-3 z-10"
+          style={{
+            background: "hsl(var(--kf-background) / 0.95)",
+            backdropFilter: "blur(8px)",
+            border: "1px solid hsl(0 70% 50% / 0.3)",
+          }}
+        >
+          <span className="text-sm font-medium" style={{ color: "hsl(var(--kf-error))" }}>Remove from store?</span>
+          <button
+            onClick={(e) => { e.stopPropagation(); onConfirmRemoveChange(null); }}
+            className="kf-btn-secondary text-xs min-h-[44px]"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              const matched = services.find((s) => s.name === p.name);
+              if (matched) onDeleteFromStore(matched.id, p.name);
+            }}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium min-h-[44px] transition-colors"
+            style={{ background: "hsl(var(--kf-error) / 0.2)", border: "1px solid hsl(var(--kf-error) / 0.3)", color: "hsl(var(--kf-error))" }}
+          >
+            Confirm
+          </button>
+        </div>
+      )}
+
+      {isDraggable && (
+        <GripVertical
+          className="w-4 h-4 flex-shrink-0 cursor-grab"
+          style={{ color: "hsl(var(--kf-muted-foreground) / 0.4)" }}
+        />
+      )}
+
+      <button
+        onClick={(e) => { e.stopPropagation(); if (!isProcessing) onToggle(); }}
+        className="min-w-[44px] min-h-[44px] flex items-center justify-center flex-shrink-0"
+        aria-label={isOnStore ? "Remove from store" : "Add to store"}
+      >
+        <div
+          className={`h-5 w-5 rounded-md border-2 flex items-center justify-center transition-all ${
+            isOnStore ? "" : "border-[hsl(var(--kf-muted-foreground)/0.3)]"
+          }`}
+          style={
+            isOnStore
+              ? { backgroundColor: "hsl(var(--kf-accent1))", borderColor: "hsl(var(--kf-accent1))" }
+              : {}
+          }
+        >
+          {isProcessing ? (
+            <div className="w-3 h-3 border-2 border-[hsl(var(--kf-accent1)/0.4)] border-t-[hsl(var(--kf-accent1))] rounded-full animate-spin" />
+          ) : isOnStore ? (
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3} style={{ color: "hsl(var(--kf-accent1-foreground, 0 0% 100%))" }}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          ) : null}
+        </div>
+      </button>
+
+      {p.imageUrl ? (
+        <div
+          className="h-10 w-10 rounded-xl overflow-hidden flex-shrink-0"
+          style={{
+            border: isOnStore
+              ? "1px solid hsl(var(--kf-accent1) / 0.3)"
+              : "1px solid hsl(var(--kf-border))",
+          }}
+        >
+          <img src={p.imageUrl} alt={p.name} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+        </div>
+      ) : (
+        <div
+          className="h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0 text-sm font-bold"
+          style={{
+            background: isOnStore
+              ? "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.2), hsl(var(--kf-accent2) / 0.1))"
+              : "hsl(var(--kf-muted))",
+            border: isOnStore
+              ? "1px solid hsl(var(--kf-accent1) / 0.3)"
+              : "1px solid hsl(var(--kf-border))",
+            color: isOnStore ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-muted-foreground))",
+          }}
+        >
+          {p.name.charAt(0).toUpperCase()}
+        </div>
+      )}
+
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className={`font-medium truncate ${isOnStore ? "" : "text-muted-foreground"}`}>{p.name}</span>
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded-full uppercase flex-shrink-0 border"
+            style={{ borderColor: "hsl(var(--kf-accent1) / 0.2)", color: "hsl(var(--kf-accent1) / 0.7)" }}
+          >
+            {p.category}
+          </span>
+          {p.sku && (
+            <span className="text-[10px] text-muted-foreground/50 flex-shrink-0">
+              SKU: {p.sku}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          <span className={`text-[11px] font-medium`} style={{ color: isOnStore ? "hsl(var(--kf-success))" : "hsl(var(--kf-muted-foreground) / 0.6)" }}>
+            {isProcessing ? "Processing..." : isOnStore ? "\u2713 On store" : "Not on store"}
+          </span>
+          {(() => {
+            const updated = formatRelativeTime((p as Record<string, unknown>).updatedAt as string | undefined);
+            return updated ? <span className="text-[10px] text-muted-foreground/40">&middot; {updated}</span> : null;
+          })()}
+          {p.description && (
+            <span className="text-[10px] text-muted-foreground/40 truncate max-w-[200px]">&middot; {p.description}</span>
+          )}
+        </div>
+      </div>
+
+      <span className="text-xs font-semibold flex-shrink-0" style={{ color: "hsl(var(--kf-accent1))" }}>
+        {formatPrice(p.price, p.currency)}
+      </span>
+    </Reorder.Item>
   );
 }
