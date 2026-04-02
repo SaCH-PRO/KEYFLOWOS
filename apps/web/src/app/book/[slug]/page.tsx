@@ -179,16 +179,16 @@ export default function PublicBookingPage() {
 
   useEffect(() => {
     if (!business) return;
-    const seo = storefrontConfig?.seo as { metaTitle?: string; metaDescription?: string; ogImage?: string } | undefined;
+    const seo = storefrontConfig?.seo;
     document.title = seo?.metaTitle || `Book with ${business.name} | KeyFlowOS`;
   }, [business, storefrontConfig]);
 
   useEffect(() => {
     if (!business) return;
-    const seo = storefrontConfig?.seo as { metaTitle?: string; metaDescription?: string; ogImage?: string } | undefined;
+    const seo = storefrontConfig?.seo;
     const pageTitle = seo?.metaTitle || `${business.name} | Book Online`;
     const description = seo?.metaDescription || business.tagline || `Book an appointment with ${business.name} online.`;
-    const ogImage = seo?.ogImage || business.logoUrl;
+    const ogImage = seo?.ogImage || seo?.socialImage || business.logoUrl;
     const pageUrl = typeof window !== "undefined" ? window.location.href : "";
     const ogTags: Record<string, string> = {
       description,
@@ -275,7 +275,7 @@ export default function PublicBookingPage() {
         });
       }
     }
-    const pOrder = (storefrontConfig?.catalog as any)?.productOrder as string[] | undefined;
+    const pOrder = storefrontConfig?.catalog?.productOrder;
     if (pOrder?.length) {
       const orderMap = new Map(pOrder.map((id, idx) => [id, idx]));
       items.sort((a, b) => {

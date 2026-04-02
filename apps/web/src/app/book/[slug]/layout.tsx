@@ -30,7 +30,7 @@ async function fetchStorefrontConfig(slug: string) {
     });
     if (res.ok) {
       const data = await res.json();
-      return data?.storefront ?? null;
+      return data?.storefront ?? data?.storefrontConfig ?? null;
     }
     return null;
   } catch {
@@ -53,11 +53,11 @@ export async function generateMetadata(
   }
 
   const sfConfig = await fetchStorefrontConfig(slug);
-  const seo = sfConfig?.seo as { metaTitle?: string; metaDescription?: string; ogImage?: string } | undefined;
+  const seo = sfConfig?.seo as { metaTitle?: string; metaDescription?: string; ogImage?: string; socialImage?: string } | undefined;
 
   const title = seo?.metaTitle || `${biz.name} | Book Online`;
   const description = seo?.metaDescription || biz.tagline || `Book an appointment with ${biz.name} online.`;
-  const ogImage = seo?.ogImage || biz.logoUrl;
+  const ogImage = seo?.ogImage || seo?.socialImage || biz.logoUrl;
 
   return {
     title,
