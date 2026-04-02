@@ -362,17 +362,21 @@ function SeoSettingsPanel({ storefrontConfig, onConfigChange, onSaveConfig, conf
               style={{ background: "hsl(var(--kf-muted) / 0.2)" }}
             >
               {ogImage ? (
-                <img
-                  src={ogImage}
-                  alt="Social preview"
-                  className="w-full h-full object-cover"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).style.display = "none";
-                    (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden");
-                  }}
-                />
+                <>
+                  <img
+                    src={ogImage}
+                    alt="Social preview"
+                    className="w-full h-full object-cover peer"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = "none";
+                      const fallback = (e.target as HTMLImageElement).nextElementSibling;
+                      if (fallback) (fallback as HTMLElement).style.display = "block";
+                    }}
+                  />
+                  <span className="text-xs hidden" style={{ color: "hsl(var(--kf-muted-foreground))" }}>Failed to load image</span>
+                </>
               ) : (
-                <span className="text-xs text-muted-foreground">No OG image set</span>
+                <span className="text-xs" style={{ color: "hsl(var(--kf-muted-foreground))" }}>No OG image set</span>
               )}
             </div>
             <div className="p-3 space-y-1" style={{ background: "hsl(var(--kf-muted) / 0.15)" }}>
