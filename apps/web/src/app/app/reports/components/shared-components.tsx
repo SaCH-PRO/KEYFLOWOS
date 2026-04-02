@@ -5,8 +5,9 @@ import { ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { motion } from "framer-motion";
 import { MetricExplainer } from "@/components/ui/metric-explainer";
 
-export function MetricCard({ label, value, subtext, icon: Icon, color = "text-white", trend, explanation, formula, goodValue }: {
+export function MetricCard({ label, value, subtext, icon: Icon, color = "text-foreground", trend, trendPct, prevValue, explanation, formula, goodValue }: {
   label: string; value: string; subtext?: string; icon: React.ElementType; color?: string; trend?: "up" | "down" | "neutral";
+  trendPct?: number; prevValue?: string;
   explanation?: string; formula?: string; goodValue?: string;
 }) {
   const card = (
@@ -16,7 +17,25 @@ export function MetricCard({ label, value, subtext, icon: Icon, color = "text-wh
           <span className="text-xs text-muted-foreground uppercase tracking-wide">{label}</span>
           <Icon className={`w-4 h-4 ${color}`} />
         </div>
-        <div className={`text-2xl font-bold ${color}`}>{value}</div>
+        <div className="flex items-center gap-2">
+          <span className={`text-2xl font-bold ${color}`}>{value}</span>
+          {trendPct != null && (
+            <span className={`inline-flex items-center gap-0.5 text-xs font-medium px-1.5 py-0.5 rounded-full ${
+              trendPct > 0
+                ? "bg-[hsl(var(--kf-success))]/15 text-[hsl(var(--kf-success))]"
+                : trendPct < 0
+                  ? "bg-[hsl(var(--kf-error))]/15 text-[hsl(var(--kf-error))]"
+                  : "bg-muted text-muted-foreground"
+            }`}>
+              {trendPct > 0 && <ArrowUpRight className="w-3 h-3" />}
+              {trendPct < 0 && <ArrowDownRight className="w-3 h-3" />}
+              {trendPct > 0 ? "+" : ""}{trendPct.toFixed(1)}%
+            </span>
+          )}
+        </div>
+        {prevValue && (
+          <p className="text-[11px] text-muted-foreground/70">Previous: {prevValue}</p>
+        )}
         {subtext && (
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
             {trend === "up" && <ArrowUpRight className="w-3 h-3 text-emerald-400" />}
@@ -82,7 +101,7 @@ export function NarrativeSection({ content }: { content: string }) {
               if (boldMatch) {
                 return (
                   <div key={j}>
-                    <h4 className="text-sm font-semibold text-white mt-3 mb-1">{boldMatch[1]}</h4>
+                    <h4 className="text-sm font-semibold text-foreground mt-3 mb-1">{boldMatch[1]}</h4>
                     {boldMatch[2] && <p className="text-sm text-muted-foreground leading-relaxed">{boldMatch[2]}</p>}
                   </div>
                 );

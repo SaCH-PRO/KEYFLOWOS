@@ -81,9 +81,10 @@ export function AiChatDrawer({ open, onClose, messages, sending, quickPrompts, o
               <div ref={messagesEndRef} />
             </div>
 
-            {quickPrompts && quickPrompts.length > 0 && messages.length <= 1 && (
+            {quickPrompts && quickPrompts.length > 0 && (
               <div className="px-4 py-2 border-t border-border/30 flex items-center gap-2 flex-wrap">
-                {quickPrompts.map((q) => (
+                <span className="text-[10px] text-muted-foreground/60 font-medium">Suggested</span>
+                {quickPrompts.slice(0, 3).map((q) => (
                   <button
                     key={q}
                     onClick={() => onQuickPrompt?.(q)}

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Zap, X } from "lucide-react";
+import { Zap, X, Plus } from "lucide-react";
 import { InfoBadge } from "@/components/ui/info-badge";
 import { Button, Input } from "@keyflow/ui";
 import { createPlaybook, updatePlaybook, Playbook } from "@/lib/client";
@@ -14,7 +14,7 @@ import {
 } from "./automation-constants";
 
 const CONDITION_OPTIONS = [
-  { value: "", label: "No condition (always run)" },
+  { value: "", label: "Select condition..." },
   { value: "contact.has_email", label: "Contact has email" },
   { value: "contact.has_phone", label: "Contact has phone number" },
   { value: "contact.is_active", label: "Contact is active" },
@@ -23,6 +23,31 @@ const CONDITION_OPTIONS = [
   { value: "booking.is_first", label: "First booking for contact" },
   { value: "time.business_hours", label: "During business hours only" },
 ];
+
+type ConditionOperator = "AND" | "OR";
+
+interface ConditionGroup {
+  operator: ConditionOperator;
+  conditions: string[];
+}
+
+function parseConditionFromPlaybook(condition: string | null | undefined): ConditionGroup {
+  if (!condition) return { operator: "AND", conditions: [""] };
+  try {
+    const parsed = JSON.parse(condition);
+    if (parsed && typeof parsed === "object" && Array.isArray(parsed.conditions)) {
+      return { operator: parsed.operator || "AND", conditions: parsed.conditions.length ? parsed.conditions : [""] };
+    }
+  } catch {}
+  return { operator: "AND", conditions: [condition] };
+}
+
+function serializeConditionGroup(group: ConditionGroup): string | null {
+  const filled = group.conditions.filter((c) => c);
+  if (filled.length === 0) return null;
+  if (filled.length === 1) return filled[0];
+  return JSON.stringify({ operator: group.operator, conditions: filled });
+}
 
 interface PlaybookEditorProps {
   open: boolean;
@@ -34,7 +59,8 @@ interface PlaybookEditorProps {
 }
 
 export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybook, businessId }: PlaybookEditorProps) {
-  const [form, setForm] = useState({ name: "", triggerEvent: "", condition: "" });
+  const [form, setForm] = useState({ name: "", triggerEvent: "" });
+  const [conditionGroup, setConditionGroup] = useState<ConditionGroup>({ operator: "AND", conditions: [""] });
   const [actionSteps, setActionSteps] = useState<ActionStep[]>([{ type: "" }]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -46,15 +72,18 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
       const actions = Array.isArray(editingPlaybook.actions)
         ? (editingPlaybook.actions as ActionStep[])
         : [{ type: "" }];
-      setForm({ name: editingPlaybook.name, triggerEvent: editingPlaybook.triggerEvent, condition: editingPlaybook.condition ?? "" });
+      setForm({ name: editingPlaybook.name, triggerEvent: editingPlaybook.triggerEvent });
+      setConditionGroup(parseConditionFromPlaybook(editingPlaybook.condition));
       setActionSteps(actions.length ? [...actions] : [{ type: "" }]);
       setError(null);
     } else if (template) {
-      setForm({ name: template.name, triggerEvent: template.trigger, condition: "" });
+      setForm({ name: template.name, triggerEvent: template.trigger });
+      setConditionGroup({ operator: "AND", conditions: [""] });
       setActionSteps(template.actions.length ? [...template.actions] : [{ type: "" }]);
       setError(null);
     } else {
-      setForm({ name: "", triggerEvent: "", condition: "" });
+      setForm({ name: "", triggerEvent: "" });
+      setConditionGroup({ operator: "AND", conditions: [""] });
       setActionSteps([{ type: "" }]);
       setError(null);
     }
@@ -65,6 +94,14 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
   const updateStep = (i: number, type: string) =>
     setActionSteps((s) => s.map((st, idx) => (idx === i ? { ...st, type } : st)));
 
+  const addCondition = () => setConditionGroup((g) => ({ ...g, conditions: [...g.conditions, ""] }));
+  const removeCondition = (i: number) =>
+    setConditionGroup((g) => ({ ...g, conditions: g.conditions.filter((_, idx) => idx !== i) }));
+  const updateCondition = (i: number, value: string) =>
+    setConditionGroup((g) => ({ ...g, conditions: g.conditions.map((c, idx) => (idx === i ? value : c)) }));
+  const toggleOperator = () =>
+    setConditionGroup((g) => ({ ...g, operator: g.operator === "AND" ? "OR" : "AND" }));
+
   async function handleSave() {
     setError(null);
     const validSteps = actionSteps.filter((s) => s.type);
@@ -73,13 +110,14 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
       return;
     }
     setSaving(true);
+    const serializedCondition = serializeConditionGroup(conditionGroup);
 
     if (isEditing) {
       const { data, error: apiError } = await updatePlaybook({
         playbookId: editingPlaybook!.id,
         name: form.name,
         triggerEvent: form.triggerEvent,
-        condition: form.condition || null,
+        condition: serializedCondition,
         actions: validSteps,
         businessId: businessId ?? undefined,
       });
@@ -94,7 +132,7 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
       const { data, error: apiError } = await createPlaybook({
         name: form.name,
         triggerEvent: form.triggerEvent,
-        condition: form.condition || undefined,
+        condition: serializedCondition || undefined,
         actions: validSteps,
         businessId: businessId ?? undefined,
       });
@@ -103,7 +141,8 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
         setError(apiError);
       } else if (data) {
         onSaved(data);
-        setForm({ name: "", triggerEvent: "", condition: "" });
+        setForm({ name: "", triggerEvent: "" });
+        setConditionGroup({ operator: "AND", conditions: [""] });
         setActionSteps([{ type: "" }]);
         onClose();
       }
@@ -165,17 +204,68 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
               </div>
             </div>
 
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 inline-flex items-center gap-1">Only if... (optional condition) <InfoBadge title="Automation Conditions" body="Conditions narrow when the automation runs. Without a condition, it fires for every trigger event. Add a condition to limit it — e.g. only for contacts with an email, or only during business hours." side="right" iconSize={10} /></label>
-              <select
-                className="w-full rounded-lg border border-border/60 bg-input px-3 py-2 text-sm"
-                value={form.condition}
-                onChange={(e) => setForm((f) => ({ ...f, condition: e.target.value }))}
-              >
-                {CONDITION_OPTIONS.map((c) => (
-                  <option key={c.value} value={c.value}>{c.label}</option>
-                ))}
-              </select>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-muted-foreground inline-flex items-center gap-1">Only if... (optional conditions) <InfoBadge title="Automation Conditions" body="Conditions narrow when the automation runs. Without a condition, it fires for every trigger event. Add multiple conditions and choose AND (all must match) or OR (any must match)." side="right" iconSize={10} /></label>
+                <div className="flex items-center gap-2">
+                  {conditionGroup.conditions.filter((c) => c).length > 1 && (
+                    <button
+                      type="button"
+                      onClick={toggleOperator}
+                      className="text-[11px] font-semibold px-2.5 py-1 rounded-lg transition-colors min-h-[32px]"
+                      style={{
+                        color: conditionGroup.operator === "AND" ? "hsl(var(--kf-info))" : "hsl(var(--kf-accent2))",
+                        background: conditionGroup.operator === "AND" ? "hsl(var(--kf-info) / 0.1)" : "hsl(var(--kf-accent2) / 0.1)",
+                      }}
+                    >
+                      {conditionGroup.operator === "AND" ? "AND — all must match" : "OR — any must match"}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={addCondition}
+                    className="text-[11px] font-medium px-2 py-1 rounded-lg transition-colors min-h-[32px]"
+                    style={{ color: "hsl(var(--kf-accent1))", background: "hsl(var(--kf-accent1) / 0.1)" }}
+                  >
+                    <Plus className="w-3 h-3 inline mr-0.5" />
+                    Add Condition
+                  </button>
+                </div>
+              </div>
+              {conditionGroup.conditions.map((cond, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  {i > 0 && (
+                    <span
+                      className="text-[10px] font-bold w-8 shrink-0 text-center rounded-md py-0.5"
+                      style={{
+                        color: conditionGroup.operator === "AND" ? "hsl(var(--kf-info))" : "hsl(var(--kf-accent2))",
+                        background: conditionGroup.operator === "AND" ? "hsl(var(--kf-info) / 0.1)" : "hsl(var(--kf-accent2) / 0.1)",
+                      }}
+                    >
+                      {conditionGroup.operator}
+                    </span>
+                  )}
+                  {i === 0 && <span className="w-8 shrink-0" />}
+                  <select
+                    className="flex-1 rounded-lg border border-border/60 bg-input px-3 py-2 text-sm"
+                    value={cond}
+                    onChange={(e) => updateCondition(i, e.target.value)}
+                  >
+                    {CONDITION_OPTIONS.map((c) => (
+                      <option key={c.value} value={c.value}>{c.label}</option>
+                    ))}
+                  </select>
+                  {conditionGroup.conditions.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeCondition(i)}
+                      className="text-muted-foreground/50 hover:text-foreground text-xs min-w-[44px] min-h-[44px] flex items-center justify-center"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
 
             <div className="space-y-2">

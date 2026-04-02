@@ -21,6 +21,8 @@ import {
   ArrowUp,
   ArrowDown,
   EyeOff,
+  Download,
+  Search,
 } from "lucide-react";
 import {
   LeadForm,
@@ -79,6 +81,7 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const [localSearch, setLocalSearch] = useState("");
+  const [submissionSearch, setSubmissionSearch] = useState<Record<string, string>>({});
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
   const initialFormRef = useRef({ name: "", description: "", fields: defaultFields, thankYouMessage: "Thank you for your submission!", redirectUrl: "" });
@@ -279,6 +282,49 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
     setSelectedIds(new Set());
   }, []);
 
+  const getFilteredSubmissions = useCallback((formId: string) => {
+    const subs = submissions[formId] || [];
+    const q = (submissionSearch[formId] || "").toLowerCase().trim();
+    if (!q) return subs;
+    return subs.filter(sub =>
+      Object.values(sub.data).some(v => String(v).toLowerCase().includes(q))
+    );
+  }, [submissions, submissionSearch]);
+
+  const exportSubmissionsCSV = useCallback((form: LeadForm) => {
+    const subs = getFilteredSubmissions(form.id);
+    if (subs.length === 0) {
+      toast.error("No submissions to export");
+      return;
+    }
+    const allKeys = new Set<string>();
+    subs.forEach(sub => Object.keys(sub.data).forEach(k => allKeys.add(k)));
+    const headers = ["Submitted At", "Source", ...Array.from(allKeys)];
+    const escapeCSV = (val: string) => {
+      if (val.includes(",") || val.includes('"') || val.includes("\n")) {
+        return `"${val.replace(/"/g, '""')}"`;
+      }
+      return val;
+    };
+    const rows = subs.map(sub => {
+      const date = new Date(sub.createdAt).toLocaleString();
+      const source = sub.source || "";
+      const fields = Array.from(allKeys).map(k => String(sub.data[k] ?? ""));
+      return [date, source, ...fields].map(escapeCSV).join(",");
+    });
+    const csv = [headers.map(escapeCSV).join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${form.name.replace(/[^a-zA-Z0-9]/g, "_")}_submissions.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${subs.length} submission${subs.length > 1 ? "s" : ""}`);
+  }, [getFilteredSubmissions]);
+
   const handleBulkDelete = useCallback(async () => {
     if (!businessId || selectedIds.size === 0) return;
     setBulkLoading(true);
@@ -461,17 +507,43 @@ export const LeadFormsPanel = React.memo(function LeadFormsPanel({
                     <div className="px-4 pb-4 pt-2 border-t border-border/20">
                       <div className="mb-3 flex items-center justify-between">
                         <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Submissions</h4>
-                        <div className="bg-muted/30 rounded-lg px-2.5 py-1 text-[10px] text-muted-foreground font-mono flex items-center gap-2">
-                          <Code className="w-3 h-3" />
-                          <span className="truncate max-w-[200px]">{`<iframe src="${typeof window !== 'undefined' ? window.location.origin : ''}/forms/${form.id}" ...>`}</span>
-                          <button onClick={() => copyEmbed(form.id)} className="hover:text-foreground" aria-label="Copy embed"><Copy className="w-3 h-3" /></button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => exportSubmissionsCSV(form)}
+                            disabled={(submissions[form.id] || []).length === 0}
+                            className="min-h-[44px] px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            aria-label="Download submissions CSV"
+                            title="Download CSV"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            Download CSV
+                          </button>
+                          <div className="bg-muted/30 rounded-lg px-2.5 py-1 text-[10px] text-muted-foreground font-mono flex items-center gap-2">
+                            <Code className="w-3 h-3" />
+                            <span className="truncate max-w-[200px]">{`<iframe src="${typeof window !== 'undefined' ? window.location.origin : ''}/forms/${form.id}" ...>`}</span>
+                            <button onClick={() => copyEmbed(form.id)} className="hover:text-foreground" aria-label="Copy embed"><Copy className="w-3 h-3" /></button>
+                          </div>
                         </div>
                       </div>
+                      {(submissions[form.id] || []).length > 0 && (
+                        <div className="mb-3 relative">
+                          <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/50" />
+                          <input
+                            type="text"
+                            value={submissionSearch[form.id] || ""}
+                            onChange={e => setSubmissionSearch(prev => ({ ...prev, [form.id]: e.target.value }))}
+                            placeholder="Search submissions by field values..."
+                            className="w-full bg-muted/30 border border-border/40 rounded-lg pl-8 pr-3 py-1.5 text-xs focus:outline-none focus:border-[hsl(var(--kf-accent1))] placeholder:text-muted-foreground/50"
+                          />
+                        </div>
+                      )}
                       {(submissions[form.id] || []).length === 0 ? (
                         <p className="text-xs text-muted-foreground py-4 text-center">No submissions yet</p>
+                      ) : getFilteredSubmissions(form.id).length === 0 ? (
+                        <p className="text-xs text-muted-foreground py-4 text-center">No submissions match your search</p>
                       ) : (
                         <div className="space-y-2 max-h-64 overflow-y-auto">
-                          {(submissions[form.id] || []).map(sub => (
+                          {getFilteredSubmissions(form.id).map(sub => (
                             <div key={sub.id} className="bg-muted/20 rounded-lg p-3 text-xs">
                               <div className="flex items-center justify-between mb-1.5">
                                 <span className="text-muted-foreground">{new Date(sub.createdAt).toLocaleString()}</span>

@@ -12,6 +12,10 @@ import {
   Package,
   FolderKanban,
   X,
+  Clock,
+  Zap,
+  Receipt,
+  Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { universalSearch, UniversalSearchResult } from "@/lib/client";
@@ -20,6 +24,7 @@ import { getStoredBusinessId } from "@/lib/workspace";
 type Action = {
   label: string;
   hint?: string;
+  shortcut?: string;
   onSelect: () => void;
 };
 
@@ -86,16 +91,50 @@ const SEARCH_SECTIONS: SearchSection[] = [
   },
 ];
 
+const RECENT_STORAGE_KEY = "kf-command-recent";
+
+type RecentItem = {
+  label: string;
+  href: string;
+  timestamp: number;
+};
+
+function getRecentItems(): RecentItem[] {
+  try {
+    const raw = localStorage.getItem(RECENT_STORAGE_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as RecentItem[];
+  } catch {
+    return [];
+  }
+}
+
+function addRecentItem(label: string, href: string) {
+  const items = getRecentItems().filter((r) => r.href !== href);
+  items.unshift({ label, href, timestamp: Date.now() });
+  localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify(items.slice(0, 5)));
+}
+
+const QUICK_ACTIONS: Action[] = [
+  { label: "New Contact", hint: "Add a CRM contact", shortcut: "⌘⇧C", onSelect: () => {} },
+  { label: "New Invoice", hint: "Create an invoice", shortcut: "⌘⇧I", onSelect: () => {} },
+  { label: "New Booking", hint: "Schedule a booking", shortcut: "⌘⇧B", onSelect: () => {} },
+  { label: "New Expense", hint: "Log an expense", onSelect: () => {} },
+  { label: "New Project", hint: "Start a project", onSelect: () => {} },
+];
+
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<UniversalSearchResult>(EMPTY);
   const [searching, setSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
 
   useEffect(() => {
-    if (open && inputRef.current) {
-      inputRef.current.focus();
+    if (open) {
+      inputRef.current?.focus();
+      setRecentItems(getRecentItems());
     }
     if (!open) {
       setQuery("");
@@ -122,9 +161,22 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     return () => clearTimeout(timer);
   }, [query]);
 
-  const actions = useMemo<Action[]>(
+  const quickActions = useMemo<Action[]>(() => {
+    return QUICK_ACTIONS.map((a) => ({
+      ...a,
+      onSelect: () => {
+        if (a.label === "New Contact") router.push("/app/crm/pipeline");
+        else if (a.label === "New Invoice") router.push("/app/commerce");
+        else if (a.label === "New Booking") router.push("/app/bookings");
+        else if (a.label === "New Expense") router.push("/app/expenses");
+        else if (a.label === "New Project") router.push("/app/projects");
+      },
+    }));
+  }, [router]);
+
+  const navActions = useMemo<Action[]>(
     () => [
-      { label: "Go to Command", hint: "Command Center", onSelect: () => router.push("/app") },
+      { label: "Go to Command", hint: "Command Center", shortcut: "", onSelect: () => router.push("/app") },
       { label: "Go to Contacts", hint: "CRM & pipeline", onSelect: () => router.push("/app/crm/pipeline") },
       { label: "Go to Commerce", hint: "Invoices & Products", onSelect: () => router.push("/app/commerce") },
       { label: "Go to Bookings", hint: "Schedule & calendar", onSelect: () => router.push("/app/bookings") },
@@ -133,7 +185,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       { label: "Go to Marketing", hint: "Email campaigns & lead forms", onSelect: () => router.push("/app/marketing") },
       { label: "Go to Expenses", hint: "Track & manage expenses", onSelect: () => router.push("/app/expenses") },
       { label: "Go to Projects", hint: "Project management & Kanban", onSelect: () => router.push("/app/projects") },
-      { label: "Go to Automations", hint: "Playbooks & workflow triggers", onSelect: () => router.push("/app/projects?tab=playbooks") },
+      { label: "Go to Automations", hint: "Playbooks & workflow triggers", onSelect: () => router.push("/app/automations") },
       { label: "Go to Reports", hint: "Analytics & KPIs", onSelect: () => router.push("/app/reports") },
       { label: "Go to Learn", hint: "MasterClass courses", onSelect: () => router.push("/app/learn") },
       { label: "Go to Community", hint: "Forum & founder circles", onSelect: () => router.push("/app/community") },
@@ -143,15 +195,33 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     [router],
   );
 
-  const filteredActions = useMemo(() => {
-    if (!query) return actions;
-    return actions.filter(
+  const filteredNav = useMemo(() => {
+    if (!query) return navActions;
+    return navActions.filter(
       (a) => a.label.toLowerCase().includes(query.toLowerCase()) || a.hint?.toLowerCase().includes(query.toLowerCase()),
     );
-  }, [actions, query]);
+  }, [navActions, query]);
+
+  const filteredQuick = useMemo(() => {
+    if (!query) return quickActions;
+    return quickActions.filter(
+      (a) => a.label.toLowerCase().includes(query.toLowerCase()) || a.hint?.toLowerCase().includes(query.toLowerCase()),
+    );
+  }, [quickActions, query]);
+
+  const filteredRecent = useMemo(() => {
+    if (query) return [];
+    return recentItems;
+  }, [recentItems, query]);
 
   const totalSearchResults = SEARCH_SECTIONS.reduce((sum, s) => sum + (searchResults[s.key]?.length ?? 0), 0);
   const hasSearch = query.trim().length >= 2;
+
+  const handleNavigate = (href: string, label: string) => {
+    addRecentItem(label, href);
+    router.push(href);
+    onClose();
+  };
 
   if (!open) return null;
 
@@ -174,8 +244,9 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
+          <kbd className="hidden sm:inline-flex px-1.5 py-0.5 rounded bg-muted text-[10px] font-mono text-muted-foreground">⌘K</kbd>
           {query && (
-            <button aria-label="Clear search" onClick={() => setQuery("")} className="text-muted-foreground hover:text-white">
+            <button aria-label="Clear search" onClick={() => setQuery("")} className="text-muted-foreground hover:text-foreground">
               <X className="w-4 h-4" />
             </button>
           )}
@@ -200,10 +271,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                     {items.map((item: any) => (
                       <button
                         key={item.id}
-                        onClick={() => {
-                          router.push(section.getHref(item));
-                          onClose();
-                        }}
+                        onClick={() => handleNavigate(section.getHref(item), section.getTitle(item))}
                         className="w-full text-left px-4 py-2.5 flex items-center gap-3 hover:bg-primary/10 transition-colors text-sm group"
                       >
                         <div
@@ -225,23 +293,88 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
             </div>
           )}
 
-          {hasSearch && !searching && totalSearchResults === 0 && filteredActions.length === 0 && (
+          {hasSearch && !searching && totalSearchResults === 0 && filteredNav.length === 0 && filteredQuick.length === 0 && (
             <div className="px-4 py-6 text-sm text-muted-foreground text-center">No results for &ldquo;{query}&rdquo;</div>
           )}
 
-          {filteredActions.length > 0 && (
+          {filteredRecent.length > 0 && (
             <div>
-              {hasSearch && totalSearchResults > 0 && (
-                <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground border-t border-border/40 mt-1 pt-2">
-                  Quick Actions
-                </div>
-              )}
-              {filteredActions.map((action) => (
+              <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 pt-2">
+                <Clock className="w-3 h-3" />
+                Recent
+              </div>
+              {filteredRecent.map((item) => (
+                <button
+                  key={item.href}
+                  onClick={() => handleNavigate(item.href, item.label)}
+                  className="w-full text-left px-4 py-2.5 flex items-center justify-between gap-3 hover:bg-primary/10 transition-colors text-sm"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Clock className="w-3.5 h-3.5 text-muted-foreground" />
+                    <span className="text-foreground">{item.label}</span>
+                  </div>
+                  <ArrowRight className="w-4 h-4 text-muted-foreground" />
+                </button>
+              ))}
+            </div>
+          )}
+
+          {filteredQuick.length > 0 && (
+            <div>
+              <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 pt-2">
+                <Plus className="w-3 h-3" />
+                Quick Actions
+              </div>
+              {filteredQuick.map((action) => (
                 <button
                   key={action.label}
                   onClick={() => {
                     action.onSelect();
                     onClose();
+                  }}
+                  className="w-full text-left px-4 py-2.5 flex items-center justify-between gap-3 hover:bg-primary/10 transition-colors text-sm"
+                >
+                  <div>
+                    <div className="text-foreground">{action.label}</div>
+                    {action.hint && <div className="text-[11px] text-muted-foreground">{action.hint}</div>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {action.shortcut && (
+                      <kbd className="px-1.5 py-0.5 rounded bg-muted text-[10px] font-mono text-muted-foreground">{action.shortcut}</kbd>
+                    )}
+                    <ArrowRight className="w-4 h-4 text-muted-foreground" />
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {filteredNav.length > 0 && (
+            <div>
+              <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 pt-2 border-t border-border/40 mt-1">
+                <Zap className="w-3 h-3" />
+                Navigate
+              </div>
+              {filteredNav.map((action) => (
+                <button
+                  key={action.label}
+                  onClick={() => {
+                    const href = action.label.includes("Command") ? "/app" :
+                      action.label.includes("Contacts") ? "/app/crm/pipeline" :
+                      action.label.includes("Commerce") ? "/app/commerce" :
+                      action.label.includes("Bookings") ? "/app/bookings" :
+                      action.label.includes("Store") ? "/app/store" :
+                      action.label.includes("Social") ? "/app/marketing?tab=social" :
+                      action.label.includes("Marketing") ? "/app/marketing" :
+                      action.label.includes("Expenses") ? "/app/expenses" :
+                      action.label.includes("Projects") ? "/app/projects" :
+                      action.label.includes("Automations") ? "/app/projects?tab=playbooks" :
+                      action.label.includes("Reports") ? "/app/reports" :
+                      action.label.includes("Learn") ? "/app/learn" :
+                      action.label.includes("Community") ? "/app/community" :
+                      action.label.includes("Templates") ? "/app/templates" :
+                      "/app/settings";
+                    handleNavigate(href, action.label);
                   }}
                   className={cn(
                     "w-full text-left px-4 py-3 flex items-center justify-between gap-3 hover:bg-primary/10 transition-colors text-sm",

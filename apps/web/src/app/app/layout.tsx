@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { CommandPalette } from "@/components/command-palette";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { clearStoredBusinessId, getStoredBusinessId, getCachedUser, getUserDisplayName, getUserInitials, refreshWorkspace, getCachedBusiness } from "@/lib/workspace";
 import { apiGet, apiPatch } from "@/lib/api";
 import { useThemeColors } from "@/lib/theme-context";
@@ -492,6 +493,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
           </header>
 
+          <div className="hidden md:block px-3 md:px-6 pt-1">
+            <Breadcrumbs />
+          </div>
           <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 md:p-6 pb-24 md:pb-6">{children}</div>
         </main>
         <AiCopilotTrigger />

@@ -3600,10 +3600,11 @@ export interface GeneratedReport {
   metrics: ReportMetrics;
   aiNarrative: string;
 }
-export async function fetchReport(businessId: string, type = 'executive', startDate?: string, endDate?: string): Promise<ApiResult<GeneratedReport>> {
+export async function fetchReport(businessId: string, type = 'executive', startDate?: string, endDate?: string, compare?: boolean): Promise<ApiResult<GeneratedReport>> {
   const params = new URLSearchParams({ type });
   if (startDate) params.set('startDate', startDate);
   if (endDate) params.set('endDate', endDate);
+  if (compare) params.set('compare', 'true');
   return apiGetSimple<GeneratedReport>(`/businesses/${encodeURIComponent(businessId)}/reports/generate?${params.toString()}`);
 }
 

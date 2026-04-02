@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Zap, Play } from "lucide-react";
+import { Zap, Play, Eye, X, ArrowRight, Filter } from "lucide-react";
 import { createPlaybook } from "@/lib/client";
 import { AUTOMATION_TEMPLATES, getTriggerLabel, getActionLabel, type AutomationTemplate } from "./automation-constants";
 
@@ -21,6 +21,7 @@ interface TemplateGalleryProps {
 export function TemplateGallery({ onSelect, businessId }: TemplateGalleryProps) {
   const [activating, setActivating] = useState<string | null>(null);
   const [activated, setActivated] = useState<Set<string>>(new Set());
+  const [previewTemplate, setPreviewTemplate] = useState<AutomationTemplate | null>(null);
 
   const categories = Array.from(new Set(AUTOMATION_TEMPLATES.map((t) => t.category)));
 
@@ -37,6 +38,11 @@ export function TemplateGallery({ onSelect, businessId }: TemplateGalleryProps) 
     if (data) {
       setActivated((prev) => new Set(prev).add(template.id));
     }
+  }
+
+  function handlePreview(template: AutomationTemplate, e: React.MouseEvent) {
+    e.stopPropagation();
+    setPreviewTemplate(template);
   }
 
   return (
@@ -93,7 +99,15 @@ export function TemplateGallery({ onSelect, businessId }: TemplateGalleryProps) 
                           </span>
                         ))}
                       </div>
-                      <div className="mt-3">
+                      <div className="mt-3 flex items-center gap-2">
+                        <button
+                          onClick={(e) => handlePreview(template, e)}
+                          className="inline-flex items-center gap-1.5 text-[11px] font-medium px-3 py-1.5 rounded-lg transition-colors min-h-[32px]"
+                          style={{ background: "hsl(var(--muted) / 0.5)", color: "hsl(var(--muted-foreground))" }}
+                        >
+                          <Eye className="w-3 h-3" />
+                          Preview
+                        </button>
                         <button
                           onClick={(e) => handleActivate(template, e)}
                           disabled={activating === template.id || isActivated}
@@ -115,6 +129,109 @@ export function TemplateGallery({ onSelect, businessId }: TemplateGalleryProps) 
           </div>
         </div>
       ))}
+
+      {previewTemplate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.5)" }}>
+          <div className="bg-card border border-border/60 rounded-2xl w-full max-w-lg shadow-xl">
+            <div className="flex items-center justify-between p-5 border-b border-border/40">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <Eye className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+                Template Preview
+              </h3>
+              <button
+                onClick={() => setPreviewTemplate(null)}
+                className="min-w-[44px] min-h-[44px] flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div>
+                <p className="text-base font-semibold">{previewTemplate.name}</p>
+                <p className="text-xs text-muted-foreground mt-1">{previewTemplate.description}</p>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                    style={{ background: "hsl(var(--kf-accent1) / 0.15)" }}
+                  >
+                    <Zap className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Trigger</p>
+                    <p className="text-sm font-medium">{getTriggerLabel(previewTemplate.trigger)}</p>
+                  </div>
+                </div>
+
+                <div className="flex justify-center">
+                  <ArrowRight className="w-4 h-4 text-muted-foreground/40 rotate-90" />
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                    style={{ background: "hsl(var(--muted) / 0.5)" }}
+                  >
+                    <Filter className="w-4 h-4 text-muted-foreground" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Condition</p>
+                    <p className="text-sm text-muted-foreground italic">No condition (always run)</p>
+                  </div>
+                </div>
+
+                <div className="flex justify-center">
+                  <ArrowRight className="w-4 h-4 text-muted-foreground/40 rotate-90" />
+                </div>
+
+                {previewTemplate.actions.map((action, i) => (
+                  <div key={i}>
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                        style={{ background: "hsl(var(--kf-success) / 0.15)" }}
+                      >
+                        <span className="text-xs font-bold" style={{ color: "hsl(var(--kf-success))" }}>{i + 1}</span>
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Action {i + 1}</p>
+                        <p className="text-sm font-medium">{getActionLabel(action.type)}</p>
+                      </div>
+                    </div>
+                    {i < previewTemplate.actions.length - 1 && (
+                      <div className="flex justify-center py-1">
+                        <ArrowRight className="w-3 h-3 text-muted-foreground/30 rotate-90" />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-2 p-5 pt-0">
+              <button
+                onClick={() => setPreviewTemplate(null)}
+                className="flex-1 text-sm font-medium px-4 py-2.5 rounded-lg border border-border/60 text-muted-foreground hover:text-foreground transition-colors min-h-[44px]"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => {
+                  onSelect(previewTemplate);
+                  setPreviewTemplate(null);
+                }}
+                className="flex-1 text-sm font-medium px-4 py-2.5 rounded-lg transition-colors min-h-[44px]"
+                style={{ background: "hsl(var(--kf-accent1))", color: "hsl(var(--kf-accent1-foreground, 0 0% 100%))" }}
+              >
+                Customize &amp; Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

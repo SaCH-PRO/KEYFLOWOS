@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { Input } from "@keyflow/ui";
 import { InfoBadge } from "@/components/ui/info-badge";
-import { FormState } from "./use-business-settings";
+import { FormState, ValidationErrors } from "./use-business-settings";
 
 const TIMEZONES = [
   "America/Port_of_Spain",
@@ -39,6 +39,7 @@ type Props = {
   form: FormState;
   setField: (field: keyof FormState, value: string) => void;
   logoUrl?: string;
+  validationErrors?: ValidationErrors;
 };
 
 function CallCard({ form, logoUrl }: { form: FormState; logoUrl?: string }) {
@@ -170,23 +171,27 @@ function CallCard({ form, logoUrl }: { form: FormState; logoUrl?: string }) {
   );
 }
 
-export function BasicInfoTab({ form, setField, logoUrl }: Props) {
+export function BasicInfoTab({ form, setField, logoUrl, validationErrors = {} }: Props) {
   return (
     <div className="space-y-4">
       <CallCard form={form} logoUrl={logoUrl} />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <label className="block text-xs text-muted-foreground">
+        <div className="block text-xs text-muted-foreground">
           <div className="flex items-center gap-1 mb-1">
             <Building2 className="h-3 w-3" />
-            Business Name
+            Business Name <span style={{ color: "hsl(var(--kf-error))" }}>*</span>
           </div>
           <Input
             value={form.name}
             onChange={(e) => setField("name", e.target.value)}
             placeholder="My Business"
+            style={validationErrors.name ? { borderColor: "hsl(var(--kf-error))" } : undefined}
           />
-        </label>
+          {validationErrors.name && (
+            <p className="text-[11px] mt-1" style={{ color: "hsl(var(--kf-error))" }}>{validationErrors.name}</p>
+          )}
+        </div>
 
         <label className="block text-xs text-muted-foreground">
           <div className="flex items-center gap-1 mb-1">
@@ -214,18 +219,22 @@ export function BasicInfoTab({ form, setField, logoUrl }: Props) {
           />
         </label>
 
-        <label className="block text-xs text-muted-foreground">
+        <div className="block text-xs text-muted-foreground">
           <div className="flex items-center gap-1 mb-1">
             <Mail className="h-3 w-3" />
-            Business Email
+            Business Email <span style={{ color: "hsl(var(--kf-error))" }}>*</span>
           </div>
           <Input
             type="email"
             value={form.email}
             onChange={(e) => setField("email", e.target.value)}
             placeholder="contact@mybusiness.com"
+            style={validationErrors.email ? { borderColor: "hsl(var(--kf-error))" } : undefined}
           />
-        </label>
+          {validationErrors.email && (
+            <p className="text-[11px] mt-1" style={{ color: "hsl(var(--kf-error))" }}>{validationErrors.email}</p>
+          )}
+        </div>
 
         <label className="block text-xs text-muted-foreground">
           <div className="flex items-center gap-1 mb-1">
