@@ -85,6 +85,7 @@ function getNotificationLink(n: any): string | null {
 }
 
 function NewEntityMenu({ onClose }: { onClose: () => void }) {
+  const router = useRouter();
   const menuRef = useRef<HTMLDivElement>(null);
   const [focusIdx, setFocusIdx] = useState(-1);
   const items = [
@@ -109,12 +110,13 @@ function NewEntityMenu({ onClose }: { onClose: () => void }) {
         setFocusIdx((prev) => Math.max(prev - 1, 0));
       } else if (e.key === "Enter" && focusIdx >= 0) {
         e.preventDefault();
+        router.push(items[focusIdx].href);
         onClose();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [focusIdx, items.length, onClose]);
+  }, [focusIdx, items, onClose, router]);
 
   useEffect(() => {
     if (focusIdx >= 0) {
@@ -539,36 +541,41 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                         notifications.slice(0, 20).map((n: any) => {
                           const notifLink = getNotificationLink(n);
                           const NotifIcon = getNotificationIcon(n);
-                          const Wrapper = notifLink ? Link : "div";
-                          const wrapperProps = notifLink ? { href: notifLink, onClick: () => setNotifOpen(false) } : {};
-                          return (
-                            <Wrapper
-                              key={n.id}
-                              {...wrapperProps as any}
-                              className={cn(
-                                "block px-4 py-3 border-b border-border last:border-0 hover:bg-muted/50 transition-colors active:bg-muted/70",
-                                !n.read && "bg-muted/30",
-                                notifLink && "cursor-pointer"
-                              )}
-                            >
-                              <div className="flex items-start gap-2.5">
-                                <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 bg-muted/50">
-                                  <NotifIcon className="w-3.5 h-3.5 text-muted-foreground" />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-start justify-between gap-2">
-                                    <p className="text-sm font-medium">{n.title}</p>
-                                    {!n.read && (
-                                      <div className="w-2 h-2 rounded-full flex-shrink-0 mt-1.5" style={{ background: "hsl(var(--kf-accent1))" }} />
-                                    )}
-                                  </div>
-                                  {n.body && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.body}</p>}
-                                  <p className="text-[10px] text-muted-foreground mt-1">
-                                    {relativeTime(n.createdAt)}
-                                  </p>
-                                </div>
+                          const itemClass = cn(
+                            "block px-4 py-3 border-b border-border last:border-0 hover:bg-muted/50 transition-colors active:bg-muted/70",
+                            !n.read && "bg-muted/30",
+                            notifLink && "cursor-pointer"
+                          );
+                          const content = (
+                            <div className="flex items-start gap-2.5">
+                              <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 bg-muted/50">
+                                <NotifIcon className="w-3.5 h-3.5 text-muted-foreground" />
                               </div>
-                            </Wrapper>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-start justify-between gap-2">
+                                  <p className="text-sm font-medium">{n.title}</p>
+                                  {!n.read && (
+                                    <div className="w-2 h-2 rounded-full flex-shrink-0 mt-1.5" style={{ background: "hsl(var(--kf-accent1))" }} />
+                                  )}
+                                </div>
+                                {n.body && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.body}</p>}
+                                <p className="text-[10px] text-muted-foreground mt-1">
+                                  {relativeTime(n.createdAt)}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                          if (notifLink) {
+                            return (
+                              <Link key={n.id} href={notifLink} onClick={() => setNotifOpen(false)} className={itemClass}>
+                                {content}
+                              </Link>
+                            );
+                          }
+                          return (
+                            <div key={n.id} className={itemClass}>
+                              {content}
+                            </div>
                           );
                         })
                       )}
