@@ -288,13 +288,13 @@ export class CommerceService {
         break;
       case 'reject':
         result = await this.prisma.client.quote.updateMany({
-          where,
+          where: { ...where, status: { in: ['SENT'] } },
           data: { status: 'REJECTED' },
         });
         break;
       case 'delete':
         result = await this.prisma.client.quote.updateMany({
-          where,
+          where: { ...where, status: { in: ['DRAFT', 'SENT', 'REJECTED', 'EXPIRED'] } },
           data: { deletedAt: new Date() },
         });
         break;

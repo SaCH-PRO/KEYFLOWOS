@@ -98,7 +98,7 @@ export function DateRangeFilter({ value, onChange, className = "" }: DateRangeFi
     <div className={`relative ${className}`}>
       <button
         onClick={() => setOpen(!open)}
-        className={`inline-flex items-center gap-1.5 px-2.5 min-h-[36px] text-[11px] font-medium rounded-lg transition-all whitespace-nowrap ${
+        className={`inline-flex items-center gap-1.5 px-2.5 min-h-[44px] text-[11px] font-medium rounded-lg transition-all whitespace-nowrap ${
           value.preset !== "all"
             ? "bg-[hsl(var(--kf-accent1))]/10 border border-[hsl(var(--kf-accent1))]/30 text-[hsl(var(--kf-accent1))]"
             : "bg-white/[0.03] border border-border/40 text-muted-foreground/70 hover:bg-white/[0.06]"
@@ -112,9 +112,12 @@ export function DateRangeFilter({ value, onChange, className = "" }: DateRangeFi
       {value.preset !== "all" && (
         <button
           onClick={clearFilter}
-          className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-muted/80 flex items-center justify-center hover:bg-muted transition-colors z-10"
+          className="absolute -top-2.5 -right-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center z-10"
+          aria-label="Clear date filter"
         >
-          <X className="w-2.5 h-2.5" />
+          <span className="w-4 h-4 rounded-full bg-muted/80 flex items-center justify-center hover:bg-muted transition-colors">
+            <X className="w-2.5 h-2.5" />
+          </span>
         </button>
       )}
 

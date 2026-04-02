@@ -27,7 +27,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { CashFlowSummary } from "../components/cash-flow-summary";
 import { DateRangeFilter, filterByDateRange, DEFAULT_DATE_RANGE } from "../components/date-range-filter";
 import type { DateRange } from "../components/date-range-filter";
-import { exportToCsv } from "../components/bulk-action-bar";
+import { BulkActionBar, exportToCsv } from "../components/bulk-action-bar";
 
 function getDaysOverdue(dueDate: string | null | undefined): number {
   if (!dueDate) return 0;
@@ -73,6 +73,7 @@ export default function PaymentsTab({
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedOverdue, setExpandedOverdue] = useState(true);
   const [dateRange, setDateRange] = useState<DateRange>(DEFAULT_DATE_RANGE);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const stats = useMemo(() => {
     const now = new Date();
@@ -220,6 +221,54 @@ export default function PaymentsTab({
     },
     [actionLoading, setInvoices]
   );
+
+  const toggleSelected = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleExportCsv = useCallback(() => {
+    const items = filteredInvoices.filter((inv) => selectedIds.size === 0 || selectedIds.has(inv.id));
+    exportToCsv(
+      items as unknown as Record<string, unknown>[],
+      [
+        { key: "invoiceNumber", header: "Invoice #" },
+        { key: "status", header: "Status" },
+        { key: "total", header: `Amount (${currency})`, format: (v: unknown) => Number(v).toFixed(2) },
+        { key: "paidAt", header: "Paid Date", format: (v: unknown) => (v ? new Date(v as string).toLocaleDateString() : "—") },
+        { key: "dueDate", header: "Due Date", format: (v: unknown) => (v ? new Date(v as string).toLocaleDateString() : "—") },
+      ],
+      `payments-${new Date().toISOString().slice(0, 10)}`,
+    );
+    toast.success("CSV exported");
+  }, [filteredInvoices, selectedIds, currency]);
+
+  const handleBulkMarkPaid = useCallback(async () => {
+    if (!businessId) return;
+    const ids = Array.from(selectedIds).filter((id) => {
+      const inv = invoices.find((i) => i.id === id);
+      return inv && inv.status !== "PAID" && inv.status !== "VOID";
+    });
+    if (ids.length === 0) {
+      toast.info("No eligible invoices to mark as paid");
+      return;
+    }
+    const results = await Promise.all(ids.map((id) => markInvoicePaid(id)));
+    const succeeded = results.filter((r) => r.data).length;
+    if (succeeded > 0) {
+      setInvoices((prev) =>
+        prev.map((inv) => {
+          const match = results.find((r) => r.data?.id === inv.id);
+          return match?.data ? { ...inv, status: match.data.status ?? "PAID" } : inv;
+        }),
+      );
+      toast.success(`${succeeded} invoice(s) marked as paid`);
+    }
+    setSelectedIds(new Set());
+  }, [businessId, selectedIds, invoices, setInvoices]);
 
   const methodBreakdown = useMemo(() => {
     const methods: Record<string, { count: number; total: number }> = {};
@@ -387,25 +436,25 @@ export default function PaymentsTab({
                           <button
                             onClick={() => handleSendReminder(inv.id)}
                             disabled={!!isLoading}
-                            className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors disabled:opacity-50"
+                            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors disabled:opacity-50"
                             title="Send Reminder"
                           >
                             {isLoading === "send" ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
                             ) : (
-                              <Send className="w-3 h-3" />
+                              <Send className="w-3.5 h-3.5" />
                             )}
                           </button>
                           <button
                             onClick={() => handleMarkPaid(inv.id)}
                             disabled={!!isLoading}
-                            className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+                            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
                             title="Mark Paid"
                           >
                             {isLoading === "paid" ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
                             ) : (
-                              <CheckCircle2 className="w-3 h-3" />
+                              <CheckCircle2 className="w-3.5 h-3.5" />
                             )}
                           </button>
                         </div>
@@ -469,7 +518,7 @@ export default function PaymentsTab({
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery("")}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-md hover:bg-muted/50 transition-colors"
+                className="absolute right-0 top-1/2 -translate-y-1/2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-md hover:bg-muted/50 transition-colors"
               >
                 <X className="w-3 h-3 text-muted-foreground/50" />
               </button>
@@ -529,6 +578,23 @@ export default function PaymentsTab({
           />
         ) : (
           <div className="space-y-1">
+            {filteredInvoices.length > 0 && (
+              <div className="flex items-center gap-1 px-2 pb-1">
+                <label className="min-w-[44px] min-h-[44px] flex items-center justify-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filteredInvoices.length > 0 && filteredInvoices.every((i) => selectedIds.has(i.id))}
+                    onChange={() => {
+                      const allSelected = filteredInvoices.every((i) => selectedIds.has(i.id));
+                      setSelectedIds(allSelected ? new Set() : new Set(filteredInvoices.map((i) => i.id)));
+                    }}
+                    className="w-4 h-4 rounded border-border/50 accent-[hsl(var(--kf-accent1))]"
+                    aria-label="Select all visible payments"
+                  />
+                </label>
+                <span className="text-[10px] text-muted-foreground/50">Select all</span>
+              </div>
+            )}
             {filteredInvoices.map((inv) => {
               const isLoading = actionLoading[inv.id];
               const isPaid = inv.status === "PAID";
@@ -541,14 +607,23 @@ export default function PaymentsTab({
               return (
                 <div
                   key={inv.id}
-                  className={`flex items-center gap-3 p-2.5 rounded-lg transition-colors ${
+                  className={`flex items-center gap-2 p-2.5 rounded-lg transition-colors ${
                     isOverdue
                       ? "bg-red-500/[0.04] hover:bg-red-500/[0.08]"
                       : isPaid
                         ? "bg-emerald-500/[0.03] hover:bg-emerald-500/[0.06]"
                         : "bg-white/[0.02] hover:bg-white/[0.04]"
-                  }`}
+                  } ${selectedIds.has(inv.id) ? "ring-1 ring-[hsl(var(--kf-accent1))]/40" : ""}`}
                 >
+                  <label className="min-w-[44px] min-h-[44px] flex items-center justify-center shrink-0 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(inv.id)}
+                      onChange={() => toggleSelected(inv.id)}
+                      className="w-4 h-4 rounded border-border/50 accent-[hsl(var(--kf-accent1))]"
+                      aria-label={`Select payment ${inv.invoiceNumber ?? inv.id.slice(0, 8)}`}
+                    />
+                  </label>
                   <div
                     className={`p-1.5 rounded-lg shrink-0 ${
                       isPaid
@@ -589,25 +664,25 @@ export default function PaymentsTab({
                       <button
                         onClick={() => handleSendReminder(inv.id)}
                         disabled={!!isLoading}
-                        className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors disabled:opacity-50"
+                        className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors disabled:opacity-50"
                         title="Send Reminder"
                       >
                         {isLoading === "send" ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
                         ) : (
-                          <Send className="w-3 h-3" />
+                          <Send className="w-3.5 h-3.5" />
                         )}
                       </button>
                       <button
                         onClick={() => handleMarkPaid(inv.id)}
                         disabled={!!isLoading}
-                        className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+                        className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
                         title="Mark Paid"
                       >
                         {isLoading === "paid" ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
                         ) : (
-                          <CheckCircle2 className="w-3 h-3" />
+                          <CheckCircle2 className="w-3.5 h-3.5" />
                         )}
                       </button>
                     </div>
@@ -618,6 +693,19 @@ export default function PaymentsTab({
           </div>
         )}
       </div>
+
+      <BulkActionBar
+        selectedCount={selectedIds.size}
+        totalCount={filteredInvoices.length}
+        onSelectAll={() => setSelectedIds(new Set(filteredInvoices.map((i) => i.id)))}
+        onClearSelection={() => setSelectedIds(new Set())}
+        onExportCsv={handleExportCsv}
+        statusOptions={[
+          { value: "PAID", label: "Mark Paid" },
+        ]}
+        onBulkStatusChange={handleBulkMarkPaid}
+        entityLabel="payments"
+      />
 
       <Link
         href="/app/settings/business?tab=payments"
