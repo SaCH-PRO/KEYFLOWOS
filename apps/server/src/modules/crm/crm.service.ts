@@ -667,7 +667,7 @@ export class CrmService {
     if (!input.contactIds || input.contactIds.length === 0) {
       throw new BadRequestException('contactIds is required');
     }
-    const data: any = {};
+    const data: Record<string, string> = {};
     if (input.status) data.status = input.status;
     if (input.addTags && input.addTags.length > 0) {
       const contacts = await this.prisma.client.contact.findMany({
@@ -683,12 +683,12 @@ export class CrmService {
           await this.timeline.logEvent(input.businessId, c.id, 'bulk.updated', {
             ...(input.status ? { status: input.status } : {}),
             ...(input.addTags ? { addedTags: input.addTags } : {}),
-          }, undefined, tx as any);
+          }, undefined, tx);
         }
         return updated;
       });
       this.stats.invalidateCache(input.businessId);
-    this.flow.invalidateCache(input.businessId);
+      this.flow.invalidateCache(input.businessId);
       return { updated: results.length };
     }
     if (Object.keys(data).length === 0) {
@@ -700,7 +700,7 @@ export class CrmService {
         data,
       });
       for (const cid of input.contactIds) {
-        await this.timeline.logEvent(input.businessId, cid, 'bulk.updated', { status: input.status }, undefined, tx as any);
+        await this.timeline.logEvent(input.businessId, cid, 'bulk.updated', { status: input.status }, undefined, tx);
       }
       return res;
     });
