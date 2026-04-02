@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { updateBusiness, getBusinessById } from "@/lib/client";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
+import { toast } from "sonner";
 import { 
   Shield, 
   CheckCircle2, 
@@ -217,10 +218,12 @@ export default function ComplianceSettingsPage() {
 
       setInitialItems([...items]);
       setSavedMessage("Compliance status saved successfully!");
+      toast.success("Compliance status saved");
       setTimeout(() => setSavedMessage(null), 3000);
     } catch (err) {
       console.error("Failed to save compliance status:", err);
       setSavedMessage("Failed to save. Please try again.");
+      toast.error("Failed to save compliance status");
     }
 
     setSaving(false);

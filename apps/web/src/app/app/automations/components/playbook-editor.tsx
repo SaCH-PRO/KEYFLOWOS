@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Zap, X, Plus, Eye, EyeOff, Filter, ArrowRight } from "lucide-react";
+import { Zap, X, Plus, Eye, EyeOff, Filter } from "lucide-react";
 import { InfoBadge } from "@/components/ui/info-badge";
 import { Button, Input } from "@keyflow/ui";
 import { createPlaybook, updatePlaybook, Playbook } from "@/lib/client";
