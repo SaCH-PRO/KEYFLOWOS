@@ -14,7 +14,8 @@ export class ReportsController {
     @Query('type') type: string = 'executive',
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
+    @Query('compare') compare?: string,
   ) {
-    return this.reports.generateReport(businessId, type, startDate, endDate);
+    return this.reports.generateReport(businessId, type, startDate, endDate, compare === 'true');
   }
 }

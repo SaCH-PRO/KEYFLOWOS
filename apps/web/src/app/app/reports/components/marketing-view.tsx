@@ -1,8 +1,8 @@
 "use client";
 
-import { Megaphone, Mail, MousePointer, Users, TrendingUp } from "lucide-react";
+import { Megaphone, Mail, MousePointer, Users, TrendingUp, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
-import { MetricCard, NarrativeSection } from "./shared-components";
+import { MetricCard, NarrativeSection, CollapsibleSection } from "./shared-components";
 import type { GeneratedReport } from "@/lib/client";
 
 interface MarketingViewProps {
@@ -25,14 +25,14 @@ export function MarketingView({ report }: MarketingViewProps) {
           label="Campaigns Sent"
           value={String(campaignsSent)}
           icon={Megaphone}
-          color="text-violet-400"
+          color="text-[hsl(var(--kf-accent1))]"
           explanation="Number of email/SMS campaigns sent in this period."
         />
         <MetricCard
           label="Avg Open Rate"
           value={`${avgOpenRate}%`}
           icon={Mail}
-          color="text-blue-400"
+          color="text-[hsl(var(--kf-info))]"
           subtext={avgOpenRate > 20 ? "Above average" : "Below average"}
           trend={avgOpenRate > 20 ? "up" : "down"}
           explanation="Percentage of recipients who opened your campaigns."
@@ -43,7 +43,7 @@ export function MarketingView({ report }: MarketingViewProps) {
           label="Total Clicks"
           value={String(totalClicks)}
           icon={MousePointer}
-          color="text-emerald-400"
+          color="text-[hsl(var(--kf-success))]"
           explanation="Total link clicks across all campaigns in this period."
           goodValue="Higher clicks indicate compelling content and CTAs."
         />
@@ -51,23 +51,21 @@ export function MarketingView({ report }: MarketingViewProps) {
           label="Form Submissions"
           value={String(formSubmissions)}
           icon={Users}
-          color="text-amber-400"
+          color="text-[hsl(var(--kf-warning))]"
           subtext="leads captured"
           explanation="Number of lead form submissions from your marketing forms."
           goodValue="Track conversion from form views to submissions."
         />
       </div>
 
-      {report.narrative && (
-        <NarrativeSection title="AI Marketing Analysis" narrative={report.narrative} />
+      {(report.aiNarrative || report.narrative) && (
+        <CollapsibleSection title="AI Marketing Analysis" icon={CheckCircle2} defaultOpen>
+          <NarrativeSection content={report.aiNarrative} narrative={report.narrative} />
+        </CollapsibleSection>
       )}
 
       <div className="grid lg:grid-cols-2 gap-4">
-        <div className="kf-card p-4 space-y-3">
-          <h3 className="text-sm font-semibold flex items-center gap-2">
-            <TrendingUp className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-            Top Campaigns by Engagement
-          </h3>
+        <CollapsibleSection title="Top Campaigns by Engagement" icon={TrendingUp} defaultOpen>
           {topCampaigns.length > 0 ? (
             <div className="space-y-2">
               {topCampaigns.slice(0, 5).map((c: { name: string; openRate: number; clickRate: number; sent: number }, i: number) => (
@@ -92,13 +90,9 @@ export function MarketingView({ report }: MarketingViewProps) {
           ) : (
             <p className="text-sm text-muted-foreground">No campaign data for this period.</p>
           )}
-        </div>
+        </CollapsibleSection>
 
-        <div className="kf-card p-4 space-y-3">
-          <h3 className="text-sm font-semibold flex items-center gap-2">
-            <Users className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
-            Lead Sources
-          </h3>
+        <CollapsibleSection title="Lead Sources" icon={Users} defaultOpen>
           {leadSources.length > 0 ? (
             <div className="space-y-2">
               {leadSources.slice(0, 5).map((src: { name: string; count: number; conversionRate: number }, i: number) => (
@@ -116,7 +110,7 @@ export function MarketingView({ report }: MarketingViewProps) {
           ) : (
             <p className="text-sm text-muted-foreground">No lead source data for this period.</p>
           )}
-        </div>
+        </CollapsibleSection>
       </div>
 
       <div className="kf-card p-4">
@@ -124,7 +118,7 @@ export function MarketingView({ report }: MarketingViewProps) {
           <h3 className="text-sm font-semibold">Take Action</h3>
           <Link
             href="/app/marketing"
-            className="text-xs font-medium transition-colors hover:opacity-80"
+            className="text-xs font-medium transition-colors hover:opacity-80 min-h-[44px] inline-flex items-center"
             style={{ color: "hsl(var(--kf-accent1))" }}
           >
             Open Marketing →

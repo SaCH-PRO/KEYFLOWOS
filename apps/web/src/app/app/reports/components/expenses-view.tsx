@@ -1,33 +1,57 @@
 "use client";
 
-import { Card } from "@keyflow/ui";
 import { BarChart3, TrendingUp, PieChart, Wallet, Store } from "lucide-react";
+import Link from "next/link";
 import { GeneratedReport } from "@/lib/client";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatCurrency } from "./report-types";
-import { MetricCard, DataTable, NarrativeSection, ProgressBar } from "./shared-components";
+import { MetricCard, DataTable, NarrativeSection, ProgressBar, CollapsibleSection } from "./shared-components";
 
 export function ExpensesView({ report }: { report: GeneratedReport }) {
   const m = report.metrics;
+  const c = report.comparison;
   return (
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-3">
-        <MetricCard label="Total Expenses" value={formatCurrency(m.expenses.total, m.currency)} subtext={`${m.expenses.count} entries`} icon={Wallet} color="text-red-400" explanation="Sum of all expense entries logged in this period." />
-        <MetricCard label="Avg Expense" value={formatCurrency(m.expenses.averageExpense, m.currency)} icon={BarChart3} color="text-amber-400" explanation="Average cost per expense entry." formula="Total Expenses ÷ Number of Entries" goodValue="Track trends to catch spending creep." />
-        <MetricCard label="Cost-to-Revenue" value={m.profitability.revenueToExpenseRatio ? `${m.profitability.revenueToExpenseRatio}x` : "N/A"} subtext={m.profitability.revenueToExpenseRatio && m.profitability.revenueToExpenseRatio > 1 ? "Revenue exceeds costs" : "Costs exceed revenue"} icon={TrendingUp} color={m.profitability.revenueToExpenseRatio && m.profitability.revenueToExpenseRatio > 1 ? "text-emerald-400" : "text-red-400"} explanation="How many times your revenue covers your expenses." formula="Total Revenue ÷ Total Expenses" goodValue="Above 2x means healthy margins. Below 1x means spending more than earning." />
+        <Link href="/app/expenses">
+          <MetricCard
+            label="Total Expenses"
+            value={formatCurrency(m.expenses.total, m.currency)}
+            subtext={`${m.expenses.count} entries`}
+            icon={Wallet}
+            color="text-[hsl(var(--kf-error))]"
+            trendPct={c ? -c.expenses.changePct : undefined}
+            prevValue={c ? formatCurrency(c.expenses.total, m.currency) : undefined}
+            explanation="Sum of all expense entries logged in this period."
+          />
+        </Link>
+        <MetricCard
+          label="Avg Expense"
+          value={formatCurrency(m.expenses.averageExpense, m.currency)}
+          icon={BarChart3}
+          color="text-[hsl(var(--kf-warning))]"
+          explanation="Average cost per expense entry."
+          formula="Total Expenses / Number of Entries"
+          goodValue="Track trends to catch spending creep."
+        />
+        <MetricCard
+          label="Cost-to-Revenue"
+          value={m.profitability.revenueToExpenseRatio ? `${m.profitability.revenueToExpenseRatio}x` : "N/A"}
+          subtext={m.profitability.revenueToExpenseRatio && m.profitability.revenueToExpenseRatio > 1 ? "Revenue exceeds costs" : "Costs exceed revenue"}
+          icon={TrendingUp}
+          color={m.profitability.revenueToExpenseRatio && m.profitability.revenueToExpenseRatio > 1 ? "text-[hsl(var(--kf-success))]" : "text-[hsl(var(--kf-error))]"}
+          explanation="How many times your revenue covers your expenses."
+          formula="Total Revenue / Total Expenses"
+          goodValue="Above 2x means healthy margins. Below 1x means spending more than earning."
+        />
       </div>
 
-      <Card className="p-5 bg-slate-950/60 backdrop-blur border-border/60">
-        <div className="flex items-center gap-2 mb-4">
-          <PieChart className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
-          <h3 className="text-sm font-semibold">Expense Analysis</h3>
-        </div>
+      <CollapsibleSection title="Expense Analysis" icon={PieChart} defaultOpen>
         <NarrativeSection content={report.aiNarrative} />
-      </Card>
+      </CollapsibleSection>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="p-4 bg-slate-950/60 backdrop-blur border-border/60">
-          <h3 className="text-sm font-semibold mb-3">By Category</h3>
+        <CollapsibleSection title="By Category" defaultOpen>
           <div className="space-y-3">
             {m.expenses.byCategory.map(cat => (
               <div key={cat.category} className="space-y-1">
@@ -35,15 +59,14 @@ export function ExpensesView({ report }: { report: GeneratedReport }) {
                   <span className="text-sm">{cat.category}</span>
                   <span className="text-xs text-muted-foreground">{formatCurrency(cat.total, m.currency)} ({cat.count})</span>
                 </div>
-                <ProgressBar value={cat.total} max={m.expenses.byCategory[0]?.total || 1} color="bg-red-400" />
+                <ProgressBar value={cat.total} max={m.expenses.byCategory[0]?.total || 1} color="hsl(var(--kf-error))" />
               </div>
             ))}
             {m.expenses.byCategory.length === 0 && <p className="text-sm text-muted-foreground">No categorized expenses</p>}
           </div>
-        </Card>
+        </CollapsibleSection>
 
-        <Card className="p-4 bg-slate-950/60 backdrop-blur border-border/60">
-          <h3 className="text-sm font-semibold mb-3">Top Vendors</h3>
+        <CollapsibleSection title="Top Vendors" defaultOpen>
           <DataTable
             headers={["Vendor", "Total Spent"]}
             rows={m.expenses.topVendors.map(v => [v.vendor, formatCurrency(v.total, m.currency)])}
@@ -51,14 +74,14 @@ export function ExpensesView({ report }: { report: GeneratedReport }) {
               <EmptyState
                 icon={Store}
                 title="No vendor data"
-                description="No vendor expenses found for this period. Try selecting a wider date range."
+                description="No vendor expenses found for this period."
                 actionLabel="Go to Expenses"
                 onAction={() => { window.location.href = "/app/expenses"; }}
                 tip="Assign vendors to expenses to track spending per supplier."
               />
             }
           />
-        </Card>
+        </CollapsibleSection>
       </div>
     </div>
   );

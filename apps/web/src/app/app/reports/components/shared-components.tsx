@@ -1,8 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { Card } from "@keyflow/ui";
-import { ArrowUpRight, ArrowDownRight } from "lucide-react";
-import { motion } from "framer-motion";
+import { ArrowUpRight, ArrowDownRight, ChevronDown, ChevronRight } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { MetricExplainer } from "@/components/ui/metric-explainer";
 
 export function MetricCard({ label, value, subtext, icon: Icon, color = "text-foreground", trend, trendPct, prevValue, explanation, formula, goodValue }: {
@@ -12,7 +13,7 @@ export function MetricCard({ label, value, subtext, icon: Icon, color = "text-fo
 }) {
   const card = (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <Card className="p-4 space-y-2 bg-slate-950/60 backdrop-blur border-border/60">
+      <Card className="p-4 space-y-2 backdrop-blur border-border/60" style={{ background: "hsl(var(--kf-card) / 0.6)" }}>
         <div className="flex items-center justify-between">
           <span className="text-xs text-muted-foreground uppercase tracking-wide">{label}</span>
           <Icon className={`w-4 h-4 ${color}`} />
@@ -38,8 +39,8 @@ export function MetricCard({ label, value, subtext, icon: Icon, color = "text-fo
         )}
         {subtext && (
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
-            {trend === "up" && <ArrowUpRight className="w-3 h-3 text-emerald-400" />}
-            {trend === "down" && <ArrowDownRight className="w-3 h-3 text-red-400" />}
+            {trend === "up" && <ArrowUpRight className="w-3 h-3" style={{ color: "hsl(var(--kf-success))" }} />}
+            {trend === "down" && <ArrowDownRight className="w-3 h-3" style={{ color: "hsl(var(--kf-error))" }} />}
             {subtext}
           </div>
         )}
@@ -53,8 +54,9 @@ export function MetricCard({ label, value, subtext, icon: Icon, color = "text-fo
   return card;
 }
 
-export function DataTable({ headers, rows, emptyText = "No data", emptyState }: {
+export function DataTable({ headers, rows, emptyText = "No data", emptyState, onRowClick }: {
   headers: string[]; rows: Array<Array<string | React.ReactNode>>; emptyText?: string; emptyState?: React.ReactNode;
+  onRowClick?: (rowIndex: number) => void;
 }) {
   return (
     <div className="overflow-x-auto">
@@ -75,7 +77,11 @@ export function DataTable({ headers, rows, emptyText = "No data", emptyState }: 
             </tr>
           ) : (
             rows.map((row, i) => (
-              <tr key={i} className="border-b border-border/20 hover:bg-white/[0.02]">
+              <tr
+                key={i}
+                className={`border-b border-border/20 hover:bg-[hsl(var(--kf-muted))]/10 ${onRowClick ? "cursor-pointer" : ""}`}
+                onClick={onRowClick ? () => onRowClick(i) : undefined}
+              >
                 {row.map((cell, j) => (
                   <td key={j} className="py-2.5 px-3">{cell}</td>
                 ))}
@@ -88,10 +94,12 @@ export function DataTable({ headers, rows, emptyText = "No data", emptyState }: 
   );
 }
 
-export function NarrativeSection({ content }: { content: string }) {
-  const sections = content.split(/\n\n+/).filter(Boolean);
+export function NarrativeSection({ content, title, narrative }: { content?: string; title?: string; narrative?: string }) {
+  const text = content || narrative || "";
+  const sections = text.split(/\n\n+/).filter(Boolean);
   return (
     <div className="space-y-4">
+      {title && <h3 className="text-sm font-semibold">{title}</h3>}
       {sections.map((section, i) => {
         const lines = section.split("\n").filter(Boolean);
         return (
@@ -107,7 +115,7 @@ export function NarrativeSection({ content }: { content: string }) {
                 );
               }
               if (line.startsWith("- ") || line.startsWith("• ")) {
-                return <p key={j} className="text-sm text-muted-foreground leading-relaxed pl-4">• {line.replace(/^[-•]\s*/, "")}</p>;
+                return <p key={j} className="text-sm text-muted-foreground leading-relaxed pl-4">- {line.replace(/^[-•]\s*/, "")}</p>;
               }
               if (/^\d+\.\s/.test(line)) {
                 return <p key={j} className="text-sm text-muted-foreground leading-relaxed pl-4">{line}</p>;
@@ -123,32 +131,64 @@ export function NarrativeSection({ content }: { content: string }) {
 
 export function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
-    PAID: "bg-emerald-500/20 text-emerald-300",
-    SENT: "bg-blue-500/20 text-blue-300",
-    DRAFT: "bg-slate-500/20 text-slate-300",
-    OVERDUE: "bg-red-500/20 text-red-300",
-    VOID: "bg-slate-600/20 text-slate-400",
-    LEAD: "bg-amber-500/20 text-amber-300",
-    CLIENT: "bg-emerald-500/20 text-emerald-300",
-    PROSPECT: "bg-blue-500/20 text-blue-300",
+    PAID: "bg-[hsl(var(--kf-success))]/20 text-[hsl(var(--kf-success))]",
+    SENT: "bg-[hsl(var(--kf-info))]/20 text-[hsl(var(--kf-info))]",
+    DRAFT: "bg-muted/40 text-muted-foreground",
+    OVERDUE: "bg-[hsl(var(--kf-error))]/20 text-[hsl(var(--kf-error))]",
+    VOID: "bg-muted/30 text-muted-foreground",
+    LEAD: "bg-[hsl(var(--kf-warning))]/20 text-[hsl(var(--kf-warning))]",
+    CLIENT: "bg-[hsl(var(--kf-success))]/20 text-[hsl(var(--kf-success))]",
+    PROSPECT: "bg-[hsl(var(--kf-info))]/20 text-[hsl(var(--kf-info))]",
   };
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${colors[status] || "bg-slate-500/20 text-slate-300"}`}>
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${colors[status] || "bg-muted/30 text-muted-foreground"}`}>
       {status}
     </span>
   );
 }
 
-export function ProgressBar({ value, max, color = "bg-emerald-400" }: { value: number; max: number; color?: string }) {
+export function ProgressBar({ value, max, color }: { value: number; max: number; color?: string }) {
   const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
   return (
-    <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+    <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: "hsl(var(--kf-muted) / 0.3)" }}>
       <motion.div
-        className={`h-full rounded-full ${color}`}
+        className="h-full rounded-full"
+        style={{ background: color || "hsl(var(--kf-success))" }}
         initial={{ width: 0 }}
         animate={{ width: `${pct}%` }}
         transition={{ duration: 0.6, ease: "easeOut" }}
       />
     </div>
+  );
+}
+
+export function CollapsibleSection({ title, icon: Icon, children, defaultOpen = false }: {
+  title: string; icon?: React.ElementType; children: React.ReactNode; defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <Card className="backdrop-blur border-border/60 overflow-hidden" style={{ background: "hsl(var(--kf-card) / 0.6)" }}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-2 p-4 min-h-[44px] text-left hover:bg-[hsl(var(--kf-muted))]/10 transition-colors"
+      >
+        {Icon && <Icon className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />}
+        <h3 className="text-sm font-semibold flex-1">{title}</h3>
+        {open ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="px-4 pb-4">{children}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </Card>
   );
 }

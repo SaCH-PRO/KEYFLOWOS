@@ -3594,11 +3594,22 @@ export interface ReportMetrics {
   products: { total: number };
   business: { name: string; industry: string | null; archetype: string | null; revenueModel: string | null };
 }
+export interface ReportComparison {
+  period: { start: string; end: string };
+  revenue: { total: number; invoiceCount: number; changePct: number };
+  expenses: { total: number; count: number; changePct: number };
+  profitability: { netProfit: number; profitMargin: number; changePct: number };
+  bookings: { total: number; changePct: number };
+  clients: { totalContacts: number; changePct: number };
+}
 export interface GeneratedReport {
   type: string;
   generatedAt: string;
   metrics: ReportMetrics;
   aiNarrative: string;
+  comparison?: ReportComparison | null;
+  data?: Record<string, any>;
+  narrative?: string;
 }
 export async function fetchReport(businessId: string, type = 'executive', startDate?: string, endDate?: string, compare?: boolean): Promise<ApiResult<GeneratedReport>> {
   const params = new URLSearchParams({ type });
