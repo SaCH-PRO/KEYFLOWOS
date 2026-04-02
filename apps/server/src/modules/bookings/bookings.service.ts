@@ -26,7 +26,7 @@ export class BookingsService {
       orderBy: { startTime: 'desc' },
       include: {
         contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
-        service: { select: { id: true, name: true, duration: true, price: true } },
+        service: { select: { id: true, name: true, duration: true, price: true, bufferMins: true, leadTimeMins: true } },
         staff: { select: { id: true, name: true } },
       },
     });
@@ -200,6 +200,7 @@ export class BookingsService {
     staffId: string;
     startTime: Date;
     endTime: Date;
+    notes?: string;
   }) {
     const createData: any = {
       businessId: input.businessId,
@@ -209,6 +210,7 @@ export class BookingsService {
     };
     if (input.contactId) createData.contactId = input.contactId;
     if (input.staffId) createData.staffId = input.staffId;
+    if (input.notes) createData.notes = input.notes;
 
     const booking = await this.prisma.client.booking.create({
       data: createData,

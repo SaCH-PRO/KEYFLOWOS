@@ -122,6 +122,14 @@ export class CrmListsService {
       if (filters.lifecycleStage && Array.isArray(filters.lifecycleStage) && filters.lifecycleStage.length > 0) {
         where.lifecycleStage = { in: filters.lifecycleStage };
       }
+      if (filters.createdWithinDays && typeof filters.createdWithinDays === 'number' && filters.createdWithinDays > 0) {
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - filters.createdWithinDays);
+        where.createdAt = { gte: cutoff };
+      }
+      if (filters.minLeadScore && typeof filters.minLeadScore === 'number' && filters.minLeadScore > 0) {
+        where.leadScore = { gte: filters.minLeadScore };
+      }
       return this.prisma.client.contact.findMany({
         where,
         orderBy: { createdAt: 'desc' },

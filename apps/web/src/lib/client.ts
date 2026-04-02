@@ -116,6 +116,7 @@ const bookingSchema = z.object({
   contactId: z.string().nullable().optional(),
   serviceId: z.string().nullable().optional(),
   staffId: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
   calendarEventId: z.string().nullable().optional(),
   contact: z.object({
     id: z.string(),
@@ -129,6 +130,8 @@ const bookingSchema = z.object({
     name: z.string(),
     duration: z.number(),
     price: z.number(),
+    bufferMins: z.number().nullable().optional(),
+    leadTimeMins: z.number().nullable().optional(),
   }).nullable().optional(),
   staff: z.object({
     id: z.string(),
@@ -1132,6 +1135,7 @@ export async function createBooking(input: {
   staffId: string;
   startTime: string;
   endTime: string;
+  notes?: string;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   const res = await apiPost<Booking>({
@@ -1142,6 +1146,7 @@ export async function createBooking(input: {
       staffId: input.staffId,
       startTime: input.startTime,
       endTime: input.endTime,
+      notes: input.notes ?? undefined,
     },
   });
 
@@ -1154,6 +1159,27 @@ export async function createBooking(input: {
     status: "PENDING",
   };
   return { data: synthesized, error: res.error };
+}
+
+export async function rescheduleBooking(bookingId: string, startTime: string, businessId?: string) {
+  const bId = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<Booking>({
+    path: `/bookings/businesses/${encodeURIComponent(bId)}/bookings/${encodeURIComponent(bookingId)}/reschedule`,
+    body: { startTime },
+  });
+}
+
+export async function fetchStaffAvailability(businessId: string, staffId: string) {
+  return apiGet<{ id: string; dayOfWeek: number; startTime: string; endTime: string }[]>(
+    `/bookings/businesses/${encodeURIComponent(businessId)}/staff/${encodeURIComponent(staffId)}/availability`
+  );
+}
+
+export async function setStaffAvailability(businessId: string, staffId: string, slots: { dayOfWeek: number; startTime: string; endTime: string }[]) {
+  return apiPost<{ id: string; dayOfWeek: number; startTime: string; endTime: string }[]>({
+    path: `/bookings/businesses/${encodeURIComponent(businessId)}/staff/${encodeURIComponent(staffId)}/availability`,
+    body: { slots },
+  });
 }
 
 export async function markInvoicePaid(invoiceId: string) {

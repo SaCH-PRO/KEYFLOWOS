@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Loader2,
   Check,
+  StickyNote,
 } from "lucide-react";
 import type { Service, StaffMember, Contact } from "./bookings-types";
 import { formatTime } from "./bookings-types";
@@ -25,6 +26,7 @@ interface BookingFormProps {
     serviceId: string;
     staffId: string;
     contactId: string;
+    notes?: string;
   }) => void;
   onCancel: () => void;
   formError: string | null;
@@ -85,6 +87,7 @@ export default function BookingForm({
   const [bookingServiceId, setBookingServiceId] = useState("");
   const [bookingStaffId, setBookingStaffId] = useState("");
   const [bookingContactId, setBookingContactId] = useState("");
+  const [bookingNotes, setBookingNotes] = useState("");
   const [weekBase, setWeekBase] = useState(() => {
     if (defaultDate) return new Date(defaultDate + "T12:00:00");
     return new Date();
@@ -160,6 +163,7 @@ export default function BookingForm({
       serviceId: bookingServiceId,
       staffId: bookingStaffId,
       contactId: bookingContactId,
+      notes: bookingNotes.trim() || undefined,
     });
   }
 
@@ -392,6 +396,21 @@ export default function BookingForm({
               contacts={contacts}
               label="Client"
               placeholder="Search or add a client..."
+            />
+          </div>
+
+          <div>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <StickyNote className="w-3.5 h-3.5 text-muted-foreground" />
+              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Notes</span>
+              <span className="text-[10px] text-muted-foreground/50">(optional)</span>
+            </div>
+            <textarea
+              value={bookingNotes}
+              onChange={(e) => setBookingNotes(e.target.value)}
+              placeholder="Add any notes for this booking..."
+              rows={2}
+              className="kf-input w-full text-xs resize-none"
             />
           </div>
         </div>

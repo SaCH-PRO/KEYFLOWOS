@@ -34,6 +34,8 @@ interface SmartListFilters {
   status?: string[];
   tags?: string[];
   source?: string;
+  createdWithinDays?: number;
+  minLeadScore?: number;
 }
 
 interface ContactListData {
@@ -102,6 +104,8 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
   const [formFilterStatus, setFormFilterStatus] = useState<string[]>([]);
   const [formFilterTags, setFormFilterTags] = useState("");
   const [formFilterSource, setFormFilterSource] = useState("");
+  const [formFilterDays, setFormFilterDays] = useState<number | "">("");
+  const [formFilterMinScore, setFormFilterMinScore] = useState<number | "">("");
   const [saving, setSaving] = useState(false);
 
   const onListsLoadedRef = useRef(onListsLoaded);
@@ -208,6 +212,8 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
     setFormFilterStatus([]);
     setFormFilterTags("");
     setFormFilterSource("");
+    setFormFilterDays("");
+    setFormFilterMinScore("");
   }, []);
 
   const openEdit = useCallback((list: ContactListData) => {
@@ -220,6 +226,8 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
       setFormFilterStatus(list.filters.status || []);
       setFormFilterTags((list.filters.tags || []).join(", "));
       setFormFilterSource(list.filters.source || "");
+      setFormFilterDays(list.filters.createdWithinDays ?? "");
+      setFormFilterMinScore(list.filters.minLeadScore ?? "");
     }
     setShowCreate(true);
     setMenuOpenId(null);
@@ -240,6 +248,8 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
           status: formFilterStatus.length > 0 ? formFilterStatus : undefined,
           tags: formFilterTags.trim() ? formFilterTags.split(",").map((t) => t.trim()).filter(Boolean) : undefined,
           source: formFilterSource.trim() || undefined,
+          createdWithinDays: formFilterDays ? Number(formFilterDays) : undefined,
+          minLeadScore: formFilterMinScore ? Number(formFilterMinScore) : undefined,
         };
       }
 
@@ -258,7 +268,7 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
       toast.error("Failed to save list");
     }
     setSaving(false);
-  }, [businessId, editList, formName, formDescription, formColor, formType, formFilterStatus, formFilterTags, formFilterSource, loadLists, resetForm]);
+  }, [businessId, editList, formName, formDescription, formColor, formType, formFilterStatus, formFilterTags, formFilterSource, formFilterDays, formFilterMinScore, loadLists, resetForm]);
 
   const handleDelete = useCallback(async (listId: string) => {
     try {
@@ -464,6 +474,36 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
                   className="kf-input w-full text-xs"
                   aria-label="Filter by source"
                 />
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Created within</label>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="number"
+                        min={1}
+                        placeholder="e.g. 30"
+                        value={formFilterDays}
+                        onChange={(e) => setFormFilterDays(e.target.value ? Number(e.target.value) : "")}
+                        className="kf-input w-full text-xs"
+                        aria-label="Created within days"
+                      />
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">days</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Min lead score</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      placeholder="e.g. 50"
+                      value={formFilterMinScore}
+                      onChange={(e) => setFormFilterMinScore(e.target.value ? Number(e.target.value) : "")}
+                      className="kf-input w-full text-xs"
+                      aria-label="Minimum lead score"
+                    />
+                  </div>
+                </div>
               </div>
             )}
 

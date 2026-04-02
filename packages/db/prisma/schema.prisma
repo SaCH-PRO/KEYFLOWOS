@@ -655,6 +655,8 @@ model Service {
   description String?
   duration    Int // Duration in minutes
   price       Float // Price for this service
+  bufferMins  Int?    @map("buffer_mins")
+  leadTimeMins Int?   @map("lead_time_mins")
 
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -701,6 +703,7 @@ model Booking {
   invoiceId String?  @unique @map("invoice_id")
   invoice   Invoice? @relation(fields: [invoiceId], references: [id], onUpdate: NoAction, onDelete: NoAction) // DATA INTEGRITY
 
+  notes           String?
   calendarEventId String? @map("calendar_event_id")
 
   createdAt DateTime  @default(now()) @map("created_at")

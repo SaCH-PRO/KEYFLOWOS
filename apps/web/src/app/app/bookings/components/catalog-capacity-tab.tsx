@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { motion } from "framer-motion";
+import { useMemo, useState, useCallback, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Briefcase,
   Clock,
@@ -12,14 +12,21 @@ import {
   Link2,
   CalendarDays,
   ExternalLink,
+  Timer,
+  ChevronDown,
+  ChevronUp,
+  Save,
+  Bell,
 } from "lucide-react";
 import NextLink from "next/link";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SetupModeBanner } from "@/components/ui/setup-mode-banner";
 import type { Service, StaffMember, Booking } from "./bookings-types";
 import { formatAmount } from "../../commerce/utils/commerce-utils";
+import { fetchStaffAvailability, setStaffAvailability } from "@/lib/client";
 
 const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 interface CatalogCapacityTabProps {
   services: Service[];
@@ -35,6 +42,7 @@ interface CatalogCapacityTabProps {
   onConnectCalendar: () => void;
   onDisconnectCalendar: () => void;
   loading: boolean;
+  businessId?: string | null;
 }
 
 const stagger = {
@@ -58,12 +66,12 @@ function AvailabilityHours() {
     <motion.div variants={stagger.item} className="space-y-3">
       <div className="flex items-center gap-2">
         <Clock className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-        <h3 className="text-sm font-semibold">Availability & Hours</h3>
+        <h3 className="text-sm font-semibold">Business Hours</h3>
       </div>
 
       <div className="kf-card p-4 space-y-2">
         <p className="text-[11px] text-muted-foreground mb-3">
-          Set your booking availability for each day of the week.
+          Set your default booking availability for each day of the week.
         </p>
         {DAY_LABELS.map((day, idx) => {
           const entry = hours[idx];
@@ -76,7 +84,7 @@ function AvailabilityHours() {
                     [idx]: { ...prev[idx], enabled: !prev[idx].enabled },
                   }))
                 }
-                className="w-5 h-5 rounded border flex items-center justify-center shrink-0 transition-colors"
+                className="w-5 h-5 rounded border flex items-center justify-center shrink-0 transition-colors min-w-[44px] min-h-[44px] p-0 flex items-center justify-center"
                 style={{
                   borderColor: entry.enabled ? "hsl(var(--kf-success) / 0.5)" : "hsl(var(--border))",
                   background: entry.enabled ? "hsl(var(--kf-success) / 0.1)" : "transparent",
@@ -124,6 +132,159 @@ function AvailabilityHours() {
   );
 }
 
+function StaffAvailabilityEditor({ staffId, staffName, businessId }: { staffId: string; staffName: string; businessId: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [slots, setSlots] = useState<Record<number, { enabled: boolean; startTime: string; endTime: string }>>(() => {
+    const defaults: Record<number, { enabled: boolean; startTime: string; endTime: string }> = {};
+    for (let i = 0; i < 7; i++) {
+      defaults[i] = { enabled: i >= 1 && i <= 5, startTime: "09:00", endTime: "17:00" };
+    }
+    return defaults;
+  });
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (expanded && !loaded) {
+      fetchStaffAvailability(businessId, staffId).then((res) => {
+        if (res.data && Array.isArray(res.data) && res.data.length > 0) {
+          const newSlots: Record<number, { enabled: boolean; startTime: string; endTime: string }> = {};
+          for (let i = 0; i < 7; i++) {
+            newSlots[i] = { enabled: false, startTime: "09:00", endTime: "17:00" };
+          }
+          for (const s of res.data) {
+            newSlots[s.dayOfWeek] = { enabled: true, startTime: s.startTime, endTime: s.endTime };
+          }
+          setSlots(newSlots);
+        }
+        setLoaded(true);
+      });
+    }
+  }, [expanded, loaded, businessId, staffId]);
+
+  const handleSave = useCallback(async () => {
+    setSaving(true);
+    const enabledSlots = Object.entries(slots)
+      .filter(([, v]) => v.enabled)
+      .map(([k, v]) => ({ dayOfWeek: Number(k), startTime: v.startTime, endTime: v.endTime }));
+    await setStaffAvailability(businessId, staffId, enabledSlots);
+    setSaving(false);
+  }, [businessId, staffId, slots]);
+
+  return (
+    <div className="mt-2">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1.5 text-[11px] font-medium min-h-[44px] px-2 rounded-lg hover:bg-muted/30 transition-colors w-full justify-between"
+        style={{ color: "hsl(var(--kf-accent2))" }}
+      >
+        <span className="flex items-center gap-1.5">
+          <Clock className="w-3 h-3" />
+          {staffName}&apos;s Availability
+        </span>
+        {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+      </button>
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="pt-2 space-y-1.5">
+              {DAY_SHORT.map((day, idx) => {
+                const slot = slots[idx];
+                return (
+                  <div key={idx} className="flex items-center gap-2">
+                    <button
+                      onClick={() => setSlots((prev) => ({ ...prev, [idx]: { ...prev[idx], enabled: !prev[idx].enabled } }))}
+                      className="w-4 h-4 rounded border flex items-center justify-center shrink-0 min-w-[44px] min-h-[44px] p-0 flex items-center justify-center"
+                      style={{
+                        borderColor: slot.enabled ? "hsl(var(--kf-success) / 0.5)" : "hsl(var(--border))",
+                        background: slot.enabled ? "hsl(var(--kf-success) / 0.1)" : "transparent",
+                      }}
+                    >
+                      {slot.enabled && <div className="w-2 h-2 rounded-sm" style={{ background: "hsl(var(--kf-success))" }} />}
+                    </button>
+                    <span className="text-[11px] font-medium w-8">{day}</span>
+                    {slot.enabled ? (
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="time"
+                          value={slot.startTime}
+                          onChange={(e) => setSlots((prev) => ({ ...prev, [idx]: { ...prev[idx], startTime: e.target.value } }))}
+                          className="kf-input text-[11px] px-1.5 py-0.5 w-[85px]"
+                        />
+                        <span className="text-[10px] text-muted-foreground">–</span>
+                        <input
+                          type="time"
+                          value={slot.endTime}
+                          onChange={(e) => setSlots((prev) => ({ ...prev, [idx]: { ...prev[idx], endTime: e.target.value } }))}
+                          className="kf-input text-[11px] px-1.5 py-0.5 w-[85px]"
+                        />
+                      </div>
+                    ) : (
+                      <span className="text-[10px] text-muted-foreground italic">Off</span>
+                    )}
+                  </div>
+                );
+              })}
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="inline-flex items-center gap-1.5 px-3 min-h-[44px] text-[11px] font-medium rounded-lg transition-colors mt-1"
+                style={{ background: "hsl(var(--kf-accent2) / 0.1)", color: "hsl(var(--kf-accent2))", borderWidth: 1, borderColor: "hsl(var(--kf-accent2) / 0.2)" }}
+              >
+                <Save className="w-3 h-3" />
+                {saving ? "Saving..." : "Save Availability"}
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function ReminderConfig() {
+  const [reminderMins, setReminderMins] = useState(60);
+
+  return (
+    <motion.div variants={stagger.item} className="space-y-3">
+      <div className="flex items-center gap-2">
+        <Bell className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+        <h3 className="text-sm font-semibold">Booking Reminders</h3>
+      </div>
+      <div className="kf-card p-4 space-y-3">
+        <p className="text-[11px] text-muted-foreground">
+          Send automated reminders to clients before their appointments.
+        </p>
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-medium">Remind</span>
+          <select
+            value={reminderMins}
+            onChange={(e) => setReminderMins(Number(e.target.value))}
+            className="kf-input text-xs px-2 py-1.5 w-[140px]"
+          >
+            <option value={15}>15 minutes</option>
+            <option value={30}>30 minutes</option>
+            <option value={60}>1 hour</option>
+            <option value={120}>2 hours</option>
+            <option value={1440}>1 day</option>
+            <option value={2880}>2 days</option>
+          </select>
+          <span className="text-xs font-medium">before appointment</span>
+        </div>
+        <p className="text-[10px] text-muted-foreground/60">
+          Reminders will be sent via email when Customer Notifications are configured in Settings.
+        </p>
+      </div>
+    </motion.div>
+  );
+}
+
 export default function CatalogCapacityTab({
   services,
   staff,
@@ -138,6 +299,7 @@ export default function CatalogCapacityTab({
   onConnectCalendar,
   onDisconnectCalendar,
   loading,
+  businessId,
 }: CatalogCapacityTabProps) {
   const serviceStats = useMemo(() => {
     const now = new Date();
@@ -201,6 +363,7 @@ export default function CatalogCapacityTab({
             {services.map((service) => {
               const monthCount = serviceStats.get(service.id) ?? 0;
               const assignedStaff = staff.length;
+              const svc = service as Service & { bufferMins?: number | null; leadTimeMins?: number | null };
               return (
                 <motion.div
                   key={service.id}
@@ -238,7 +401,7 @@ export default function CatalogCapacityTab({
                       {formatAmount(service.price)}
                     </div>
                   </div>
-                  <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+                  <div className="flex items-center gap-3 text-[11px] text-muted-foreground flex-wrap">
                     <span className="flex items-center gap-1">
                       <Clock className="w-3 h-3" />
                       {service.durationMins ?? service.duration ?? 60}m
@@ -251,6 +414,18 @@ export default function CatalogCapacityTab({
                       <CalendarDays className="w-3 h-3" />
                       {monthCount} this month
                     </span>
+                    {svc.bufferMins ? (
+                      <span className="flex items-center gap-1" style={{ color: "hsl(var(--kf-accent2))" }}>
+                        <Timer className="w-3 h-3" />
+                        {svc.bufferMins}m buffer
+                      </span>
+                    ) : null}
+                    {svc.leadTimeMins ? (
+                      <span className="flex items-center gap-1" style={{ color: "hsl(var(--kf-warning))" }}>
+                        <Timer className="w-3 h-3" />
+                        {svc.leadTimeMins}m lead
+                      </span>
+                    ) : null}
                   </div>
                 </motion.div>
               );
@@ -292,7 +467,7 @@ export default function CatalogCapacityTab({
             </div>
             <button
               onClick={onCreateStaff}
-              className="kf-btn-primary inline-flex items-center gap-1.5 text-xs h-[34px]"
+              className="kf-btn-primary inline-flex items-center gap-1.5 text-xs min-h-[44px]"
             >
               <Plus className="w-3.5 h-3.5" /> Add
             </button>
@@ -318,41 +493,46 @@ export default function CatalogCapacityTab({
             {staff.map((s) => (
               <div
                 key={s.id}
-                className="kf-card p-3 flex items-center justify-between group hover:ring-1 hover:ring-[hsl(var(--kf-accent2)/0.2)] transition-all"
+                className="kf-card p-3 group hover:ring-1 hover:ring-[hsl(var(--kf-accent2)/0.2)] transition-all"
               >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-                    style={{
-                      background: "hsl(var(--kf-accent2) / 0.1)",
-                      color: "hsl(var(--kf-accent2))",
-                      borderWidth: 1,
-                      borderColor: "hsl(var(--kf-accent2) / 0.2)",
-                    }}
-                  >
-                    {s.name.charAt(0).toUpperCase()}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold truncate">{s.name}</p>
-                    <div className="flex items-center gap-2">
-                      {s.email && (
-                        <p className="text-[10px] text-muted-foreground flex items-center gap-1 truncate">
-                          <Mail className="w-2.5 h-2.5" /> {s.email}
-                        </p>
-                      )}
-                      <span className="text-[10px] text-muted-foreground">
-                        {staffBookingCounts.get(s.id) ?? 0} bookings
-                      </span>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div
+                      className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+                      style={{
+                        background: "hsl(var(--kf-accent2) / 0.1)",
+                        color: "hsl(var(--kf-accent2))",
+                        borderWidth: 1,
+                        borderColor: "hsl(var(--kf-accent2) / 0.2)",
+                      }}
+                    >
+                      {s.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold truncate">{s.name}</p>
+                      <div className="flex items-center gap-2">
+                        {s.email && (
+                          <p className="text-[10px] text-muted-foreground flex items-center gap-1 truncate">
+                            <Mail className="w-2.5 h-2.5" /> {s.email}
+                          </p>
+                        )}
+                        <span className="text-[10px] text-muted-foreground">
+                          {staffBookingCounts.get(s.id) ?? 0} bookings
+                        </span>
+                      </div>
                     </div>
                   </div>
+                  <button
+                    onClick={() => onDeleteStaff(s.id)}
+                    className="p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-all shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center"
+                    style={{ color: "hsl(var(--kf-error) / 0.7)" }}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-                <button
-                  onClick={() => onDeleteStaff(s.id)}
-                  className="p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-all shrink-0"
-                  style={{ color: "hsl(var(--kf-error) / 0.7)" }}
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                {businessId && (
+                  <StaffAvailabilityEditor staffId={s.id} staffName={s.name} businessId={businessId} />
+                )}
               </div>
             ))}
           </div>
@@ -360,6 +540,8 @@ export default function CatalogCapacityTab({
       </motion.div>
 
       <AvailabilityHours />
+
+      <ReminderConfig />
 
       <motion.div variants={stagger.item} className="space-y-3">
         <div className="flex items-center gap-2">

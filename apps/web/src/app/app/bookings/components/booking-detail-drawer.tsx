@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { motion } from "framer-motion";
 import {
   CalendarDays,
@@ -11,6 +12,10 @@ import {
   CheckCircle2,
   XCircle,
   Link2,
+  RefreshCw,
+  StickyNote,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import type { Booking } from "./bookings-types";
 import { STATUS_STYLE, formatTime, formatFullDate, contactName } from "./bookings-types";
@@ -20,7 +25,125 @@ interface BookingDetailDrawerProps {
   onClose: () => void;
   onStatusChange: (bookingId: string, newStatus: string) => void;
   onSyncCalendar: (bookingId: string) => void;
+  onReschedule?: (bookingId: string, newStartTime: string) => void;
   calendarConnected: boolean;
+}
+
+function toDateStr(d: Date): string {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function RescheduleForm({ onSubmit, onCancel }: { onSubmit: (startTime: string) => void; onCancel: () => void }) {
+  const [date, setDate] = useState("");
+  const [time, setTime] = useState("");
+
+  const [weekBase, setWeekBase] = useState(() => new Date());
+
+  const weekDays = (() => {
+    const start = new Date(weekBase);
+    start.setDate(start.getDate() - start.getDay());
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      return d;
+    });
+  })();
+
+  const today = new Date();
+
+  const timeSlots = (() => {
+    const slots: { value: string; label: string }[] = [];
+    for (let h = 7; h <= 20; h++) {
+      for (const m of [0, 30]) {
+        if (h === 20 && m === 30) continue;
+        const value = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+        const hour12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+        const ampm = h >= 12 ? "PM" : "AM";
+        slots.push({ value, label: `${hour12}:${String(m).padStart(2, "0")} ${ampm}` });
+      }
+    }
+    return slots;
+  })();
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">New Date</span>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setWeekBase((prev) => { const d = new Date(prev); d.setDate(d.getDate() - 7); return d; })}
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted/50"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => setWeekBase((prev) => { const d = new Date(prev); d.setDate(d.getDate() + 7); return d; })}
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted/50"
+          >
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {weekDays.map((day) => {
+          const ds = toDateStr(day);
+          const sel = date === ds;
+          const isPast = day < today && !(day.toDateString() === today.toDateString());
+          return (
+            <button
+              key={ds}
+              disabled={isPast}
+              onClick={() => setDate(ds)}
+              className={`flex flex-col items-center py-1.5 rounded-lg text-center transition-all ${
+                sel ? "ring-1 ring-[hsl(var(--kf-accent1)/0.5)]" : isPast ? "opacity-30 cursor-not-allowed" : "hover:bg-muted/40"
+              }`}
+              style={sel ? { background: "hsl(var(--kf-accent1)/0.12)" } : undefined}
+            >
+              <span className="text-[9px] font-medium uppercase">{day.toLocaleDateString("en-US", { weekday: "short" })}</span>
+              <span className="text-sm font-bold" style={sel ? { color: "hsl(var(--kf-accent1))" } : undefined}>{day.getDate()}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div>
+        <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">New Time</span>
+        <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-thin">
+          {timeSlots.map((slot) => (
+            <button
+              key={slot.value}
+              onClick={() => setTime(slot.value)}
+              className={`flex-shrink-0 px-2 py-1.5 rounded-lg text-[11px] font-medium transition-all whitespace-nowrap border ${
+                time === slot.value
+                  ? "border-[hsl(var(--kf-accent1)/0.5)] ring-1 ring-[hsl(var(--kf-accent1)/0.3)]"
+                  : "border-border/40 hover:border-border/70 hover:bg-muted/30 text-muted-foreground"
+              }`}
+              style={time === slot.value ? { background: "hsl(var(--kf-accent1)/0.12)" } : undefined}
+            >
+              {slot.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex gap-2 pt-1">
+        <button onClick={onCancel} className="flex-1 px-3 min-h-[44px] text-xs rounded-lg border border-border/50 hover:bg-muted/50 transition-colors text-muted-foreground">
+          Cancel
+        </button>
+        <button
+          onClick={() => { if (date && time) onSubmit(new Date(`${date}T${time}`).toISOString()); }}
+          disabled={!date || !time}
+          className="flex-1 px-3 min-h-[44px] text-xs font-semibold rounded-lg text-white transition-all disabled:opacity-40"
+          style={{ background: date && time ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-accent1)/0.4)" }}
+        >
+          Confirm Reschedule
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export default function BookingDetailDrawer({
@@ -28,8 +151,13 @@ export default function BookingDetailDrawer({
   onClose,
   onStatusChange,
   onSyncCalendar,
+  onReschedule,
   calendarConnected,
 }: BookingDetailDrawerProps) {
+  const [showReschedule, setShowReschedule] = useState(false);
+
+  const canReschedule = selectedBooking.status === "PENDING" || selectedBooking.status === "CONFIRMED";
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -68,6 +196,16 @@ export default function BookingDetailDrawer({
             </div>
           </div>
 
+          {selectedBooking.notes && (
+            <div className="kf-card p-4 space-y-2">
+              <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide flex items-center gap-1.5">
+                <StickyNote className="w-3.5 h-3.5" />
+                Notes
+              </div>
+              <p className="text-sm text-foreground/90 whitespace-pre-wrap">{selectedBooking.notes}</p>
+            </div>
+          )}
+
           {selectedBooking.contact && (
             <div className="kf-card p-4 space-y-2">
               <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Client</div>
@@ -105,6 +243,16 @@ export default function BookingDetailDrawer({
               <div className="text-sm font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>
                 TTD {selectedBooking.service.price.toLocaleString()}
               </div>
+              {(selectedBooking.service.bufferMins || selectedBooking.service.leadTimeMins) && (
+                <div className="flex items-center gap-3 text-[11px] text-muted-foreground pt-1 border-t border-border/30">
+                  {selectedBooking.service.bufferMins ? (
+                    <span>{selectedBooking.service.bufferMins}m buffer</span>
+                  ) : null}
+                  {selectedBooking.service.leadTimeMins ? (
+                    <span>{selectedBooking.service.leadTimeMins}m lead time</span>
+                  ) : null}
+                </div>
+              )}
             </div>
           )}
 
@@ -121,56 +269,85 @@ export default function BookingDetailDrawer({
           )}
         </div>
 
-        <div className="space-y-2 pt-2 border-t border-border/40">
-          <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-2">Actions</div>
-          <div className="grid grid-cols-2 gap-2">
-            {selectedBooking.status === "PENDING" && (
-              <>
-                <button
-                  onClick={() => onStatusChange(selectedBooking.id, "CONFIRMED")}
-                  className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20 transition-colors"
-                >
-                  <CheckCircle2 className="w-4 h-4" /> Confirm
-                </button>
-                <button
-                  onClick={() => onStatusChange(selectedBooking.id, "CANCELLED")}
-                  className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium bg-red-500/10 border border-red-500/30 text-red-300 hover:bg-red-500/20 transition-colors"
-                >
-                  <XCircle className="w-4 h-4" /> Cancel
-                </button>
-              </>
+        {showReschedule && canReschedule && onReschedule ? (
+          <div className="kf-card p-4 space-y-3">
+            <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide flex items-center gap-1.5">
+              <RefreshCw className="w-3.5 h-3.5" />
+              Reschedule Booking
+            </div>
+            <RescheduleForm
+              onSubmit={(startTime) => {
+                onReschedule(selectedBooking.id, startTime);
+                setShowReschedule(false);
+              }}
+              onCancel={() => setShowReschedule(false)}
+            />
+          </div>
+        ) : (
+          <div className="space-y-2 pt-2 border-t border-border/40">
+            <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-2">Actions</div>
+            <div className="grid grid-cols-2 gap-2">
+              {selectedBooking.status === "PENDING" && (
+                <>
+                  <button
+                    onClick={() => onStatusChange(selectedBooking.id, "CONFIRMED")}
+                    className="flex items-center justify-center gap-1.5 px-3 min-h-[44px] rounded-xl text-sm font-medium transition-colors"
+                    style={{ background: "hsl(var(--kf-success) / 0.1)", borderWidth: 1, borderColor: "hsl(var(--kf-success) / 0.3)", color: "hsl(var(--kf-success))" }}
+                  >
+                    <CheckCircle2 className="w-4 h-4" /> Confirm
+                  </button>
+                  <button
+                    onClick={() => onStatusChange(selectedBooking.id, "CANCELLED")}
+                    className="flex items-center justify-center gap-1.5 px-3 min-h-[44px] rounded-xl text-sm font-medium transition-colors"
+                    style={{ background: "hsl(var(--kf-error) / 0.1)", borderWidth: 1, borderColor: "hsl(var(--kf-error) / 0.3)", color: "hsl(var(--kf-error))" }}
+                  >
+                    <XCircle className="w-4 h-4" /> Cancel
+                  </button>
+                </>
+              )}
+              {selectedBooking.status === "CONFIRMED" && (
+                <>
+                  <button
+                    onClick={() => onStatusChange(selectedBooking.id, "COMPLETED")}
+                    className="flex items-center justify-center gap-1.5 px-3 min-h-[44px] rounded-xl text-sm font-medium border transition-colors"
+                    style={{ background: "hsl(var(--kf-accent2) / 0.1)", borderColor: "hsl(var(--kf-accent2) / 0.3)", color: "hsl(var(--kf-accent2))" }}
+                  >
+                    <CheckCircle2 className="w-4 h-4" /> Complete
+                  </button>
+                  <button
+                    onClick={() => onStatusChange(selectedBooking.id, "CANCELLED")}
+                    className="flex items-center justify-center gap-1.5 px-3 min-h-[44px] rounded-xl text-sm font-medium transition-colors"
+                    style={{ background: "hsl(var(--kf-error) / 0.1)", borderWidth: 1, borderColor: "hsl(var(--kf-error) / 0.3)", color: "hsl(var(--kf-error))" }}
+                  >
+                    <XCircle className="w-4 h-4" /> Cancel
+                  </button>
+                </>
+              )}
+              {(selectedBooking.status === "CANCELLED" || selectedBooking.status === "COMPLETED") && (
+                <div className="col-span-2 text-center text-xs text-muted-foreground py-2">
+                  This booking is {selectedBooking.status.toLowerCase()}
+                </div>
+              )}
+            </div>
+            {canReschedule && onReschedule && (
+              <button
+                onClick={() => setShowReschedule(true)}
+                className="w-full flex items-center justify-center gap-1.5 px-3 min-h-[44px] rounded-xl text-sm font-medium border transition-colors"
+                style={{ background: "hsl(var(--kf-accent1) / 0.08)", borderColor: "hsl(var(--kf-accent1) / 0.2)", color: "hsl(var(--kf-accent1))" }}
+              >
+                <RefreshCw className="w-4 h-4" /> Reschedule
+              </button>
             )}
-            {selectedBooking.status === "CONFIRMED" && (
-              <>
-                <button
-                  onClick={() => onStatusChange(selectedBooking.id, "COMPLETED")}
-                  className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium border transition-colors" style={{ background: "hsl(var(--kf-accent2) / 0.1)", borderColor: "hsl(var(--kf-accent2) / 0.3)", color: "hsl(var(--kf-accent2))" }}
-                >
-                  <CheckCircle2 className="w-4 h-4" /> Complete
-                </button>
-                <button
-                  onClick={() => onStatusChange(selectedBooking.id, "CANCELLED")}
-                  className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium bg-red-500/10 border border-red-500/30 text-red-300 hover:bg-red-500/20 transition-colors"
-                >
-                  <XCircle className="w-4 h-4" /> Cancel
-                </button>
-              </>
-            )}
-            {(selectedBooking.status === "CANCELLED" || selectedBooking.status === "COMPLETED") && (
-              <div className="col-span-2 text-center text-xs text-muted-foreground py-2">
-                This booking is {selectedBooking.status.toLowerCase()}
-              </div>
+            {calendarConnected && selectedBooking.status !== "CANCELLED" && (
+              <button
+                onClick={() => onSyncCalendar(selectedBooking.id)}
+                className="w-full kf-btn-secondary flex items-center justify-center gap-1.5 px-3 min-h-[44px] text-sm"
+              >
+                <Link2 className="w-4 h-4" /> Sync to Google Calendar
+              </button>
             )}
           </div>
-          {calendarConnected && selectedBooking.status !== "CANCELLED" && (
-            <button
-              onClick={() => onSyncCalendar(selectedBooking.id)}
-              className="w-full kf-btn-secondary flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm"
-            >
-              <Link2 className="w-4 h-4" /> Sync to Google Calendar
-            </button>
-          )}
-        </div>
+        )}
       </motion.div>
     </motion.div>
   );

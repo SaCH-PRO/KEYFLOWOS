@@ -21,4 +21,8 @@ export class CreateBookingDto {
   @IsISO8601()
   @Type(() => Date)
   endTime!: Date;
+
+  @IsString()
+  @IsOptional()
+  notes?: string;
 }
