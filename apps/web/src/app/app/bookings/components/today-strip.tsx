@@ -9,6 +9,7 @@ import {
   DollarSign,
   ShieldAlert,
   Users,
+  StickyNote,
 } from "lucide-react";
 import type { Booking, BookingStats } from "./bookings-types";
 import type { ScheduleHealth } from "@/lib/client";
@@ -179,6 +180,11 @@ export default function TodayStrip({
                       {b.service && (
                         <span className="text-[10px] text-muted-foreground truncate hidden sm:inline">
                           {b.service.name}
+                        </span>
+                      )}
+                      {b.notes && (
+                        <span className="text-[10px] text-muted-foreground/60 hidden sm:flex items-center gap-0.5 shrink-0" title={b.notes}>
+                          <StickyNote className="w-2.5 h-2.5" />
                         </span>
                       )}
                     </button>

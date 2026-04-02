@@ -130,6 +130,22 @@ export class CrmListsService {
       if (filters.minLeadScore && typeof filters.minLeadScore === 'number' && filters.minLeadScore > 0) {
         where.leadScore = { gte: filters.minLeadScore };
       }
+      if (filters.minRevenue && typeof filters.minRevenue === 'number' && filters.minRevenue > 0) {
+        const highRevContacts = await this.prisma.client.$queryRaw<Array<{ contact_id: string }>>`
+          SELECT i.contact_id
+          FROM invoices i
+          WHERE i.business_id = ${input.businessId}
+            AND i.status = 'PAID'
+            AND i.deleted_at IS NULL
+          GROUP BY i.contact_id
+          HAVING SUM(i.total) >= ${filters.minRevenue}
+        `;
+        const revenueIds = highRevContacts.map((r) => r.contact_id);
+        if (revenueIds.length === 0) {
+          return [];
+        }
+        where.id = where.id ? { ...where.id, in: revenueIds } : { in: revenueIds };
+      }
       return this.prisma.client.contact.findMany({
         where,
         orderBy: { createdAt: 'desc' },

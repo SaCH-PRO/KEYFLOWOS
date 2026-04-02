@@ -259,6 +259,10 @@ export class BookingsController {
     @Param('staffId') staffId: string,
     @Body() body: { slots: { dayOfWeek: number; startTime: string; endTime: string }[] },
   ) {
+    const staff = await this.prisma.client.staffMember.findFirst({
+      where: { id: staffId, businessId, deletedAt: null },
+    });
+    if (!staff) throw new ForbiddenException('Staff member not found in this business');
     await this.prisma.client.availability.deleteMany({
       where: { staffId, staff: { businessId } },
     });
@@ -273,7 +277,7 @@ export class BookingsController {
       });
     }
     return this.prisma.client.availability.findMany({
-      where: { staffId },
+      where: { staffId, staff: { businessId, deletedAt: null } },
       orderBy: { dayOfWeek: 'asc' },
     });
   }

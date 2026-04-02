@@ -248,8 +248,30 @@ function StaffAvailabilityEditor({ staffId, staffName, businessId }: { staffId: 
   );
 }
 
-function ReminderConfig() {
-  const [reminderMins, setReminderMins] = useState(60);
+const REMINDER_KEY = "kf_booking_reminder_mins";
+
+function ReminderConfig({ businessId }: { businessId?: string | null }) {
+  const [reminderMins, setReminderMins] = useState(() => {
+    if (typeof window === "undefined") return 60;
+    try {
+      const stored = localStorage.getItem(`${REMINDER_KEY}_${businessId ?? "default"}`);
+      return stored ? Number(stored) : 60;
+    } catch { return 60; }
+  });
+  const [saved, setSaved] = useState(false);
+
+  const handleChange = (value: number) => {
+    setReminderMins(value);
+    setSaved(false);
+  };
+
+  const handleSave = () => {
+    try {
+      localStorage.setItem(`${REMINDER_KEY}_${businessId ?? "default"}`, String(reminderMins));
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {}
+  };
 
   return (
     <motion.div variants={stagger.item} className="space-y-3">
@@ -265,8 +287,8 @@ function ReminderConfig() {
           <span className="text-xs font-medium">Remind</span>
           <select
             value={reminderMins}
-            onChange={(e) => setReminderMins(Number(e.target.value))}
-            className="kf-input text-xs px-2 py-1.5 w-[140px]"
+            onChange={(e) => handleChange(Number(e.target.value))}
+            className="kf-input text-xs px-2 py-1.5 w-[140px] min-h-[44px]"
           >
             <option value={15}>15 minutes</option>
             <option value={30}>30 minutes</option>
@@ -276,6 +298,19 @@ function ReminderConfig() {
             <option value={2880}>2 days</option>
           </select>
           <span className="text-xs font-medium">before appointment</span>
+          <button
+            onClick={handleSave}
+            className="inline-flex items-center gap-1 px-3 min-h-[44px] text-xs font-medium rounded-lg transition-colors"
+            style={{
+              background: saved ? "hsl(var(--kf-success) / 0.1)" : "hsl(var(--kf-accent1) / 0.1)",
+              color: saved ? "hsl(var(--kf-success))" : "hsl(var(--kf-accent1))",
+              borderWidth: 1,
+              borderColor: saved ? "hsl(var(--kf-success) / 0.3)" : "hsl(var(--kf-accent1) / 0.2)",
+            }}
+          >
+            <Save className="w-3 h-3" />
+            {saved ? "Saved" : "Save"}
+          </button>
         </div>
         <p className="text-[10px] text-muted-foreground/60">
           Reminders will be sent via email when Customer Notifications are configured in Settings.
@@ -541,7 +576,7 @@ export default function CatalogCapacityTab({
 
       <AvailabilityHours />
 
-      <ReminderConfig />
+      <ReminderConfig businessId={businessId} />
 
       <motion.div variants={stagger.item} className="space-y-3">
         <div className="flex items-center gap-2">
