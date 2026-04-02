@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { BookingCompletedPayload, BookingConfirmedPayload, BookingCreatedPayload, BookingRescheduledPayload } from '../../core/event-bus/events.types';
@@ -7,6 +7,7 @@ import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
 import { AutomationService } from '../automation/automation.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+import { TransactionalEmailService } from '../notifications/transactional-email.service';
 
 interface DayHours {
   open: string;
@@ -16,9 +17,12 @@ interface DayHours {
 
 type BusinessHoursMap = Record<string, DayHours>;
 
+const REMINDER_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+
 @Injectable()
-export class BookingsService {
+export class BookingsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(BookingsService.name);
+  private reminderInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -27,7 +31,83 @@ export class BookingsService {
     @Inject(CommerceService) private readonly commerce: CommerceService,
     @Inject(AutomationService) private readonly automation: AutomationService,
     @Inject(SubscriptionsService) private readonly subscriptions: SubscriptionsService,
+    @Inject(TransactionalEmailService) private readonly emailService: TransactionalEmailService,
   ) {}
+
+  onModuleInit() {
+    this.reminderInterval = setInterval(() => {
+      this.processBookingReminders().catch((e) =>
+        this.logger.error(`Booking reminder check failed: ${(e as Error).message}`),
+      );
+    }, REMINDER_CHECK_INTERVAL_MS);
+    this.logger.log('Booking reminder scheduler started (5min interval)');
+  }
+
+  onModuleDestroy() {
+    if (this.reminderInterval) clearInterval(this.reminderInterval);
+  }
+
+  private async processBookingReminders() {
+    const businesses = await this.prisma.client.business.findMany({
+      where: { bookingReminderMins: { not: null, gt: 0 } },
+      select: { id: true, bookingReminderMins: true },
+    });
+
+    for (const biz of businesses) {
+      const reminderMins = biz.bookingReminderMins ?? 60;
+      const now = new Date();
+      const windowStart = new Date(now.getTime() + (reminderMins - 5) * 60_000);
+      const windowEnd = new Date(now.getTime() + (reminderMins + 5) * 60_000);
+
+      const upcomingBookings = await this.prisma.client.booking.findMany({
+        where: {
+          businessId: biz.id,
+          startTime: { gte: windowStart, lte: windowEnd },
+          status: { in: ['CONFIRMED', 'PENDING'] },
+          reminderSentAt: null,
+        },
+        include: {
+          contact: true,
+          service: true,
+        },
+      });
+
+      for (const booking of upcomingBookings) {
+        if (!booking.contact?.email) continue;
+
+        try {
+          const endTime = new Date(
+            new Date(booking.startTime).getTime() + (booking.service?.duration || 60) * 60_000,
+          );
+
+          await this.emailService.send({
+            businessId: biz.id,
+            type: 'booking_reminder',
+            recipientEmail: booking.contact.email,
+            recipientName: booking.contact.firstName || booking.contact.email,
+            contactId: booking.contactId || undefined,
+            templateData: {
+              serviceName: booking.service?.name || 'Your appointment',
+              startTime: booking.startTime.toISOString(),
+              endTime: endTime.toISOString(),
+              staffName: '',
+              bookingId: booking.id,
+            },
+            dedupeKey: `booking-reminder-${booking.id}`,
+          });
+
+          await this.prisma.client.booking.update({
+            where: { id: booking.id },
+            data: { reminderSentAt: now },
+          });
+
+          this.logger.debug(`Sent booking reminder for booking ${booking.id}`);
+        } catch (e) {
+          this.logger.error(`Failed to send reminder for booking ${booking.id}: ${(e as Error).message}`);
+        }
+      }
+    }
+  }
 
   listBookings(businessId: string) {
     return this.prisma.client.booking.findMany({

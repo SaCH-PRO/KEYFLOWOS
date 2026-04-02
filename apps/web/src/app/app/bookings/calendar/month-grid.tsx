@@ -104,7 +104,7 @@ export default function MonthGrid({
                 onClick={() => onSelectDay(day)}
                 className={`relative rounded-xl p-1.5 min-h-[72px] sm:min-h-[80px] text-left transition-all border ${
                   isSelected
-                    ? "border-blue-500/50 bg-blue-500/10 ring-1 ring-blue-500/30"
+                    ? "border-[hsl(var(--kf-accent1))]/50 bg-[hsl(var(--kf-accent1))]/10 ring-1 ring-[hsl(var(--kf-accent1))]/30"
                     : isToday
                     ? "border-[hsl(var(--kf-accent1)/0.4)] bg-[hsl(var(--kf-accent1)/0.06)]"
                     : isCurrentMonth
