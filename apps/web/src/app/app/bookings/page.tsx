@@ -52,6 +52,8 @@ import PerformanceTab from "./components/performance-tab";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { ShareLinkModal } from "@/components/ui/share-link-modal";
 import { SetupModeBanner } from "@/components/ui/setup-mode-banner";
+import { usePlan } from "@/hooks/use-plan";
+import { PlanLimitBanner } from "@/components/ui/upgrade-prompt";
 
 const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
   { key: "schedule", label: "Schedule", icon: Calendar },
@@ -70,6 +72,7 @@ export default function BookingsPage() {
   const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("schedule");
+  const { checkLimit } = usePlan();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
@@ -455,6 +458,11 @@ export default function BookingsPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {(() => {
+        const bl = checkLimit("bookings");
+        return <PlanLimitBanner resourceKey="bookings" label="bookings" currentUsage={bl.current} limit={bl.limit} isUnlimited={bl.isUnlimited} nearLimit={bl.nearLimit} atLimit={bl.atLimit} />;
+      })()}
 
       {tab === "catalog" && (
         <SetupModeBanner

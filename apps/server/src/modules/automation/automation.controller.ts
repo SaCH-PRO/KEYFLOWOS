@@ -3,6 +3,7 @@ import { AutomationService } from './automation.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
 
 @Controller('automation')
 export class AutomationController {
@@ -37,7 +38,8 @@ export class AutomationController {
     }));
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, PlanLimitGuard)
+  @RequirePlanLimit('automations')
   @Post('businesses/:businessId/playbooks')
   async createPlaybook(
     @Param('businessId') businessId: string,

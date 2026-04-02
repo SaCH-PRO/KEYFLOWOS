@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, UseGuards, Delete, Query, Res } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Inject, Param, Patch, Post, UseGuards, Delete, Query, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { BookingsService } from './bookings.service';
 import { CalendarService } from './calendar.service';
@@ -6,8 +6,10 @@ import { BookingOptimizerService } from './booking-optimizer.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CreateBookingDto } from './dto/create-booking.dto';
+import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
 import { PublicCreateBookingDto } from './dto/public-create-booking.dto';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
 @Controller('bookings')
 export class BookingsController {
@@ -16,6 +18,7 @@ export class BookingsController {
     @Inject(CalendarService) private readonly calendar: CalendarService,
     @Inject(BookingOptimizerService) private readonly optimizer: BookingOptimizerService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(SubscriptionsService) private readonly subscriptions: SubscriptionsService,
   ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -50,7 +53,8 @@ export class BookingsController {
     return this.bookings.rescheduleBooking(businessId, bookingId, new Date(startTime));
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, PlanLimitGuard)
+  @RequirePlanLimit('bookings')
   @Post('businesses/:businessId')
   createBooking(
     @Param('businessId') businessId: string,
@@ -83,10 +87,22 @@ export class BookingsController {
   }
 
   @Post('public/businesses/:businessId')
-  publicCreateBooking(
+  async publicCreateBooking(
     @Param('businessId') businessId: string,
     @Body() body: PublicCreateBookingDto,
   ) {
+    const limitCheck = await this.subscriptions.checkLimit(businessId, 'bookings');
+    if (!limitCheck.allowed) {
+      const limitLabel = limitCheck.limit === -1 ? 'unlimited' : String(limitCheck.limit);
+      throw new ForbiddenException({
+        statusCode: 403,
+        error: 'PLAN_LIMIT_REACHED',
+        message: `You have reached the bookings limit for your current plan (${limitCheck.current}/${limitLabel}). Please upgrade to add more.`,
+        resource: 'bookings',
+        current: limitCheck.current,
+        limit: limitCheck.limit,
+      });
+    }
     return this.bookings.publicCreateBooking({
       businessId,
       serviceId: body.serviceId,
