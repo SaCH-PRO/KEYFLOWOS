@@ -169,7 +169,7 @@ export function ContactsDatabase({
           <button
             onClick={db.handleSync}
             disabled={db.syncing}
-            className="inline-flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] transition-all disabled:opacity-40 shrink-0"
+            className="inline-flex items-center gap-1.5 px-2 py-1.5 min-h-[44px] text-[11px] font-medium rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] transition-all disabled:opacity-40 shrink-0"
             aria-label="Sync contacts from cloud"
           >
             {db.syncing ? (
@@ -182,7 +182,7 @@ export function ContactsDatabase({
           <div className="relative" ref={viewsPickerRef}>
             <button
               onClick={db.toggleViewsPicker}
-              className={`inline-flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] transition-all shrink-0 ${db.showViewsPicker ? "ring-1 ring-[hsl(var(--kf-accent1))]/40" : ""}`}
+              className={`inline-flex items-center gap-1.5 px-2 py-1.5 min-h-[44px] text-[11px] font-medium rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] transition-all shrink-0 ${db.showViewsPicker ? "ring-1 ring-[hsl(var(--kf-accent1))]/40" : ""}`}
               aria-label="Saved views"
               aria-haspopup="true"
               aria-expanded={db.showViewsPicker}
@@ -227,7 +227,7 @@ export function ContactsDatabase({
                       {!view.isDefault && (
                         <button
                           onClick={(e) => { e.stopPropagation(); db.deleteView(view.id); }}
-                          className="p-1 rounded hover:bg-red-500/20 text-muted-foreground/50 hover:text-red-400 transition-colors shrink-0"
+                          className="p-2 min-w-[44px] min-h-[44px] -m-1 inline-flex items-center justify-center rounded hover:bg-[hsl(var(--kf-error))]/20 text-muted-foreground/50 hover:text-[hsl(var(--kf-error))] transition-colors shrink-0"
                           aria-label={`Delete view ${view.name}`}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -261,14 +261,14 @@ export function ContactsDatabase({
                               setShowSaveInput(false);
                             }
                           }}
-                          className="p-1.5 rounded-lg bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/25 transition-colors"
+                          className="p-2 min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-lg bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/25 transition-colors"
                           aria-label="Save view"
                         >
                           <Check className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => { setShowSaveInput(false); setSavingViewName(""); }}
-                          className="p-1.5 rounded-lg hover:bg-white/[0.05] text-muted-foreground/50 transition-colors"
+                          className="p-2 min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-lg hover:bg-white/[0.05] text-muted-foreground/50 transition-colors"
                           aria-label="Cancel"
                         >
                           <X className="w-3.5 h-3.5" />
@@ -291,7 +291,7 @@ export function ContactsDatabase({
           <div className="relative" ref={columnPickerRef}>
             <button
               onClick={db.toggleColumnPicker}
-              className={`inline-flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] transition-all shrink-0 ${db.showColumnPicker ? "ring-1 ring-[hsl(var(--kf-accent1))]/40" : ""}`}
+              className={`inline-flex items-center gap-1.5 px-2 py-1.5 min-h-[44px] text-[11px] font-medium rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] transition-all shrink-0 ${db.showColumnPicker ? "ring-1 ring-[hsl(var(--kf-accent1))]/40" : ""}`}
               aria-label="Toggle column visibility"
               aria-haspopup="true"
               aria-expanded={db.showColumnPicker}
@@ -343,7 +343,7 @@ export function ContactsDatabase({
             <button
               ref={exportTriggerRef}
               onClick={db.toggleExport}
-              className="inline-flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium rounded-lg bg-gradient-to-r from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all shrink-0"
+              className="inline-flex items-center gap-1.5 px-2 py-1.5 min-h-[44px] text-[11px] font-medium rounded-lg bg-gradient-to-r from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all shrink-0"
               aria-haspopup="dialog"
               aria-expanded={db.showExport}
             >
@@ -462,7 +462,7 @@ export function ContactsDatabase({
             <button
               disabled={db.page <= 1}
               onClick={db.handlePrevPage}
-              className="px-2.5 py-1.5 rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] disabled:opacity-25 disabled:cursor-not-allowed transition-all font-medium text-muted-foreground/60"
+              className="px-2.5 py-1.5 min-h-[44px] rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] disabled:opacity-25 disabled:cursor-not-allowed transition-all font-medium text-muted-foreground/60"
               aria-label="Previous page"
             >
               Previous
@@ -471,7 +471,7 @@ export function ContactsDatabase({
             <button
               disabled={db.page >= db.totalPages}
               onClick={db.handleNextPage}
-              className="px-2.5 py-1.5 rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] disabled:opacity-25 disabled:cursor-not-allowed transition-all font-medium text-muted-foreground/60"
+              className="px-2.5 py-1.5 min-h-[44px] rounded-lg border border-border/40 bg-white/[0.02] hover:bg-white/[0.05] disabled:opacity-25 disabled:cursor-not-allowed transition-all font-medium text-muted-foreground/60"
               aria-label="Next page"
             >
               Next
