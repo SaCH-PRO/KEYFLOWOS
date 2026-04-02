@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { MapPin, Phone, Mail, CheckCircle, Shield, Award, Star, ExternalLink } from "lucide-react";
+import { MapPin, Phone, Mail, CheckCircle, Shield, Award, Star, ExternalLink, Facebook, Instagram, Twitter, MessageCircle } from "lucide-react";
 import type { Business, BusinessHours } from "./types";
 import { getThemeStyles, type ThemeKey } from "@/lib/storefront-themes";
 import type { StorefrontConfig } from "@/lib/client";
@@ -231,6 +231,62 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
               {business.website && (
                 <a href={business.website} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 hover:text-white/60 transition-colors">
                   <ExternalLink className="w-3.5 h-3.5" style={{ color: primaryColor }} /> Website
+                </a>
+              )}
+            </div>
+          )}
+
+          {(business.facebook || business.instagram || business.twitter || business.whatsapp) && (
+            <div
+              className="flex items-center justify-center gap-2 flex-wrap"
+              style={{
+                opacity: entered ? 1 : 0,
+                transform: entered ? "translateY(0)" : "translateY(10px)",
+                transition: "opacity 0.5s 0.5s, transform 0.5s 0.5s",
+              }}
+            >
+              {business.facebook && (
+                <a
+                  href={business.facebook.startsWith("http") ? business.facebook : `https://facebook.com/${business.facebook}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-9 h-9 rounded-full flex items-center justify-center bg-white/[0.06] border border-white/[0.08] hover:bg-white/[0.12] transition-colors"
+                  aria-label="Facebook"
+                >
+                  <Facebook className="w-4 h-4 text-white/50 hover:text-white/70" />
+                </a>
+              )}
+              {business.instagram && (
+                <a
+                  href={business.instagram.startsWith("http") ? business.instagram : `https://instagram.com/${business.instagram}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-9 h-9 rounded-full flex items-center justify-center bg-white/[0.06] border border-white/[0.08] hover:bg-white/[0.12] transition-colors"
+                  aria-label="Instagram"
+                >
+                  <Instagram className="w-4 h-4 text-white/50 hover:text-white/70" />
+                </a>
+              )}
+              {business.twitter && (
+                <a
+                  href={business.twitter.startsWith("http") ? business.twitter : `https://twitter.com/${business.twitter}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-9 h-9 rounded-full flex items-center justify-center bg-white/[0.06] border border-white/[0.08] hover:bg-white/[0.12] transition-colors"
+                  aria-label="Twitter"
+                >
+                  <Twitter className="w-4 h-4 text-white/50 hover:text-white/70" />
+                </a>
+              )}
+              {business.whatsapp && (
+                <a
+                  href={`https://wa.me/${business.whatsapp.replace(/\D/g, "")}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-9 h-9 rounded-full flex items-center justify-center bg-white/[0.06] border border-white/[0.08] hover:bg-white/[0.12] transition-colors"
+                  aria-label="WhatsApp"
+                >
+                  <MessageCircle className="w-4 h-4 text-white/50 hover:text-white/70" />
                 </a>
               )}
             </div>

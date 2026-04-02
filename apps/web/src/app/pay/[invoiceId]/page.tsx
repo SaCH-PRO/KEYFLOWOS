@@ -1110,6 +1110,66 @@ export default function PublicPaymentPage() {
           </div>
         )}
 
+        {business && (business.facebook || business.instagram || business.twitter || business.whatsapp || business.website) && (
+          <div className="flex items-center justify-center gap-2 flex-wrap pt-2">
+            {business.facebook && (
+              <a
+                href={business.facebook.startsWith("http") ? business.facebook : `https://facebook.com/${business.facebook}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-8 h-8 rounded-full flex items-center justify-center bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.08] transition-colors"
+                aria-label="Facebook"
+              >
+                <Globe className="w-3.5 h-3.5 text-slate-500" />
+              </a>
+            )}
+            {business.instagram && (
+              <a
+                href={business.instagram.startsWith("http") ? business.instagram : `https://instagram.com/${business.instagram}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-8 h-8 rounded-full flex items-center justify-center bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.08] transition-colors"
+                aria-label="Instagram"
+              >
+                <Globe className="w-3.5 h-3.5 text-slate-500" />
+              </a>
+            )}
+            {business.twitter && (
+              <a
+                href={business.twitter.startsWith("http") ? business.twitter : `https://x.com/${business.twitter.replace(/^@/, "")}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-8 h-8 rounded-full flex items-center justify-center bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.08] transition-colors"
+                aria-label="Twitter / X"
+              >
+                <Globe className="w-3.5 h-3.5 text-slate-500" />
+              </a>
+            )}
+            {business.whatsapp && (
+              <a
+                href={`https://wa.me/${business.whatsapp.replace(/\D/g, "")}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-8 h-8 rounded-full flex items-center justify-center bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.08] transition-colors"
+                aria-label="WhatsApp"
+              >
+                <Phone className="w-3.5 h-3.5 text-slate-500" />
+              </a>
+            )}
+            {business.website && (
+              <a
+                href={business.website}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-8 h-8 rounded-full flex items-center justify-center bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.08] transition-colors"
+                aria-label="Website"
+              >
+                <Globe className="w-3.5 h-3.5 text-slate-500" />
+              </a>
+            )}
+          </div>
+        )}
+
         <div className="text-center text-xs text-slate-600 pb-6">
           Powered by <span className="font-semibold" style={{ color: primaryColor }}>KeyFlowOS</span>
         </div>
