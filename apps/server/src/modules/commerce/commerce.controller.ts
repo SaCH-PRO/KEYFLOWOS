@@ -15,6 +15,7 @@ import { UpdateInvoiceStatusDto } from './dto/update-invoice-status.dto';
 import { UpdateQuoteStatusDto } from './dto/update-quote-status.dto';
 import { buildQuoteEmailHtml } from './quote-email.template';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
 @Controller('commerce')
 export class CommerceController {
@@ -27,6 +28,7 @@ export class CommerceController {
     @Inject(GmailService) private readonly gmail: GmailService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CommerceVisionService) private readonly vision: CommerceVisionService,
+    @Inject(SubscriptionsService) private readonly subscriptions: SubscriptionsService,
   ) {}
 
   private async verifyBusinessAccess(userId: string, businessId: string) {
@@ -139,6 +141,18 @@ export class CommerceController {
     }
     if (body.products.length > 200) {
       throw new ForbiddenException('Maximum 200 products per import');
+    }
+    const limitCheck = await this.subscriptions.checkLimit(businessId, 'products');
+    if (!limitCheck.allowed) {
+      const limitLabel = limitCheck.limit === -1 ? 'unlimited' : String(limitCheck.limit);
+      throw new ForbiddenException({
+        statusCode: 403,
+        error: 'PLAN_LIMIT_REACHED',
+        message: `You have reached the products limit for your current plan (${limitCheck.current}/${limitLabel}). Please upgrade to add more.`,
+        resource: 'products',
+        current: limitCheck.current,
+        limit: limitCheck.limit,
+      });
     }
     const validProducts = body.products.filter(p => p.name && typeof p.name === 'string' && p.name.trim().length > 0);
     if (validProducts.length === 0) {

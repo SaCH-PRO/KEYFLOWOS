@@ -36,6 +36,8 @@ import {
   Link2,
 } from "lucide-react";
 import { AiCommandBar, AiCopilotTrigger } from "./_command/ai-command-bar";
+import { usePlanLimitHandler } from "@/hooks/use-plan";
+import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
 
 interface NavItem {
   label: string;
@@ -121,6 +123,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [initials, setInitials] = useState("KF");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [onboardingChecked, setOnboardingChecked] = useState(false);
+  const { planLimitHit, clearPlanLimit } = usePlanLimitHandler();
 
   useEffect(() => {
     setMobileDrawerOpen(false);
@@ -643,6 +646,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </nav>
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <PlanLimitDialog planLimit={planLimitHit} onClose={clearPlanLimit} />
     </div>
   );
 }
