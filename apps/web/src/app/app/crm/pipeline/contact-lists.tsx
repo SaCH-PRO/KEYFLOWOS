@@ -259,7 +259,7 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
         payload.filters = {
           status: formFilterStatus.length > 0 ? formFilterStatus : undefined,
           tags: formFilterTags.trim() ? formFilterTags.split(",").map((t) => t.trim()).filter(Boolean) : undefined,
-          source: formFilterSource.trim() || undefined,
+          source: formFilterSource.trim() ? [formFilterSource.trim()] : undefined,
           createdWithinDays: formFilterDays ? Number(formFilterDays) : undefined,
           createdAfter: formFilterAfter || undefined,
           createdBefore: formFilterBefore || undefined,
