@@ -11,7 +11,7 @@ interface BulkActionBarProps {
   onClearSelection: () => void;
   onExportCsv: () => void;
   onBulkStatusChange?: (status: string) => void;
-  onBulkDelete: () => void;
+  onBulkDelete?: () => void;
   statusOptions?: { value: string; label: string }[];
   entityLabel?: string;
 }
@@ -47,7 +47,7 @@ export function BulkActionBar({
           {selectedCount < totalCount && (
             <button
               onClick={onSelectAll}
-              className="text-[10px] text-[hsl(var(--kf-accent1))] hover:underline whitespace-nowrap"
+              className="text-[10px] text-[hsl(var(--kf-accent1))] hover:underline whitespace-nowrap min-h-[44px]"
             >
               Select all
             </button>
@@ -58,7 +58,7 @@ export function BulkActionBar({
           <div className="relative">
             <button
               onClick={() => setShowStatusMenu(!showStatusMenu)}
-              className="inline-flex items-center gap-1 px-2.5 min-h-[36px] text-[11px] font-medium rounded-lg bg-white/[0.05] border border-border/40 hover:bg-white/[0.08] transition-colors whitespace-nowrap"
+              className="inline-flex items-center gap-1 px-2.5 min-h-[44px] text-[11px] font-medium rounded-lg bg-white/[0.05] border border-border/40 hover:bg-white/[0.08] transition-colors whitespace-nowrap"
             >
               <RefreshCw className="w-3 h-3" />
               Status
@@ -89,23 +89,25 @@ export function BulkActionBar({
 
         <button
           onClick={onExportCsv}
-          className="inline-flex items-center gap-1 px-2.5 min-h-[36px] text-[11px] font-medium rounded-lg bg-white/[0.05] border border-border/40 hover:bg-white/[0.08] transition-colors whitespace-nowrap"
+          className="inline-flex items-center gap-1 px-2.5 min-h-[44px] text-[11px] font-medium rounded-lg bg-white/[0.05] border border-border/40 hover:bg-white/[0.08] transition-colors whitespace-nowrap"
         >
           <Download className="w-3 h-3" />
           Export CSV
         </button>
 
-        <button
-          onClick={onBulkDelete}
-          className="inline-flex items-center gap-1 px-2.5 min-h-[36px] text-[11px] font-medium rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition-colors whitespace-nowrap"
-        >
-          <Trash2 className="w-3 h-3" />
-          Delete
-        </button>
+        {onBulkDelete && (
+          <button
+            onClick={onBulkDelete}
+            className="inline-flex items-center gap-1 px-2.5 min-h-[44px] text-[11px] font-medium rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition-colors whitespace-nowrap"
+          >
+            <Trash2 className="w-3 h-3" />
+            Delete
+          </button>
+        )}
 
         <button
           onClick={onClearSelection}
-          className="ml-1 p-1.5 rounded-lg hover:bg-white/[0.05] transition-colors"
+          className="ml-1 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-white/[0.05] transition-colors"
           aria-label="Clear selection"
         >
           <X className="w-3.5 h-3.5 text-muted-foreground/60" />
@@ -115,9 +117,9 @@ export function BulkActionBar({
   );
 }
 
-export function exportToCsv<T extends Record<string, unknown>>(
-  items: T[],
-  columns: { key: keyof T; header: string; format?: (val: unknown) => string }[],
+export function exportToCsv(
+  items: Record<string, unknown>[],
+  columns: { key: string; header: string; format?: (val: unknown) => string }[],
   filename: string,
 ) {
   const header = columns.map((c) => c.header).join(",");

@@ -227,13 +227,13 @@ export default function QuotesPanel({
     exportToCsv(
       toExport as unknown as Record<string, unknown>[],
       [
-        { key: "quoteNumber" as never, header: "Quote #" },
-        { key: "status" as never, header: "Status" },
-        { key: "contact" as never, header: "Client", format: (v: unknown) => { const c = v as { firstName?: string; lastName?: string } | null; return c ? `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() : ""; } },
-        { key: "total" as never, header: "Total" },
-        { key: "currency" as never, header: "Currency" },
-        { key: "issueDate" as never, header: "Issue Date", format: (v: unknown) => v ? new Date(v as string).toLocaleDateString() : "" },
-        { key: "expiryDate" as never, header: "Expiry Date", format: (v: unknown) => v ? new Date(v as string).toLocaleDateString() : "" },
+        { key: "quoteNumber", header: "Quote #" },
+        { key: "status", header: "Status" },
+        { key: "contact", header: "Client", format: (v: unknown) => { const c = v as { firstName?: string; lastName?: string } | null; return c ? `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() : ""; } },
+        { key: "total", header: "Total" },
+        { key: "currency", header: "Currency" },
+        { key: "issueDate", header: "Issue Date", format: (v: unknown) => v ? new Date(v as string).toLocaleDateString() : "" },
+        { key: "expiryDate", header: "Expiry Date", format: (v: unknown) => v ? new Date(v as string).toLocaleDateString() : "" },
       ],
       `quotes-${new Date().toISOString().split("T")[0]}`,
     );
@@ -849,17 +849,19 @@ export default function QuotesPanel({
       ) : (
         <div className="space-y-2">
           {filteredQuotes.length > 0 && (
-            <div className="flex items-center gap-2 px-2 pb-1">
-              <input
-                type="checkbox"
-                checked={filteredQuotes.length > 0 && filteredQuotes.every((q) => selectedIds.has(q.id))}
-                onChange={() => {
-                  const allSelected = filteredQuotes.every((q) => selectedIds.has(q.id));
-                  setSelectedIds(allSelected ? new Set() : new Set(filteredQuotes.map((q) => q.id)));
-                }}
-                className="w-4 h-4 rounded border-border/50 accent-[hsl(var(--kf-accent1))]"
-                aria-label="Select all visible quotes"
-              />
+            <div className="flex items-center gap-1 px-2 pb-1">
+              <label className="min-w-[44px] min-h-[44px] flex items-center justify-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={filteredQuotes.length > 0 && filteredQuotes.every((q) => selectedIds.has(q.id))}
+                  onChange={() => {
+                    const allSelected = filteredQuotes.every((q) => selectedIds.has(q.id));
+                    setSelectedIds(allSelected ? new Set() : new Set(filteredQuotes.map((q) => q.id)));
+                  }}
+                  className="w-4 h-4 rounded border-border/50 accent-[hsl(var(--kf-accent1))]"
+                  aria-label="Select all visible quotes"
+                />
+              </label>
               <span className="text-[10px] text-muted-foreground/50">Select all</span>
             </div>
           )}
@@ -920,14 +922,16 @@ export default function QuotesPanel({
             );
 
             return (
-              <div key={quote.id} className="flex items-start gap-2">
-                <input
-                  type="checkbox"
-                  checked={selectedIds.has(quote.id)}
-                  onChange={() => toggleSelected(quote.id)}
-                  className="mt-4 w-4 h-4 shrink-0 rounded border-border/50 accent-[hsl(var(--kf-accent1))]"
-                  aria-label={`Select quote ${quote.quoteNumber}`}
-                />
+              <div key={quote.id} className="flex items-start gap-1">
+                <label className="min-w-[44px] min-h-[44px] flex items-center justify-center shrink-0 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(quote.id)}
+                    onChange={() => toggleSelected(quote.id)}
+                    className="w-4 h-4 rounded border-border/50 accent-[hsl(var(--kf-accent1))]"
+                    aria-label={`Select quote ${quote.quoteNumber}`}
+                  />
+                </label>
                 <div className="flex-1 min-w-0">
               <RecordRowCard
                 type="quote"

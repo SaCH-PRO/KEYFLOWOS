@@ -229,14 +229,14 @@ export default function InvoicesPanel({
     exportToCsv(
       toExport as unknown as Record<string, unknown>[],
       [
-        { key: "invoiceNumber" as never, header: "Invoice #" },
-        { key: "status" as never, header: "Status" },
-        { key: "contact" as never, header: "Client", format: (v: unknown) => { const c = v as { firstName?: string; lastName?: string } | null; return c ? `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() : ""; } },
-        { key: "total" as never, header: "Total" },
-        { key: "currency" as never, header: "Currency" },
-        { key: "issueDate" as never, header: "Issue Date", format: (v: unknown) => v ? new Date(v as string).toLocaleDateString() : "" },
-        { key: "dueDate" as never, header: "Due Date", format: (v: unknown) => v ? new Date(v as string).toLocaleDateString() : "" },
-        { key: "taxRate" as never, header: "Tax Rate %" },
+        { key: "invoiceNumber", header: "Invoice #" },
+        { key: "status", header: "Status" },
+        { key: "contact", header: "Client", format: (v: unknown) => { const c = v as { firstName?: string; lastName?: string } | null; return c ? `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() : ""; } },
+        { key: "total", header: "Total" },
+        { key: "currency", header: "Currency" },
+        { key: "issueDate", header: "Issue Date", format: (v: unknown) => v ? new Date(v as string).toLocaleDateString() : "" },
+        { key: "dueDate", header: "Due Date", format: (v: unknown) => v ? new Date(v as string).toLocaleDateString() : "" },
+        { key: "taxRate", header: "Tax Rate %" },
       ],
       `invoices-${new Date().toISOString().split("T")[0]}`,
     );
@@ -717,7 +717,7 @@ export default function InvoicesPanel({
         </motion.div>
       )}
 
-      <TaxSummaryPanel invoices={invoices} currency={currency} />
+      <TaxSummaryPanel invoices={dateFiltered} currency={currency} />
       <DunningRulesPanel businessId={businessId} />
 
       <div className="rounded-2xl border border-border/50 bg-card p-3 sm:p-4">
@@ -845,17 +845,19 @@ export default function InvoicesPanel({
       ) : (
         <div className="space-y-2">
           {filteredInvoices.length > 0 && (
-            <div className="flex items-center gap-2 px-2 pb-1">
-              <input
-                type="checkbox"
-                checked={filteredInvoices.length > 0 && filteredInvoices.every((i) => selectedIds.has(i.id))}
-                onChange={() => {
-                  const allSelected = filteredInvoices.every((i) => selectedIds.has(i.id));
-                  setSelectedIds(allSelected ? new Set() : new Set(filteredInvoices.map((i) => i.id)));
-                }}
-                className="w-4 h-4 rounded border-border/50 accent-[hsl(var(--kf-accent1))]"
-                aria-label="Select all visible invoices"
-              />
+            <div className="flex items-center gap-1 px-2 pb-1">
+              <label className="min-w-[44px] min-h-[44px] flex items-center justify-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={filteredInvoices.length > 0 && filteredInvoices.every((i) => selectedIds.has(i.id))}
+                  onChange={() => {
+                    const allSelected = filteredInvoices.every((i) => selectedIds.has(i.id));
+                    setSelectedIds(allSelected ? new Set() : new Set(filteredInvoices.map((i) => i.id)));
+                  }}
+                  className="w-4 h-4 rounded border-border/50 accent-[hsl(var(--kf-accent1))]"
+                  aria-label="Select all visible invoices"
+                />
+              </label>
               <span className="text-[10px] text-muted-foreground/50">Select all</span>
             </div>
           )}
@@ -914,14 +916,16 @@ export default function InvoicesPanel({
             const paymentPercent = Number(inv.total) > 0 ? Math.round((paidAmount / Number(inv.total)) * 100) : 0;
 
             return (
-              <div key={inv.id} className="flex items-start gap-2">
-                <input
-                  type="checkbox"
-                  checked={selectedIds.has(inv.id)}
-                  onChange={() => toggleSelected(inv.id)}
-                  className="mt-4 w-4 h-4 shrink-0 rounded border-border/50 accent-[hsl(var(--kf-accent1))]"
-                  aria-label={`Select invoice ${inv.invoiceNumber ?? inv.id.slice(0, 8)}`}
-                />
+              <div key={inv.id} className="flex items-start gap-1">
+                <label className="min-w-[44px] min-h-[44px] flex items-center justify-center shrink-0 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(inv.id)}
+                    onChange={() => toggleSelected(inv.id)}
+                    className="w-4 h-4 rounded border-border/50 accent-[hsl(var(--kf-accent1))]"
+                    aria-label={`Select invoice ${inv.invoiceNumber ?? inv.id.slice(0, 8)}`}
+                  />
+                </label>
                 <div className="flex-1 min-w-0">
                 <RecordRowCard
                   type="invoice"

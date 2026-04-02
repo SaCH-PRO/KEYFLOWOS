@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { InfoBadge } from "@/components/ui/info-badge";
@@ -41,6 +41,8 @@ import {
   generateItemId,
 } from "../components/commerce-types";
 import { useModuleEmit } from "@/hooks/use-module-events";
+import { DateRangeFilter, filterByDateRange, DEFAULT_DATE_RANGE, type DateRange } from "../components/date-range-filter";
+import { BulkActionBar, exportToCsv } from "../components/bulk-action-bar";
 
 interface RecurringPanelProps {
   businessId: string | null;
@@ -66,6 +68,8 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
+  const [dateRange, setDateRange] = useState<DateRange>(DEFAULT_DATE_RANGE);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const [form, setForm] = useState({
     name: "",
@@ -249,6 +253,50 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
     }
   }
 
+  const dateFiltered = useMemo(
+    () => filterByDateRange(recurring, (r) => r.nextRunDate, dateRange),
+    [recurring, dateRange],
+  );
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleBulkDelete = useCallback(() => {
+    if (!businessId) return;
+    setConfirmState({
+      open: true,
+      action: async () => {
+        const ids = Array.from(selectedIds);
+        await Promise.all(ids.map((id) => deleteRecurringInvoice(businessId!, id)));
+        setRecurring((prev) => prev.filter((r) => !selectedIds.has(r.id)));
+        setSelectedIds(new Set());
+        toast.success(`${ids.length} schedule(s) deleted`);
+      },
+    });
+  }, [businessId, selectedIds]);
+
+  const handleExportCsv = useCallback(() => {
+    const items = dateFiltered.filter((r) => selectedIds.size === 0 || selectedIds.has(r.id));
+    exportToCsv(
+      items as unknown as Record<string, unknown>[],
+      [
+        { key: "name", header: "Name" },
+        { key: "frequency", header: "Frequency" },
+        { key: "isActive", header: "Status", format: (v: unknown) => (v ? "Active" : "Paused") },
+        { key: "total", header: `Amount (${currency})`, format: (v: unknown) => Number(v).toFixed(2) },
+        { key: "nextRunDate", header: "Next Run", format: (v: unknown) => (v ? new Date(v as string).toLocaleDateString() : "—") },
+        { key: "runCount", header: "Run Count" },
+      ],
+      `recurring-invoices-${new Date().toISOString().slice(0, 10)}`,
+    );
+    toast.success("CSV exported");
+  }, [dateFiltered, selectedIds, currency]);
+
   const totals = useMemo(() => {
     const subtotal = form.items.reduce((s, i) => s + (parseInt(i.quantity) || 0) * (parseFloat(i.unitPrice) || 0), 0);
     const tax = (subtotal * (parseFloat(form.taxRate) || 0)) / 100;
@@ -278,7 +326,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
                   <RefreshCw className="w-5 h-5 text-primary" />
                   {editingId ? "Edit Schedule" : "New Recurring Invoice"}
                 </h3>
-                <button onClick={() => { setShowBuilder(false); resetForm(); }} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
+                <button onClick={() => { setShowBuilder(false); resetForm(); }} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted transition-colors">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -423,6 +471,10 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
         )}
       </AnimatePresence>
 
+      <div className="flex items-center gap-3 flex-wrap">
+        <DateRangeFilter value={dateRange} onChange={setDateRange} />
+      </div>
+
       {loading ? (
         <div className="space-y-3 animate-pulse">
           {[1, 2, 3].map((i) => <div key={i} className="h-20 bg-muted/30 rounded-xl border border-border/50" />)}
@@ -440,16 +492,28 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
             <Plus className="w-4 h-4" /> Create Your First Schedule
           </Button>
         </div>
+      ) : dateFiltered.length === 0 ? (
+        <div className="py-10 text-center text-muted-foreground text-sm">
+          No recurring invoices match the selected date range.
+        </div>
       ) : (
         <div className="space-y-3">
-          {recurring.map((rec) => (
+          {dateFiltered.map((rec) => (
             <motion.div
               key={rec.id}
               initial={{ opacity: 0, y: 5 }}
               animate={{ opacity: 1, y: 0 }}
-              className={`rounded-xl border bg-card p-4 transition-all ${rec.isActive ? "border-border/50 hover:border-border/70" : "border-border/30 opacity-60"}`}
+              className={`rounded-xl border bg-card p-4 transition-all ${rec.isActive ? "border-border/50 hover:border-border/70" : "border-border/30 opacity-60"} ${selectedIds.has(rec.id) ? "ring-1 ring-[hsl(var(--kf-accent1))]/40" : ""}`}
             >
               <div className="flex items-start justify-between gap-4">
+                <label className="min-w-[44px] min-h-[44px] flex items-center justify-center shrink-0 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(rec.id)}
+                    onChange={() => toggleSelect(rec.id)}
+                    className="w-4 h-4 rounded border-border accent-[hsl(var(--kf-accent1))]"
+                  />
+                </label>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-3">
                     <h3 className="font-semibold text-base truncate">{rec.name}</h3>
@@ -482,13 +546,13 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
                     {rec.currency} {Number(rec.total).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </span>
                   <div className="flex items-center gap-1">
-                    <button onClick={() => handleToggle(rec.id)} className={`p-1.5 rounded-lg transition-colors ${rec.isActive ? "hover:bg-amber-500/20 text-amber-400" : "hover:bg-emerald-500/20 text-emerald-400"}`} title={rec.isActive ? "Pause" : "Resume"}>
+                    <button onClick={() => handleToggle(rec.id)} className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg transition-colors ${rec.isActive ? "hover:bg-amber-500/20 text-amber-400" : "hover:bg-emerald-500/20 text-emerald-400"}`} title={rec.isActive ? "Pause" : "Resume"}>
                       {rec.isActive ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                     </button>
-                    <button onClick={() => openEdit(rec)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Edit">
+                    <button onClick={() => openEdit(rec)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Edit">
                       <Pencil className="w-4 h-4" />
                     </button>
-                    <button onClick={() => handleDelete(rec.id)} className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400 transition-colors" title="Delete">
+                    <button onClick={() => handleDelete(rec.id)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-red-500/20 text-red-400 transition-colors" title="Delete">
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
@@ -553,6 +617,40 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
           ))}
         </div>
       )}
+      <BulkActionBar
+        selectedCount={selectedIds.size}
+        totalCount={dateFiltered.length}
+        onSelectAll={() => setSelectedIds(new Set(dateFiltered.map((r) => r.id)))}
+        onClearSelection={() => setSelectedIds(new Set())}
+        onExportCsv={handleExportCsv}
+        onBulkDelete={handleBulkDelete}
+        statusOptions={[
+          { value: "activate", label: "Activate" },
+          { value: "pause", label: "Pause" },
+        ]}
+        onBulkStatusChange={async (action) => {
+          if (!businessId) return;
+          const wantActive = action === "activate";
+          const eligible = Array.from(selectedIds).filter((id) => {
+            const rec = recurring.find((r) => r.id === id);
+            return rec ? rec.isActive !== wantActive : false;
+          });
+          if (eligible.length === 0) {
+            toast.info(`All selected schedules are already ${wantActive ? "active" : "paused"}`);
+            return;
+          }
+          const results = await Promise.all(eligible.map((id) => toggleRecurringInvoice(businessId!, id)));
+          setRecurring((prev) =>
+            prev.map((r) => {
+              const match = results.find((res) => res.data?.id === r.id);
+              return match?.data ?? r;
+            }),
+          );
+          setSelectedIds(new Set());
+          toast.success(`${eligible.length} schedule(s) ${wantActive ? "activated" : "paused"}`);
+        }}
+        entityLabel="schedules"
+      />
       <ConfirmDialog
         open={confirmState.open}
         title="Delete?"
