@@ -156,6 +156,7 @@ export class CommerceController {
         resource: 'products',
         current: limitCheck.current,
         limit: limitCheck.limit,
+        upgradeTo: limitCheck.upgradeTo,
       });
     }
     if (limitCheck.limit !== -1) {
@@ -168,6 +169,7 @@ export class CommerceController {
           resource: 'products',
           current: limitCheck.current,
           limit: limitCheck.limit,
+          upgradeTo: limitCheck.upgradeTo,
         });
       }
     }

@@ -14,6 +14,7 @@ export interface PlanLimitError {
   current: number;
   limit: number;
   message: string;
+  upgradeTo?: string;
 }
 
 function parsePlanLimitError(parsed: Record<string, unknown> | null): PlanLimitError | null {
@@ -23,6 +24,7 @@ function parsePlanLimitError(parsed: Record<string, unknown> | null): PlanLimitE
     current: (parsed.current as number) ?? 0,
     limit: (parsed.limit as number) ?? 0,
     message: (parsed.message as string) ?? "Plan limit reached",
+    upgradeTo: (parsed.upgradeTo as string) ?? undefined,
   };
 }
 

@@ -262,6 +262,7 @@ export function PlanLimitDialog({
             feature={planLimit.resource}
             description={planLimit.message}
             variant="card"
+            requiredPlan={planLimit.upgradeTo ?? "FLOW"}
             currentUsage={planLimit.current}
             limit={planLimit.limit}
             dismissible={true}
