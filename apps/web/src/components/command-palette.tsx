@@ -229,6 +229,12 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const totalSearchResults = SEARCH_SECTIONS.reduce((sum, s) => sum + (searchResults[s.key]?.length ?? 0), 0);
   const hasSearch = query.trim().length >= 2;
 
+  const handleNavigate = useCallback((href: string, label: string) => {
+    addRecentItem(label, href);
+    router.push(href);
+    onClose();
+  }, [router, onClose]);
+
   const flatItems = useMemo(() => {
     const items: { type: string; id: string; onSelect: () => void }[] = [];
     if (hasSearch && !searching) {
@@ -260,12 +266,6 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   useEffect(() => {
     setSelectedIdx(0);
   }, [query]);
-
-  const handleNavigate = useCallback((href: string, label: string) => {
-    addRecentItem(label, href);
-    router.push(href);
-    onClose();
-  }, [router, onClose]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {
