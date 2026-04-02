@@ -126,7 +126,7 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
       )}
 
       {((nextActions && nextActions.length > 0) || (autopilotActions && autopilotActions.length > 0)) && (
-        <div className="rounded-xl border border-border/50 bg-card overflow-hidden">
+        <div className="rounded-xl border border-border/50 bg-card overflow-hidden" data-walkthrough="crm-ai">
           <button
             onClick={() => setShowEngageSection(!showEngageSection)}
             className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"

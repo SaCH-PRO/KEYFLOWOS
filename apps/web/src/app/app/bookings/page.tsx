@@ -53,6 +53,7 @@ import { FeatureGuide } from "@/components/ui/feature-guide";
 import { ShareLinkModal } from "@/components/ui/share-link-modal";
 import { SetupModeBanner } from "@/components/ui/setup-mode-banner";
 import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { RichTooltip } from "@/components/ui/rich-tooltip";
 import { BOOKINGS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { usePlan } from "@/hooks/use-plan";
 import { PlanLimitBanner } from "@/components/ui/upgrade-prompt";
@@ -420,6 +421,7 @@ export default function BookingsPage() {
                 <span className="hidden sm:inline">Share</span>
               </button>
             )}
+            <RichTooltip title="Calendar Sync" description={calendarConnected ? `Connected to ${calendarEmail ?? "Google Calendar"}. Bookings sync automatically.` : "Connect Google Calendar in Settings to sync your bookings."} side="bottom">
             <a
               href="/app/settings/connections"
               className="inline-flex items-center justify-center gap-1.5 min-w-[44px] min-h-[44px] rounded-lg text-[11px] transition-colors"
@@ -434,6 +436,7 @@ export default function BookingsPage() {
               <Link2 className="w-4 h-4" />
               {calendarConnected && <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-success))" }} />}
             </a>
+            </RichTooltip>
           </div>
         }
         actionLabel="New Booking"
@@ -526,6 +529,7 @@ export default function BookingsPage() {
             </div>
           )}
           {tab === "catalog" && (
+            <div data-walkthrough="bookings-catalog">
             <CatalogCapacityTab
               services={services}
               staff={staff}
@@ -541,6 +545,7 @@ export default function BookingsPage() {
               onDisconnectCalendar={handleDisconnectCalendar}
               loading={loading}
             />
+            </div>
           )}
           {tab === "performance" && (
             <PerformanceTab

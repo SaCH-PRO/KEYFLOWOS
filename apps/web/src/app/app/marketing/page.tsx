@@ -24,6 +24,7 @@ import { useMarketing } from "./hooks/use-marketing";
 import { MarketingSkeleton } from "./components/marketing-skeleton";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { AiBadge } from "@/components/ui/ai-badge";
 import { MARKETING_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { CampaignsPanel } from "./components/campaigns-panel";
 import { LeadFormsPanel } from "./components/lead-forms-panel";
@@ -251,8 +252,9 @@ export default function MarketingPage() {
           <motion.div key={activeTab} custom={directionRef.current} variants={slideVariants} initial="enter" animate="center" exit="exit" transition={{ type: "spring", bounce: 0.15, duration: 0.35 }}>
             {activeTab === "create" && (
               <div className="space-y-6">
+                <div className="flex items-center gap-2 mb-1"><AiBadge label="AI Content" explanation="AI can generate email subject lines, body copy, and social posts based on your business context and audience." /></div>
                 <CampaignActionQueue campaigns={mk.campaigns} onEdit={handleEditCampaign} onSend={handleSendCampaign} onAiWrite={() => handleAiAction("campaign-content-generator")} />
-                <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/20 border border-border/30 w-fit">
+                <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/20 border border-border/30 w-fit" data-walkthrough="marketing-create">
                   <button
                     onClick={() => setCreateMode("email")}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
@@ -296,7 +298,7 @@ export default function MarketingPage() {
                   <AudienceHealthSection businessId={mk.businessId} />
                   <AudienceSegmentsPanel businessId={mk.businessId} />
                 </div>
-                <div className="space-y-4">
+                <div className="space-y-4" data-walkthrough="marketing-forms">
                   <FormOptimizationQueue forms={mk.forms} onAiOptimize={() => handleAiAction("lead-form-optimizer")} onEdit={handleEditForm} onToggle={mk.handleToggleForm} />
                   <LeadFormsPanel businessId={mk.businessId} forms={mk.forms} setForms={mk.setForms} onViewContact={mk.handleViewContact} onAiOptimize={() => handleAiAction("lead-form-optimizer")} />
                 </div>

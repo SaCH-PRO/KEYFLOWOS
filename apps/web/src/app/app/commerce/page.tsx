@@ -31,6 +31,8 @@ import { useCommerceAiHub } from "./hooks/use-commerce-ai-hub";
 import { SearchableHelpDrawer } from "./components/contextual-onboarding";
 import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
 import { MetricExplainer } from "@/components/ui/metric-explainer";
+import { RichTooltip } from "@/components/ui/rich-tooltip";
+import { InfoBadge } from "@/components/ui/info-badge";
 import { COMMERCE_WALKTHROUGH, METRIC_DEFINITIONS } from "@/lib/walkthrough-definitions";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useModuleEmit, useModuleEvent } from "@/hooks/use-module-events";
@@ -210,20 +212,23 @@ export default function CommercePage() {
         subtitle="Revenue workspace"
         rightSlot={
           <div className="flex items-center gap-2">
-            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border/50 bg-white/[0.03] text-sm">
-              <DollarSign className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span className="font-semibold text-xs text-emerald-400">{overview.revenuePulse}</span>
-              <span className="text-[10px] text-muted-foreground/50">collected</span>
-            </div>
+            <RichTooltip title="Revenue Pulse" description="Total payments collected this month across all invoices." side="bottom">
+              <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border/50 bg-white/[0.03] text-sm cursor-help">
+                <DollarSign className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span className="font-semibold text-xs text-emerald-400">{overview.revenuePulse}</span>
+                <span className="text-[10px] text-muted-foreground/50">collected</span>
+              </div>
+            </RichTooltip>
             <div className="flex items-center gap-0.5">
-              <Link
-                href="/app/settings/business"
-                className="min-w-[44px] min-h-[44px] rounded-lg flex items-center justify-center hover:bg-white/[0.06] transition-colors"
-                aria-label="Billing Settings"
-                title="Billing Settings"
-              >
-                <Settings className="w-4 h-4 text-muted-foreground/60" />
-              </Link>
+              <RichTooltip title="Billing Settings" description="Configure tax rates, payment methods, and invoice templates." shortcut="⌘ ,">
+                <Link
+                  href="/app/settings/business"
+                  className="min-w-[44px] min-h-[44px] rounded-lg flex items-center justify-center hover:bg-white/[0.06] transition-colors"
+                  aria-label="Billing Settings"
+                >
+                  <Settings className="w-4 h-4 text-muted-foreground/60" />
+                </Link>
+              </RichTooltip>
               <button
                 onClick={() => setHelpOpen(true)}
                 className="min-w-[44px] min-h-[44px] rounded-lg flex items-center justify-center hover:bg-white/[0.06] transition-colors"

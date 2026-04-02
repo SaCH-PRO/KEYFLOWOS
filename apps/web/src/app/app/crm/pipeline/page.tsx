@@ -17,6 +17,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { InfoBadge } from "@/components/ui/info-badge";
 import { CRM_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { ContactsDatabase } from "./contacts-database";
 import { InsightsTab } from "./insights-tab";
@@ -192,7 +193,7 @@ export default function ContactsPage() {
       <PageHeader
         icon={Users}
         title="Contacts"
-        subtitle="Your AI-powered contact management hub"
+        subtitle={<span className="inline-flex items-center gap-1.5">Your AI-powered contact management hub <InfoBadge title="CRM Overview" body="Your CRM centralizes all contact data, lead scoring, communication history, and AI insights. Use Smart Segments to quickly filter contacts by engagement level." side="bottom" iconSize={12} /></span>}
         titleExtra={
           <FeatureGuide
             featureKey="crm-pipeline"
