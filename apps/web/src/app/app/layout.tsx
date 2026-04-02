@@ -35,10 +35,126 @@ import {
   FolderKanban,
   Globe,
   Link2,
+  FileText,
 } from "lucide-react";
 import { AiCommandBar, AiCopilotTrigger } from "./_command/ai-command-bar";
 import { usePlanLimitHandler } from "@/hooks/use-plan";
 import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
+
+function relativeTime(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diff = now - then;
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(dateStr).toLocaleDateString();
+}
+
+function getNotificationIcon(n: any): typeof Bell {
+  const type = (n.type || n.category || "").toLowerCase();
+  const title = (n.title || "").toLowerCase();
+  if (type.includes("invoice") || title.includes("invoice") || title.includes("payment")) return Receipt;
+  if (type.includes("booking") || title.includes("booking") || title.includes("appointment")) return Calendar;
+  if (type.includes("contact") || title.includes("contact") || title.includes("lead")) return Users;
+  if (type.includes("campaign") || title.includes("campaign") || title.includes("marketing")) return Megaphone;
+  if (type.includes("project") || title.includes("project") || title.includes("task")) return FolderKanban;
+  if (type.includes("expense") || title.includes("expense")) return Receipt;
+  if (type.includes("automation") || title.includes("automation") || title.includes("playbook")) return Zap;
+  return Bell;
+}
+
+function getNotificationLink(n: any): string | null {
+  const type = (n.type || n.category || "").toLowerCase();
+  const title = (n.title || "").toLowerCase();
+  if (type.includes("invoice") || title.includes("invoice")) return "/app/commerce?tab=invoices";
+  if (type.includes("payment") || title.includes("payment")) return "/app/commerce?tab=payments";
+  if (type.includes("booking") || title.includes("booking") || title.includes("appointment")) return "/app/bookings";
+  if (type.includes("contact") || title.includes("contact") || title.includes("lead")) return "/app/crm/pipeline";
+  if (type.includes("campaign") || title.includes("campaign")) return "/app/marketing";
+  if (type.includes("project") || title.includes("project")) return "/app/projects";
+  if (type.includes("expense") || title.includes("expense")) return "/app/expenses";
+  if (type.includes("automation") || title.includes("automation")) return "/app/automations";
+  if (n.link || n.href) return n.link || n.href;
+  return null;
+}
+
+function NewEntityMenu({ onClose }: { onClose: () => void }) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [focusIdx, setFocusIdx] = useState(-1);
+  const items = [
+    { label: "Contact", icon: Users, href: "/app/crm/pipeline", shortcut: "⌘⇧C" },
+    { label: "Invoice", icon: Receipt, href: "/app/commerce", shortcut: "⌘⇧I" },
+    { label: "Quote", icon: FileText, href: "/app/commerce?tab=quotes" },
+    { label: "Booking", icon: Calendar, href: "/app/bookings", shortcut: "⌘⇧B" },
+    { label: "Expense", icon: Receipt, href: "/app/expenses" },
+    { label: "Project", icon: FolderKanban, href: "/app/projects" },
+    { label: "Campaign", icon: Megaphone, href: "/app/marketing" },
+    { label: "Post", icon: MessageCircle, href: "/app/marketing?tab=social" },
+    { label: "Automation", icon: Zap, href: "/app/automations" },
+  ];
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setFocusIdx((prev) => Math.min(prev + 1, items.length - 1));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setFocusIdx((prev) => Math.max(prev - 1, 0));
+      } else if (e.key === "Enter" && focusIdx >= 0) {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [focusIdx, items.length, onClose]);
+
+  useEffect(() => {
+    if (focusIdx >= 0) {
+      const el = menuRef.current?.querySelector(`[data-menu-idx="${focusIdx}"]`) as HTMLElement | null;
+      el?.focus();
+    }
+  }, [focusIdx]);
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} />
+      <div ref={menuRef} className="absolute right-0 mt-1.5 w-56 kf-glass-surface p-1.5 z-50 max-h-[70vh] overflow-y-auto" role="menu">
+        {items.map((action, idx) => {
+          const ActionIcon = action.icon;
+          return (
+            <Link
+              key={action.label}
+              href={action.href}
+              data-menu-idx={idx}
+              onClick={onClose}
+              role="menuitem"
+              className={cn(
+                "flex items-center justify-between gap-2.5 px-2.5 py-2 rounded-md text-sm hover:bg-muted transition-colors",
+                focusIdx === idx && "bg-muted"
+              )}
+            >
+              <div className="flex items-center gap-2.5">
+                <ActionIcon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                <span className="text-[13px]">{action.label}</span>
+              </div>
+              {action.shortcut && (
+                <kbd className="px-1 py-0.5 rounded bg-muted text-[9px] font-mono text-muted-foreground">{action.shortcut}</kbd>
+              )}
+            </Link>
+          );
+        })}
+      </div>
+    </>
+  );
+}
 
 interface NavItem {
   label: string;
@@ -217,10 +333,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         e.preventDefault();
         setPaletteOpen((v) => !v);
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        setAddMenuOpen((v) => !v);
+      }
       if (e.key === "Escape") {
         setPaletteOpen(false);
         setAddMenuOpen(false);
         setMobileDrawerOpen(false);
+        setNotifOpen(false);
       }
     };
     window.addEventListener("keydown", handler);
@@ -368,38 +489,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <button
                   onClick={() => setAddMenuOpen((v) => !v)}
                   className="kf-btn-primary inline-flex items-center gap-1.5 !px-2.5 !py-1.5 !text-xs !rounded-lg"
+                  title="New (⌘N)"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span className="hidden sm:inline">New</span>
+                  <kbd className="hidden sm:inline px-1 py-0.5 rounded bg-black/20 text-[9px] font-mono">⌘N</kbd>
                 </button>
                 {addMenuOpen && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setAddMenuOpen(false)} />
-                    <div className="absolute right-0 mt-1.5 w-56 kf-glass-surface p-1.5 z-50 max-h-[70vh] overflow-y-auto">
-                      {[
-                        { label: "Contact", icon: Users, href: "/app/crm/pipeline" },
-                        { label: "Invoice", icon: Receipt, href: "/app/commerce" },
-                        { label: "Booking", icon: Calendar, href: "/app/bookings" },
-                        { label: "Post", icon: MessageCircle, href: "/app/marketing?tab=social" },
-                        { label: "Expense", icon: Receipt, href: "/app/expenses" },
-                        { label: "Project", icon: FolderKanban, href: "/app/projects" },
-                        { label: "Campaign", icon: Megaphone, href: "/app/marketing" },
-                      ].map((action) => {
-                        const ActionIcon = action.icon;
-                        return (
-                          <Link
-                            key={action.label}
-                            href={action.href}
-                            onClick={() => setAddMenuOpen(false)}
-                            className="flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm hover:bg-muted transition-colors"
-                          >
-                            <ActionIcon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                            <span className="text-[13px]">{action.label}</span>
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  </>
+                  <NewEntityMenu onClose={() => setAddMenuOpen(false)} />
                 )}
               </div>
 
@@ -439,26 +536,41 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                       {notifications.length === 0 ? (
                         <div className="px-4 py-8 text-center text-sm text-muted-foreground">No notifications yet</div>
                       ) : (
-                        notifications.slice(0, 20).map((n: any) => (
-                          <div
-                            key={n.id}
-                            className={cn(
-                              "px-4 py-3 border-b border-border last:border-0 hover:bg-muted/50 transition-colors active:bg-muted/70",
-                              !n.read && "bg-muted/30"
-                            )}
-                          >
-                            <div className="flex items-start gap-2">
-                              <div className={cn("w-2 h-2 rounded-full mt-1.5 flex-shrink-0", n.read ? "bg-transparent" : "")} style={!n.read ? { background: "hsl(var(--kf-accent1))" } : {}} />
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium">{n.title}</p>
-                                {n.body && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.body}</p>}
-                                <p className="text-[10px] text-muted-foreground mt-1">
-                                  {new Date(n.createdAt).toLocaleString()}
-                                </p>
+                        notifications.slice(0, 20).map((n: any) => {
+                          const notifLink = getNotificationLink(n);
+                          const NotifIcon = getNotificationIcon(n);
+                          const Wrapper = notifLink ? Link : "div";
+                          const wrapperProps = notifLink ? { href: notifLink, onClick: () => setNotifOpen(false) } : {};
+                          return (
+                            <Wrapper
+                              key={n.id}
+                              {...wrapperProps as any}
+                              className={cn(
+                                "block px-4 py-3 border-b border-border last:border-0 hover:bg-muted/50 transition-colors active:bg-muted/70",
+                                !n.read && "bg-muted/30",
+                                notifLink && "cursor-pointer"
+                              )}
+                            >
+                              <div className="flex items-start gap-2.5">
+                                <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 bg-muted/50">
+                                  <NotifIcon className="w-3.5 h-3.5 text-muted-foreground" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <p className="text-sm font-medium">{n.title}</p>
+                                    {!n.read && (
+                                      <div className="w-2 h-2 rounded-full flex-shrink-0 mt-1.5" style={{ background: "hsl(var(--kf-accent1))" }} />
+                                    )}
+                                  </div>
+                                  {n.body && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.body}</p>}
+                                  <p className="text-[10px] text-muted-foreground mt-1">
+                                    {relativeTime(n.createdAt)}
+                                  </p>
+                                </div>
                               </div>
-                            </div>
-                          </div>
-                        ))
+                            </Wrapper>
+                          );
+                        })
                       )}
                       <div className="h-safe-area-inset-bottom md:hidden" />
                     </div>
