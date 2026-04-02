@@ -490,14 +490,21 @@ export class BookingOptimizerService {
     }[]
   > {
     const now = new Date();
-    const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-    const in26h = new Date(now.getTime() + 26 * 60 * 60 * 1000);
+
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { bookingReminderMins: true },
+    });
+    const reminderMins = business?.bookingReminderMins ?? 60;
+    const reminderMs = reminderMins * 60 * 1000;
+    const windowStart = new Date(now.getTime() + reminderMs - 60 * 60 * 1000);
+    const windowEnd = new Date(now.getTime() + reminderMs + 60 * 60 * 1000);
 
     const bookings = await this.prisma.client.booking.findMany({
       where: {
         businessId,
         deletedAt: null,
-        startTime: { gte: in24h, lt: in26h },
+        startTime: { gte: windowStart, lt: windowEnd },
         status: { in: ['PENDING', 'CONFIRMED'] },
       },
       include: {
