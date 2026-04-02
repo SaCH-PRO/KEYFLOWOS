@@ -146,37 +146,44 @@ export function BookingsView({ report }: { report: GeneratedReport }) {
 function BookingStatusChart({ report }: { report: GeneratedReport }) {
   const [granularity, setGranularity] = useState<BookingGranularity>("weekly");
   const m = report.metrics;
+  const c = report.comparison;
   const d = report.data || {};
 
   const statusBreakdown = (d as Record<string, unknown>).bookingsByStatus as Record<string, number> | undefined;
   const completed = statusBreakdown?.completed ?? Math.round(m.bookings.total * m.bookings.completionRate / 100);
   const noShows = m.bookings.total - completed;
 
+  const prevTotal = c?.bookings.total ?? 0;
+
   const chartData = useMemo(() => {
     const total = m.bookings.total;
-    if (total === 0) return [];
+    if (total === 0 && prevTotal === 0) return [];
     if (granularity === "daily") {
       const days = 7;
       const perDay = Math.max(1, Math.round(total / days));
+      const prevPerDay = prevTotal > 0 ? Math.max(1, Math.round(prevTotal / days)) : 0;
       return Array.from({ length: days }, (_, i) => ({
         label: `Day ${i + 1}`,
         completed: Math.round(perDay * m.bookings.completionRate / 100),
         missed: Math.round(perDay * (100 - m.bookings.completionRate) / 100),
+        ...(c ? { prevPeriod: prevPerDay } : {}),
       }));
     }
     if (granularity === "weekly") {
       const weeks = 4;
       const perWeek = Math.max(1, Math.round(total / weeks));
+      const prevPerWeek = prevTotal > 0 ? Math.max(1, Math.round(prevTotal / weeks)) : 0;
       return Array.from({ length: weeks }, (_, i) => ({
         label: `Week ${i + 1}`,
         completed: Math.round(perWeek * m.bookings.completionRate / 100),
         missed: Math.round(perWeek * (100 - m.bookings.completionRate) / 100),
+        ...(c ? { prevPeriod: prevPerWeek } : {}),
       }));
     }
     return [
-      { label: "This Period", completed, missed: noShows },
+      { label: "This Period", completed, missed: noShows, ...(c ? { prevPeriod: prevTotal } : {}) },
     ];
-  }, [granularity, m.bookings.total, m.bookings.completionRate, completed, noShows]);
+  }, [granularity, m.bookings.total, m.bookings.completionRate, completed, noShows, c, prevTotal]);
 
   if (m.bookings.total === 0) return null;
 
@@ -217,6 +224,7 @@ function BookingStatusChart({ report }: { report: GeneratedReport }) {
             <Legend wrapperStyle={{ fontSize: 11 }} />
             <Bar dataKey="completed" name="Completed" fill="hsl(var(--kf-success))" radius={[4, 4, 0, 0]} />
             <Bar dataKey="missed" name="Missed/No-show" fill="hsl(var(--kf-error))" radius={[4, 4, 0, 0]} />
+            {c && <Bar dataKey="prevPeriod" name="Previous Period" fill="hsl(var(--kf-muted-foreground) / 0.3)" radius={[4, 4, 0, 0]} />}
           </BarChart>
         </ResponsiveContainer>
       </Card>

@@ -63,7 +63,7 @@ export function ExecutiveView({ report }: { report: GeneratedReport }) {
         <Link href="/app/crm/pipeline">
           <MetricCard
             label={c ? "New Contacts" : "Total Contacts"}
-            value={c ? (m.clients.totalContacts - (c.clients.totalContacts || 0)).toString() : m.clients.totalContacts.toString()}
+            value={c ? (c.clients.newContacts ?? 0).toString() : m.clients.totalContacts.toString()}
             subtext={c ? `${m.clients.totalContacts} total in CRM` : `${m.bookings.total} bookings this period`}
             icon={Users}
             color="text-[hsl(var(--kf-info))]"
@@ -138,7 +138,7 @@ export function ExecutiveView({ report }: { report: GeneratedReport }) {
   );
 }
 
-function AiBriefingCard({ report }: { report: GeneratedReport }) {
+export function AiBriefingCard({ report }: { report: GeneratedReport }) {
   const [expanded, setExpanded] = useState(true);
   const m = report.metrics;
   const c = report.comparison;
