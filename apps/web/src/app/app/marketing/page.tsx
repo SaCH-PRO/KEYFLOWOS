@@ -41,11 +41,11 @@ type CreateMode = "email" | "social";
 
 type MarketingTab = "create" | "calendar" | "audience" | "performance";
 
-const TABS: { key: MarketingTab; label: string; icon: React.ElementType }[] = [
-  { key: "create", label: "Create & Schedule", icon: PenSquare },
-  { key: "calendar", label: "Calendar", icon: CalendarDays },
-  { key: "audience", label: "Audiences & Forms", icon: Users },
-  { key: "performance", label: "Performance", icon: BarChart3 },
+const TABS: { key: MarketingTab; label: string; icon: React.ElementType; tooltip?: string }[] = [
+  { key: "create", label: "Create & Schedule", icon: PenSquare, tooltip: "Create email, SMS, or social campaigns and schedule them for delivery." },
+  { key: "calendar", label: "Calendar", icon: CalendarDays, tooltip: "Visual calendar of all scheduled and sent campaigns." },
+  { key: "audience", label: "Audiences & Forms", icon: Users, tooltip: "Build audience segments and lead capture forms for targeting." },
+  { key: "performance", label: "Performance", icon: BarChart3, tooltip: "Track open rates, click-through rates, and campaign ROI." },
 ];
 
 const TAB_KEYS = TABS.map((t) => t.key);

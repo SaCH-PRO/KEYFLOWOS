@@ -58,10 +58,10 @@ import { BOOKINGS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { usePlan } from "@/hooks/use-plan";
 import { PlanLimitBanner } from "@/components/ui/upgrade-prompt";
 
-const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
-  { key: "schedule", label: "Schedule", icon: Calendar },
-  { key: "catalog", label: "Setup: Catalog & Capacity", icon: Briefcase },
-  { key: "performance", label: "Performance", icon: BarChart3 },
+const TABS: { key: Tab; label: string; icon: React.ElementType; tooltip?: string }[] = [
+  { key: "schedule", label: "Schedule", icon: Calendar, tooltip: "View and manage upcoming bookings. Filter by status, date, or service." },
+  { key: "catalog", label: "Setup: Catalog & Capacity", icon: Briefcase, tooltip: "Configure bookable services, staff availability, and capacity limits." },
+  { key: "performance", label: "Performance", icon: BarChart3, tooltip: "Booking analytics: utilization rates, popular services, and revenue trends." },
 ];
 
 const slideVariants = {

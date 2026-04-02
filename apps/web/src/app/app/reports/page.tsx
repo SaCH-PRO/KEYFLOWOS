@@ -122,6 +122,7 @@ export default function ReportsPage() {
     key: t.id,
     label: t.label,
     icon: t.icon,
+    tooltip: t.tooltip,
   }));
 
   return (

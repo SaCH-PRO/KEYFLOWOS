@@ -223,9 +223,9 @@ export default function ContactsPage() {
       <div data-walkthrough="crm-tabs">
         <TabNav
           tabs={[
-            { key: "contacts", label: "Contacts", icon: Users },
-            { key: "insights", label: "Insights", icon: BarChart3 },
-            { key: "studio", label: "Studio", icon: Layers },
+            { key: "contacts", label: "Contacts", icon: Users, tooltip: "Your full contact database — search, filter, and manage client relationships." },
+            { key: "insights", label: "Insights", icon: BarChart3, tooltip: "AI-powered analytics: lead scoring, churn risk, and engagement patterns." },
+            { key: "studio", label: "Studio", icon: Layers, tooltip: "Visual pipeline builder for custom contact workflows and stages." },
           ]}
           activeTab={crmViewTab}
           onTabChange={handleTabChange}

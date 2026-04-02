@@ -31,8 +31,8 @@ import { Feed } from "./components/feed";
 import { CohortList } from "./components/cohort-list";
 
 const COMMUNITY_TABS = [
-  { key: "feed", label: "Feed", icon: MessageSquare },
-  { key: "cohorts", label: "Cohorts", icon: Users },
+  { key: "feed", label: "Feed", icon: MessageSquare, tooltip: "Community posts, discussions, and updates from other business owners." },
+  { key: "cohorts", label: "Cohorts", icon: Users, tooltip: "Join or browse peer groups organized by industry or business stage." },
 ];
 const TAB_KEYS = COMMUNITY_TABS.map((t) => t.key);
 

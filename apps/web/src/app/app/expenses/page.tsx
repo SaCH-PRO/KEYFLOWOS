@@ -131,9 +131,9 @@ export default function ExpensesPage() {
       </div>
       <div data-walkthrough="expenses-tabs">
         <TabNav tabs={[
-          { key: "expenses", label: "Expenses", icon: Receipt },
-          { key: "budgets", label: "Budgets", icon: Target },
-          { key: "analytics", label: "Analytics", icon: BarChart3 },
+          { key: "expenses", label: "Expenses", icon: Receipt, tooltip: "Log and track all business expenses by category and vendor." },
+          { key: "budgets", label: "Budgets", icon: Target, tooltip: "Set spending limits per category and monitor budget utilization." },
+          { key: "analytics", label: "Analytics", icon: BarChart3, tooltip: "Spending trends, category breakdowns, and cost projections." },
         ]} activeTab={activeTab} onTabChange={(k) => setActiveTab(k as Tab)} layoutId="expenses-tab-underline" />
       </div>
       {(activeTab === "expenses" || activeTab === "analytics") && (

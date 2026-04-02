@@ -30,9 +30,9 @@ import { ProgressTracker } from "./components/progress-tracker";
 import { LessonViewer } from "./components/lesson-viewer";
 
 const LEARN_TABS = [
-  { key: "learning", label: "My Learning", icon: Play },
-  { key: "catalog", label: "Catalog", icon: BookOpen },
-  { key: "certificates", label: "Certificates", icon: GraduationCap },
+  { key: "learning", label: "My Learning", icon: Play, tooltip: "Continue courses you've started and track your progress." },
+  { key: "catalog", label: "Catalog", icon: BookOpen, tooltip: "Browse all available courses and masterclasses." },
+  { key: "certificates", label: "Certificates", icon: GraduationCap, tooltip: "View and download certificates for completed courses." },
 ];
 
 const LEARN_TAB_KEYS = LEARN_TABS.map((t) => t.key);

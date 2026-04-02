@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { TrendingUp, RefreshCw, ShieldCheck } from "lucide-react";
+import { InfoBadge } from "@/components/ui/info-badge";
 import { Card } from "@keyflow/ui";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
 import { fetchCashFlowForecast, type CashFlowForecast } from "@/lib/client";
@@ -121,7 +122,7 @@ export function RevenueProjectionChart({
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <TrendingUp className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
-          <h3 className="text-sm font-semibold">Revenue Trend & Projections</h3>
+          <h3 className="text-sm font-semibold inline-flex items-center gap-1">Revenue Trend & Projections <InfoBadge title="Cash Flow Projections" body="Projections are based on your historical invoice collection rate and upcoming recurring expenses. The confidence score reflects data quality — more history means higher confidence. Dotted lines indicate projected values." side="bottom" iconSize={11} /></h3>
           {confidence && (
             <span
               className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full font-medium"
