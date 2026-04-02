@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Plus, Users, RefreshCw, AlertTriangle } from "lucide-react";
+import { Plus, Users, RefreshCw, AlertTriangle, X, Loader2, Mail, Phone, User } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { CardListSkeleton } from "@/components/ui/skeleton";
 import { ContactCard, ContactCardData } from "@/components/contacts";
@@ -86,6 +86,108 @@ export interface PipelineContactListProps {
   onLoadMore: () => void;
   onRetry?: () => void;
   onAddContact: () => void;
+  onQuickCreate?: (data: { firstName: string; lastName?: string; email?: string; phone?: string }) => Promise<void>;
+}
+
+function QuickAddRow({ onSubmit, onCancel }: { onSubmit: (data: { firstName: string; lastName?: string; email?: string; phone?: string }) => Promise<void>; onCancel: () => void }) {
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [saving, setSaving] = useState(false);
+  const firstRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { firstRef.current?.focus(); }, []);
+
+  const handleSubmit = async () => {
+    if (!firstName.trim()) return;
+    setSaving(true);
+    try {
+      await onSubmit({
+        firstName: firstName.trim(),
+        lastName: lastName.trim() || undefined,
+        email: email.trim() || undefined,
+        phone: phone.trim() || undefined,
+      });
+      setFirstName("");
+      setLastName("");
+      setEmail("");
+      setPhone("");
+      firstRef.current?.focus();
+    } catch {
+      // error handled by parent
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="kf-card p-3 space-y-2" style={{ borderColor: "hsl(var(--kf-accent1) / 0.3)", background: "hsl(var(--kf-accent1) / 0.03)" }}>
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: "hsl(var(--kf-accent1))" }}>
+          <Plus className="w-3 h-3" /> Quick Add Contact
+        </span>
+        <button onClick={onCancel} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted/50">
+          <X className="w-3.5 h-3.5 text-muted-foreground" />
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="relative">
+          <User className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+          <input
+            ref={firstRef}
+            value={firstName}
+            onChange={(e) => setFirstName(e.target.value)}
+            placeholder="First name *"
+            className="kf-input w-full text-xs pl-7"
+            onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); if (e.key === "Escape") onCancel(); }}
+          />
+        </div>
+        <input
+          value={lastName}
+          onChange={(e) => setLastName(e.target.value)}
+          placeholder="Last name"
+          className="kf-input w-full text-xs"
+          onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); if (e.key === "Escape") onCancel(); }}
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="relative">
+          <Mail className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+          <input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Email"
+            type="email"
+            className="kf-input w-full text-xs pl-7"
+            onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); if (e.key === "Escape") onCancel(); }}
+          />
+        </div>
+        <div className="relative">
+          <Phone className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+          <input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="Phone"
+            className="kf-input w-full text-xs pl-7"
+            onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); if (e.key === "Escape") onCancel(); }}
+          />
+        </div>
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] text-muted-foreground/50">Press Enter to save, Esc to cancel</span>
+        <button
+          onClick={handleSubmit}
+          disabled={!firstName.trim() || saving}
+          className="inline-flex items-center gap-1.5 px-3 min-h-[44px] text-xs font-medium rounded-lg text-white transition-all disabled:opacity-40"
+          style={{ background: firstName.trim() && !saving ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-accent1) / 0.4)" }}
+        >
+          {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+          {saving ? "Adding..." : "Add"}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function PipelineContactListInner({
@@ -108,7 +210,9 @@ function PipelineContactListInner({
   onLoadMore,
   onRetry,
   onAddContact,
+  onQuickCreate,
 }: PipelineContactListProps) {
+  const [showQuickAdd, setShowQuickAdd] = useState(false);
   const enableVirtual = contacts.length >= VIRTUAL_SCROLL_THRESHOLD;
   const {
     containerRef,
@@ -202,22 +306,40 @@ function PipelineContactListInner({
     );
   }
 
+  const quickAddRow = onQuickCreate && activeListTab === "all" && (
+    showQuickAdd ? (
+      <QuickAddRow onSubmit={onQuickCreate} onCancel={() => setShowQuickAdd(false)} />
+    ) : (
+      <button
+        onClick={() => setShowQuickAdd(true)}
+        className="w-full kf-card p-2.5 flex items-center justify-center gap-1.5 text-xs font-medium transition-all hover:border-[hsl(var(--kf-accent1)/0.3)] min-h-[44px]"
+        style={{ color: "hsl(var(--kf-accent1))", borderStyle: "dashed" }}
+      >
+        <Plus className="w-3.5 h-3.5" />
+        Quick Add Contact
+      </button>
+    )
+  );
+
   if (contacts.length === 0) {
     return (
-      <EmptyState
-        icon={Users}
-        title={activeListTab === "pinned" ? "No pinned contacts" : activeListTab === "recent" ? "No recent contacts" : "No contacts yet"}
-        description={
-          activeListTab === "pinned"
-            ? "Pin your most important contacts for quick access"
-            : activeListTab === "recent"
-            ? "Your recently viewed contacts will appear here"
-            : "Add your first contact to get started"
-        }
-        actionLabel={activeListTab === "all" ? "Add Contact" : undefined}
-        onAction={activeListTab === "all" ? onAddContact : undefined}
-        tip={activeListTab === "all" ? "Contacts are the heart of your CRM — add clients, leads, and partners to track relationships and activity." : undefined}
-      />
+      <div className="space-y-3">
+        {quickAddRow}
+        <EmptyState
+          icon={Users}
+          title={activeListTab === "pinned" ? "No pinned contacts" : activeListTab === "recent" ? "No recent contacts" : "No contacts yet"}
+          description={
+            activeListTab === "pinned"
+              ? "Pin your most important contacts for quick access"
+              : activeListTab === "recent"
+              ? "Your recently viewed contacts will appear here"
+              : "Add your first contact to get started"
+          }
+          actionLabel={activeListTab === "all" ? "Add Contact" : undefined}
+          onAction={activeListTab === "all" ? onAddContact : undefined}
+          tip={activeListTab === "all" ? "Contacts are the heart of your CRM — add clients, leads, and partners to track relationships and activity." : undefined}
+        />
+      </div>
     );
   }
 
@@ -264,39 +386,45 @@ function PipelineContactListInner({
 
   if (isVirtual) {
     return (
-      <div
-        ref={containerRef}
-        onScroll={handleScroll}
-        onKeyDown={handleKeyDown}
-        role="listbox"
-        aria-label="Contacts list"
-        tabIndex={0}
-        className="max-h-[calc(100vh-16rem)] overflow-y-auto outline-none"
-        style={{ willChange: "transform" }}
-      >
-        <div style={{ height: totalHeight, position: "relative" }}>
-          <div style={{ position: "absolute", top: 0, left: 0, right: 0, transform: `translateY(${offsetY}px)` }}>
-            <div className="space-y-3">
-              {visibleContacts.map((contact, i) => renderContactItem(contact, startIndex + i))}
+      <div className="space-y-3">
+        {quickAddRow}
+        <div
+          ref={containerRef}
+          onScroll={handleScroll}
+          onKeyDown={handleKeyDown}
+          role="listbox"
+          aria-label="Contacts list"
+          tabIndex={0}
+          className="max-h-[calc(100vh-16rem)] overflow-y-auto outline-none"
+          style={{ willChange: "transform" }}
+        >
+          <div style={{ height: totalHeight, position: "relative" }}>
+            <div style={{ position: "absolute", top: 0, left: 0, right: 0, transform: `translateY(${offsetY}px)` }}>
+              <div className="space-y-3">
+                {visibleContacts.map((contact, i) => renderContactItem(contact, startIndex + i))}
+              </div>
             </div>
           </div>
+          {loadMoreButton}
         </div>
-        {loadMoreButton}
       </div>
     );
   }
 
   return (
-    <div
-      ref={listRef}
-      role="listbox"
-      aria-label="Contacts list"
-      tabIndex={0}
-      onKeyDown={handleKeyDown}
-      className="space-y-3 outline-none"
-    >
-      {visibleContacts.map((contact, index) => renderContactItem(contact, index))}
-      {loadMoreButton}
+    <div className="space-y-3">
+      {quickAddRow}
+      <div
+        ref={listRef}
+        role="listbox"
+        aria-label="Contacts list"
+        tabIndex={0}
+        onKeyDown={handleKeyDown}
+        className="space-y-3 outline-none"
+      >
+        {visibleContacts.map((contact, index) => renderContactItem(contact, index))}
+        {loadMoreButton}
+      </div>
     </div>
   );
 }

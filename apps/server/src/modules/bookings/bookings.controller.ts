@@ -67,6 +67,7 @@ export class BookingsController {
       staffId: body.staffId,
       startTime: new Date(body.startTime),
       endTime: new Date(body.endTime),
+      notes: body.notes,
     });
   }
 
@@ -149,7 +150,7 @@ export class BookingsController {
   updateService(
     @Param('businessId') businessId: string,
     @Param('serviceId') serviceId: string,
-    @Body() body: { name?: string; duration?: number; price?: number; description?: string },
+    @Body() body: { name?: string; duration?: number; price?: number; description?: string; bufferMins?: number; leadTimeMins?: number },
   ) {
     return this.prisma.client.service.update({
       where: { id: serviceId, businessId },
@@ -158,6 +159,8 @@ export class BookingsController {
         ...(body.duration !== undefined && { duration: body.duration }),
         ...(body.price !== undefined && { price: body.price }),
         ...(body.description !== undefined && { description: body.description }),
+        ...(body.bufferMins !== undefined && { bufferMins: body.bufferMins }),
+        ...(body.leadTimeMins !== undefined && { leadTimeMins: body.leadTimeMins }),
       },
     });
   }
@@ -235,6 +238,44 @@ export class BookingsController {
       data: { deletedAt: new Date() },
     });
     return { success: true };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/staff/:staffId/availability')
+  listStaffAvailability(
+    @Param('businessId') businessId: string,
+    @Param('staffId') staffId: string,
+  ) {
+    return this.prisma.client.availability.findMany({
+      where: { staffId, staff: { businessId, deletedAt: null } },
+      orderBy: { dayOfWeek: 'asc' },
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/staff/:staffId/availability')
+  async setStaffAvailability(
+    @Param('businessId') businessId: string,
+    @Param('staffId') staffId: string,
+    @Body() body: { slots: { dayOfWeek: number; startTime: string; endTime: string }[] },
+  ) {
+    await this.prisma.client.availability.deleteMany({
+      where: { staffId, staff: { businessId } },
+    });
+    if (body.slots.length > 0) {
+      await this.prisma.client.availability.createMany({
+        data: body.slots.map((s) => ({
+          staffId,
+          dayOfWeek: s.dayOfWeek,
+          startTime: s.startTime,
+          endTime: s.endTime,
+        })),
+      });
+    }
+    return this.prisma.client.availability.findMany({
+      where: { staffId },
+      orderBy: { dayOfWeek: 'asc' },
+    });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

@@ -3,6 +3,8 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, type PanInfo } from "framer-motion";
 import { X, List, Heart, ChevronDown, Zap, Bot } from "lucide-react";
+import { toast } from "sonner";
+import { createContact } from "@/lib/client";
 import { STATUS_COLORS } from "@/lib/crm-utils";
 import {
   ContactCapture,
@@ -89,6 +91,28 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
   const detailPanelRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const prevSelectedRef = useRef<string | null>(null);
+
+  const handleQuickCreate = useCallback(async (data: { firstName: string; lastName?: string; email?: string; phone?: string }) => {
+    if (!businessId) return;
+    try {
+      const { data: result } = await createContact({
+        businessId,
+        firstName: data.firstName,
+        lastName: data.lastName,
+        email: data.email,
+        phone: data.phone,
+        source: "manual",
+        status: "LEAD",
+      });
+      if (result) {
+        toast.success(`${data.firstName} added`);
+        void loadContacts();
+        void loadFlowData();
+      }
+    } catch {
+      toast.error("Failed to create contact");
+    }
+  }, [businessId, loadContacts, loadFlowData]);
 
   const handleRefresh = useCallback(() => { void loadContacts(); void loadFlowData(); }, [loadContacts, loadFlowData]);
   const handleToggleAddMenu = useCallback(() => setShowAddMenu((prev: boolean) => !prev), [setShowAddMenu]);
@@ -347,6 +371,7 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
               onLoadMore={handleLoadMore}
               onRetry={handleRetry}
               onAddContact={handleOpenAddForm}
+              onQuickCreate={handleQuickCreate}
             />
           </div>
 

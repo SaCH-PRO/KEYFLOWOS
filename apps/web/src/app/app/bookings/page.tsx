@@ -18,6 +18,7 @@ import {
   BookingStats,
   ScheduleHealth,
   createBooking,
+  rescheduleBooking,
   fetchBookings,
   fetchServices,
   fetchStaff,
@@ -238,7 +239,7 @@ export default function BookingsPage() {
     setCalendarLoading(false);
   }
 
-  async function handleCreateBooking(data: { date: string; time: string; serviceId: string; staffId: string; contactId: string }) {
+  async function handleCreateBooking(data: { date: string; time: string; serviceId: string; staffId: string; contactId: string; notes?: string }) {
     if (!businessId) return;
     setFormError(null);
     if (!data.date || !data.time) { setFormError("Please pick a date and time"); return; }
@@ -258,6 +259,7 @@ export default function BookingsPage() {
         contactId: data.contactId || undefined,
         startTime,
         endTime,
+        notes: data.notes || undefined,
       });
       if (error) { setFormError(error); return; }
       if (result) {
@@ -307,6 +309,18 @@ export default function BookingsPage() {
     const res = await syncBookingToCalendar(bookingId, businessId);
     if (res.data?.success) setBanner({ text: "Booking synced to Google Calendar!", type: "success" });
     else setBanner({ text: "Failed to sync booking.", type: "error" });
+  }
+
+  async function handleReschedule(bookingId: string, newStartTime: string) {
+    if (!businessId) return;
+    const res = await rescheduleBooking(bookingId, newStartTime, businessId);
+    if (res.data) {
+      await loadData();
+      setSelectedBooking(res.data);
+      setBanner({ text: "Booking rescheduled successfully!", type: "success" });
+    } else {
+      setBanner({ text: res.error ?? "Failed to reschedule booking.", type: "error" });
+    }
   }
 
   const handleCalendarCreate = useCallback((prefill: { date: string; time?: string }) => {
@@ -547,6 +561,7 @@ export default function BookingsPage() {
               onConnectCalendar={handleConnectCalendar}
               onDisconnectCalendar={handleDisconnectCalendar}
               loading={loading}
+              businessId={businessId}
             />
             </div>
           )}
@@ -585,6 +600,7 @@ export default function BookingsPage() {
             onClose={() => setSelectedBooking(null)}
             onStatusChange={handleStatusChange}
             onSyncCalendar={handleSyncBooking}
+            onReschedule={handleReschedule}
             calendarConnected={calendarConnected}
           />
         )}
