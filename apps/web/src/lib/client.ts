@@ -3602,6 +3602,12 @@ export interface ReportComparison {
   bookings: { total: number; changePct: number };
   clients: { totalContacts: number; newContacts: number; changePct: number };
 }
+export interface BookingTimeSeriesPoint {
+  date: string;
+  completed: number;
+  missed: number;
+  total: number;
+}
 export interface ReportModuleData {
   totalBookings?: number;
   completedBookings?: number;
@@ -3609,6 +3615,8 @@ export interface ReportModuleData {
   noShowRate?: number;
   avgBookingValue?: number;
   utilizationRate?: number;
+  bookingTimeSeries?: BookingTimeSeriesPoint[];
+  prevBookingTimeSeries?: BookingTimeSeriesPoint[];
   topServices?: Array<{ name: string; count: number; revenue: number }>;
   topStaff?: Array<{ name: string; bookings: number; completionRate: number }>;
   campaignsSent?: number;

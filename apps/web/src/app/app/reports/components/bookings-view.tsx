@@ -143,49 +143,74 @@ export function BookingsView({ report }: { report: GeneratedReport }) {
   );
 }
 
+function aggregateTimeSeries(
+  series: Array<{ date: string; completed: number; missed: number; total: number }>,
+  granularity: BookingGranularity,
+): Array<{ label: string; completed: number; missed: number; total: number }> {
+  if (!series || series.length === 0) return [];
+
+  if (granularity === "daily") {
+    return series.map((pt) => ({
+      label: new Date(pt.date).toLocaleDateString("en-TT", { month: "short", day: "numeric" }),
+      completed: pt.completed,
+      missed: pt.missed,
+      total: pt.total,
+    }));
+  }
+
+  if (granularity === "weekly") {
+    const weeks: Array<{ label: string; completed: number; missed: number; total: number }> = [];
+    for (let i = 0; i < series.length; i += 7) {
+      const chunk = series.slice(i, i + 7);
+      weeks.push({
+        label: `Week ${weeks.length + 1}`,
+        completed: chunk.reduce((s, p) => s + p.completed, 0),
+        missed: chunk.reduce((s, p) => s + p.missed, 0),
+        total: chunk.reduce((s, p) => s + p.total, 0),
+      });
+    }
+    return weeks;
+  }
+
+  return [{
+    label: "This Period",
+    completed: series.reduce((s, p) => s + p.completed, 0),
+    missed: series.reduce((s, p) => s + p.missed, 0),
+    total: series.reduce((s, p) => s + p.total, 0),
+  }];
+}
+
 function BookingStatusChart({ report }: { report: GeneratedReport }) {
   const [granularity, setGranularity] = useState<BookingGranularity>("weekly");
   const m = report.metrics;
   const c = report.comparison;
   const d = report.data || {};
 
-  const statusBreakdown = (d as Record<string, unknown>).bookingsByStatus as Record<string, number> | undefined;
-  const completed = statusBreakdown?.completed ?? Math.round(m.bookings.total * m.bookings.completionRate / 100);
-  const noShows = m.bookings.total - completed;
-
-  const prevTotal = c?.bookings.total ?? 0;
+  const timeSeries = d.bookingTimeSeries ?? [];
+  const prevTimeSeries = d.prevBookingTimeSeries ?? [];
 
   const chartData = useMemo(() => {
-    const total = m.bookings.total;
-    if (total === 0 && prevTotal === 0) return [];
-    if (granularity === "daily") {
-      const days = 7;
-      const perDay = Math.max(1, Math.round(total / days));
-      const prevPerDay = prevTotal > 0 ? Math.max(1, Math.round(prevTotal / days)) : 0;
-      return Array.from({ length: days }, (_, i) => ({
-        label: `Day ${i + 1}`,
-        completed: Math.round(perDay * m.bookings.completionRate / 100),
-        missed: Math.round(perDay * (100 - m.bookings.completionRate) / 100),
-        ...(c ? { prevPeriod: prevPerDay } : {}),
-      }));
-    }
-    if (granularity === "weekly") {
-      const weeks = 4;
-      const perWeek = Math.max(1, Math.round(total / weeks));
-      const prevPerWeek = prevTotal > 0 ? Math.max(1, Math.round(prevTotal / weeks)) : 0;
-      return Array.from({ length: weeks }, (_, i) => ({
-        label: `Week ${i + 1}`,
-        completed: Math.round(perWeek * m.bookings.completionRate / 100),
-        missed: Math.round(perWeek * (100 - m.bookings.completionRate) / 100),
-        ...(c ? { prevPeriod: prevPerWeek } : {}),
-      }));
-    }
-    return [
-      { label: "This Period", completed, missed: noShows, ...(c ? { prevPeriod: prevTotal } : {}) },
-    ];
-  }, [granularity, m.bookings.total, m.bookings.completionRate, completed, noShows, c, prevTotal]);
+    const current = aggregateTimeSeries(timeSeries, granularity);
+    if (!c || prevTimeSeries.length === 0) return current;
 
-  if (m.bookings.total === 0) return null;
+    const prev = aggregateTimeSeries(prevTimeSeries, granularity);
+    return current.map((pt, i) => ({
+      ...pt,
+      prevPeriod: prev[i]?.total ?? 0,
+    }));
+  }, [granularity, timeSeries, prevTimeSeries, c]);
+
+  if (m.bookings.total === 0 && timeSeries.length === 0) {
+    return (
+      <CollapsibleSection title="Booking Volume" icon={Calendar} defaultOpen persistKey="bk-volume-chart">
+        <Card className="p-6 border-border/60 flex flex-col items-center justify-center gap-2" style={{ background: "hsl(var(--kf-card) / 0.6)" }}>
+          <Calendar className="w-8 h-8 text-muted-foreground/40" />
+          <p className="text-sm text-muted-foreground">No booking data for this period</p>
+          <p className="text-xs text-muted-foreground/60">Bookings will appear here once scheduled.</p>
+        </Card>
+      </CollapsibleSection>
+    );
+  }
 
   const granularityOptions: { value: BookingGranularity; label: string }[] = [
     { value: "daily", label: "Daily" },
@@ -197,7 +222,10 @@ function BookingStatusChart({ report }: { report: GeneratedReport }) {
     <CollapsibleSection title="Booking Volume" icon={Calendar} defaultOpen persistKey="bk-volume-chart">
       <Card className="p-4 border-border/60" style={{ background: "hsl(var(--kf-card) / 0.6)" }}>
         <div className="flex items-center justify-between mb-4">
-          <p className="text-xs text-muted-foreground">Completed vs missed bookings</p>
+          <p className="text-xs text-muted-foreground">
+            Completed vs missed bookings
+            {c && <span className="ml-1" style={{ color: "hsl(var(--kf-accent2))" }}>· with previous period overlay</span>}
+          </p>
           <div className="flex gap-1 rounded-md p-0.5" style={{ background: "hsl(var(--kf-muted) / 0.3)" }}>
             {granularityOptions.map((opt) => (
               <button
@@ -213,20 +241,26 @@ function BookingStatusChart({ report }: { report: GeneratedReport }) {
             ))}
           </div>
         </div>
-        <ResponsiveContainer width="100%" height={200}>
-          <BarChart data={chartData}>
-            <XAxis dataKey="label" tick={{ fontSize: 11, fill: "hsl(var(--kf-muted-foreground))" }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fontSize: 11, fill: "hsl(var(--kf-muted-foreground))" }} axisLine={false} tickLine={false} allowDecimals={false} />
-            <Tooltip
-              contentStyle={{ background: "hsl(var(--kf-popover))", border: "1px solid hsl(var(--kf-border))", borderRadius: 8, fontSize: 12 }}
-              labelStyle={{ color: "hsl(var(--kf-foreground))" }}
-            />
-            <Legend wrapperStyle={{ fontSize: 11 }} />
-            <Bar dataKey="completed" name="Completed" fill="hsl(var(--kf-success))" radius={[4, 4, 0, 0]} />
-            <Bar dataKey="missed" name="Missed/No-show" fill="hsl(var(--kf-error))" radius={[4, 4, 0, 0]} />
-            {c && <Bar dataKey="prevPeriod" name="Previous Period" fill="hsl(var(--kf-muted-foreground) / 0.3)" radius={[4, 4, 0, 0]} />}
-          </BarChart>
-        </ResponsiveContainer>
+        {chartData.length === 0 ? (
+          <div className="h-[200px] flex items-center justify-center text-sm text-muted-foreground">
+            No data available for the selected granularity.
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={chartData}>
+              <XAxis dataKey="label" tick={{ fontSize: 11, fill: "hsl(var(--kf-muted-foreground))" }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: "hsl(var(--kf-muted-foreground))" }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <Tooltip
+                contentStyle={{ background: "hsl(var(--kf-popover))", border: "1px solid hsl(var(--kf-border))", borderRadius: 8, fontSize: 12 }}
+                labelStyle={{ color: "hsl(var(--kf-foreground))" }}
+              />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Bar dataKey="completed" name="Completed" fill="hsl(var(--kf-success))" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="missed" name="Missed/No-show" fill="hsl(var(--kf-error))" radius={[4, 4, 0, 0]} />
+              {c && <Bar dataKey="prevPeriod" name="Previous Period" fill="hsl(var(--kf-muted-foreground) / 0.3)" radius={[4, 4, 0, 0]} />}
+            </BarChart>
+          </ResponsiveContainer>
+        )}
       </Card>
     </CollapsibleSection>
   );

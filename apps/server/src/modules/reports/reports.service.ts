@@ -306,12 +306,69 @@ Use ${currency} for all monetary values. Be specific with numbers. Keep each sec
       };
     }
 
+    const bookingTimeSeries = this.buildBookingTimeSeries(bookings as Array<{ id: string; status: string; startTime: Date }>, start, end);
+    const prevBookingTimeSeries = compare
+      ? await this.fetchPrevBookingTimeSeries(businessId, start, end)
+      : undefined;
+
     return {
       type,
       generatedAt: new Date().toISOString(),
       metrics,
       aiNarrative,
       comparison,
+      data: {
+        totalBookings: bookings.length,
+        completedBookings,
+        cancelledBookings,
+        noShowRate: bookings.length > 0 ? Math.round((cancelledBookings / bookings.length) * 100) : 0,
+        bookingTimeSeries,
+        prevBookingTimeSeries,
+      },
     };
+  }
+
+  private buildBookingTimeSeries(
+    bookings: Array<{ id: string; status: string; startTime: Date }>,
+    start: Date,
+    end: Date,
+  ): Array<{ date: string; completed: number; missed: number; total: number }> {
+    const dayMap = new Map<string, { completed: number; missed: number; total: number }>();
+
+    const current = new Date(start);
+    while (current <= end) {
+      const key = current.toISOString().split('T')[0];
+      dayMap.set(key, { completed: 0, missed: 0, total: 0 });
+      current.setDate(current.getDate() + 1);
+    }
+
+    for (const b of bookings) {
+      const key = new Date(b.startTime).toISOString().split('T')[0];
+      const entry = dayMap.get(key);
+      if (entry) {
+        entry.total++;
+        if (b.status === 'COMPLETED' || b.status === 'CONFIRMED') entry.completed++;
+        else entry.missed++;
+      }
+    }
+
+    return Array.from(dayMap.entries()).map(([date, counts]) => ({ date, ...counts }));
+  }
+
+  private async fetchPrevBookingTimeSeries(
+    businessId: string,
+    start: Date,
+    end: Date,
+  ): Promise<Array<{ date: string; completed: number; missed: number; total: number }>> {
+    const periodMs = end.getTime() - start.getTime();
+    const prevEnd = new Date(start.getTime() - 1);
+    const prevStart = new Date(prevEnd.getTime() - periodMs);
+
+    const prevBookings = await this.prisma.client.booking.findMany({
+      where: { businessId, deletedAt: null, startTime: { gte: prevStart, lte: prevEnd } },
+      select: { id: true, status: true, startTime: true },
+    });
+
+    return this.buildBookingTimeSeries(prevBookings, prevStart, prevEnd);
   }
 }
