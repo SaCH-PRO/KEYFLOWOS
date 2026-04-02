@@ -4,7 +4,7 @@ import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, type PanInfo } from "framer-motion";
 import { X, List, Heart, ChevronDown, Zap, Bot } from "lucide-react";
 import { toast } from "sonner";
-import { createContact } from "@/lib/client";
+import { createContact, fetchContactLists } from "@/lib/client";
 import { STATUS_COLORS } from "@/lib/crm-utils";
 import {
   ContactCapture,
@@ -83,6 +83,18 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
   const [viewMode, setViewMode] = useState<ViewMode>(getStoredViewMode);
   const [showImport, setShowImport] = useState(false);
   const [showEngageSection, setShowEngageSection] = useState(false);
+  const [pipelineLists, setPipelineLists] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    if (!businessId || !selectMode) return;
+    let cancelled = false;
+    fetchContactLists(businessId).then(({ data }) => {
+      if (cancelled || !data) return;
+      const manual = (data as { id: string; name: string; type?: string }[]).filter((l) => l.type === "MANUAL");
+      setPipelineLists(manual.map((l) => ({ id: l.id, name: l.name })));
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [businessId, selectMode]);
   const handleViewModeChange = useCallback((mode: ViewMode) => {
     setViewMode(mode);
     try { localStorage.setItem(PIPELINE_VIEW_KEY, mode); } catch {}
@@ -320,6 +332,7 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
           onBroadcast={handleOpenBroadcast}
           onCancel={handleToggleSelectMode}
           onAddToList={handleBulkAddToList}
+          lists={pipelineLists}
           loading={bulkLoading}
         />
       )}
