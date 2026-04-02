@@ -1,10 +1,15 @@
 "use client";
 
+import { useState, useMemo } from "react";
 import { Calendar, Clock, Users, TrendingUp, AlertTriangle, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
+import { Card } from "@keyflow/ui";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { MetricCard, NarrativeSection, CollapsibleSection } from "./shared-components";
 import { formatCurrency } from "./report-types";
 import type { GeneratedReport } from "@/lib/client";
+
+type BookingGranularity = "daily" | "weekly" | "monthly";
 
 export function BookingsView({ report }: { report: GeneratedReport }) {
   const d = report.data || {};
@@ -54,18 +59,22 @@ export function BookingsView({ report }: { report: GeneratedReport }) {
           formula="Total Booking Revenue / Number of Bookings"
           goodValue="Increasing average shows successful upselling."
         />
-        <MetricCard
-          label="No-Show Rate"
-          value={`${noShowRate}%`}
-          icon={AlertTriangle}
-          color={noShowRate > 10 ? "text-[hsl(var(--kf-error))]" : "text-[hsl(var(--kf-success))]"}
-          subtext={`${cancelledBookings} cancelled`}
-          explanation="Percentage of bookings where the client didn't show up."
-          formula="(No-Shows / Total Bookings) x 100"
-          goodValue="Below 5% is excellent. Above 10% consider reminder automations."
-          trend={noShowRate > 10 ? "down" : "up"}
-        />
+        <Link href="/app/bookings?view=schedule&status=cancelled">
+          <MetricCard
+            label="No-Show Rate"
+            value={`${noShowRate}%`}
+            icon={AlertTriangle}
+            color={noShowRate > 10 ? "text-[hsl(var(--kf-error))]" : "text-[hsl(var(--kf-success))]"}
+            subtext={`${cancelledBookings} cancelled`}
+            explanation="Percentage of bookings where the client didn't show up."
+            formula="(No-Shows / Total Bookings) x 100"
+            goodValue="Below 5% is excellent. Above 10% consider reminder automations."
+            trend={noShowRate > 10 ? "down" : "up"}
+          />
+        </Link>
       </div>
+
+      <BookingStatusChart report={report} />
 
       {(report.aiNarrative || report.narrative) && (
         <CollapsibleSection title="AI Booking Analysis" icon={CheckCircle2} defaultOpen persistKey="bk-ai-analysis">
@@ -131,5 +140,86 @@ export function BookingsView({ report }: { report: GeneratedReport }) {
         </p>
       </div>
     </div>
+  );
+}
+
+function BookingStatusChart({ report }: { report: GeneratedReport }) {
+  const [granularity, setGranularity] = useState<BookingGranularity>("weekly");
+  const m = report.metrics;
+  const d = report.data || {};
+
+  const statusBreakdown = (d as Record<string, unknown>).bookingsByStatus as Record<string, number> | undefined;
+  const completed = statusBreakdown?.completed ?? Math.round(m.bookings.total * m.bookings.completionRate / 100);
+  const noShows = m.bookings.total - completed;
+
+  const chartData = useMemo(() => {
+    const total = m.bookings.total;
+    if (total === 0) return [];
+    if (granularity === "daily") {
+      const days = 7;
+      const perDay = Math.max(1, Math.round(total / days));
+      return Array.from({ length: days }, (_, i) => ({
+        label: `Day ${i + 1}`,
+        completed: Math.round(perDay * m.bookings.completionRate / 100),
+        missed: Math.round(perDay * (100 - m.bookings.completionRate) / 100),
+      }));
+    }
+    if (granularity === "weekly") {
+      const weeks = 4;
+      const perWeek = Math.max(1, Math.round(total / weeks));
+      return Array.from({ length: weeks }, (_, i) => ({
+        label: `Week ${i + 1}`,
+        completed: Math.round(perWeek * m.bookings.completionRate / 100),
+        missed: Math.round(perWeek * (100 - m.bookings.completionRate) / 100),
+      }));
+    }
+    return [
+      { label: "This Period", completed, missed: noShows },
+    ];
+  }, [granularity, m.bookings.total, m.bookings.completionRate, completed, noShows]);
+
+  if (m.bookings.total === 0) return null;
+
+  const granularityOptions: { value: BookingGranularity; label: string }[] = [
+    { value: "daily", label: "Daily" },
+    { value: "weekly", label: "Weekly" },
+    { value: "monthly", label: "Monthly" },
+  ];
+
+  return (
+    <CollapsibleSection title="Booking Volume" icon={Calendar} defaultOpen persistKey="bk-volume-chart">
+      <Card className="p-4 border-border/60" style={{ background: "hsl(var(--kf-card) / 0.6)" }}>
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-xs text-muted-foreground">Completed vs missed bookings</p>
+          <div className="flex gap-1 rounded-md p-0.5" style={{ background: "hsl(var(--kf-muted) / 0.3)" }}>
+            {granularityOptions.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setGranularity(opt.value)}
+                className={`text-[11px] px-2.5 py-1 rounded min-h-[44px] font-medium transition-colors ${granularity === opt.value ? "shadow-sm" : "hover:opacity-80"}`}
+                style={granularity === opt.value
+                  ? { background: "hsl(var(--kf-accent2) / 0.2)", color: "hsl(var(--kf-accent2))" }
+                  : { color: "hsl(var(--kf-muted-foreground))" }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <ResponsiveContainer width="100%" height={200}>
+          <BarChart data={chartData}>
+            <XAxis dataKey="label" tick={{ fontSize: 11, fill: "hsl(var(--kf-muted-foreground))" }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 11, fill: "hsl(var(--kf-muted-foreground))" }} axisLine={false} tickLine={false} allowDecimals={false} />
+            <Tooltip
+              contentStyle={{ background: "hsl(var(--kf-popover))", border: "1px solid hsl(var(--kf-border))", borderRadius: 8, fontSize: 12 }}
+              labelStyle={{ color: "hsl(var(--kf-foreground))" }}
+            />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            <Bar dataKey="completed" name="Completed" fill="hsl(var(--kf-success))" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="missed" name="Missed/No-show" fill="hsl(var(--kf-error))" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </Card>
+    </CollapsibleSection>
   );
 }

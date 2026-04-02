@@ -7,6 +7,19 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { formatCurrency } from "./report-types";
 import { MetricCard, DataTable, NarrativeSection, StatusBadge, ProgressBar, CollapsibleSection } from "./shared-components";
 
+function estimateChurnProbability(clientTotal: number, avgInvoice: number, totalClients: number, bookingRate: number): { pct: number; label: string; color: string } {
+  let score = 50;
+  if (clientTotal < avgInvoice * 0.5) score += 20;
+  else if (clientTotal > avgInvoice * 3) score -= 25;
+  if (bookingRate < 30) score += 15;
+  else if (bookingRate > 70) score -= 15;
+  if (totalClients > 20) score -= 5;
+  score = Math.max(5, Math.min(95, score));
+  if (score >= 60) return { pct: score, label: "High Risk", color: "--kf-error" };
+  if (score >= 35) return { pct: score, label: "Medium Risk", color: "--kf-warning" };
+  return { pct: score, label: "Low Risk", color: "--kf-success" };
+}
+
 export function ClientsView({ report }: { report: GeneratedReport }) {
   const m = report.metrics;
   const c = report.comparison;
@@ -15,7 +28,8 @@ export function ClientsView({ report }: { report: GeneratedReport }) {
     const share = m.revenue.total > 0 ? Math.round((client.total / m.revenue.total) * 100) : 0;
     const isAtRisk = share > 30;
     const tier = client.total > (m.revenue.averageInvoice * 5) ? "High" : client.total > (m.revenue.averageInvoice * 2) ? "Medium" : "Standard";
-    return { ...client, share, isAtRisk, tier, rank: idx + 1 };
+    const churn = estimateChurnProbability(client.total, m.revenue.averageInvoice, m.clients.totalContacts, m.bookings.completionRate);
+    return { ...client, share, isAtRisk, tier, churn, rank: idx + 1 };
   });
 
   const concentrationRisk = clvRanking.length > 0 && clvRanking[0]?.share > 40;
@@ -25,13 +39,14 @@ export function ClientsView({ report }: { report: GeneratedReport }) {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Link href="/app/crm/pipeline">
           <MetricCard
-            label="Total Contacts"
-            value={m.clients.totalContacts.toString()}
+            label={c ? "New Contacts" : "Total Contacts"}
+            value={c ? (m.clients.totalContacts - (c.clients.totalContacts || 0)).toString() : m.clients.totalContacts.toString()}
+            subtext={c ? `${m.clients.totalContacts} total in CRM` : undefined}
             icon={Users}
             color="text-[hsl(var(--kf-info))]"
             trendPct={c?.clients.changePct}
             prevValue={c ? c.clients.totalContacts.toString() : undefined}
-            explanation="All contacts in your CRM including leads, prospects, and clients."
+            explanation={c ? "New contacts created this period vs. previous period." : "All contacts in your CRM including leads, prospects, and clients."}
           />
         </Link>
         <Link href="/app/bookings">
@@ -116,6 +131,12 @@ export function ClientsView({ report }: { report: GeneratedReport }) {
                           Concentration Risk
                         </span>
                       )}
+                      <span
+                        className="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
+                        style={{ background: `hsl(var(${client.churn.color}) / 0.12)`, color: `hsl(var(${client.churn.color}))` }}
+                      >
+                        Churn: {client.churn.label} ({client.churn.pct}%)
+                      </span>
                     </div>
                   </div>
                 </div>

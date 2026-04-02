@@ -62,14 +62,14 @@ export function ExecutiveView({ report }: { report: GeneratedReport }) {
         />
         <Link href="/app/crm/pipeline">
           <MetricCard
-            label="Total Contacts"
-            value={m.clients.totalContacts.toString()}
-            subtext={`${m.bookings.total} bookings this period`}
+            label={c ? "New Contacts" : "Total Contacts"}
+            value={c ? (m.clients.totalContacts - (c.clients.totalContacts || 0)).toString() : m.clients.totalContacts.toString()}
+            subtext={c ? `${m.clients.totalContacts} total in CRM` : `${m.bookings.total} bookings this period`}
             icon={Users}
             color="text-[hsl(var(--kf-info))]"
             trendPct={c?.clients.changePct}
             prevValue={c ? c.clients.totalContacts.toString() : undefined}
-            explanation="Total contacts in your CRM during this reporting period."
+            explanation={c ? "Contacts created during this period vs. previous period." : "Total contacts in your CRM."}
           />
         </Link>
       </div>
@@ -93,7 +93,7 @@ export function ExecutiveView({ report }: { report: GeneratedReport }) {
           <div className="text-xl font-bold mt-2">{formatCurrency(m.revenue.averageInvoice, m.currency)}</div>
           <div className="text-xs text-muted-foreground">Per paid invoice</div>
         </Card>
-        <Link href="/app/bookings">
+        <Link href={`/app/bookings?view=schedule&status=${m.bookings.completionRate < 80 ? "pending" : "all"}`}>
           <Card className="p-4 backdrop-blur border-border/60 hover:border-[hsl(var(--kf-accent2))]/40 transition-colors cursor-pointer" style={{ background: "hsl(var(--kf-card) / 0.6)" }}>
             <div className="flex items-center gap-2">
               <Calendar className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
