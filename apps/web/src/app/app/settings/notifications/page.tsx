@@ -132,7 +132,7 @@ export default function NotificationsSettingsPage() {
     const updated = { ...preferences, [key]: newValue };
     setPreferences(updated);
     const businessId = getStoredBusinessId();
-    if (!businessId) return;
+    if (!businessId) { setSaving(null); return; }
     const res = await apiPatch(`/notifications/businesses/${businessId}/customer-preferences`, { [key]: newValue });
     if (res.error) {
       setPreferences(preferences);
