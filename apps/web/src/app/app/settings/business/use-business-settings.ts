@@ -130,9 +130,10 @@ export function useBusinessSettings() {
     if (!form.name.trim()) errors.name = "Business name is required";
     if (!form.email.trim()) errors.email = "Business email is required";
     else if (!validateEmail(form.email)) errors.email = "Please enter a valid email address";
+    if (!form.currency.trim()) errors.currency = "Currency is required";
     setValidationErrors(errors);
     return Object.keys(errors).length === 0;
-  }, [form.name, form.email]);
+  }, [form.name, form.email, form.currency]);
 
   const setField = (field: keyof FormState, value: string) => {
     setForm((f) => ({ ...f, [field]: value }));

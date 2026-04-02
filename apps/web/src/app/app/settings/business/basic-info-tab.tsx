@@ -353,6 +353,7 @@ export function BasicInfoTab({ form, setField, logoUrl, validationErrors = {} }:
           </div>
           <select
             className="w-full rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2 text-sm"
+            style={validationErrors.currency ? { borderColor: "hsl(var(--kf-error))" } : undefined}
             value={form.currency}
             onChange={(e) => setField("currency", e.target.value)}
           >
@@ -360,6 +361,9 @@ export function BasicInfoTab({ form, setField, logoUrl, validationErrors = {} }:
               <option key={c} value={c}>{c}</option>
             ))}
           </select>
+          {validationErrors.currency && (
+            <p className="text-[11px] mt-1" style={{ color: "hsl(var(--kf-error))" }}>{validationErrors.currency}</p>
+          )}
         </label>
       </div>
     </div>
