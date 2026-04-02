@@ -16,6 +16,7 @@ import {
   Twitter,
   Linkedin,
   MessageCircle,
+  HelpCircle,
 } from "lucide-react";
 import { Input } from "@keyflow/ui";
 import { FormState } from "./use-business-settings";
@@ -169,6 +170,17 @@ function CallCard({ form, logoUrl }: { form: FormState; logoUrl?: string }) {
   );
 }
 
+function FieldHint({ text }: { text: string }) {
+  return (
+    <span className="group/hint relative ml-1 inline-flex items-center cursor-help">
+      <HelpCircle className="w-3 h-3 text-muted-foreground/40 group-hover/hint:text-muted-foreground transition-colors" />
+      <span className="invisible group-hover/hint:visible absolute left-5 top-1/2 -translate-y-1/2 z-50 w-48 px-2.5 py-2 rounded-lg text-[11px] text-muted-foreground leading-relaxed shadow-xl" style={{ background: "hsl(var(--kf-bg))", border: "1px solid hsl(var(--kf-border) / 0.4)" }}>
+        {text}
+      </span>
+    </span>
+  );
+}
+
 export function BasicInfoTab({ form, setField, logoUrl }: Props) {
   return (
     <div className="space-y-4">
@@ -191,6 +203,7 @@ export function BasicInfoTab({ form, setField, logoUrl }: Props) {
           <div className="flex items-center gap-1 mb-1">
             <Globe className="h-3 w-3" />
             Public URL Slug
+            <FieldHint text="This creates your store and booking page URL. Use lowercase letters and hyphens only." />
           </div>
           <Input
             value={form.slug}
@@ -320,6 +333,7 @@ export function BasicInfoTab({ form, setField, logoUrl }: Props) {
           <div className="flex items-center gap-1 mb-1">
             <Clock className="h-3 w-3" />
             Timezone
+            <FieldHint text="Controls date/time display across all modules. Bookings and reminders use this timezone." />
           </div>
           <select
             className="w-full rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2 text-sm"
@@ -336,6 +350,7 @@ export function BasicInfoTab({ form, setField, logoUrl }: Props) {
           <div className="flex items-center gap-1 mb-1">
             <DollarSign className="h-3 w-3" />
             Default Currency
+            <FieldHint text="Used across invoices, quotes, store pricing, and expense tracking. TTD is the default for Trinidad businesses." />
           </div>
           <select
             className="w-full rounded-xl border border-border/60 bg-slate-950/80 px-3 py-2 text-sm"

@@ -16,7 +16,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { FeatureGuide } from "@/components/ui/feature-guide";
-import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { ModuleWalkthrough, WalkthroughTrigger } from "@/components/ui/module-walkthrough";
 import { InfoBadge } from "@/components/ui/info-badge";
 import { CRM_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { ContactsDatabase } from "./contacts-database";
@@ -195,19 +195,22 @@ export default function ContactsPage() {
         title="Contacts"
         subtitle={<span className="inline-flex items-center gap-1.5">Your AI-powered contact management hub <InfoBadge title="CRM Overview" body="Your CRM centralizes all contact data, lead scoring, communication history, and AI insights. Use Smart Segments to quickly filter contacts by engagement level." side="bottom" iconSize={12} /></span>}
         titleExtra={
-          <FeatureGuide
-            featureKey="crm-pipeline"
-            title="Getting Started with CRM"
-            description="Manage your contacts, track relationships, and grow your business."
-            steps={[
-              { title: "Add Contacts", description: "Create manually, scan business cards, import CSV/VCF, or sync from Google Contacts." },
-              { title: "Smart Segments", description: "Filter with one-tap segments like High Value, New This Week, and At Risk." },
-              { title: "Communicate", description: "Reach out via WhatsApp, email, or phone directly from any contact card." },
-              { title: "Bulk Actions", description: "Select multiple contacts for broadcast messages, tagging, or status updates." },
-              { title: "Insights & AI", description: "Track pipeline health, revenue data, and use AI tools for summaries and scoring." },
-              { title: "Studio", description: "Use the database view for bulk operations, smart lists, and data cleanup." },
-            ]}
-          />
+          <div className="flex items-center gap-2">
+            <FeatureGuide
+              featureKey="crm-pipeline"
+              title="Getting Started with CRM"
+              description="Manage your contacts, track relationships, and grow your business."
+              steps={[
+                { title: "Add Contacts", description: "Create manually, scan business cards, import CSV/VCF, or sync from Google Contacts." },
+                { title: "Smart Segments", description: "Filter with one-tap segments like High Value, New This Week, and At Risk." },
+                { title: "Communicate", description: "Reach out via WhatsApp, email, or phone directly from any contact card." },
+                { title: "Bulk Actions", description: "Select multiple contacts for broadcast messages, tagging, or status updates." },
+                { title: "Insights & AI", description: "Track pipeline health, revenue data, and use AI tools for summaries and scoring." },
+                { title: "Studio", description: "Use the database view for bulk operations, smart lists, and data cleanup." },
+              ]}
+            />
+            <WalkthroughTrigger moduleKey="crm" />
+          </div>
         }
       />
 

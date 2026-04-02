@@ -16,6 +16,7 @@ import {
   ChevronDown,
   MapPin,
   Info,
+  HelpCircle,
 } from "lucide-react";
 import { Button } from "@keyflow/ui";
 import { apiGet, apiPatch } from "@/lib/api";
@@ -49,23 +50,47 @@ const defaultSettings: PaymentSettings = {
   cashEnabled: false,
 };
 
+function FieldHint({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => setOpen(!open)}
+      className="relative ml-1 inline-flex items-center"
+      aria-label="Field help"
+    >
+      <HelpCircle className="w-3 h-3 text-muted-foreground/50 hover:text-muted-foreground transition-colors" />
+      {open && (
+        <span className="absolute left-5 top-1/2 -translate-y-1/2 z-50 w-52 px-2.5 py-2 rounded-lg text-[11px] text-muted-foreground leading-relaxed shadow-xl" style={{ background: "hsl(var(--kf-bg))", border: "1px solid hsl(var(--kf-border) / 0.4)" }}>
+          {text}
+        </span>
+      )}
+    </button>
+  );
+}
+
 function SecretField({
   label,
   value,
   onChange,
   placeholder,
   showToggle = true,
+  hint,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
   showToggle?: boolean;
+  hint?: string;
 }) {
   const [show, setShow] = useState(false);
   return (
     <div>
-      <label className="text-xs text-[hsl(var(--kf-text-muted))] block mb-1.5 font-medium">{label}</label>
+      <label className="text-xs text-[hsl(var(--kf-text-muted))] block mb-1.5 font-medium">
+        {label}
+        {hint && <FieldHint text={hint} />}
+      </label>
       <div className="relative">
         <input
           type={show ? "text" : "password"}
@@ -94,16 +119,21 @@ function TextField({
   onChange,
   placeholder,
   multiline = false,
+  hint,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
   multiline?: boolean;
+  hint?: string;
 }) {
   return (
     <div>
-      <label className="text-xs text-[hsl(var(--kf-text-muted))] block mb-1.5 font-medium">{label}</label>
+      <label className="text-xs text-[hsl(var(--kf-text-muted))] block mb-1.5 font-medium">
+        {label}
+        {hint && <FieldHint text={hint} />}
+      </label>
       {multiline ? (
         <textarea
           value={value}
@@ -487,6 +517,7 @@ export function PaymentsTab() {
             value={settings.wipayApiKey}
             onChange={(v) => setField("wipayApiKey", v)}
             placeholder="Your WiPay API key"
+            hint="Find this in your WiPay merchant dashboard under Developer Settings."
           />
           <SecretField
             label="Account Number"
@@ -494,6 +525,7 @@ export function PaymentsTab() {
             onChange={(v) => setField("wipayAccountNumber", v)}
             placeholder="Your WiPay account number"
             showToggle={false}
+            hint="Your WiPay merchant account number used to receive payments."
           />
         </div>
       </PaymentCard>
@@ -525,12 +557,14 @@ export function PaymentsTab() {
             value={settings.paypalClientId}
             onChange={(v) => setField("paypalClientId", v)}
             placeholder="PayPal client ID"
+            hint="From PayPal Developer Portal → My Apps & Credentials → REST API app."
           />
           <SecretField
             label="Client Secret"
             value={settings.paypalClientSecret}
             onChange={(v) => setField("paypalClientSecret", v)}
             placeholder="PayPal client secret"
+            hint="Keep this secret — it authenticates your app with PayPal's API."
           />
         </div>
       </PaymentCard>
@@ -560,24 +594,28 @@ export function PaymentsTab() {
             value={settings.bankName}
             onChange={(v) => setField("bankName", v)}
             placeholder="e.g. Republic Bank"
+            hint="The bank where your business account is held."
           />
           <SecretField
             label="Account Number"
             value={settings.bankAccountNumber}
             onChange={(v) => setField("bankAccountNumber", v)}
             placeholder="Bank account number"
+            hint="Your business bank account number — shown to customers for wire transfers."
           />
           <TextField
             label="Routing / Transit Number"
             value={settings.bankRoutingNumber}
             onChange={(v) => setField("bankRoutingNumber", v)}
             placeholder="Routing or transit number"
+            hint="Used by the sender's bank to route the transfer to your account."
           />
           <TextField
             label="Branch Name"
             value={settings.bankBranch}
             onChange={(v) => setField("bankBranch", v)}
             placeholder="e.g. Port of Spain"
+            hint="The specific branch of your bank for this account."
           />
         </div>
         <div className="mt-3">
@@ -587,6 +625,7 @@ export function PaymentsTab() {
             onChange={(v) => setField("bankInstructions", v)}
             placeholder="e.g. Please include your invoice number as reference"
             multiline
+            hint="These instructions will appear on invoices when bank transfer is selected as a payment method."
           />
         </div>
       </PaymentCard>

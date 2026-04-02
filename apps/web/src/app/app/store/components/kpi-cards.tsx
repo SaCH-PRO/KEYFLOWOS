@@ -5,6 +5,19 @@ import { Store, ShoppingBag, TrendingUp, AlertTriangle } from "lucide-react";
 import { MetricExplainer } from "@/components/ui/metric-explainer";
 import type { DriftedItem } from "./store-types";
 
+interface KpiCardData {
+  label: string;
+  value: number | string;
+  icon: typeof Store;
+  color: string;
+  bg: string;
+  border: string;
+  explanation: string;
+  goodValue?: string;
+  dot?: string;
+  warn?: boolean;
+}
+
 interface KpiCardsProps {
   servicesCount: number;
   commerceProductsCount: number;
@@ -13,7 +26,7 @@ interface KpiCardsProps {
 }
 
 export function KpiCards({ servicesCount, commerceProductsCount, storeEnabled, driftedItemsCount }: KpiCardsProps) {
-  const kpiCards = [
+  const kpiCards: KpiCardData[] = [
     {
       label: "Store Items",
       value: servicesCount,
@@ -76,13 +89,13 @@ export function KpiCards({ servicesCount, commerceProductsCount, storeEnabled, d
             >
               <div className="flex items-center justify-between mb-2">
                 <Icon className="w-4 h-4" style={{ color: kpi.color }} />
-                {(kpi as any).dot && (
+                {kpi.dot && (
                   <span
                     className="w-2 h-2 rounded-full animate-pulse"
-                    style={{ background: (kpi as any).dot }}
+                    style={{ background: kpi.dot }}
                   />
                 )}
-                {(kpi as any).warn && (
+                {kpi.warn && (
                   <span
                     className="w-2 h-2 rounded-full animate-pulse"
                     style={{ background: "hsl(30 90% 55%)" }}

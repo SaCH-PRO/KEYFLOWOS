@@ -49,14 +49,15 @@ export function WalkthroughTrigger({
 }: {
   moduleKey: string;
   label?: string;
-  onStart: () => void;
+  onStart?: () => void;
 }) {
   const { resetTour } = useWalkthrough(moduleKey);
   return (
     <button
       onClick={() => {
         resetTour();
-        onStart();
+        window.dispatchEvent(new CustomEvent("kf-walkthrough-restart", { detail: moduleKey }));
+        onStart?.();
       }}
       className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1.5 rounded-lg min-h-[32px]"
       style={{ background: "hsl(var(--kf-muted) / 0.3)" }}
@@ -79,6 +80,17 @@ export function ModuleWalkthrough({ moduleKey, steps, onComplete }: ModuleWalkth
       const timer = setTimeout(() => setActive(true), 800);
       return () => clearTimeout(timer);
     }
+  }, [moduleKey]);
+
+  useEffect(() => {
+    const handler = (e: CustomEvent) => {
+      if (e.detail === moduleKey) {
+        setCurrentStep(0);
+        setActive(true);
+      }
+    };
+    window.addEventListener("kf-walkthrough-restart" as any, handler as EventListener);
+    return () => window.removeEventListener("kf-walkthrough-restart" as any, handler as EventListener);
   }, [moduleKey]);
 
   useEffect(() => {

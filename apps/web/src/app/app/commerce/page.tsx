@@ -29,7 +29,7 @@ import { useCommerceCopilot } from "./hooks/use-commerce-copilot";
 import { useCommerceComposer } from "./hooks/use-commerce-composer";
 import { useCommerceAiHub } from "./hooks/use-commerce-ai-hub";
 import { SearchableHelpDrawer } from "./components/contextual-onboarding";
-import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { ModuleWalkthrough, WalkthroughTrigger } from "@/components/ui/module-walkthrough";
 import { MetricExplainer } from "@/components/ui/metric-explainer";
 import { RichTooltip } from "@/components/ui/rich-tooltip";
 import { InfoBadge } from "@/components/ui/info-badge";
@@ -210,6 +210,7 @@ export default function CommercePage() {
         icon={CreditCard}
         title="Commerce"
         subtitle="Revenue workspace"
+        titleExtra={<WalkthroughTrigger moduleKey="commerce" />}
         rightSlot={
           <div className="flex items-center gap-2">
             <RichTooltip title="Revenue Pulse" description="Total payments collected this month across all invoices." side="bottom">
