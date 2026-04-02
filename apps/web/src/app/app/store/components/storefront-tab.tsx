@@ -1,8 +1,8 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { AlertCircle, X, Search, Globe } from "lucide-react";
-import { useState } from "react";
+import { AlertCircle, X, Search, Globe, Copy, ExternalLink, Check } from "lucide-react";
+import { useState, useCallback } from "react";
 import { StoreSettings } from "./store-settings";
 import { AppearanceCustomizer } from "./appearance-customizer";
 import { StorefrontPreview } from "./storefront-preview";
@@ -62,6 +62,13 @@ export function StorefrontTab({
   onTabChange,
 }: Props) {
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyUrl = useCallback(() => {
+    navigator.clipboard.writeText(publicUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [publicUrl]);
 
   return (
     <div className="space-y-6">
@@ -343,6 +350,43 @@ function SeoSettingsPanel({ storefrontConfig, onConfigChange, onSaveConfig, conf
           </div>
         )}
       </div>
+
+      {storeEnabled && currentSlug && (
+        <div
+          className="kf-card rounded-2xl p-5 space-y-3"
+          style={{
+            background: "hsl(var(--kf-card))",
+            border: "1px solid hsl(var(--kf-border))",
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <ExternalLink className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
+            <h3 className="text-sm font-semibold" style={{ color: "hsl(var(--kf-foreground))" }}>Share Your Store</h3>
+          </div>
+          <div className="flex items-center gap-2">
+            <div
+              className="flex-1 rounded-lg px-3 py-2.5 text-xs truncate"
+              style={{
+                background: "hsl(var(--kf-muted) / 0.3)",
+                border: "1px solid hsl(var(--kf-border))",
+                color: "hsl(var(--kf-muted-foreground))",
+              }}
+            >
+              {publicUrl}
+            </div>
+            <button
+              onClick={handleCopyUrl}
+              className="kf-btn-secondary min-h-[44px] px-4 text-sm flex items-center gap-1.5"
+            >
+              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+          <p className="text-[10px]" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+            Share this link with customers. View full sharing options including QR code in the Performance tab.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
