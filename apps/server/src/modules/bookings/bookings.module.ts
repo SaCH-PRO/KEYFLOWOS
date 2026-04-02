@@ -11,9 +11,10 @@ import { AutomationModule } from '../automation/automation.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { AiModule } from '../ai/ai.module';
 import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [CrmModule, CommerceModule, AutomationModule, SubscriptionsModule, AiModule],
+  imports: [CrmModule, CommerceModule, AutomationModule, SubscriptionsModule, AiModule, NotificationsModule],
   controllers: [BookingsController, BookingsAiController],
   providers: [BookingsService, BookingsAiService, CalendarService, BookingOptimizerService, PlanLimitGuard],
   exports: [BookingsService, BookingsAiService, CalendarService, BookingOptimizerService],
