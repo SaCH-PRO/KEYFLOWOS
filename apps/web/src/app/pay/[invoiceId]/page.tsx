@@ -1156,7 +1156,7 @@ export default function PublicPaymentPage() {
                 <Phone className="w-3.5 h-3.5 text-slate-500" />
               </a>
             )}
-            {business.website && (
+            {business.website && /^https?:\/\//i.test(business.website) && (
               <a
                 href={business.website}
                 target="_blank"
