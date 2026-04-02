@@ -46,12 +46,12 @@ export function ExpensesView({ report }: { report: GeneratedReport }) {
         />
       </div>
 
-      <CollapsibleSection title="Expense Analysis" icon={PieChart} defaultOpen>
+      <CollapsibleSection title="Expense Analysis" icon={PieChart} defaultOpen persistKey="exp-analysis">
         <NarrativeSection content={report.aiNarrative} />
       </CollapsibleSection>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <CollapsibleSection title="By Category" defaultOpen>
+        <CollapsibleSection title="By Category" defaultOpen persistKey="exp-by-category">
           <div className="space-y-3">
             {m.expenses.byCategory.map(cat => (
               <div key={cat.category} className="space-y-1">
@@ -66,7 +66,7 @@ export function ExpensesView({ report }: { report: GeneratedReport }) {
           </div>
         </CollapsibleSection>
 
-        <CollapsibleSection title="Top Vendors" defaultOpen>
+        <CollapsibleSection title="Top Vendors" defaultOpen persistKey="exp-top-vendors">
           <DataTable
             headers={["Vendor", "Total Spent"]}
             rows={m.expenses.topVendors.map(v => [v.vendor, formatCurrency(v.total, m.currency)])}

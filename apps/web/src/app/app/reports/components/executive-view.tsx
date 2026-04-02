@@ -110,11 +110,11 @@ export function ExecutiveView({ report }: { report: GeneratedReport }) {
         </Link>
       </div>
 
-      <CollapsibleSection title="AI Executive Analysis" icon={Briefcase} defaultOpen>
+      <CollapsibleSection title="AI Executive Analysis" icon={Briefcase} defaultOpen persistKey="exec-ai-analysis">
         <NarrativeSection content={report.aiNarrative} />
       </CollapsibleSection>
 
-      <CollapsibleSection title="Top Revenue Clients" icon={Target}>
+      <CollapsibleSection title="Top Revenue Clients" icon={Target} persistKey="exec-top-clients">
         <DataTable
           headers={["Client", "Revenue", "Share"]}
           rows={m.revenue.topClients.map(cl => [

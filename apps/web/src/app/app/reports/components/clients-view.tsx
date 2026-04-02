@@ -83,11 +83,11 @@ export function ClientsView({ report }: { report: GeneratedReport }) {
         </div>
       )}
 
-      <CollapsibleSection title="Client Portfolio Analysis" icon={Users} defaultOpen>
+      <CollapsibleSection title="Client Portfolio Analysis" icon={Users} defaultOpen persistKey="cli-portfolio">
         <NarrativeSection content={report.aiNarrative} />
       </CollapsibleSection>
 
-      <CollapsibleSection title="Client Lifetime Value Ranking" icon={Shield} defaultOpen>
+      <CollapsibleSection title="Client Lifetime Value Ranking" icon={Shield} defaultOpen persistKey="cli-clv-ranking">
         {clvRanking.length > 0 ? (
           <div className="space-y-2">
             {clvRanking.map(client => (
@@ -141,7 +141,7 @@ export function ClientsView({ report }: { report: GeneratedReport }) {
       </CollapsibleSection>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <CollapsibleSection title="Contact Segmentation" defaultOpen>
+        <CollapsibleSection title="Contact Segmentation" defaultOpen persistKey="cli-segmentation">
           <div className="space-y-3">
             {m.clients.byStatus.map(s => (
               <div key={s.status} className="space-y-1">
@@ -156,7 +156,7 @@ export function ClientsView({ report }: { report: GeneratedReport }) {
           </div>
         </CollapsibleSection>
 
-        <CollapsibleSection title="Booking Performance" defaultOpen>
+        <CollapsibleSection title="Booking Performance" defaultOpen persistKey="cli-booking-perf">
           <div className="space-y-3">
             {[
               { label: "Completed", value: m.bookings.completed, color: "hsl(var(--kf-success))" },

@@ -68,13 +68,13 @@ export function BookingsView({ report }: { report: GeneratedReport }) {
       </div>
 
       {(report.aiNarrative || report.narrative) && (
-        <CollapsibleSection title="AI Booking Analysis" icon={CheckCircle2} defaultOpen>
+        <CollapsibleSection title="AI Booking Analysis" icon={CheckCircle2} defaultOpen persistKey="bk-ai-analysis">
           <NarrativeSection content={report.aiNarrative} narrative={report.narrative} />
         </CollapsibleSection>
       )}
 
       <div className="grid lg:grid-cols-2 gap-4">
-        <CollapsibleSection title="Top Services by Bookings" icon={CheckCircle2} defaultOpen>
+        <CollapsibleSection title="Top Services by Bookings" icon={CheckCircle2} defaultOpen persistKey="bk-top-services">
           {topServices.length > 0 ? (
             <div className="space-y-2">
               {topServices.slice(0, 5).map((svc: { name: string; count: number; revenue: number }, i: number) => (
@@ -94,7 +94,7 @@ export function BookingsView({ report }: { report: GeneratedReport }) {
           )}
         </CollapsibleSection>
 
-        <CollapsibleSection title="Staff Performance" icon={Users} defaultOpen>
+        <CollapsibleSection title="Staff Performance" icon={Users} defaultOpen persistKey="bk-staff-perf">
           {topStaff.length > 0 ? (
             <div className="space-y-2">
               {topStaff.slice(0, 5).map((st: { name: string; bookings: number; completionRate: number }, i: number) => (
