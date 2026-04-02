@@ -240,7 +240,7 @@ Use ${currency} for all monetary values. Be specific with numbers. Keep each sec
       expenses: { total: number; count: number; changePct: number };
       profitability: { netProfit: number; profitMargin: number; changePct: number };
       bookings: { total: number; changePct: number };
-      clients: { totalContacts: number; changePct: number };
+      clients: { totalContacts: number; newContacts: number; changePct: number };
     } | null = null;
     if (compare) {
       const periodMs = end.getTime() - start.getTime();
@@ -300,6 +300,7 @@ Use ${currency} for all monetary values. Be specific with numbers. Keep each sec
         },
         clients: {
           totalContacts: prevContacts,
+          newContacts: currentPeriodContacts,
           changePct: pctChange(currentPeriodContacts, prevContacts),
         },
       };

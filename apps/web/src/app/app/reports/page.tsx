@@ -16,7 +16,7 @@ import { ContactPickerDrawer } from "@/components/contacts";
 import { fetchReport, GeneratedReport } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { ReportType, REPORT_TABS, DATE_PRESETS, getDateRange, formatDate } from "./components/report-types";
-import { ExecutiveView } from "./components/executive-view";
+import { ExecutiveView, AiBriefingCard } from "./components/executive-view";
 import { PnlView } from "./components/pnl-view";
 import { RevenueView } from "./components/revenue-view";
 import { ExpensesView } from "./components/expenses-view";
@@ -360,6 +360,11 @@ export default function ReportsPage() {
                 <div className="flex items-center gap-2 mb-4 text-xs text-muted-foreground">
                   <Loader2 className="w-3 h-3 animate-spin" />
                   Refreshing report...
+                </div>
+              )}
+              {activeTab !== "executive" && activeTab !== "cash-flow" && (
+                <div className="mb-6">
+                  <AiBriefingCard report={report} />
                 </div>
               )}
               {activeTab === "executive" && <ExecutiveView report={report} />}

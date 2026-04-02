@@ -3600,7 +3600,7 @@ export interface ReportComparison {
   expenses: { total: number; count: number; changePct: number };
   profitability: { netProfit: number; profitMargin: number; changePct: number };
   bookings: { total: number; changePct: number };
-  clients: { totalContacts: number; changePct: number };
+  clients: { totalContacts: number; newContacts: number; changePct: number };
 }
 export interface ReportModuleData {
   totalBookings?: number;

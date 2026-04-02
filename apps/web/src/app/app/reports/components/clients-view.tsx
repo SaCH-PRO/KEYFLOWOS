@@ -40,7 +40,7 @@ export function ClientsView({ report }: { report: GeneratedReport }) {
         <Link href="/app/crm/pipeline">
           <MetricCard
             label={c ? "New Contacts" : "Total Contacts"}
-            value={c ? (m.clients.totalContacts - (c.clients.totalContacts || 0)).toString() : m.clients.totalContacts.toString()}
+            value={c ? (c.clients.newContacts ?? 0).toString() : m.clients.totalContacts.toString()}
             subtext={c ? `${m.clients.totalContacts} total in CRM` : undefined}
             icon={Users}
             color="text-[hsl(var(--kf-info))]"
