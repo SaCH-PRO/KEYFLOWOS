@@ -65,15 +65,19 @@ export default function TemplateGalleryPage() {
 
   const handleActivateAutomation = useCallback(async (template: AutomationTemplate) => {
     setActivating(template.id);
-    const { data } = await createPlaybook({
-      name: template.name,
-      triggerEvent: template.trigger,
-      actions: template.actions,
-      businessId: businessId ?? undefined,
-    });
-    setActivating(null);
-    if (data) {
-      setActivated((prev) => new Set(prev).add(template.id));
+    try {
+      const { data } = await createPlaybook({
+        name: template.name,
+        triggerEvent: template.trigger,
+        actions: template.actions,
+        businessId: businessId ?? undefined,
+      });
+      if (data) {
+        setActivated((prev) => new Set(prev).add(template.id));
+      }
+    } catch {
+    } finally {
+      setActivating(null);
     }
   }, [businessId]);
 

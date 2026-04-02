@@ -455,7 +455,7 @@ export default function WebhooksSettingsPage() {
           Delivery Guarantees
         </h3>
         <p className="text-xs text-muted-foreground mb-3">
-          Each webhook delivery is retried up to 3 times with exponential backoff (1s → 4s → 16s). All deliveries are signed with HMAC-SHA256 for verification.
+          Each webhook delivery is retried up to 3 times with exponential backoff (1s → 4s). All deliveries are signed with HMAC-SHA256 for verification.
         </p>
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 mt-4">
           Available Events
