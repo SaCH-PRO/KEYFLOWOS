@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import Link from "next/link";
+import QRCodeLib from "qrcode";
 import {
   Globe,
   Copy,
@@ -19,7 +20,7 @@ import {
   QrCode,
   TrendingDown,
 } from "lucide-react";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import type { StoreAnalytics, ConversionFunnel, ConversionFunnelStage } from "@/lib/client";
 import { fetchConversionFunnel } from "@/lib/client";
 
@@ -169,8 +170,24 @@ function ConversionFunnelChart({ businessId }: { businessId: string }) {
 }
 
 function QrCodeModal({ url, onClose }: { url: string; onClose: () => void }) {
-  const qrSize = 200;
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${qrSize}x${qrSize}&data=${encodeURIComponent(url)}&bgcolor=1a1a2e&color=ffffff&format=svg`;
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    QRCodeLib.toDataURL(url, {
+      width: 200,
+      margin: 2,
+      color: { dark: "#ffffff", light: "#1a1a2e" },
+      errorCorrectionLevel: "M",
+    }).then((dataUrl: string) => setQrDataUrl(dataUrl)).catch(() => {});
+  }, [url]);
+
+  const handleDownload = useCallback(() => {
+    if (!qrDataUrl) return;
+    const link = document.createElement("a");
+    link.href = qrDataUrl;
+    link.download = "store-qr-code.png";
+    link.click();
+  }, [qrDataUrl]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "hsl(var(--kf-background)/0.7)" }}>
@@ -194,7 +211,11 @@ function QrCodeModal({ url, onClose }: { url: string; onClose: () => void }) {
         </div>
         <div className="flex justify-center">
           <div className="rounded-xl p-4" style={{ background: "hsl(var(--kf-muted)/0.2)" }}>
-            <img src={qrUrl} alt="Store QR Code" width={qrSize} height={qrSize} className="rounded-lg" />
+            {qrDataUrl ? (
+              <img src={qrDataUrl} alt="Store QR Code" width={200} height={200} className="rounded-lg" />
+            ) : (
+              <div className="w-[200px] h-[200px] flex items-center justify-center animate-pulse bg-muted/30 rounded-lg" />
+            )}
           </div>
         </div>
         <p className="text-xs text-muted-foreground">
@@ -208,14 +229,14 @@ function QrCodeModal({ url, onClose }: { url: string; onClose: () => void }) {
           >
             Close
           </button>
-          <a
-            href={qrUrl}
-            download="store-qr-code.svg"
-            className="flex-1 text-sm font-medium px-4 py-2.5 rounded-lg transition-colors min-h-[44px] flex items-center justify-center"
+          <button
+            onClick={handleDownload}
+            disabled={!qrDataUrl}
+            className="flex-1 text-sm font-medium px-4 py-2.5 rounded-lg transition-colors min-h-[44px] flex items-center justify-center disabled:opacity-50"
             style={{ background: "hsl(var(--kf-accent1))", color: "hsl(var(--kf-accent1-foreground, 0 0% 100%))" }}
           >
             Download
-          </a>
+          </button>
         </div>
       </motion.div>
     </div>
