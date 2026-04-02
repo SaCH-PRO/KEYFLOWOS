@@ -507,7 +507,8 @@ export class BookingsService {
         const startMins = start.getHours() * 60 + start.getMinutes();
         const openMins = oh * 60 + om;
         const closeMins = ch * 60 + cm;
-        if (startMins < openMins || startMins >= closeMins) {
+        const endMins = startMins + (service.duration || 0) + (service.bufferMins || 0);
+        if (startMins < openMins || endMins > closeMins) {
           throw new BadRequestException('The selected time is outside business hours.');
         }
       }
