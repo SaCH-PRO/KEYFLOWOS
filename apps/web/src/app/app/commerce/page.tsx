@@ -246,7 +246,7 @@ export default function CommercePage() {
 
       {(() => {
         const il = checkLimit("invoices");
-        return <PlanLimitBanner resourceKey="invoices" label="invoices" currentUsage={il.current} limit={il.limit} isUnlimited={il.isUnlimited} nearLimit={il.nearLimit} atLimit={il.atLimit} />;
+        return <PlanLimitBanner resourceKey="invoices" label="invoices" currentUsage={il.current} limit={il.limit} isUnlimited={il.isUnlimited} nearLimit={il.nearLimit} atLimit={il.atLimit} upgradeTo={il.upgradeTo} />;
       })()}
 
       {shell.error && (

@@ -461,7 +461,7 @@ export default function BookingsPage() {
 
       {(() => {
         const bl = checkLimit("bookings");
-        return <PlanLimitBanner resourceKey="bookings" label="bookings" currentUsage={bl.current} limit={bl.limit} isUnlimited={bl.isUnlimited} nearLimit={bl.nearLimit} atLimit={bl.atLimit} />;
+        return <PlanLimitBanner resourceKey="bookings" label="bookings" currentUsage={bl.current} limit={bl.limit} isUnlimited={bl.isUnlimited} nearLimit={bl.nearLimit} atLimit={bl.atLimit} upgradeTo={bl.upgradeTo} />;
       })()}
 
       {tab === "catalog" && (

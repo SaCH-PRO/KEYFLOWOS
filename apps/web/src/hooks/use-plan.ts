@@ -17,6 +17,7 @@ interface ResourceUsage {
   percent: number;
   atLimit: boolean;
   nearLimit: boolean;
+  upgradeTo: string | null;
 }
 
 interface FeatureAccess {
@@ -81,10 +82,11 @@ export function usePlan(): UsePlanResult {
     try {
       const res = await apiGet<PlanData>(`/subscriptions/businesses/${businessId}/billing-dashboard`);
       if (res.data) {
+        const d = res.data;
         const planData: PlanData = {
-          plan: res.data.plan as PlanData["plan"],
-          resourceUsage: (res.data as any).resourceUsage ?? [],
-          featureAccess: (res.data as any).featureAccess ?? [],
+          plan: d.plan,
+          resourceUsage: d.resourceUsage ?? [],
+          featureAccess: d.featureAccess ?? [],
         };
         planCache.data = planData;
         planCache.timestamp = Date.now();
@@ -109,9 +111,9 @@ export function usePlan(): UsePlanResult {
   }, [data]);
 
   const checkLimit = useCallback((resourceKey: string) => {
-    if (!data) return { atLimit: false, nearLimit: false, current: 0, limit: -1, isUnlimited: true, percent: 0 };
+    if (!data) return { atLimit: false, nearLimit: false, current: 0, limit: -1, isUnlimited: true, percent: 0, upgradeTo: null as string | null };
     const resource = data.resourceUsage.find((r) => r.key === resourceKey);
-    if (!resource) return { atLimit: false, nearLimit: false, current: 0, limit: -1, isUnlimited: true, percent: 0 };
+    if (!resource) return { atLimit: false, nearLimit: false, current: 0, limit: -1, isUnlimited: true, percent: 0, upgradeTo: null as string | null };
     return {
       atLimit: resource.atLimit,
       nearLimit: resource.nearLimit,
@@ -119,6 +121,7 @@ export function usePlan(): UsePlanResult {
       limit: resource.limit,
       isUnlimited: resource.isUnlimited,
       percent: resource.percent,
+      upgradeTo: resource.upgradeTo,
     };
   }, [data]);
 

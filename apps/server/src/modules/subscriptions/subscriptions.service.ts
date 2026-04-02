@@ -410,6 +410,15 @@ export class SubscriptionsService {
         const isUnlimited = limit === -1;
         const percent = isUnlimited ? 0 : (limit > 0 ? Math.min(100, Math.round((current / limit) * 100)) : 0);
 
+        const nextTier = subInfo.plan === 'FREE' ? 'FLOW' : (subInfo.plan === 'FLOW' ? 'KEYFLOW' : null);
+        let upgradeTo: string | null = null;
+        if (nextTier) {
+          const nextTierValue = f.tiers[nextTier as keyof typeof f.tiers];
+          if (nextTierValue === 'Unlimited' || (typeof nextTierValue === 'number' && nextTierValue > (typeof tierValue === 'number' ? tierValue : 0))) {
+            upgradeTo = nextTier;
+          }
+        }
+
         return {
           key: f.key,
           label: f.label,
@@ -421,6 +430,7 @@ export class SubscriptionsService {
           percent,
           atLimit: !isUnlimited && limit > 0 && current >= limit,
           nearLimit: !isUnlimited && limit > 0 && percent >= 80,
+          upgradeTo,
         };
       });
 
