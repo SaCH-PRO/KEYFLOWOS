@@ -16,6 +16,7 @@ import type {
 
 interface WebhookRecord {
   id: string;
+  name: string;
   url: string;
   secret: string;
   events: string[];
@@ -80,13 +81,21 @@ export class WebhookDispatcherService {
       data: {
         message: 'This is a test webhook delivery from KeyFlowOS',
         webhookId: webhook.id,
-        webhookName: (webhook as any).name || 'Webhook',
+        webhookName: webhook.name || 'Webhook',
       },
     };
 
     const body = JSON.stringify(testPayload);
+    const wh: WebhookRecord = {
+      id: webhook.id,
+      name: webhook.name,
+      url: webhook.url,
+      secret: webhook.secret,
+      events: webhook.events,
+      isActive: webhook.isActive,
+    };
     const logEntry = await this.sendWithLogging(
-      webhook as unknown as WebhookRecord,
+      wh,
       'test.ping',
       testPayload.timestamp,
       body,

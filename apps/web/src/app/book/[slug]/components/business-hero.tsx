@@ -228,7 +228,7 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
                   <Mail className="w-3.5 h-3.5" style={{ color: primaryColor }} /> {business.email}
                 </a>
               )}
-              {business.website && (
+              {business.website && /^https?:\/\//i.test(business.website) && (
                 <a href={business.website} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 hover:text-white/60 transition-colors">
                   <ExternalLink className="w-3.5 h-3.5" style={{ color: primaryColor }} /> Website
                 </a>
