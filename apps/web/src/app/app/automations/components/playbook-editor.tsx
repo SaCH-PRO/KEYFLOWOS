@@ -2,13 +2,15 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Zap, X, Plus } from "lucide-react";
+import { Zap, X, Plus, Eye, EyeOff, Filter, ArrowRight } from "lucide-react";
 import { InfoBadge } from "@/components/ui/info-badge";
 import { Button, Input } from "@keyflow/ui";
 import { createPlaybook, updatePlaybook, Playbook } from "@/lib/client";
 import {
   TRIGGER_GROUPS,
   ACTION_GROUPS,
+  getTriggerLabel,
+  getActionLabel,
   type ActionStep,
   type AutomationTemplate,
 } from "./automation-constants";
@@ -58,12 +60,117 @@ interface PlaybookEditorProps {
   businessId?: string | null;
 }
 
+function VisualFlowPreview({
+  triggerEvent,
+  conditionGroup,
+  actionSteps,
+}: {
+  triggerEvent: string;
+  conditionGroup: ConditionGroup;
+  actionSteps: ActionStep[];
+}) {
+  const filledConditions = conditionGroup.conditions.filter((c) => c);
+  const filledActions = actionSteps.filter((a) => a.type);
+
+  if (!triggerEvent && filledActions.length === 0) {
+    return (
+      <div className="rounded-xl p-4 text-center" style={{ background: "hsl(var(--kf-muted)/0.1)", border: "1px solid hsl(var(--kf-border)/0.3)" }}>
+        <p className="text-xs text-muted-foreground">
+          Select a trigger and actions to see the automation flow.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl p-4 space-y-0" style={{ background: "hsl(var(--kf-muted)/0.1)", border: "1px solid hsl(var(--kf-border)/0.3)" }}>
+      {triggerEvent && (
+        <div className="flex items-center gap-3">
+          <div className="flex flex-col items-center">
+            <div
+              className="w-8 h-8 rounded-lg flex items-center justify-center"
+              style={{ background: "hsl(var(--kf-accent1)/0.15)" }}
+            >
+              <Zap className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+            </div>
+            {(filledConditions.length > 0 || filledActions.length > 0) && (
+              <div className="w-px h-4" style={{ background: "hsl(var(--kf-border)/0.4)" }} />
+            )}
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Trigger</p>
+            <p className="text-sm font-medium">{getTriggerLabel(triggerEvent)}</p>
+          </div>
+        </div>
+      )}
+
+      {filledConditions.length > 0 && (
+        <div className="flex items-center gap-3">
+          <div className="flex flex-col items-center">
+            <div
+              className="w-8 h-8 rounded-lg flex items-center justify-center"
+              style={{ background: "hsl(var(--kf-info)/0.15)" }}
+            >
+              <Filter className="w-4 h-4" style={{ color: "hsl(var(--kf-info))" }} />
+            </div>
+            {filledActions.length > 0 && (
+              <div className="w-px h-4" style={{ background: "hsl(var(--kf-border)/0.4)" }} />
+            )}
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+              Condition{filledConditions.length > 1 ? `s (${conditionGroup.operator})` : ""}
+            </p>
+            {filledConditions.map((c, i) => {
+              const label = CONDITION_OPTIONS.find((o) => o.value === c)?.label ?? c;
+              return (
+                <p key={i} className="text-sm font-medium">
+                  {i > 0 && (
+                    <span
+                      className="text-[10px] font-bold mr-1"
+                      style={{ color: conditionGroup.operator === "AND" ? "hsl(var(--kf-info))" : "hsl(var(--kf-accent2))" }}
+                    >
+                      {conditionGroup.operator}
+                    </span>
+                  )}
+                  {label}
+                </p>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {filledActions.map((action, i) => (
+        <div key={i} className="flex items-center gap-3">
+          <div className="flex flex-col items-center">
+            <div
+              className="w-8 h-8 rounded-lg flex items-center justify-center"
+              style={{ background: "hsl(var(--kf-success)/0.15)" }}
+            >
+              <span className="text-xs font-bold" style={{ color: "hsl(var(--kf-success))" }}>{i + 1}</span>
+            </div>
+            {i < filledActions.length - 1 && (
+              <div className="w-px h-4" style={{ background: "hsl(var(--kf-border)/0.4)" }} />
+            )}
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Action {i + 1}</p>
+            <p className="text-sm font-medium">{getActionLabel(action.type)}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybook, businessId }: PlaybookEditorProps) {
   const [form, setForm] = useState({ name: "", triggerEvent: "" });
   const [conditionGroup, setConditionGroup] = useState<ConditionGroup>({ operator: "AND", conditions: [""] });
   const [actionSteps, setActionSteps] = useState<ActionStep[]>([{ type: "" }]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [showFlow, setShowFlow] = useState(false);
 
   const isEditing = !!editingPlaybook;
 
@@ -310,12 +417,43 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
               ))}
             </div>
 
-            <div className="flex gap-2 pt-1">
-              <Button variant="outline" onClick={onClose}>Cancel</Button>
-              <Button onClick={handleSave} disabled={saving}>
-                {saving ? "Saving..." : isEditing ? "Save Changes" : "Create Automation"}
-              </Button>
+            <div className="flex items-center justify-between pt-1">
+              <button
+                type="button"
+                onClick={() => setShowFlow((v) => !v)}
+                className="inline-flex items-center gap-1.5 text-[11px] font-medium px-3 py-1.5 rounded-lg transition-colors min-h-[44px]"
+                style={{
+                  color: showFlow ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-muted-foreground))",
+                  background: showFlow ? "hsl(var(--kf-accent1)/0.1)" : "hsl(var(--kf-muted)/0.2)",
+                }}
+              >
+                {showFlow ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                {showFlow ? "Hide Flow" : "Preview Flow"}
+              </button>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={onClose}>Cancel</Button>
+                <Button onClick={handleSave} disabled={saving}>
+                  {saving ? "Saving..." : isEditing ? "Save Changes" : "Create Automation"}
+                </Button>
+              </div>
             </div>
+
+            <AnimatePresence>
+              {showFlow && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <VisualFlowPreview
+                    triggerEvent={form.triggerEvent}
+                    conditionGroup={conditionGroup}
+                    actionSteps={actionSteps}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </motion.div>
       )}

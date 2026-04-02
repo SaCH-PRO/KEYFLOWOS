@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   User, Mail, Phone, Shield, CheckCircle2, AlertCircle,
@@ -17,6 +17,7 @@ import {
   fetchDocumentGuidance,
   type DocumentRecommendation,
 } from "@/lib/client";
+import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -220,6 +221,8 @@ export default function ProfileSettingsPage() {
 
   const isDirty = JSON.stringify(form) !== JSON.stringify(initialForm);
   const isBizDirty = JSON.stringify(bizForm) !== JSON.stringify(initialBizForm);
+  const hasUnsavedChanges = useMemo(() => isDirty || isBizDirty, [isDirty, isBizDirty]);
+  useUnsavedChanges(hasUnsavedChanges);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
