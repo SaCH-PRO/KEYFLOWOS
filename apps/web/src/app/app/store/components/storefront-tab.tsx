@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { AlertCircle, X } from "lucide-react";
+import { AlertCircle, X, Search, Globe } from "lucide-react";
 import { useState } from "react";
 import { StoreSettings } from "./store-settings";
 import { AppearanceCustomizer } from "./appearance-customizer";
@@ -141,6 +141,136 @@ export function StorefrontTab({
         onConfigChange={onConfigChange}
         onSaveConfig={onSaveConfig}
       />
+
+      <SeoSettingsPanel
+        storefrontConfig={storefrontConfig}
+        onConfigChange={onConfigChange}
+        onSaveConfig={onSaveConfig}
+        configSaving={configSaving}
+        publicUrl={publicUrl}
+        businessName={businessData?.name}
+      />
+    </div>
+  );
+}
+
+type SeoProps = {
+  storefrontConfig: StorefrontConfig;
+  onConfigChange: (section: string, updates: Record<string, any>) => void;
+  onSaveConfig: () => Promise<void>;
+  configSaving: boolean;
+  publicUrl: string;
+  businessName?: string;
+};
+
+function SeoSettingsPanel({ storefrontConfig, onConfigChange, onSaveConfig, configSaving, publicUrl, businessName }: SeoProps) {
+  const seo = (storefrontConfig.seo ?? {}) as { metaTitle?: string; metaDescription?: string };
+  const metaTitle = seo.metaTitle ?? "";
+  const metaDescription = seo.metaDescription ?? "";
+
+  const previewTitle = metaTitle || businessName || "Your Store";
+  const previewDesc = metaDescription || "Browse our products and services. Book online today.";
+  const previewUrl = publicUrl || "https://yoursite.com/book/your-store";
+
+  return (
+    <div
+      className="rounded-2xl p-5 space-y-5"
+      style={{
+        background: "hsl(var(--kf-card))",
+        border: "1px solid hsl(var(--kf-border))",
+      }}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Search className="w-4 h-4" style={{ color: "hsl(var(--kf-primary))" }} />
+          <h3 className="text-sm font-semibold" style={{ color: "hsl(var(--kf-foreground))" }}>SEO Settings</h3>
+        </div>
+        <button
+          onClick={onSaveConfig}
+          disabled={configSaving}
+          className="kf-btn-primary min-h-[44px] px-4 text-sm"
+        >
+          {configSaving ? "Saving..." : "Save SEO"}
+        </button>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <label className="block text-xs font-medium mb-1.5" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+            Meta Title
+          </label>
+          <input
+            type="text"
+            value={metaTitle}
+            onChange={(e) => onConfigChange("seo", { metaTitle: e.target.value })}
+            placeholder={businessName || "Your Store Name"}
+            maxLength={60}
+            className="w-full rounded-lg px-3 py-2.5 text-sm min-h-[44px]"
+            style={{
+              background: "hsl(var(--kf-muted) / 0.3)",
+              border: "1px solid hsl(var(--kf-border))",
+              color: "hsl(var(--kf-foreground))",
+            }}
+          />
+          <p className="text-[10px] mt-1" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+            {metaTitle.length}/60 characters
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium mb-1.5" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+            Meta Description
+          </label>
+          <textarea
+            value={metaDescription}
+            onChange={(e) => onConfigChange("seo", { metaDescription: e.target.value })}
+            placeholder="Browse our products and services. Book online today."
+            maxLength={160}
+            rows={3}
+            className="w-full rounded-lg px-3 py-2.5 text-sm resize-none"
+            style={{
+              background: "hsl(var(--kf-muted) / 0.3)",
+              border: "1px solid hsl(var(--kf-border))",
+              color: "hsl(var(--kf-foreground))",
+            }}
+          />
+          <p className="text-[10px] mt-1" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+            {metaDescription.length}/160 characters
+          </p>
+        </div>
+      </div>
+
+      <div>
+        <p className="text-xs font-medium mb-2" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+          Google Search Preview
+        </p>
+        <div
+          className="rounded-xl p-4 space-y-1"
+          style={{
+            background: "hsl(var(--kf-muted) / 0.15)",
+            border: "1px solid hsl(var(--kf-border) / 0.5)",
+          }}
+        >
+          <div className="flex items-center gap-1.5">
+            <Globe className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-muted-foreground))" }} />
+            <span className="text-xs truncate" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+              {previewUrl}
+            </span>
+          </div>
+          <p
+            className="text-sm font-medium truncate"
+            style={{ color: "hsl(210 100% 56%)" }}
+          >
+            {previewTitle}
+          </p>
+          <p
+            className="text-xs line-clamp-2"
+            style={{ color: "hsl(var(--kf-muted-foreground))" }}
+          >
+            {previewDesc}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

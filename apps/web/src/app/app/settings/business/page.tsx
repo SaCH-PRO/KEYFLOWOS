@@ -52,7 +52,7 @@ export default function BusinessSettingsPage() {
   const {
     form, setField, loading, saving, uploading, status,
     business, handleSave, handleLogoUpload, fileInputRef, logoUrl,
-    isDirty,
+    isDirty, validationErrors,
   } = useBusinessSettings();
   const [activeTab, setActiveTab] = useState<TabKey>(() => {
     if (typeof window === "undefined") return "basic";
@@ -151,7 +151,7 @@ export default function BusinessSettingsPage() {
         transition={{ duration: 0.2 }}
         className="kf-card p-6"
       >
-        {activeTab === "basic" && <BasicInfoTab form={form} setField={setField} logoUrl={logoUrl ?? undefined} />}
+        {activeTab === "basic" && <BasicInfoTab form={form} setField={setField} logoUrl={logoUrl ?? undefined} validationErrors={validationErrors} />}
         {activeTab === "social" && <SocialTab form={form} setField={setField} />}
         {activeTab === "branding" && <BrandingTab form={form} setField={setField} />}
         {activeTab === "payments" && <PaymentsTab />}

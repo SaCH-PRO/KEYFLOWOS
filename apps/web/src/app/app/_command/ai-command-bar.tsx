@@ -26,14 +26,14 @@ type ModuleQuickPrompts = { module: string; prompts: string[] };
 
 const MODULE_PROMPTS: Record<string, ModuleQuickPrompts> = {
   "/app": { module: "Today", prompts: ["Daily briefing", "Cash flow", "Focus areas"] },
-  "/app/crm": { module: "CRM", prompts: ["Score my leads", "Churn risk scan", "Pipeline analysis"] },
-  "/app/commerce": { module: "Commerce", prompts: ["Cash flow forecast", "Overdue recovery", "Revenue analysis"] },
-  "/app/bookings": { module: "Bookings", prompts: ["Schedule optimizer", "No-show predictions", "Revenue insights"] },
-  "/app/marketing": { module: "Marketing", prompts: ["Campaign performance", "Subject line ideas", "Audience segments"] },
+  "/app/crm": { module: "CRM", prompts: ["Score my leads", "Find inactive contacts", "Suggest follow-ups"] },
+  "/app/commerce": { module: "Commerce", prompts: ["Summarize overdue", "Revenue this month", "Draft reminder"] },
+  "/app/bookings": { module: "Bookings", prompts: ["Today's schedule", "Empty slots this week", "Rebooking suggestions"] },
+  "/app/marketing": { module: "Marketing", prompts: ["Campaign performance", "Best send time", "Audience health"] },
   "/app/store": { module: "Store", prompts: ["Store optimizer", "SEO advice", "Pricing analysis"] },
-  "/app/expenses": { module: "Expenses", prompts: ["Spending trends", "Budget review", "Tax deductions"] },
+  "/app/expenses": { module: "Expenses", prompts: ["Spending summary", "Over budget alerts", "Tax estimate"] },
   "/app/projects": { module: "Projects", prompts: ["Task priorities", "Automation ideas", "Project status"] },
-  "/app/reports": { module: "Reports", prompts: ["Revenue trends", "Growth analysis", "Key metrics"] },
+  "/app/reports": { module: "Reports", prompts: ["Executive brief", "Cash flow forecast", "Revenue trends"] },
 };
 
 function getModuleContext(pathname: string): ModuleQuickPrompts {

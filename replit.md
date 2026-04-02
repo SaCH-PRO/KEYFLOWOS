@@ -27,7 +27,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Commerce Module:** Redesigned with four focused tabs: Invoices, Quotes, Payments, and Recurring. Features comprehensive CRUD, KPI tracking, AI-powered revenue analysis, cash flow forecasting, NL interpretation, and a unified currency system. Supports recurring invoices, partial payments, and customizable templates.
 - **CRM Module:** Provides Contacts, Insights, and Studio. Features simplified contact cards, progressive disclosure, AI copilot for summarization, lead scoring, churn detection, and natural language search. Includes an AI-powered "Next Actions" service and a prominent NextBestActionCard on contact detail showing AI-recommended actions with confidence scores.
 - **Bookings Module:** Redesigned with Schedule, Catalog & Capacity, and Performance tabs. Features priority lanes, collapsible schedule filters, side-sheet booking creation, staff management, and consolidated performance analytics. Includes a prominent "Share Booking Link" feature with multiple sharing options, an enhanced public booking confirmation page, and ScheduleHints component surfacing empty slot promotions, rebooking suggestions, and AI recommendations.
-- **Marketing Module:** Redesigned with Create & Schedule, Calendar, Audiences & Forms, and Performance tabs. Features a mode selector for campaign creation, a unified content calendar, and audience health scoring. Consolidates AI features into an AI hub.
+- **Marketing Module:** Redesigned with Create & Schedule, Calendar, Audiences & Forms, and Performance tabs. Features a mode selector for campaign creation, a unified content calendar, and audience health scoring. Consolidates AI features into an AI hub. Lead form submissions support search filtering and CSV export.
 - **Client Momentum Agent:** Relationship intelligence system calculating per-contact momentum scores for prioritized action recommendations.
 - **Campaign Intelligence Agent:** Provides post-campaign analysis, AI-powered performance briefings, pre-send validation, and send-time optimization.
 - **AI Copilot System:** Consolidated global AI entry point via `AiCopilotTrigger` FAB in the app layout, with route-aware module context detection (MODULE_PROMPTS map), self-contained chat drawer, and AI suggestion nudges in the Today priority queue. Per-module `AiCommandHub` panels removed; module AI hooks preserved for context feeding. Three AI entry categories: (1) global copilot, (2) inline contextual actions, (3) priority queue nudges.
@@ -35,10 +35,10 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Core Workflows:** Quote-to-Invoice, multi-gateway payment, subscription & billing, and expense tracking.
 - **User & Security:** Multi-Tenant System with `businessId` isolation, personalized authentication (Google OAuth), notification system, input sanitization, DTO validation, rate limiting, and AI prompt injection guards.
 - **Data Integrity:** Ensures atomic operations for campaign sending, lead form submissions, and valid tax/discount bounds.
-- **Store Module:** Redesigned with Storefront, Products & Hours, and Performance tabs. Features a consolidated setup surface for the storefront, detailed product and hour management, and comprehensive performance analytics with AI Command Hub capabilities.
+- **Store Module:** Redesigned with Storefront, Products & Hours, and Performance tabs. Features a consolidated setup surface for the storefront, detailed product and hour management, comprehensive performance analytics, SEO settings panel (meta title/description with Google search preview), and Share Store button with URL copy.
 - **Expenses Module:** Decomposed into a modular structure with dedicated components for filters, stats, list, forms, budgets, vendors, categories, and analytics, organized into three tabs: Expenses, Budgets, and Analytics.
-- **Projects Module:** Focused kanban board for project management with task tracking and status columns.
-- **Automations Module:** Dedicated `/app/automations` page with three tabs: My Automations (unified list of playbooks + cross-module intelligence workflows with search, toggle, and config), Templates (pre-built automation recipes across Commerce, Bookings, CRM, Marketing, and Time-Based categories), and Activity Log (execution history from activity feed). Form-based trigger→action editor for creating custom playbooks.
+- **Projects Module:** Focused kanban board for project management with task tracking, due date pickers (project and task level), overdue indicators, task assignment support, and archive/unarchive functionality for completed projects.
+- **Automations Module:** Dedicated `/app/automations` page with three tabs: My Automations (unified list of playbooks + cross-module intelligence workflows with search, toggle, and config), Templates (pre-built automation recipes with preview modal showing trigger→condition→action flow), and Activity Log (execution history with search/filter by status). Playbook editor supports AND/OR condition grouping for complex rules.
 - **Settings Consolidation:** All configuration settings are centralized in a dedicated Settings section, with deep-links from other modules to avoid duplication.
 - **Cross-Module Contact Journey:** Enhanced `ContactJourneyTimeline` component provides a unified lifecycle timeline for contacts, merging events, notes, tasks, invoices, and bookings into chronological entries with cross-module CTAs.
 - **Financial Copilot Agent:** Monitors revenue, expenses, and cash flow with anomaly detection, providing a Financial Pulse dashboard and weekly AI-powered briefings.
@@ -66,12 +66,13 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 | Settings (Tax, Payments, Branding) | Settings (`/app/settings`) | Commerce, Bookings, Store (deep-link cards) | Settings owns config; modules link to it |
 | Analytics / KPIs | Reports (`/app/reports`) | All modules (compact KPI cards + "View Full Report" links) | Reports is single analytics source; module tabs show operational summaries only |
 
-**Navigation Structure:**
-- OPERATE: Command, Contacts, Commerce, Bookings
-- GROW: Marketing, Marketplace
-- MANAGE: Expenses, Projects, Automations, Reports
-- SETUP: Store Setup
-- Bottom: Learn, Community, Settings
+**Navigation & Command System:**
+- Sidebar groups: OPERATE (Command, Contacts, Commerce, Bookings), GROW (Marketing, Marketplace), MANAGE (Expenses, Projects, Automations, Reports), SETUP (Store Setup), Bottom (Learn, Community, Settings)
+- Breadcrumb navigation (`Breadcrumbs` component) on all app pages with human-readable labels and clickable parent links
+- Command Palette (⌘K): Recent items (last 5 pages, localStorage), Quick Actions (New Contact/Invoice/Booking/Expense/Project with shortcuts), Navigate section (all routes), and universal search (contacts, invoices, bookings, products, projects)
+- AI Copilot: Route-aware quick-action chips (3 per module) shown persistently, enhanced MODULE_PROMPTS map covering all modules
+- Reports: Period comparison toggle, CSV export alongside PDF, MetricCard trend percentages
+- Settings: Required field validation with inline errors, unsaved changes warning (beforeunload), save confirmation toasts
 
 **Removed Routes:**
 - `/app/social` — redirects to Marketing module (social tab); OAuth callback route (`/app/social/oauth/[platform]/callback`) retained for backend compatibility

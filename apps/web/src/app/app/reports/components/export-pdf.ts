@@ -1,6 +1,95 @@
 import { GeneratedReport } from "@/lib/client";
 import { formatCurrency, formatDate } from "./report-types";
 
+export function exportReportCSV(report: GeneratedReport) {
+  const m = report.metrics;
+  const rows: string[][] = [];
+
+  rows.push(["Report Type", report.type]);
+  rows.push(["Business", m.business.name]);
+  rows.push(["Period Start", formatDate(m.period.start)]);
+  rows.push(["Period End", formatDate(m.period.end)]);
+  rows.push(["Generated", formatDate(report.generatedAt)]);
+  rows.push(["Currency", m.currency]);
+  rows.push([]);
+
+  rows.push(["--- Key Metrics ---"]);
+  rows.push(["Metric", "Value"]);
+  rows.push(["Total Revenue", formatCurrency(m.revenue.total, m.currency)]);
+  rows.push(["Invoice Count", String(m.revenue.invoiceCount)]);
+  rows.push(["Average Invoice", formatCurrency(m.revenue.averageInvoice, m.currency)]);
+  rows.push(["Outstanding", formatCurrency(m.revenue.outstanding, m.currency)]);
+  rows.push(["Outstanding Count", String(m.revenue.outstandingCount)]);
+  rows.push(["Overdue Count", String(m.revenue.overdueCount)]);
+  rows.push(["Total Expenses", formatCurrency(m.expenses.total, m.currency)]);
+  rows.push(["Expense Count", String(m.expenses.count)]);
+  rows.push(["Average Expense", formatCurrency(m.expenses.averageExpense, m.currency)]);
+  rows.push(["Net Profit", formatCurrency(m.profitability.netProfit, m.currency)]);
+  rows.push(["Profit Margin", `${m.profitability.profitMargin}%`]);
+  rows.push(["Total Contacts", String(m.clients.totalContacts)]);
+  rows.push(["Total Bookings", String(m.bookings.total)]);
+  rows.push(["Bookings Confirmed", String(m.bookings.confirmed)]);
+  rows.push(["Bookings Completed", String(m.bookings.completed)]);
+  rows.push(["Bookings Cancelled", String(m.bookings.cancelled)]);
+  rows.push(["Completion Rate", `${m.bookings.completionRate}%`]);
+  rows.push([]);
+
+  if (m.expenses.byCategory.length > 0) {
+    rows.push(["--- Expenses by Category ---"]);
+    rows.push(["Category", "Amount", "Count"]);
+    for (const c of m.expenses.byCategory) {
+      rows.push([c.category, formatCurrency(c.total, m.currency), String(c.count)]);
+    }
+    rows.push([]);
+  }
+
+  if (m.revenue.topClients.length > 0) {
+    rows.push(["--- Top Clients ---"]);
+    rows.push(["Client", "Revenue"]);
+    for (const c of m.revenue.topClients) {
+      rows.push([c.name, formatCurrency(c.total, m.currency)]);
+    }
+    rows.push([]);
+  }
+
+  if (m.expenses.topVendors.length > 0) {
+    rows.push(["--- Top Vendors ---"]);
+    rows.push(["Vendor", "Amount"]);
+    for (const v of m.expenses.topVendors) {
+      rows.push([v.vendor, formatCurrency(v.total, m.currency)]);
+    }
+    rows.push([]);
+  }
+
+  if (m.clients.byStatus.length > 0) {
+    rows.push(["--- Contacts by Status ---"]);
+    rows.push(["Status", "Count"]);
+    for (const s of m.clients.byStatus) {
+      rows.push([s.status, String(s.count)]);
+    }
+    rows.push([]);
+  }
+
+  const csvContent = rows.map(row =>
+    row.map(cell => {
+      const val = cell ?? "";
+      return val.includes(",") || val.includes('"') || val.includes("\n")
+        ? `"${val.replace(/"/g, '""')}"`
+        : val;
+    }).join(",")
+  ).join("\n");
+
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${m.business.name?.replace(/\s+/g, "_") || "Report"}_${report.type}_${new Date().toISOString().split("T")[0]}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export async function exportReportPDF(report: GeneratedReport) {
   const jsPDFModule = await import("jspdf");
   const jsPDF = jsPDFModule.default;

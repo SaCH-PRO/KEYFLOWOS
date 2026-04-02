@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, MoreHorizontal, Calendar,
-  Trash2, FolderKanban, ChevronDown, ChevronRight,
+  Trash2, FolderKanban, ChevronDown, ChevronRight, Archive, Eye, EyeOff,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { KanbanSkeleton } from "@/components/ui/skeleton";
@@ -23,6 +23,11 @@ const STATUS_COLUMNS = [
   { key: "ON_HOLD", label: "On Hold", color: "hsl(var(--kf-neutral))" },
 ];
 
+const ALL_STATUS_COLUMNS = [
+  ...STATUS_COLUMNS,
+  { key: "ARCHIVED", label: "Archived", color: "hsl(var(--kf-neutral))" },
+];
+
 const PROJECT_COLORS = [
   "#f97316", "#ef4444", "#8b5cf6", "#06b6d4", "#22c55e", "#eab308", "#ec4899", "#6366f1",
 ];
@@ -33,8 +38,10 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectColor, setNewProjectColor] = useState(PROJECT_COLORS[0]);
+  const [newProjectDueDate, setNewProjectDueDate] = useState("");
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
 
   const loadProjects = useCallback(async () => {
     if (!businessId) { setLoading(false); return; }
@@ -50,12 +57,17 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
 
   const handleCreateProject = async () => {
     if (!businessId || !newProjectName.trim()) return;
-    const res = await createProject(businessId, { name: newProjectName.trim(), color: newProjectColor });
+    const res = await createProject(businessId, {
+      name: newProjectName.trim(),
+      color: newProjectColor,
+      dueDate: newProjectDueDate || undefined,
+    });
     if (res.data) {
       setProjects((prev) => [res.data!, ...prev]);
       setExpandedProjects((prev) => new Set(prev).add(res.data!.id));
     }
     setNewProjectName("");
+    setNewProjectDueDate("");
     setShowNewProject(false);
   };
 
@@ -73,9 +85,9 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
     setMenuOpen(null);
   };
 
-  const handleAddTask = async (projectId: string, title: string) => {
+  const handleAddTask = async (projectId: string, title: string, dueDate?: string) => {
     if (!businessId || !title) return;
-    const res = await createProjectTask(businessId, projectId, { title });
+    const res = await createProjectTask(businessId, projectId, { title, dueDate });
     if (res.data) {
       setProjects((prev) =>
         prev.map((p) =>
@@ -108,6 +120,19 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
     );
   };
 
+  const handleUpdateTask = async (projectId: string, taskId: string, data: { dueDate?: string | null }) => {
+    if (!businessId) return;
+    await updateProjectTask(businessId, taskId, data);
+    const mapped = { dueDate: data.dueDate ?? undefined };
+    setProjects((prev) =>
+      prev.map((p) =>
+        p.id === projectId
+          ? { ...p, tasks: p.tasks.map((t) => (t.id === taskId ? { ...t, ...mapped } : t)) }
+          : p,
+      ),
+    );
+  };
+
   const toggleExpand = (projectId: string) => {
     setExpandedProjects((prev) => {
       const next = new Set(prev);
@@ -117,10 +142,18 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
     });
   };
 
-  const projectsByStatus = STATUS_COLUMNS.map((col) => ({
+  const visibleProjects = showArchived
+    ? projects
+    : projects.filter((p) => p.status !== "ARCHIVED");
+
+  const displayColumns = showArchived ? ALL_STATUS_COLUMNS : STATUS_COLUMNS;
+
+  const projectsByStatus = displayColumns.map((col) => ({
     ...col,
-    projects: projects.filter((p) => p.status === col.key),
+    projects: visibleProjects.filter((p) => p.status === col.key),
   }));
+
+  const archivedCount = projects.filter((p) => p.status === "ARCHIVED").length;
 
   if (loading) {
     return <KanbanSkeleton />;
@@ -129,17 +162,28 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <ExplainerButton
-          items={[
-            { title: "Create a Project", text: "Click '+ New Project' to set up a project with a name and color. Each project is a container for related tasks — like a client job, campaign, or event." },
-            { title: "Add Tasks", text: "Expand a project and add tasks — each is a specific action item (e.g. \"Design flyer\", \"Confirm venue\"). Check them off as you complete them." },
-            { title: "Kanban Board View", text: "Projects are displayed in columns by status: Active, In Progress, Completed, and On Hold. Move projects between statuses using the menu." },
-            { title: "Track Progress", text: "Each project shows a progress bar based on completed tasks. Open it to see all tasks and their status at a glance." },
-          ]}
-        />
+        <div className="flex items-center gap-3">
+          <ExplainerButton
+            items={[
+              { title: "Create a Project", text: "Click '+ New Project' to set up a project with a name and color. Each project is a container for related tasks — like a client job, campaign, or event." },
+              { title: "Add Tasks", text: "Expand a project and add tasks — each is a specific action item (e.g. \"Design flyer\", \"Confirm venue\"). Check them off as you complete them." },
+              { title: "Kanban Board View", text: "Projects are displayed in columns by status: Active, In Progress, Completed, and On Hold. Move projects between statuses using the menu." },
+              { title: "Track Progress", text: "Each project shows a progress bar based on completed tasks. Open it to see all tasks and their status at a glance." },
+            ]}
+          />
+          {archivedCount > 0 && (
+            <button
+              onClick={() => setShowArchived(!showArchived)}
+              className="inline-flex items-center gap-1.5 px-3 min-h-[44px] rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
+            >
+              {showArchived ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              {showArchived ? "Hide" : "Show"} Archived ({archivedCount})
+            </button>
+          )}
+        </div>
         <button
           onClick={() => setShowNewProject(true)}
-          className="kf-btn-primary px-4 py-2 rounded-xl text-sm font-medium inline-flex items-center gap-2"
+          className="kf-btn-primary px-4 min-h-[44px] rounded-xl text-sm font-medium inline-flex items-center gap-2"
         >
           <Plus className="w-4 h-4" />
           New Project
@@ -178,17 +222,26 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
                   />
                 ))}
               </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Due date:</span>
+                <input
+                  type="date"
+                  value={newProjectDueDate}
+                  onChange={(e) => setNewProjectDueDate(e.target.value)}
+                  className="bg-transparent border border-border/60 rounded-lg px-3 py-1.5 text-xs text-muted-foreground focus:outline-none focus:border-[hsl(var(--kf-accent1))]"
+                />
+              </div>
               <div className="flex gap-2">
                 <button
                   onClick={handleCreateProject}
                   disabled={!newProjectName.trim()}
-                  className="kf-btn-primary px-4 py-1.5 rounded-lg text-sm font-medium disabled:opacity-40"
+                  className="kf-btn-primary px-4 min-h-[44px] rounded-lg text-sm font-medium disabled:opacity-40"
                 >
                   Create
                 </button>
                 <button
-                  onClick={() => setShowNewProject(false)}
-                  className="px-4 py-1.5 rounded-lg text-sm text-muted-foreground hover:bg-muted/30"
+                  onClick={() => { setShowNewProject(false); setNewProjectDueDate(""); }}
+                  className="px-4 min-h-[44px] rounded-lg text-sm text-muted-foreground hover:bg-muted/30"
                 >
                   Cancel
                 </button>
@@ -208,7 +261,7 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
           onAction={() => setShowNewProject(true)}
         />
       ) : (
-      <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
+      <div className={`grid gap-4 grid-cols-1 md:grid-cols-2 ${showArchived ? "xl:grid-cols-5" : "xl:grid-cols-4"}`}>
         {projectsByStatus.map((column) => (
           <div key={column.key} className="space-y-3">
             <div className="flex items-center gap-2 px-1">
@@ -238,7 +291,7 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
                     >
                       <div className="p-3">
                         <div className="flex items-start gap-2">
-                          <button onClick={() => toggleExpand(project.id)} className="mt-0.5 text-muted-foreground hover:text-white">
+                          <button onClick={() => toggleExpand(project.id)} className="mt-0.5 text-muted-foreground hover:text-foreground">
                             {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                           </button>
                           <div className="flex-1 min-w-0">
@@ -256,12 +309,12 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
                           <div className="relative">
                             <button
                               onClick={() => setMenuOpen(menuOpen === project.id ? null : project.id)}
-                              className="p-1 text-muted-foreground hover:text-white rounded"
+                              className="p-1 text-muted-foreground hover:text-foreground rounded"
                             >
                               <MoreHorizontal className="w-4 h-4" />
                             </button>
                             {menuOpen === project.id && (
-                              <div className="absolute right-0 top-7 z-50 w-44 rounded-lg border border-border/60 bg-slate-900 p-1 shadow-xl">
+                              <div className="absolute right-0 top-7 z-50 w-44 rounded-lg border border-border/60 bg-card p-1 shadow-xl">
                                 {STATUS_COLUMNS.filter((s) => s.key !== project.status).map((s) => (
                                   <button
                                     key={s.key}
@@ -273,9 +326,28 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
                                   </button>
                                 ))}
                                 <div className="border-t border-border/40 my-1" />
+                                {project.status !== "ARCHIVED" && (
+                                  <button
+                                    onClick={() => handleUpdateProjectStatus(project.id, "ARCHIVED")}
+                                    className="w-full text-left px-3 py-1.5 text-xs rounded hover:bg-muted/30 flex items-center gap-2 text-muted-foreground"
+                                  >
+                                    <Archive className="w-3 h-3" />
+                                    Archive
+                                  </button>
+                                )}
+                                {project.status === "ARCHIVED" && (
+                                  <button
+                                    onClick={() => handleUpdateProjectStatus(project.id, "ACTIVE")}
+                                    className="w-full text-left px-3 py-1.5 text-xs rounded hover:bg-muted/30 flex items-center gap-2 text-muted-foreground"
+                                  >
+                                    <Archive className="w-3 h-3" />
+                                    Unarchive
+                                  </button>
+                                )}
                                 <button
                                   onClick={() => handleDeleteProject(project.id)}
-                                  className="w-full text-left px-3 py-1.5 text-xs rounded hover:bg-red-500/20 text-red-400 flex items-center gap-2"
+                                  className="w-full text-left px-3 py-1.5 text-xs rounded hover:bg-red-500/20 flex items-center gap-2"
+                                  style={{ color: "hsl(var(--kf-error))" }}
                                 >
                                   <Trash2 className="w-3 h-3" />
                                   Delete
@@ -317,6 +389,7 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
                                   onToggleTask={handleToggleTask}
                                   onDeleteTask={handleDeleteTask}
                                   onAddTask={handleAddTask}
+                                  onUpdateTask={handleUpdateTask}
                                 />
                               </div>
                             </motion.div>

@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import {
-  BarChart3, Download, Loader2, RefreshCw, ChevronDown, Send, Clock, Lightbulb, X
+  BarChart3, Download, Loader2, RefreshCw, ChevronDown, Send, Clock, Lightbulb, X, FileSpreadsheet, GitCompare
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/ui/page-header";
@@ -24,7 +24,7 @@ import { ClientsView } from "./components/clients-view";
 import { BookingsView } from "./components/bookings-view";
 import { MarketingView } from "./components/marketing-view";
 import { CashFlowForecastView } from "./components/cash-flow-forecast-view";
-import { exportReportPDF } from "./components/export-pdf";
+import { exportReportPDF, exportReportCSV } from "./components/export-pdf";
 
 const REPORT_TAB_KEYS = REPORT_TABS.map((t) => t.id);
 
@@ -42,6 +42,8 @@ export default function ReportsPage() {
   const [error, setError] = useState<string | null>(null);
   const [showContactPicker, setShowContactPicker] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportingCSV, setExportingCSV] = useState(false);
+  const [comparePrevious, setComparePrevious] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
 
@@ -87,7 +89,7 @@ export default function ReportsPage() {
 
     try {
       setError(null);
-      const result = await fetchReport(businessId, overrideTab || activeTab, startDate, endDate);
+      const result = await fetchReport(businessId, overrideTab || activeTab, startDate, endDate, comparePrevious);
       if (result.data) {
         setReport(result.data);
       } else {
@@ -100,11 +102,11 @@ export default function ReportsPage() {
       setLoading(false);
       setGenerating(false);
     }
-  }, [businessId, activeTab, datePreset, customStart, customEnd]);
+  }, [businessId, activeTab, datePreset, customStart, customEnd, comparePrevious]);
 
   useEffect(() => {
     if (businessId) void generateReport();
-  }, [businessId, activeTab, datePreset, generateReport]);
+  }, [businessId, activeTab, datePreset, comparePrevious, generateReport]);
 
   const exportPDF = useCallback(async () => {
     if (!report) return;
@@ -115,6 +117,18 @@ export default function ReportsPage() {
       console.error("PDF export error:", err);
     } finally {
       setExporting(false);
+    }
+  }, [report]);
+
+  const exportCSV = useCallback(() => {
+    if (!report) return;
+    setExportingCSV(true);
+    try {
+      exportReportCSV(report);
+    } catch (err) {
+      console.error("CSV export error:", err);
+    } finally {
+      setExportingCSV(false);
     }
   }, [report]);
 
@@ -138,7 +152,7 @@ export default function ReportsPage() {
               onClick={() => setShowGuide(!showGuide)}
               className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
                 showGuide
-                  ? "bg-amber-400 text-white shadow-md shadow-amber-400/40 scale-110"
+                  ? "bg-amber-400 text-foreground shadow-md shadow-amber-400/40 scale-110"
                   : "bg-amber-400/15 text-amber-400 hover:bg-amber-400/25 hover:shadow-sm hover:shadow-amber-400/20 hover:scale-105"
               }`}
               aria-label="Getting started guide"
@@ -200,14 +214,22 @@ export default function ReportsPage() {
             <button
               onClick={exportPDF}
               disabled={!report || exporting}
-              className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-[hsl(var(--kf-accent1))]/20 hover:bg-[hsl(var(--kf-accent1))]/30 text-[hsl(var(--kf-accent1))] transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-2 text-sm px-3 min-h-[44px] rounded-xl bg-[hsl(var(--kf-accent1))]/20 hover:bg-[hsl(var(--kf-accent1))]/30 text-[hsl(var(--kf-accent1))] transition-colors disabled:opacity-50"
             >
               {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-              Export PDF
+              PDF
+            </button>
+            <button
+              onClick={exportCSV}
+              disabled={!report || exportingCSV}
+              className="inline-flex items-center gap-2 text-sm px-3 min-h-[44px] rounded-xl bg-[hsl(var(--kf-accent2))]/20 hover:bg-[hsl(var(--kf-accent2))]/30 text-[hsl(var(--kf-accent2))] transition-colors disabled:opacity-50"
+            >
+              {exportingCSV ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+              CSV
             </button>
             <button
               onClick={() => setShowContactPicker(true)}
-              className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+              className="inline-flex items-center gap-2 text-sm px-3 min-h-[44px] rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
             >
               <Send className="w-4 h-4" />
               Broadcast
@@ -274,7 +296,7 @@ export default function ReportsPage() {
             />
             <button
               onClick={() => generateReport()}
-              className="text-sm px-3 py-2 rounded-xl bg-[hsl(var(--kf-accent1))] text-white hover:opacity-90 transition-opacity"
+              className="text-sm px-3 py-2 rounded-xl bg-[hsl(var(--kf-accent1))] text-foreground hover:opacity-90 transition-opacity"
             >
               Generate
             </button>
@@ -282,9 +304,21 @@ export default function ReportsPage() {
         )}
 
         <button
+          onClick={() => setComparePrevious(!comparePrevious)}
+          className={`inline-flex items-center gap-2 text-sm px-3 min-h-[44px] rounded-xl border transition-colors ${
+            comparePrevious
+              ? "bg-[hsl(var(--kf-accent1))]/15 border-[hsl(var(--kf-accent1))]/40 text-[hsl(var(--kf-accent1))]"
+              : "bg-slate-900/80 border-border/60 hover:border-border text-muted-foreground"
+          }`}
+        >
+          <GitCompare className="w-4 h-4" />
+          Compare
+        </button>
+
+        <button
           onClick={() => generateReport()}
           disabled={generating}
-          className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-slate-900/80 border border-border/60 hover:border-border transition-colors disabled:opacity-50"
+          className="inline-flex items-center gap-2 text-sm px-3 min-h-[44px] rounded-xl bg-slate-900/80 border border-border/60 hover:border-border transition-colors disabled:opacity-50"
         >
           {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
           Refresh
