@@ -16,6 +16,8 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { FeatureGuide } from "@/components/ui/feature-guide";
+import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { CRM_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { ContactsDatabase } from "./contacts-database";
 import { InsightsTab } from "./insights-tab";
 import { PipelineTabContent } from "./pipeline-tab-content";
@@ -214,15 +216,17 @@ export default function ContactsPage() {
         return <PlanLimitBanner resourceKey="contacts" label="contacts" currentUsage={cl.current} limit={cl.limit} isUnlimited={cl.isUnlimited} nearLimit={cl.nearLimit} atLimit={cl.atLimit} upgradeTo={cl.upgradeTo} />;
       })()}
 
-      <TabNav
-        tabs={[
-          { key: "contacts", label: "Contacts", icon: Users },
-          { key: "insights", label: "Insights", icon: BarChart3 },
-          { key: "studio", label: "Studio", icon: Layers },
-        ]}
-        activeTab={crmViewTab}
-        onTabChange={handleTabChange}
-      />
+      <div data-walkthrough="crm-tabs">
+        <TabNav
+          tabs={[
+            { key: "contacts", label: "Contacts", icon: Users },
+            { key: "insights", label: "Insights", icon: BarChart3 },
+            { key: "studio", label: "Studio", icon: Layers },
+          ]}
+          activeTab={crmViewTab}
+          onTabChange={handleTabChange}
+        />
+      </div>
 
       <div {...swipeHandlers} className="touch-pan-y">
         <AnimatePresence mode="wait" custom={slideDirection}>
@@ -315,6 +319,8 @@ export default function ContactsPage() {
         onConfirm={handleConfirmAction}
         onCancel={handleCancelConfirm}
       />
+
+      <ModuleWalkthrough moduleKey="crm" steps={CRM_WALKTHROUGH} />
     </div>
   );
 }

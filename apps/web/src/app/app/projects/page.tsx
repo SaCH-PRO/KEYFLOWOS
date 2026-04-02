@@ -5,6 +5,8 @@ import { FolderKanban, Send } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
 import { FeatureGuide } from "@/components/ui/feature-guide";
+import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { PROJECTS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { ContactPickerDrawer } from "@/components/contacts";
 import { ProjectBoard } from "./components/project-board";
 import { useProjectsAiHub } from "./hooks/use-projects-ai-hub";
@@ -48,6 +50,8 @@ export default function ProjectsPage() {
       <ProjectBoard businessId={businessId} />
 
       <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
+
+      <ModuleWalkthrough moduleKey="projects" steps={PROJECTS_WALKTHROUGH} />
     </div>
   );
 }

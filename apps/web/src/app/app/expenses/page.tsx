@@ -11,6 +11,9 @@ import { TabNav } from "@/components/ui/tab-nav";
 import { StatCards } from "@/components/ui/stat-cards";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { FeatureGuide } from "@/components/ui/feature-guide";
+import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { MetricExplainer } from "@/components/ui/metric-explainer";
+import { EXPENSES_WALKTHROUGH, METRIC_DEFINITIONS } from "@/lib/walkthrough-definitions";
 import { formatCurrency } from "./components/expense-utils";
 import { useExpensesData } from "./components/use-expenses-data";
 import { useExpensesAiHub } from "./hooks/use-expenses-ai-hub";
@@ -85,11 +88,13 @@ export default function ExpensesPage() {
         { label: "Budgets", value: d.budgets.length > 0 ? `${d.budgets.length} active` : "None set", sub: d.overBudgetCount > 0 ? <span style={{ color: "hsl(var(--kf-error))" }}>{d.overBudgetCount} over budget</span> : d.nearAlertCount > 0 ? <span style={{ color: "hsl(var(--kf-warning))" }}>{d.nearAlertCount} near limit</span> : "All on track", icon: Target, color: "hsl(var(--kf-info))" },
         { label: "Top Vendor", value: d.vendors[0]?.name ?? "---", sub: d.vendors[0] ? formatCurrency(d.vendors[0].total) : "No vendor data", icon: Store, color: "hsl(var(--kf-success))" },
       ]} />
-      <TabNav tabs={[
-        { key: "expenses", label: "Expenses", icon: Receipt },
-        { key: "budgets", label: "Budgets", icon: Target },
-        { key: "analytics", label: "Analytics", icon: BarChart3 },
-      ]} activeTab={activeTab} onTabChange={(k) => setActiveTab(k as Tab)} layoutId="expenses-tab-underline" />
+      <div data-walkthrough="expenses-tabs">
+        <TabNav tabs={[
+          { key: "expenses", label: "Expenses", icon: Receipt },
+          { key: "budgets", label: "Budgets", icon: Target },
+          { key: "analytics", label: "Analytics", icon: BarChart3 },
+        ]} activeTab={activeTab} onTabChange={(k) => setActiveTab(k as Tab)} layoutId="expenses-tab-underline" />
+      </div>
       {(activeTab === "expenses" || activeTab === "analytics") && (
         <ExpenseFilters period={d.period} setPeriod={d.setPeriod} customStart={d.customStart} setCustomStart={d.setCustomStart} customEnd={d.customEnd} setCustomEnd={d.setCustomEnd} searchQuery={d.searchQuery} setSearchQuery={d.setSearchQuery} />
       )}
@@ -112,6 +117,8 @@ export default function ExpensesPage() {
       </AnimatePresence>
       <AnimatePresence>{showModal && d.businessId && <ExpenseFormModal businessId={d.businessId} categories={d.categories} editingExpense={editingExpense} onClose={() => setShowModal(false)} onSaved={d.loadData} />}</AnimatePresence>
       <AnimatePresence>{detailExpense && <ExpenseDetailModal expense={detailExpense} onClose={() => setDetailExpense(null)} onEdit={openEditModal} />}</AnimatePresence>
+
+      <ModuleWalkthrough moduleKey="expenses" steps={EXPENSES_WALKTHROUGH} />
     </div>
   );
 }

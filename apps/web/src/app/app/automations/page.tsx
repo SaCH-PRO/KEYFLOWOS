@@ -6,6 +6,8 @@ import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { FeatureGuide } from "@/components/ui/feature-guide";
+import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { AUTOMATIONS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { usePlan } from "@/hooks/use-plan";
 import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
 import { AutomationList } from "./components/automation-list";
@@ -65,12 +67,14 @@ export default function AutomationsPage() {
         />
       )}
 
-      <TabNav
-        tabs={TABS}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        layoutId="automations-tab"
-      />
+      <div data-walkthrough="automations-list">
+        <TabNav
+          tabs={TABS}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          layoutId="automations-tab"
+        />
+      </div>
 
       {activeTab === "automations" && (
         <AutomationList
@@ -87,6 +91,8 @@ export default function AutomationsPage() {
       {activeTab === "log" && (
         <ExecutionLog businessId={businessId} />
       )}
+
+      <ModuleWalkthrough moduleKey="automations" steps={AUTOMATIONS_WALKTHROUGH} />
     </div>
   );
 }

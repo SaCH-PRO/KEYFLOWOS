@@ -10,6 +10,8 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { DashboardSkeleton } from "@/components/ui/skeleton";
+import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { TODAY_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { formatTTD } from "./_command/types";
 import { useCommandData } from "./_command/use-command-data";
 import { QuickActionBar } from "./_command/quick-action-bar";
@@ -110,7 +112,9 @@ export default function CommandPage() {
             )}
           </div>
         </div>
-        <QuickActionBar />
+        <div data-walkthrough="today-ai">
+          <QuickActionBar />
+        </div>
       </header>
 
       {businessSlug && hasServices && (
@@ -153,7 +157,7 @@ export default function CommandPage() {
         description="Clients can browse services and book directly from this link."
       />
 
-      <div className="order-1 sm:order-2 space-y-4">
+      <div className="order-1 sm:order-2 space-y-4" data-walkthrough="today-briefing">
         <CashFlowWidget businessId={d.businessId} />
         <PriorityQueue
           priorities={d.priorities}
@@ -179,7 +183,7 @@ export default function CommandPage() {
         />
       </div>
 
-      <div className="order-3 space-y-4">
+      <div className="order-3 space-y-4" data-walkthrough="today-actions">
         <NextBestActionWidget businessId={d.businessId} />
         <BriefingCard
           businessId={d.businessId}
@@ -187,6 +191,8 @@ export default function CommandPage() {
           initialCampaignBriefings={d.campaignBriefings}
         />
       </div>
+
+      <ModuleWalkthrough moduleKey="today" steps={TODAY_WALKTHROUGH} />
     </div>
   );
 }
