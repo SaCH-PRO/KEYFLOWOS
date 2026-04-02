@@ -147,6 +147,84 @@ export class BookingsService {
     const duration = booking.service?.duration ?? 60;
     const end = new Date(start.getTime() + duration * 60000);
 
+    const service = await this.prisma.client.service.findUnique({
+      where: { id: booking.serviceId },
+      select: { bufferMins: true, leadTimeMins: true },
+    });
+
+    if (service?.leadTimeMins && service.leadTimeMins > 0) {
+      const minStart = new Date(Date.now() + service.leadTimeMins * 60000);
+      if (start < minStart) {
+        throw new BadRequestException(
+          `This service requires at least ${service.leadTimeMins} minutes advance notice.`,
+        );
+      }
+    }
+
+    const bufferMins = service?.bufferMins ?? 0;
+    if (bufferMins > 0) {
+      const bufferMs = bufferMins * 60000;
+      const bufferedStart = new Date(start.getTime() - bufferMs);
+      const bufferedEnd = new Date(end.getTime() + bufferMs);
+      const staffFilter = booking.staffId ? { staffId: booking.staffId } : {};
+      const overlap = await this.prisma.client.booking.findFirst({
+        where: {
+          businessId,
+          ...staffFilter,
+          id: { not: booking.id },
+          status: { not: 'CANCELLED' },
+          deletedAt: null,
+          startTime: { lt: bufferedEnd },
+          endTime: { gt: bufferedStart },
+        },
+      });
+      if (overlap) {
+        throw new BadRequestException(
+          `This time conflicts with another booking (including ${bufferMins}-min buffer).`,
+        );
+      }
+    }
+
+    if (booking.staffId) {
+      const staffAvailabilities = await this.prisma.client.availability.findMany({
+        where: {
+          staffId: booking.staffId,
+          staff: { businessId, deletedAt: null },
+        },
+      });
+      if (staffAvailabilities.length > 0) {
+        const dayOfWeek = start.getDay();
+        const slotAvail = staffAvailabilities.filter((a) => a.dayOfWeek === dayOfWeek);
+        if (slotAvail.length === 0) {
+          throw new BadRequestException('The selected staff member is not available on this day.');
+        }
+        const startMinsOfDay = start.getHours() * 60 + start.getMinutes();
+        const endMinsOfDay = (end.getHours() * 60 + end.getMinutes()) || 1440;
+        const withinAny = slotAvail.some((a) => {
+          const [sh, sm] = a.startTime.split(':').map(Number);
+          const [eh, em] = a.endTime.split(':').map(Number);
+          return startMinsOfDay >= sh * 60 + sm && endMinsOfDay <= eh * 60 + em;
+        });
+        if (!withinAny) {
+          throw new BadRequestException('The selected time is outside this staff member\'s available hours.');
+        }
+      }
+    }
+
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { businessHours: true },
+    });
+    const hours = (business as any)?.businessHours as Record<string, { open: string; close: string; closed: boolean }> | null;
+    if (hours) {
+      const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+      const dayKey = dayKeys[start.getDay()];
+      const dayHours = hours[dayKey];
+      if (dayHours?.closed) {
+        throw new BadRequestException('The business is closed on this day.');
+      }
+    }
+
     const updated = await this.prisma.client.booking.update({
       where: { id: bookingId },
       data: { startTime: start, endTime: end },
@@ -488,5 +566,27 @@ export class BookingsService {
     } catch (err) {
       this.logger.error(`Failed to auto-generate invoice for booking ${booking.id}: ${(err as Error).message}`);
     }
+  }
+
+  async getReminderSettings(businessId: string) {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { bookingReminderMins: true },
+    });
+    if (!business) throw new BadRequestException('Business not found');
+    return { bookingReminderMins: business.bookingReminderMins };
+  }
+
+  async updateReminderSettings(businessId: string, bookingReminderMins: number) {
+    const validOptions = [15, 30, 60, 120, 1440, 2880];
+    if (!validOptions.includes(bookingReminderMins)) {
+      throw new BadRequestException('Invalid reminder interval. Valid options: 15, 30, 60, 120, 1440, 2880 minutes.');
+    }
+    const updated = await this.prisma.client.business.update({
+      where: { id: businessId },
+      data: { bookingReminderMins },
+      select: { bookingReminderMins: true },
+    });
+    return { bookingReminderMins: updated.bookingReminderMins };
   }
 }

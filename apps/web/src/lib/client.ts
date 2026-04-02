@@ -1177,6 +1177,21 @@ export async function updateBookingNotes(bookingId: string, notes: string, busin
   });
 }
 
+export async function fetchReminderSettings(businessId?: string) {
+  const bId = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet<{ bookingReminderMins: number }>(
+    `/bookings/businesses/${encodeURIComponent(bId)}/reminder-settings`
+  );
+}
+
+export async function updateReminderSettings(bookingReminderMins: number, businessId?: string) {
+  const bId = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPatch<{ bookingReminderMins: number }>(
+    `/bookings/businesses/${encodeURIComponent(bId)}/reminder-settings`,
+    { bookingReminderMins },
+  );
+}
+
 export async function fetchStaffAvailability(businessId: string, staffId: string) {
   return apiGet<{ id: string; dayOfWeek: number; startTime: string; endTime: string }[]>(
     `/bookings/businesses/${encodeURIComponent(businessId)}/staff/${encodeURIComponent(staffId)}/availability`

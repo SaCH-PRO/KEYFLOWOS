@@ -10,6 +10,7 @@ import {
   LogIn,
   FileText,
   RotateCcw,
+  StickyNote,
 } from "lucide-react";
 import type { Booking } from "../components/bookings-types";
 import { formatAmount } from "../../commerce/utils/commerce-utils";
@@ -180,6 +181,9 @@ export default function DayTimeline({
                               >
                                 {b.status}
                               </span>
+                              {b.notes && (
+                                <StickyNote className="w-3 h-3 text-muted-foreground opacity-60" title="Has notes" />
+                              )}
                             </div>
                             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                               <span className="flex items-center gap-1">

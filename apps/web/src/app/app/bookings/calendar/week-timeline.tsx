@@ -6,6 +6,7 @@ import {
   LogIn,
   FileText,
   RotateCcw,
+  StickyNote,
 } from "lucide-react";
 import type { Booking } from "../components/bookings-types";
 import { contactName, formatTime } from "../components/bookings-types";
@@ -178,12 +179,16 @@ export default function WeekTimeline({
                           }}
                           title={`${formatTime(b.startTime)} - ${contactName(b)} - ${b.service?.name ?? "Service"}`}
                         >
+
                           <button
                             onClick={() => onSelectBooking(b)}
                             className="flex-1 min-w-0 text-left"
                           >
-                            <div className="font-medium truncate">
+                            <div className="font-medium truncate flex items-center gap-0.5">
                               {formatTime(b.startTime)}
+                              {b.notes && (
+                                <StickyNote className="w-2 h-2 opacity-60 shrink-0" title="Has notes" />
+                              )}
                             </div>
                             <div className="truncate opacity-80">
                               {b.service?.name ?? contactName(b)}

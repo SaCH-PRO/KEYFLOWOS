@@ -368,4 +368,19 @@ export class BookingsController {
   getRebookingSuggestions(@Param('businessId') businessId: string) {
     return this.optimizer.getRebookingSuggestions(businessId);
   }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/reminder-settings')
+  async getReminderSettings(@Param('businessId') businessId: string) {
+    return this.bookings.getReminderSettings(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/reminder-settings')
+  async updateReminderSettings(
+    @Param('businessId') businessId: string,
+    @Body() body: { bookingReminderMins: number },
+  ) {
+    return this.bookings.updateReminderSettings(businessId, body.bookingReminderMins);
+  }
 }

@@ -342,29 +342,38 @@ function ServiceTimingEditor({ serviceId, businessId, initialBuffer, initialLead
   );
 }
 
-const REMINDER_KEY = "kf_booking_reminder_mins";
-
 function ReminderConfig({ businessId }: { businessId?: string | null }) {
-  const [reminderMins, setReminderMins] = useState(() => {
-    if (typeof window === "undefined") return 60;
-    try {
-      const stored = localStorage.getItem(`${REMINDER_KEY}_${businessId ?? "default"}`);
-      return stored ? Number(stored) : 60;
-    } catch { return 60; }
-  });
+  const [reminderMins, setReminderMins] = useState(60);
   const [saved, setSaved] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!businessId) return;
+    let cancelled = false;
+    (async () => {
+      const { fetchReminderSettings } = await import("@/lib/client");
+      const res = await fetchReminderSettings(businessId);
+      if (!cancelled && res.data) {
+        setReminderMins(res.data.bookingReminderMins);
+      }
+      if (!cancelled) setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [businessId]);
 
   const handleChange = (value: number) => {
     setReminderMins(value);
     setSaved(false);
   };
 
-  const handleSave = () => {
-    try {
-      localStorage.setItem(`${REMINDER_KEY}_${businessId ?? "default"}`, String(reminderMins));
+  const handleSave = async () => {
+    if (!businessId) return;
+    const { updateReminderSettings } = await import("@/lib/client");
+    const res = await updateReminderSettings(reminderMins, businessId);
+    if (res.data) {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-    } catch {}
+    }
   };
 
   return (

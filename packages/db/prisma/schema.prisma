@@ -165,6 +165,9 @@ model Business {
   storeEnabled      Boolean @default(true) @map("store_enabled")
   onboardingComplete Boolean @default(false) @map("onboarding_complete")
 
+  // Booking Reminder (minutes before appointment to send reminder email)
+  bookingReminderMins Int @default(60) @map("booking_reminder_mins")
+
   // Business Hours (JSON: { "mon": { "open": "09:00", "close": "17:00", "closed": false }, ... })
   businessHours Json? @map("business_hours")
 
