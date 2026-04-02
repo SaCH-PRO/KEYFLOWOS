@@ -23,6 +23,21 @@ async function fetchBusiness(slug: string) {
   }
 }
 
+async function fetchStorefrontConfig(slug: string) {
+  try {
+    const res = await fetch(`${API_BASE}/site/storefront/public/${encodeURIComponent(slug)}`, {
+      next: { revalidate: 300 },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data?.storefront ?? null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function generateMetadata(
   { params }: Props,
   parent: ResolvingMetadata
@@ -37,23 +52,28 @@ export async function generateMetadata(
     };
   }
 
-  const description = biz.tagline || `Book an appointment with ${biz.name} online.`;
+  const sfConfig = await fetchStorefrontConfig(slug);
+  const seo = sfConfig?.seo as { metaTitle?: string; metaDescription?: string; ogImage?: string } | undefined;
+
+  const title = seo?.metaTitle || `${biz.name} | Book Online`;
+  const description = seo?.metaDescription || biz.tagline || `Book an appointment with ${biz.name} online.`;
+  const ogImage = seo?.ogImage || biz.logoUrl;
 
   return {
-    title: `${biz.name} | Book Online`,
+    title,
     description,
     openGraph: {
-      title: `${biz.name} | Book Online`,
+      title,
       description,
       type: "website",
       siteName: "KeyFlowOS",
-      ...(biz.logoUrl ? { images: [{ url: biz.logoUrl, width: 200, height: 200, alt: biz.name }] } : {}),
+      ...(ogImage ? { images: [{ url: ogImage, width: ogImage === biz.logoUrl ? 200 : 1200, height: ogImage === biz.logoUrl ? 200 : 630, alt: biz.name }] } : {}),
     },
     twitter: {
-      card: "summary",
-      title: `${biz.name} | Book Online`,
+      card: seo?.ogImage ? "summary_large_image" : "summary",
+      title,
       description,
-      ...(biz.logoUrl ? { images: [biz.logoUrl] } : {}),
+      ...(ogImage ? { images: [ogImage] } : {}),
     },
   };
 }

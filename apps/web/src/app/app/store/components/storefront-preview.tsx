@@ -83,7 +83,7 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
   const ts = getThemeStyles(theme, pc, sc, ac);
 
   const storeNames = new Set(services.map((s) => s.name));
-  const allItems: PreviewItem[] = [
+  const unsortedItems: PreviewItem[] = [
     ...services.map((s) => ({
       id: s.id,
       name: s.name,
@@ -119,6 +119,18 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
         itemType: "package" as const,
       })),
   ];
+
+  const productOrder = (config?.catalog as any)?.productOrder as string[] | undefined;
+  const allItems = productOrder?.length
+    ? (() => {
+        const orderMap = new Map(productOrder.map((id, idx) => [id, idx]));
+        return [...unsortedItems].sort((a, b) => {
+          const ai = orderMap.get(a.id) ?? Infinity;
+          const bi = orderMap.get(b.id) ?? Infinity;
+          return ai - bi;
+        });
+      })()
+    : unsortedItems;
 
   const hasServices = allItems.some((i) => i.itemType === "service");
   const hasProducts = allItems.some((i) => i.itemType === "product");
