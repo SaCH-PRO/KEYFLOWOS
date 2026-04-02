@@ -21,41 +21,49 @@ export function MarketingView({ report }: MarketingViewProps) {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <MetricCard
-          label="Campaigns Sent"
-          value={String(campaignsSent)}
-          icon={Megaphone}
-          color="text-[hsl(var(--kf-accent1))]"
-          explanation="Number of email/SMS campaigns sent in this period."
-        />
-        <MetricCard
-          label="Avg Open Rate"
-          value={`${avgOpenRate}%`}
-          icon={Mail}
-          color="text-[hsl(var(--kf-info))]"
-          subtext={avgOpenRate > 20 ? "Above average" : "Below average"}
-          trend={avgOpenRate > 20 ? "up" : "down"}
-          explanation="Percentage of recipients who opened your campaigns."
-          formula="(Unique Opens ÷ Delivered) × 100"
-          goodValue="20-25% is industry average. Above 30% is excellent."
-        />
-        <MetricCard
-          label="Total Clicks"
-          value={String(totalClicks)}
-          icon={MousePointer}
-          color="text-[hsl(var(--kf-success))]"
-          explanation="Total link clicks across all campaigns in this period."
-          goodValue="Higher clicks indicate compelling content and CTAs."
-        />
-        <MetricCard
-          label="Form Submissions"
-          value={String(formSubmissions)}
-          icon={Users}
-          color="text-[hsl(var(--kf-warning))]"
-          subtext="leads captured"
-          explanation="Number of lead form submissions from your marketing forms."
-          goodValue="Track conversion from form views to submissions."
-        />
+        <Link href="/app/marketing?tab=calendar">
+          <MetricCard
+            label="Campaigns Sent"
+            value={String(campaignsSent)}
+            icon={Megaphone}
+            color="text-[hsl(var(--kf-accent1))]"
+            explanation="Number of email/SMS campaigns sent in this period."
+          />
+        </Link>
+        <Link href="/app/marketing?tab=performance">
+          <MetricCard
+            label="Avg Open Rate"
+            value={`${avgOpenRate}%`}
+            icon={Mail}
+            color="text-[hsl(var(--kf-info))]"
+            subtext={avgOpenRate > 20 ? "Above average" : "Below average"}
+            trend={avgOpenRate > 20 ? "up" : "down"}
+            explanation="Percentage of recipients who opened your campaigns."
+            formula="(Unique Opens ÷ Delivered) × 100"
+            goodValue="20-25% is industry average. Above 30% is excellent."
+          />
+        </Link>
+        <Link href="/app/marketing?tab=performance">
+          <MetricCard
+            label="Total Clicks"
+            value={String(totalClicks)}
+            icon={MousePointer}
+            color="text-[hsl(var(--kf-success))]"
+            explanation="Total link clicks across all campaigns in this period."
+            goodValue="Higher clicks indicate compelling content and CTAs."
+          />
+        </Link>
+        <Link href="/app/marketing?tab=audiences">
+          <MetricCard
+            label="Form Submissions"
+            value={String(formSubmissions)}
+            icon={Users}
+            color="text-[hsl(var(--kf-warning))]"
+            subtext="leads captured"
+            explanation="Number of lead form submissions from your marketing forms."
+            goodValue="Track conversion from form views to submissions."
+          />
+        </Link>
       </div>
 
       {(report.aiNarrative || report.narrative) && (
