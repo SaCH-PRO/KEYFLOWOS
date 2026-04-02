@@ -193,6 +193,7 @@ function PipelineToolbarInner({
           className="p-2 rounded-xl bg-gradient-to-br from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all flex-shrink-0"
           aria-label="Add contact"
           title="Add contact"
+          data-walkthrough="crm-add"
         >
           <Plus className="w-4 h-4" />
         </button>
@@ -316,7 +317,7 @@ function PipelineToolbarInner({
         )}
       </AnimatePresence>
 
-      <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
+      <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide pb-0.5" data-walkthrough="crm-segments">
         {SMART_SEGMENTS.map(({ key, label, icon: SIcon, color }) => {
           const count = segmentCounts[key];
           const isActive = activeSegment === key;

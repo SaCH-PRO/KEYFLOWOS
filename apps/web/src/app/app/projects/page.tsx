@@ -6,6 +6,7 @@ import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { RichTooltip } from "@/components/ui/rich-tooltip";
 import { PROJECTS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { ContactPickerDrawer } from "@/components/contacts";
 import { ProjectBoard } from "./components/project-board";
@@ -25,13 +26,15 @@ export default function ProjectsPage() {
         title="Projects"
         subtitle="Organize and track your work"
         rightSlot={
-          <button
-            onClick={() => setShowContactPicker(true)}
-            className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <Send className="w-4 h-4" />
-            Broadcast
-          </button>
+          <RichTooltip title="Broadcast Update" description="Send a project update to selected contacts via the CRM.">
+            <button
+              onClick={() => setShowContactPicker(true)}
+              className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Send className="w-4 h-4" />
+              Broadcast
+            </button>
+          </RichTooltip>
         }
       />
 
@@ -47,7 +50,9 @@ export default function ProjectsPage() {
         ]}
       />
 
-      <ProjectBoard businessId={businessId} />
+      <div data-walkthrough="projects-board">
+        <ProjectBoard businessId={businessId} />
+      </div>
 
       <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
 

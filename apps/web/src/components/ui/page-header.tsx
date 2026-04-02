@@ -5,12 +5,13 @@ import { Plus } from "lucide-react";
 interface PageHeaderProps {
   icon: React.ElementType;
   title: string;
-  subtitle?: string;
+  subtitle?: React.ReactNode;
   actionLabel?: string;
   actionIcon?: React.ElementType;
   onAction?: () => void;
   rightSlot?: React.ReactNode;
   titleExtra?: React.ReactNode;
+  actionDataAttr?: string;
 }
 
 export function PageHeader({
@@ -22,6 +23,7 @@ export function PageHeader({
   onAction,
   rightSlot,
   titleExtra,
+  actionDataAttr,
 }: PageHeaderProps) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
@@ -48,6 +50,7 @@ export function PageHeader({
           <button
             onClick={onAction}
             className="kf-btn-primary inline-flex items-center gap-1.5 kf-text-caption !py-1.5 !px-3"
+            {...(actionDataAttr ? { "data-walkthrough": actionDataAttr } : {})}
           >
             <ActionIcon className="w-3.5 h-3.5" />
             {actionLabel}

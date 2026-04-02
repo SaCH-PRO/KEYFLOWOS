@@ -7,6 +7,8 @@ import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { AiBadge } from "@/components/ui/ai-badge";
+import { InfoBadge } from "@/components/ui/info-badge";
 import { AUTOMATIONS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { usePlan } from "@/hooks/use-plan";
 import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
@@ -42,7 +44,7 @@ export default function AutomationsPage() {
       <PageHeader
         icon={Zap}
         title="Automations"
-        subtitle="Build workflows that run your business on autopilot"
+        subtitle={<span className="inline-flex items-center gap-1.5">Build workflows that run your business on autopilot <AiBadge label="AI-Powered" compact /></span>}
       />
 
       <FeatureGuide
@@ -85,7 +87,9 @@ export default function AutomationsPage() {
       )}
 
       {activeTab === "templates" && (
-        <TemplateGallery onSelect={handleTemplateSelect} businessId={businessId} />
+        <div data-walkthrough="automations-templates">
+          <TemplateGallery onSelect={handleTemplateSelect} businessId={businessId} />
+        </div>
       )}
 
       {activeTab === "log" && (

@@ -289,7 +289,7 @@ export default function ReportsPage() {
         </button>
       </div>
 
-      <div ref={reportRef}>
+      <div ref={reportRef} data-walkthrough="reports-ai">
         {error && (
           <div className="rounded-xl border p-4 text-sm mb-4" style={{ borderColor: "hsl(var(--kf-error) / 0.3)", background: "hsl(var(--kf-error) / 0.1)", color: "hsl(var(--kf-error))" }}>
             {error}

@@ -3,12 +3,12 @@
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import { AnimatePresence } from "framer-motion";
-import { Receipt, DollarSign, Target, Store, Download, ArrowUp, ArrowDown, Minus, BarChart3 } from "lucide-react";
+import { Receipt, DollarSign, Target, Store, Download, ArrowUp, ArrowDown, Minus, BarChart3, Sparkles } from "lucide-react";
 import { deleteExpense, getExpenseExportUrl, Expense } from "@/lib/client";
 import { getAuthHeaders } from "@/lib/api";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
-import { StatCards } from "@/components/ui/stat-cards";
+
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
@@ -79,15 +79,53 @@ export default function ExpensesPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader icon={Receipt} title="Expenses" subtitle="Track, analyze, and optimize your business spending" actionLabel="Add Expense" onAction={openAddModal}
+      <PageHeader icon={Receipt} title="Expenses" subtitle="Track, analyze, and optimize your business spending" actionLabel="Add Expense" onAction={openAddModal} actionDataAttr="expenses-add"
         rightSlot={<button onClick={handleExport} className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"><Download className="w-4 h-4" /> Export CSV</button>} />
       <FeatureGuide featureKey="expenses" title="Getting Started with Expenses" description="Track spending, set budgets, and manage vendors" steps={GUIDE_STEPS} />
-      <StatCards items={[
-        { label: "Total Spent", value: formatCurrency(d.summary?.total ?? 0), sub: <ChangeIndicator value={d.summary?.comparison?.changePercent ?? 0} />, icon: DollarSign, color: "hsl(var(--kf-error))" },
-        { label: "Transactions", value: String(d.summary?.count ?? 0), sub: `Avg ${formatCurrency(d.summary?.averageExpense ?? 0)}`, icon: Receipt, color: "hsl(var(--kf-accent1))" },
-        { label: "Budgets", value: d.budgets.length > 0 ? `${d.budgets.length} active` : "None set", sub: d.overBudgetCount > 0 ? <span style={{ color: "hsl(var(--kf-error))" }}>{d.overBudgetCount} over budget</span> : d.nearAlertCount > 0 ? <span style={{ color: "hsl(var(--kf-warning))" }}>{d.nearAlertCount} near limit</span> : "All on track", icon: Target, color: "hsl(var(--kf-info))" },
-        { label: "Top Vendor", value: d.vendors[0]?.name ?? "---", sub: d.vendors[0] ? formatCurrency(d.vendors[0].total) : "No vendor data", icon: Store, color: "hsl(var(--kf-success))" },
-      ]} />
+      <div data-walkthrough="expenses-kpi">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+          <MetricExplainer label={METRIC_DEFINITIONS.budget_utilization.label} explanation="Total amount spent across all tracked expenses for the selected period." formula="Sum of all expense amounts" goodValue="Compare month-over-month to spot spending trends.">
+            <div className="rounded-xl border border-border/50 bg-card p-3 flex items-center gap-2.5">
+              <div className="p-1.5 rounded-lg shrink-0" style={{ background: "hsl(var(--kf-error) / 0.1)" }}><DollarSign className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-error))" }} /></div>
+              <div className="min-w-0">
+                <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Total Spent</span>
+                <span className="text-sm font-bold" style={{ color: "hsl(var(--kf-error))" }}>{formatCurrency(d.summary?.total ?? 0)}</span>
+                <div className="mt-0.5"><ChangeIndicator value={d.summary?.comparison?.changePercent ?? 0} /></div>
+              </div>
+            </div>
+          </MetricExplainer>
+          <MetricExplainer label="Transactions" explanation="Number of individual expense records logged in the selected period." formula="Count of expense entries" goodValue="Track frequency to ensure all expenses are being captured.">
+            <div className="rounded-xl border border-border/50 bg-card p-3 flex items-center gap-2.5">
+              <div className="p-1.5 rounded-lg shrink-0" style={{ background: "hsl(var(--kf-accent1) / 0.1)" }}><Receipt className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} /></div>
+              <div className="min-w-0">
+                <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Transactions</span>
+                <span className="text-sm font-bold">{String(d.summary?.count ?? 0)}</span>
+                <span className="text-[10px] text-muted-foreground block mt-0.5">Avg {formatCurrency(d.summary?.averageExpense ?? 0)}</span>
+              </div>
+            </div>
+          </MetricExplainer>
+          <MetricExplainer label={METRIC_DEFINITIONS.budget_utilization.label} explanation={METRIC_DEFINITIONS.budget_utilization.explanation} formula={METRIC_DEFINITIONS.budget_utilization.formula} goodValue={METRIC_DEFINITIONS.budget_utilization.goodValue}>
+            <div className="rounded-xl border border-border/50 bg-card p-3 flex items-center gap-2.5">
+              <div className="p-1.5 rounded-lg shrink-0" style={{ background: "hsl(var(--kf-info) / 0.1)" }}><Target className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-info))" }} /></div>
+              <div className="min-w-0">
+                <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Budgets</span>
+                <span className="text-sm font-bold">{d.budgets.length > 0 ? `${d.budgets.length} active` : "None set"}</span>
+                <span className="text-[10px] block mt-0.5">{d.overBudgetCount > 0 ? <span style={{ color: "hsl(var(--kf-error))" }}>{d.overBudgetCount} over budget</span> : d.nearAlertCount > 0 ? <span style={{ color: "hsl(var(--kf-warning))" }}>{d.nearAlertCount} near limit</span> : <span className="text-muted-foreground">All on track</span>}</span>
+              </div>
+            </div>
+          </MetricExplainer>
+          <MetricExplainer label="Top Vendor" explanation="The vendor you've spent the most with during the selected period." goodValue="Know your biggest suppliers to negotiate better rates.">
+            <div className="rounded-xl border border-border/50 bg-card p-3 flex items-center gap-2.5">
+              <div className="p-1.5 rounded-lg shrink-0" style={{ background: "hsl(var(--kf-success) / 0.1)" }}><Store className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-success))" }} /></div>
+              <div className="min-w-0">
+                <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Top Vendor</span>
+                <span className="text-sm font-bold">{d.vendors[0]?.name ?? "---"}</span>
+                <span className="text-[10px] text-muted-foreground block mt-0.5">{d.vendors[0] ? formatCurrency(d.vendors[0].total) : "No vendor data"}</span>
+              </div>
+            </div>
+          </MetricExplainer>
+        </div>
+      </div>
       <div data-walkthrough="expenses-tabs">
         <TabNav tabs={[
           { key: "expenses", label: "Expenses", icon: Receipt },
@@ -106,7 +144,7 @@ export default function ExpensesPage() {
           </div>
         )}
         {activeTab === "budgets" && (
-          <div className="space-y-6">
+          <div className="space-y-6" data-walkthrough="expenses-budgets">
             {d.businessId && <ExpenseBudgetsTab businessId={d.businessId} budgets={d.budgets} categories={d.categories} onReload={d.loadData} />}
             {d.businessId && <ExpenseCategoriesTab businessId={d.businessId} categories={d.categories} setCategories={d.setCategories} />}
           </div>
