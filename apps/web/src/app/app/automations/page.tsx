@@ -8,7 +8,7 @@ import { TabNav } from "@/components/ui/tab-nav";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { ModuleWalkthrough, WalkthroughTrigger } from "@/components/ui/module-walkthrough";
 import { AiBadge } from "@/components/ui/ai-badge";
-import { InfoBadge } from "@/components/ui/info-badge";
+
 import { AUTOMATIONS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { usePlan } from "@/hooks/use-plan";
 import { UpgradePrompt } from "@/components/ui/upgrade-prompt";

@@ -18,6 +18,9 @@ import {
   FolderKanban,
   Zap,
   ShoppingBag,
+  BookOpen,
+  GraduationCap,
+  Play,
   Palette,
   Share2,
   Target,
@@ -232,6 +235,27 @@ export const TODAY_WALKTHROUGH: WalkthroughStep[] = [
     title: "Next Best Actions",
     description: "AI analyzes your entire business and suggests the most impactful actions you should take today.",
     icon: Sparkles,
+  },
+];
+
+export const LEARN_WALKTHROUGH: WalkthroughStep[] = [
+  {
+    target: "[data-walkthrough='learn-catalog']",
+    title: "Course Catalog",
+    description: "Browse available courses and masterclasses to level up your business skills.",
+    icon: BookOpen,
+  },
+  {
+    target: "[data-walkthrough='learn-progress']",
+    title: "My Learning",
+    description: "Track your enrolled courses, completion progress, and pick up where you left off.",
+    icon: Play,
+  },
+  {
+    target: "[data-walkthrough='learn-certificates']",
+    title: "Certificates",
+    description: "Earn certificates as you complete courses — share them to build credibility.",
+    icon: GraduationCap,
   },
 ];
 

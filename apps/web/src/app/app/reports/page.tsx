@@ -10,7 +10,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatCardSkeleton, ChartSkeleton } from "@/components/ui/skeleton";
 import { TabNav } from "@/components/ui/tab-nav";
-import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { ModuleWalkthrough, WalkthroughTrigger } from "@/components/ui/module-walkthrough";
 import { REPORTS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { ContactPickerDrawer } from "@/components/contacts";
 import { fetchReport, GeneratedReport } from "@/lib/client";
@@ -131,7 +131,8 @@ export default function ReportsPage() {
         title="Reports"
         subtitle="Generate intelligent business reports with AI-powered insights"
         titleExtra={
-          <div className="relative">
+          <div className="relative flex items-center gap-2">
+            <WalkthroughTrigger moduleKey="reports" />
             <button
               onClick={() => setShowGuide(!showGuide)}
               className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${

@@ -20,6 +20,8 @@ import {
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
+import { ModuleWalkthrough, WalkthroughTrigger } from "@/components/ui/module-walkthrough";
+import { LEARN_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { LearnSkeleton } from "./components/learn-skeleton";
@@ -170,7 +172,8 @@ export default function LearnPage() {
         title="MasterClass"
         subtitle="Level up your business skills"
         titleExtra={
-          <div className="relative">
+          <div className="relative flex items-center gap-2">
+            <WalkthroughTrigger moduleKey="learn" />
             <button
               onClick={() => setShowGuide(!showGuide)}
               className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
@@ -256,6 +259,7 @@ export default function LearnPage() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: slideDirection * -60 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
+              data-walkthrough="learn-progress"
             >
               <ProgressTracker
                 enrolledCourses={enrolledCourses}
@@ -272,6 +276,7 @@ export default function LearnPage() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: slideDirection * -60 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
+              data-walkthrough="learn-catalog"
             >
               <CourseCatalog
                 courses={courses}
@@ -291,6 +296,7 @@ export default function LearnPage() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: slideDirection * -60 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
+              data-walkthrough="learn-certificates"
             >
               <ProgressTracker
                 enrolledCourses={completedCourses}
@@ -300,6 +306,7 @@ export default function LearnPage() {
           )}
         </AnimatePresence>
       </div>
+      <ModuleWalkthrough moduleKey="learn" steps={LEARN_WALKTHROUGH} />
     </div>
   );
 }
