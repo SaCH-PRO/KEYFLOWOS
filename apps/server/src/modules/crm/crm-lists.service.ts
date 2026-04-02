@@ -1,4 +1,5 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Injectable()
@@ -108,36 +109,40 @@ export class CrmListsService {
     if (!list) throw new NotFoundException('Contact list not found');
 
     if (list.type === 'SMART' && list.filters) {
-      const filters = list.filters as Record<string, any>;
-      const where: any = { businessId: input.businessId, deletedAt: null };
+      const filters = list.filters as Record<string, unknown>;
+      const where: Prisma.ContactWhereInput = { businessId: input.businessId, deletedAt: null };
+      let createdAtFilter: Prisma.DateTimeFilter = {};
       if (filters.status && Array.isArray(filters.status) && filters.status.length > 0) {
-        where.status = { in: filters.status };
+        where.status = { in: filters.status as string[] };
       }
       if (filters.tags && Array.isArray(filters.tags) && filters.tags.length > 0) {
-        where.tags = { hasSome: filters.tags };
+        where.tags = { hasSome: filters.tags as string[] };
       }
       if (filters.source && Array.isArray(filters.source) && filters.source.length > 0) {
-        where.source = { in: filters.source };
+        where.source = { in: filters.source as string[] };
       }
       if (filters.lifecycleStage && Array.isArray(filters.lifecycleStage) && filters.lifecycleStage.length > 0) {
-        where.lifecycleStage = { in: filters.lifecycleStage };
+        where.lifecycleStage = { in: filters.lifecycleStage as string[] };
       }
       if (filters.createdWithinDays && typeof filters.createdWithinDays === 'number' && filters.createdWithinDays > 0) {
         const cutoff = new Date();
         cutoff.setDate(cutoff.getDate() - filters.createdWithinDays);
-        where.createdAt = { ...((where.createdAt as any) ?? {}), gte: cutoff };
+        createdAtFilter = { ...createdAtFilter, gte: cutoff };
       }
       if (filters.createdAfter && typeof filters.createdAfter === 'string') {
         const afterDate = new Date(filters.createdAfter);
         if (!isNaN(afterDate.getTime())) {
-          where.createdAt = { ...((where.createdAt as any) ?? {}), gte: afterDate };
+          createdAtFilter = { ...createdAtFilter, gte: afterDate };
         }
       }
       if (filters.createdBefore && typeof filters.createdBefore === 'string') {
         const beforeDate = new Date(filters.createdBefore);
         if (!isNaN(beforeDate.getTime())) {
-          where.createdAt = { ...((where.createdAt as any) ?? {}), lte: beforeDate };
+          createdAtFilter = { ...createdAtFilter, lte: beforeDate };
         }
+      }
+      if (Object.keys(createdAtFilter).length > 0) {
+        where.createdAt = createdAtFilter;
       }
       if (filters.minLeadScore && typeof filters.minLeadScore === 'number' && filters.minLeadScore > 0) {
         where.leadScore = { gte: filters.minLeadScore };
