@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   Search,
   ArrowRight,
-  Link2,
   User,
   FileText,
   Calendar,
@@ -16,15 +15,27 @@ import {
   Zap,
   Receipt,
   Plus,
+  Megaphone,
+  BarChart3,
+  Settings,
+  GraduationCap,
+  Users,
+  Store,
+  Globe,
+  ArrowUp,
+  ArrowDown,
+  CornerDownLeft,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { universalSearch, UniversalSearchResult } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 
 type Action = {
+  id: string;
   label: string;
   hint?: string;
   shortcut?: string;
+  icon?: typeof User;
   onSelect: () => void;
 };
 
@@ -54,7 +65,7 @@ const SEARCH_SECTIONS: SearchSection[] = [
     key: "invoices",
     label: "Invoices",
     icon: FileText,
-    color: "#22c55e",
+    color: "hsl(var(--kf-success))",
     getHref: (i) => `/app/commerce?tab=invoices`,
     getTitle: (i) => i.invoiceNumber || `Invoice ${i.id?.slice(0, 8)}`,
     getSub: (i) => `${i.currency || "TTD"} ${i.total?.toFixed(2) ?? "0.00"} · ${i.status || ""}`,
@@ -63,7 +74,7 @@ const SEARCH_SECTIONS: SearchSection[] = [
     key: "bookings",
     label: "Bookings",
     icon: Calendar,
-    color: "#3b82f6",
+    color: "hsl(var(--kf-info))",
     getHref: () => `/app/bookings`,
     getTitle: (b: any) => {
       const name = b.contact ? [b.contact.firstName, b.contact.lastName].filter(Boolean).join(" ") : "";
@@ -75,7 +86,7 @@ const SEARCH_SECTIONS: SearchSection[] = [
     key: "products",
     label: "Products",
     icon: Package,
-    color: "#f97316",
+    color: "hsl(var(--kf-warning))",
     getHref: () => `/app/commerce?tab=products`,
     getTitle: (p) => p.name,
     getSub: (p) => `${p.currency || "TTD"} ${p.price?.toFixed(2) ?? "0.00"}`,
@@ -84,7 +95,7 @@ const SEARCH_SECTIONS: SearchSection[] = [
     key: "projects",
     label: "Projects",
     icon: FolderKanban,
-    color: "#8b5cf6",
+    color: "hsl(var(--kf-accent1))",
     getHref: () => `/app/projects`,
     getTitle: (p) => p.name,
     getSub: (p) => `${p.status || ""} · ${p.priority || ""}`,
@@ -115,13 +126,16 @@ function addRecentItem(label: string, href: string) {
   localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify(items.slice(0, 5)));
 }
 
-const QUICK_ACTIONS: Action[] = [
-  { label: "New Contact", hint: "Add a CRM contact", shortcut: "⌘⇧C", onSelect: () => {} },
-  { label: "New Invoice", hint: "Create an invoice", shortcut: "⌘⇧I", onSelect: () => {} },
-  { label: "New Booking", hint: "Schedule a booking", shortcut: "⌘⇧B", onSelect: () => {} },
-  { label: "New Expense", hint: "Log an expense", onSelect: () => {} },
-  { label: "New Project", hint: "Start a project", onSelect: () => {} },
-];
+function fuzzyMatch(text: string, query: string): boolean {
+  const lowerText = text.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  if (lowerText.includes(lowerQuery)) return true;
+  let qi = 0;
+  for (let i = 0; i < lowerText.length && qi < lowerQuery.length; i++) {
+    if (lowerText[i] === lowerQuery[qi]) qi++;
+  }
+  return qi === lowerQuery.length;
+}
 
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const router = useRouter();
@@ -130,15 +144,19 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const [searching, setSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (open) {
       inputRef.current?.focus();
       setRecentItems(getRecentItems());
+      setSelectedIdx(0);
     }
     if (!open) {
       setQuery("");
       setSearchResults(EMPTY);
+      setSelectedIdx(0);
     }
   }, [open]);
 
@@ -161,53 +179,47 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     return () => clearTimeout(timer);
   }, [query]);
 
-  const quickActions = useMemo<Action[]>(() => {
-    return QUICK_ACTIONS.map((a) => ({
-      ...a,
-      onSelect: () => {
-        if (a.label === "New Contact") router.push("/app/crm/pipeline");
-        else if (a.label === "New Invoice") router.push("/app/commerce");
-        else if (a.label === "New Booking") router.push("/app/bookings");
-        else if (a.label === "New Expense") router.push("/app/expenses");
-        else if (a.label === "New Project") router.push("/app/projects");
-      },
-    }));
-  }, [router]);
+  const QUICK_ACTIONS: Action[] = useMemo(() => [
+    { id: "new-contact", label: "New Contact", hint: "Add a CRM contact", shortcut: "⌘⇧C", icon: Users, onSelect: () => router.push("/app/crm/pipeline") },
+    { id: "new-invoice", label: "New Invoice", hint: "Create an invoice", shortcut: "⌘⇧I", icon: Receipt, onSelect: () => router.push("/app/commerce") },
+    { id: "new-booking", label: "New Booking", hint: "Schedule a booking", shortcut: "⌘⇧B", icon: Calendar, onSelect: () => router.push("/app/bookings") },
+    { id: "new-expense", label: "New Expense", hint: "Log an expense", icon: Receipt, onSelect: () => router.push("/app/expenses") },
+    { id: "new-project", label: "New Project", hint: "Start a project", icon: FolderKanban, onSelect: () => router.push("/app/projects") },
+    { id: "new-quote", label: "New Quote", hint: "Draft a quote", icon: FileText, onSelect: () => router.push("/app/commerce?tab=quotes") },
+    { id: "new-campaign", label: "New Campaign", hint: "Create a campaign", icon: Megaphone, onSelect: () => router.push("/app/marketing") },
+    { id: "new-automation", label: "New Automation", hint: "Build a playbook", icon: Zap, onSelect: () => router.push("/app/automations") },
+  ], [router]);
 
-  const navActions = useMemo<Action[]>(
-    () => [
-      { label: "Go to Command", hint: "Command Center", shortcut: "", onSelect: () => router.push("/app") },
-      { label: "Go to Contacts", hint: "CRM & pipeline", onSelect: () => router.push("/app/crm/pipeline") },
-      { label: "Go to Commerce", hint: "Invoices & Products", onSelect: () => router.push("/app/commerce") },
-      { label: "Go to Bookings", hint: "Schedule & calendar", onSelect: () => router.push("/app/bookings") },
-      { label: "Go to Store", hint: "Online booking page", onSelect: () => router.push("/app/store") },
-      { label: "Go to Social", hint: "Content & scheduling (Marketing)", onSelect: () => router.push("/app/marketing?tab=social") },
-      { label: "Go to Marketing", hint: "Email campaigns & lead forms", onSelect: () => router.push("/app/marketing") },
-      { label: "Go to Expenses", hint: "Track & manage expenses", onSelect: () => router.push("/app/expenses") },
-      { label: "Go to Projects", hint: "Project management & Kanban", onSelect: () => router.push("/app/projects") },
-      { label: "Go to Automations", hint: "Playbooks & workflow triggers", onSelect: () => router.push("/app/automations") },
-      { label: "Go to Reports", hint: "Analytics & KPIs", onSelect: () => router.push("/app/reports") },
-      { label: "Go to Learn", hint: "MasterClass courses", onSelect: () => router.push("/app/learn") },
-      { label: "Go to Community", hint: "Forum & founder circles", onSelect: () => router.push("/app/community") },
-      { label: "Go to Templates", hint: "Business templates & presets", onSelect: () => router.push("/app/templates") },
-      { label: "Go to Settings", hint: "Business settings", onSelect: () => router.push("/app/settings") },
-    ],
-    [router],
-  );
-
-  const filteredNav = useMemo(() => {
-    if (!query) return navActions;
-    return navActions.filter(
-      (a) => a.label.toLowerCase().includes(query.toLowerCase()) || a.hint?.toLowerCase().includes(query.toLowerCase()),
-    );
-  }, [navActions, query]);
+  const NAV_ACTIONS: Action[] = useMemo(() => [
+    { id: "nav-command", label: "Command", hint: "Command Center / Today view", shortcut: "⌘1", icon: Zap, onSelect: () => router.push("/app") },
+    { id: "nav-contacts", label: "Contacts", hint: "CRM & pipeline", shortcut: "⌘2", icon: Users, onSelect: () => router.push("/app/crm/pipeline") },
+    { id: "nav-commerce", label: "Commerce", hint: "Invoices, quotes & products", shortcut: "⌘3", icon: Receipt, onSelect: () => router.push("/app/commerce") },
+    { id: "nav-bookings", label: "Bookings", hint: "Schedule & calendar", shortcut: "⌘4", icon: Calendar, onSelect: () => router.push("/app/bookings") },
+    { id: "nav-marketing", label: "Marketing", hint: "Campaigns, social & lead forms", icon: Megaphone, onSelect: () => router.push("/app/marketing") },
+    { id: "nav-marketplace", label: "Marketplace", hint: "Discover & connect", icon: Globe, onSelect: () => router.push("/app/marketplace") },
+    { id: "nav-expenses", label: "Expenses", hint: "Track spending & budgets", icon: Receipt, onSelect: () => router.push("/app/expenses") },
+    { id: "nav-projects", label: "Projects", hint: "Kanban board & tasks", icon: FolderKanban, onSelect: () => router.push("/app/projects") },
+    { id: "nav-automations", label: "Automations", hint: "Playbooks & workflow triggers", icon: Zap, onSelect: () => router.push("/app/automations") },
+    { id: "nav-reports", label: "Reports", hint: "Analytics & KPIs", icon: BarChart3, onSelect: () => router.push("/app/reports") },
+    { id: "nav-store", label: "Store Setup", hint: "Online storefront", icon: Store, onSelect: () => router.push("/app/store") },
+    { id: "nav-learn", label: "Learn", hint: "MasterClass courses", icon: GraduationCap, onSelect: () => router.push("/app/learn") },
+    { id: "nav-community", label: "Community", hint: "Forum & founder circles", icon: Users, onSelect: () => router.push("/app/community") },
+    { id: "nav-settings", label: "Settings", hint: "Business settings", icon: Settings, onSelect: () => router.push("/app/settings") },
+  ], [router]);
 
   const filteredQuick = useMemo(() => {
-    if (!query) return quickActions;
-    return quickActions.filter(
-      (a) => a.label.toLowerCase().includes(query.toLowerCase()) || a.hint?.toLowerCase().includes(query.toLowerCase()),
+    if (!query) return QUICK_ACTIONS;
+    return QUICK_ACTIONS.filter(
+      (a) => fuzzyMatch(a.label, query) || fuzzyMatch(a.hint || "", query),
     );
-  }, [quickActions, query]);
+  }, [QUICK_ACTIONS, query]);
+
+  const filteredNav = useMemo(() => {
+    if (!query) return NAV_ACTIONS;
+    return NAV_ACTIONS.filter(
+      (a) => fuzzyMatch(a.label, query) || fuzzyMatch(a.hint || "", query),
+    );
+  }, [NAV_ACTIONS, query]);
 
   const filteredRecent = useMemo(() => {
     if (query) return [];
@@ -217,13 +229,66 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const totalSearchResults = SEARCH_SECTIONS.reduce((sum, s) => sum + (searchResults[s.key]?.length ?? 0), 0);
   const hasSearch = query.trim().length >= 2;
 
-  const handleNavigate = (href: string, label: string) => {
+  const flatItems = useMemo(() => {
+    const items: { type: string; id: string; onSelect: () => void }[] = [];
+    if (hasSearch && !searching) {
+      for (const section of SEARCH_SECTIONS) {
+        const sectionItems = searchResults[section.key];
+        if (sectionItems && sectionItems.length > 0) {
+          for (const item of sectionItems as any[]) {
+            items.push({
+              type: "search",
+              id: `search-${section.key}-${item.id}`,
+              onSelect: () => handleNavigate(section.getHref(item), section.getTitle(item)),
+            });
+          }
+        }
+      }
+    }
+    for (const r of filteredRecent) {
+      items.push({ type: "recent", id: `recent-${r.href}`, onSelect: () => handleNavigate(r.href, r.label) });
+    }
+    for (const a of filteredQuick) {
+      items.push({ type: "quick", id: a.id, onSelect: () => { a.onSelect(); onClose(); } });
+    }
+    for (const a of filteredNav) {
+      items.push({ type: "nav", id: a.id, onSelect: () => { handleNavigate(a.id.replace("nav-", "/app/").replace("/app/command", "/app").replace("/app/contacts", "/app/crm/pipeline"), a.label); } });
+    }
+    return items;
+  }, [hasSearch, searching, searchResults, filteredRecent, filteredQuick, filteredNav]);
+
+  useEffect(() => {
+    setSelectedIdx(0);
+  }, [query]);
+
+  const handleNavigate = useCallback((href: string, label: string) => {
     addRecentItem(label, href);
     router.push(href);
     onClose();
-  };
+  }, [router, onClose]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSelectedIdx((prev) => Math.min(prev + 1, flatItems.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSelectedIdx((prev) => Math.max(prev - 1, 0));
+    } else if (e.key === "Enter" && flatItems.length > 0) {
+      e.preventDefault();
+      flatItems[selectedIdx]?.onSelect();
+    }
+  }, [flatItems, selectedIdx]);
+
+  useEffect(() => {
+    const el = listRef.current?.querySelector(`[data-idx="${selectedIdx}"]`);
+    if (el) el.scrollIntoView({ block: "nearest" });
+  }, [selectedIdx]);
 
   if (!open) return null;
+
+  let itemIdx = -1;
+  const getNextIdx = () => ++itemIdx;
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm pt-[12vh]" role="presentation" onClick={onClose}>
@@ -233,6 +298,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
         aria-label="Command palette"
         className="w-full max-w-2xl rounded-2xl border border-border/80 bg-slate-950/95 shadow-2xl shadow-primary/20"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={handleKeyDown}
       >
         <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3">
           <Search className="w-4 h-4 text-muted-foreground flex-shrink-0" />
@@ -251,7 +317,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
             </button>
           )}
         </div>
-        <div className="max-h-[60vh] overflow-y-auto">
+        <div className="max-h-[60vh] overflow-y-auto" ref={listRef}>
           {hasSearch && searching && (
             <div className="px-4 py-4 text-sm text-muted-foreground text-center animate-pulse">Searching...</div>
           )}
@@ -268,25 +334,32 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                       <Icon className="w-3 h-3" style={{ color: section.color }} />
                       {section.label}
                     </div>
-                    {items.map((item: any) => (
-                      <button
-                        key={item.id}
-                        onClick={() => handleNavigate(section.getHref(item), section.getTitle(item))}
-                        className="w-full text-left px-4 py-2.5 flex items-center gap-3 hover:bg-primary/10 transition-colors text-sm group"
-                      >
-                        <div
-                          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-                          style={{ background: `${section.color}20` }}
+                    {(items as any[]).map((item: any) => {
+                      const idx = getNextIdx();
+                      return (
+                        <button
+                          key={item.id}
+                          data-idx={idx}
+                          onClick={() => handleNavigate(section.getHref(item), section.getTitle(item))}
+                          className={cn(
+                            "w-full text-left px-4 py-2.5 flex items-center gap-3 transition-colors text-sm group",
+                            selectedIdx === idx ? "bg-primary/15" : "hover:bg-primary/10"
+                          )}
                         >
-                          <Icon className="w-4 h-4" style={{ color: section.color }} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-foreground font-medium truncate">{section.getTitle(item)}</div>
-                          <div className="text-[11px] text-muted-foreground truncate">{section.getSub(item)}</div>
-                        </div>
-                        <ArrowRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                      </button>
-                    ))}
+                          <div
+                            className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                            style={{ background: `${section.color}20` }}
+                          >
+                            <Icon className="w-4 h-4" style={{ color: section.color }} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-foreground font-medium truncate">{section.getTitle(item)}</div>
+                            <div className="text-[11px] text-muted-foreground truncate">{section.getSub(item)}</div>
+                          </div>
+                          <ArrowRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </button>
+                      );
+                    })}
                   </div>
                 );
               })}
@@ -303,19 +376,26 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                 <Clock className="w-3 h-3" />
                 Recent
               </div>
-              {filteredRecent.map((item) => (
-                <button
-                  key={item.href}
-                  onClick={() => handleNavigate(item.href, item.label)}
-                  className="w-full text-left px-4 py-2.5 flex items-center justify-between gap-3 hover:bg-primary/10 transition-colors text-sm"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <Clock className="w-3.5 h-3.5 text-muted-foreground" />
-                    <span className="text-foreground">{item.label}</span>
-                  </div>
-                  <ArrowRight className="w-4 h-4 text-muted-foreground" />
-                </button>
-              ))}
+              {filteredRecent.map((item) => {
+                const idx = getNextIdx();
+                return (
+                  <button
+                    key={item.href}
+                    data-idx={idx}
+                    onClick={() => handleNavigate(item.href, item.label)}
+                    className={cn(
+                      "w-full text-left px-4 py-2.5 flex items-center justify-between gap-3 transition-colors text-sm",
+                      selectedIdx === idx ? "bg-primary/15" : "hover:bg-primary/10"
+                    )}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Clock className="w-3.5 h-3.5 text-muted-foreground" />
+                      <span className="text-foreground">{item.label}</span>
+                    </div>
+                    <ArrowRight className="w-4 h-4 text-muted-foreground" />
+                  </button>
+                );
+              })}
             </div>
           )}
 
@@ -325,27 +405,38 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                 <Plus className="w-3 h-3" />
                 Quick Actions
               </div>
-              {filteredQuick.map((action) => (
-                <button
-                  key={action.label}
-                  onClick={() => {
-                    action.onSelect();
-                    onClose();
-                  }}
-                  className="w-full text-left px-4 py-2.5 flex items-center justify-between gap-3 hover:bg-primary/10 transition-colors text-sm"
-                >
-                  <div>
-                    <div className="text-foreground">{action.label}</div>
-                    {action.hint && <div className="text-[11px] text-muted-foreground">{action.hint}</div>}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {action.shortcut && (
-                      <kbd className="px-1.5 py-0.5 rounded bg-muted text-[10px] font-mono text-muted-foreground">{action.shortcut}</kbd>
+              {filteredQuick.map((action) => {
+                const idx = getNextIdx();
+                const ActionIcon = action.icon;
+                return (
+                  <button
+                    key={action.id}
+                    data-idx={idx}
+                    onClick={() => {
+                      action.onSelect();
+                      onClose();
+                    }}
+                    className={cn(
+                      "w-full text-left px-4 py-2.5 flex items-center justify-between gap-3 transition-colors text-sm",
+                      selectedIdx === idx ? "bg-primary/15" : "hover:bg-primary/10"
                     )}
-                    <ArrowRight className="w-4 h-4 text-muted-foreground" />
-                  </div>
-                </button>
-              ))}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      {ActionIcon && <ActionIcon className="w-4 h-4 text-muted-foreground" />}
+                      <div>
+                        <div className="text-foreground">{action.label}</div>
+                        {action.hint && <div className="text-[11px] text-muted-foreground">{action.hint}</div>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {action.shortcut && (
+                        <kbd className="px-1.5 py-0.5 rounded bg-muted text-[10px] font-mono text-muted-foreground">{action.shortcut}</kbd>
+                      )}
+                      <ArrowRight className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           )}
 
@@ -355,45 +446,53 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                 <Zap className="w-3 h-3" />
                 Navigate
               </div>
-              {filteredNav.map((action) => (
-                <button
-                  key={action.label}
-                  onClick={() => {
-                    const href = action.label.includes("Command") ? "/app" :
-                      action.label.includes("Contacts") ? "/app/crm/pipeline" :
-                      action.label.includes("Commerce") ? "/app/commerce" :
-                      action.label.includes("Bookings") ? "/app/bookings" :
-                      action.label.includes("Store") ? "/app/store" :
-                      action.label.includes("Social") ? "/app/marketing?tab=social" :
-                      action.label.includes("Marketing") ? "/app/marketing" :
-                      action.label.includes("Expenses") ? "/app/expenses" :
-                      action.label.includes("Projects") ? "/app/projects" :
-                      action.label.includes("Automations") ? "/app/projects?tab=playbooks" :
-                      action.label.includes("Reports") ? "/app/reports" :
-                      action.label.includes("Learn") ? "/app/learn" :
-                      action.label.includes("Community") ? "/app/community" :
-                      action.label.includes("Templates") ? "/app/templates" :
-                      "/app/settings";
-                    handleNavigate(href, action.label);
-                  }}
-                  className={cn(
-                    "w-full text-left px-4 py-3 flex items-center justify-between gap-3 hover:bg-primary/10 transition-colors text-sm",
-                  )}
-                >
-                  <div>
-                    <div className="text-foreground">{action.label}</div>
-                    {action.hint && <div className="text-[11px] text-muted-foreground">{action.hint}</div>}
-                  </div>
-                  <ArrowRight className="w-4 h-4 text-muted-foreground" />
-                </button>
-              ))}
+              {filteredNav.map((action) => {
+                const idx = getNextIdx();
+                const NavIcon = action.icon;
+                return (
+                  <button
+                    key={action.id}
+                    data-idx={idx}
+                    onClick={() => {
+                      action.onSelect();
+                      onClose();
+                    }}
+                    className={cn(
+                      "w-full text-left px-4 py-2.5 flex items-center justify-between gap-3 transition-colors text-sm",
+                      selectedIdx === idx ? "bg-primary/15" : "hover:bg-primary/10"
+                    )}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      {NavIcon && <NavIcon className="w-4 h-4 text-muted-foreground" />}
+                      <div>
+                        <div className="text-foreground">{action.label}</div>
+                        {action.hint && <div className="text-[11px] text-muted-foreground">{action.hint}</div>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {action.shortcut && (
+                        <kbd className="px-1.5 py-0.5 rounded bg-muted text-[10px] font-mono text-muted-foreground">{action.shortcut}</kbd>
+                      )}
+                      <ArrowRight className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
-        <div className="border-t border-border/60 px-4 py-3 flex items-center justify-between text-[11px] text-muted-foreground">
-          <span>Enter to run · Esc to close</span>
+        <div className="border-t border-border/60 px-4 py-2.5 flex items-center justify-between text-[11px] text-muted-foreground">
+          <div className="flex items-center gap-3">
+            <span className="inline-flex items-center gap-1">
+              <ArrowUp className="w-3 h-3" /><ArrowDown className="w-3 h-3" /> Navigate
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <CornerDownLeft className="w-3 h-3" /> Select
+            </span>
+            <span>Esc close</span>
+          </div>
           <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-1">
-            <Link2 className="w-3 h-3" /> Cmd/Ctrl + K
+            ⌘K
           </span>
         </div>
       </div>

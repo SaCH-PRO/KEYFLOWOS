@@ -41,6 +41,19 @@ const LABEL_MAP: Record<string, string> = {
   social: "Social",
   insights: "Insights",
   onboarding: "Onboarding",
+  branding: "Branding",
+  integrations: "Integrations",
+  security: "Security",
+  "api-keys": "API Keys",
+  budgets: "Budgets",
+  analytics: "Analytics",
+  performance: "Performance",
+  catalog: "Catalog",
+  audiences: "Audiences",
+  forms: "Forms",
+  cohorts: "Cohorts",
+  certificates: "Certificates",
+  feed: "Feed",
 };
 
 export function Breadcrumbs() {
