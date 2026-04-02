@@ -20,6 +20,7 @@ type Props = {
   onHoursChange: (hours: BusinessHoursMap) => void;
   onSaveHours: () => Promise<void>;
   hoursSaving: boolean;
+  onReorderProducts?: (orderedIds: string[]) => void;
 };
 
 export function ProductsHoursTab({
@@ -38,6 +39,7 @@ export function ProductsHoursTab({
   onHoursChange,
   onSaveHours,
   hoursSaving,
+  onReorderProducts,
 }: Props) {
   return (
     <div className="space-y-6">
@@ -53,6 +55,7 @@ export function ProductsHoursTab({
         onConfirmRemoveChange={onConfirmRemoveChange}
         onDeleteFromStore={onDeleteFromStore}
         services={services.map((s) => ({ id: s.id, name: s.name }))}
+        onReorder={onReorderProducts}
       />
 
       <HoursEditor
