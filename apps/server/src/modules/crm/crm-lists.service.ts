@@ -125,7 +125,19 @@ export class CrmListsService {
       if (filters.createdWithinDays && typeof filters.createdWithinDays === 'number' && filters.createdWithinDays > 0) {
         const cutoff = new Date();
         cutoff.setDate(cutoff.getDate() - filters.createdWithinDays);
-        where.createdAt = { gte: cutoff };
+        where.createdAt = { ...((where.createdAt as any) ?? {}), gte: cutoff };
+      }
+      if (filters.createdAfter && typeof filters.createdAfter === 'string') {
+        const afterDate = new Date(filters.createdAfter);
+        if (!isNaN(afterDate.getTime())) {
+          where.createdAt = { ...((where.createdAt as any) ?? {}), gte: afterDate };
+        }
+      }
+      if (filters.createdBefore && typeof filters.createdBefore === 'string') {
+        const beforeDate = new Date(filters.createdBefore);
+        if (!isNaN(beforeDate.getTime())) {
+          where.createdAt = { ...((where.createdAt as any) ?? {}), lte: beforeDate };
+        }
       }
       if (filters.minLeadScore && typeof filters.minLeadScore === 'number' && filters.minLeadScore > 0) {
         where.leadScore = { gte: filters.minLeadScore };

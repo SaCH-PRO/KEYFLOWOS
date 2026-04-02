@@ -223,6 +223,19 @@ export class BookingsService {
       if (dayHours?.closed) {
         throw new BadRequestException('The business is closed on this day.');
       }
+      if (dayHours && dayHours.open && dayHours.close) {
+        const [oh, om] = dayHours.open.split(':').map(Number);
+        const [ch, cm] = dayHours.close.split(':').map(Number);
+        const openMin = oh * 60 + om;
+        const closeMin = ch * 60 + cm;
+        const bookingStartMin = start.getHours() * 60 + start.getMinutes();
+        const bookingEndMin = (end.getHours() * 60 + end.getMinutes()) || 1440;
+        if (bookingStartMin < openMin || bookingEndMin > closeMin) {
+          throw new BadRequestException(
+            `The selected time is outside business hours (${dayHours.open} – ${dayHours.close}).`,
+          );
+        }
+      }
     }
 
     const updated = await this.prisma.client.booking.update({

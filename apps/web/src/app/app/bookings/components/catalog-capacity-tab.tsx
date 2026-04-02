@@ -108,7 +108,7 @@ function AvailabilityHours() {
                         [idx]: { ...prev[idx], open: e.target.value },
                       }))
                     }
-                    className="kf-input text-xs px-2 py-1 w-[100px]"
+                    className="kf-input text-xs px-2 py-1 w-[100px] min-h-[44px]"
                   />
                   <span className="text-xs text-muted-foreground">to</span>
                   <input
@@ -120,7 +120,7 @@ function AvailabilityHours() {
                         [idx]: { ...prev[idx], close: e.target.value },
                       }))
                     }
-                    className="kf-input text-xs px-2 py-1 w-[100px]"
+                    className="kf-input text-xs px-2 py-1 w-[100px] min-h-[44px]"
                   />
                 </div>
               ) : (
@@ -217,14 +217,14 @@ function StaffAvailabilityEditor({ staffId, staffName, businessId }: { staffId: 
                           type="time"
                           value={slot.startTime}
                           onChange={(e) => setSlots((prev) => ({ ...prev, [idx]: { ...prev[idx], startTime: e.target.value } }))}
-                          className="kf-input text-[11px] px-1.5 py-0.5 w-[85px]"
+                          className="kf-input text-[11px] px-1.5 py-0.5 w-[85px] min-h-[44px]"
                         />
                         <span className="text-[10px] text-muted-foreground">–</span>
                         <input
                           type="time"
                           value={slot.endTime}
                           onChange={(e) => setSlots((prev) => ({ ...prev, [idx]: { ...prev[idx], endTime: e.target.value } }))}
-                          className="kf-input text-[11px] px-1.5 py-0.5 w-[85px]"
+                          className="kf-input text-[11px] px-1.5 py-0.5 w-[85px] min-h-[44px]"
                         />
                       </div>
                     ) : (
@@ -282,7 +282,7 @@ function ServiceTimingEditor({ serviceId, businessId, initialBuffer, initialLead
     return (
       <button
         onClick={() => setEditing(true)}
-        className="flex items-center gap-1 text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors mt-1"
+        className="flex items-center gap-1 text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors mt-1 min-h-[44px]"
       >
         <Pencil className="w-2.5 h-2.5" />
         Edit buffer & lead time
@@ -301,7 +301,7 @@ function ServiceTimingEditor({ serviceId, businessId, initialBuffer, initialLead
             max={120}
             value={buffer}
             onChange={(e) => setBuffer(Number(e.target.value))}
-            className="kf-input w-full text-xs px-2 py-1.5 min-h-[36px]"
+            className="kf-input w-full text-xs px-2 py-1.5 min-h-[44px]"
             aria-label="Buffer minutes between appointments"
           />
         </div>
@@ -313,7 +313,7 @@ function ServiceTimingEditor({ serviceId, businessId, initialBuffer, initialLead
             max={10080}
             value={lead}
             onChange={(e) => setLead(Number(e.target.value))}
-            className="kf-input w-full text-xs px-2 py-1.5 min-h-[36px]"
+            className="kf-input w-full text-xs px-2 py-1.5 min-h-[44px]"
             aria-label="Lead time in minutes for advance booking"
           />
         </div>
@@ -321,14 +321,14 @@ function ServiceTimingEditor({ serviceId, businessId, initialBuffer, initialLead
       <div className="flex gap-1.5 justify-end">
         <button
           onClick={() => setEditing(false)}
-          className="px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors min-h-[32px]"
+          className="px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors min-h-[44px]"
         >
           Cancel
         </button>
         <button
           onClick={handleSave}
           disabled={saving}
-          className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded-md transition-colors min-h-[32px] disabled:opacity-50"
+          className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded-md transition-colors min-h-[44px] disabled:opacity-50"
           style={{
             background: "hsl(var(--kf-accent1) / 0.1)",
             color: "hsl(var(--kf-accent1))",
