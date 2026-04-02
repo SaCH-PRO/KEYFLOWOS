@@ -11,7 +11,7 @@ export class ReportsService {
     private readonly aiUsage: AiUsageService,
   ) {}
 
-  async generateReport(businessId: string, type: string, startDate?: string, endDate?: string) {
+  async generateReport(businessId: string, type: string, startDate?: string, endDate?: string, compare = false) {
     const now = new Date();
     const start = startDate ? new Date(startDate) : new Date(now.getFullYear(), now.getMonth(), 1);
     const end = endDate ? new Date(endDate) : now;
@@ -234,11 +234,73 @@ Use ${currency} for all monetary values. Be specific with numbers. Keep each sec
       aiNarrative = 'AI analysis is temporarily unavailable. Please review the data metrics below.';
     }
 
+    let comparison: Record<string, any> | null = null;
+    if (compare) {
+      const periodMs = end.getTime() - start.getTime();
+      const prevEnd = new Date(start.getTime() - 1);
+      const prevStart = new Date(prevEnd.getTime() - periodMs);
+
+      const [prevPaid, prevExpenses, prevBookings, prevContacts] = await Promise.all([
+        this.prisma.client.invoice.aggregate({
+          where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: prevStart, lte: prevEnd } },
+          _sum: { total: true },
+          _count: true,
+        }),
+        this.prisma.client.expense.aggregate({
+          where: { businessId, deletedAt: null, date: { gte: prevStart, lte: prevEnd } },
+          _sum: { amount: true },
+          _count: true,
+        }),
+        this.prisma.client.booking.count({
+          where: { businessId, deletedAt: null, startTime: { gte: prevStart, lte: prevEnd } },
+        }),
+        this.prisma.client.contact.count({
+          where: { businessId, deletedAt: null, createdAt: { lte: prevEnd } },
+        }),
+      ]);
+
+      const prevRevenue = Number(prevPaid._sum.total ?? 0);
+      const prevExpenseTotal = Number(prevExpenses._sum.amount ?? 0);
+      const prevNetProfit = prevRevenue - prevExpenseTotal;
+      const prevProfitMargin = prevRevenue > 0 ? (prevNetProfit / prevRevenue) * 100 : 0;
+
+      const pctChange = (curr: number, prev: number) =>
+        prev === 0 ? (curr > 0 ? 100 : 0) : Math.round(((curr - prev) / prev) * 1000) / 10;
+
+      comparison = {
+        period: { start: prevStart.toISOString(), end: prevEnd.toISOString() },
+        revenue: {
+          total: prevRevenue,
+          invoiceCount: prevPaid._count ?? 0,
+          changePct: pctChange(totalRevenue, prevRevenue),
+        },
+        expenses: {
+          total: prevExpenseTotal,
+          count: prevExpenses._count ?? 0,
+          changePct: pctChange(totalExpenses, prevExpenseTotal),
+        },
+        profitability: {
+          netProfit: prevNetProfit,
+          profitMargin: Math.round(prevProfitMargin * 100) / 100,
+          changePct: pctChange(netProfit, prevNetProfit),
+        },
+        bookings: {
+          total: prevBookings,
+          changePct: pctChange(bookings.length, prevBookings),
+        },
+        clients: {
+          totalContacts: prevContacts,
+          changePct: pctChange(contacts, prevContacts),
+        },
+      };
+    }
+
     return {
       type,
       generatedAt: new Date().toISOString(),
       metrics,
       aiNarrative,
+      comparison,
     };
   }
 }
