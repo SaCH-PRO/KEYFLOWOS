@@ -68,11 +68,28 @@ export function WalkthroughTrigger({
   );
 }
 
+function computeCardPosition(targetRect: DOMRect | null, viewportWidth: number) {
+  if (!targetRect) return { top: "50%", left: "50%", transform: "translate(-50%, -50%)" };
+  return {
+    top: `${targetRect.bottom + 16}px`,
+    left: `${Math.max(16, Math.min(targetRect.left, viewportWidth - 340))}px`,
+    transform: undefined,
+  };
+}
+
 export function ModuleWalkthrough({ moduleKey, steps, onComplete }: ModuleWalkthroughProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [active, setActive] = useState(false);
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
+  const [viewportWidth, setViewportWidth] = useState(0);
   const overlayRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setViewportWidth(window.innerWidth);
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   useEffect(() => {
     const seen = localStorage.getItem(getStorageKey(moduleKey));
@@ -101,8 +118,7 @@ export function ModuleWalkthrough({ moduleKey, steps, onComplete }: ModuleWalkth
     }
     const el = document.querySelector(steps[currentStep].target!);
     if (el) {
-      const rect = el.getBoundingClientRect();
-      setTargetRect(rect);
+      setTargetRect(el.getBoundingClientRect());
     } else {
       setTargetRect(null);
     }
@@ -145,12 +161,7 @@ export function ModuleWalkthrough({ moduleKey, steps, onComplete }: ModuleWalkth
       }
     : {};
 
-  const cardTop = targetRect
-    ? targetRect.bottom + 16
-    : undefined;
-  const cardLeft = targetRect
-    ? Math.max(16, Math.min(targetRect.left, window.innerWidth - 340))
-    : undefined;
+  const cardPos = computeCardPosition(targetRect, viewportWidth);
 
   return (
     <AnimatePresence>
@@ -191,9 +202,9 @@ export function ModuleWalkthrough({ moduleKey, steps, onComplete }: ModuleWalkth
           transition={{ duration: 0.2 }}
           className="absolute z-[101] w-[320px]"
           style={{
-            top: cardTop ?? "50%",
-            left: cardLeft ?? "50%",
-            transform: !targetRect ? "translate(-50%, -50%)" : undefined,
+            top: cardPos.top,
+            left: cardPos.left,
+            transform: cardPos.transform,
           }}
         >
           <div
