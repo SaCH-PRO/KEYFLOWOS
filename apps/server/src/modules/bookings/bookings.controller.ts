@@ -1,4 +1,4 @@
-import { Body, Controller, ForbiddenException, Get, Inject, Param, Patch, Post, UseGuards, Delete, Query, Res } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Inject, NotFoundException, Param, Patch, Post, UseGuards, Delete, Query, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { BookingsService } from './bookings.service';
 import { CalendarService } from './calendar.service';
@@ -157,13 +157,15 @@ export class BookingsController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Patch('businesses/:businessId/services/:serviceId')
-  updateService(
+  async updateService(
     @Param('businessId') businessId: string,
     @Param('serviceId') serviceId: string,
     @Body() body: { name?: string; duration?: number; price?: number; description?: string; bufferMins?: number; leadTimeMins?: number },
   ) {
+    const existing = await this.prisma.client.service.findFirst({ where: { id: serviceId, businessId } });
+    if (!existing) throw new NotFoundException('Service not found');
     return this.prisma.client.service.update({
-      where: { id: serviceId, businessId },
+      where: { id: serviceId },
       data: {
         ...(body.name !== undefined && { name: body.name }),
         ...(body.duration !== undefined && { duration: body.duration }),
@@ -178,8 +180,10 @@ export class BookingsController {
   @UseGuards(AuthGuard, BusinessGuard)
   @Delete('businesses/:businessId/services/:serviceId')
   async deleteService(@Param('businessId') businessId: string, @Param('serviceId') serviceId: string) {
+    const existing = await this.prisma.client.service.findFirst({ where: { id: serviceId, businessId } });
+    if (!existing) throw new NotFoundException('Service not found');
     await this.prisma.client.service.update({
-      where: { id: serviceId, businessId },
+      where: { id: serviceId },
       data: { deletedAt: new Date() },
     });
     return { success: true };
@@ -243,8 +247,10 @@ export class BookingsController {
   @UseGuards(AuthGuard, BusinessGuard)
   @Delete('businesses/:businessId/staff/:staffId')
   async deleteStaff(@Param('businessId') businessId: string, @Param('staffId') staffId: string) {
+    const existing = await this.prisma.client.staffMember.findFirst({ where: { id: staffId, businessId } });
+    if (!existing) throw new NotFoundException('Staff member not found');
     await this.prisma.client.staffMember.update({
-      where: { id: staffId, businessId },
+      where: { id: staffId },
       data: { deletedAt: new Date() },
     });
     return { success: true };
