@@ -84,7 +84,7 @@ export function BrandingTab({ form, setField }: Props) {
           <label className="block text-xs text-muted-foreground">
             <div className="flex items-center gap-1.5 mb-2 font-medium">
               <Palette className="h-3.5 w-3.5" />
-              Primary Accent Color
+              Primary Accent Color <InfoBadge title="Primary Color" body="Used for buttons, navigation highlights, and interactive elements across the entire app." side="right" iconSize={11} />
             </div>
             <div className="flex items-center gap-3">
               <div className="relative">
@@ -110,7 +110,7 @@ export function BrandingTab({ form, setField }: Props) {
           <label className="block text-xs text-muted-foreground">
             <div className="flex items-center gap-1.5 mb-2 font-medium">
               <Palette className="h-3.5 w-3.5" />
-              Secondary Accent Color
+              Secondary Accent Color <InfoBadge title="Secondary Color" body="Used for badges, secondary highlights, and complementary accents throughout the app." side="right" iconSize={11} />
             </div>
             <div className="flex items-center gap-3">
               <input

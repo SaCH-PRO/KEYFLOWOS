@@ -21,6 +21,7 @@ export function CourseCatalog({ courses, enrolledCourseIds, enrollingId, onEnrol
         icon={GraduationCap}
         title="No courses available yet"
         description="Check back soon — new courses are added regularly to help you grow your business skills."
+        tip="Tip: New courses cover topics like pricing strategy, client retention, and marketing automation."
       />
     );
   }

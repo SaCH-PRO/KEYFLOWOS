@@ -65,6 +65,9 @@ export function CampaignsEmptyState({ onAction }: MarketingEmptyStateProps) {
           Create Campaign
         </button>
       )}
+      <p className="text-[11px] text-muted-foreground/60 mt-4 px-4">
+        Tip: Import your contacts from the CRM first, then segment them for targeted campaigns.
+      </p>
     </motion.div>
   );
 }
@@ -116,6 +119,9 @@ export function FormsEmptyState({ onAction }: MarketingEmptyStateProps) {
           Create Form
         </button>
       )}
+      <p className="text-[11px] text-muted-foreground/60 mt-4 px-4">
+        Tip: Embed forms on your website or share a direct link. Submissions auto-create CRM contacts.
+      </p>
     </motion.div>
   );
 }
@@ -167,6 +173,9 @@ export function SocialEmptyState({ onAction }: MarketingEmptyStateProps) {
           Create Post
         </button>
       )}
+      <p className="text-[11px] text-muted-foreground/60 mt-4 px-4">
+        Tip: Use the AI Content Studio to generate captions, hashtags, and images in seconds.
+      </p>
     </motion.div>
   );
 }

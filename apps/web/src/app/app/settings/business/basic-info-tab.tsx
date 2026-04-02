@@ -205,6 +205,7 @@ export function BasicInfoTab({ form, setField, logoUrl }: Props) {
           <div className="flex items-center gap-1 mb-1">
             <Building2 className="h-3 w-3" />
             Tagline
+            <InfoBadge title="Tagline" body="A short one-liner shown on your Call Card, public store page, and customer-facing documents." side="right" iconSize={11} />
           </div>
           <Input
             value={form.tagline}

@@ -20,6 +20,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
+import { InfoBadge } from "@/components/ui/info-badge";
 import {
   fetchWebhooks,
   createWebhook,
@@ -227,6 +228,7 @@ export default function WebhooksSettingsPage() {
           <h2 className="text-lg font-semibold flex items-center gap-2">
             <Webhook className="w-5 h-5" style={{ color: "hsl(var(--kf-accent1))" }} />
             Webhooks
+            <InfoBadge title="Webhooks" body="Webhooks send HTTP POST requests to your URL when events happen in your business (e.g., new booking, paid invoice). Each payload is HMAC-signed for security." side="right" iconSize={13} />
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
             Receive real-time event notifications with automatic retries and delivery tracking
