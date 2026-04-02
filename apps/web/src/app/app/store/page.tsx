@@ -10,6 +10,8 @@ import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { FeatureGuide } from "@/components/ui/feature-guide";
+import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { STORE_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { SetupModeBanner } from "@/components/ui/setup-mode-banner";
 import { useStoreAiHub } from "./hooks/use-store-ai-hub";
 import { useStoreData } from "./hooks/use-store-data";
@@ -98,7 +100,9 @@ export default function StorePage() {
         titleExtra={<FeatureGuide featureKey="store" title="Getting Started with Your Store" description="Set up your online storefront to accept bookings and sell products." steps={GUIDE_STEPS} />}
         rightSlot={<StoreHeaderActions storeEnabled={s.storeEnabled} publicUrl={s.getPublicBookingUrl()} onToggleEnabled={s.toggleStoreEnabled} />}
       />
-      <TabNav tabs={VIEW_TABS} activeTab={activeTab} onTabChange={handleTabChange} layoutId="store-tab-pill" />
+      <div data-walkthrough="store-setup">
+        <TabNav tabs={VIEW_TABS} activeTab={activeTab} onTabChange={handleTabChange} layoutId="store-tab-pill" />
+      </div>
       <div {...swipeHandlers} className="touch-pan-y">
         <AnimatePresence mode="wait" custom={dirRef.current}>
           <motion.div key={activeTab} custom={dirRef.current} variants={SLIDE} initial="enter" animate="center" exit="exit" transition={{ type: "spring", bounce: 0.15, duration: 0.35 }}>
@@ -108,6 +112,8 @@ export default function StorePage() {
           </motion.div>
         </AnimatePresence>
       </div>
+
+      <ModuleWalkthrough moduleKey="store" steps={STORE_WALKTHROUGH} />
     </div>
   );
 }

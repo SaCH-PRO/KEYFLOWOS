@@ -52,6 +52,8 @@ import PerformanceTab from "./components/performance-tab";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { ShareLinkModal } from "@/components/ui/share-link-modal";
 import { SetupModeBanner } from "@/components/ui/setup-mode-banner";
+import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { BOOKINGS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { usePlan } from "@/hooks/use-plan";
 import { PlanLimitBanner } from "@/components/ui/upgrade-prompt";
 
@@ -412,6 +414,7 @@ export default function BookingsPage() {
                   color: "hsl(var(--kf-accent2))",
                 }}
                 title="Share booking link"
+                data-walkthrough="bookings-share"
               >
                 <Share2 className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Share</span>
@@ -471,12 +474,14 @@ export default function BookingsPage() {
         />
       )}
 
-      <TabNav
-        tabs={TABS}
-        activeTab={tab}
-        onTabChange={handleTabChange}
-        layoutId="bookings-tab"
-      />
+      <div data-walkthrough="bookings-calendar">
+        <TabNav
+          tabs={TABS}
+          activeTab={tab}
+          onTabChange={handleTabChange}
+          layoutId="bookings-tab"
+        />
+      </div>
 
       <AnimatePresence mode="wait" custom={directionRef.current}>
         <motion.div
@@ -587,6 +592,8 @@ export default function BookingsPage() {
           description="Clients can browse services and book directly from this link."
         />
       )}
+
+      <ModuleWalkthrough moduleKey="bookings" steps={BOOKINGS_WALKTHROUGH} />
     </div>
   );
 }

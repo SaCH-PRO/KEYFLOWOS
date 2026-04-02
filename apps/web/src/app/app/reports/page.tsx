@@ -10,6 +10,8 @@ import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatCardSkeleton, ChartSkeleton } from "@/components/ui/skeleton";
 import { TabNav } from "@/components/ui/tab-nav";
+import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { REPORTS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { ContactPickerDrawer } from "@/components/contacts";
 import { fetchReport, GeneratedReport } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
@@ -212,14 +214,16 @@ export default function ReportsPage() {
         }
       />
 
-      <TabNav
-        tabs={tabs}
-        activeTab={activeTab}
-        onTabChange={(id) => setActiveTab(id as ReportType)}
-        layoutId="reports-tab-pill"
-      />
+      <div data-walkthrough="reports-tabs">
+        <TabNav
+          tabs={tabs}
+          activeTab={activeTab}
+          onTabChange={(id) => setActiveTab(id as ReportType)}
+          layoutId="reports-tab-pill"
+        />
+      </div>
 
-      <div className="flex items-center gap-3 flex-wrap">
+      <div className="flex items-center gap-3 flex-wrap" data-walkthrough="reports-period">
         <div className="relative">
           <button
             onClick={() => setShowDatePicker(!showDatePicker)}
@@ -354,6 +358,8 @@ export default function ReportsPage() {
       </div>
 
       <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
+
+      <ModuleWalkthrough moduleKey="reports" steps={REPORTS_WALKTHROUGH} />
     </div>
   );
 }

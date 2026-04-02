@@ -23,6 +23,8 @@ import { useMarketingAiHub } from "./hooks/use-marketing-ai-hub";
 import { useMarketing } from "./hooks/use-marketing";
 import { MarketingSkeleton } from "./components/marketing-skeleton";
 import { FeatureGuide } from "@/components/ui/feature-guide";
+import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { MARKETING_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { CampaignsPanel } from "./components/campaigns-panel";
 import { LeadFormsPanel } from "./components/lead-forms-panel";
 import { CampaignActionQueue } from "./components/campaign-action-queue";
@@ -240,7 +242,9 @@ export default function MarketingPage() {
       />
 
 
-      <TabNav tabs={TABS} activeTab={activeTab} onTabChange={handleTabChange} layoutId="marketing-tab-pill" />
+      <div data-walkthrough="marketing-tabs">
+        <TabNav tabs={TABS} activeTab={activeTab} onTabChange={handleTabChange} layoutId="marketing-tab-pill" />
+      </div>
 
       <div {...swipeHandlers} className="touch-pan-y">
         <AnimatePresence mode="wait" custom={directionRef.current}>
@@ -304,6 +308,8 @@ export default function MarketingPage() {
           </motion.div>
         </AnimatePresence>
       </div>
+
+      <ModuleWalkthrough moduleKey="marketing" steps={MARKETING_WALKTHROUGH} />
     </div>
   );
 }

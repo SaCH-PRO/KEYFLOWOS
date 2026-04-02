@@ -29,6 +29,9 @@ import { useCommerceCopilot } from "./hooks/use-commerce-copilot";
 import { useCommerceComposer } from "./hooks/use-commerce-composer";
 import { useCommerceAiHub } from "./hooks/use-commerce-ai-hub";
 import { SearchableHelpDrawer } from "./components/contextual-onboarding";
+import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { MetricExplainer } from "@/components/ui/metric-explainer";
+import { COMMERCE_WALKTHROUGH, METRIC_DEFINITIONS } from "@/lib/walkthrough-definitions";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useModuleEmit, useModuleEvent } from "@/hooks/use-module-events";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
@@ -226,6 +229,7 @@ export default function CommercePage() {
                 className="min-w-[44px] min-h-[44px] rounded-lg flex items-center justify-center hover:bg-white/[0.06] transition-colors"
                 aria-label="Help"
                 title="Help (?)"
+                data-walkthrough="commerce-help"
               >
                 <BookOpen className="w-4 h-4 text-muted-foreground/60" />
               </button>
@@ -238,11 +242,13 @@ export default function CommercePage() {
       />
 
 
-      <TabNav
-        tabs={TABS}
-        activeTab={tab}
-        onTabChange={handleWrappedTabChange}
-      />
+      <div data-walkthrough="commerce-tabs">
+        <TabNav
+          tabs={TABS}
+          activeTab={tab}
+          onTabChange={handleWrappedTabChange}
+        />
+      </div>
 
       {(() => {
         const il = checkLimit("invoices");
@@ -260,34 +266,40 @@ export default function CommercePage() {
           {tab === "invoices" && (
             <motion.div key="invoices" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
               <div className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <div className="rounded-xl border border-border/50 bg-card p-3 flex items-center gap-2.5">
-                    <div className="p-1.5 rounded-lg bg-amber-500/10 shrink-0">
-                      <Clock className="w-3.5 h-3.5 text-amber-400" />
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2" data-walkthrough="commerce-kpi">
+                  <MetricExplainer label={METRIC_DEFINITIONS.outstanding.label} explanation={METRIC_DEFINITIONS.outstanding.explanation} formula={METRIC_DEFINITIONS.outstanding.formula} goodValue={METRIC_DEFINITIONS.outstanding.goodValue}>
+                    <div className="rounded-xl border border-border/50 bg-card p-3 flex items-center gap-2.5">
+                      <div className="p-1.5 rounded-lg bg-amber-500/10 shrink-0">
+                        <Clock className="w-3.5 h-3.5 text-amber-400" />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Outstanding</span>
+                        <span className="text-sm font-bold text-amber-400">{formatCurrencyCompact(financialSummary.outstanding, businessCurrency)}</span>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Outstanding</span>
-                      <span className="text-sm font-bold text-amber-400">{formatCurrencyCompact(financialSummary.outstanding, businessCurrency)}</span>
+                  </MetricExplainer>
+                  <MetricExplainer label={METRIC_DEFINITIONS.overdue.label} explanation={METRIC_DEFINITIONS.overdue.explanation} formula={METRIC_DEFINITIONS.overdue.formula} goodValue={METRIC_DEFINITIONS.overdue.goodValue}>
+                    <div className="rounded-xl border border-border/50 bg-card p-3 flex items-center gap-2.5">
+                      <div className="p-1.5 rounded-lg bg-red-500/10 shrink-0">
+                        <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Overdue</span>
+                        <span className="text-sm font-bold text-red-400">{formatCurrencyCompact(financialSummary.overdue, businessCurrency)}</span>
+                      </div>
                     </div>
-                  </div>
-                  <div className="rounded-xl border border-border/50 bg-card p-3 flex items-center gap-2.5">
-                    <div className="p-1.5 rounded-lg bg-red-500/10 shrink-0">
-                      <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+                  </MetricExplainer>
+                  <MetricExplainer label={METRIC_DEFINITIONS.collected_this_month.label} explanation={METRIC_DEFINITIONS.collected_this_month.explanation} formula={METRIC_DEFINITIONS.collected_this_month.formula} goodValue={METRIC_DEFINITIONS.collected_this_month.goodValue}>
+                    <div className="rounded-xl border border-border/50 bg-card p-3 flex items-center gap-2.5">
+                      <div className="p-1.5 rounded-lg bg-emerald-500/10 shrink-0">
+                        <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">This Month</span>
+                        <span className="text-sm font-bold text-emerald-400">{formatCurrencyCompact(financialSummary.collectedThisMonth, businessCurrency)}</span>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Overdue</span>
-                      <span className="text-sm font-bold text-red-400">{formatCurrencyCompact(financialSummary.overdue, businessCurrency)}</span>
-                    </div>
-                  </div>
-                  <div className="rounded-xl border border-border/50 bg-card p-3 flex items-center gap-2.5">
-                    <div className="p-1.5 rounded-lg bg-emerald-500/10 shrink-0">
-                      <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
-                    </div>
-                    <div className="min-w-0">
-                      <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">This Month</span>
-                      <span className="text-sm font-bold text-emerald-400">{formatCurrencyCompact(financialSummary.collectedThisMonth, businessCurrency)}</span>
-                    </div>
-                  </div>
+                  </MetricExplainer>
                 </div>
                 <InvoicesPanel
                   invoices={shell.invoices}
@@ -391,6 +403,8 @@ export default function CommercePage() {
         onClose={() => setHelpOpen(false)}
         onNavigate={(navTab: string) => handleTabChange(navTab)}
       />
+
+      <ModuleWalkthrough moduleKey="commerce" steps={COMMERCE_WALKTHROUGH} />
     </div>
   );
 }
