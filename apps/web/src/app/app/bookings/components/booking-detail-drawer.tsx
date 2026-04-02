@@ -108,7 +108,7 @@ function RescheduleForm({ onSubmit, onCancel, currentStartTime }: { onSubmit: (s
               key={ds}
               disabled={isPast}
               onClick={() => setDate(ds)}
-              className={`flex flex-col items-center py-1.5 rounded-lg text-center transition-all ${
+              className={`flex flex-col items-center py-1.5 rounded-lg text-center transition-all min-h-[44px] justify-center ${
                 sel ? "ring-1 ring-[hsl(var(--kf-accent1)/0.5)]" : isPast ? "opacity-30 cursor-not-allowed" : "hover:bg-muted/40"
               }`}
               style={sel ? { background: "hsl(var(--kf-accent1)/0.12)" } : undefined}
@@ -127,7 +127,7 @@ function RescheduleForm({ onSubmit, onCancel, currentStartTime }: { onSubmit: (s
             <button
               key={slot.value}
               onClick={() => setTime(slot.value)}
-              className={`flex-shrink-0 px-2 py-1.5 rounded-lg text-[11px] font-medium transition-all whitespace-nowrap border ${
+              className={`flex-shrink-0 px-2 py-1.5 rounded-lg text-[11px] font-medium transition-all whitespace-nowrap border min-h-[44px] ${
                 time === slot.value
                   ? "border-[hsl(var(--kf-accent1)/0.5)] ring-1 ring-[hsl(var(--kf-accent1)/0.3)]"
                   : "border-border/40 hover:border-border/70 hover:bg-muted/30 text-muted-foreground"
@@ -147,7 +147,7 @@ function RescheduleForm({ onSubmit, onCancel, currentStartTime }: { onSubmit: (s
         <button
           onClick={() => { if (date && time) onSubmit(new Date(`${date}T${time}`).toISOString()); }}
           disabled={!date || !time}
-          className="flex-1 px-3 min-h-[44px] text-xs font-semibold rounded-lg text-white transition-all disabled:opacity-40"
+          className="flex-1 px-3 min-h-[44px] text-xs font-semibold rounded-lg text-foreground transition-all disabled:opacity-40"
           style={{ background: date && time ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-accent1)/0.4)" }}
         >
           Confirm Reschedule
@@ -179,7 +179,7 @@ export default function BookingDetailDrawer({
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 flex items-start justify-end"
     >
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" onClick={onClose} />
       <motion.div
         initial={{ x: "100%" }}
         animate={{ x: 0 }}
@@ -219,7 +219,7 @@ export default function BookingDetailDrawer({
               {!editingNotes && onUpdateNotes && (
                 <button
                   onClick={() => { setNotesText(selectedBooking.notes ?? ""); setEditingNotes(true); }}
-                  className="flex items-center gap-1 text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                  className="flex items-center gap-1 text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors min-h-[44px]"
                 >
                   <Pencil className="w-2.5 h-2.5" />
                   {selectedBooking.notes ? "Edit" : "Add notes"}
@@ -239,7 +239,7 @@ export default function BookingDetailDrawer({
                 <div className="flex gap-1.5 justify-end">
                   <button
                     onClick={() => setEditingNotes(false)}
-                    className="px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors min-h-[32px]"
+                    className="px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors min-h-[44px]"
                   >
                     Cancel
                   </button>
@@ -248,7 +248,7 @@ export default function BookingDetailDrawer({
                       onUpdateNotes?.(selectedBooking.id, notesText);
                       setEditingNotes(false);
                     }}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded-md transition-colors min-h-[32px]"
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded-md transition-colors min-h-[44px]"
                     style={{
                       background: "hsl(var(--kf-accent1) / 0.1)",
                       color: "hsl(var(--kf-accent1))",

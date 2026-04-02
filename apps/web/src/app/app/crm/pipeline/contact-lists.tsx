@@ -35,6 +35,8 @@ interface SmartListFilters {
   tags?: string[];
   source?: string;
   createdWithinDays?: number;
+  createdAfter?: string;
+  createdBefore?: string;
   minLeadScore?: number;
   minRevenue?: number;
 }
@@ -106,6 +108,8 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
   const [formFilterTags, setFormFilterTags] = useState("");
   const [formFilterSource, setFormFilterSource] = useState("");
   const [formFilterDays, setFormFilterDays] = useState<number | "">("");
+  const [formFilterAfter, setFormFilterAfter] = useState("");
+  const [formFilterBefore, setFormFilterBefore] = useState("");
   const [formFilterMinScore, setFormFilterMinScore] = useState<number | "">("");
   const [formFilterMinRevenue, setFormFilterMinRevenue] = useState<number | "">("");
   const [saving, setSaving] = useState(false);
@@ -215,6 +219,8 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
     setFormFilterTags("");
     setFormFilterSource("");
     setFormFilterDays("");
+    setFormFilterAfter("");
+    setFormFilterBefore("");
     setFormFilterMinScore("");
     setFormFilterMinRevenue("");
   }, []);
@@ -230,6 +236,8 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
       setFormFilterTags((list.filters.tags || []).join(", "));
       setFormFilterSource(list.filters.source || "");
       setFormFilterDays(list.filters.createdWithinDays ?? "");
+      setFormFilterAfter(list.filters.createdAfter ?? "");
+      setFormFilterBefore(list.filters.createdBefore ?? "");
       setFormFilterMinScore(list.filters.minLeadScore ?? "");
       setFormFilterMinRevenue(list.filters.minRevenue ?? "");
     }
@@ -253,6 +261,8 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
           tags: formFilterTags.trim() ? formFilterTags.split(",").map((t) => t.trim()).filter(Boolean) : undefined,
           source: formFilterSource.trim() || undefined,
           createdWithinDays: formFilterDays ? Number(formFilterDays) : undefined,
+          createdAfter: formFilterAfter || undefined,
+          createdBefore: formFilterBefore || undefined,
           minLeadScore: formFilterMinScore ? Number(formFilterMinScore) : undefined,
           minRevenue: formFilterMinRevenue ? Number(formFilterMinRevenue) : undefined,
         };
@@ -273,7 +283,7 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
       toast.error("Failed to save list");
     }
     setSaving(false);
-  }, [businessId, editList, formName, formDescription, formColor, formType, formFilterStatus, formFilterTags, formFilterSource, formFilterDays, formFilterMinScore, formFilterMinRevenue, loadLists, resetForm]);
+  }, [businessId, editList, formName, formDescription, formColor, formType, formFilterStatus, formFilterTags, formFilterSource, formFilterDays, formFilterAfter, formFilterBefore, formFilterMinScore, formFilterMinRevenue, loadLists, resetForm]);
 
   const handleDelete = useCallback(async (listId: string) => {
     try {
@@ -494,6 +504,26 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
                       />
                       <span className="text-xs text-muted-foreground whitespace-nowrap">days</span>
                     </div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Created after</label>
+                    <input
+                      type="date"
+                      value={formFilterAfter}
+                      onChange={(e) => setFormFilterAfter(e.target.value)}
+                      className="kf-input w-full text-xs min-h-[44px]"
+                      aria-label="Created after date"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Created before</label>
+                    <input
+                      type="date"
+                      value={formFilterBefore}
+                      onChange={(e) => setFormFilterBefore(e.target.value)}
+                      className="kf-input w-full text-xs min-h-[44px]"
+                      aria-label="Created before date"
+                    />
                   </div>
                   <div>
                     <label className="text-xs text-muted-foreground mb-1 block">Min lead score</label>

@@ -497,8 +497,9 @@ export class BookingOptimizerService {
     });
     const reminderMins = business?.bookingReminderMins ?? 60;
     const reminderMs = reminderMins * 60 * 1000;
-    const windowStart = new Date(now.getTime() + reminderMs - 60 * 60 * 1000);
-    const windowEnd = new Date(now.getTime() + reminderMs + 60 * 60 * 1000);
+    const toleranceMs = 30 * 60 * 1000;
+    const windowStart = new Date(Math.max(now.getTime(), now.getTime() + reminderMs - toleranceMs));
+    const windowEnd = new Date(now.getTime() + reminderMs + toleranceMs);
 
     const bookings = await this.prisma.client.booking.findMany({
       where: {
