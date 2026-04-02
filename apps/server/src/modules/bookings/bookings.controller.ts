@@ -53,6 +53,16 @@ export class BookingsController {
     return this.bookings.rescheduleBooking(businessId, bookingId, new Date(startTime));
   }
 
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/bookings/:bookingId/notes')
+  updateBookingNotes(
+    @Param('businessId') businessId: string,
+    @Param('bookingId') bookingId: string,
+    @Body('notes') notes: string,
+  ) {
+    return this.bookings.updateBookingNotes(businessId, bookingId, notes);
+  }
+
   @UseGuards(AuthGuard, BusinessGuard, PlanLimitGuard)
   @RequirePlanLimit('bookings')
   @Post('businesses/:businessId')

@@ -19,6 +19,7 @@ import {
   ScheduleHealth,
   createBooking,
   rescheduleBooking,
+  updateBookingNotes,
   fetchBookings,
   fetchServices,
   fetchStaff,
@@ -323,6 +324,18 @@ export default function BookingsPage() {
     }
   }
 
+  async function handleUpdateNotes(bookingId: string, notes: string) {
+    if (!businessId) return;
+    const res = await updateBookingNotes(bookingId, notes, businessId);
+    if (res.data) {
+      await loadData();
+      setSelectedBooking(res.data);
+      setBanner({ text: "Booking notes updated.", type: "success" });
+    } else {
+      setBanner({ text: res.error ?? "Failed to update notes.", type: "error" });
+    }
+  }
+
   const handleCalendarCreate = useCallback((prefill: { date: string; time?: string }) => {
     setPrefillDate(prefill.date);
     setPrefillTime(prefill.time);
@@ -601,6 +614,7 @@ export default function BookingsPage() {
             onStatusChange={handleStatusChange}
             onSyncCalendar={handleSyncBooking}
             onReschedule={handleReschedule}
+            onUpdateNotes={handleUpdateNotes}
             calendarConnected={calendarConnected}
           />
         )}
