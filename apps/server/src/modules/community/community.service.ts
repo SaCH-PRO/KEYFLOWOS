@@ -21,7 +21,7 @@ export class CommunityService {
         where,
         orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }],
         include: {
-          business: { select: { id: true, name: true, logoUrl: true } },
+          business: { select: { id: true, name: true, logoUrl: true, headline: true, bio: true, industry: true } },
           _count: { select: { comments: true } },
         },
         skip,
@@ -37,10 +37,10 @@ export class CommunityService {
     return this.prisma.client.communityPost.findFirst({
       where: { id, deletedAt: null },
       include: {
-        business: { select: { id: true, name: true, logoUrl: true } },
+        business: { select: { id: true, name: true, logoUrl: true, headline: true, bio: true, industry: true } },
         comments: {
           include: {
-            business: { select: { id: true, name: true, logoUrl: true } },
+            business: { select: { id: true, name: true, logoUrl: true, headline: true } },
           },
           orderBy: { createdAt: 'asc' },
         },
@@ -58,7 +58,7 @@ export class CommunityService {
         tags: input.tags ?? [],
       },
       include: {
-        business: { select: { id: true, name: true, logoUrl: true } },
+        business: { select: { id: true, name: true, logoUrl: true, headline: true, bio: true, industry: true } },
         _count: { select: { comments: true } },
       },
     });
@@ -74,7 +74,7 @@ export class CommunityService {
         ...(input.tags !== undefined && { tags: input.tags }),
       },
       include: {
-        business: { select: { id: true, name: true, logoUrl: true } },
+        business: { select: { id: true, name: true, logoUrl: true, headline: true, bio: true, industry: true } },
         _count: { select: { comments: true } },
       },
     });
@@ -102,7 +102,7 @@ export class CommunityService {
         content,
       },
       include: {
-        business: { select: { id: true, name: true, logoUrl: true } },
+        business: { select: { id: true, name: true, logoUrl: true, headline: true } },
       },
     });
   }

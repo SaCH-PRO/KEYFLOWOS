@@ -56,6 +56,14 @@ model Business {
   youtube      String?
   whatsapp     String?
 
+  // Community Profile
+  headline          String?
+  bio               String?
+  skills            String[] @default([])
+  businessStage     String?  @map("business_stage")       // IDEA, STARTUP, GROWTH, ESTABLISHED, SCALING
+  interests         String[] @default([])
+  profileCompleteness Int    @default(0) @map("profile_completeness")
+
   // Brand Settings
   primaryColor   String?  @default("#F97316") @map("primary_color")
   secondaryColor String?  @default("#14B8A6") @map("secondary_color")

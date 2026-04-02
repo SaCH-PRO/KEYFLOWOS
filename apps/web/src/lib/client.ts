@@ -3909,7 +3909,7 @@ export interface CommunityPost {
   likes: number;
   isPinned: boolean;
   businessId: string;
-  business?: { name: string; logoUrl?: string };
+  business?: { id: string; name: string; logoUrl?: string; headline?: string; bio?: string; industry?: string };
   _count?: { comments: number };
   createdAt: string;
 }
@@ -3918,7 +3918,7 @@ export interface CommunityComment {
   content: string;
   postId: string;
   businessId: string;
-  business?: { name: string };
+  business?: { id: string; name: string; logoUrl?: string; headline?: string };
   likes: number;
   createdAt: string;
 }
@@ -3930,6 +3930,29 @@ export interface Cohort {
   industry?: string;
   isActive: boolean;
   _count?: { members: number };
+}
+export interface CommunityProfile {
+  id: string;
+  name: string;
+  logoUrl?: string;
+  headline?: string;
+  bio?: string;
+  industry?: string;
+  skills: string[];
+  businessStage?: string;
+  city?: string;
+  country?: string;
+  interests: string[];
+  profileCompleteness: number;
+  tagline?: string;
+  createdAt: string;
+  _count?: { communityPosts: number; cohortMembers: number };
+}
+export interface DocumentRecommendation {
+  category: 'Legal' | 'Financial' | 'Creative' | 'Constitutional';
+  title: string;
+  description: string;
+  priority: 'high' | 'medium' | 'low';
 }
 export async function fetchCommunityPosts(params?: { type?: string }): Promise<ApiResult<CommunityPost[]>> {
   const q = params?.type ? `?type=${params.type}` : '';
@@ -3958,6 +3981,15 @@ export async function leaveCohort(businessId: string, cohortId: string): Promise
 }
 export async function fetchMyCohorts(businessId: string): Promise<ApiResult<Cohort[]>> {
   return apiGetSimple<Cohort[]>(`/businesses/${encodeURIComponent(businessId)}/community/my-cohorts`);
+}
+export async function fetchCommunityProfile(businessId: string): Promise<ApiResult<CommunityProfile>> {
+  return apiGetSimple<CommunityProfile>(`/identity/businesses/community-profile/${encodeURIComponent(businessId)}`);
+}
+export async function generateAiProfile(businessId: string, data: { name?: string; industry?: string; skills?: string[]; businessStage?: string; description?: string }): Promise<ApiResult<{ headline: string; bio: string }>> {
+  return apiPost<{ headline: string; bio: string }>({ path: `/identity/businesses/${encodeURIComponent(businessId)}/generate-profile`, body: data });
+}
+export async function fetchDocumentGuidance(businessId: string): Promise<ApiResult<{ recommendations: DocumentRecommendation[] }>> {
+  return apiGetSimple<{ recommendations: DocumentRecommendation[] }>(`/identity/businesses/${encodeURIComponent(businessId)}/document-guidance`);
 }
 
 
