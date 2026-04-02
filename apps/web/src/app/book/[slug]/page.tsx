@@ -152,7 +152,8 @@ export default function PublicBookingPage() {
       setBusiness(res.data);
 
       const sfRes = await apiGet<any>(`/site/storefront/public/${encodeURIComponent(slug)}`);
-      if (sfRes.data?.storefrontConfig) setStorefrontConfig(sfRes.data.storefrontConfig);
+      if (sfRes.data?.storefront) setStorefrontConfig(sfRes.data.storefront);
+      else if (sfRes.data?.storefrontConfig) setStorefrontConfig(sfRes.data.storefrontConfig);
 
       if (res.data?.id) trackStoreEvent(res.data.id, 'page_view');
 
@@ -177,27 +178,32 @@ export default function PublicBookingPage() {
   }, [slug]);
 
   useEffect(() => {
-    if (business) document.title = `Book with ${business.name} | KeyFlowOS`;
-  }, [business]);
+    if (!business) return;
+    const seo = storefrontConfig?.seo as { metaTitle?: string; metaDescription?: string; ogImage?: string } | undefined;
+    document.title = seo?.metaTitle || `Book with ${business.name} | KeyFlowOS`;
+  }, [business, storefrontConfig]);
 
   useEffect(() => {
     if (!business) return;
-    const description = business.tagline || `Book an appointment with ${business.name} online.`;
+    const seo = storefrontConfig?.seo as { metaTitle?: string; metaDescription?: string; ogImage?: string } | undefined;
+    const pageTitle = seo?.metaTitle || `${business.name} | Book Online`;
+    const description = seo?.metaDescription || business.tagline || `Book an appointment with ${business.name} online.`;
+    const ogImage = seo?.ogImage || business.logoUrl;
     const pageUrl = typeof window !== "undefined" ? window.location.href : "";
     const ogTags: Record<string, string> = {
       description,
-      "og:title": `${business.name} | Book Online`,
+      "og:title": pageTitle,
       "og:description": description,
       "og:type": "website",
       "og:url": pageUrl,
       "og:site_name": "KeyFlowOS",
-      "twitter:card": "summary",
-      "twitter:title": `${business.name} | Book Online`,
+      "twitter:card": seo?.ogImage ? "summary_large_image" : "summary",
+      "twitter:title": pageTitle,
       "twitter:description": description,
     };
-    if (business.logoUrl) {
-      ogTags["og:image"] = business.logoUrl;
-      ogTags["twitter:image"] = business.logoUrl;
+    if (ogImage) {
+      ogTags["og:image"] = ogImage;
+      ogTags["twitter:image"] = ogImage;
     }
     for (const [key, value] of Object.entries(ogTags)) {
       const isOg = key.startsWith("og:") || key.startsWith("twitter:");
@@ -210,7 +216,7 @@ export default function PublicBookingPage() {
       }
       meta.setAttribute("content", value);
     }
-  }, [business]);
+  }, [business, storefrontConfig]);
 
   const catalogItems: CatalogItem[] = (() => {
     const items: CatalogItem[] = [];
@@ -268,6 +274,15 @@ export default function PublicBookingPage() {
           requiresBooking: false,
         });
       }
+    }
+    const pOrder = (storefrontConfig?.catalog as any)?.productOrder as string[] | undefined;
+    if (pOrder?.length) {
+      const orderMap = new Map(pOrder.map((id, idx) => [id, idx]));
+      items.sort((a, b) => {
+        const ai = orderMap.get(a.id) ?? Infinity;
+        const bi = orderMap.get(b.id) ?? Infinity;
+        return ai - bi;
+      });
     }
     return items;
   })();
