@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { SkeletonList } from "@/components/ui/skeleton";
+import { InfoBadge } from "@/components/ui/info-badge";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button, Input } from "@keyflow/ui";
 import {
@@ -684,6 +685,7 @@ export default function InvoicesPanel({
         </div>
 
         <div className="flex items-center gap-1 overflow-x-auto scrollbar-none" role="group" aria-label="Filter by status">
+          <InfoBadge title="Invoice Status Filters" body="Draft: Not yet sent. Sent: Delivered to client. Partially Paid: Some amount received. Paid: Fully settled. Overdue: Past due date. Void: Cancelled." side="bottom" iconSize={11} />
           {INVOICE_STATUS_FILTERS.slice(0, 4).map((f) => {
             const count = statusCounts[f.value] ?? 0;
             const isActive = invoiceStatusFilter === f.value;

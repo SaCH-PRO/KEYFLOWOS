@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { Button } from "@keyflow/ui";
 import { Plus, Minus } from "lucide-react";
+import { InfoBadge } from "@/components/ui/info-badge";
 import { Product } from "@/lib/client";
 import { InvoiceLineItem, CATEGORIES } from "./commerce-types";
 
@@ -192,7 +193,7 @@ export default function LineItemsEditor({
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 rounded-xl border border-border/50 bg-card/60 backdrop-blur-sm p-4">
         <div>
-          <label className="text-xs text-muted-foreground mb-1 block">Tax Rate (%)</label>
+          <label className="text-xs text-muted-foreground mb-1 inline-flex items-center gap-1">Tax Rate (%) <InfoBadge title="Tax Rate" body="Applied to the subtotal. Trinidad standard VAT is 12.5%. Set your default rate in Settings > Payments. Override per invoice here." side="right" iconSize={10} /></label>
           <input
             type="number"
             step="0.1"
@@ -204,7 +205,7 @@ export default function LineItemsEditor({
         </div>
 
         <div>
-          <label className="text-xs text-muted-foreground mb-1 block">Discount</label>
+          <label className="text-xs text-muted-foreground mb-1 inline-flex items-center gap-1">Discount <InfoBadge title="Discount" body="Apply a percentage or fixed amount discount to the subtotal before tax. Choose % for proportional discounts or $ for a flat reduction." side="right" iconSize={10} /></label>
           <div className="flex gap-2">
             <select
               value={discountType}

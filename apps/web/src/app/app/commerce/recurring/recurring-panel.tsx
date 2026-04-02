@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { InfoBadge } from "@/components/ui/info-badge";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button, Input } from "@keyflow/ui";
 import {
@@ -303,7 +304,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
                   required
                 />
                 <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 block">Frequency *</label>
+                  <label className="text-xs text-muted-foreground mb-1.5 inline-flex items-center gap-1">Frequency * <InfoBadge title="Recurring Frequency" body="How often this invoice is auto-generated and sent. Monthly is most common for retainers. The system creates a new invoice each cycle and optionally sends it to the client." side="right" iconSize={10} /></label>
                   <select
                     className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
                     value={form.frequency}

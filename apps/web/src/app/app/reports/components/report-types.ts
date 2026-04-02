@@ -2,15 +2,15 @@ import { Briefcase, Wallet, TrendingUp, PieChart, Users, Calendar, Megaphone } f
 
 export type ReportType = "executive" | "pnl" | "revenue" | "cash-flow" | "expenses" | "clients" | "bookings" | "marketing";
 
-export const REPORT_TABS: Array<{ id: ReportType; label: string; icon: React.ElementType }> = [
-  { id: "executive", label: "Executive Summary", icon: Briefcase },
-  { id: "pnl", label: "Profit & Loss", icon: Wallet },
-  { id: "revenue", label: "Revenue & Collections", icon: TrendingUp },
-  { id: "cash-flow", label: "Cash Flow Forecast", icon: Wallet },
-  { id: "expenses", label: "Expenses & Profitability", icon: PieChart },
-  { id: "clients", label: "Client Portfolio", icon: Users },
-  { id: "bookings", label: "Bookings Performance", icon: Calendar },
-  { id: "marketing", label: "Marketing ROI", icon: Megaphone },
+export const REPORT_TABS: Array<{ id: ReportType; label: string; icon: React.ElementType; tooltip?: string }> = [
+  { id: "executive", label: "Executive Summary", icon: Briefcase, tooltip: "High-level business health snapshot with key KPIs and trends." },
+  { id: "pnl", label: "Profit & Loss", icon: Wallet, tooltip: "Income minus expenses — see your net profit over any period." },
+  { id: "revenue", label: "Revenue & Collections", icon: TrendingUp, tooltip: "Invoiced vs. collected revenue, aging receivables, and payment velocity." },
+  { id: "cash-flow", label: "Cash Flow Forecast", icon: Wallet, tooltip: "Projected cash inflows and outflows based on invoices and recurring expenses." },
+  { id: "expenses", label: "Expenses & Profitability", icon: PieChart, tooltip: "Expense breakdown by category with profit margin analysis." },
+  { id: "clients", label: "Client Portfolio", icon: Users, tooltip: "Client lifetime value, retention rates, and revenue concentration." },
+  { id: "bookings", label: "Bookings Performance", icon: Calendar, tooltip: "Booking volume, utilization rates, and service popularity." },
+  { id: "marketing", label: "Marketing ROI", icon: Megaphone, tooltip: "Campaign spend vs. revenue attributed — calculate your marketing return." },
 ];
 
 export const DATE_PRESETS = [

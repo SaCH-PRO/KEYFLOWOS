@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Zap, X } from "lucide-react";
+import { InfoBadge } from "@/components/ui/info-badge";
 import { Button, Input } from "@keyflow/ui";
 import { createPlaybook, updatePlaybook, Playbook } from "@/lib/client";
 import {
@@ -146,7 +147,7 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
               />
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">When this happens...</label>
+                <label className="text-xs text-muted-foreground mb-1 inline-flex items-center gap-1">When this happens... <InfoBadge title="Automation Trigger" body="The event that starts this automation. For example, 'Invoice Paid' fires whenever a client completes payment. Each automation needs exactly one trigger." side="right" iconSize={10} /></label>
                 <select
                   className="w-full rounded-lg border border-border/60 bg-input px-3 py-2 text-sm"
                   value={form.triggerEvent}
@@ -165,7 +166,7 @@ export function PlaybookEditor({ open, onClose, onSaved, template, editingPlaybo
             </div>
 
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Only if... (optional condition)</label>
+              <label className="text-xs text-muted-foreground mb-1 inline-flex items-center gap-1">Only if... (optional condition) <InfoBadge title="Automation Conditions" body="Conditions narrow when the automation runs. Without a condition, it fires for every trigger event. Add a condition to limit it — e.g. only for contacts with an email, or only during business hours." side="right" iconSize={10} /></label>
               <select
                 className="w-full rounded-lg border border-border/60 bg-input px-3 py-2 text-sm"
                 value={form.condition}

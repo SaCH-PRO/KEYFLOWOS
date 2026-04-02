@@ -18,9 +18,9 @@ import { ExecutionLog } from "./components/execution-log";
 import type { AutomationTemplate } from "./components/automation-constants";
 
 const TABS = [
-  { key: "automations", label: "My Automations", icon: List },
-  { key: "templates", label: "Templates", icon: LayoutGrid },
-  { key: "log", label: "Activity Log", icon: Clock },
+  { key: "automations", label: "My Automations", icon: List, tooltip: "Active automations and playbooks running in your business." },
+  { key: "templates", label: "Templates", icon: LayoutGrid, tooltip: "Pre-built automation recipes you can activate with one click." },
+  { key: "log", label: "Activity Log", icon: Clock, tooltip: "History of all automation executions, triggers, and outcomes." },
 ];
 
 export default function AutomationsPage() {

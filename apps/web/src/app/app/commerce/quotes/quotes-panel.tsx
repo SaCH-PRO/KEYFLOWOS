@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { SkeletonList } from "@/components/ui/skeleton";
+import { InfoBadge } from "@/components/ui/info-badge";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button, Input } from "@keyflow/ui";
 import {
@@ -693,6 +694,7 @@ export default function QuotesPanel({
         </div>
 
         <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none" role="group" aria-label="Filter by status">
+          <InfoBadge title="Quote Status Filters" body="Draft: Work in progress. Sent: Delivered to client. Accepted: Client approved — ready to convert to invoice. Rejected: Client declined. Expired: Past validity date." side="bottom" iconSize={11} />
           {QUOTE_STATUS_FILTERS.slice(0, 4).map((f) => {
             const count = statusCounts[f.value] ?? 0;
             return (

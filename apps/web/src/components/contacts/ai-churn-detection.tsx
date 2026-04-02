@@ -7,6 +7,7 @@ import {
   TrendingDown, Lightbulb, Users,
 } from "lucide-react";
 import { aiChurnDetection, type AiChurnRisk } from "@/lib/client";
+import { InfoBadge } from "@/components/ui/info-badge";
 
 interface AiChurnDetectionProps {
   onSelectContact?: (contactId: string) => void;
@@ -47,7 +48,7 @@ export function AiChurnDetectionPanel({ onSelectContact }: AiChurnDetectionProps
       >
         <ShieldAlert className="w-4.5 h-4.5 text-amber-400" />
         <div className="flex-1 min-w-0">
-          <span className="text-sm font-medium block">Churn Risk Detection</span>
+          <span className="text-sm font-medium inline-flex items-center gap-1">Churn Risk Detection <InfoBadge title="Churn Risk" body="AI analyzes engagement patterns — booking gaps, invoice payment delays, and interaction recency — to flag contacts likely to leave. Critical risk means no activity in 60+ days." side="right" iconSize={10} /></span>
           <span className="text-[10px] text-muted-foreground/60">AI-powered analysis of at-risk contacts</span>
         </div>
         <span className="text-[10px] text-muted-foreground/50">2 credits</span>

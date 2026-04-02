@@ -2,12 +2,14 @@
 
 import { useRef, useCallback, useEffect } from "react";
 import { motion } from "framer-motion";
+import { RichTooltip } from "@/components/ui/rich-tooltip";
 
 interface TabItem {
   key: string;
   label: string;
   icon?: React.ElementType;
   count?: number;
+  tooltip?: string;
 }
 
 interface TabNavProps {
@@ -63,7 +65,7 @@ export function TabNav({ tabs, activeTab, onTabChange, layoutId = "tab-underline
         {tabs.map((t) => {
           const Icon = t.icon;
           const isActive = activeTab === t.key;
-          return (
+          const btn = (
             <button
               key={t.key}
               role="tab"
@@ -111,6 +113,13 @@ export function TabNav({ tabs, activeTab, onTabChange, layoutId = "tab-underline
                 </span>
               )}
             </button>
+          );
+          return t.tooltip ? (
+            <RichTooltip key={t.key} title={t.tooltip!} side="bottom">
+              {btn}
+            </RichTooltip>
+          ) : (
+            <span key={t.key}>{btn}</span>
           );
         })}
       </div>

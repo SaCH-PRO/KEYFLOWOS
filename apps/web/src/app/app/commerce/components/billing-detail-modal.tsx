@@ -2,6 +2,7 @@
 
 import { type ReactNode, useEffect, useCallback, useRef, useState, useMemo } from "react";
 import { motion } from "framer-motion";
+import { InfoBadge } from "@/components/ui/info-badge";
 import {
   FileText,
   X,
@@ -643,7 +644,7 @@ export function BillingDetailModal({
                   </div>
                   {(taxRate || 0) > 0 && (
                     <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>Tax ({taxRate}%)</span>
+                      <span className="inline-flex items-center gap-1">Tax ({taxRate}%) <InfoBadge title="Tax Calculation" body="Tax is applied to the subtotal after any discounts. The rate is set per invoice or in Settings > Payments. Trinidad default: 12.5% VAT." side="left" iconSize={10} /></span>
                       <span>{formatAmount(taxAmount, currency)}</span>
                     </div>
                   )}

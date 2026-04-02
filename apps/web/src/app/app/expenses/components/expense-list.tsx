@@ -6,6 +6,7 @@ import {
   Pencil, Trash2, ArrowUpDown, Repeat, FileText,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
+import { InfoBadge } from "@/components/ui/info-badge";
 import { Expense, ExpenseCategory, PAYMENT_METHODS } from "@/lib/client";
 import { formatCurrency, formatDate } from "./expense-utils";
 
@@ -55,7 +56,7 @@ export function ExpenseList({
   return (
     <div className="kf-card rounded-xl overflow-hidden">
       <div className="p-4 border-b border-border/40 flex items-center justify-between flex-wrap gap-3">
-        <h3 className="text-sm font-semibold">All Expenses <span className="text-muted-foreground font-normal">({totalExpenses})</span></h3>
+        <h3 className="text-sm font-semibold inline-flex items-center gap-1.5">All Expenses <span className="text-muted-foreground font-normal">({totalExpenses})</span> <InfoBadge title="Expense Tracking" body="Track all business expenses by category and payment method. Use filters to drill into specific types. Recurring expenses are marked with a repeat icon." side="right" iconSize={11} /></h3>
         <div className="flex items-center gap-2">
           <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} className="appearance-none bg-white/5 border border-white/10 rounded-lg pl-7 pr-8 py-1.5 text-xs focus:outline-none focus:border-[hsl(var(--kf-accent1))]">
             <option value="">All Categories</option>

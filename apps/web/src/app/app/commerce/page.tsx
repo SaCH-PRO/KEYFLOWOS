@@ -48,10 +48,10 @@ import RecurringPanel from "./recurring/recurring-panel";
 import PaymentsTab from "./payments/payments-tab";
 
 const TABS = [
-  { key: "invoices", label: "Invoices", icon: FileText },
-  { key: "quotes", label: "Quotes", icon: CreditCard },
-  { key: "payments", label: "Payments", icon: DollarSign },
-  { key: "recurring", label: "Recurring", icon: RefreshCw },
+  { key: "invoices", label: "Invoices", icon: FileText, tooltip: "Create and manage invoices. Track sent, paid, overdue, and draft invoices." },
+  { key: "quotes", label: "Quotes", icon: CreditCard, tooltip: "Send price estimates to clients. Accepted quotes can be converted to invoices." },
+  { key: "payments", label: "Payments", icon: DollarSign, tooltip: "View all received payments across invoices and payment methods." },
+  { key: "recurring", label: "Recurring", icon: RefreshCw, tooltip: "Set up automatic recurring invoices on a schedule for repeat clients." },
 ];
 
 export default function CommercePage() {

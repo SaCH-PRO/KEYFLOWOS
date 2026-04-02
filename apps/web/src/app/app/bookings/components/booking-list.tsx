@@ -1,6 +1,7 @@
 "use client";
 
 import { motion, AnimatePresence } from "framer-motion";
+import { InfoBadge } from "@/components/ui/info-badge";
 import {
   Calendar,
   Clock,
@@ -67,6 +68,7 @@ export default function BookingList({
         >
           <Filter className="w-4 h-4" />
           Filters
+          <InfoBadge title="Booking Filters" body="Filter by status (Confirmed, Pending, Cancelled, Completed), date range, or service type to find specific bookings." side="bottom" iconSize={11} />
           <ChevronDown className={`w-4 h-4 transition-transform ${showFilters ? "rotate-180" : ""}`} />
         </button>
         <button
