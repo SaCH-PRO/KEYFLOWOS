@@ -347,8 +347,8 @@ Use ${currency} for all monetary values. Be specific with numbers. Keep each sec
       const entry = dayMap.get(key);
       if (entry) {
         entry.total++;
-        if (b.status === 'COMPLETED' || b.status === 'CONFIRMED') entry.completed++;
-        else entry.missed++;
+        if (b.status === 'COMPLETED' || b.status === 'CONFIRMED' || b.status === 'PENDING') entry.completed++;
+        else if (b.status === 'CANCELLED' || b.status === 'NO_SHOW') entry.missed++;
       }
     }
 
