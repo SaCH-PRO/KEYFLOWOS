@@ -17,6 +17,7 @@ import { CreateNoteDto } from './dto/create-note.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
 import { CrmRateLimitGuard, CrmRateLimit } from './guards/rate-limit.guard';
+import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
 import { FeatureFlagGuard, RequireFeature } from './guards/feature-flag.guard';
 import { checkAiRateLimit } from './ai-rate-limit.util';
 import { memoryStorage } from 'multer';
@@ -96,8 +97,9 @@ export class CrmController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, PlanLimitGuard)
   @CrmRateLimit(30, 60_000)
+  @RequirePlanLimit('contacts')
   @Post('businesses/:businessId/contacts')
   createContact(
     @Param('businessId') businessId: string,

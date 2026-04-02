@@ -34,6 +34,8 @@ import { useModuleEmit, useModuleEvent } from "@/hooks/use-module-events";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { useRouter } from "next/navigation";
 import { formatCurrencyCompact } from "@/lib/currency";
+import { usePlan } from "@/hooks/use-plan";
+import { PlanLimitBanner } from "@/components/ui/upgrade-prompt";
 import type { BillingSlots } from "./utils/commerce-slots";
 import InvoicesPanel from "./invoices/invoices-panel";
 import QuotesPanel from "./quotes/quotes-panel";
@@ -50,6 +52,7 @@ const TABS = [
 export default function CommercePage() {
   const shell = useCommerceShell();
   const billing = useBillingWorkspace();
+  const { checkLimit } = usePlan();
   const overview = useCommerceOverview(shell.invoices, shell.businessCurrency);
   const composer = useCommerceComposer({
     tab: overview.tab,
@@ -240,6 +243,11 @@ export default function CommercePage() {
         activeTab={tab}
         onTabChange={handleWrappedTabChange}
       />
+
+      {(() => {
+        const il = checkLimit("invoices");
+        return <PlanLimitBanner resourceKey="invoices" label="invoices" currentUsage={il.current} limit={il.limit} isUnlimited={il.isUnlimited} nearLimit={il.nearLimit} atLimit={il.atLimit} />;
+      })()}
 
       {shell.error && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200 flex items-center gap-2">

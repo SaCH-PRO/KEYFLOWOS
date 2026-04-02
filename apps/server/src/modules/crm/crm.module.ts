@@ -20,6 +20,7 @@ import { CrmVisionService } from './crm-vision.service';
 import { CrmService } from './crm.service';
 import { CrmRateLimitGuard } from './guards/rate-limit.guard';
 import { FeatureFlagGuard } from './guards/feature-flag.guard';
+import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
 import { AiModule } from '../ai/ai.module';
 import { AutomationModule } from '../automation/automation.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
@@ -27,7 +28,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 @Module({
   imports: [forwardRef(() => AutomationModule), SubscriptionsModule, AiModule],
   controllers: [CrmController, CrmAiController, CrmGoogleController, CrmSequenceController],
-  providers: [CrmService, CrmTimelineService, CrmListsService, CrmStatsService, CrmImportService, CrmPlaybookService, CrmVisionService, CrmGoogleService, CrmFlowService, CrmActionsService, CrmRevenueService, CrmJourneyService, CrmAiService, CrmSequenceService, CrmSequenceSchedulerService, CrmRateLimitGuard, FeatureFlagGuard],
+  providers: [CrmService, CrmTimelineService, CrmListsService, CrmStatsService, CrmImportService, CrmPlaybookService, CrmVisionService, CrmGoogleService, CrmFlowService, CrmActionsService, CrmRevenueService, CrmJourneyService, CrmAiService, CrmSequenceService, CrmSequenceSchedulerService, CrmRateLimitGuard, FeatureFlagGuard, PlanLimitGuard],
   exports: [CrmService, CrmTimelineService, CrmListsService, CrmStatsService, CrmImportService, CrmPlaybookService, CrmVisionService, CrmGoogleService, CrmFlowService, CrmActionsService, CrmRevenueService, CrmJourneyService, CrmAiService, CrmSequenceService, CrmSequenceSchedulerService],
 })
 export class CrmModule {}

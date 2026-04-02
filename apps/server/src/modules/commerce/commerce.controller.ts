@@ -7,6 +7,7 @@ import { CommerceVisionService } from './commerce-vision.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CreateProductDto } from './dto/create-product.dto';
+import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
 import { BulkProductsDto } from './dto/bulk-products.dto';
 import { ReceiptService } from './receipt.service';
 import { GmailService } from './gmail.service';
@@ -62,7 +63,8 @@ export class CommerceController {
     );
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, PlanLimitGuard)
+  @RequirePlanLimit('products')
   @Post('businesses/:businessId/products')
   createProduct(
     @Param('businessId') businessId: string,
@@ -220,7 +222,8 @@ export class CommerceController {
     );
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, PlanLimitGuard)
+  @RequirePlanLimit('invoices')
   @Post('businesses/:businessId/invoices')
   createInvoice(
     @Param('businessId') businessId: string,

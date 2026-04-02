@@ -6,6 +6,8 @@ import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { FeatureGuide } from "@/components/ui/feature-guide";
+import { usePlan } from "@/hooks/use-plan";
+import { UpgradePrompt } from "@/components/ui/upgrade-prompt";
 import { AutomationList } from "./components/automation-list";
 import { TemplateGallery } from "./components/template-gallery";
 import { ExecutionLog } from "./components/execution-log";
@@ -20,6 +22,7 @@ const TABS = [
 export default function AutomationsPage() {
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("automations");
+  const { isFreePlan } = usePlan();
   const [selectedTemplate, setSelectedTemplate] = useState<AutomationTemplate | null>(null);
 
   useEffect(() => {
@@ -52,6 +55,15 @@ export default function AutomationsPage() {
           { title: "Monitor Activity", description: "Check the Activity Log tab to see when automations ran and what they did." },
         ]}
       />
+
+      {isFreePlan && (
+        <UpgradePrompt
+          feature="Playbook Automations"
+          description="Automate your business with event-driven workflows. Available on Flow and above."
+          requiredPlan="FLOW"
+          variant="inline"
+        />
+      )}
 
       <TabNav
         tabs={TABS}

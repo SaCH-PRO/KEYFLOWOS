@@ -24,6 +24,8 @@ import { useCrmAiHub } from "./hooks/use-crm-ai-hub";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useModuleEmit } from "@/hooks/use-module-events";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
+import { usePlan } from "@/hooks/use-plan";
+import { PlanLimitBanner } from "@/components/ui/upgrade-prompt";
 
 export default function ContactsPage() {
   const searchParams = useSearchParams();
@@ -31,6 +33,7 @@ export default function ContactsPage() {
   const googleHandled = useRef(false);
   const state = useContactsPipeline();
   const crmAi = useCrmAiHub();
+  const { checkLimit } = usePlan();
   const emitEvent = useModuleEmit();
   const [slideDirection, setSlideDirection] = useState(0);
 
@@ -205,6 +208,11 @@ export default function ContactsPage() {
         }
       />
 
+
+      {(() => {
+        const cl = checkLimit("contacts");
+        return <PlanLimitBanner resourceKey="contacts" label="contacts" currentUsage={cl.current} limit={cl.limit} isUnlimited={cl.isUnlimited} nearLimit={cl.nearLimit} atLimit={cl.atLimit} />;
+      })()}
 
       <TabNav
         tabs={[

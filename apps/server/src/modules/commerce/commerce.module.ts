@@ -15,11 +15,12 @@ import { CrmModule } from '../crm/crm.module';
 import { AutomationModule } from '../automation/automation.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { AiModule } from '../ai/ai.module';
+import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
 
 @Module({
   imports: [CrmModule, AutomationModule, SubscriptionsModule, AiModule],
   controllers: [CommerceController, CommerceAiController, FinancialCopilotController],
-  providers: [CommerceService, CommerceStatsService, CommerceAiService, CommerceVisionService, RecurringInvoiceService, ReceiptService, GmailService, FinancialCopilotService, FinancialBriefingSchedulerService],
+  providers: [CommerceService, CommerceStatsService, CommerceAiService, CommerceVisionService, RecurringInvoiceService, ReceiptService, GmailService, FinancialCopilotService, FinancialBriefingSchedulerService, PlanLimitGuard],
   exports: [CommerceService, CommerceStatsService, RecurringInvoiceService, GmailService, FinancialCopilotService],
 })
 export class CommerceModule {}

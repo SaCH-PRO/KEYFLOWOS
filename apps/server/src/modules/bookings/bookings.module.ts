@@ -10,11 +10,12 @@ import { CommerceModule } from '../commerce/commerce.module';
 import { AutomationModule } from '../automation/automation.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { AiModule } from '../ai/ai.module';
+import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
 
 @Module({
   imports: [CrmModule, CommerceModule, AutomationModule, SubscriptionsModule, AiModule],
   controllers: [BookingsController, BookingsAiController],
-  providers: [BookingsService, BookingsAiService, CalendarService, BookingOptimizerService],
+  providers: [BookingsService, BookingsAiService, CalendarService, BookingOptimizerService, PlanLimitGuard],
   exports: [BookingsService, BookingsAiService, CalendarService, BookingOptimizerService],
 })
 export class BookingsModule {}
