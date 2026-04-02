@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { API_BASE, apiPost, apiPatch, apiDelete, apiGet as apiGetSimple, getAuthHeaders } from "./api";
+import { API_BASE, apiPost, apiPatch, apiDelete, apiGet as apiGetSimple, getAuthHeaders, type PlanLimitError } from "./api";
 
 const DEFAULT_BUSINESS_ID = process.env.NEXT_PUBLIC_DEMO_BUSINESS_ID ?? "biz_demo";
 
@@ -236,7 +236,7 @@ export type Invoice = {
   payments?: PaymentRecord[];
 };
 
-type ApiResult<T> = { data: T | null; error: string | null };
+type ApiResult<T> = { data: T | null; error: string | null; planLimitReached?: PlanLimitError | null };
 
 const fallbackContacts: Contact[] = [];
 

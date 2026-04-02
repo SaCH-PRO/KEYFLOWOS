@@ -26,6 +26,12 @@ function parsePlanLimitError(parsed: Record<string, unknown> | null): PlanLimitE
   };
 }
 
+function emitPlanLimitEvent(planLimit: PlanLimitError) {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("kf:plan-limit-reached", { detail: planLimit }));
+  }
+}
+
 function buildHeaders(initHeaders?: HeadersInit) {
   const headers = new Headers({
     "Content-Type": "application/json",
@@ -57,18 +63,21 @@ export async function apiPost<T>({ path, body, init }: FetchOptions): Promise<Ap
       ...restInit,
     });
     const data: unknown = await res.json().catch(() => null);
-    if (!res.ok) {
-      const parsed = (typeof data === "object" && data !== null ? (data as Record<string, unknown>) : null);
-      const planLimit = parsePlanLimitError(parsed);
-      const message =
-        parsed && typeof parsed.message === "string" ? parsed.message : res.statusText || "Request failed";
-      return { data: null, error: message, planLimitReached: planLimit };
-    }
+    if (!res.ok) return handleErrorResponse<T>(data, res.statusText);
     return { data: data as T, error: null };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Network error";
     return { data: null, error: message };
   }
+}
+
+function handleErrorResponse<T>(data: unknown, statusText: string): ApiResponse<T> {
+  const parsed = (typeof data === "object" && data !== null ? (data as Record<string, unknown>) : null);
+  const planLimit = parsePlanLimitError(parsed);
+  if (planLimit) emitPlanLimitEvent(planLimit);
+  const message =
+    parsed && typeof parsed.message === "string" ? parsed.message : statusText || "Request failed";
+  return { data: null, error: message, planLimitReached: planLimit };
 }
 
 export async function apiGet<T>(path: string, opts?: { signal?: AbortSignal }): Promise<ApiResponse<T>> {
@@ -82,12 +91,7 @@ export async function apiGet<T>(path: string, opts?: { signal?: AbortSignal }): 
       signal: opts?.signal,
     });
     const data: unknown = await res.json().catch(() => null);
-    if (!res.ok) {
-      const parsed = (typeof data === "object" && data !== null ? (data as Record<string, unknown>) : null);
-      const message =
-        parsed && typeof parsed.message === "string" ? parsed.message : res.statusText || "Request failed";
-      return { data: null, error: message };
-    }
+    if (!res.ok) return handleErrorResponse<T>(data, res.statusText);
     return { data: data as T, error: null };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Network error";
@@ -103,12 +107,7 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<ApiRespo
       body: JSON.stringify(body),
     });
     const data: unknown = await res.json().catch(() => null);
-    if (!res.ok) {
-      const parsed = (typeof data === "object" && data !== null ? (data as Record<string, unknown>) : null);
-      const message =
-        parsed && typeof parsed.message === "string" ? parsed.message : res.statusText || "Request failed";
-      return { data: null, error: message };
-    }
+    if (!res.ok) return handleErrorResponse<T>(data, res.statusText);
     return { data: data as T, error: null };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Network error";
@@ -124,12 +123,7 @@ export async function apiDelete<T>(path: string, body?: unknown): Promise<ApiRes
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
     const data: unknown = await res.json().catch(() => null);
-    if (!res.ok) {
-      const parsed = (typeof data === "object" && data !== null ? (data as Record<string, unknown>) : null);
-      const message =
-        parsed && typeof parsed.message === "string" ? parsed.message : res.statusText || "Request failed";
-      return { data: null, error: message };
-    }
+    if (!res.ok) return handleErrorResponse<T>(data, res.statusText);
     return { data: data as T, error: null };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Network error";

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { apiGet } from "@/lib/api";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { apiGet, type PlanLimitError } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 
 export type PlanTier = "FREE" | "FLOW" | "KEYFLOW";
@@ -137,4 +137,41 @@ export function usePlan(): UsePlanResult {
     featureAccess: data?.featureAccess ?? [],
     refresh: () => load(true),
   };
+}
+
+export interface PlanLimitState {
+  resource: string;
+  message: string;
+  current: number;
+  limit: number;
+}
+
+export function usePlanLimitHandler() {
+  const [planLimitHit, setPlanLimitHit] = useState<PlanLimitState | null>(null);
+  const listenerRef = useRef(false);
+
+  useEffect(() => {
+    if (listenerRef.current) return;
+    listenerRef.current = true;
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<PlanLimitError>).detail;
+      if (detail) {
+        setPlanLimitHit({
+          resource: detail.resource,
+          message: detail.message,
+          current: detail.current,
+          limit: detail.limit,
+        });
+      }
+    };
+    window.addEventListener("kf:plan-limit-reached", handler);
+    return () => {
+      listenerRef.current = false;
+      window.removeEventListener("kf:plan-limit-reached", handler);
+    };
+  }, []);
+
+  const clearPlanLimit = useCallback(() => setPlanLimitHit(null), []);
+
+  return { planLimitHit, clearPlanLimit };
 }

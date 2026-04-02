@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Lock, Sparkles, Crown, ArrowRight, X, Zap, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import type { PlanLimitState } from "@/hooks/use-plan";
 
 type PromptVariant = "inline" | "banner" | "card" | "compact";
 
@@ -228,5 +229,46 @@ export function PlanLimitBanner({
       currentUsage={currentUsage}
       limit={limit}
     />
+  );
+}
+
+export function PlanLimitDialog({
+  planLimit,
+  onClose,
+}: {
+  planLimit: PlanLimitState | null;
+  onClose: () => void;
+}) {
+  if (!planLimit) return null;
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-50 flex items-center justify-center"
+        onClick={onClose}
+      >
+        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95, y: 10 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.95, y: 10 }}
+          onClick={(e) => e.stopPropagation()}
+          className="relative z-10 w-full max-w-sm mx-4"
+        >
+          <UpgradePrompt
+            feature={planLimit.resource}
+            description={planLimit.message}
+            variant="card"
+            currentUsage={planLimit.current}
+            limit={planLimit.limit}
+            dismissible={true}
+            onDismiss={onClose}
+          />
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
   );
 }
