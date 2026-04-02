@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { updateBusiness, getBusinessById } from "@/lib/client";
+import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 import { 
   Shield, 
   CheckCircle2, 
@@ -130,9 +131,12 @@ const statusConfig = {
 export default function ComplianceSettingsPage() {
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [items, setItems] = useState<ComplianceItem[]>(COMPLIANCE_ITEMS);
+  const [initialItems, setInitialItems] = useState<ComplianceItem[]>(COMPLIANCE_ITEMS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
+  const isDirty = useMemo(() => JSON.stringify(items) !== JSON.stringify(initialItems), [items, initialItems]);
+  useUnsavedChanges(isDirty);
 
   useEffect(() => {
     const init = async () => {
@@ -154,10 +158,12 @@ export default function ComplianceSettingsPage() {
           const result = await getBusinessById(bizId);
           if (result?.data?.complianceData) {
             const cd = result.data.complianceData as Record<string, boolean>;
-            setItems(prev => prev.map(item => ({
+            const updated = COMPLIANCE_ITEMS.map(item => ({
               ...item,
               completed: cd[item.id] ?? false,
-            })));
+            }));
+            setItems(updated);
+            setInitialItems(updated);
           }
         } catch (err) {
           console.error("Failed to load compliance data from backend:", err);
@@ -209,6 +215,7 @@ export default function ComplianceSettingsPage() {
         lastHealthCheck: new Date().toISOString(),
       });
 
+      setInitialItems([...items]);
       setSavedMessage("Compliance status saved successfully!");
       setTimeout(() => setSavedMessage(null), 3000);
     } catch (err) {

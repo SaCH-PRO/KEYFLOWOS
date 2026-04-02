@@ -121,6 +121,22 @@ export default function DevelopersSettingsPage() {
     toast.success("Copied to clipboard");
   };
 
+  if (loading) {
+    return (
+      <div className="space-y-6 max-w-3xl animate-pulse">
+        <div className="space-y-2">
+          <div className="h-5 w-40 bg-muted/40 rounded-lg" />
+          <div className="h-3 w-64 bg-muted/30 rounded-lg" />
+        </div>
+        <div className="kf-card p-6 space-y-4">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-12 bg-muted/20 rounded-xl" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 max-w-3xl">
       <div>

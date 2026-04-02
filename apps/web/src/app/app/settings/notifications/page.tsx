@@ -138,8 +138,25 @@ export default function NotificationsSettingsPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 className="w-5 h-5 animate-spin" style={{ color: "hsl(var(--muted-foreground))" }} />
+      <div className="space-y-6 animate-pulse">
+        <div className="flex items-center gap-3">
+          <div className="h-5 w-36 bg-muted/40 rounded-lg" />
+        </div>
+        <div className="flex gap-1 p-1 rounded-xl bg-muted/30 border border-border/40">
+          <div className="h-9 w-28 bg-muted/30 rounded-lg" />
+          <div className="h-9 w-28 bg-muted/20 rounded-lg" />
+        </div>
+        <div className="kf-card p-6 space-y-4">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="flex items-center justify-between">
+              <div className="space-y-1">
+                <div className="h-4 w-32 bg-muted/30 rounded" />
+                <div className="h-3 w-48 bg-muted/20 rounded" />
+              </div>
+              <div className="h-6 w-10 bg-muted/30 rounded-full" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
