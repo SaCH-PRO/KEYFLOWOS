@@ -27,11 +27,11 @@ export function CashFlowSummary({ totalReceived, totalPending, totalOverdue, cur
           <TrendingDown className="w-3 h-3 text-red-400" />
         )}
         <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium">
-          Net Cash Flow
+          Collections Health
         </span>
         <InfoBadge
-          title="Net Cash Flow"
-          body="Received payments minus outstanding (pending + overdue). Positive = healthy. Negative = more money is owed to you than collected."
+          title="Collections Health"
+          body="Received payments minus outstanding (pending + overdue). Positive = healthy collections. Negative = more money is owed than collected. Does not include expenses."
           side="bottom"
           iconSize={10}
         />
