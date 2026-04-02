@@ -4,6 +4,7 @@ import React, { useMemo } from "react";
 import { motion } from "framer-motion";
 import { Clock } from "lucide-react";
 import type { Contact } from "@/lib/client";
+import { InfoBadge } from "@/components/ui/info-badge";
 
 export const ConversionTimeline = React.memo(function ConversionTimeline({ contacts }: { contacts: Contact[] }) {
   const timeline = useMemo(() => {
@@ -49,6 +50,7 @@ export const ConversionTimeline = React.memo(function ConversionTimeline({ conta
         <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5">
           <Clock className="w-3.5 h-3.5" />
           Conversion Timeline
+          <InfoBadge title="Conversion Timeline" body="Average number of days it takes contacts to move through your pipeline stages. Shorter timelines indicate a more efficient sales process." iconSize={10} />
         </h3>
         {timeline.sampleSize > 0 && <span className="text-[10px] text-muted-foreground/50">{timeline.sampleSize} conversions</span>}
       </div>

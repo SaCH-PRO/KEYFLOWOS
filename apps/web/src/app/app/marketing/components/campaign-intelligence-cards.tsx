@@ -33,6 +33,8 @@ import {
   fetchAudienceHealth,
   fetchSendTimeRecommendations,
 } from "@/lib/client";
+import { AiBadge } from "@/components/ui/ai-badge";
+import { InfoBadge } from "@/components/ui/info-badge";
 
 const stagger = {
   container: { hidden: {}, visible: { transition: { staggerChildren: 0.06 } } },
@@ -185,6 +187,7 @@ export function CampaignBriefingsSection({ businessId }: { businessId: string | 
       <div className="flex items-center gap-2 mb-1">
         <Brain className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
         <h3 className="text-sm font-semibold">Campaign Performance Briefings</h3>
+        <AiBadge label="AI Analysis" explanation="AI analyzes open rates, click-through rates, and engagement patterns to generate actionable post-campaign insights." />
       </div>
       {briefings.map((b) => (
         <BriefingCard key={b.id} briefing={b} />
@@ -240,6 +243,7 @@ export function AudienceHealthSection({ businessId }: { businessId: string | nul
         <div className="flex items-center gap-2">
           <HeartPulse className="w-4 h-4 text-emerald-400" />
           <h3 className="text-sm font-semibold">Audience Health</h3>
+          <InfoBadge title="Audience Health Score" body="Measures overall engagement quality of your subscriber list. Based on open rates, click rates, bounce rates, and unsubscribe rates. Above 70% is healthy." iconSize={12} />
         </div>
         <span className="text-lg font-bold text-emerald-400">{health.healthPercentage}%</span>
       </div>

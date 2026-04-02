@@ -15,10 +15,10 @@ export function ExecutiveView({ report }: { report: GeneratedReport }) {
   return (
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Total Revenue" value={formatCurrency(m.revenue.total, m.currency)} subtext={`${m.revenue.invoiceCount} paid invoices`} icon={DollarSign} color="text-emerald-400" trend="up" />
-        <MetricCard label="Total Expenses" value={formatCurrency(m.expenses.total, m.currency)} subtext={`${m.expenses.count} expense entries`} icon={Wallet} color="text-red-400" />
-        <MetricCard label="Net Profit" value={formatCurrency(m.profitability.netProfit, m.currency)} subtext={`${m.profitability.profitMargin}% margin`} icon={TrendingUp} color={m.profitability.netProfit >= 0 ? "text-emerald-400" : "text-red-400"} trend={m.profitability.netProfit >= 0 ? "up" : "down"} />
-        <MetricCard label="Total Contacts" value={m.clients.totalContacts.toString()} subtext={`${m.bookings.total} bookings this period`} icon={Users} color="text-blue-400" />
+        <MetricCard label="Total Revenue" value={formatCurrency(m.revenue.total, m.currency)} subtext={`${m.revenue.invoiceCount} paid invoices`} icon={DollarSign} color="text-emerald-400" trend="up" explanation="All collected revenue from paid invoices in the reporting period." />
+        <MetricCard label="Total Expenses" value={formatCurrency(m.expenses.total, m.currency)} subtext={`${m.expenses.count} expense entries`} icon={Wallet} color="text-red-400" explanation="Total business spending recorded in the Expenses module." />
+        <MetricCard label="Net Profit" value={formatCurrency(m.profitability.netProfit, m.currency)} subtext={`${m.profitability.profitMargin}% margin`} icon={TrendingUp} color={m.profitability.netProfit >= 0 ? "text-emerald-400" : "text-red-400"} trend={m.profitability.netProfit >= 0 ? "up" : "down"} explanation="Revenue minus expenses. Positive means profitable." formula="Total Revenue − Total Expenses" goodValue="Aim for 20%+ profit margin." />
+        <MetricCard label="Total Contacts" value={m.clients.totalContacts.toString()} subtext={`${m.bookings.total} bookings this period`} icon={Users} color="text-blue-400" explanation="Total contacts in your CRM during this reporting period." />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">

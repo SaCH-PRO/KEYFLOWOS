@@ -13,10 +13,10 @@ export function RevenueView({ report, businessId }: { report: GeneratedReport; b
   return (
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Total Revenue" value={formatCurrency(m.revenue.total, m.currency)} icon={DollarSign} color="text-[hsl(var(--kf-success))]" />
-        <MetricCard label="Avg Invoice" value={formatCurrency(m.revenue.averageInvoice, m.currency)} icon={FileText} color="text-[hsl(var(--kf-info))]" />
-        <MetricCard label="Outstanding" value={formatCurrency(m.revenue.outstanding, m.currency)} subtext={`${m.revenue.overdueCount} overdue`} icon={AlertTriangle} color="text-[hsl(var(--kf-warning))]" />
-        <MetricCard label="Invoices Paid" value={m.revenue.invoiceCount.toString()} icon={CheckCircle2} color="text-[hsl(var(--kf-success))]" />
+        <MetricCard label="Total Revenue" value={formatCurrency(m.revenue.total, m.currency)} icon={DollarSign} color="text-[hsl(var(--kf-success))]" explanation="Total collected revenue from all paid invoices in the selected period." goodValue="Track month-over-month for growth trends." />
+        <MetricCard label="Avg Invoice" value={formatCurrency(m.revenue.averageInvoice, m.currency)} icon={FileText} color="text-[hsl(var(--kf-info))]" explanation="Average value across all paid invoices." formula="Total Revenue ÷ Number of Invoices" goodValue="Higher averages indicate upselling success." />
+        <MetricCard label="Outstanding" value={formatCurrency(m.revenue.outstanding, m.currency)} subtext={`${m.revenue.overdueCount} overdue`} icon={AlertTriangle} color="text-[hsl(var(--kf-warning))]" explanation="Total amount owed from unpaid invoices. Overdue invoices need follow-up." goodValue="Keep below 20% of total revenue." />
+        <MetricCard label="Invoices Paid" value={m.revenue.invoiceCount.toString()} icon={CheckCircle2} color="text-[hsl(var(--kf-success))]" explanation="Number of invoices fully paid in this period." />
       </div>
 
       <Card className="p-5 backdrop-blur border-border/60" style={{ background: "hsl(var(--kf-card) / 0.6)" }}>

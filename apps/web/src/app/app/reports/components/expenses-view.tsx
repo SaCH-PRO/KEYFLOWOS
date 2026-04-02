@@ -12,9 +12,9 @@ export function ExpensesView({ report }: { report: GeneratedReport }) {
   return (
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-3">
-        <MetricCard label="Total Expenses" value={formatCurrency(m.expenses.total, m.currency)} subtext={`${m.expenses.count} entries`} icon={Wallet} color="text-red-400" />
-        <MetricCard label="Avg Expense" value={formatCurrency(m.expenses.averageExpense, m.currency)} icon={BarChart3} color="text-amber-400" />
-        <MetricCard label="Cost-to-Revenue" value={m.profitability.revenueToExpenseRatio ? `${m.profitability.revenueToExpenseRatio}x` : "N/A"} subtext={m.profitability.revenueToExpenseRatio && m.profitability.revenueToExpenseRatio > 1 ? "Revenue exceeds costs" : "Costs exceed revenue"} icon={TrendingUp} color={m.profitability.revenueToExpenseRatio && m.profitability.revenueToExpenseRatio > 1 ? "text-emerald-400" : "text-red-400"} />
+        <MetricCard label="Total Expenses" value={formatCurrency(m.expenses.total, m.currency)} subtext={`${m.expenses.count} entries`} icon={Wallet} color="text-red-400" explanation="Sum of all expense entries logged in this period." />
+        <MetricCard label="Avg Expense" value={formatCurrency(m.expenses.averageExpense, m.currency)} icon={BarChart3} color="text-amber-400" explanation="Average cost per expense entry." formula="Total Expenses ÷ Number of Entries" goodValue="Track trends to catch spending creep." />
+        <MetricCard label="Cost-to-Revenue" value={m.profitability.revenueToExpenseRatio ? `${m.profitability.revenueToExpenseRatio}x` : "N/A"} subtext={m.profitability.revenueToExpenseRatio && m.profitability.revenueToExpenseRatio > 1 ? "Revenue exceeds costs" : "Costs exceed revenue"} icon={TrendingUp} color={m.profitability.revenueToExpenseRatio && m.profitability.revenueToExpenseRatio > 1 ? "text-emerald-400" : "text-red-400"} explanation="How many times your revenue covers your expenses." formula="Total Revenue ÷ Total Expenses" goodValue="Above 2x means healthy margins. Below 1x means spending more than earning." />
       </div>
 
       <Card className="p-5 bg-slate-950/60 backdrop-blur border-border/60">

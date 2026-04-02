@@ -15,9 +15,9 @@ export function PnlView({ report }: { report: GeneratedReport }) {
   return (
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-3">
-        <MetricCard label="Revenue" value={formatCurrency(m.revenue.total, m.currency)} subtext={`${m.revenue.invoiceCount} invoices`} icon={TrendingUp} color="text-emerald-400" trend="up" />
-        <MetricCard label="Expenses" value={formatCurrency(m.expenses.total, m.currency)} subtext={`${m.expenses.count} entries`} icon={ArrowDownRight} color="text-red-400" />
-        <MetricCard label="Net Profit" value={formatCurrency(m.profitability.netProfit, m.currency)} subtext={`${m.profitability.profitMargin}% margin`} icon={DollarSign} color={m.profitability.netProfit >= 0 ? "text-emerald-400" : "text-red-400"} trend={m.profitability.netProfit >= 0 ? "up" : "down"} />
+        <MetricCard label="Revenue" value={formatCurrency(m.revenue.total, m.currency)} subtext={`${m.revenue.invoiceCount} invoices`} icon={TrendingUp} color="text-emerald-400" trend="up" explanation="Gross revenue from paid invoices." />
+        <MetricCard label="Expenses" value={formatCurrency(m.expenses.total, m.currency)} subtext={`${m.expenses.count} entries`} icon={ArrowDownRight} color="text-red-400" explanation="Total business costs including operating expenses, supplies, and services." />
+        <MetricCard label="Net Profit" value={formatCurrency(m.profitability.netProfit, m.currency)} subtext={`${m.profitability.profitMargin}% margin`} icon={DollarSign} color={m.profitability.netProfit >= 0 ? "text-emerald-400" : "text-red-400"} trend={m.profitability.netProfit >= 0 ? "up" : "down"} explanation="Bottom line after all expenses. The profit margin shows what percentage of revenue is kept as profit." formula="Revenue − Expenses" goodValue="Healthy businesses maintain 15-30% margins." />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
