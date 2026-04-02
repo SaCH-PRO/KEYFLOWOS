@@ -5,10 +5,10 @@ import type { Booking } from "../components/bookings-types";
 import { contactName } from "../components/bookings-types";
 
 const STATUS_DOT: Record<string, string> = {
-  PENDING: "bg-amber-400",
-  CONFIRMED: "bg-blue-400",
-  COMPLETED: "bg-emerald-400",
-  CANCELLED: "bg-red-400",
+  PENDING: "bg-[hsl(var(--kf-warning))]",
+  CONFIRMED: "bg-[hsl(var(--kf-info))]",
+  COMPLETED: "bg-[hsl(var(--kf-success))]",
+  CANCELLED: "bg-[hsl(var(--kf-error))]",
 };
 
 interface MonthGridProps {
