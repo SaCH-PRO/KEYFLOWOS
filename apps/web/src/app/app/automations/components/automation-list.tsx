@@ -199,6 +199,11 @@ export function AutomationList({ businessId, templateToUse, onTemplateClear }: A
           <p className="text-xs text-muted-foreground">
             {search.trim() ? "Try a different search term." : "Create an automation or use a template to get started."}
           </p>
+          {!search.trim() && (
+            <p className="text-[11px] text-muted-foreground/60 mt-3 px-4">
+              Tip: Start with a template like "Follow up on paid invoices" or "Remind no-shows" — they're one click to activate.
+            </p>
+          )}
         </div>
       ) : (
         <div className="grid gap-3 md:grid-cols-2">

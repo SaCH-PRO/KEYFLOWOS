@@ -13,6 +13,7 @@ import {
 import type { Invoice } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
 import { CustomerBadge } from "./customer-badge";
+import { AiBadge } from "@/components/ui/ai-badge";
 import type { CustomerBadge as CustomerBadgeType } from "../hooks/use-customer-badge";
 
 interface ContactIntelligenceCardProps {
@@ -75,6 +76,7 @@ export const ContactIntelligenceCard = React.memo(function ContactIntelligenceCa
         <div className="flex items-center gap-2">
           <Activity className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
           <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">Client Intelligence</span>
+          <AiBadge label="AI" compact />
         </div>
         {badge && <CustomerBadge badge={badge} size="sm" />}
       </div>

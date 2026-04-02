@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { AiBadge } from "@/components/ui/ai-badge";
 import {
   AlertTriangle,
   UserX,
@@ -54,7 +55,7 @@ export function ChurnRiskPanel({ businessId }: ChurnRiskPanelProps) {
             <UserX className="w-5 h-5 text-orange-400" />
           </div>
           <div>
-            <h3 className="text-sm font-semibold">Churn Risk Alerts</h3>
+            <h3 className="text-sm font-semibold inline-flex items-center gap-1.5">Churn Risk Alerts <AiBadge label="AI" compact /></h3>
             <p className="text-xs text-muted-foreground">Detect declining payment patterns in recurring customers</p>
           </div>
         </div>

@@ -7,6 +7,7 @@ import { Button, Input, Card, Badge } from "@keyflow/ui";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { apiGet, apiPostSimple as apiPost, apiDelete, apiPatch } from "@/lib/api";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { InfoBadge } from "@/components/ui/info-badge";
 
 type TeamMember = {
   id: string;
@@ -186,7 +187,7 @@ export default function TeamSettingsPage() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <Users className="h-4 w-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-            Team Members
+            Team Members <InfoBadge title="Roles" body="Admin has full access to all settings and data. Staff can manage day-to-day operations but cannot change billing or team settings." side="right" iconSize={12} />
           </div>
           <span className="text-xs text-muted-foreground px-2.5 py-1 rounded-full bg-muted/30 border border-border/40">
             {members.length} {members.length === 1 ? "member" : "members"}

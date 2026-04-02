@@ -1,6 +1,7 @@
 "use client";
 
 import { Lightbulb, CalendarPlus, Users, TrendingUp, ShieldCheck } from "lucide-react";
+import { AiBadge } from "@/components/ui/ai-badge";
 import type { ScheduleHealth } from "@/lib/client";
 
 interface ScheduleHintsProps {
@@ -111,6 +112,7 @@ export function ScheduleHints({ scheduleHealth }: ScheduleHintsProps) {
             <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
               AI Recommendations
             </span>
+            <AiBadge label="AI" compact />
           </div>
           <ul className="space-y-1">
             {recommendations.slice(0, 3).map((r, i) => (

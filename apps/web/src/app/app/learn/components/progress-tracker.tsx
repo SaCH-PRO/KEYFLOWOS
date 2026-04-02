@@ -29,6 +29,7 @@ export function ProgressTracker({ enrolledCourses, onOpenCourse }: ProgressTrack
         icon={BookOpen}
         title="No courses started yet"
         description="Browse the catalog and enroll in a course to start tracking your progress."
+        tip="Tip: Courses are self-paced — pick one and start with the first lesson anytime."
       />
     );
   }

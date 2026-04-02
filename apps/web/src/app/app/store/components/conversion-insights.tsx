@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { AiBadge } from "@/components/ui/ai-badge";
 import {
   TrendingUp,
   TrendingDown,
@@ -433,7 +434,7 @@ function AiAdvicePanel({
             <Sparkles className="w-5 h-5" style={{ color: "hsl(280 70% 60%)" }} />
           </div>
           <div>
-            <p className="text-sm font-semibold mb-1">AI Conversion Advisor</p>
+            <p className="text-sm font-semibold mb-1 inline-flex items-center gap-1.5">AI Conversion Advisor <AiBadge label="AI" compact /></p>
             <p className="text-[11px] text-muted-foreground">Get personalized recommendations to improve your storefront conversions</p>
           </div>
           <button
