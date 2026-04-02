@@ -245,6 +245,7 @@ export default function CommercePage() {
         actionLabel="+ New"
         actionIcon={Plus}
         onAction={composer.handleNewItem}
+        actionDataAttr="commerce-new"
       />
 
 
