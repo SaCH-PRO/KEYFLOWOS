@@ -26,6 +26,7 @@ export function MarketingView({ report }: MarketingViewProps) {
           value={String(campaignsSent)}
           icon={Megaphone}
           color="text-violet-400"
+          explanation="Number of email/SMS campaigns sent in this period."
         />
         <MetricCard
           label="Avg Open Rate"
@@ -34,12 +35,17 @@ export function MarketingView({ report }: MarketingViewProps) {
           color="text-blue-400"
           subtext={avgOpenRate > 20 ? "Above average" : "Below average"}
           trend={avgOpenRate > 20 ? "up" : "down"}
+          explanation="Percentage of recipients who opened your campaigns."
+          formula="(Unique Opens ÷ Delivered) × 100"
+          goodValue="20-25% is industry average. Above 30% is excellent."
         />
         <MetricCard
           label="Total Clicks"
           value={String(totalClicks)}
           icon={MousePointer}
           color="text-emerald-400"
+          explanation="Total link clicks across all campaigns in this period."
+          goodValue="Higher clicks indicate compelling content and CTAs."
         />
         <MetricCard
           label="Form Submissions"
@@ -47,6 +53,8 @@ export function MarketingView({ report }: MarketingViewProps) {
           icon={Users}
           color="text-amber-400"
           subtext="leads captured"
+          explanation="Number of lead form submissions from your marketing forms."
+          goodValue="Track conversion from form views to submissions."
         />
       </div>
 

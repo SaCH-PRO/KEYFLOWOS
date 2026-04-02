@@ -12,10 +12,10 @@ export function ClientsView({ report }: { report: GeneratedReport }) {
   return (
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Total Contacts" value={m.clients.totalContacts.toString()} icon={Users} color="text-blue-400" />
-        <MetricCard label="Bookings" value={m.bookings.total.toString()} subtext={`${m.bookings.completionRate}% completed`} icon={Calendar} color="text-purple-400" />
-        <MetricCard label="Products/Services" value={m.products.total.toString()} icon={Building2} color="text-[hsl(var(--kf-accent1))]" />
-        <MetricCard label="Revenue Per Client" value={m.clients.totalContacts > 0 ? formatCurrency(m.revenue.total / m.clients.totalContacts, m.currency) : "N/A"} icon={DollarSign} color="text-emerald-400" />
+        <MetricCard label="Total Contacts" value={m.clients.totalContacts.toString()} icon={Users} color="text-blue-400" explanation="All contacts in your CRM including leads, prospects, and clients." />
+        <MetricCard label="Bookings" value={m.bookings.total.toString()} subtext={`${m.bookings.completionRate}% completed`} icon={Calendar} color="text-purple-400" explanation="Total bookings in this period with completion rate." />
+        <MetricCard label="Products/Services" value={m.products.total.toString()} icon={Building2} color="text-[hsl(var(--kf-accent1))]" explanation="Active items in your product and service catalog." />
+        <MetricCard label="Revenue Per Client" value={m.clients.totalContacts > 0 ? formatCurrency(m.revenue.total / m.clients.totalContacts, m.currency) : "N/A"} icon={DollarSign} color="text-emerald-400" explanation="Average revenue generated per contact." formula="Total Revenue ÷ Total Contacts" goodValue="Increasing ARPC signals growing customer value." />
       </div>
 
       <Card className="p-5 bg-slate-950/60 backdrop-blur border-border/60">

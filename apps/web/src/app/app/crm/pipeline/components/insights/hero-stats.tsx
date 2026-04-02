@@ -6,6 +6,7 @@ import { Users, TrendingUp, DollarSign, Activity, ArrowUpRight, ArrowDownRight }
 import type { FlowIntelligenceData } from "@/components/contacts/flow-intelligence";
 import type { RevenueData } from "@/components/contacts/predictive-revenue";
 import type { Contact } from "@/lib/client";
+import { MetricExplainer } from "@/components/ui/metric-explainer";
 import { formatTTD, stagger, buildWeeklyBuckets } from "./insights-shared";
 
 function Sparkline({ data, color, width = 44, height = 18 }: { data: number[]; color: string; width?: number; height?: number }) {
@@ -64,6 +65,8 @@ export const HeroStats = React.memo(function HeroStats({
       trend: newThisWeek > 0 ? "up" as const : null,
       trendLabel: newThisWeek > 0 ? `+${newThisWeek} this week` : undefined,
       onClick: () => onNavigatePipeline?.(),
+      explanation: "All contacts in your CRM including leads, prospects, and active clients.",
+      goodValue: "Growing contact base indicates healthy pipeline activity.",
     },
     {
       label: "Conversion Rate",
@@ -76,6 +79,9 @@ export const HeroStats = React.memo(function HeroStats({
       trend: convThisWeek > 0 ? "up" as const : null,
       trendLabel: convThisWeek > 0 ? `${convThisWeek} this week` : undefined,
       onClick: () => onNavigatePipeline?.({ status: "CLIENT" }),
+      explanation: "Percentage of leads that became paying clients.",
+      formula: "(Clients ÷ Total Leads) × 100",
+      goodValue: "Above 20% is strong for service businesses.",
     },
     {
       label: "Pipeline Value",
@@ -88,6 +94,9 @@ export const HeroStats = React.memo(function HeroStats({
       trend: null,
       trendLabel: undefined,
       onClick: () => onNavigatePipeline?.({ segment: "high-value" }),
+      explanation: "Total estimated revenue from active pipeline, recurring clients, and cold leads.",
+      formula: "Active Pipeline + Recurring Revenue + Cold Lead Potential",
+      goodValue: "Should be 3-5× your monthly revenue target.",
     },
     {
       label: "New This Week",
@@ -100,6 +109,8 @@ export const HeroStats = React.memo(function HeroStats({
       trend: flowIntelligence && flowIntelligence.lost > 0 ? "down" as const : null,
       trendLabel: flowIntelligence && flowIntelligence.lost > 0 ? `${flowIntelligence.lost} lost` : undefined,
       onClick: () => onNavigatePipeline?.({ segment: "new-this-week" }),
+      explanation: "Contacts added in the last 7 days, plus conversions and losses.",
+      goodValue: "Consistent weekly growth shows healthy lead generation.",
     },
   ];
 
@@ -118,40 +129,41 @@ export const HeroStats = React.memo(function HeroStats({
       {stats.map((s) => {
         const Icon = s.icon;
         return (
-          <motion.button
-            key={s.label}
-            variants={stagger.item}
-            onClick={s.onClick}
-            className="relative overflow-hidden rounded-xl border border-border/50 bg-card p-2 sm:p-3 group hover:border-border/80 transition-all duration-200 text-left cursor-pointer"
-          >
-            <div
-              className="absolute top-0 right-0 w-20 h-20 rounded-full opacity-[0.04] -translate-y-1/2 translate-x-1/2 blur-xl"
-              style={{ background: `hsl(var(${s.accentVar}))` }}
-              aria-hidden="true"
-            />
-            <div className="flex items-center gap-1 mb-1 sm:mb-1.5">
-              <Icon className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-muted-foreground/50 shrink-0" />
-              <span className="text-[10px] text-muted-foreground/60 font-semibold uppercase tracking-wider leading-tight sm:hidden">{s.mobileLabel}</span>
-              <span className="text-[10px] text-muted-foreground/60 font-semibold uppercase tracking-wider leading-tight hidden sm:inline">{s.label}</span>
-            </div>
-            <div className="hidden sm:flex items-center justify-end mb-1">
-              <div className="opacity-50 group-hover:opacity-100 transition-opacity">
-                <Sparkline data={sparkData} color={s.sparkColor} />
+          <MetricExplainer key={s.label} label={s.label} explanation={s.explanation} formula={s.formula} goodValue={s.goodValue}>
+            <motion.button
+              variants={stagger.item}
+              onClick={s.onClick}
+              className="relative overflow-hidden rounded-xl border border-border/50 bg-card p-2 sm:p-3 group hover:border-border/80 transition-all duration-200 text-left cursor-pointer w-full"
+            >
+              <div
+                className="absolute top-0 right-0 w-20 h-20 rounded-full opacity-[0.04] -translate-y-1/2 translate-x-1/2 blur-xl"
+                style={{ background: `hsl(var(${s.accentVar}))` }}
+                aria-hidden="true"
+              />
+              <div className="flex items-center gap-1 mb-1 sm:mb-1.5">
+                <Icon className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-muted-foreground/50 shrink-0" />
+                <span className="text-[10px] text-muted-foreground/60 font-semibold uppercase tracking-wider leading-tight sm:hidden">{s.mobileLabel}</span>
+                <span className="text-[10px] text-muted-foreground/60 font-semibold uppercase tracking-wider leading-tight hidden sm:inline">{s.label}</span>
               </div>
-            </div>
-            <div className="text-sm sm:text-xl font-bold tracking-tight leading-tight" style={{ color: `hsl(var(${s.accentVar}))` }}>
-              {s.value}
-            </div>
-            <div className="hidden sm:flex items-center gap-1.5 mt-0.5">
-              <span className="text-[10px] text-muted-foreground/50">{s.sub}</span>
-            </div>
-            {s.trend && s.trendLabel && (
-              <div className={`items-center gap-0.5 mt-1 text-[10px] font-semibold hidden sm:flex ${s.trend === "up" ? "text-emerald-400" : "text-red-400"}`}>
-                {s.trend === "up" ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                {s.trendLabel}
+              <div className="hidden sm:flex items-center justify-end mb-1">
+                <div className="opacity-50 group-hover:opacity-100 transition-opacity">
+                  <Sparkline data={sparkData} color={s.sparkColor} />
+                </div>
               </div>
-            )}
-          </motion.button>
+              <div className="text-sm sm:text-xl font-bold tracking-tight leading-tight" style={{ color: `hsl(var(${s.accentVar}))` }}>
+                {s.value}
+              </div>
+              <div className="hidden sm:flex items-center gap-1.5 mt-0.5">
+                <span className="text-[10px] text-muted-foreground/50">{s.sub}</span>
+              </div>
+              {s.trend && s.trendLabel && (
+                <div className={`items-center gap-0.5 mt-1 text-[10px] font-semibold hidden sm:flex ${s.trend === "up" ? "text-emerald-400" : "text-red-400"}`}>
+                  {s.trend === "up" ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {s.trendLabel}
+                </div>
+              )}
+            </motion.button>
+          </MetricExplainer>
         );
       })}
     </motion.div>

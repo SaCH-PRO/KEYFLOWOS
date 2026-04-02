@@ -3,11 +3,13 @@
 import { Card } from "@keyflow/ui";
 import { ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { motion } from "framer-motion";
+import { MetricExplainer } from "@/components/ui/metric-explainer";
 
-export function MetricCard({ label, value, subtext, icon: Icon, color = "text-white", trend }: {
+export function MetricCard({ label, value, subtext, icon: Icon, color = "text-white", trend, explanation, formula, goodValue }: {
   label: string; value: string; subtext?: string; icon: React.ElementType; color?: string; trend?: "up" | "down" | "neutral";
+  explanation?: string; formula?: string; goodValue?: string;
 }) {
-  return (
+  const card = (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <Card className="p-4 space-y-2 bg-slate-950/60 backdrop-blur border-border/60">
         <div className="flex items-center justify-between">
@@ -25,6 +27,11 @@ export function MetricCard({ label, value, subtext, icon: Icon, color = "text-wh
       </Card>
     </motion.div>
   );
+
+  if (explanation) {
+    return <MetricExplainer label={label} explanation={explanation} formula={formula} goodValue={goodValue}>{card}</MetricExplainer>;
+  }
+  return card;
 }
 
 export function DataTable({ headers, rows, emptyText = "No data", emptyState }: {

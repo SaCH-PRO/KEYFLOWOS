@@ -4,6 +4,7 @@ import React, { useMemo } from "react";
 import { Target } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import type { Contact } from "@/lib/client";
+import { InfoBadge } from "@/components/ui/info-badge";
 import { RECHARTS_TOOLTIP_STYLE } from "./insights-shared";
 
 const LEAD_SCORE_COLORS = { Hot: '#ef4444', Warm: '#f97316', Cool: '#14b8a6', Cold: '#6482a6' };
@@ -35,6 +36,7 @@ export const LeadScoreDistribution = React.memo(function LeadScoreDistribution({
       <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex items-center gap-1.5">
         <Target className="w-3.5 h-3.5" />
         Lead Scores
+        <InfoBadge title="Lead Score Methodology" body="Scores are calculated from engagement signals: email opens, booking frequency, invoice payment speed, and recency of interaction. Hot (75-100), Warm (50-74), Cool (25-49), Cold (0-24)." iconSize={10} />
       </h3>
       <ResponsiveContainer width="100%" height={160}>
         <PieChart>

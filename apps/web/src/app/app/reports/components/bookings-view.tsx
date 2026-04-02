@@ -31,6 +31,7 @@ export function BookingsView({ report }: BookingsViewProps) {
           color="text-blue-400"
           subtext={`${completedBookings} completed`}
           trend="up"
+          explanation="All bookings in this reporting period including confirmed, completed, and cancelled."
         />
         <MetricCard
           label="Utilization Rate"
@@ -38,12 +39,18 @@ export function BookingsView({ report }: BookingsViewProps) {
           icon={Clock}
           color="text-emerald-400"
           subtext="of available capacity"
+          explanation="How much of your available schedule is filled with bookings."
+          formula="(Booked Slots ÷ Available Slots) × 100"
+          goodValue="70-85% is optimal. Too high means no room for walk-ins."
         />
         <MetricCard
           label="Avg Booking Value"
           value={formatCurrency(avgBookingValue)}
           icon={TrendingUp}
           color="text-amber-400"
+          explanation="Average revenue per booking based on service pricing."
+          formula="Total Booking Revenue ÷ Number of Bookings"
+          goodValue="Increasing average shows successful upselling."
         />
         <MetricCard
           label="No-Show Rate"
@@ -51,6 +58,9 @@ export function BookingsView({ report }: BookingsViewProps) {
           icon={AlertTriangle}
           color={noShowRate > 10 ? "text-red-400" : "text-emerald-400"}
           subtext={`${cancelledBookings} cancelled`}
+          explanation="Percentage of bookings where the client didn't show up."
+          formula="(No-Shows ÷ Total Bookings) × 100"
+          goodValue="Below 5% is excellent. Above 10% consider reminder automations."
           trend={noShowRate > 10 ? "down" : "up"}
         />
       </div>

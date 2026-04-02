@@ -21,6 +21,7 @@ import {
   List,
   Upload,
 } from "lucide-react";
+import { RichTooltip } from "@/components/ui/rich-tooltip";
 
 export type SortOption = "name" | "newest" | "oldest" | "revenue" | "score";
 export type SmartSegment = "high-value" | "needs-followup" | "new-this-week" | "at-risk" | "stale";
@@ -45,12 +46,12 @@ const SORT_OPTIONS: { value: SortOption; label: string }[] = [
   { value: "score", label: "Highest Score" },
 ];
 
-const SMART_SEGMENTS: { key: SmartSegment; label: string; icon: typeof Flame; color: string }[] = [
-  { key: "high-value", label: "High Value", icon: TrendingUp, color: "hsl(142 76% 36%)" },
-  { key: "needs-followup", label: "Needs Follow-up", icon: AlertTriangle, color: "hsl(var(--kf-accent1))" },
-  { key: "new-this-week", label: "New This Week", icon: CalendarPlus, color: "hsl(var(--kf-accent2))" },
-  { key: "at-risk", label: "At Risk", icon: Flame, color: "hsl(0 70% 55%)" },
-  { key: "stale", label: "No Activity 30d", icon: Clock, color: "hsl(var(--kf-muted-foreground))" },
+const SMART_SEGMENTS: { key: SmartSegment; label: string; icon: typeof Flame; color: string; description: string }[] = [
+  { key: "high-value", label: "High Value", icon: TrendingUp, color: "hsl(142 76% 36%)", description: "Contacts with high revenue potential or significant transaction history." },
+  { key: "needs-followup", label: "Needs Follow-up", icon: AlertTriangle, color: "hsl(var(--kf-accent1))", description: "Contacts with pending tasks, unanswered messages, or overdue interactions." },
+  { key: "new-this-week", label: "New This Week", icon: CalendarPlus, color: "hsl(var(--kf-accent2))", description: "Contacts added in the last 7 days — follow up quickly to build rapport." },
+  { key: "at-risk", label: "At Risk", icon: Flame, color: "hsl(0 70% 55%)", description: "Clients showing signs of churn — declining engagement or missed bookings." },
+  { key: "stale", label: "No Activity 30d", icon: Clock, color: "hsl(var(--kf-muted-foreground))", description: "Contacts with no interaction in the last 30 days — consider a re-engagement campaign." },
 ];
 
 export interface PipelineToolbarProps {
@@ -318,27 +319,28 @@ function PipelineToolbarInner({
       </AnimatePresence>
 
       <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide pb-0.5" data-walkthrough="crm-segments">
-        {SMART_SEGMENTS.map(({ key, label, icon: SIcon, color }) => {
+        {SMART_SEGMENTS.map(({ key, label, icon: SIcon, color, description }) => {
           const count = segmentCounts[key];
           const isActive = activeSegment === key;
           return (
-            <button
-              key={key}
-              onClick={() => onSegmentChange(isActive ? null : key)}
-              aria-pressed={isActive}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] rounded-lg transition-all whitespace-nowrap flex-shrink-0 font-medium ${
-                isActive
-                  ? "bg-white/[0.08] border border-border/50"
-                  : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.05] hover:text-muted-foreground"
-              }`}
-              style={isActive ? { color } : undefined}
-            >
-              <SIcon className="w-3.5 h-3.5" style={{ color }} />
-              {label}
-              {count > 0 && (
-                <span className="text-[10px] font-bold ml-0.5 opacity-80" style={{ color }}>{count}</span>
-              )}
-            </button>
+            <RichTooltip key={key} title={label} description={description} side="bottom">
+              <button
+                onClick={() => onSegmentChange(isActive ? null : key)}
+                aria-pressed={isActive}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] rounded-lg transition-all whitespace-nowrap flex-shrink-0 font-medium ${
+                  isActive
+                    ? "bg-white/[0.08] border border-border/50"
+                    : "bg-white/[0.02] border border-transparent text-muted-foreground/60 hover:bg-white/[0.05] hover:text-muted-foreground"
+                }`}
+                style={isActive ? { color } : undefined}
+              >
+                <SIcon className="w-3.5 h-3.5" style={{ color }} />
+                {label}
+                {count > 0 && (
+                  <span className="text-[10px] font-bold ml-0.5 opacity-80" style={{ color }}>{count}</span>
+                )}
+              </button>
+            </RichTooltip>
           );
         })}
         {activeSegment && (
