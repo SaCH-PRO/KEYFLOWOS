@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence, Reorder } from "framer-motion";
 import {
   Store,
@@ -78,22 +78,20 @@ export function CatalogManager({
   const [showFilters, setShowFilters] = useState(false);
   const [bulkConfirm, setBulkConfirm] = useState<"add" | "remove" | null>(null);
   const [orderedProducts, setOrderedProducts] = useState<Product[]>(products);
-  const [isDragging, setIsDragging] = useState(false);
   const orderDirty = useRef(false);
 
-  const syncOrder = useCallback(() => {
-    setOrderedProducts((prev) => {
-      const prevIds = new Set(prev.map((p) => p.id));
-      const productIds = new Set(products.map((p) => p.id));
-      const kept = prev.filter((p) => productIds.has(p.id));
-      const added = products.filter((p) => !prevIds.has(p.id));
-      return [...kept, ...added];
-    });
+  useEffect(() => {
+    if (!orderDirty.current) {
+      setOrderedProducts((prev) => {
+        const prevIds = new Set(prev.map((p) => p.id));
+        const productIds = new Set(products.map((p) => p.id));
+        const kept = prev.filter((p) => productIds.has(p.id));
+        const added = products.filter((p) => !prevIds.has(p.id));
+        if (kept.length + added.length === prev.length && added.length === 0) return prev;
+        return [...kept, ...added];
+      });
+    }
   }, [products]);
-
-  if (!orderDirty.current && products.length !== orderedProducts.length) {
-    syncOrder();
-  }
 
   const handleReorder = useCallback((newOrder: Product[]) => {
     orderDirty.current = true;
@@ -101,7 +99,6 @@ export function CatalogManager({
   }, []);
 
   const handleReorderComplete = useCallback(() => {
-    setIsDragging(false);
     if (onReorder && orderDirty.current) {
       onReorder(orderedProducts.map((p) => p.id));
     }
@@ -322,7 +319,7 @@ export function CatalogManager({
                 onConfirmRemoveChange={onConfirmRemoveChange}
                 onDeleteFromStore={onDeleteFromStore}
                 services={services}
-                onDragStart={() => setIsDragging(true)}
+                onDragStart={() => {}}
                 onDragEnd={handleReorderComplete}
               />
             ))}

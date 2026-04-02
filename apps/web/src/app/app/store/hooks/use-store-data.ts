@@ -335,6 +335,18 @@ export function useStoreData() {
     }));
   }
 
+  function handleReorderProducts(orderedIds: string[]) {
+    handleConfigChange("catalog", { productOrder: orderedIds });
+    if (businessId) {
+      updateStorefrontConfig(businessId, {
+        ...storefrontConfig,
+        catalog: { ...(storefrontConfig as any).catalog, productOrder: orderedIds },
+      }).then((res) => {
+        if (!res.error) toast.success("Display order saved");
+      });
+    }
+  }
+
   async function handleSaveConfig() {
     if (!businessId) return;
     setConfigSaving(true);
@@ -385,6 +397,7 @@ export function useStoreData() {
     handleConfigChange,
     handleSaveConfig,
     handleDeleteServiceFromStore,
+    handleReorderProducts,
     storeServiceNames,
     storeItemCount,
     emitEvent,
