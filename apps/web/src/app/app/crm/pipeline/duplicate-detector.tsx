@@ -13,6 +13,7 @@ import {
   User,
   X,
   Loader2,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchDuplicateContacts, mergeContacts, type Contact } from "@/lib/client";
@@ -77,6 +78,7 @@ const FIELD_LABELS: Record<string, string> = {
 export function DuplicateDetector({ businessId, onMergeComplete }: DuplicateDetectorProps) {
   const [groups, setGroups] = useState<DuplicateGroup[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [expandedGroupIdx, setExpandedGroupIdx] = useState<number | null>(null);
   const [merging, setMerging] = useState(false);
@@ -86,11 +88,17 @@ export function DuplicateDetector({ businessId, onMergeComplete }: DuplicateDete
 
   const loadDuplicates = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const { data } = await fetchDuplicateContacts(businessId);
       if (data?.groups) setGroups(data.groups);
-    } catch {}
-    setLoading(false);
+      else setGroups([]);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to load duplicates";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
   }, [businessId]);
 
   useEffect(() => {
@@ -105,10 +113,12 @@ export function DuplicateDetector({ businessId, onMergeComplete }: DuplicateDete
       setMergeModal({ open: false, left: null, right: null });
       await loadDuplicates();
       onMergeComplete();
-    } catch {
-      toast.error("Failed to merge contacts");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to merge contacts";
+      toast.error(message);
+    } finally {
+      setMerging(false);
     }
-    setMerging(false);
   };
 
   const formatName = (c: DuplicateContact) => {
@@ -116,30 +126,54 @@ export function DuplicateDetector({ businessId, onMergeComplete }: DuplicateDete
     return name || c.email || "Unknown";
   };
 
-  if (loading) return null;
+  if (loading && groups.length === 0) return null;
+  if (error) {
+    return (
+      <div className="kf-card border-[hsl(var(--kf-error))]/30 bg-[hsl(var(--kf-error))]/5 p-4 flex items-center gap-3">
+        <AlertTriangle className="w-4 h-4 text-[hsl(var(--kf-error))]" />
+        <span className="text-sm text-muted-foreground flex-1">Could not check for duplicates</span>
+        <button onClick={loadDuplicates} className="kf-btn-secondary text-xs min-h-[44px] px-3 flex items-center gap-1.5">
+          <RefreshCw className="w-3.5 h-3.5" />
+          Retry
+        </button>
+      </div>
+    );
+  }
   if (groups.length === 0) return null;
 
   const totalDuplicates = groups.reduce((sum, g) => sum + g.contacts.length - 1, 0);
 
   return (
-    <div className="kf-card border-amber-500/30 bg-amber-500/5">
+    <div className="kf-card border-[hsl(var(--kf-warning))]/30 bg-[hsl(var(--kf-warning))]/5">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full p-4 flex items-center gap-3 text-left"
+        className="w-full p-4 flex items-center gap-3 text-left min-h-[44px]"
+        aria-expanded={expanded}
+        aria-label={`${totalDuplicates} potential duplicates found. Click to ${expanded ? "collapse" : "expand"}`}
       >
-        <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center flex-shrink-0">
-          <Copy className="w-4 h-4 text-amber-400" />
+        <div className="w-8 h-8 rounded-lg bg-[hsl(var(--kf-warning))]/20 flex items-center justify-center flex-shrink-0">
+          <Copy className="w-4 h-4 text-[hsl(var(--kf-warning))]" />
         </div>
         <div className="flex-1">
           <div className="text-sm font-medium flex items-center gap-2">
             <span>{totalDuplicates} potential duplicate{totalDuplicates !== 1 ? "s" : ""} found</span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400">
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[hsl(var(--kf-warning))]/20 text-[hsl(var(--kf-warning))]">
               {groups.length} group{groups.length !== 1 ? "s" : ""}
             </span>
+            {loading && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
           </div>
           <p className="text-xs text-muted-foreground">Review and merge duplicate contacts to keep your CRM clean</p>
         </div>
-        {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={(e) => { e.stopPropagation(); loadDuplicates(); }}
+            className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg hover:bg-muted/50 transition-colors text-muted-foreground"
+            aria-label="Refresh duplicates"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+          </button>
+          {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+        </div>
       </button>
 
       <AnimatePresence>
@@ -160,7 +194,9 @@ export function DuplicateDetector({ businessId, onMergeComplete }: DuplicateDete
                   <div key={idx} className="border border-border/40 rounded-xl overflow-hidden">
                     <button
                       onClick={() => setExpandedGroupIdx(isExpanded ? null : idx)}
-                      className="w-full p-3 flex items-center gap-3 hover:bg-muted/30 transition-colors text-left"
+                      className="w-full p-3 flex items-center gap-3 hover:bg-muted/30 transition-colors text-left min-h-[44px]"
+                      aria-expanded={isExpanded}
+                      aria-label={`${fieldLabel}: ${group.value} — ${group.contacts.length} contacts`}
                     >
                       <FieldIcon className="w-4 h-4 text-muted-foreground" />
                       <div className="flex-1 min-w-0">
@@ -181,8 +217,8 @@ export function DuplicateDetector({ businessId, onMergeComplete }: DuplicateDete
                         >
                           <div className="px-3 pb-3 space-y-2">
                             {group.contacts.map((contact, cIdx) => (
-                              <div key={contact.id} className="flex items-center gap-3 p-2 rounded-lg bg-muted/20">
-                                <div className="w-8 h-8 rounded-full bg-[hsl(var(--kf-accent1))]/20 flex items-center justify-center text-xs font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>
+                              <div key={contact.id} className="flex items-center gap-3 p-2 rounded-lg bg-muted/20 min-h-[44px]">
+                                <div className="w-8 h-8 rounded-full bg-[hsl(var(--kf-accent1))]/20 flex items-center justify-center text-xs font-semibold text-[hsl(var(--kf-accent1))]">
                                   {(contact.firstName?.[0] || "?").toUpperCase()}
                                 </div>
                                 <div className="flex-1 min-w-0">
@@ -193,7 +229,7 @@ export function DuplicateDetector({ businessId, onMergeComplete }: DuplicateDete
                                     {contact.phone && <span>{contact.phone}</span>}
                                   </div>
                                 </div>
-                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${contact.status === "CLIENT" ? "bg-emerald-500/20 text-emerald-400" : contact.status === "PROSPECT" ? "bg-blue-500/20 text-blue-400" : "bg-amber-500/20 text-amber-400"}`}>
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${contact.status === "CLIENT" ? "bg-[hsl(var(--kf-success))]/20 text-[hsl(var(--kf-success))]" : contact.status === "PROSPECT" ? "bg-[hsl(var(--kf-info))]/20 text-[hsl(var(--kf-info))]" : "bg-[hsl(var(--kf-warning))]/20 text-[hsl(var(--kf-warning))]"}`}>
                                   {contact.status || "LEAD"}
                                 </span>
                                 {cIdx > 0 && (
@@ -204,10 +240,9 @@ export function DuplicateDetector({ businessId, onMergeComplete }: DuplicateDete
                                       right: contact,
                                     })}
                                     disabled={merging}
-                                    className="text-xs px-2 py-1 rounded-lg bg-[hsl(var(--kf-accent2))]/10 hover:bg-[hsl(var(--kf-accent2))]/20 transition-colors flex items-center gap-1 disabled:opacity-50"
-                                    style={{ color: "hsl(var(--kf-accent2))" }}
+                                    className="text-xs px-3 min-h-[44px] rounded-lg bg-[hsl(var(--kf-accent2))]/10 hover:bg-[hsl(var(--kf-accent2))]/20 transition-colors flex items-center gap-1.5 disabled:opacity-50 text-[hsl(var(--kf-accent2))]"
                                   >
-                                    <Merge className="w-3 h-3" />
+                                    {merging ? <Loader2 className="w-3 h-3 animate-spin" /> : <Merge className="w-3 h-3" />}
                                     Merge
                                   </button>
                                 )}

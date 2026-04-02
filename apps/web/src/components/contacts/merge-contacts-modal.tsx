@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -18,6 +18,7 @@ import {
   User,
   Calendar,
   Hash,
+  AlertTriangle,
 } from "lucide-react";
 
 interface MergeContact {
@@ -93,10 +94,10 @@ const FIELDS: FieldDef[] = [
 ];
 
 const STATUS_COLORS: Record<string, string> = {
-  LEAD: "bg-amber-500/20 text-amber-400",
-  PROSPECT: "bg-blue-500/20 text-blue-400",
-  CLIENT: "bg-emerald-500/20 text-emerald-400",
-  LOST: "bg-red-500/20 text-red-400",
+  LEAD: "bg-[hsl(var(--kf-warning))]/20 text-[hsl(var(--kf-warning))]",
+  PROSPECT: "bg-[hsl(var(--kf-info))]/20 text-[hsl(var(--kf-info))]",
+  CLIENT: "bg-[hsl(var(--kf-success))]/20 text-[hsl(var(--kf-success))]",
+  LOST: "bg-[hsl(var(--kf-error))]/20 text-[hsl(var(--kf-error))]",
 };
 
 function formatName(c: MergeContact) {
@@ -112,9 +113,18 @@ export function MergeContactsModal({ open, left, right, onClose, onMerge }: Merg
   const [primarySide, setPrimarySide] = useState<"left" | "right">("left");
   const [fieldChoices, setFieldChoices] = useState<Record<string, "left" | "right">>({});
   const [merging, setMerging] = useState(false);
+  const [mergeError, setMergeError] = useState<string | null>(null);
 
   const primary = primarySide === "left" ? left : right;
   const duplicate = primarySide === "left" ? right : left;
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && open && !merging) onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open, merging, onClose]);
 
   const conflictFields = useMemo(() => {
     return FIELDS.filter((f) => {
@@ -130,6 +140,7 @@ export function MergeContactsModal({ open, left, right, onClose, onMerge }: Merg
 
   const handleMerge = async () => {
     setMerging(true);
+    setMergeError(null);
     try {
       const fieldOverrides: Record<string, unknown> = {};
       for (const [key, side] of Object.entries(fieldChoices)) {
@@ -140,6 +151,8 @@ export function MergeContactsModal({ open, left, right, onClose, onMerge }: Merg
         }
       }
       await onMerge(primary.id, duplicate.id, fieldOverrides);
+    } catch (err) {
+      setMergeError(err instanceof Error ? err.message : "Merge failed. Please try again.");
     } finally {
       setMerging(false);
     }
@@ -160,13 +173,13 @@ export function MergeContactsModal({ open, left, right, onClose, onMerge }: Merg
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="merge-title">
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-          onClick={onClose}
+          className="absolute inset-0 bg-background/60 backdrop-blur-sm"
+          onClick={merging ? undefined : onClose}
         />
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
@@ -177,9 +190,14 @@ export function MergeContactsModal({ open, left, right, onClose, onMerge }: Merg
           <div className="flex items-center justify-between p-4 border-b border-border/30">
             <div className="flex items-center gap-2">
               <Merge className="w-5 h-5 text-[hsl(var(--kf-accent2))]" />
-              <h2 className="text-lg font-semibold">Merge Contacts</h2>
+              <h2 className="text-lg font-semibold" id="merge-title">Merge Contacts</h2>
             </div>
-            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors">
+            <button
+              onClick={onClose}
+              disabled={merging}
+              className="p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg hover:bg-muted/50 transition-colors disabled:opacity-50"
+              aria-label="Close merge dialog"
+            >
               <X className="w-4 h-4" />
             </button>
           </div>
@@ -193,14 +211,17 @@ export function MergeContactsModal({ open, left, right, onClose, onMerge }: Merg
                   <button
                     key={contact.id}
                     onClick={() => setPrimarySide(side as "left" | "right")}
-                    className={`p-4 rounded-xl border-2 transition-all text-left ${
+                    disabled={merging}
+                    className={`p-4 rounded-xl border-2 transition-all text-left min-h-[44px] disabled:opacity-70 ${
                       isPrimary
                         ? "border-[hsl(var(--kf-accent1))] bg-[hsl(var(--kf-accent1))]/5"
                         : "border-border/40 hover:border-border/60"
                     }`}
+                    aria-pressed={isPrimary}
+                    aria-label={`${isPrimary ? "Keep" : "Merge"} ${formatName(contact)}`}
                   >
                     <div className="flex items-center gap-3 mb-2">
-                      <div className="w-10 h-10 rounded-full bg-[hsl(var(--kf-accent1))]/20 flex items-center justify-center text-sm font-bold" style={{ color: "hsl(var(--kf-accent1))" }}>
+                      <div className="w-10 h-10 rounded-full bg-[hsl(var(--kf-accent1))]/20 flex items-center justify-center text-sm font-bold text-[hsl(var(--kf-accent1))]">
                         {(contact.firstName?.[0] || "?").toUpperCase()}
                       </div>
                       <div className="flex-1 min-w-0">
@@ -208,12 +229,12 @@ export function MergeContactsModal({ open, left, right, onClose, onMerge }: Merg
                         <div className="text-xs text-muted-foreground truncate">{contact.email || "No email"}</div>
                       </div>
                       {isPrimary && (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-[hsl(var(--kf-accent1))]/20 font-medium" style={{ color: "hsl(var(--kf-accent1))" }}>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-[hsl(var(--kf-accent1))]/20 font-medium text-[hsl(var(--kf-accent1))]">
                           Keep
                         </span>
                       )}
                       {!isPrimary && (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 font-medium">
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-[hsl(var(--kf-error))]/20 text-[hsl(var(--kf-error))] font-medium">
                           Merge
                         </span>
                       )}
@@ -253,21 +274,25 @@ export function MergeContactsModal({ open, left, right, onClose, onMerge }: Merg
                         </div>
                         <button
                           onClick={() => setFieldChoices((p) => ({ ...p, [field.key]: "left" }))}
-                          className={`text-left text-xs p-2 rounded-lg border transition-all truncate ${
+                          disabled={merging}
+                          className={`text-left text-xs p-2 min-h-[44px] rounded-lg border transition-all truncate disabled:opacity-70 ${
                             resolved.side === "left"
                               ? "border-[hsl(var(--kf-accent1))] bg-[hsl(var(--kf-accent1))]/10"
                               : "border-border/30 hover:border-border/60"
                           }`}
+                          aria-pressed={resolved.side === "left"}
                         >
                           {leftVal || "—"}
                         </button>
                         <button
                           onClick={() => setFieldChoices((p) => ({ ...p, [field.key]: "right" }))}
-                          className={`text-left text-xs p-2 rounded-lg border transition-all truncate ${
+                          disabled={merging}
+                          className={`text-left text-xs p-2 min-h-[44px] rounded-lg border transition-all truncate disabled:opacity-70 ${
                             resolved.side === "right"
                               ? "border-[hsl(var(--kf-accent1))] bg-[hsl(var(--kf-accent1))]/10"
                               : "border-border/30 hover:border-border/60"
                           }`}
+                          aria-pressed={resolved.side === "right"}
                         >
                           {rightVal || "—"}
                         </button>
@@ -283,7 +308,7 @@ export function MergeContactsModal({ open, left, right, onClose, onMerge }: Merg
                 <h3 className="text-sm font-medium text-muted-foreground">Merged Tags (union)</h3>
                 <div className="flex flex-wrap gap-1.5">
                   {mergedTags.map((tag) => (
-                    <span key={tag} className="text-[10px] px-2 py-0.5 rounded-full bg-[hsl(var(--kf-accent2))]/15 font-medium" style={{ color: "hsl(var(--kf-accent2))" }}>
+                    <span key={tag} className="text-[10px] px-2 py-0.5 rounded-full bg-[hsl(var(--kf-accent2))]/15 font-medium text-[hsl(var(--kf-accent2))]">
                       {tag}
                     </span>
                   ))}
@@ -302,19 +327,27 @@ export function MergeContactsModal({ open, left, right, onClose, onMerge }: Merg
                 <li>The merged contact is soft-deleted</li>
               </ul>
             </div>
+
+            {mergeError && (
+              <div className="flex items-center gap-2 p-3 rounded-xl bg-[hsl(var(--kf-error))]/10 border border-[hsl(var(--kf-error))]/30">
+                <AlertTriangle className="w-4 h-4 text-[hsl(var(--kf-error))] flex-shrink-0" />
+                <span className="text-sm text-[hsl(var(--kf-error))]">{mergeError}</span>
+              </div>
+            )}
           </div>
 
           <div className="p-4 border-t border-border/30 flex items-center justify-between">
             <button
               onClick={onClose}
-              className="px-4 py-2 text-sm rounded-lg hover:bg-muted/50 transition-colors"
+              disabled={merging}
+              className="px-4 min-h-[44px] text-sm rounded-lg hover:bg-muted/50 transition-colors disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               onClick={handleMerge}
               disabled={merging}
-              className="px-4 py-2 text-sm rounded-lg bg-[hsl(var(--kf-accent2))] text-white hover:opacity-90 transition-opacity flex items-center gap-2 disabled:opacity-50"
+              className="px-4 min-h-[44px] text-sm rounded-lg bg-[hsl(var(--kf-accent2))] text-foreground hover:opacity-90 transition-opacity flex items-center gap-2 disabled:opacity-50"
             >
               {merging ? (
                 <>

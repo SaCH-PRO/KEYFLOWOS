@@ -14,6 +14,7 @@ import {
   logContactEvent, logCommunication, bulkUpdateContacts, bulkDeleteContacts,
   deleteContactNote, deleteContactTask,
   updateContactNote, updateContactTask,
+  addContactsToList,
 } from "@/lib/client";
 import { moduleEvents } from "@/lib/module-events";
 
@@ -464,21 +465,29 @@ export function useContactActions({
     router.push("/app/commerce?tab=invoices&filter=overdue");
   }, [router]);
 
+  const [bulkLoading, setBulkLoading] = useState(false);
+
   const handleBulkStatusChange = useCallback(async (newStatus: string) => {
     const ids = selectedIdsRef.current;
     if (!businessId || ids.size === 0) return;
+    setBulkLoading(true);
     try {
       await bulkUpdateContacts({ businessId, contactIds: Array.from(ids), status: newStatus });
       setContacts((prev) => prev.map((c) => ids.has(c.id) ? { ...c, status: newStatus } : c));
       setSelectedIds(new Set());
       setSelectMode(false);
       toast.success(`Updated ${ids.size} contact${ids.size !== 1 ? "s" : ""}`);
-    } catch { toast.error("Failed to update contacts"); }
+    } catch {
+      toast.error("Failed to update contacts");
+    } finally {
+      setBulkLoading(false);
+    }
   }, [businessId, setContacts, setSelectedIds, setSelectMode]);
 
   const handleBulkTag = useCallback(async (tag: string) => {
     const ids = selectedIdsRef.current;
     if (!businessId || ids.size === 0 || !tag.trim()) return;
+    setBulkLoading(true);
     try {
       await bulkUpdateContacts({ businessId, contactIds: Array.from(ids), addTags: [tag.trim()] });
       setContacts((prev) => prev.map((c) => {
@@ -487,7 +496,11 @@ export function useContactActions({
         return tags.includes(tag.trim()) ? c : { ...c, tags: [...tags, tag.trim()] };
       }));
       toast.success(`Tagged ${ids.size} contact${ids.size !== 1 ? "s" : ""}`);
-    } catch { toast.error("Failed to tag contacts"); }
+    } catch {
+      toast.error("Failed to tag contacts");
+    } finally {
+      setBulkLoading(false);
+    }
   }, [businessId, setContacts]);
 
   const handleBulkDelete = useCallback(async () => {
@@ -498,6 +511,7 @@ export function useContactActions({
       action: async () => {
         const currentIds = selectedIdsRef.current;
         const currentSelectedId = selectedContactIdRef.current;
+        setBulkLoading(true);
         try {
           await bulkDeleteContacts({ businessId, contactIds: Array.from(currentIds) });
           setContacts((prev) => prev.filter((c) => !currentIds.has(c.id)));
@@ -506,10 +520,28 @@ export function useContactActions({
           setSelectMode(false);
           void loadFlowData();
           toast.success(`Deleted ${currentIds.size} contact${currentIds.size !== 1 ? "s" : ""}`);
-        } catch { toast.error("Failed to delete contacts"); }
+        } catch {
+          toast.error("Failed to delete contacts");
+        } finally {
+          setBulkLoading(false);
+        }
       },
     });
   }, [businessId, loadFlowData, setContacts, setSelectedIds, setSelectMode, setSelectedContactId, setContactDetail]);
+
+  const handleBulkAddToList = useCallback(async (listId: string) => {
+    const ids = selectedIdsRef.current;
+    if (!businessId || ids.size === 0 || !listId) return;
+    setBulkLoading(true);
+    try {
+      await addContactsToList(businessId, listId, Array.from(ids));
+      toast.success(`Added ${ids.size} contact${ids.size !== 1 ? "s" : ""} to list`);
+    } catch {
+      toast.error("Failed to add contacts to list");
+    } finally {
+      setBulkLoading(false);
+    }
+  }, [businessId]);
 
   return {
     showAddForm, setShowAddForm,
@@ -528,6 +560,7 @@ export function useContactActions({
     handleImportFile, handleImportLink, handleDeviceImport,
     handleUpdateNote, handleUpdateTask,
     handleQuickAction, handleViewExpiringQuotes, handleViewOverdueInvoices,
-    handleBulkStatusChange, handleBulkTag, handleBulkDelete,
+    handleBulkStatusChange, handleBulkTag, handleBulkDelete, handleBulkAddToList,
+    bulkLoading,
   };
 }

@@ -237,6 +237,8 @@ export function useContactsPipeline() {
     handleBulkStatusChange: actions.handleBulkStatusChange,
     handleBulkTag: actions.handleBulkTag,
     handleBulkDelete: actions.handleBulkDelete,
+    handleBulkAddToList: actions.handleBulkAddToList,
+    bulkLoading: actions.bulkLoading,
     handleToggleSelectMode: contactsData.handleToggleSelectMode,
     handleTogglePin: contactsData.handleTogglePin,
     handleToggleSelect: contactsData.handleToggleSelect,

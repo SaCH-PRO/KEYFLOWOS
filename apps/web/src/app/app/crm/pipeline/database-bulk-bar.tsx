@@ -18,10 +18,10 @@ import type { BulkAction, ListSummary } from "./hooks/use-database-state";
 const STATUSES = ["LEAD", "PROSPECT", "CLIENT", "LOST"];
 
 const STATUS_COLORS: Record<string, string> = {
-  LEAD: "bg-amber-500/15 text-amber-400 border-amber-500/20",
-  PROSPECT: "bg-blue-500/15 text-blue-400 border-blue-500/20",
-  CLIENT: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20",
-  LOST: "bg-red-500/15 text-red-400 border-red-500/20",
+  LEAD: "bg-[hsl(var(--kf-warning))]/15 text-[hsl(var(--kf-warning))] border-[hsl(var(--kf-warning))]/20",
+  PROSPECT: "bg-[hsl(var(--kf-info))]/15 text-[hsl(var(--kf-info))] border-[hsl(var(--kf-info))]/20",
+  CLIENT: "bg-[hsl(var(--kf-success))]/15 text-[hsl(var(--kf-success))] border-[hsl(var(--kf-success))]/20",
+  LOST: "bg-[hsl(var(--kf-error))]/15 text-[hsl(var(--kf-error))] border-[hsl(var(--kf-error))]/20",
 };
 
 interface DatabaseBulkBarProps {
@@ -71,7 +71,14 @@ function DatabaseBulkBarInner({
       }
     };
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onSetBulkAction(null);
+      if (e.key === "Escape") {
+        if (showDeleteConfirm) {
+          setShowDeleteConfirm(false);
+          setDeleteConfirmText("");
+        } else {
+          onSetBulkAction(null);
+        }
+      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     document.addEventListener("keydown", handleEscape);
@@ -79,7 +86,7 @@ function DatabaseBulkBarInner({
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("keydown", handleEscape);
     };
-  }, [activeBulkAction, onSetBulkAction]);
+  }, [activeBulkAction, onSetBulkAction, showDeleteConfirm]);
 
   const toggleStatusAction = useCallback(() => {
     onSetBulkAction(activeBulkAction === "status" ? null : "status");
@@ -123,7 +130,7 @@ function DatabaseBulkBarInner({
               All {selectedCount} on this page selected.{" "}
               <button
                 onClick={onSelectAllPages}
-                className="text-[hsl(var(--kf-accent1))] hover:underline font-semibold"
+                className="text-[hsl(var(--kf-accent1))] hover:underline font-semibold min-h-[44px]"
               >
                 Select all {totalFiltered} contacts
               </button>
@@ -147,7 +154,7 @@ function DatabaseBulkBarInner({
               <button
                 onClick={toggleStatusAction}
                 disabled={bulkActing}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-border/50 bg-white/[0.04] backdrop-blur-sm hover:bg-white/[0.08] transition-all disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 px-2.5 min-h-[44px] text-[11px] font-medium rounded-lg border border-border/50 bg-muted/10 hover:bg-muted/20 transition-all disabled:opacity-40"
                 aria-label="Change status of selected contacts"
                 aria-haspopup="listbox"
                 aria-expanded={activeBulkAction === "status"}
@@ -171,8 +178,9 @@ function DatabaseBulkBarInner({
                       key={s}
                       onClick={() => onBulkStatusChange(s)}
                       disabled={bulkActing}
-                      className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-white/[0.05] transition-colors disabled:opacity-50"
+                      className="w-full text-left px-3 min-h-[44px] flex items-center text-[11px] hover:bg-muted/30 transition-colors disabled:opacity-50"
                       role="option"
+                      aria-selected={false}
                     >
                       <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-semibold border ${STATUS_COLORS[s]}`}>{s}</span>
                     </button>
@@ -185,7 +193,7 @@ function DatabaseBulkBarInner({
               <button
                 onClick={toggleTagsAction}
                 disabled={bulkActing}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-border/50 bg-white/[0.04] backdrop-blur-sm hover:bg-white/[0.08] transition-all disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 px-2.5 min-h-[44px] text-[11px] font-medium rounded-lg border border-border/50 bg-muted/10 hover:bg-muted/20 transition-all disabled:opacity-40"
                 aria-label="Add tags to selected contacts"
                 aria-haspopup="true"
                 aria-expanded={activeBulkAction === "tags"}
@@ -206,14 +214,14 @@ function DatabaseBulkBarInner({
                     value={bulkTagInput}
                     onChange={(e) => onBulkTagInputChange(e.target.value)}
                     placeholder="tag1, tag2, ..."
-                    className="w-full px-3 py-1.5 text-[11px] bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 placeholder:text-muted-foreground/40 mb-2"
+                    className="kf-input w-full text-[11px] min-h-[44px] mb-2"
                     onKeyDown={handleTagKeyDown}
                     autoFocus
                   />
                   <button
                     onClick={handleApplyTags}
                     disabled={bulkActing || !bulkTagInput.trim()}
-                    className="w-full px-3 py-1.5 text-[11px] font-medium rounded-lg bg-gradient-to-r from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all disabled:opacity-40"
+                    className="w-full px-3 min-h-[44px] text-[11px] font-medium rounded-lg bg-gradient-to-r from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all disabled:opacity-40"
                   >
                     Apply Tags
                   </button>
@@ -225,7 +233,7 @@ function DatabaseBulkBarInner({
               <button
                 onClick={toggleAddToListAction}
                 disabled={bulkActing}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-border/50 bg-white/[0.04] backdrop-blur-sm hover:bg-white/[0.08] transition-all disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 px-2.5 min-h-[44px] text-[11px] font-medium rounded-lg border border-border/50 bg-muted/10 hover:bg-muted/20 transition-all disabled:opacity-40"
                 aria-label="Add selected contacts to a list"
                 aria-haspopup="listbox"
                 aria-expanded={activeBulkAction === "addToList"}
@@ -254,8 +262,9 @@ function DatabaseBulkBarInner({
                         key={list.id}
                         onClick={() => onBulkAddToList(list.id)}
                         disabled={bulkActing}
-                        className="w-full text-left px-3 py-2 text-[11px] hover:bg-white/[0.05] transition-colors disabled:opacity-50 flex items-center gap-2"
+                        className="w-full text-left px-3 min-h-[44px] flex items-center text-[11px] hover:bg-muted/30 transition-colors disabled:opacity-50 gap-2"
                         role="option"
+                        aria-selected={false}
                       >
                         <div
                           className="w-2 h-2 rounded-full flex-shrink-0"
@@ -273,7 +282,7 @@ function DatabaseBulkBarInner({
             <button
               onClick={() => setShowDeleteConfirm(true)}
               disabled={bulkActing}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-red-500/30 bg-red-500/[0.08] backdrop-blur-sm text-red-400/80 hover:bg-red-500/15 hover:text-red-400 transition-all disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 px-2.5 min-h-[44px] text-[11px] font-medium rounded-lg border border-[hsl(var(--kf-error))]/30 bg-[hsl(var(--kf-error))]/[0.08] text-[hsl(var(--kf-error))]/80 hover:bg-[hsl(var(--kf-error))]/15 hover:text-[hsl(var(--kf-error))] transition-all disabled:opacity-40"
               aria-label={`Delete ${selectedCount} selected contacts`}
             >
               <Trash2 className="w-3 h-3" />
@@ -282,7 +291,7 @@ function DatabaseBulkBarInner({
 
             <button
               onClick={onClearSelection}
-              className="p-1 hover:bg-white/[0.04] rounded-md transition-colors"
+              className="p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center hover:bg-muted/30 rounded-md transition-colors"
               aria-label="Clear selection"
             >
               <X className="w-3.5 h-3.5 text-muted-foreground/40" />
@@ -295,30 +304,30 @@ function DatabaseBulkBarInner({
     {showDeleteConfirm && (
       <div className="fixed inset-0 z-[60] flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="db-bulk-delete-title" aria-describedby="db-bulk-delete-desc">
         <div
-          className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+          className="absolute inset-0 bg-background/60 backdrop-blur-sm"
           onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmText(""); }}
         />
-        <div className="relative z-10 w-full max-w-md mx-4 rounded-xl border border-border/60 bg-slate-900/95 backdrop-blur-xl p-6 shadow-2xl">
+        <div className="relative z-10 w-full max-w-md mx-4 rounded-xl border border-border/60 kf-card p-6 shadow-2xl">
           <h3 className="text-lg font-semibold mb-2" id="db-bulk-delete-title">Delete {selectedCount} contact{selectedCount !== 1 ? "s" : ""}?</h3>
           <p className="text-sm text-muted-foreground mb-4" id="db-bulk-delete-desc">
-            This action cannot be undone. Type <span className="font-mono font-bold text-red-400">DELETE</span> to confirm.
+            This action cannot be undone. Type <span className="font-mono font-bold text-[hsl(var(--kf-error))]">DELETE</span> to confirm.
           </p>
           <input
             type="text"
             value={deleteConfirmText}
             onChange={(e) => setDeleteConfirmText(e.target.value)}
             placeholder='Type "DELETE" to confirm'
-            className="w-full px-3 py-2 text-sm bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500/40 placeholder:text-muted-foreground/40 mb-4"
+            className="kf-input w-full text-sm min-h-[44px] mb-4"
             autoFocus
           />
           <div className="flex justify-end gap-2">
-            <Button variant="subtle" onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmText(""); }}>
+            <Button variant="subtle" onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmText(""); }} className="min-h-[44px]">
               Cancel
             </Button>
             <Button
               onClick={() => { onBulkDelete(); setShowDeleteConfirm(false); setDeleteConfirmText(""); }}
               disabled={deleteConfirmText !== "DELETE"}
-              className="bg-red-600 hover:bg-red-700 text-white disabled:opacity-40"
+              className="bg-[hsl(var(--kf-error))] hover:bg-[hsl(var(--kf-error))]/90 text-foreground min-h-[44px] disabled:opacity-40"
             >
               Delete {selectedCount} Contact{selectedCount !== 1 ? "s" : ""}
             </Button>

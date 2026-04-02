@@ -76,6 +76,7 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
     handleToggleSelect, handleTogglePin,
     handleDeleteContact, handleQuickAction,
     handleSelectAll, handleBulkStatusChange, handleBulkTag, handleBulkDelete,
+    handleBulkAddToList, bulkLoading,
     handleToggleSelectMode,
   } = state;
 
@@ -318,6 +319,8 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
           onBulkDelete={handleBulkDelete}
           onBroadcast={handleOpenBroadcast}
           onCancel={handleToggleSelectMode}
+          onAddToList={handleBulkAddToList}
+          loading={bulkLoading}
         />
       )}
 
