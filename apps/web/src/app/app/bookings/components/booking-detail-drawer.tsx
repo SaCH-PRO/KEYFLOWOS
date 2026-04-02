@@ -16,6 +16,8 @@ import {
   StickyNote,
   ChevronLeft,
   ChevronRight,
+  Pencil,
+  Save,
 } from "lucide-react";
 import type { Booking } from "./bookings-types";
 import { STATUS_STYLE, formatTime, formatFullDate, contactName } from "./bookings-types";
@@ -26,6 +28,7 @@ interface BookingDetailDrawerProps {
   onStatusChange: (bookingId: string, newStatus: string) => void;
   onSyncCalendar: (bookingId: string) => void;
   onReschedule?: (bookingId: string, newStartTime: string) => void;
+  onUpdateNotes?: (bookingId: string, notes: string) => void;
   calendarConnected: boolean;
 }
 
@@ -48,7 +51,7 @@ function RescheduleForm({ onSubmit, onCancel, currentStartTime }: { onSubmit: (s
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   });
 
-  const [weekBase, setWeekBase] = useState(() => new Date());
+  const [weekBase, setWeekBase] = useState(() => currentStartTime ? new Date(currentStartTime) : new Date());
 
   const weekDays = (() => {
     const start = new Date(weekBase);
@@ -160,9 +163,12 @@ export default function BookingDetailDrawer({
   onStatusChange,
   onSyncCalendar,
   onReschedule,
+  onUpdateNotes,
   calendarConnected,
 }: BookingDetailDrawerProps) {
   const [showReschedule, setShowReschedule] = useState(false);
+  const [editingNotes, setEditingNotes] = useState(false);
+  const [notesText, setNotesText] = useState(selectedBooking.notes ?? "");
 
   const canReschedule = selectedBooking.status === "PENDING" || selectedBooking.status === "CONFIRMED";
 
@@ -204,15 +210,61 @@ export default function BookingDetailDrawer({
             </div>
           </div>
 
-          {selectedBooking.notes && (
-            <div className="kf-card p-4 space-y-2">
+          <div className="kf-card p-4 space-y-2">
+            <div className="flex items-center justify-between">
               <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide flex items-center gap-1.5">
                 <StickyNote className="w-3.5 h-3.5" />
                 Notes
               </div>
-              <p className="text-sm text-foreground/90 whitespace-pre-wrap">{selectedBooking.notes}</p>
+              {!editingNotes && onUpdateNotes && (
+                <button
+                  onClick={() => { setNotesText(selectedBooking.notes ?? ""); setEditingNotes(true); }}
+                  className="flex items-center gap-1 text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                >
+                  <Pencil className="w-2.5 h-2.5" />
+                  {selectedBooking.notes ? "Edit" : "Add notes"}
+                </button>
+              )}
             </div>
-          )}
+            {editingNotes ? (
+              <div className="space-y-2">
+                <textarea
+                  value={notesText}
+                  onChange={(e) => setNotesText(e.target.value)}
+                  rows={3}
+                  className="kf-input w-full text-sm resize-none"
+                  placeholder="Add notes about this booking..."
+                  aria-label="Booking notes"
+                />
+                <div className="flex gap-1.5 justify-end">
+                  <button
+                    onClick={() => setEditingNotes(false)}
+                    className="px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors min-h-[32px]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      onUpdateNotes?.(selectedBooking.id, notesText);
+                      setEditingNotes(false);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded-md transition-colors min-h-[32px]"
+                    style={{
+                      background: "hsl(var(--kf-accent1) / 0.1)",
+                      color: "hsl(var(--kf-accent1))",
+                    }}
+                  >
+                    <Save className="w-2.5 h-2.5" />
+                    Save
+                  </button>
+                </div>
+              </div>
+            ) : selectedBooking.notes ? (
+              <p className="text-sm text-foreground/90 whitespace-pre-wrap">{selectedBooking.notes}</p>
+            ) : (
+              <p className="text-[11px] text-muted-foreground/50 italic">No notes yet</p>
+            )}
+          </div>
 
           {selectedBooking.contact && (
             <div className="kf-card p-4 space-y-2">

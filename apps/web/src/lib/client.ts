@@ -1169,6 +1169,14 @@ export async function rescheduleBooking(bookingId: string, startTime: string, bu
   });
 }
 
+export async function updateBookingNotes(bookingId: string, notes: string, businessId?: string) {
+  const bId = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<Booking>({
+    path: `/bookings/businesses/${encodeURIComponent(bId)}/bookings/${encodeURIComponent(bookingId)}/notes`,
+    body: { notes },
+  });
+}
+
 export async function fetchStaffAvailability(businessId: string, staffId: string) {
   return apiGet<{ id: string; dayOfWeek: number; startTime: string; endTime: string }[]>(
     `/bookings/businesses/${encodeURIComponent(businessId)}/staff/${encodeURIComponent(staffId)}/availability`
@@ -1595,6 +1603,8 @@ export async function fetchServices(businessId: string = DEFAULT_BUSINESS_ID) {
       price: z.number(),
       currency: z.string().optional(),
       description: z.string().nullable().optional(),
+      bufferMins: z.number().nullable().optional(),
+      leadTimeMins: z.number().nullable().optional(),
     })),
     [],
   );
@@ -1608,7 +1618,7 @@ export async function createService(input: { businessId?: string; name: string; 
   });
 }
 
-export async function updateService(serviceId: string, data: { name?: string; duration?: number; price?: number; description?: string }, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function updateService(serviceId: string, data: { name?: string; duration?: number; price?: number; description?: string; bufferMins?: number | null; leadTimeMins?: number | null }, businessId: string = DEFAULT_BUSINESS_ID) {
   return apiPatch<Service>(
     `/bookings/businesses/${encodeURIComponent(businessId)}/services/${encodeURIComponent(serviceId)}`,
     data,

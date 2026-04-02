@@ -108,6 +108,25 @@ export class BookingsService {
     return updated;
   }
 
+  async updateBookingNotes(businessId: string, bookingId: string, notes: string) {
+    const booking = await this.prisma.client.booking.findFirst({
+      where: { id: bookingId, businessId, deletedAt: null },
+    });
+    if (!booking) {
+      throw new BadRequestException('Booking not found');
+    }
+    return this.prisma.client.booking.update({
+      where: { id: bookingId },
+      data: { notes: notes || null },
+      include: {
+        contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+        service: { select: { id: true, name: true, duration: true, price: true, bufferMins: true, leadTimeMins: true } },
+        staff: { select: { id: true, name: true } },
+        invoice: { select: { id: true, invoiceNumber: true, status: true, total: true } },
+      },
+    });
+  }
+
   async rescheduleBooking(businessId: string, bookingId: string, newStartTime: Date) {
     const booking = await this.prisma.client.booking.findFirst({
       where: { id: bookingId, businessId, deletedAt: null },
@@ -340,6 +359,32 @@ export class BookingsService {
         throw new BadRequestException(
           `This time slot is unavailable due to a ${service.bufferMins}-minute buffer between appointments.`,
         );
+      }
+    }
+
+    if (input.staffId) {
+      const staffAvailabilities = await this.prisma.client.availability.findMany({
+        where: {
+          staffId: input.staffId,
+          staff: { businessId: input.businessId, deletedAt: null },
+        },
+      });
+      if (staffAvailabilities.length > 0) {
+        const dayOfWeek = start.getDay();
+        const slotAvail = staffAvailabilities.filter((a) => a.dayOfWeek === dayOfWeek);
+        if (slotAvail.length === 0) {
+          throw new BadRequestException('The selected staff member is not available on this day.');
+        }
+        const startMinsOfDay = start.getHours() * 60 + start.getMinutes();
+        const endMinsOfDay = (end.getHours() * 60 + end.getMinutes()) || 1440;
+        const withinAny = slotAvail.some((a) => {
+          const [sh, sm] = a.startTime.split(':').map(Number);
+          const [eh, em] = a.endTime.split(':').map(Number);
+          return startMinsOfDay >= sh * 60 + sm && endMinsOfDay <= eh * 60 + em;
+        });
+        if (!withinAny) {
+          throw new BadRequestException('The selected time is outside this staff member\'s available hours.');
+        }
       }
     }
 

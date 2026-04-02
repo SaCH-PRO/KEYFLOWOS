@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useCallback, useEffect } from "react";
+import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Briefcase,
@@ -17,13 +17,15 @@ import {
   ChevronUp,
   Save,
   Bell,
+  Pencil,
 } from "lucide-react";
 import NextLink from "next/link";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SetupModeBanner } from "@/components/ui/setup-mode-banner";
 import type { Service, StaffMember, Booking } from "./bookings-types";
 import { formatAmount } from "../../commerce/utils/commerce-utils";
-import { fetchStaffAvailability, setStaffAvailability } from "@/lib/client";
+import { fetchStaffAvailability, setStaffAvailability, updateService } from "@/lib/client";
+import { toast } from "sonner";
 
 const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -248,6 +250,98 @@ function StaffAvailabilityEditor({ staffId, staffName, businessId }: { staffId: 
   );
 }
 
+function ServiceTimingEditor({ serviceId, businessId, initialBuffer, initialLead }: {
+  serviceId: string;
+  businessId?: string;
+  initialBuffer: number | null;
+  initialLead: number | null;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [buffer, setBuffer] = useState(initialBuffer ?? 0);
+  const [lead, setLead] = useState(initialLead ?? 0);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!businessId) return;
+    setSaving(true);
+    try {
+      await updateService(serviceId, {
+        bufferMins: buffer || null,
+        leadTimeMins: lead || null,
+      }, businessId);
+      toast.success("Timing settings updated");
+      setEditing(false);
+    } catch {
+      toast.error("Failed to update timing");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <button
+        onClick={() => setEditing(true)}
+        className="flex items-center gap-1 text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors mt-1"
+      >
+        <Pencil className="w-2.5 h-2.5" />
+        Edit buffer & lead time
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-2 pt-2 border-t border-border/30 space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-[10px] text-muted-foreground mb-0.5 block">Buffer (mins)</label>
+          <input
+            type="number"
+            min={0}
+            max={120}
+            value={buffer}
+            onChange={(e) => setBuffer(Number(e.target.value))}
+            className="kf-input w-full text-xs px-2 py-1.5 min-h-[36px]"
+            aria-label="Buffer minutes between appointments"
+          />
+        </div>
+        <div>
+          <label className="text-[10px] text-muted-foreground mb-0.5 block">Lead time (mins)</label>
+          <input
+            type="number"
+            min={0}
+            max={10080}
+            value={lead}
+            onChange={(e) => setLead(Number(e.target.value))}
+            className="kf-input w-full text-xs px-2 py-1.5 min-h-[36px]"
+            aria-label="Lead time in minutes for advance booking"
+          />
+        </div>
+      </div>
+      <div className="flex gap-1.5 justify-end">
+        <button
+          onClick={() => setEditing(false)}
+          className="px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors min-h-[32px]"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded-md transition-colors min-h-[32px] disabled:opacity-50"
+          style={{
+            background: "hsl(var(--kf-accent1) / 0.1)",
+            color: "hsl(var(--kf-accent1))",
+          }}
+        >
+          <Save className="w-2.5 h-2.5" />
+          {saving ? "Saving..." : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const REMINDER_KEY = "kf_booking_reminder_mins";
 
 function ReminderConfig({ businessId }: { businessId?: string | null }) {
@@ -462,6 +556,12 @@ export default function CatalogCapacityTab({
                       </span>
                     ) : null}
                   </div>
+                  <ServiceTimingEditor
+                    serviceId={service.id}
+                    businessId={businessId ?? undefined}
+                    initialBuffer={svc.bufferMins ?? null}
+                    initialLead={svc.leadTimeMins ?? null}
+                  />
                 </motion.div>
               );
             })}
