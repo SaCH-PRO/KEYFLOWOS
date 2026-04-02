@@ -126,9 +126,9 @@ export default function BookingList({
                 ? "Try adjusting your search or filters."
                 : "Create your first booking to start managing your schedule."
             }
+            tip={!searchQuery && statusFilter === "ALL" ? "Share your booking page link to let clients self-schedule. Set up services in the Catalog tab first." : undefined}
             actionLabel={!searchQuery && statusFilter === "ALL" ? "New Booking" : undefined}
             onAction={!searchQuery && statusFilter === "ALL" ? onCreateNew : undefined}
-            tip={!searchQuery && statusFilter === "ALL" ? "Set up your services in the Catalog tab first to enable online booking." : undefined}
           />
         ) : (
           filteredBookings.map((b, index) => (

@@ -203,9 +203,9 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
           icon={FolderKanban}
           title="No projects yet"
           description="Create your first project to organize tasks, track progress, and stay on top of your work."
+          tip="Projects use a kanban board with four status columns. Add tasks within each project to break work into manageable steps."
           actionLabel="New Project"
           onAction={() => setShowNewProject(true)}
-          tip="Projects move across Active, In Progress, Completed, and On Hold columns as you work."
         />
       ) : (
       <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
@@ -310,13 +310,15 @@ export function ProjectBoard({ businessId }: { businessId: string | null }) {
                               exit={{ height: 0, opacity: 0 }}
                               className="overflow-hidden"
                             >
-                              <TaskList
-                                tasks={project.tasks ?? []}
-                                projectId={project.id}
-                                onToggleTask={handleToggleTask}
-                                onDeleteTask={handleDeleteTask}
-                                onAddTask={handleAddTask}
-                              />
+                              <div data-walkthrough="projects-tasks">
+                                <TaskList
+                                  tasks={project.tasks ?? []}
+                                  projectId={project.id}
+                                  onToggleTask={handleToggleTask}
+                                  onDeleteTask={handleDeleteTask}
+                                  onAddTask={handleAddTask}
+                                />
+                              </div>
                             </motion.div>
                           )}
                         </AnimatePresence>

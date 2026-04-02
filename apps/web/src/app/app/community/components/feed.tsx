@@ -248,6 +248,7 @@ export function Feed({
           icon={MessageSquare}
           title="No posts yet"
           description="Start the conversation! Share a discussion, question, win, or resource with the community."
+          tip="Posts can be discussions, questions, wins, or resource shares. Engage with fellow entrepreneurs in your cohort."
           actionLabel="New Post"
           onAction={() => setShowNewPost(true)}
         />

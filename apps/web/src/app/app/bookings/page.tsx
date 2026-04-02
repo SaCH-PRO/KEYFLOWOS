@@ -52,7 +52,7 @@ import PerformanceTab from "./components/performance-tab";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { ShareLinkModal } from "@/components/ui/share-link-modal";
 import { SetupModeBanner } from "@/components/ui/setup-mode-banner";
-import { ModuleWalkthrough } from "@/components/ui/module-walkthrough";
+import { ModuleWalkthrough, WalkthroughTrigger } from "@/components/ui/module-walkthrough";
 import { RichTooltip } from "@/components/ui/rich-tooltip";
 import { BOOKINGS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { usePlan } from "@/hooks/use-plan";
@@ -390,18 +390,21 @@ export default function BookingsPage() {
         title="Bookings"
         subtitle="Schedule, catalog & performance"
         titleExtra={
-          <FeatureGuide
-            featureKey="bookings"
-            title="Getting Started with Bookings"
-            description="Set up your schedule, services, and staff to start accepting bookings."
-            steps={[
-              { title: "Add Services", description: "Define your bookable services with pricing and duration." },
-              { title: "Add Staff", description: "Add team members who can be assigned to bookings." },
-              { title: "Manage Schedule", description: "View bookings on the calendar, confirm or cancel appointments." },
-              { title: "Connect Google Calendar", description: "Sync bookings to your Google Calendar from Catalog & Capacity." },
-              { title: "Track Performance", description: "Monitor volume, revenue, and schedule health." },
-            ]}
-          />
+          <div className="flex items-center gap-2">
+            <FeatureGuide
+              featureKey="bookings"
+              title="Getting Started with Bookings"
+              description="Set up your schedule, services, and staff to start accepting bookings."
+              steps={[
+                { title: "Add Services", description: "Define your bookable services with pricing and duration." },
+                { title: "Add Staff", description: "Add team members who can be assigned to bookings." },
+                { title: "Manage Schedule", description: "View bookings on the calendar, confirm or cancel appointments." },
+                { title: "Connect Google Calendar", description: "Sync bookings to your Google Calendar from Catalog & Capacity." },
+                { title: "Track Performance", description: "Monitor volume, revenue, and schedule health." },
+              ]}
+            />
+            <WalkthroughTrigger moduleKey="bookings" />
+          </div>
         }
         rightSlot={
           <div className="flex items-center gap-1">

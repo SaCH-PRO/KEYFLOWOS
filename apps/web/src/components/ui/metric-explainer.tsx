@@ -35,15 +35,21 @@ export function MetricExplainer({
 
   return (
     <div ref={containerRef} className="relative">
-      <div className="group">
+      <div
+        className="group cursor-pointer"
+        onClick={() => setOpen(!open)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(!open); } }}
+        aria-label={`What is ${label}? Tap for details`}
+      >
         {children}
-        <button
-          onClick={() => setOpen(!open)}
-          className="absolute top-1.5 right-1.5 p-1 rounded-full opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity hover:bg-muted/30"
-          aria-label={`What is ${label}?`}
+        <span
+          className="absolute top-1.5 right-1.5 p-1 rounded-full opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity pointer-events-none"
+          aria-hidden="true"
         >
           <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/50" />
-        </button>
+        </span>
       </div>
       <AnimatePresence>
         {open && (
