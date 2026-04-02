@@ -3158,6 +3158,10 @@ export interface StorefrontConfig {
     metaTitle?: string;
     metaDescription?: string;
     socialImage?: string;
+    ogImage?: string;
+  };
+  catalog?: {
+    productOrder?: string[];
   };
 }
 

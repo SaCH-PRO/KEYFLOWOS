@@ -340,7 +340,7 @@ export function useStoreData() {
     if (businessId) {
       updateStorefrontConfig(businessId, {
         ...storefrontConfig,
-        catalog: { ...(storefrontConfig as any).catalog, productOrder: orderedIds },
+        catalog: { ...storefrontConfig.catalog, productOrder: orderedIds },
       }).then((res) => {
         if (!res.error) toast.success("Display order saved");
       });

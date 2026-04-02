@@ -120,7 +120,7 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
       })),
   ];
 
-  const productOrder = (config?.catalog as any)?.productOrder as string[] | undefined;
+  const productOrder = config?.catalog?.productOrder;
   const allItems = productOrder?.length
     ? (() => {
         const orderMap = new Map(productOrder.map((id, idx) => [id, idx]));
