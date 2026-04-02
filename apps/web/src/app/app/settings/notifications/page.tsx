@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { apiGet, apiPatch } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { InfoBadge } from "@/components/ui/info-badge";
 
 interface NotificationPreferences {
   booking_confirmed: boolean;
@@ -153,7 +154,7 @@ export default function NotificationsSettingsPage() {
           <Bell className="w-4.5 h-4.5" style={{ color: "hsl(var(--kf-accent1))" }} />
         </div>
         <div>
-          <h2 className="text-lg font-semibold">Customer Notifications</h2>
+          <h2 className="text-lg font-semibold inline-flex items-center gap-2">Customer Notifications <InfoBadge title="How Notifications Work" body="Transactional emails are sent via your connected Gmail account. Toggle each type on/off. Customers receive branded emails with your business info." side="right" iconSize={13} /></h2>
           <p className="kf-text-caption text-muted-foreground">
             Automated emails sent to your customers via Gmail
           </p>

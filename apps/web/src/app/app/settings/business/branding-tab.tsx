@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { Palette, Eye, Sparkles } from "lucide-react";
 import { Input } from "@keyflow/ui";
+import { InfoBadge } from "@/components/ui/info-badge";
 import { FormState } from "./use-business-settings";
 import { useThemeColors } from "@/lib/theme-context";
 
@@ -55,6 +56,7 @@ export function BrandingTab({ form, setField }: Props) {
         <h3 className="text-sm font-medium flex items-center gap-2">
           <Sparkles className="h-4 w-4" style={{ color: "hsl(var(--kf-accent1))" }} />
           Quick Palettes
+          <InfoBadge title="Quick Palettes" body="One-click color themes. Your primary color is used for buttons and accents, secondary for highlights and badges." side="right" iconSize={12} />
         </h3>
         <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
           {presetPalettes.map((p) => (

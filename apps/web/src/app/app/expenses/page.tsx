@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import { AnimatePresence } from "framer-motion";
-import { Receipt, DollarSign, Target, Store, Download, ArrowUp, ArrowDown, Minus, BarChart3, Sparkles } from "lucide-react";
+import { Receipt, DollarSign, Target, Store, Download, ArrowUp, ArrowDown, Minus, BarChart3 } from "lucide-react";
 import { deleteExpense, getExpenseExportUrl, Expense } from "@/lib/client";
 import { getAuthHeaders } from "@/lib/api";
 import { PageHeader } from "@/components/ui/page-header";

@@ -21,6 +21,7 @@ import Link from "next/link";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { apiGet, apiPost, apiDelete } from "@/lib/api";
 import { toast } from "sonner";
+import { InfoBadge } from "@/components/ui/info-badge";
 
 interface ApiKey {
   id: string;
@@ -169,7 +170,7 @@ export default function DevelopersSettingsPage() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Key className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-            <h3 className="text-sm font-semibold">API Keys</h3>
+            <h3 className="text-sm font-semibold inline-flex items-center gap-1.5">API Keys <InfoBadge title="API Keys" body="HMAC-signed keys for programmatic access. Each key has scoped permissions — only grant what's needed. Store your key securely; it's shown only once." side="right" iconSize={12} /></h3>
           </div>
           <button
             onClick={() => { setShowCreateModal(true); setNewKey(null); }}

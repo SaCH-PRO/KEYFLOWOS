@@ -83,14 +83,15 @@ export function ModuleWalkthrough({ moduleKey, steps, onComplete }: ModuleWalkth
   }, [moduleKey]);
 
   useEffect(() => {
-    const handler = (e: CustomEvent) => {
-      if (e.detail === moduleKey) {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<string>).detail;
+      if (detail === moduleKey) {
         setCurrentStep(0);
         setActive(true);
       }
     };
-    window.addEventListener("kf-walkthrough-restart" as any, handler as EventListener);
-    return () => window.removeEventListener("kf-walkthrough-restart" as any, handler as EventListener);
+    window.addEventListener("kf-walkthrough-restart", handler);
+    return () => window.removeEventListener("kf-walkthrough-restart", handler);
   }, [moduleKey]);
 
   useEffect(() => {
