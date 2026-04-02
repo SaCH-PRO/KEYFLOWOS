@@ -24,6 +24,10 @@ import { markInvoicePaid, updateInvoiceStatus } from "@/lib/client";
 import { formatCurrency, formatCurrencyCompact } from "@/lib/currency";
 import { getStatusBadge } from "../components/commerce-types";
 import { EmptyState } from "@/components/ui/empty-state";
+import { CashFlowSummary } from "../components/cash-flow-summary";
+import { DateRangeFilter, filterByDateRange, DEFAULT_DATE_RANGE } from "../components/date-range-filter";
+import type { DateRange } from "../components/date-range-filter";
+import { exportToCsv } from "../components/bulk-action-bar";
 
 function getDaysOverdue(dueDate: string | null | undefined): number {
   if (!dueDate) return 0;
@@ -68,6 +72,7 @@ export default function PaymentsTab({
   const [actionLoading, setActionLoading] = useState<Record<string, string>>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedOverdue, setExpandedOverdue] = useState(true);
+  const [dateRange, setDateRange] = useState<DateRange>(DEFAULT_DATE_RANGE);
 
   const stats = useMemo(() => {
     const now = new Date();
@@ -146,10 +151,12 @@ export default function PaymentsTab({
       );
     }
 
+    list = filterByDateRange(list, (inv) => inv.paidAt ?? inv.issueDate, dateRange);
+
     return list.sort(
       (a, b) => new Date(b.paidAt ?? b.issueDate ?? 0).getTime() - new Date(a.paidAt ?? a.issueDate ?? 0).getTime()
     );
-  }, [invoices, activeView, searchQuery]);
+  }, [invoices, activeView, searchQuery, dateRange]);
 
   const overdueQueue = useMemo(() => {
     const now = new Date();
@@ -310,6 +317,13 @@ export default function PaymentsTab({
         </div>
       </div>
 
+      <CashFlowSummary
+        totalReceived={stats.totalReceived}
+        totalPending={stats.totalPending}
+        totalOverdue={stats.totalOverdue}
+        currency={currency}
+      />
+
       {overdueQueue.length > 0 && (
         <div className="rounded-xl border border-red-500/20 bg-card overflow-hidden">
           <button
@@ -461,6 +475,7 @@ export default function PaymentsTab({
               </button>
             )}
           </div>
+          <DateRangeFilter value={dateRange} onChange={setDateRange} />
         </div>
 
         <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide pb-0.5 mb-3">

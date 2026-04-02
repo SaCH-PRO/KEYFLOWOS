@@ -308,6 +308,24 @@ export class CommerceController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/invoices/bulk')
+  bulkUpdateInvoices(
+    @Param('businessId') businessId: string,
+    @Body() body: { ids: string[]; action: 'send' | 'void' | 'delete' },
+  ) {
+    return this.commerce.bulkUpdateInvoices(businessId, body.ids, body.action);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/quotes/bulk')
+  bulkUpdateQuotes(
+    @Param('businessId') businessId: string,
+    @Body() body: { ids: string[]; action: 'send' | 'reject' | 'delete' },
+  ) {
+    return this.commerce.bulkUpdateQuotes(businessId, body.ids, body.action);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Delete('businesses/:businessId/invoices/:invoiceId')
   deleteInvoice(
     @Param('businessId') businessId: string,

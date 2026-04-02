@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { SkeletonList } from "@/components/ui/skeleton";
@@ -39,6 +39,7 @@ import {
   sendQuoteEmail,
   recordInvoicePayment,
   listInvoicePayments,
+  bulkUpdateInvoices,
   Product,
   Invoice,
   Contact,
@@ -65,6 +66,11 @@ import { RecordRowCard, OverflowMenu, OverflowMenuItem } from "../components/sta
 import { getInvoiceSmartCTA } from "../utils/smart-cta";
 import { useInvoiceForm } from "../hooks/use-invoice-form";
 import { useBusinessPreview } from "../hooks/use-business-preview";
+import { DateRangeFilter, filterByDateRange, DEFAULT_DATE_RANGE } from "../components/date-range-filter";
+import type { DateRange } from "../components/date-range-filter";
+import { BulkActionBar, exportToCsv } from "../components/bulk-action-bar";
+import { TaxSummaryPanel } from "../components/tax-summary-panel";
+import { DunningRulesPanel } from "../components/dunning-rules";
 
 import { formatAmount, formatRelativeDate, getStatusAccentColor, getContactInitials, getItemsSummary, getDaysUntilDue } from "../utils/commerce-utils";
 import { useCommerceSearch } from "../hooks/use-commerce-search";
@@ -168,6 +174,74 @@ export default function InvoicesPanel({
   const [paymentForm, setPaymentForm] = useState({ amount: "", method: "Cash", reference: "", notes: "" });
   const [recordingPayment, setRecordingPayment] = useState(false);
   const [paymentHistory, setPaymentHistory] = useState<Record<string, PaymentRecord[]>>({});
+  const [dateRange, setDateRange] = useState<DateRange>(DEFAULT_DATE_RANGE);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  const toggleSelected = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleBulkStatusChange = useCallback(async (status: string) => {
+    if (!businessId || selectedIds.size === 0) return;
+    const action = status === "SENT" ? "send" : status === "VOID" ? "void" : "delete";
+    const { data, error } = await bulkUpdateInvoices(businessId, Array.from(selectedIds), action as "send" | "void" | "delete");
+    if (data) {
+      toast.success(`${data.updated} invoice(s) updated`);
+      setSelectedIds(new Set());
+      if (data.updated > 0) {
+        const eligibleStatuses: Record<string, string[]> = {
+          send: ["DRAFT"],
+          void: ["DRAFT", "SENT", "OVERDUE"],
+          delete: ["DRAFT", "SENT", "OVERDUE"],
+        };
+        const eligible = new Set(
+          invoices
+            .filter((i) => selectedIds.has(i.id) && (eligibleStatuses[action] ?? []).includes(i.status))
+            .map((i) => i.id)
+        );
+        if (action === "delete") {
+          setInvoices((prev) => prev.filter((i) => !eligible.has(i.id)));
+        } else {
+          setInvoices((prev) => prev.map((i) => eligible.has(i.id) ? { ...i, status: status as Invoice["status"] } : i));
+        }
+      }
+    } else {
+      toast.error(error ?? "Bulk action failed");
+    }
+  }, [businessId, selectedIds, invoices, setInvoices]);
+
+  const handleBulkDelete = useCallback(async () => {
+    setConfirmState({
+      open: true,
+      action: () => handleBulkStatusChange("DELETE"),
+    });
+  }, [handleBulkStatusChange]);
+
+  const handleExportCsv = useCallback(() => {
+    const toExport = selectedIds.size > 0
+      ? invoices.filter((i) => selectedIds.has(i.id))
+      : invoices;
+    exportToCsv(
+      toExport as unknown as Record<string, unknown>[],
+      [
+        { key: "invoiceNumber" as never, header: "Invoice #" },
+        { key: "status" as never, header: "Status" },
+        { key: "contact" as never, header: "Client", format: (v: unknown) => { const c = v as { firstName?: string; lastName?: string } | null; return c ? `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() : ""; } },
+        { key: "total" as never, header: "Total" },
+        { key: "currency" as never, header: "Currency" },
+        { key: "issueDate" as never, header: "Issue Date", format: (v: unknown) => v ? new Date(v as string).toLocaleDateString() : "" },
+        { key: "dueDate" as never, header: "Due Date", format: (v: unknown) => v ? new Date(v as string).toLocaleDateString() : "" },
+        { key: "taxRate" as never, header: "Tax Rate %" },
+      ],
+      `invoices-${new Date().toISOString().split("T")[0]}`,
+    );
+    toast.success(`Exported ${toExport.length} invoice(s)`);
+  }, [invoices, selectedIds]);
 
   const statusCounts = useMemo(() => {
     const counts: Record<string, number> = { ALL: invoices.length, DRAFT: 0, SENT: 0, PAID: 0, PARTIALLY_PAID: 0, OVERDUE: 0, VOID: 0 };
@@ -197,10 +271,14 @@ export default function InvoicesPanel({
     }
   }, [invoices, sortKey]);
 
+  const dateFiltered = useMemo(() => {
+    return filterByDateRange(sorted, (inv) => inv.issueDate, dateRange);
+  }, [sorted, dateRange]);
+
   const statusFiltered = useMemo(() => {
-    if (invoiceStatusFilter === "ALL") return sorted;
-    return sorted.filter((inv) => inv.status === invoiceStatusFilter);
-  }, [sorted, invoiceStatusFilter]);
+    if (invoiceStatusFilter === "ALL") return dateFiltered;
+    return dateFiltered.filter((inv) => inv.status === invoiceStatusFilter);
+  }, [dateFiltered, invoiceStatusFilter]);
 
   const { filtered: filteredInvoices } = useCommerceSearch(
     statusFiltered,
@@ -639,6 +717,9 @@ export default function InvoicesPanel({
         </motion.div>
       )}
 
+      <TaxSummaryPanel invoices={invoices} currency={currency} />
+      <DunningRulesPanel businessId={businessId} />
+
       <div className="rounded-2xl border border-border/50 bg-card p-3 sm:p-4">
         <div className="flex items-center gap-2 mb-3">
           <div className="relative flex-1 min-w-0">
@@ -661,6 +742,7 @@ export default function InvoicesPanel({
               </button>
             )}
           </div>
+          <DateRangeFilter value={dateRange} onChange={setDateRange} />
           <div className="relative shrink-0">
             <ArrowUpDown className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50 pointer-events-none" />
             <select
@@ -762,6 +844,21 @@ export default function InvoicesPanel({
         </div>
       ) : (
         <div className="space-y-2">
+          {filteredInvoices.length > 0 && (
+            <div className="flex items-center gap-2 px-2 pb-1">
+              <input
+                type="checkbox"
+                checked={filteredInvoices.length > 0 && filteredInvoices.every((i) => selectedIds.has(i.id))}
+                onChange={() => {
+                  const allSelected = filteredInvoices.every((i) => selectedIds.has(i.id));
+                  setSelectedIds(allSelected ? new Set() : new Set(filteredInvoices.map((i) => i.id)));
+                }}
+                className="w-4 h-4 rounded border-border/50 accent-[hsl(var(--kf-accent1))]"
+                aria-label="Select all visible invoices"
+              />
+              <span className="text-[10px] text-muted-foreground/50">Select all</span>
+            </div>
+          )}
           {filteredInvoices.map((inv) => {
             const dueInfo = getDaysUntilDue(inv.dueDate);
             const smartCTA = getInvoiceSmartCTA(inv.status);
@@ -817,7 +914,15 @@ export default function InvoicesPanel({
             const paymentPercent = Number(inv.total) > 0 ? Math.round((paidAmount / Number(inv.total)) * 100) : 0;
 
             return (
-              <div key={inv.id}>
+              <div key={inv.id} className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(inv.id)}
+                  onChange={() => toggleSelected(inv.id)}
+                  className="mt-4 w-4 h-4 shrink-0 rounded border-border/50 accent-[hsl(var(--kf-accent1))]"
+                  aria-label={`Select invoice ${inv.invoiceNumber ?? inv.id.slice(0, 8)}`}
+                />
+                <div className="flex-1 min-w-0">
                 <RecordRowCard
                   type="invoice"
                   number={inv.invoiceNumber ?? inv.id.slice(0, 8)}
@@ -905,11 +1010,27 @@ export default function InvoicesPanel({
                     </div>
                   </div>
                 )}
+                </div>
               </div>
             );
           })}
         </div>
       )}
+
+      <BulkActionBar
+        selectedCount={selectedIds.size}
+        totalCount={filteredInvoices.length}
+        onSelectAll={() => setSelectedIds(new Set(filteredInvoices.map((i) => i.id)))}
+        onClearSelection={() => setSelectedIds(new Set())}
+        onExportCsv={handleExportCsv}
+        onBulkDelete={handleBulkDelete}
+        statusOptions={[
+          { value: "SENT", label: "Send All" },
+          { value: "VOID", label: "Void All" },
+        ]}
+        onBulkStatusChange={handleBulkStatusChange}
+        entityLabel="invoices"
+      />
 
       <AnimatePresence>
         {selectedInvoice && !showEmailModal && (
