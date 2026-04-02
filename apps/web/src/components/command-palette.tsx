@@ -255,7 +255,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       items.push({ type: "nav", id: a.id, onSelect: () => { a.onSelect(); onClose(); } });
     }
     return items;
-  }, [hasSearch, searching, searchResults, filteredRecent, filteredQuick, filteredNav]);
+  }, [hasSearch, searching, searchResults, filteredRecent, filteredQuick, filteredNav, handleNavigate, onClose]);
 
   useEffect(() => {
     setSelectedIdx(0);
