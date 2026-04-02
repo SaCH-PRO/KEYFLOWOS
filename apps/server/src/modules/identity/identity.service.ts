@@ -144,6 +144,11 @@ export class IdentityService {
     city?: string;
     country?: string;
     metaData?: Record<string, any>;
+    headline?: string;
+    bio?: string;
+    skills?: string[];
+    businessStage?: string;
+    interests?: string[];
   }) {
     if (input.slug) {
       const existing = await this.prisma.client.business.findFirst({
@@ -168,10 +173,67 @@ export class IdentityService {
       data.metaData = { ...existingMeta, ...metaData };
     }
     
-    return this.prisma.client.business.update({
+    const result = await this.prisma.client.business.update({
       where: { id: businessId },
       data,
     });
+
+    await this.updateProfileCompleteness(businessId);
+    return this.prisma.client.business.findUnique({ where: { id: businessId } });
+  }
+
+  private async updateProfileCompleteness(businessId: string) {
+    const biz = await this.prisma.client.business.findUnique({ where: { id: businessId } });
+    if (!biz) return;
+
+    const fields = [
+      !!biz.name,
+      !!biz.logoUrl,
+      !!biz.headline,
+      !!biz.bio,
+      !!biz.industry,
+      biz.skills && biz.skills.length > 0,
+      !!biz.businessStage,
+      !!biz.city || !!biz.country,
+      biz.interests && biz.interests.length > 0,
+      !!biz.tagline || !!biz.description,
+    ];
+    const completeness = Math.round((fields.filter(Boolean).length / fields.length) * 100);
+
+    await this.prisma.client.business.update({
+      where: { id: businessId },
+      data: { profileCompleteness: completeness },
+    });
+  }
+
+  async getBusinessCommunityProfile(businessId: string) {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: {
+        id: true,
+        name: true,
+        logoUrl: true,
+        headline: true,
+        bio: true,
+        industry: true,
+        skills: true,
+        businessStage: true,
+        city: true,
+        country: true,
+        interests: true,
+        profileCompleteness: true,
+        tagline: true,
+        createdAt: true,
+        _count: {
+          select: {
+            communityPosts: true,
+            cohortMembers: true,
+          },
+        },
+      },
+    });
+    if (!business) throw new NotFoundException('Business not found');
+    return business;
   }
 
   async listTeamMembers(businessId: string) {

@@ -11,6 +11,7 @@ import {
   BookOpen,
 } from "lucide-react";
 import type { CommunityPost } from "@/lib/client";
+import { API_BASE } from "@/lib/api";
 
 const POST_TYPE_CONFIG: Record<string, { label: string; color: string; bg: string; icon: typeof MessageSquare }> = {
   DISCUSSION: { label: "Discussion", color: "text-blue-400", bg: "bg-blue-500/20", icon: MessageCircle },
@@ -38,11 +39,16 @@ interface PostCardProps {
   index: number;
   onExpand: (postId: string) => void;
   onLike: (postId: string) => void;
+  onAuthorClick?: (businessId: string) => void;
 }
 
-export function PostCard({ post, index, onExpand, onLike }: PostCardProps) {
+export function PostCard({ post, index, onExpand, onLike, onAuthorClick }: PostCardProps) {
   const typeConfig = POST_TYPE_CONFIG[post.type] || POST_TYPE_CONFIG.DISCUSSION;
   const TypeIcon = typeConfig.icon;
+
+  const logoUrl = post.business?.logoUrl
+    ? post.business.logoUrl.startsWith("http") ? post.business.logoUrl : `${API_BASE}${post.business.logoUrl}`
+    : null;
 
   return (
     <motion.div
@@ -54,17 +60,42 @@ export function PostCard({ post, index, onExpand, onLike }: PostCardProps) {
       className="bg-white/5 backdrop-blur border border-white/10 rounded-xl p-4 space-y-3 cursor-pointer hover:bg-white/[0.07] transition-colors"
     >
       <div className="flex items-center gap-3">
-        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-xs">
-          {post.business?.name?.[0] || "?"}
+        <div
+          onClick={(e) => {
+            if (onAuthorClick && post.business?.id) {
+              e.stopPropagation();
+              onAuthorClick(post.business.id);
+            }
+          }}
+          className={`w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-xs overflow-hidden flex-shrink-0 ${onAuthorClick ? "cursor-pointer hover:ring-2 hover:ring-[hsl(var(--kf-accent1))]/50 transition-all" : ""}`}
+        >
+          {logoUrl ? (
+            <img src={logoUrl} alt={post.business?.name || ""} className="w-full h-full object-cover" />
+          ) : (
+            post.business?.name?.[0] || "?"
+          )}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium">{post.business?.name || "Anonymous"}</p>
+          <p
+            onClick={(e) => {
+              if (onAuthorClick && post.business?.id) {
+                e.stopPropagation();
+                onAuthorClick(post.business.id);
+              }
+            }}
+            className={`text-sm font-medium truncate ${onAuthorClick ? "hover:text-[hsl(var(--kf-accent1))] cursor-pointer transition-colors" : ""}`}
+          >
+            {post.business?.name || "Anonymous"}
+          </p>
+          {post.business?.headline && (
+            <p className="text-[10px] text-muted-foreground truncate">{post.business.headline}</p>
+          )}
         </div>
-        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${typeConfig.bg} ${typeConfig.color} flex items-center gap-1`}>
+        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${typeConfig.bg} ${typeConfig.color} flex items-center gap-1 flex-shrink-0`}>
           <TypeIcon className="w-3 h-3" />
           {typeConfig.label}
         </span>
-        <span className="text-[10px] text-muted-foreground">{timeAgo(post.createdAt)}</span>
+        <span className="text-[10px] text-muted-foreground flex-shrink-0">{timeAgo(post.createdAt)}</span>
       </div>
 
       {post.title && <h3 className="text-sm font-semibold">{post.title}</h3>}

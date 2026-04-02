@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import type { CommunityPost, CommunityComment } from "@/lib/client";
+import { API_BASE } from "@/lib/api";
 import { PostCard, POST_TYPE_CONFIG, timeAgo } from "./post-card";
 import { CreatePost } from "./create-post";
 import { FeedSkeleton } from "./community-skeleton";
@@ -31,6 +32,7 @@ interface FeedProps {
   onCreatePost: (data: { title: string; content: string; type: string; tags: string }) => Promise<void>;
   onAddComment: (text: string) => Promise<void>;
   submittingComment: boolean;
+  onAuthorClick?: (businessId: string) => void;
 }
 
 export function Feed({
@@ -45,6 +47,7 @@ export function Feed({
   onCreatePost,
   onAddComment,
   submittingComment,
+  onAuthorClick,
 }: FeedProps) {
   const [showNewPost, setShowNewPost] = useState(false);
   const [newPostTitle, setNewPostTitle] = useState("");
@@ -79,6 +82,9 @@ export function Feed({
   if (expandedPost) {
     const typeConfig = POST_TYPE_CONFIG[expandedPost.type] || POST_TYPE_CONFIG.DISCUSSION;
     const TypeIcon = typeConfig.icon;
+    const expandedLogo = expandedPost.business?.logoUrl
+      ? expandedPost.business.logoUrl.startsWith("http") ? expandedPost.business.logoUrl : `${API_BASE}${expandedPost.business.logoUrl}`
+      : null;
     return (
       <div className="space-y-4">
         <button
@@ -91,12 +97,30 @@ export function Feed({
 
         <div className="bg-white/5 backdrop-blur border border-white/10 rounded-xl p-6 space-y-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm">
-              {expandedPost.business?.name?.[0] || "?"}
+            <div
+              onClick={() => onAuthorClick && expandedPost.business?.id && onAuthorClick(expandedPost.business.id)}
+              className={`w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm overflow-hidden flex-shrink-0 ${onAuthorClick ? "cursor-pointer hover:ring-2 hover:ring-[hsl(var(--kf-accent1))]/50 transition-all" : ""}`}
+            >
+              {expandedLogo ? (
+                <img src={expandedLogo} alt={expandedPost.business?.name || ""} className="w-full h-full object-cover" />
+              ) : (
+                expandedPost.business?.name?.[0] || "?"
+              )}
             </div>
             <div className="flex-1">
-              <p className="text-sm font-semibold">{expandedPost.business?.name || "Anonymous"}</p>
-              <p className="text-xs text-muted-foreground">{timeAgo(expandedPost.createdAt)}</p>
+              <p
+                onClick={() => onAuthorClick && expandedPost.business?.id && onAuthorClick(expandedPost.business.id)}
+                className={`text-sm font-semibold ${onAuthorClick ? "hover:text-[hsl(var(--kf-accent1))] cursor-pointer transition-colors" : ""}`}
+              >
+                {expandedPost.business?.name || "Anonymous"}
+              </p>
+              <div className="flex items-center gap-2">
+                {expandedPost.business?.headline && (
+                  <span className="text-[10px] text-muted-foreground">{expandedPost.business.headline}</span>
+                )}
+                {expandedPost.business?.headline && <span className="text-[10px] text-muted-foreground/40">·</span>}
+                <span className="text-[10px] text-muted-foreground">{timeAgo(expandedPost.createdAt)}</span>
+              </div>
             </div>
             <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${typeConfig.bg} ${typeConfig.color} flex items-center gap-1`}>
               <TypeIcon className="w-3 h-3" />
@@ -135,23 +159,45 @@ export function Feed({
         <div className="space-y-3">
           <h3 className="text-sm font-semibold">Comments</h3>
           {expandedPost.comments?.length ? (
-            expandedPost.comments.map((comment) => (
-              <motion.div
-                key={comment.id}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="bg-white/5 border border-white/10 rounded-lg p-3 space-y-1"
-              >
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-[10px] font-bold">
-                    {comment.business?.name?.[0] || "?"}
+            expandedPost.comments.map((comment) => {
+              const commentLogo = comment.business?.logoUrl
+                ? comment.business.logoUrl.startsWith("http") ? comment.business.logoUrl : `${API_BASE}${comment.business.logoUrl}`
+                : null;
+              return (
+                <motion.div
+                  key={comment.id}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="bg-white/5 border border-white/10 rounded-lg p-3 space-y-1"
+                >
+                  <div className="flex items-center gap-2">
+                    <div
+                      onClick={() => onAuthorClick && comment.business?.id && onAuthorClick(comment.business.id)}
+                      className={`w-6 h-6 rounded-full bg-gradient-to-br from-indigo-500/80 to-purple-600/80 flex items-center justify-center text-[10px] font-bold text-white overflow-hidden flex-shrink-0 ${onAuthorClick ? "cursor-pointer hover:ring-2 hover:ring-[hsl(var(--kf-accent1))]/50 transition-all" : ""}`}
+                    >
+                      {commentLogo ? (
+                        <img src={commentLogo} alt={comment.business?.name || ""} className="w-full h-full object-cover" />
+                      ) : (
+                        comment.business?.name?.[0] || "?"
+                      )}
+                    </div>
+                    <span
+                      onClick={() => onAuthorClick && comment.business?.id && onAuthorClick(comment.business.id)}
+                      className={`text-xs font-medium ${onAuthorClick ? "hover:text-[hsl(var(--kf-accent1))] cursor-pointer transition-colors" : ""}`}
+                    >
+                      {comment.business?.name || "Anonymous"}
+                    </span>
+                    {comment.business?.headline && (
+                      <span className="text-[10px] text-muted-foreground truncate hidden sm:inline">
+                        {comment.business.headline}
+                      </span>
+                    )}
+                    <span className="text-[10px] text-muted-foreground ml-auto flex-shrink-0">{timeAgo(comment.createdAt)}</span>
                   </div>
-                  <span className="text-xs font-medium">{comment.business?.name || "Anonymous"}</span>
-                  <span className="text-[10px] text-muted-foreground">{timeAgo(comment.createdAt)}</span>
-                </div>
-                <p className="text-sm text-muted-foreground pl-8">{comment.content}</p>
-              </motion.div>
-            ))
+                  <p className="text-sm text-muted-foreground pl-8">{comment.content}</p>
+                </motion.div>
+              );
+            })
           ) : (
             <p className="text-xs text-muted-foreground">No comments yet. Be the first!</p>
           )}
@@ -261,6 +307,7 @@ export function Feed({
               index={i}
               onExpand={onExpandPost}
               onLike={onLike}
+              onAuthorClick={onAuthorClick}
             />
           ))}
         </div>

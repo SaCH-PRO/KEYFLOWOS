@@ -29,6 +29,7 @@ import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-s
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { Feed } from "./components/feed";
 import { CohortList } from "./components/cohort-list";
+import { ProfileCard } from "./components/profile-card";
 
 const COMMUNITY_TABS = [
   { key: "feed", label: "Feed", icon: MessageSquare, tooltip: "Community posts, discussions, and updates from other business owners." },
@@ -49,6 +50,7 @@ export default function CommunityPage() {
   const [joiningCohort, setJoiningCohort] = useState<string | null>(null);
   const [showGuide, setShowGuide] = useState(false);
   const [slideDirection, setSlideDirection] = useState(0);
+  const [profileCardBusinessId, setProfileCardBusinessId] = useState<string | null>(null);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -298,6 +300,7 @@ export default function CommunityPage() {
                 onCreatePost={handleCreatePost}
                 onAddComment={handleAddComment}
                 submittingComment={submittingComment}
+                onAuthorClick={setProfileCardBusinessId}
               />
             </motion.div>
           )}
@@ -323,6 +326,12 @@ export default function CommunityPage() {
           )}
         </AnimatePresence>
       </div>
+
+      <ProfileCard
+        businessId={profileCardBusinessId || ""}
+        isOpen={!!profileCardBusinessId}
+        onClose={() => setProfileCardBusinessId(null)}
+      />
     </div>
   );
 }

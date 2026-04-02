@@ -48,7 +48,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Tiered Monetization:** Plan comparison grid (Free/Flow/KeyFlow) with feature-by-feature breakdown across 7 categories, integrated into billing settings.
 - **Observability:** Request correlation ID middleware, global logging interceptor, and health check endpoints.
 - **Learn Module:** MasterClass functionality with My Learning, Catalog, and Certificates.
-- **Community Module:** Features Feed and Cohorts with social functionalities.
+- **Community Module:** Features Feed and Cohorts with social functionalities. Includes comprehensive user profile & community identity: rich professional fields (headline, bio, skills, businessStage, interests) on Business model with auto-computed profileCompleteness, AI profile generator endpoint, document guidance engine, clickable author names in posts/comments that open ProfileCard slide-out panels, public profile page at `/app/community/profile/[businessId]`, and an upgraded profile settings page with professional profile section, AI generation, document recommendations, and completeness ring indicator.
 - **Error Boundaries:** Dedicated `error.tsx` boundaries for all core modules.
 
 ## Module Entity Ownership
