@@ -1,11 +1,20 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Prisma } from '@prisma/client';
 import { BookingCompletedPayload, BookingConfirmedPayload, BookingCreatedPayload, BookingRescheduledPayload } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
 import { AutomationService } from '../automation/automation.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+
+interface DayHours {
+  open: string;
+  close: string;
+  closed: boolean;
+}
+
+type BusinessHoursMap = Record<string, DayHours>;
 
 @Injectable()
 export class BookingsService {
@@ -185,6 +194,7 @@ export class BookingsService {
       }
     }
 
+    let hasStaffSchedule = false;
     if (booking.staffId) {
       const staffAvailabilities = await this.prisma.client.availability.findMany({
         where: {
@@ -193,6 +203,7 @@ export class BookingsService {
         },
       });
       if (staffAvailabilities.length > 0) {
+        hasStaffSchedule = true;
         const dayOfWeek = start.getDay();
         const slotAvail = staffAvailabilities.filter((a) => a.dayOfWeek === dayOfWeek);
         if (slotAvail.length === 0) {
@@ -215,25 +226,27 @@ export class BookingsService {
       where: { id: businessId },
       select: { businessHours: true },
     });
-    const hours = (business as any)?.businessHours as Record<string, { open: string; close: string; closed: boolean }> | null;
-    if (hours) {
-      const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-      const dayKey = dayKeys[start.getDay()];
-      const dayHours = hours[dayKey];
-      if (dayHours?.closed) {
-        throw new BadRequestException('The business is closed on this day.');
-      }
-      if (dayHours && dayHours.open && dayHours.close) {
-        const [oh, om] = dayHours.open.split(':').map(Number);
-        const [ch, cm] = dayHours.close.split(':').map(Number);
-        const openMin = oh * 60 + om;
-        const closeMin = ch * 60 + cm;
-        const bookingStartMin = start.getHours() * 60 + start.getMinutes();
-        const bookingEndMin = (end.getHours() * 60 + end.getMinutes()) || 1440;
-        if (bookingStartMin < openMin || bookingEndMin > closeMin) {
-          throw new BadRequestException(
-            `The selected time is outside business hours (${dayHours.open} – ${dayHours.close}).`,
-          );
+    if (!hasStaffSchedule) {
+      const hours = business?.businessHours as BusinessHoursMap | null;
+      if (hours) {
+        const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+        const dayKey = dayKeys[start.getDay()];
+        const dayHours = hours[dayKey];
+        if (dayHours?.closed) {
+          throw new BadRequestException('The business is closed on this day.');
+        }
+        if (dayHours && dayHours.open && dayHours.close) {
+          const [oh, om] = dayHours.open.split(':').map(Number);
+          const [ch, cm] = dayHours.close.split(':').map(Number);
+          const openMin = oh * 60 + om;
+          const closeMin = ch * 60 + cm;
+          const bookingStartMin = start.getHours() * 60 + start.getMinutes();
+          const bookingEndMin = (end.getHours() * 60 + end.getMinutes()) || 1440;
+          if (bookingStartMin < openMin || bookingEndMin > closeMin) {
+            throw new BadRequestException(
+              `The selected time is outside business hours (${dayHours.open} – ${dayHours.close}).`,
+            );
+          }
         }
       }
     }
@@ -312,7 +325,7 @@ export class BookingsService {
     endTime: Date;
     notes?: string;
   }) {
-    const createData: any = {
+    const createData: Prisma.BookingUncheckedCreateInput = {
       businessId: input.businessId,
       serviceId: input.serviceId,
       startTime: input.startTime,
@@ -327,9 +340,11 @@ export class BookingsService {
       include: { contact: true },
     });
 
+    const bookingWithContact = booking as typeof booking & { contact?: { id: string; firstName: string; lastName: string; email: string | null } };
+
     const payload: BookingCreatedPayload = {
       booking,
-      contact: (booking as any).contact ?? undefined,
+      contact: bookingWithContact.contact ?? undefined,
       businessId: booking.businessId,
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore
@@ -408,7 +423,8 @@ export class BookingsService {
       where: { id: input.businessId, deletedAt: null },
     });
 
-    if ((business as any).storeEnabled === false) {
+    const businessConfig = business as typeof business & { storeEnabled?: boolean };
+    if (businessConfig.storeEnabled === false) {
       throw new BadRequestException('This store is currently unavailable.');
     }
 
@@ -432,17 +448,13 @@ export class BookingsService {
       const bufferMs = service.bufferMins * 60000;
       const bufferedStart = new Date(start.getTime() - bufferMs);
       const bufferedEnd = new Date(end.getTime() + bufferMs);
-      const overlapWhere: any = {
+      const overlapWhere: Prisma.BookingWhereInput = {
         businessId: input.businessId,
         status: { notIn: ['CANCELLED', 'NO_SHOW'] },
         startTime: { lt: bufferedEnd },
         endTime: { gt: bufferedStart },
+        ...(input.staffId ? { staffId: input.staffId } : { serviceId: service.id }),
       };
-      if (input.staffId) {
-        overlapWhere.staffId = input.staffId;
-      } else {
-        overlapWhere.serviceId = service.id;
-      }
       const overlapping = await this.prisma.client.booking.findFirst({
         where: overlapWhere,
       });
@@ -453,6 +465,7 @@ export class BookingsService {
       }
     }
 
+    let hasStaffScheduleOverride = false;
     if (input.staffId) {
       const staffAvailabilities = await this.prisma.client.availability.findMany({
         where: {
@@ -461,6 +474,7 @@ export class BookingsService {
         },
       });
       if (staffAvailabilities.length > 0) {
+        hasStaffScheduleOverride = true;
         const dayOfWeek = start.getDay();
         const slotAvail = staffAvailabilities.filter((a) => a.dayOfWeek === dayOfWeek);
         if (slotAvail.length === 0) {
@@ -479,8 +493,8 @@ export class BookingsService {
       }
     }
 
-    const hours = (business as any).businessHours as Record<string, { open: string; close: string; closed: boolean }> | null;
-    if (hours) {
+    const hours = business.businessHours as BusinessHoursMap | null;
+    if (hours && !hasStaffScheduleOverride) {
       const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
       const dayKey = dayKeys[start.getDay()];
       const dayHours = hours[dayKey];
@@ -511,7 +525,7 @@ export class BookingsService {
     const invoice =
       service.price > 0 ? await this.commerce.createInvoiceForService(input.businessId, contact.id, service) : null;
 
-    const bookingData: any = {
+    const bookingData: Prisma.BookingUncheckedCreateInput = {
       businessId: input.businessId,
       contactId: contact.id,
       serviceId: service.id,
@@ -527,7 +541,7 @@ export class BookingsService {
 
     const payload: BookingCreatedPayload = {
       booking,
-      contact: contact as any,
+      contact,
       businessId: booking.businessId,
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore
@@ -568,7 +582,7 @@ export class BookingsService {
       });
       if (!service || service.price <= 0) return;
 
-      const invoice = await this.commerce.createInvoiceForService(businessId, booking.contactId, service as any);
+      const invoice = await this.commerce.createInvoiceForService(businessId, booking.contactId, service);
       if (invoice) {
         await this.prisma.client.booking.update({
           where: { id: booking.id },
