@@ -36,9 +36,17 @@ function toDateStr(d: Date): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function RescheduleForm({ onSubmit, onCancel }: { onSubmit: (startTime: string) => void; onCancel: () => void }) {
-  const [date, setDate] = useState("");
-  const [time, setTime] = useState("");
+function RescheduleForm({ onSubmit, onCancel, currentStartTime }: { onSubmit: (startTime: string) => void; onCancel: () => void; currentStartTime?: string }) {
+  const [date, setDate] = useState(() => {
+    if (!currentStartTime) return "";
+    const d = new Date(currentStartTime);
+    return toDateStr(d);
+  });
+  const [time, setTime] = useState(() => {
+    if (!currentStartTime) return "";
+    const d = new Date(currentStartTime);
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  });
 
   const [weekBase, setWeekBase] = useState(() => new Date());
 
@@ -276,6 +284,7 @@ export default function BookingDetailDrawer({
               Reschedule Booking
             </div>
             <RescheduleForm
+              currentStartTime={selectedBooking.startTime}
               onSubmit={(startTime) => {
                 onReschedule(selectedBooking.id, startTime);
                 setShowReschedule(false);

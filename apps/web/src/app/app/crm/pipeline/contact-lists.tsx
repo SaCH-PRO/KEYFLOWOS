@@ -36,6 +36,7 @@ interface SmartListFilters {
   source?: string;
   createdWithinDays?: number;
   minLeadScore?: number;
+  minRevenue?: number;
 }
 
 interface ContactListData {
@@ -106,6 +107,7 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
   const [formFilterSource, setFormFilterSource] = useState("");
   const [formFilterDays, setFormFilterDays] = useState<number | "">("");
   const [formFilterMinScore, setFormFilterMinScore] = useState<number | "">("");
+  const [formFilterMinRevenue, setFormFilterMinRevenue] = useState<number | "">("");
   const [saving, setSaving] = useState(false);
 
   const onListsLoadedRef = useRef(onListsLoaded);
@@ -214,6 +216,7 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
     setFormFilterSource("");
     setFormFilterDays("");
     setFormFilterMinScore("");
+    setFormFilterMinRevenue("");
   }, []);
 
   const openEdit = useCallback((list: ContactListData) => {
@@ -228,6 +231,7 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
       setFormFilterSource(list.filters.source || "");
       setFormFilterDays(list.filters.createdWithinDays ?? "");
       setFormFilterMinScore(list.filters.minLeadScore ?? "");
+      setFormFilterMinRevenue(list.filters.minRevenue ?? "");
     }
     setShowCreate(true);
     setMenuOpenId(null);
@@ -250,6 +254,7 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
           source: formFilterSource.trim() || undefined,
           createdWithinDays: formFilterDays ? Number(formFilterDays) : undefined,
           minLeadScore: formFilterMinScore ? Number(formFilterMinScore) : undefined,
+          minRevenue: formFilterMinRevenue ? Number(formFilterMinRevenue) : undefined,
         };
       }
 
@@ -268,7 +273,7 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
       toast.error("Failed to save list");
     }
     setSaving(false);
-  }, [businessId, editList, formName, formDescription, formColor, formType, formFilterStatus, formFilterTags, formFilterSource, formFilterDays, formFilterMinScore, loadLists, resetForm]);
+  }, [businessId, editList, formName, formDescription, formColor, formType, formFilterStatus, formFilterTags, formFilterSource, formFilterDays, formFilterMinScore, formFilterMinRevenue, loadLists, resetForm]);
 
   const handleDelete = useCallback(async (listId: string) => {
     try {
@@ -501,6 +506,19 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
                       onChange={(e) => setFormFilterMinScore(e.target.value ? Number(e.target.value) : "")}
                       className="kf-input w-full text-xs"
                       aria-label="Minimum lead score"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Min revenue (TTD)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={100}
+                      placeholder="e.g. 5000"
+                      value={formFilterMinRevenue}
+                      onChange={(e) => setFormFilterMinRevenue(e.target.value ? Number(e.target.value) : "")}
+                      className="kf-input w-full text-xs"
+                      aria-label="Minimum revenue threshold"
                     />
                   </div>
                 </div>

@@ -309,6 +309,40 @@ export class BookingsService {
     const start = new Date(input.startTime);
     const end = new Date(start.getTime() + service.duration * 60000);
 
+    if (service.leadTimeMins && service.leadTimeMins > 0) {
+      const minStart = new Date(Date.now() + service.leadTimeMins * 60000);
+      if (start < minStart) {
+        throw new BadRequestException(
+          `This service requires at least ${service.leadTimeMins} minutes advance notice.`,
+        );
+      }
+    }
+
+    if (service.bufferMins && service.bufferMins > 0) {
+      const bufferMs = service.bufferMins * 60000;
+      const bufferedStart = new Date(start.getTime() - bufferMs);
+      const bufferedEnd = new Date(end.getTime() + bufferMs);
+      const overlapWhere: any = {
+        businessId: input.businessId,
+        status: { notIn: ['CANCELLED', 'NO_SHOW'] },
+        startTime: { lt: bufferedEnd },
+        endTime: { gt: bufferedStart },
+      };
+      if (input.staffId) {
+        overlapWhere.staffId = input.staffId;
+      } else {
+        overlapWhere.serviceId = service.id;
+      }
+      const overlapping = await this.prisma.client.booking.findFirst({
+        where: overlapWhere,
+      });
+      if (overlapping) {
+        throw new BadRequestException(
+          `This time slot is unavailable due to a ${service.bufferMins}-minute buffer between appointments.`,
+        );
+      }
+    }
+
     const hours = (business as any).businessHours as Record<string, { open: string; close: string; closed: boolean }> | null;
     if (hours) {
       const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
