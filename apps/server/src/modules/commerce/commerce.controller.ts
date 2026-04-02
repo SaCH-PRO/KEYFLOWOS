@@ -142,6 +142,10 @@ export class CommerceController {
     if (body.products.length > 200) {
       throw new ForbiddenException('Maximum 200 products per import');
     }
+    const validProducts = body.products.filter(p => p.name && typeof p.name === 'string' && p.name.trim().length > 0);
+    if (validProducts.length === 0) {
+      throw new ForbiddenException('No valid products found — each product must have a name');
+    }
     const limitCheck = await this.subscriptions.checkLimit(businessId, 'products');
     if (!limitCheck.allowed) {
       const limitLabel = limitCheck.limit === -1 ? 'unlimited' : String(limitCheck.limit);
@@ -154,9 +158,18 @@ export class CommerceController {
         limit: limitCheck.limit,
       });
     }
-    const validProducts = body.products.filter(p => p.name && typeof p.name === 'string' && p.name.trim().length > 0);
-    if (validProducts.length === 0) {
-      throw new ForbiddenException('No valid products found — each product must have a name');
+    if (limitCheck.limit !== -1) {
+      const remaining = limitCheck.limit - limitCheck.current;
+      if (validProducts.length > remaining) {
+        throw new ForbiddenException({
+          statusCode: 403,
+          error: 'PLAN_LIMIT_REACHED',
+          message: `Import would exceed your plan limit. You can add ${remaining} more product${remaining === 1 ? '' : 's'} (${limitCheck.current}/${limitCheck.limit} used). Please reduce the import size or upgrade your plan.`,
+          resource: 'products',
+          current: limitCheck.current,
+          limit: limitCheck.limit,
+        });
+      }
     }
     const created = [];
     const errors: string[] = [];
