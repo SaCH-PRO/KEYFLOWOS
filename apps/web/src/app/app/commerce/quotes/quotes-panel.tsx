@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { SkeletonList } from "@/components/ui/skeleton";
@@ -36,6 +36,7 @@ import {
   convertQuoteToInvoice,
   sendQuoteEmail,
   disconnectGmail,
+  bulkUpdateQuotes,
   Product,
   Quote,
   Contact,
@@ -46,6 +47,9 @@ import { ContactSelect } from "@/components/contacts";
 import { formatAmount, formatRelativeDate, getStatusAccentColor, getContactInitials, getItemsSummary } from "../utils/commerce-utils";
 import { useCommerceSearch } from "../hooks/use-commerce-search";
 import type { ReactNode } from "react";
+import { DateRangeFilter, filterByDateRange, DEFAULT_DATE_RANGE } from "../components/date-range-filter";
+import type { DateRange } from "../components/date-range-filter";
+import { BulkActionBar, exportToCsv } from "../components/bulk-action-bar";
 import {
   QUOTE_STATUS_FILTERS,
   BILLING_SORT_OPTIONS,
@@ -168,6 +172,74 @@ export default function QuotesPanel({
   });
   const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
   const [actionLoading, setActionLoading] = useState<Record<string, string>>({});
+  const [dateRange, setDateRange] = useState<DateRange>(DEFAULT_DATE_RANGE);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  const toggleSelected = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleBulkStatusChange = useCallback(async (status: string) => {
+    if (!businessId || selectedIds.size === 0) return;
+    const action = status === "SENT" ? "send" : status === "REJECTED" ? "reject" : "delete";
+    const { data, error } = await bulkUpdateQuotes(businessId, Array.from(selectedIds), action as "send" | "reject" | "delete");
+    if (data) {
+      toast.success(`${data.updated} quote(s) updated`);
+      setSelectedIds(new Set());
+      if (data.updated > 0) {
+        const eligibleStatuses: Record<string, string[]> = {
+          send: ["DRAFT"],
+          reject: ["SENT"],
+          delete: ["DRAFT", "SENT", "REJECTED", "EXPIRED"],
+        };
+        const eligible = new Set(
+          quotes
+            .filter((q) => selectedIds.has(q.id) && (eligibleStatuses[action] ?? []).includes(q.status))
+            .map((q) => q.id)
+        );
+        if (action === "delete") {
+          setQuotes((prev) => prev.filter((q) => !eligible.has(q.id)));
+        } else {
+          setQuotes((prev) => prev.map((q) => eligible.has(q.id) ? { ...q, status: status as Quote["status"] } : q));
+        }
+      }
+    } else {
+      toast.error(error ?? "Bulk action failed");
+    }
+  }, [businessId, selectedIds, quotes, setQuotes]);
+
+  const handleBulkDelete = useCallback(async () => {
+    setConfirmState({
+      open: true,
+      action: () => handleBulkStatusChange("DELETE"),
+    });
+  }, [handleBulkStatusChange]);
+
+  const handleExportCsv = useCallback(() => {
+    const toExport = selectedIds.size > 0
+      ? quotes.filter((q) => selectedIds.has(q.id))
+      : quotes;
+    exportToCsv(
+      toExport as unknown as Record<string, unknown>[],
+      [
+        { key: "quoteNumber" as never, header: "Quote #" },
+        { key: "status" as never, header: "Status" },
+        { key: "contact" as never, header: "Client", format: (v: unknown) => { const c = v as { firstName?: string; lastName?: string } | null; return c ? `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() : ""; } },
+        { key: "total" as never, header: "Total" },
+        { key: "currency" as never, header: "Currency" },
+        { key: "issueDate" as never, header: "Issue Date", format: (v: unknown) => v ? new Date(v as string).toLocaleDateString() : "" },
+        { key: "expiryDate" as never, header: "Expiry Date", format: (v: unknown) => v ? new Date(v as string).toLocaleDateString() : "" },
+      ],
+      `quotes-${new Date().toISOString().split("T")[0]}`,
+    );
+    toast.success(`Exported ${toExport.length} quote(s)`);
+  }, [quotes, selectedIds]);
+
   const [autoConvertToInvoice, setAutoConvertToInvoice] = useState(() => {
     if (typeof window !== "undefined") {
       return localStorage.getItem("kf_auto_convert_quote") === "true";
@@ -330,10 +402,14 @@ export default function QuotesPanel({
     }
   }, [quotes, sortKey]);
 
+  const dateFiltered = useMemo(() => {
+    return filterByDateRange(sorted, (q) => q.issueDate, dateRange);
+  }, [sorted, dateRange]);
+
   const statusFiltered = useMemo(() => {
-    if (quoteStatusFilter === "ALL") return sorted;
-    return sorted.filter((q) => q.status === quoteStatusFilter);
-  }, [sorted, quoteStatusFilter]);
+    if (quoteStatusFilter === "ALL") return dateFiltered;
+    return dateFiltered.filter((q) => q.status === quoteStatusFilter);
+  }, [dateFiltered, quoteStatusFilter]);
 
   const { filtered: filteredQuotes } = useCommerceSearch(
     statusFiltered,
@@ -637,26 +713,28 @@ export default function QuotesPanel({
               placeholder="Search quotes..."
               value={quoteSearch}
               onChange={(e) => setQuoteSearch(e.target.value)}
-              className="w-full pl-9 pr-8 py-1.5 text-sm bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 focus:border-[hsl(var(--kf-accent1))]/40 placeholder:text-muted-foreground/40 transition-all"
+              className="w-full pl-9 pr-8 min-h-[44px] text-sm bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 focus:border-[hsl(var(--kf-accent1))]/40 placeholder:text-muted-foreground/40 transition-all"
               aria-label="Search quotes"
             />
             {quoteSearch && (
               <button
                 onClick={() => setQuoteSearch("")}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-md hover:bg-muted/50 transition-colors"
+                className="absolute right-0 top-1/2 -translate-y-1/2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-md hover:bg-muted/50 transition-colors"
                 aria-label="Clear search"
               >
-                <X className="w-3 h-3 text-muted-foreground/40" />
+                <X className="w-3.5 h-3.5 text-muted-foreground/40" />
               </button>
             )}
           </div>
+
+          <DateRangeFilter value={dateRange} onChange={setDateRange} />
 
           <div className="relative shrink-0">
             <ArrowUpDown className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50 pointer-events-none" />
             <select
               value={sortKey}
               onChange={(e) => setSortKey(e.target.value as BillingSortKey)}
-              className="appearance-none pl-7 pr-2 py-1.5 text-[11px] bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 text-muted-foreground cursor-pointer"
+              className="appearance-none pl-7 pr-2 min-h-[44px] text-[11px] bg-white/[0.03] border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 text-muted-foreground cursor-pointer"
               aria-label="Sort quotes"
             >
               {BILLING_SORT_OPTIONS.map((o) => (
@@ -667,7 +745,7 @@ export default function QuotesPanel({
 
           <button
             onClick={() => { resetQuoteForm(); setShowQuoteBuilder(true); }}
-            className="inline-flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium rounded-lg bg-gradient-to-r from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all shrink-0"
+            className="inline-flex items-center gap-1.5 px-3 min-h-[44px] text-[11px] font-medium rounded-lg bg-gradient-to-r from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all shrink-0"
             aria-label="New Quote"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -680,7 +758,7 @@ export default function QuotesPanel({
               setAutoConvertToInvoice(newVal);
               localStorage.setItem("kf_auto_convert_quote", String(newVal));
             }}
-            className={`inline-flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium rounded-lg border transition-all shrink-0 ${
+            className={`inline-flex items-center gap-1.5 px-3 min-h-[44px] text-[11px] font-medium rounded-lg border transition-all shrink-0 ${
               autoConvertToInvoice
                 ? "bg-green-500/20 text-green-400 border-green-500/30"
                 : "bg-white/[0.02] text-muted-foreground/60 border-border/40 hover:bg-white/[0.05]"
@@ -770,6 +848,21 @@ export default function QuotesPanel({
         </div>
       ) : (
         <div className="space-y-2">
+          {filteredQuotes.length > 0 && (
+            <div className="flex items-center gap-2 px-2 pb-1">
+              <input
+                type="checkbox"
+                checked={filteredQuotes.length > 0 && filteredQuotes.every((q) => selectedIds.has(q.id))}
+                onChange={() => {
+                  const allSelected = filteredQuotes.every((q) => selectedIds.has(q.id));
+                  setSelectedIds(allSelected ? new Set() : new Set(filteredQuotes.map((q) => q.id)));
+                }}
+                className="w-4 h-4 rounded border-border/50 accent-[hsl(var(--kf-accent1))]"
+                aria-label="Select all visible quotes"
+              />
+              <span className="text-[10px] text-muted-foreground/50">Select all</span>
+            </div>
+          )}
           {filteredQuotes.map((quote) => {
             const expired = isQuoteExpired(quote);
             const daysRemaining = getDaysRemaining(quote);
@@ -827,8 +920,16 @@ export default function QuotesPanel({
             );
 
             return (
+              <div key={quote.id} className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(quote.id)}
+                  onChange={() => toggleSelected(quote.id)}
+                  className="mt-4 w-4 h-4 shrink-0 rounded border-border/50 accent-[hsl(var(--kf-accent1))]"
+                  aria-label={`Select quote ${quote.quoteNumber}`}
+                />
+                <div className="flex-1 min-w-0">
               <RecordRowCard
-                key={quote.id}
                 type="quote"
                 number={quote.quoteNumber}
                 status={quote.status}
@@ -844,7 +945,7 @@ export default function QuotesPanel({
                   <button
                     onClick={handleSmartAction}
                     disabled={!!actionLoading[quote.id] || (smartCTA.actionKey === "convert" && !!quote.invoiceId)}
-                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all disabled:opacity-50 ${smartCTA.bgColor} ${smartCTA.color} ${smartCTA.hoverBgColor}`}
+                    className={`inline-flex items-center gap-1 px-2.5 min-w-[44px] min-h-[44px] justify-center rounded-lg text-[11px] font-medium transition-all disabled:opacity-50 ${smartCTA.bgColor} ${smartCTA.color} ${smartCTA.hoverBgColor}`}
                   >
                     {actionLoading[quote.id] ? (
                       <Loader2 className="w-3 h-3 animate-spin" />
@@ -889,10 +990,27 @@ export default function QuotesPanel({
                   </OverflowMenu>
                 }
               />
+                </div>
+              </div>
             );
           })}
         </div>
       )}
+
+      <BulkActionBar
+        selectedCount={selectedIds.size}
+        totalCount={filteredQuotes.length}
+        onSelectAll={() => setSelectedIds(new Set(filteredQuotes.map((q) => q.id)))}
+        onClearSelection={() => setSelectedIds(new Set())}
+        onExportCsv={handleExportCsv}
+        onBulkDelete={handleBulkDelete}
+        statusOptions={[
+          { value: "SENT", label: "Send All" },
+          { value: "REJECTED", label: "Reject All" },
+        ]}
+        onBulkStatusChange={handleBulkStatusChange}
+        entityLabel="quotes"
+      />
 
       <AnimatePresence>
         {showConvertModal && selectedQuote && (

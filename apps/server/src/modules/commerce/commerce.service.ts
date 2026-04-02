@@ -249,6 +249,60 @@ export class CommerceService {
     return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
   }
 
+  async bulkUpdateInvoices(businessId: string, ids: string[], action: 'send' | 'void' | 'delete') {
+    const where = { id: { in: ids }, businessId, deletedAt: null };
+    let result: { count: number };
+    switch (action) {
+      case 'send':
+        result = await this.prisma.client.invoice.updateMany({
+          where: { ...where, status: 'DRAFT' },
+          data: { status: 'SENT', sentAt: new Date() },
+        });
+        break;
+      case 'void':
+        result = await this.prisma.client.invoice.updateMany({
+          where: { ...where, status: { notIn: ['PAID', 'PARTIALLY_PAID'] } },
+          data: { status: 'VOID' },
+        });
+        break;
+      case 'delete':
+        result = await this.prisma.client.invoice.updateMany({
+          where: { ...where, status: { notIn: ['PAID', 'PARTIALLY_PAID'] } },
+          data: { deletedAt: new Date() },
+        });
+        break;
+    }
+    this.statsCache.invalidateCache(businessId);
+    return { updated: result.count, action };
+  }
+
+  async bulkUpdateQuotes(businessId: string, ids: string[], action: 'send' | 'reject' | 'delete') {
+    const where = { id: { in: ids }, businessId, deletedAt: null };
+    let result: { count: number };
+    switch (action) {
+      case 'send':
+        result = await this.prisma.client.quote.updateMany({
+          where: { ...where, status: 'DRAFT' },
+          data: { status: 'SENT' },
+        });
+        break;
+      case 'reject':
+        result = await this.prisma.client.quote.updateMany({
+          where,
+          data: { status: 'REJECTED' },
+        });
+        break;
+      case 'delete':
+        result = await this.prisma.client.quote.updateMany({
+          where,
+          data: { deletedAt: new Date() },
+        });
+        break;
+    }
+    this.statsCache.invalidateCache(businessId);
+    return { updated: result.count, action };
+  }
+
   async deleteInvoice(invoiceId: string, businessId: string) {
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: invoiceId, businessId },

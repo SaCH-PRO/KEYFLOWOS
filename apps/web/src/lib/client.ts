@@ -1356,6 +1356,20 @@ export async function deleteQuote(businessId: string, quoteId: string) {
   return apiDelete(`/commerce/businesses/${encodeURIComponent(businessId)}/quotes/${encodeURIComponent(quoteId)}`);
 }
 
+export async function bulkUpdateInvoices(businessId: string, ids: string[], action: "send" | "void" | "delete") {
+  return apiPatch<{ updated: number; action: string }>(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/bulk`,
+    { ids, action },
+  );
+}
+
+export async function bulkUpdateQuotes(businessId: string, ids: string[], action: "send" | "reject" | "delete") {
+  return apiPatch<{ updated: number; action: string }>(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/quotes/bulk`,
+    { ids, action },
+  );
+}
+
 export async function convertQuoteToInvoice(input: {
   businessId?: string;
   quoteId: string;
