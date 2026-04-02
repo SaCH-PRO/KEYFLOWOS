@@ -164,9 +164,11 @@ type SeoProps = {
 };
 
 function SeoSettingsPanel({ storefrontConfig, onConfigChange, onSaveConfig, configSaving, publicUrl, businessName }: SeoProps) {
-  const seo = (storefrontConfig.seo ?? {}) as { metaTitle?: string; metaDescription?: string };
+  const seo = (storefrontConfig.seo ?? {}) as { metaTitle?: string; metaDescription?: string; ogImage?: string };
   const metaTitle = seo.metaTitle ?? "";
   const metaDescription = seo.metaDescription ?? "";
+  const ogImage = seo.ogImage ?? "";
+  const [previewMode, setPreviewMode] = useState<"google" | "social">("google");
 
   const previewTitle = metaTitle || businessName || "Your Store";
   const previewDesc = metaDescription || "Browse our products and services. Book online today.";
@@ -241,35 +243,105 @@ function SeoSettingsPanel({ storefrontConfig, onConfigChange, onSaveConfig, conf
       </div>
 
       <div>
-        <p className="text-xs font-medium mb-2" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-          Google Search Preview
-        </p>
-        <div
-          className="rounded-xl p-4 space-y-1"
+        <label className="block text-xs font-medium mb-1.5" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+          Social Sharing Image (OG Image URL)
+        </label>
+        <input
+          type="url"
+          value={ogImage}
+          onChange={(e) => onConfigChange("seo", { ogImage: e.target.value })}
+          placeholder="https://example.com/og-image.jpg"
+          className="w-full rounded-lg px-3 py-2.5 text-sm min-h-[44px]"
           style={{
-            background: "hsl(var(--kf-muted) / 0.15)",
-            border: "1px solid hsl(var(--kf-border) / 0.5)",
+            background: "hsl(var(--kf-muted) / 0.3)",
+            border: "1px solid hsl(var(--kf-border))",
+            color: "hsl(var(--kf-foreground))",
           }}
-        >
-          <div className="flex items-center gap-1.5">
-            <Globe className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-muted-foreground))" }} />
-            <span className="text-xs truncate" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-              {previewUrl}
-            </span>
-          </div>
-          <p
-            className="text-sm font-medium truncate"
-            style={{ color: "hsl(210 100% 56%)" }}
+        />
+        <p className="text-[10px] mt-1" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+          Recommended: 1200×630px. Shown when your store is shared on social media.
+        </p>
+      </div>
+
+      <div>
+        <div className="flex items-center gap-2 mb-2">
+          <button
+            onClick={() => setPreviewMode("google")}
+            className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors min-h-[44px]"
+            style={{
+              background: previewMode === "google" ? "hsl(var(--kf-accent1) / 0.15)" : "transparent",
+              color: previewMode === "google" ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-muted-foreground))",
+            }}
           >
-            {previewTitle}
-          </p>
-          <p
-            className="text-xs line-clamp-2"
-            style={{ color: "hsl(var(--kf-muted-foreground))" }}
+            Google Preview
+          </button>
+          <button
+            onClick={() => setPreviewMode("social")}
+            className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors min-h-[44px]"
+            style={{
+              background: previewMode === "social" ? "hsl(var(--kf-accent2) / 0.15)" : "transparent",
+              color: previewMode === "social" ? "hsl(var(--kf-accent2))" : "hsl(var(--kf-muted-foreground))",
+            }}
           >
-            {previewDesc}
-          </p>
+            Social Preview
+          </button>
         </div>
+
+        {previewMode === "google" ? (
+          <div
+            className="rounded-xl p-4 space-y-1"
+            style={{
+              background: "hsl(var(--kf-muted) / 0.15)",
+              border: "1px solid hsl(var(--kf-border) / 0.5)",
+            }}
+          >
+            <div className="flex items-center gap-1.5">
+              <Globe className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-muted-foreground))" }} />
+              <span className="text-xs truncate" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+                {previewUrl}
+              </span>
+            </div>
+            <p className="text-sm font-medium truncate" style={{ color: "hsl(210 100% 56%)" }}>
+              {previewTitle}
+            </p>
+            <p className="text-xs line-clamp-2" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+              {previewDesc}
+            </p>
+          </div>
+        ) : (
+          <div
+            className="rounded-xl overflow-hidden"
+            style={{ border: "1px solid hsl(var(--kf-border) / 0.5)" }}
+          >
+            <div
+              className="w-full h-[160px] flex items-center justify-center"
+              style={{ background: "hsl(var(--kf-muted) / 0.2)" }}
+            >
+              {ogImage ? (
+                <img
+                  src={ogImage}
+                  alt="Social preview"
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = "none";
+                    (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden");
+                  }}
+                />
+              ) : (
+                <span className="text-xs text-muted-foreground">No OG image set</span>
+              )}
+            </div>
+            <div className="p-3 space-y-1" style={{ background: "hsl(var(--kf-muted) / 0.15)" }}>
+              <p className="text-[10px] uppercase tracking-wide" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+                {previewUrl.replace(/^https?:\/\//, "").split("/")[0]}
+              </p>
+              <p className="text-sm font-semibold line-clamp-1">{previewTitle}</p>
+              <p className="text-xs line-clamp-2" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+                {previewDesc}
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
