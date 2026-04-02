@@ -252,7 +252,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       items.push({ type: "quick", id: a.id, onSelect: () => { a.onSelect(); onClose(); } });
     }
     for (const a of filteredNav) {
-      items.push({ type: "nav", id: a.id, onSelect: () => { handleNavigate(a.id.replace("nav-", "/app/").replace("/app/command", "/app").replace("/app/contacts", "/app/crm/pipeline"), a.label); } });
+      items.push({ type: "nav", id: a.id, onSelect: () => { a.onSelect(); onClose(); } });
     }
     return items;
   }, [hasSearch, searching, searchResults, filteredRecent, filteredQuick, filteredNav]);

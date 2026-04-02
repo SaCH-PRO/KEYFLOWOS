@@ -246,6 +246,30 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     setMobileDrawerOpen(false);
+    if (pathname && pathname !== "/app/onboarding") {
+      try {
+        const segments = pathname.split("/").filter(Boolean);
+        const last = segments[segments.length - 1];
+        const isUuid = /^[0-9a-f-]{20,}$/i.test(last || "");
+        const labelSegment = isUuid && segments.length > 1 ? segments[segments.length - 2] : last;
+        const labelMap: Record<string, string> = {
+          app: "Command", crm: "CRM", pipeline: "Contacts", commerce: "Commerce",
+          bookings: "Bookings", marketing: "Marketing", expenses: "Expenses",
+          projects: "Projects", automations: "Automations", reports: "Reports",
+          store: "Store Setup", settings: "Settings", learn: "Learn",
+          community: "Community", marketplace: "Marketplace",
+        };
+        const label = labelMap[labelSegment || ""] || (labelSegment ? labelSegment.charAt(0).toUpperCase() + labelSegment.slice(1) : "");
+        if (label) {
+          const key = "kf-command-recent";
+          const raw = localStorage.getItem(key);
+          const items: { label: string; href: string; timestamp: number }[] = raw ? JSON.parse(raw) : [];
+          const filtered = items.filter((r) => r.href !== pathname);
+          filtered.unshift({ label, href: pathname, timestamp: Date.now() });
+          localStorage.setItem(key, JSON.stringify(filtered.slice(0, 5)));
+        }
+      } catch {}
+    }
   }, [pathname]);
 
   useEffect(() => {
@@ -612,7 +636,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
           </header>
 
-          <div className="hidden md:block px-3 md:px-6 pt-1">
+          <div className="px-3 md:px-6 pt-1">
             <Breadcrumbs />
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 md:p-6 pb-24 md:pb-6">{children}</div>
