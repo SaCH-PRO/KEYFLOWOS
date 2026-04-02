@@ -6,6 +6,7 @@ import { Users, UserPlus, Trash2, CheckCircle2, AlertCircle, Mail, Shield, Crown
 import { Button, Input, Card, Badge } from "@keyflow/ui";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { apiGet, apiPostSimple as apiPost, apiDelete, apiPatch } from "@/lib/api";
+import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { InfoBadge } from "@/components/ui/info-badge";
 
@@ -91,8 +92,10 @@ export default function TeamSettingsPage() {
     setInviting(false);
     if (res.error) {
       setStatus({ type: "error", message: res.error });
+      toast.error(res.error || "Failed to invite team member");
     } else {
       setStatus({ type: "success", message: "Team member invited" });
+      toast.success("Team member invited");
       setInviteEmail("");
       loadMembers();
     }
@@ -104,8 +107,10 @@ export default function TeamSettingsPage() {
     const res = await apiDelete(`/identity/businesses/${businessId}/team/${membershipId}`);
     if (res.error) {
       setStatus({ type: "error", message: res.error });
+      toast.error(res.error || "Failed to remove team member");
     } else {
       setStatus({ type: "success", message: "Team member removed" });
+      toast.success("Team member removed");
       loadMembers();
     }
   };
@@ -116,7 +121,9 @@ export default function TeamSettingsPage() {
     const res = await apiPatch(`/identity/businesses/${businessId}/team/${membershipId}`, { role: newRole });
     if (res.error) {
       setStatus({ type: "error", message: res.error });
+      toast.error(res.error || "Failed to update role");
     } else {
+      toast.success("Role updated");
       loadMembers();
     }
   };

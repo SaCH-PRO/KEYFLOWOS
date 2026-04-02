@@ -31,6 +31,7 @@ import {
 } from "@/lib/client";
 import type { WebhookConfig, WebhookDeliveryLog } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { toast } from "sonner";
 
 const EVENT_GROUPS: { group: string; events: string[] }[] = [
   {
@@ -148,8 +149,13 @@ export default function WebhooksSettingsPage() {
       });
       if (res.data) {
         setWebhooks((prev) => [...prev, res.data!]);
+        toast.success("Webhook created");
+      } else {
+        toast.error("Failed to create webhook");
       }
-    } catch {}
+    } catch {
+      toast.error("Failed to create webhook");
+    }
     setWebhookForm({ name: "", url: "", events: "" });
     setShowWebhookModal(false);
     setCreating(false);
@@ -160,7 +166,10 @@ export default function WebhooksSettingsPage() {
     try {
       await deleteWebhook(businessId, webhookId);
       setWebhooks((prev) => prev.filter((w) => w.id !== webhookId));
-    } catch {}
+      toast.success("Webhook deleted");
+    } catch {
+      toast.error("Failed to delete webhook");
+    }
   };
 
   const handleTest = async (webhookId: string) => {
@@ -187,6 +196,9 @@ export default function WebhooksSettingsPage() {
       setWebhooks((prev) =>
         prev.map((w) => (w.id === webhookId ? { ...w, isActive: !currentActive } : w))
       );
+      toast.success(!currentActive ? "Webhook enabled" : "Webhook disabled");
+    } else {
+      toast.error("Failed to update webhook");
     }
   };
 

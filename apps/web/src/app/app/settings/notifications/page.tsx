@@ -18,6 +18,7 @@ import {
 import { apiGet, apiPatch } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { InfoBadge } from "@/components/ui/info-badge";
+import { toast } from "sonner";
 
 interface NotificationPreferences {
   booking_confirmed: boolean;
@@ -132,7 +133,13 @@ export default function NotificationsSettingsPage() {
     setPreferences(updated);
     const businessId = getStoredBusinessId();
     if (!businessId) return;
-    await apiPatch(`/notifications/businesses/${businessId}/customer-preferences`, { [key]: newValue });
+    const res = await apiPatch(`/notifications/businesses/${businessId}/customer-preferences`, { [key]: newValue });
+    if (res.error) {
+      setPreferences(preferences);
+      toast.error("Failed to update notification preference");
+    } else {
+      toast.success("Notification preference updated");
+    }
     setSaving(null);
   };
 
