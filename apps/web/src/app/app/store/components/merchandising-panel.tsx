@@ -463,6 +463,34 @@ export function MerchandisingPanel({ config, products, services, onConfigChange,
               className="space-y-3"
             >
               <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Quick Templates</label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {[
+                    { text: "🎉 Grand Opening Sale — 20% Off Everything!", color: "hsl(45 93% 55%)" },
+                    { text: "🔥 Limited Time Offer — Book Now & Save!", color: "hsl(0 72% 51%)" },
+                    { text: "✨ New Services Available — Check Them Out!", color: "hsl(263 70% 58%)" },
+                    { text: "💚 Free Consultation — Book Your Spot Today!", color: "hsl(160 84% 39%)" },
+                  ].map((tpl, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => {
+                        onConfigChange("promotions", { bannerText: tpl.text, bannerColor: tpl.color });
+                      }}
+                      className="text-[10px] text-left px-2.5 py-2 rounded-lg transition-all hover:scale-[1.02]"
+                      style={{
+                        background: `${tpl.color}12`,
+                        border: `1px solid ${tpl.color}25`,
+                        color: tpl.color,
+                      }}
+                    >
+                      {tpl.text}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Banner Message</label>
                 <input
                   type="text"

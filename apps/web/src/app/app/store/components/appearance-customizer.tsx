@@ -558,6 +558,64 @@ export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, b
             </div>
           </div>
 
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-2 block">Content Density</label>
+            <div className="flex gap-2">
+              {([
+                { key: "comfortable", label: "Comfortable" },
+                { key: "compact", label: "Compact" },
+              ] as const).map((opt) => {
+                const isActive = ((appearance as any).density ?? "comfortable") === opt.key;
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => onConfigChange("appearance", { density: opt.key })}
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all"
+                    style={{
+                      background: isActive ? "hsl(var(--kf-accent1)/0.1)" : "hsl(var(--kf-muted)/0.2)",
+                      border: isActive ? "1px solid hsl(var(--kf-accent1)/0.3)" : "1px solid hsl(var(--kf-border)/0.5)",
+                      color: isActive ? "hsl(var(--kf-accent1))" : undefined,
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1.5">Controls card spacing and padding on the public storefront</p>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-2 block">Font Family</label>
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                { key: "system", label: "System", preview: "Aa" },
+                { key: "sans", label: "Sans Serif", preview: "Aa" },
+                { key: "serif", label: "Serif", preview: "Aa" },
+              ] as const).map((font) => {
+                const isActive = ((appearance as any).fontFamily ?? "system") === font.key;
+                const fontClass = font.key === "serif" ? "font-serif" : font.key === "sans" ? "font-sans" : "";
+                return (
+                  <button
+                    key={font.key}
+                    type="button"
+                    onClick={() => onConfigChange("appearance", { fontFamily: font.key })}
+                    className="flex flex-col items-center gap-1.5 py-3 rounded-xl text-xs font-medium transition-all"
+                    style={{
+                      background: isActive ? "hsl(var(--kf-accent1)/0.1)" : "hsl(var(--kf-muted)/0.2)",
+                      border: isActive ? "1px solid hsl(var(--kf-accent1)/0.3)" : "1px solid hsl(var(--kf-border)/0.5)",
+                      color: isActive ? "hsl(var(--kf-accent1))" : undefined,
+                    }}
+                  >
+                    <span className={`text-lg ${fontClass}`}>{font.preview}</span>
+                    <span>{font.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div
             className="rounded-xl p-3 space-y-1"
             style={{ background: "hsl(var(--kf-muted)/0.15)", border: "1px solid hsl(var(--kf-border)/0.3)" }}

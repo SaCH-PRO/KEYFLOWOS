@@ -264,7 +264,7 @@ export function CartDrawer({
 
               <div className="space-y-1.5">
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-white/50">Subtotal</span>
+                  <span className="text-white/50">Subtotal ({cartCount} {cartCount === 1 ? "item" : "items"})</span>
                   <span className="text-white/70">{formatPrice(cartTotal, cartCurrency)}</span>
                 </div>
                 <div className="flex justify-between items-center">
@@ -277,7 +277,7 @@ export function CartDrawer({
 
               <button
                 onClick={onCheckout}
-                className="relative w-full py-3.5 rounded-2xl text-white font-semibold text-sm transition-all duration-300 hover:scale-[1.015] active:scale-[0.98] overflow-hidden group"
+                className="relative w-full py-3.5 rounded-2xl text-white font-semibold text-sm transition-all duration-300 hover:scale-[1.015] active:scale-[0.98] overflow-hidden group min-h-[44px]"
                 style={{ backgroundColor: primaryColor, boxShadow: `0 8px 32px ${primaryColor}35` }}
               >
                 <span
@@ -292,9 +292,13 @@ export function CartDrawer({
                 </span>
               </button>
 
-              <div className="flex items-center justify-center gap-1.5 text-[10px] text-white/25">
-                <ShieldCheck className="w-3 h-3" />
-                <span>Secure checkout</span>
+              <div className="flex items-center justify-center gap-4 text-[10px] text-white/25">
+                <span className="flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3" />
+                  Secure checkout
+                </span>
+                <span className="w-px h-3 bg-white/10" />
+                <span>SSL Encrypted</span>
               </div>
             </div>
           </div>

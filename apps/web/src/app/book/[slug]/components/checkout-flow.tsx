@@ -641,6 +641,22 @@ export function CheckoutFlow({
                 </div>
               </div>
 
+              <div
+                className="rounded-2xl border border-white/[0.04] p-4 flex items-center justify-between gap-3"
+                style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.03) 0%, rgba(16,185,129,0.01) 100%)" }}
+              >
+                {[
+                  { icon: ShieldCheck, label: "Secure" },
+                  { icon: Lock, label: "Encrypted" },
+                  { icon: CheckCircle2, label: "Verified" },
+                ].map(({ icon: Icon, label }) => (
+                  <div key={label} className="flex items-center gap-1.5 text-[11px] text-emerald-400/60">
+                    <Icon className="w-3.5 h-3.5" />
+                    <span>{label}</span>
+                  </div>
+                ))}
+              </div>
+
               {error && (
                 <div className="rounded-xl border border-red-500/20 bg-red-500/[0.06] px-4 py-3 text-sm text-red-300 flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 flex-shrink-0" />

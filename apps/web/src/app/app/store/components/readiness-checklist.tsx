@@ -30,7 +30,9 @@ export function ReadinessChecklist({
   productsCount,
   onTabChange,
 }: ReadinessChecklistProps) {
-  const [open, setOpen] = useState(false);
+  const allChecks = [hasSlug, hasLogo, hasHeroImage, hoursConfigured, servicesCount > 0 || productsCount > 0, hasTestimonials];
+  const completedCount = allChecks.filter(Boolean).length;
+  const [open, setOpen] = useState(completedCount < allChecks.length);
 
   const checks = [
     { label: "Custom URL", hint: "Set a memorable slug for your store", done: hasSlug, tab: "storefront" },

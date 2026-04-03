@@ -436,6 +436,20 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
                   </div>
                 )}
 
+                {config?.promotions?.bannerEnabled && config.promotions.bannerText && (
+                  <div
+                    className={`${ts.cardRadius} px-3 py-2 text-center text-[9px] font-medium flex items-center justify-center gap-1`}
+                    style={{
+                      backgroundColor: `${config.promotions.bannerColor || '#f59e0b'}15`,
+                      color: config.promotions.bannerColor || '#f59e0b',
+                      border: `1px solid ${config.promotions.bannerColor || '#f59e0b'}25`,
+                    }}
+                  >
+                    <span className="animate-pulse">🔥</span>
+                    <span className="truncate">{config.promotions.bannerText}</span>
+                  </div>
+                )}
+
                 {allItems.length === 0 ? (
                   <div className="text-center py-6 space-y-2">
                     <Store className="w-6 h-6 text-white/15 mx-auto" />
@@ -489,6 +503,22 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
                     <ArrowRight className="w-2.5 h-2.5" />
                   </div>
                 )}
+
+                <div
+                  className={`${ts.cardRadius} flex items-center justify-around py-2 px-2 gap-1`}
+                  style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}
+                >
+                  {[
+                    { label: "Secure" },
+                    { label: "Instant" },
+                    { label: "Safe Pay" },
+                  ].map((t) => (
+                    <span key={t.label} className="text-[7px] text-white/25 flex items-center gap-0.5">
+                      <span className="w-1 h-1 rounded-full bg-emerald-400/30" />
+                      {t.label}
+                    </span>
+                  ))}
+                </div>
 
                 <div className={`text-center text-[8px] text-white/15 pb-1 ${ts.footerStyle}`}>
                   Powered by <span style={{ color: ts.footerAccent }}>KeyFlowOS</span>
