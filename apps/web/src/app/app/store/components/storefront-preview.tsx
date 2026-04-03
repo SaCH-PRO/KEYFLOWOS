@@ -91,7 +91,7 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
       description: s.description,
       price: s.price,
       currency: s.currency ?? "TTD",
-      duration: (s as any).durationMins ?? s.duration,
+      duration: s.durationMins ?? s.duration,
       imageUrl: null as string | null,
       itemType: "service" as const,
     })),

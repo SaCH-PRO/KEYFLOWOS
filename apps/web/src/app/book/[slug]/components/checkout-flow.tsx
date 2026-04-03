@@ -66,27 +66,26 @@ export function CheckoutFlow({
 }: Props) {
   const [checkoutStep, setCheckoutStep] = useState(0);
   const [serviceBookings, setServiceBookings] = useState<Record<string, ServiceBookingData>>({});
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [emailInput, setEmailInput] = useState("");
-  const [phoneInput, setPhoneInput] = useState("");
+  const [firstName, setFirstName] = useState(() => {
+    if (typeof window === "undefined") return "";
+    try { const s = localStorage.getItem("kf_checkout_details"); return s ? (JSON.parse(s).firstName || "") : ""; } catch { return ""; }
+  });
+  const [lastName, setLastName] = useState(() => {
+    if (typeof window === "undefined") return "";
+    try { const s = localStorage.getItem("kf_checkout_details"); return s ? (JSON.parse(s).lastName || "") : ""; } catch { return ""; }
+  });
+  const [emailInput, setEmailInput] = useState(() => {
+    if (typeof window === "undefined") return "";
+    try { const s = localStorage.getItem("kf_checkout_details"); return s ? (JSON.parse(s).email || "") : ""; } catch { return ""; }
+  });
+  const [phoneInput, setPhoneInput] = useState(() => {
+    if (typeof window === "undefined") return "";
+    try { const s = localStorage.getItem("kf_checkout_details"); return s ? (JSON.parse(s).phone || "") : ""; } catch { return ""; }
+  });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stepDirection, setStepDirection] = useState<"forward" | "back">("forward");
   const [fieldTouched, setFieldTouched] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("kf_checkout_details");
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.firstName && !firstName) setFirstName(parsed.firstName);
-        if (parsed.lastName && !lastName) setLastName(parsed.lastName);
-        if (parsed.email && !emailInput) setEmailInput(parsed.email);
-        if (parsed.phone && !phoneInput) setPhoneInput(parsed.phone);
-      }
-    } catch {}
-  }, []);
 
   const serviceItemsInCart = cart.filter((c) => c.requiresBooking);
 

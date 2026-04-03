@@ -437,10 +437,10 @@ export default function PublicBookingPage() {
           {Array.from({ length: 40 }).map((_, i) => {
             const colors = [primaryColor, secondaryColor, accentColor, "#f59e0b", "#10b981", "#ec4899"];
             const color = colors[i % colors.length];
-            const left = Math.random() * 100;
-            const delay = Math.random() * 2;
-            const duration = 2.5 + Math.random() * 2;
-            const size = 4 + Math.random() * 8;
+            const left = ((i * 37 + 13) % 100);
+            const delay = ((i * 7) % 20) / 10;
+            const duration = 2.5 + ((i * 11) % 20) / 10;
+            const size = 4 + ((i * 13) % 8);
             const shape = i % 3 === 0 ? "rounded-full" : i % 3 === 1 ? "rounded-sm" : "";
             return (
               <div
