@@ -113,7 +113,10 @@ export function CheckoutFlow({
         return bd && bd.date && bd.time;
       });
     }
-    if (stepKey === "details") return firstName.trim() !== "" && emailInput.trim() !== "";
+    if (stepKey === "details") {
+      const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput.trim());
+      return firstName.trim() !== "" && emailValid;
+    }
     return true;
   })();
 

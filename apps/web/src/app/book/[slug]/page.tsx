@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { apiGet, apiPost, API_BASE } from "@/lib/api";
 import { formatPrice } from "@/lib/format";
-import { Loader2, CheckCircle2, Globe, Star, MessageCircle, Shield, Award, Flame, Sparkles, CalendarPlus, Clock, MapPin } from "lucide-react";
+import { Loader2, CheckCircle2, Globe, Star, MessageCircle, Shield, Award, Flame, Sparkles, CalendarPlus, Clock, MapPin, X } from "lucide-react";
 import { ItemDetailModal } from "./components/item-detail-modal";
 import { trackStoreEvent, StorefrontConfig } from "@/lib/client";
 import { getThemeStyles, type ThemeKey } from "@/lib/storefront-themes";
@@ -52,6 +52,7 @@ export default function PublicBookingPage() {
 
   const [selectedItem, setSelectedItem] = useState<CatalogItem | null>(null);
   const [storefrontConfig, setStorefrontConfig] = useState<StorefrontConfig | null>(null);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
   const appearance = storefrontConfig?.appearance;
   const primaryColor = appearance?.primaryColor || business?.primaryColor || "#F97316";
@@ -548,9 +549,9 @@ export default function PublicBookingPage() {
           businessName={business?.name}
         />
 
-        {storefrontConfig?.promotions?.bannerEnabled && storefrontConfig.promotions.bannerText && (
+        {storefrontConfig?.promotions?.bannerEnabled && storefrontConfig.promotions.bannerText && !bannerDismissed && (
           <div
-            className="rounded-2xl px-5 py-3.5 text-center text-sm font-medium flex items-center justify-center gap-2 backdrop-blur-sm"
+            className="rounded-2xl px-5 py-3.5 text-center text-sm font-medium flex items-center justify-center gap-2 backdrop-blur-sm relative"
             style={{
               backgroundColor: `${storefrontConfig.promotions.bannerColor || '#f59e0b'}12`,
               color: storefrontConfig.promotions.bannerColor || '#f59e0b',
@@ -559,6 +560,13 @@ export default function PublicBookingPage() {
           >
             <Flame className="w-4 h-4 animate-pulse" />
             {storefrontConfig.promotions.bannerText}
+            <button
+              onClick={() => setBannerDismissed(true)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg hover:bg-white/[0.08] transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
+              aria-label="Dismiss banner"
+            >
+              <X className="w-3.5 h-3.5 opacity-50 hover:opacity-80" />
+            </button>
           </div>
         )}
 

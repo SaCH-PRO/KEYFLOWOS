@@ -7,6 +7,9 @@ import {
   CheckCircle2,
   ArrowRight,
   ChevronDown,
+  PartyPopper,
+  ExternalLink,
+  Copy,
 } from "lucide-react";
 
 interface ReadinessChecklistProps {
@@ -18,6 +21,7 @@ interface ReadinessChecklistProps {
   servicesCount: number;
   productsCount: number;
   onTabChange: (tab: string) => void;
+  slug?: string;
 }
 
 export function ReadinessChecklist({
@@ -29,10 +33,15 @@ export function ReadinessChecklist({
   servicesCount,
   productsCount,
   onTabChange,
+  slug,
 }: ReadinessChecklistProps) {
   const allChecks = [hasSlug, hasLogo, hasHeroImage, hoursConfigured, servicesCount > 0 || productsCount > 0, hasTestimonials];
   const completedCount = allChecks.filter(Boolean).length;
+  const allComplete = completedCount === allChecks.length;
   const [open, setOpen] = useState(completedCount < allChecks.length);
+  const [copied, setCopied] = useState(false);
+
+  const storeUrl = slug ? `${typeof window !== "undefined" ? window.location.origin : ""}/book/${slug}` : "";
 
   const checks = [
     { label: "Custom URL", hint: "Set a memorable slug for your store", done: hasSlug, tab: "storefront" },
@@ -129,7 +138,7 @@ export function ReadinessChecklist({
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: i * 0.03 }}
                   onClick={() => onTabChange(check.tab)}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors hover:bg-[hsl(var(--kf-muted)/0.12)] group"
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors hover:bg-[hsl(var(--kf-muted)/0.12)] group min-h-[44px]"
                 >
                   {check.done ? (
                     <CheckCircle2 className="w-4 h-4 flex-shrink-0" style={{ color: "hsl(var(--kf-success))" }} />
@@ -161,6 +170,54 @@ export function ReadinessChecklist({
                   )}
                 </motion.button>
               ))}
+
+              {allComplete && storeUrl && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className="mt-3 pt-3 space-y-3"
+                  style={{ borderTop: "1px solid hsl(var(--kf-border)/0.25)" }}
+                >
+                  <div className="flex items-center gap-2 px-3">
+                    <PartyPopper className="w-4 h-4" style={{ color: "hsl(var(--kf-success))" }} />
+                    <span className="text-xs font-semibold" style={{ color: "hsl(var(--kf-success))" }}>
+                      Your storefront is ready to go!
+                    </span>
+                  </div>
+                  <div className="flex gap-2 px-3">
+                    <a
+                      href={`/book/${slug}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-colors min-h-[44px]"
+                      style={{
+                        background: "hsl(var(--kf-accent1)/0.1)",
+                        color: "hsl(var(--kf-accent1))",
+                      }}
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      View Live
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(storeUrl);
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 2000);
+                      }}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-colors min-h-[44px]"
+                      style={{
+                        background: "hsl(var(--kf-muted)/0.12)",
+                        color: "hsl(var(--kf-foreground)/0.7)",
+                      }}
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      {copied ? "Copied!" : "Copy Link"}
+                    </button>
+                  </div>
+                </motion.div>
+              )}
             </div>
           </motion.div>
         )}
