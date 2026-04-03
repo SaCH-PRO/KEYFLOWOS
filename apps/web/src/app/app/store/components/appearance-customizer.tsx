@@ -342,9 +342,9 @@ export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, b
   const appearance = config.appearance ?? {};
   const seo = config.seo ?? {};
 
-  const currentPrimary = (appearance as any).primaryColor || businessData?.primaryColor || "";
-  const currentSecondary = (appearance as any).secondaryColor || businessData?.secondaryColor || "";
-  const currentAccent = (appearance as any).accentColor || "";
+  const currentPrimary = appearance.primaryColor || businessData?.primaryColor || "";
+  const currentSecondary = appearance.secondaryColor || businessData?.secondaryColor || "";
+  const currentAccent = appearance.accentColor || "";
 
   return (
     <div className="space-y-4">
@@ -565,7 +565,7 @@ export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, b
                 { key: "comfortable", label: "Comfortable" },
                 { key: "compact", label: "Compact" },
               ] as const).map((opt) => {
-                const isActive = ((appearance as any).density ?? "comfortable") === opt.key;
+                const isActive = (appearance.density ?? "comfortable") === opt.key;
                 return (
                   <button
                     key={opt.key}
@@ -594,7 +594,7 @@ export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, b
                 { key: "sans", label: "Sans Serif", preview: "Aa" },
                 { key: "serif", label: "Serif", preview: "Aa" },
               ] as const).map((font) => {
-                const isActive = ((appearance as any).fontFamily ?? "system") === font.key;
+                const isActive = (appearance.fontFamily ?? "system") === font.key;
                 const fontClass = font.key === "serif" ? "font-serif" : font.key === "sans" ? "font-sans" : "";
                 return (
                   <button

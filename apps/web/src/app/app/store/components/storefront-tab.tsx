@@ -130,6 +130,7 @@ export function StorefrontTab({
           services={services}
           commerceProducts={commerceProducts}
           config={storefrontConfig}
+          slug={slug}
         />
       </div>
 

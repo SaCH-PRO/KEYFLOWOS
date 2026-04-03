@@ -38,6 +38,7 @@ type Props = {
   services: Service[];
   commerceProducts: Product[];
   config?: StorefrontConfig;
+  slug?: string;
 };
 
 type PreviewItem = {
@@ -68,10 +69,10 @@ function TypeBadge({ type, primaryColor, secondaryColor, accentColor, radius }: 
   );
 }
 
-export function StorefrontPreview({ businessData, services, commerceProducts, config }: Props) {
-  const pc = (config?.appearance as any)?.primaryColor || businessData?.primaryColor || "#F97316";
-  const sc = (config?.appearance as any)?.secondaryColor || businessData?.secondaryColor || "#14B8A6";
-  const ac = (config?.appearance as any)?.accentColor || "#a78bfa";
+export function StorefrontPreview({ businessData, services, commerceProducts, config, slug }: Props) {
+  const pc = config?.appearance?.primaryColor || businessData?.primaryColor || "#F97316";
+  const sc = config?.appearance?.secondaryColor || businessData?.secondaryColor || "#14B8A6";
+  const ac = config?.appearance?.accentColor || "#a78bfa";
 
   const hero = config?.hero ?? {};
   const appearance = config?.appearance ?? {};
@@ -531,6 +532,22 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
             <div className="w-28 h-1 rounded-full bg-muted-foreground/20" />
           </div>
         </div>
+
+        {slug && (
+          <div className="flex justify-center pt-2">
+            <a
+              href={`/book/${slug}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 text-xs font-medium px-4 py-2 rounded-xl transition-all duration-200 hover:bg-white/[0.04]"
+              style={{ color: pc }}
+            >
+              <Store className="w-3.5 h-3.5" />
+              View Live Store
+              <ArrowRight className="w-3 h-3" />
+            </a>
+          </div>
+        )}
       </div>
     </motion.div>
   );

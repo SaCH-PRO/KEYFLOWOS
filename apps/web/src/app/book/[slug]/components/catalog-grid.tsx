@@ -294,23 +294,32 @@ export function CatalogGrid({
               <span />
             )}
             {inCart ? (
-              <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+              item.itemType === "service" ? (
                 <button
-                  onClick={() => onUpdateQuantity ? onUpdateQuantity(item.id, item.itemType, -1) : removeFromCart(item.id, item.itemType)}
-                  className={`w-7 h-7 ${ts.buttonRadius} bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center transition-all duration-200 hover:bg-red-500/10 hover:border-red-500/20 group/minus active:scale-90`}
+                  onClick={(e) => { e.stopPropagation(); removeFromCart(item.id, item.itemType); }}
+                  className={`flex items-center gap-1.5 px-3.5 py-1.5 ${ts.buttonRadius} text-xs font-medium transition-all duration-200 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20`}
                 >
-                  <Minus className="w-3 h-3 text-emerald-400 group-hover/minus:text-red-400" />
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Added
                 </button>
-                <span className="w-6 text-center text-xs font-semibold tabular-nums text-emerald-400">
-                  {cartItems?.find((c) => c.id === item.id && c.itemType === item.itemType)?.quantity ?? 1}
-                </span>
-                <button
-                  onClick={() => onUpdateQuantity ? onUpdateQuantity(item.id, item.itemType, 1) : addToCart(item)}
-                  className={`w-7 h-7 ${ts.buttonRadius} bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center transition-all duration-200 hover:bg-emerald-500/20 active:scale-90`}
-                >
-                  <Plus className="w-3 h-3 text-emerald-400" />
-                </button>
-              </div>
+              ) : (
+                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    onClick={() => onUpdateQuantity ? onUpdateQuantity(item.id, item.itemType, -1) : removeFromCart(item.id, item.itemType)}
+                    className={`w-7 h-7 ${ts.buttonRadius} bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center transition-all duration-200 hover:bg-red-500/10 hover:border-red-500/20 group/minus active:scale-90`}
+                  >
+                    <Minus className="w-3 h-3 text-emerald-400 group-hover/minus:text-red-400" />
+                  </button>
+                  <span className="w-6 text-center text-xs font-semibold tabular-nums text-emerald-400">
+                    {cartItems?.find((c) => c.id === item.id && c.itemType === item.itemType)?.quantity ?? 1}
+                  </span>
+                  <button
+                    onClick={() => onUpdateQuantity ? onUpdateQuantity(item.id, item.itemType, 1) : addToCart(item)}
+                    className={`w-7 h-7 ${ts.buttonRadius} bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center transition-all duration-200 hover:bg-emerald-500/20 active:scale-90`}
+                  >
+                    <Plus className="w-3 h-3 text-emerald-400" />
+                  </button>
+                </div>
+              )
             ) : (
               <button
                 onClick={(e) => { e.stopPropagation(); addToCart(item); }}
@@ -424,23 +433,32 @@ export function CatalogGrid({
               <span />
             )}
             {inCart ? (
-              <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+              item.itemType === "service" ? (
                 <button
-                  onClick={() => onUpdateQuantity ? onUpdateQuantity(item.id, item.itemType, -1) : removeFromCart(item.id, item.itemType)}
-                  className={`w-7 h-7 ${ts.buttonRadius} bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center transition-all duration-200 hover:bg-red-500/10 hover:border-red-500/20 group/minus active:scale-90`}
+                  onClick={(e) => { e.stopPropagation(); removeFromCart(item.id, item.itemType); }}
+                  className={`flex items-center gap-1.5 px-3.5 py-1.5 ${ts.buttonRadius} text-xs font-medium transition-all duration-200 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20`}
                 >
-                  <Minus className="w-3 h-3 text-emerald-400 group-hover/minus:text-red-400" />
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Added
                 </button>
-                <span className="w-6 text-center text-xs font-semibold tabular-nums text-emerald-400">
-                  {cartItems?.find((c) => c.id === item.id && c.itemType === item.itemType)?.quantity ?? 1}
-                </span>
-                <button
-                  onClick={() => onUpdateQuantity ? onUpdateQuantity(item.id, item.itemType, 1) : addToCart(item)}
-                  className={`w-7 h-7 ${ts.buttonRadius} bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center transition-all duration-200 hover:bg-emerald-500/20 active:scale-90`}
-                >
-                  <Plus className="w-3 h-3 text-emerald-400" />
-                </button>
-              </div>
+              ) : (
+                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    onClick={() => onUpdateQuantity ? onUpdateQuantity(item.id, item.itemType, -1) : removeFromCart(item.id, item.itemType)}
+                    className={`w-7 h-7 ${ts.buttonRadius} bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center transition-all duration-200 hover:bg-red-500/10 hover:border-red-500/20 group/minus active:scale-90`}
+                  >
+                    <Minus className="w-3 h-3 text-emerald-400 group-hover/minus:text-red-400" />
+                  </button>
+                  <span className="w-6 text-center text-xs font-semibold tabular-nums text-emerald-400">
+                    {cartItems?.find((c) => c.id === item.id && c.itemType === item.itemType)?.quantity ?? 1}
+                  </span>
+                  <button
+                    onClick={() => onUpdateQuantity ? onUpdateQuantity(item.id, item.itemType, 1) : addToCart(item)}
+                    className={`w-7 h-7 ${ts.buttonRadius} bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center transition-all duration-200 hover:bg-emerald-500/20 active:scale-90`}
+                  >
+                    <Plus className="w-3 h-3 text-emerald-400" />
+                  </button>
+                </div>
+              )
             ) : (
               <button
                 onClick={(e) => { e.stopPropagation(); addToCart(item); }}
