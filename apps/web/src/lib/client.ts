@@ -3135,6 +3135,10 @@ export interface StorefrontConfig {
     showPrices?: boolean;
     showDuration?: boolean;
     accentColor?: string;
+    primaryColor?: string;
+    secondaryColor?: string;
+    density?: 'comfortable' | 'compact';
+    fontFamily?: 'system' | 'sans' | 'serif';
   };
   merchandising: {
     featuredItemIds?: string[];

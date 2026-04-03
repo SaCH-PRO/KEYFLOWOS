@@ -73,6 +73,7 @@ export function CheckoutFlow({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stepDirection, setStepDirection] = useState<"forward" | "back">("forward");
+  const [fieldTouched, setFieldTouched] = useState<Record<string, boolean>>({});
 
   const serviceItemsInCart = cart.filter((c) => c.requiresBooking);
 
@@ -498,10 +499,14 @@ export function CheckoutFlow({
                       type="text"
                       value={firstName}
                       onChange={(e) => setFirstName(e.target.value)}
+                      onBlur={() => setFieldTouched((p) => ({ ...p, firstName: true }))}
                       placeholder="John"
                       className="w-full rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3 text-sm text-white placeholder:text-white/20 focus:outline-none transition-all duration-200"
-                      style={{ borderColor: firstName.trim() ? `${primaryColor}25` : undefined }}
+                      style={{ borderColor: firstName.trim() ? `${primaryColor}25` : fieldTouched.firstName && !firstName.trim() ? "rgba(239,68,68,0.4)" : undefined }}
                     />
+                    {fieldTouched.firstName && !firstName.trim() && (
+                      <p className="text-[10px] text-red-400/80 mt-0.5">First name is required</p>
+                    )}
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-[10px] uppercase tracking-widest text-white/30 font-medium">
@@ -523,10 +528,17 @@ export function CheckoutFlow({
                       type="email"
                       value={emailInput}
                       onChange={(e) => setEmailInput(e.target.value)}
+                      onBlur={() => setFieldTouched((p) => ({ ...p, email: true }))}
                       placeholder="john@example.com"
                       className="w-full rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3 text-sm text-white placeholder:text-white/20 focus:outline-none transition-all duration-200"
-                      style={{ borderColor: emailInput.trim() ? `${primaryColor}25` : undefined }}
+                      style={{ borderColor: emailInput.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput) ? `${primaryColor}25` : fieldTouched.email && (!emailInput.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput)) ? "rgba(239,68,68,0.4)" : undefined }}
                     />
+                    {fieldTouched.email && !emailInput.trim() && (
+                      <p className="text-[10px] text-red-400/80 mt-0.5">Email is required</p>
+                    )}
+                    {fieldTouched.email && emailInput.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput) && (
+                      <p className="text-[10px] text-red-400/80 mt-0.5">Please enter a valid email address</p>
+                    )}
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-[10px] uppercase tracking-widest text-white/30 font-medium">
@@ -712,6 +724,26 @@ export function CheckoutFlow({
             </button>
           )}
         </div>
+
+        {currentStepKey !== "review" && (
+          <div
+            className="rounded-2xl border p-3 flex items-center justify-between"
+            style={{
+              borderColor: `${primaryColor}15`,
+              background: `linear-gradient(135deg, ${primaryColor}05 0%, ${primaryColor}02 100%)`,
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <ShoppingBag className="w-4 h-4 text-white/30" />
+              <span className="text-xs text-white/50">
+                {cart.length} {cart.length === 1 ? "item" : "items"}
+              </span>
+            </div>
+            <span className="text-sm font-bold tabular-nums" style={{ color: primaryColor }}>
+              {formatPrice(cartTotal, cartCurrency)}
+            </span>
+          </div>
+        )}
 
         <div className="flex items-center justify-center gap-1.5 text-[10px] text-white/20 pb-4">
           <Lock className="w-3 h-3" />
