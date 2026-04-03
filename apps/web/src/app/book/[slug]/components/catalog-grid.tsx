@@ -305,7 +305,7 @@ export function CatalogGrid({
                 <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                   <button
                     onClick={() => onUpdateQuantity ? onUpdateQuantity(item.id, item.itemType, -1) : removeFromCart(item.id, item.itemType)}
-                    className={`w-7 h-7 ${ts.buttonRadius} bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center transition-all duration-200 hover:bg-red-500/10 hover:border-red-500/20 group/minus active:scale-90`}
+                    className={`w-8 h-8 min-h-[44px] min-w-[44px] ${ts.buttonRadius} bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center transition-all duration-200 hover:bg-red-500/10 hover:border-red-500/20 group/minus active:scale-90`}
                   >
                     <Minus className="w-3 h-3 text-emerald-400 group-hover/minus:text-red-400" />
                   </button>
@@ -314,7 +314,7 @@ export function CatalogGrid({
                   </span>
                   <button
                     onClick={() => onUpdateQuantity ? onUpdateQuantity(item.id, item.itemType, 1) : addToCart(item)}
-                    className={`w-7 h-7 ${ts.buttonRadius} bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center transition-all duration-200 hover:bg-emerald-500/20 active:scale-90`}
+                    className={`w-8 h-8 min-h-[44px] min-w-[44px] ${ts.buttonRadius} bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center transition-all duration-200 hover:bg-emerald-500/20 active:scale-90`}
                   >
                     <Plus className="w-3 h-3 text-emerald-400" />
                   </button>
@@ -377,7 +377,7 @@ export function CatalogGrid({
 
         {item.imageUrl ? (
           <div className="w-24 h-24 flex-shrink-0 overflow-hidden relative" style={{ borderRadius: "inherit" }}>
-            <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+            <img src={item.imageUrl} alt={item.name} loading="lazy" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
           </div>
         ) : (
           <div
@@ -444,7 +444,7 @@ export function CatalogGrid({
                 <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                   <button
                     onClick={() => onUpdateQuantity ? onUpdateQuantity(item.id, item.itemType, -1) : removeFromCart(item.id, item.itemType)}
-                    className={`w-7 h-7 ${ts.buttonRadius} bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center transition-all duration-200 hover:bg-red-500/10 hover:border-red-500/20 group/minus active:scale-90`}
+                    className={`w-8 h-8 min-h-[44px] min-w-[44px] ${ts.buttonRadius} bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center transition-all duration-200 hover:bg-red-500/10 hover:border-red-500/20 group/minus active:scale-90`}
                   >
                     <Minus className="w-3 h-3 text-emerald-400 group-hover/minus:text-red-400" />
                   </button>
@@ -453,7 +453,7 @@ export function CatalogGrid({
                   </span>
                   <button
                     onClick={() => onUpdateQuantity ? onUpdateQuantity(item.id, item.itemType, 1) : addToCart(item)}
-                    className={`w-7 h-7 ${ts.buttonRadius} bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center transition-all duration-200 hover:bg-emerald-500/20 active:scale-90`}
+                    className={`w-8 h-8 min-h-[44px] min-w-[44px] ${ts.buttonRadius} bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center transition-all duration-200 hover:bg-emerald-500/20 active:scale-90`}
                   >
                     <Plus className="w-3 h-3 text-emerald-400" />
                   </button>

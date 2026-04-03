@@ -10,10 +10,10 @@ type Props = {
 };
 
 const trustItems = [
-  { icon: ShieldCheck, label: "Secure Booking", key: "secure" },
+  { icon: ShieldCheck, label: "Secure Checkout", key: "secure" },
   { icon: Clock, label: "Instant Confirmation", key: "instant" },
-  { icon: CreditCard, label: "Safe Payments", key: "payments" },
-  { icon: Award, label: "Satisfaction Guaranteed", key: "guarantee" },
+  { icon: CreditCard, label: "Secure Payments", key: "payments" },
+  { icon: Award, label: "Guaranteed by KeyFlowOS", key: "guarantee" },
 ];
 
 export function TrustBar({ primaryColor, secondaryColor, showPaymentBadge = true }: Props) {

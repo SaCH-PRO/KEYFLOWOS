@@ -165,22 +165,22 @@ export function OrderConfirmation({
       )}
 
       <div className="space-y-3" style={{ animation: "fadeUp 500ms ease-out 450ms both" }}>
-        {bookingResults.map((br, idx) =>
-          !br.bookingId.startsWith("order-") ? (
-            <div
-              key={idx}
-              className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-3 inline-flex items-center gap-2 mx-auto"
+        {bookingResults.map((br, idx) => (
+          <div
+            key={idx}
+            className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-3 inline-flex items-center gap-2 mx-auto"
+          >
+            <span className="text-[11px] text-white/40">
+              {br.bookingId.startsWith("order-") ? "Order:" : "Reference:"}
+            </span>
+            <code
+              className="font-mono text-sm font-bold tracking-wider"
+              style={{ color: primaryColor }}
             >
-              <span className="text-[11px] text-white/40">Reference:</span>
-              <code
-                className="font-mono text-sm font-bold tracking-wider"
-                style={{ color: primaryColor }}
-              >
-                {br.bookingId.slice(-8).toUpperCase()}
-              </code>
-            </div>
-          ) : null
-        )}
+              {br.bookingId.slice(-8).toUpperCase()}
+            </code>
+          </div>
+        ))}
       </div>
 
       <div
