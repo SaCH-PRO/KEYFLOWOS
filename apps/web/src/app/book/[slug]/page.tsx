@@ -23,6 +23,8 @@ import { BusinessHero } from "./components/business-hero";
 import { CatalogGrid } from "./components/catalog-grid";
 import { CartDrawer } from "./components/cart-drawer";
 import { CheckoutFlow } from "./components/checkout-flow";
+import { TrustBar, SecurityFooter } from "./components/trust-bar";
+import { OrderConfirmation } from "./components/order-confirmation";
 
 export default function PublicBookingPage() {
   const params = useParams();
@@ -459,136 +461,26 @@ export default function PublicBookingPage() {
           }}
         />
 
-        <div
-          className="relative max-w-md w-full rounded-3xl border border-emerald-500/20 backdrop-blur-xl p-10 text-center space-y-6"
-          style={{
-            background: "linear-gradient(135deg, rgba(16,185,129,0.06) 0%, rgba(16,185,129,0.02) 100%)",
-            animation: "successPop 600ms cubic-bezier(0.16,1,0.3,1)",
+        <OrderConfirmation
+          isOrder={isOrder}
+          businessName={business?.name || ""}
+          businessAddress={business?.address}
+          primaryColor={primaryColor}
+          secondaryColor={secondaryColor}
+          accentColor={accentColor}
+          confirmedDetails={confirmedDetails}
+          bookingResults={bookingResults}
+          calendarUrl={calendarUrl}
+          apiBase={API_BASE}
+          onContinueShopping={() => {
+            setSuccess(false);
+            setCheckoutMode(false);
+            setBookingResults([]);
+            setConfirmedDetails(null);
           }}
-        >
-          <div
-            className="w-20 h-20 rounded-2xl bg-emerald-500/10 flex items-center justify-center mx-auto relative"
-            style={{ animation: "checkBounce 800ms cubic-bezier(0.16,1,0.3,1) 200ms both" }}
-          >
-            <div
-              className="absolute inset-0 rounded-2xl opacity-30 blur-xl"
-              style={{ backgroundColor: "#10b981" }}
-            />
-            <CheckCircle2 className="w-10 h-10 text-emerald-400 relative" />
-          </div>
-
-          <div style={{ animation: "fadeUp 500ms ease-out 300ms both" }}>
-            <h1 className="text-2xl font-bold text-emerald-400 mb-2">
-              {isOrder ? "Order Placed!" : "Booking Confirmed!"}
-            </h1>
-            <p className="text-sm text-white/50 leading-relaxed">
-              Your {isOrder ? "order" : "appointment"} with{" "}
-              <span className="font-semibold text-white/80">{business?.name}</span> has been confirmed.
-            </p>
-          </div>
-
-          {confirmedDetails && confirmedDetails.serviceNames.length > 0 && !isOrder && (
-            <div className="space-y-2" style={{ animation: "fadeUp 500ms ease-out 400ms both" }}>
-              {confirmedDetails.serviceNames.map((name, idx) => (
-                <div
-                  key={idx}
-                  className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-3 text-left space-y-1.5"
-                >
-                  <p className="text-sm font-medium text-white/80">{name}</p>
-                  <div className="flex items-center gap-4 text-[12px] text-white/45">
-                    {confirmedDetails.dates[idx] && (
-                      <span className="flex items-center gap-1">
-                        <CalendarPlus className="w-3 h-3" />
-                        {formatDate(confirmedDetails.dates[idx])}
-                      </span>
-                    )}
-                    {confirmedDetails.times[idx] && (
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        {formatTime(confirmedDetails.times[idx])}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="space-y-3" style={{ animation: "fadeUp 500ms ease-out 450ms both" }}>
-            {bookingResults.map((br, idx) =>
-              !br.bookingId.startsWith("order-") ? (
-                <div
-                  key={idx}
-                  className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-3 inline-flex items-center gap-2 mx-auto"
-                >
-                  <span className="text-[11px] text-white/40">Reference:</span>
-                  <code
-                    className="font-mono text-sm font-bold tracking-wider"
-                    style={{ color: primaryColor }}
-                  >
-                    {br.bookingId.slice(-8).toUpperCase()}
-                  </code>
-                </div>
-              ) : null
-            )}
-          </div>
-
-          <div className="flex flex-col gap-3 pt-2" style={{ animation: "fadeUp 500ms ease-out 600ms both" }}>
-            {calendarUrl && (
-              <a
-                href={calendarUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full py-3.5 rounded-2xl font-semibold text-sm text-white transition-all duration-300 hover:scale-[1.015] active:scale-[0.98] inline-flex items-center justify-center gap-2"
-                style={{ backgroundColor: primaryColor, boxShadow: `0 8px 32px ${primaryColor}30` }}
-              >
-                <CalendarPlus className="w-4 h-4" />
-                Add to Calendar
-              </a>
-            )}
-            {bookingResults.some((br) => br.invoiceId) && (
-              <button
-                onClick={() => {
-                  const inv = bookingResults.find((br) => br.invoiceId);
-                  if (inv?.invoiceId) window.open(`${API_BASE}/commerce/invoices/${inv.invoiceId}/receipt`, "_blank");
-                }}
-                aria-label="View invoice"
-                className="w-full py-3.5 rounded-2xl font-semibold text-sm transition-all duration-300 hover:scale-[1.015] active:scale-[0.98]"
-                style={{
-                  backgroundColor: calendarUrl ? "transparent" : primaryColor,
-                  color: calendarUrl ? "white" : "white",
-                  border: calendarUrl ? "1px solid rgba(255,255,255,0.1)" : "none",
-                  boxShadow: calendarUrl ? "none" : `0 8px 32px ${primaryColor}30`,
-                }}
-              >
-                View Invoice
-              </button>
-            )}
-            <button
-              onClick={() => {
-                setSuccess(false);
-                setCheckoutMode(false);
-                setBookingResults([]);
-                setConfirmedDetails(null);
-              }}
-              className="w-full py-3 rounded-2xl border border-white/[0.06] text-sm font-medium text-white/50 hover:text-white/80 hover:bg-white/[0.03] transition-all duration-200"
-            >
-              Continue Shopping
-            </button>
-          </div>
-
-          {business?.address && (
-            <div className="flex items-center justify-center gap-1.5 text-[11px] text-white/25" style={{ animation: "fadeUp 500ms ease-out 700ms both" }}>
-              <MapPin className="w-3 h-3" />
-              <span>{business.address}</span>
-            </div>
-          )}
-
-          <div className="flex items-center justify-center gap-1.5 text-[10px] text-white/20">
-            <Star className="w-3 h-3" />
-            <span>Thank you for your business</span>
-          </div>
-        </div>
+          formatDate={formatDate}
+          formatTime={formatTime}
+        />
 
         <style jsx>{`
           @keyframes confettiFall {
@@ -645,6 +537,12 @@ export default function PublicBookingPage() {
       />
 
       <div className="max-w-4xl mx-auto px-4 pb-32 space-y-8">
+        <TrustBar
+          primaryColor={primaryColor}
+          secondaryColor={secondaryColor}
+          businessName={business?.name}
+        />
+
         {storefrontConfig?.promotions?.bannerEnabled && storefrontConfig.promotions.bannerText && (
           <div
             className="rounded-2xl px-5 py-3.5 text-center text-sm font-medium flex items-center justify-center gap-2 backdrop-blur-sm"
@@ -667,6 +565,8 @@ export default function PublicBookingPage() {
           isInCart={isInCart}
           addToCart={addToCart}
           removeFromCart={removeFromCart}
+          onUpdateQuantity={updateQuantity}
+          cartItems={cart}
           badges={storefrontConfig?.merchandising?.badges}
           featuredItemIds={storefrontConfig?.merchandising?.featuredItemIds}
           onItemClick={handleItemClick}
@@ -717,6 +617,11 @@ export default function PublicBookingPage() {
             <span className="text-white/55">{storefrontConfig.socialProof.guaranteeText}</span>
           </div>
         )}
+
+        <SecurityFooter
+          primaryColor={primaryColor}
+          businessName={business?.name || ""}
+        />
       </div>
 
       <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
