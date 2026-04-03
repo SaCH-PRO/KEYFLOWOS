@@ -53,11 +53,14 @@ export default function PublicBookingPage() {
   const [selectedItem, setSelectedItem] = useState<CatalogItem | null>(null);
   const [storefrontConfig, setStorefrontConfig] = useState<StorefrontConfig | null>(null);
 
-  const primaryColor = (storefrontConfig?.appearance as any)?.primaryColor || business?.primaryColor || "#F97316";
-  const secondaryColor = (storefrontConfig?.appearance as any)?.secondaryColor || business?.secondaryColor || "#14B8A6";
-  const accentColor = (storefrontConfig?.appearance as any)?.accentColor || "#a78bfa";
-  const themeKey = ((storefrontConfig?.appearance as any)?.theme ?? "default") as ThemeKey;
+  const appearance = storefrontConfig?.appearance;
+  const primaryColor = appearance?.primaryColor || business?.primaryColor || "#F97316";
+  const secondaryColor = appearance?.secondaryColor || business?.secondaryColor || "#14B8A6";
+  const accentColor = appearance?.accentColor || "#a78bfa";
+  const themeKey = (appearance?.theme ?? "default") as ThemeKey;
   const ts = getThemeStyles(themeKey, primaryColor, secondaryColor, accentColor);
+  const densityPadding = appearance?.density === "compact" ? "px-4 py-4" : "px-4 sm:px-8 py-8";
+  const fontFamilyClass = appearance?.fontFamily === "serif" ? "font-serif" : appearance?.fontFamily === "sans" ? "font-sans" : "";
 
   const updateCart = useCallback(
     (newCart: CartItem[]) => {
@@ -73,6 +76,7 @@ export default function PublicBookingPage() {
         const existing = prev.find((c) => c.id === item.id && c.itemType === item.itemType);
         let next: CartItem[];
         if (existing) {
+          if (item.itemType === "service") return prev;
           next = prev.map((c) =>
             c.id === item.id && c.itemType === item.itemType ? { ...c, quantity: c.quantity + 1 } : c
           );
@@ -100,6 +104,7 @@ export default function PublicBookingPage() {
 
   const updateQuantity = useCallback(
     (itemId: string, itemType: string, delta: number) => {
+      if (itemType === "service") return;
       setCart((prev) => {
         const next = prev
           .map((c) => {
@@ -526,7 +531,7 @@ export default function PublicBookingPage() {
   }
 
   return (
-    <main className="min-h-screen text-white relative" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
+    <main className={`min-h-screen text-white relative ${fontFamilyClass}`} style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
       <BusinessHero
         business={business!}
         primaryColor={primaryColor}
@@ -536,7 +541,7 @@ export default function PublicBookingPage() {
         catalogCount={catalogItems.length}
       />
 
-      <div className="max-w-4xl mx-auto px-4 pb-32 space-y-8">
+      <div className={`max-w-4xl mx-auto ${densityPadding} pb-32 ${appearance?.density === "compact" ? "space-y-5" : "space-y-8"}`}>
         <TrustBar
           primaryColor={primaryColor}
           secondaryColor={secondaryColor}

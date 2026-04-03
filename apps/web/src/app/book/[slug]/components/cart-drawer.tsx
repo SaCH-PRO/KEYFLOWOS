@@ -223,23 +223,27 @@ export function CartDrawer({
                     </div>
 
                     <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-white/[0.04]">
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => onUpdateQuantity(item.id, item.itemType, -1)}
-                          className="w-7 h-7 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] flex items-center justify-center transition-all duration-200 active:scale-90"
-                        >
-                          <Minus className="w-3 h-3 text-white/50" />
-                        </button>
-                        <span className="text-sm font-semibold w-8 text-center text-white/90 tabular-nums">
-                          {item.quantity}
-                        </span>
-                        <button
-                          onClick={() => onUpdateQuantity(item.id, item.itemType, 1)}
-                          className="w-7 h-7 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] flex items-center justify-center transition-all duration-200 active:scale-90"
-                        >
-                          <Plus className="w-3 h-3 text-white/50" />
-                        </button>
-                      </div>
+                      {item.itemType === "service" ? (
+                        <span className="text-[10px] text-white/30 bg-white/[0.04] px-2 py-1 rounded-lg">Qty: 1</span>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => onUpdateQuantity(item.id, item.itemType, -1)}
+                            className="w-8 h-8 min-h-[44px] min-w-[44px] rounded-lg bg-white/[0.04] hover:bg-white/[0.08] flex items-center justify-center transition-all duration-200 active:scale-90"
+                          >
+                            <Minus className="w-3 h-3 text-white/50" />
+                          </button>
+                          <span className="text-sm font-semibold w-8 text-center text-white/90 tabular-nums">
+                            {item.quantity}
+                          </span>
+                          <button
+                            onClick={() => onUpdateQuantity(item.id, item.itemType, 1)}
+                            className="w-8 h-8 min-h-[44px] min-w-[44px] rounded-lg bg-white/[0.04] hover:bg-white/[0.08] flex items-center justify-center transition-all duration-200 active:scale-90"
+                          >
+                            <Plus className="w-3 h-3 text-white/50" />
+                          </button>
+                        </div>
+                      )}
                       <span className="text-sm font-bold tabular-nums" style={{ color: primaryColor }}>
                         {formatPrice(item.price * item.quantity, item.currency)}
                       </span>
@@ -290,6 +294,13 @@ export function CartDrawer({
                   Proceed to Checkout
                   <ArrowRight className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-1" />
                 </span>
+              </button>
+
+              <button
+                onClick={onClose}
+                className="w-full py-2.5 rounded-xl text-xs font-medium text-white/40 hover:text-white/60 hover:bg-white/[0.03] transition-all duration-200 min-h-[44px]"
+              >
+                Continue Shopping
               </button>
 
               <div className="flex items-center justify-center gap-4 text-[10px] text-white/25">

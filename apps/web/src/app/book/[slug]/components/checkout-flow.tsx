@@ -75,6 +75,19 @@ export function CheckoutFlow({
   const [stepDirection, setStepDirection] = useState<"forward" | "back">("forward");
   const [fieldTouched, setFieldTouched] = useState<Record<string, boolean>>({});
 
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("kf_checkout_details");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.firstName && !firstName) setFirstName(parsed.firstName);
+        if (parsed.lastName && !lastName) setLastName(parsed.lastName);
+        if (parsed.email && !emailInput) setEmailInput(parsed.email);
+        if (parsed.phone && !phoneInput) setPhoneInput(parsed.phone);
+      }
+    } catch {}
+  }, []);
+
   const serviceItemsInCart = cart.filter((c) => c.requiresBooking);
 
   const checkoutSteps = (() => {
@@ -123,6 +136,17 @@ export function CheckoutFlow({
 
   const goNext = () => {
     setStepDirection("forward");
+    const nextKey = checkoutSteps[checkoutStep + 1]?.key;
+    if (nextKey === "confirm" && firstName && emailInput) {
+      try {
+        localStorage.setItem("kf_checkout_details", JSON.stringify({
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          email: emailInput.trim(),
+          phone: phoneInput.trim(),
+        }));
+      } catch {}
+    }
     setCheckoutStep((s) => s + 1);
   };
 
@@ -260,21 +284,27 @@ export function CheckoutFlow({
                       </p>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => onUpdateQuantity(item.id, item.itemType, -1)}
-                        className="w-7 h-7 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] flex items-center justify-center transition-all active:scale-90"
-                        aria-label={`Decrease quantity of ${item.name}`}
-                      >
-                        <Minus className="w-3 h-3 text-white/50" />
-                      </button>
-                      <span className="text-sm font-semibold w-6 text-center tabular-nums text-white/90">{item.quantity}</span>
-                      <button
-                        onClick={() => onUpdateQuantity(item.id, item.itemType, 1)}
-                        className="w-7 h-7 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] flex items-center justify-center transition-all active:scale-90"
-                        aria-label={`Increase quantity of ${item.name}`}
-                      >
-                        <Plus className="w-3 h-3 text-white/50" />
-                      </button>
+                      {item.itemType === "service" ? (
+                        <span className="text-[10px] text-white/30 bg-white/[0.04] px-2 py-1 rounded-lg">Qty: 1</span>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => onUpdateQuantity(item.id, item.itemType, -1)}
+                            className="w-8 h-8 min-h-[44px] min-w-[44px] rounded-lg bg-white/[0.04] hover:bg-white/[0.08] flex items-center justify-center transition-all active:scale-90"
+                            aria-label={`Decrease quantity of ${item.name}`}
+                          >
+                            <Minus className="w-3 h-3 text-white/50" />
+                          </button>
+                          <span className="text-sm font-semibold w-6 text-center tabular-nums text-white/90">{item.quantity}</span>
+                          <button
+                            onClick={() => onUpdateQuantity(item.id, item.itemType, 1)}
+                            className="w-8 h-8 min-h-[44px] min-w-[44px] rounded-lg bg-white/[0.04] hover:bg-white/[0.08] flex items-center justify-center transition-all active:scale-90"
+                            aria-label={`Increase quantity of ${item.name}`}
+                          >
+                            <Plus className="w-3 h-3 text-white/50" />
+                          </button>
+                        </>
+                      )}
                     </div>
                     <div className="text-sm font-bold whitespace-nowrap tabular-nums" style={{ color: primaryColor }}>
                       {formatPrice(item.price * item.quantity, item.currency)}
