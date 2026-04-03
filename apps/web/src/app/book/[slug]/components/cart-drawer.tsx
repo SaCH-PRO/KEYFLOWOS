@@ -271,7 +271,11 @@ export function CartDrawer({
                   <span className="text-white/50">Subtotal ({cartCount} {cartCount === 1 ? "item" : "items"})</span>
                   <span className="text-white/70">{formatPrice(cartTotal, cartCurrency)}</span>
                 </div>
-                <div className="flex justify-between items-center">
+                <div className="flex justify-between items-center text-[11px]">
+                  <span className="text-white/30">Tax</span>
+                  <span className="text-white/30">Calculated at checkout</span>
+                </div>
+                <div className="flex justify-between items-center pt-1.5 border-t border-white/[0.04]">
                   <span className="text-base font-semibold text-white/80">Total</span>
                   <span className="text-xl font-bold tabular-nums" style={{ color: primaryColor }}>
                     {formatPrice(cartTotal, cartCurrency)}
