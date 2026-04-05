@@ -37,7 +37,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Tiered Monetization:** Plan comparison grid with feature breakdowns.
 - **Observability:** Request correlation ID, logging interceptor, and health checks.
 - **Learn Module:** MasterClass functionality with My Learning, Catalog, and Certificates.
-- **Profile Module:** Centralized personal information, professional identity, security settings, and profile completeness.
+- **Profile Module:** Modular accordion-based UI (personal-info-section, professional-profile-section, security-section) with profile completeness ring, CSS variable theming, and unsaved-changes protection. Business Guidance Engine dashboard with AI health scores and roadmap.
 - **Community Module:** Feed and Cohorts with social functionalities and public profile views.
 - **Navigation & Command System:** Sidebar, breadcrumbs, Command Palette (⌘K), and persistent AI Copilot quick-action chips.
 - **Error Boundaries:** Dedicated `error.tsx` boundaries for all core modules.
