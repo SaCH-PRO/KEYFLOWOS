@@ -290,7 +290,13 @@ export class GuidanceAssessmentService {
     });
 
     if (!profile) {
-      throw new NotFoundException('Guidance profile not found.');
+      return {
+        status: 'NOT_STARTED',
+        latestAssessment: null,
+        topRecommendations: [],
+        nextRoadmapItems: [],
+        progressHistory: [],
+      };
     }
 
     return {
