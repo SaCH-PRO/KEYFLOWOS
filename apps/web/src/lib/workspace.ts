@@ -137,21 +137,22 @@ export async function refreshWorkspace(): Promise<string | null> {
 export function getUserDisplayName(): string {
   const user = getCachedUser();
   if (!user) return "";
+  if (user.name) return user.name;
   if (user.firstName) return user.firstName;
-  if (user.name) return user.name.split(" ")[0] || user.name;
   return user.email?.split("@")[0] || "";
 }
 
 export function getUserInitials(): string {
   const user = getCachedUser();
   if (!user) return "KF";
-  if (user.firstName && user.lastName) {
-    return `${user.firstName[0]}${user.lastName[0]}`.toUpperCase();
-  }
   if (user.name) {
     const parts = user.name.split(" ");
     if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
     return user.name.substring(0, 2).toUpperCase();
   }
+  if (user.firstName && user.lastName) {
+    return `${user.firstName[0]}${user.lastName[0]}`.toUpperCase();
+  }
+  if (user.firstName) return user.firstName.substring(0, 2).toUpperCase();
   return user.email?.substring(0, 2).toUpperCase() || "KF";
 }
