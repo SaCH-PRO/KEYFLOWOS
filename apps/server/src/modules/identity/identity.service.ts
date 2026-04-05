@@ -327,15 +327,14 @@ export class IdentityService {
 
     const existingUser = await this.prisma.client.user.findUnique({ where: { id: input.userId } });
     let user;
-    const userData: Record<string, unknown> = {};
-    if (input.firstName) userData.firstName = input.firstName;
-    if (input.lastName) userData.lastName = input.lastName;
-    if (input.phone) userData.phone = input.phone;
-    if (input.avatarUrl) userData.avatarUrl = input.avatarUrl;
 
     if (existingUser) {
-      const updateData: Record<string, unknown> = { ...userData };
-      if (desiredName && existingUser.name !== desiredName) {
+      const updateData: Record<string, unknown> = {};
+      if (input.firstName && !existingUser.firstName) updateData.firstName = input.firstName;
+      if (input.lastName && !existingUser.lastName) updateData.lastName = input.lastName;
+      if (input.phone && !existingUser.phone) updateData.phone = input.phone;
+      if (input.avatarUrl && !existingUser.avatarUrl) updateData.avatarUrl = input.avatarUrl;
+      if (desiredName && !existingUser.name) {
         updateData.name = desiredName;
       }
 
@@ -348,6 +347,12 @@ export class IdentityService {
         user = existingUser;
       }
     } else {
+      const userData: Record<string, unknown> = {};
+      if (input.firstName) userData.firstName = input.firstName;
+      if (input.lastName) userData.lastName = input.lastName;
+      if (input.phone) userData.phone = input.phone;
+      if (input.avatarUrl) userData.avatarUrl = input.avatarUrl;
+
       user = await this.prisma.client.user.create({
         data: {
           id: input.userId,
