@@ -1,4 +1,4 @@
-import { Body, Controller, ForbiddenException, Get, Inject, NotFoundException, Param, Patch, Post, UseGuards, Delete, Query, Res } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Inject, NotFoundException, Param, Patch, Post, UseGuards, Delete, Query, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { BookingsService } from './bookings.service';
 import { CalendarService } from './calendar.service';
@@ -70,6 +70,9 @@ export class BookingsController {
     @Param('businessId') businessId: string,
     @Body() body: CreateBookingDto,
   ) {
+    if (!body.contactId) {
+      throw new BadRequestException('contactId is required');
+    }
     return this.bookings.createBooking({
       businessId,
       contactId: body.contactId,
