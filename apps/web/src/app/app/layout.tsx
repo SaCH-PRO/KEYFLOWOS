@@ -36,6 +36,7 @@ import {
   Globe,
   Link2,
   FileText,
+  User,
 } from "lucide-react";
 import { AiCommandBar, AiCopilotTrigger } from "./_command/ai-command-bar";
 import { usePlanLimitHandler } from "@/hooks/use-plan";
@@ -233,6 +234,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
   const { setAccent1, setAccent2 } = useThemeColors();
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -326,10 +329,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
         setNotifOpen(false);
       }
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
     };
-    if (notifOpen) document.addEventListener("mousedown", handleClickOutside);
+    if (notifOpen || userMenuOpen) document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [notifOpen]);
+  }, [notifOpen, userMenuOpen]);
 
   useEffect(() => {
     if (mobileDrawerOpen) {
@@ -609,29 +615,71 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 )}
               </div>
 
-              <div className="hidden sm:flex items-center gap-1.5">
-                {avatarUrl ? (
-                  <img 
-                    src={avatarUrl} 
-                    alt={displayName || "User"} 
-                    className="h-7 w-7 rounded-full object-cover"
-                  />
-                ) : (
-                  <div 
-                    className="h-7 w-7 rounded-full flex items-center justify-center text-[11px] font-semibold text-white"
-                    style={{ background: "hsl(var(--kf-accent1))" }}
+              <div className="hidden sm:flex items-center relative" ref={userMenuRef}>
+                <button
+                  onClick={() => setUserMenuOpen((v) => !v)}
+                  className="flex items-center gap-1.5 p-1 rounded-lg hover:bg-muted transition-colors min-h-[44px]"
+                  aria-label="User menu"
+                  aria-expanded={userMenuOpen}
+                  aria-haspopup="true"
+                >
+                  {avatarUrl ? (
+                    <img 
+                      src={avatarUrl} 
+                      alt={displayName || "User"} 
+                      className="h-7 w-7 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div 
+                      className="h-7 w-7 rounded-full flex items-center justify-center text-[11px] font-semibold text-white"
+                      style={{ background: "hsl(var(--kf-accent1))" }}
+                    >
+                      {initials}
+                    </div>
+                  )}
+                  <ChevronDown className={`w-3 h-3 text-muted-foreground transition-transform duration-200 ${userMenuOpen ? "rotate-180" : ""}`} />
+                </button>
+
+                {userMenuOpen && (
+                  <div
+                    className="absolute right-0 top-full mt-1 w-48 rounded-xl border border-border shadow-xl z-50 py-1 overflow-hidden"
+                    style={{ background: "hsl(var(--kf-card))" }}
+                    role="menu"
                   >
-                    {initials}
+                    <div className="px-3 py-2 border-b border-border">
+                      <p className="text-xs font-medium text-foreground truncate">{displayName || "User"}</p>
+                      <p className="text-[10px] text-muted-foreground truncate mt-0.5">{getCachedUser()?.email}</p>
+                    </div>
+                    <Link
+                      href="/app/settings/profile"
+                      onClick={() => setUserMenuOpen(false)}
+                      className="flex items-center gap-2.5 px-3 py-2.5 text-xs text-foreground/80 hover:bg-muted transition-colors min-h-[44px]"
+                      role="menuitem"
+                    >
+                      <User className="w-3.5 h-3.5 text-muted-foreground" />
+                      My Profile
+                    </Link>
+                    <Link
+                      href="/app/settings"
+                      onClick={() => setUserMenuOpen(false)}
+                      className="flex items-center gap-2.5 px-3 py-2.5 text-xs text-foreground/80 hover:bg-muted transition-colors min-h-[44px]"
+                      role="menuitem"
+                    >
+                      <Settings className="w-3.5 h-3.5 text-muted-foreground" />
+                      Settings
+                    </Link>
+                    <div className="border-t border-border mt-1 pt-1">
+                      <button
+                        onClick={() => { setUserMenuOpen(false); handleLogout(); }}
+                        className="flex items-center gap-2.5 px-3 py-2.5 text-xs text-foreground/80 hover:bg-muted transition-colors w-full text-left min-h-[44px]"
+                        role="menuitem"
+                      >
+                        <LogOut className="w-3.5 h-3.5 text-muted-foreground" />
+                        Log out
+                      </button>
+                    </div>
                   </div>
                 )}
-                <button
-                  onClick={handleLogout}
-                  className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                  aria-label="Log out"
-                  title="Log out"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                </button>
               </div>
             </div>
           </header>
@@ -672,7 +720,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
 
             {displayName && (
-              <div className="px-3 py-2.5 border-b border-border flex items-center gap-2.5">
+              <Link
+                href="/app/settings/profile"
+                onClick={() => setMobileDrawerOpen(false)}
+                className="px-3 py-2.5 border-b border-border flex items-center gap-2.5 hover:bg-muted transition-colors min-h-[44px]"
+              >
                 {avatarUrl ? (
                   <img src={avatarUrl} alt="" className="h-7 w-7 rounded-full object-cover" />
                 ) : (
@@ -685,8 +737,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 )}
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{displayName}</p>
+                  <p className="text-[10px] text-muted-foreground truncate">View profile</p>
                 </div>
-              </div>
+                <ChevronDown className="w-3 h-3 text-muted-foreground -rotate-90" />
+              </Link>
             )}
 
             <div className="flex-1 py-2 px-2">
