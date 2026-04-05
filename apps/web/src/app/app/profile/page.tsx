@@ -250,7 +250,7 @@ export default function ProfileSettingsPage() {
             )}
           </motion.div>
         ) : (
-          <motion.div key="profile" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }} className="space-y-6">
+          <motion.div key="profile" variants={stagger} initial="hidden" animate="show" exit={{ opacity: 0, y: -8 }} className="space-y-6">
             <AnimatePresence>
               {status && (
                 <motion.div
