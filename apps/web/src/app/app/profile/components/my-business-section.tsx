@@ -206,7 +206,7 @@ export default function MyBusinessSection({
               <p className="text-[10px] mt-1 opacity-60">Appears on invoices, storefront, and all customer-facing pages</p>
             </label>
 
-            <label className="block text-xs text-muted-foreground">
+            <div className="block text-xs text-muted-foreground">
               <div className="flex items-center justify-between mb-1.5">
                 <div className="flex items-center gap-1.5 font-medium">
                   <SparklesIcon className="h-3 w-3" />
@@ -214,9 +214,10 @@ export default function MyBusinessSection({
                   <AiFieldBadge />
                 </div>
                 <button
+                  type="button"
                   onClick={() => handleAiGenerateField("tagline")}
                   disabled={generatingTagline || !form.name}
-                  className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-all"
+                  className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-all min-h-[44px]"
                   style={{
                     background: "hsl(var(--kf-accent1) / 0.1)",
                     color: "hsl(var(--kf-accent1))",
@@ -236,9 +237,9 @@ export default function MyBusinessSection({
                 <p className="text-[10px] opacity-60">Shown on your storefront hero section</p>
                 <p className="text-[10px]">{form.tagline.length}/100</p>
               </div>
-            </label>
+            </div>
 
-            <label className="block text-xs text-muted-foreground">
+            <div className="block text-xs text-muted-foreground">
               <div className="flex items-center justify-between mb-1.5">
                 <div className="flex items-center gap-1.5 font-medium">
                   <FileText className="h-3 w-3" />
@@ -246,9 +247,10 @@ export default function MyBusinessSection({
                   <AiFieldBadge />
                 </div>
                 <button
+                  type="button"
                   onClick={() => handleAiGenerateField("description")}
                   disabled={generatingDesc || !form.name}
-                  className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-all"
+                  className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-all min-h-[44px]"
                   style={{
                     background: "hsl(var(--kf-accent1) / 0.1)",
                     color: "hsl(var(--kf-accent1))",
@@ -270,7 +272,7 @@ export default function MyBusinessSection({
                 <p className="text-[10px] opacity-60">Used on your storefront and in AI-powered recommendations</p>
                 <p className="text-[10px]">{form.description.length}/500</p>
               </div>
-            </label>
+            </div>
           </div>
         </AccordionSection>
 
