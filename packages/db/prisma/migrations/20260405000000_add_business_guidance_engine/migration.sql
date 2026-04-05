@@ -243,17 +243,42 @@ CREATE TABLE "assessment_results" (
 );
 
 -- CreateTable
+CREATE TABLE "guidance_assessments" (
+    "id" TEXT NOT NULL,
+    "business_id" TEXT NOT NULL,
+    "business_type" TEXT,
+    "business_stage" TEXT,
+    "scores" JSONB,
+    "flags" JSONB,
+    "ai_summary" JSONB,
+    "status" TEXT NOT NULL DEFAULT 'COMPLETED',
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "guidance_assessments_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "guidance_recommendations" (
     "id" TEXT NOT NULL,
-    "guidance_profile_id" TEXT NOT NULL,
+    "guidance_profile_id" TEXT,
+    "assessment_id" TEXT,
+    "template_id" TEXT,
     "title" TEXT NOT NULL,
     "description" TEXT NOT NULL,
     "category" TEXT NOT NULL,
     "priority" TEXT NOT NULL DEFAULT 'MEDIUM',
-    "impact" TEXT NOT NULL DEFAULT 'MEDIUM',
-    "effort" TEXT NOT NULL DEFAULT 'MEDIUM',
+    "impact_level" TEXT,
+    "urgency" TEXT DEFAULT 'planned',
+    "rationale" TEXT,
+    "suggested_action" TEXT,
+    "estimated_difficulty" TEXT,
+    "impact" TEXT DEFAULT 'MEDIUM',
+    "effort" TEXT DEFAULT 'MEDIUM',
     "status" TEXT NOT NULL DEFAULT 'PENDING',
     "action_url" TEXT,
+    "score_value" INTEGER,
+    "trigger_score_key" TEXT,
     "completed_at" TIMESTAMP(3),
     "dismissed_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -265,11 +290,17 @@ CREATE TABLE "guidance_recommendations" (
 -- CreateTable
 CREATE TABLE "roadmap_items" (
     "id" TEXT NOT NULL,
-    "guidance_profile_id" TEXT NOT NULL,
-    "title" TEXT NOT NULL,
-    "description" TEXT NOT NULL,
-    "category" TEXT NOT NULL,
-    "sequence_order" INTEGER NOT NULL,
+    "guidance_profile_id" TEXT,
+    "assessment_id" TEXT,
+    "title" TEXT,
+    "description" TEXT,
+    "category" TEXT,
+    "sequence_order" INTEGER,
+    "order_index" INTEGER,
+    "action_title" TEXT,
+    "why_it_matters" TEXT,
+    "expected_outcome" TEXT,
+    "linked_score_area" TEXT,
     "estimated_days" INTEGER,
     "status" TEXT NOT NULL DEFAULT 'PENDING',
     "depends_on" TEXT[] DEFAULT ARRAY[]::TEXT[],
@@ -371,6 +402,12 @@ CREATE INDEX "assessment_results_guidance_profile_id_idx" ON "assessment_results
 CREATE INDEX "assessment_results_guidance_profile_id_created_at_idx" ON "assessment_results"("guidance_profile_id", "created_at");
 
 -- CreateIndex
+CREATE INDEX "guidance_assessments_business_id_idx" ON "guidance_assessments"("business_id");
+
+-- CreateIndex
+CREATE INDEX "guidance_assessments_business_id_created_at_idx" ON "guidance_assessments"("business_id", "created_at");
+
+-- CreateIndex
 CREATE INDEX "guidance_recommendations_guidance_profile_id_idx" ON "guidance_recommendations"("guidance_profile_id");
 
 -- CreateIndex
@@ -380,6 +417,9 @@ CREATE INDEX "guidance_recommendations_guidance_profile_id_status_idx" ON "guida
 CREATE INDEX "guidance_recommendations_guidance_profile_id_priority_idx" ON "guidance_recommendations"("guidance_profile_id", "priority");
 
 -- CreateIndex
+CREATE INDEX "guidance_recommendations_assessment_id_idx" ON "guidance_recommendations"("assessment_id");
+
+-- CreateIndex
 CREATE INDEX "roadmap_items_guidance_profile_id_idx" ON "roadmap_items"("guidance_profile_id");
 
 -- CreateIndex
@@ -387,6 +427,9 @@ CREATE INDEX "roadmap_items_guidance_profile_id_sequence_order_idx" ON "roadmap_
 
 -- CreateIndex
 CREATE INDEX "roadmap_items_guidance_profile_id_status_idx" ON "roadmap_items"("guidance_profile_id", "status");
+
+-- CreateIndex
+CREATE INDEX "roadmap_items_assessment_id_idx" ON "roadmap_items"("assessment_id");
 
 -- CreateIndex
 CREATE INDEX "progress_snapshots_guidance_profile_id_idx" ON "progress_snapshots"("guidance_profile_id");
@@ -430,11 +473,23 @@ ALTER TABLE "goals_profiles" ADD CONSTRAINT "goals_profiles_guidance_profile_id_
 -- AddForeignKey
 ALTER TABLE "assessment_results" ADD CONSTRAINT "assessment_results_guidance_profile_id_fkey" FOREIGN KEY ("guidance_profile_id") REFERENCES "business_guidance_profiles"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+-- CreateIndex (expression index for public token lookup on marketplace_orders)
+CREATE INDEX IF NOT EXISTS "marketplace_orders_metadata_public_token_idx" ON "marketplace_orders" ((metadata->>'publicToken')) WHERE metadata->>'publicToken' IS NOT NULL;
+
+-- AddForeignKey
+ALTER TABLE "guidance_assessments" ADD CONSTRAINT "guidance_assessments_business_id_fkey" FOREIGN KEY ("business_id") REFERENCES "businesses"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
 -- AddForeignKey
 ALTER TABLE "guidance_recommendations" ADD CONSTRAINT "guidance_recommendations_guidance_profile_id_fkey" FOREIGN KEY ("guidance_profile_id") REFERENCES "business_guidance_profiles"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "guidance_recommendations" ADD CONSTRAINT "guidance_recommendations_assessment_id_fkey" FOREIGN KEY ("assessment_id") REFERENCES "guidance_assessments"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "roadmap_items" ADD CONSTRAINT "roadmap_items_guidance_profile_id_fkey" FOREIGN KEY ("guidance_profile_id") REFERENCES "business_guidance_profiles"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "roadmap_items" ADD CONSTRAINT "roadmap_items_assessment_id_fkey" FOREIGN KEY ("assessment_id") REFERENCES "guidance_assessments"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "progress_snapshots" ADD CONSTRAINT "progress_snapshots_guidance_profile_id_fkey" FOREIGN KEY ("guidance_profile_id") REFERENCES "business_guidance_profiles"("id") ON DELETE CASCADE ON UPDATE CASCADE;

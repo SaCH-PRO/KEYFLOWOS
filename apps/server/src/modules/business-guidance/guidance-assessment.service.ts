@@ -246,7 +246,7 @@ export class GuidanceAssessmentService {
             weaknesses: [output.weakestArea],
             risks: output.flags.filter(f => f.severity === 'critical').map(f => f.title),
             opportunities: [],
-            metrics: output.financialMetrics as any,
+            metrics: output.financialMetrics as unknown as Record<string, unknown>,
             flags: output.flags.map(f => f.id),
           },
         });
