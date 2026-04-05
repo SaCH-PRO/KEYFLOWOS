@@ -7,10 +7,12 @@ import { GuidanceRecommendationService } from './guidance-recommendation.service
 import { GuidanceRoadmapService } from './guidance-roadmap.service';
 import { GuidanceAiFeedbackService } from './guidance-ai-feedback.service';
 import { GuidanceAssessmentService } from './guidance-assessment.service';
+import { PrismaModule } from '../../core/prisma/prisma.module';
 import { AiModule } from '../ai/ai.module';
+import { AiUsageService } from '../ai/ai-usage.service';
 
 @Module({
-  imports: [AiModule],
+  imports: [PrismaModule, AiModule],
   controllers: [BusinessGuidanceController],
   providers: [
     GuidanceProfileService,
@@ -20,6 +22,10 @@ import { AiModule } from '../ai/ai.module';
     GuidanceRoadmapService,
     GuidanceAiFeedbackService,
     GuidanceAssessmentService,
+    {
+      provide: 'AI_USAGE_SERVICE',
+      useExisting: AiUsageService,
+    },
   ],
   exports: [
     GuidanceProfileService,
