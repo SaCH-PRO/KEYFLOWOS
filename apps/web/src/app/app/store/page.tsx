@@ -21,6 +21,7 @@ import { StoreHeaderActions } from "./components/store-header-actions";
 import { StorefrontTab } from "./components/storefront-tab";
 import { ProductsHoursTab } from "./components/products-hours-tab";
 import { PerformanceTab } from "./components/performance-tab";
+import { FulfillmentTab } from "./components/fulfillment-tab";
 import { VIEW_TABS, type TabKey } from "./components/store-types";
 
 type HeroSection = { imageUrl?: string; coverImageUrl?: string };
@@ -83,7 +84,8 @@ export default function StorePage() {
     shortcuts: [
       { key: "1", description: "Storefront", action: () => handleTabChange("storefront") },
       { key: "2", description: "Products & Hours", action: () => handleTabChange("products") },
-      { key: "3", description: "Performance", action: () => handleTabChange("performance") },
+      { key: "3", description: "Fulfillment", action: () => handleTabChange("fulfillment") },
+      { key: "4", description: "Performance", action: () => handleTabChange("performance") },
       { key: "r", description: "Refresh", action: () => { void s.loadData(); } },
     ],
   }], [handleTabChange, s.loadData]);
@@ -109,6 +111,7 @@ export default function StorePage() {
           <motion.div key={activeTab} custom={dirRef.current} variants={SLIDE} initial="enter" animate="center" exit="exit" transition={{ type: "spring", bounce: 0.15, duration: 0.35 }}>
             {activeTab === "storefront" && <div data-walkthrough="store-customize"><StorefrontTab businessId={s.businessId} storeEnabled={s.storeEnabled} slug={s.storeSlug} currentSlug={s.businessData?.slug ?? null} publicUrl={s.getPublicBookingUrl()} onSlugChange={s.setStoreSlug} onSaveSlug={s.handleSaveSlug} slugSaving={s.slugSaving} storefrontConfig={cfg} onConfigChange={s.handleConfigChange} onSaveConfig={s.handleSaveConfig} configSaving={s.configSaving} businessData={s.businessData} services={s.services} commerceProducts={s.commerceProducts} hasHeroImage={!!(cfg.hero as HeroSection | undefined)?.imageUrl || !!(cfg.hero as HeroSection | undefined)?.coverImageUrl} hoursConfigured={Object.values(s.businessHours).some((h) => (h as BusinessHourEntry)?.enabled)} hasTestimonials={!!((cfg.socialProof as SocialProofSection | undefined)?.testimonials?.length)} onTabChange={handleTabChange} /></div>}
             {activeTab === "products" && <ProductsHoursTab commerceProducts={s.commerceProducts} storeServiceNames={s.storeServiceNames} storeItemCount={s.storeItemCount} processingItems={s.processingItems} confirmRemove={s.confirmRemove} onToggleItem={s.handleToggleStoreItem} onSelectAll={s.handleSelectAll} onDeselectAll={s.handleDeselectAll} onConfirmRemoveChange={s.setConfirmRemove} onDeleteFromStore={s.handleDeleteServiceFromStore} services={s.services} businessHours={s.businessHours} onHoursChange={s.setBusinessHours} onSaveHours={s.handleSaveHours} hoursSaving={s.hoursSaving} onReorderProducts={s.handleReorderProducts} />}
+            {activeTab === "fulfillment" && <FulfillmentTab businessId={s.businessId} />}
             {activeTab === "performance" && <div data-walkthrough="store-analytics"><PerformanceTab businessId={s.businessId} storeEnabled={s.storeEnabled} publicUrl={s.getPublicBookingUrl()} servicesCount={s.services.length} productsCount={s.commerceProducts.length} driftedCount={s.driftedItems.length} analytics={s.overviewAnalytics} businessName={s.businessData?.name} onTabChange={handleTabChange} onToggleStore={s.toggleStoreEnabled} /></div>}
           </motion.div>
         </AnimatePresence>

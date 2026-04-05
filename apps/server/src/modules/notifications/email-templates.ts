@@ -232,3 +232,167 @@ export function bookingCancelledTemplate(ctx: TemplateContext & {
   ].join('');
   return { subject, html: baseLayout(ctx, subject, body) };
 }
+
+export function orderConfirmedTemplate(ctx: TemplateContext & {
+  orderNumber: string;
+  items: { name: string; quantity: number; unitPrice: number; total: number }[];
+  subtotal: number;
+  shippingFee: number;
+  total: number;
+  currency: string;
+  estimatedDelivery?: string;
+  orderStatusUrl?: string;
+}): { subject: string; html: string } {
+  const subject = `Order ${ctx.orderNumber} confirmed — ${ctx.businessName}`;
+  const itemRows = ctx.items.map(item =>
+    detailRow(`${item.name} &times; ${item.quantity}`, formatCurrency(item.total, ctx.currency)),
+  ).join('');
+  const body = [
+    heading('Order Confirmed &#10003;'),
+    paragraph(`Hi ${ctx.customerName},`),
+    paragraph(`Thank you for your order! We've received it and will begin processing shortly.`),
+    detailTable([
+      detailRow('Order #', ctx.orderNumber),
+      itemRows,
+      detailRow('Subtotal', formatCurrency(ctx.subtotal, ctx.currency)),
+      ctx.shippingFee > 0 ? detailRow('Shipping', formatCurrency(ctx.shippingFee, ctx.currency)) : '',
+      detailRow('Total', `<strong>${formatCurrency(ctx.total, ctx.currency)}</strong>`),
+      ctx.estimatedDelivery ? detailRow('Estimated Delivery', ctx.estimatedDelivery) : '',
+    ].join('')),
+    ctx.orderStatusUrl ? ctaButton('Track Your Order', ctx.orderStatusUrl) : '',
+    paragraph('We\'ll send you updates as your order progresses.'),
+  ].join('');
+  return { subject, html: baseLayout(ctx, subject, body) };
+}
+
+export function orderShippedTemplate(ctx: TemplateContext & {
+  orderNumber: string;
+  carrier?: string;
+  trackingNumber?: string;
+  trackingUrl?: string;
+  estimatedDelivery?: string;
+  orderStatusUrl?: string;
+}): { subject: string; html: string } {
+  const subject = `Your order ${ctx.orderNumber} has shipped — ${ctx.businessName}`;
+  const body = [
+    heading('Order Shipped &#128230;'),
+    paragraph(`Hi ${ctx.customerName},`),
+    paragraph(`Great news! Your order has been shipped and is on its way to you.`),
+    detailTable([
+      detailRow('Order #', ctx.orderNumber),
+      ctx.carrier ? detailRow('Carrier', ctx.carrier) : '',
+      ctx.trackingNumber ? detailRow('Tracking #', ctx.trackingNumber) : '',
+      ctx.estimatedDelivery ? detailRow('Estimated Delivery', ctx.estimatedDelivery) : '',
+    ].join('')),
+    ctx.trackingUrl ? ctaButton('Track Shipment', ctx.trackingUrl) : '',
+    ctx.orderStatusUrl && !ctx.trackingUrl ? ctaButton('View Order Status', ctx.orderStatusUrl) : '',
+    paragraph('Thank you for shopping with us!'),
+  ].join('');
+  return { subject, html: baseLayout(ctx, subject, body) };
+}
+
+export function orderDeliveredTemplate(ctx: TemplateContext & {
+  orderNumber: string;
+  deliveredAt: Date | string;
+  orderStatusUrl?: string;
+}): { subject: string; html: string } {
+  const subject = `Your order ${ctx.orderNumber} has been delivered — ${ctx.businessName}`;
+  const body = [
+    heading('Order Delivered &#127881;'),
+    paragraph(`Hi ${ctx.customerName},`),
+    paragraph(`Your order has been delivered! We hope you love it.`),
+    detailTable([
+      detailRow('Order #', ctx.orderNumber),
+      detailRow('Delivered On', formatDate(ctx.deliveredAt)),
+    ].join('')),
+    ctx.orderStatusUrl ? ctaButton('View Order Details', ctx.orderStatusUrl) : '',
+    paragraph('Thank you for your purchase. We appreciate your business!'),
+  ].join('');
+  return { subject, html: baseLayout(ctx, subject, body) };
+}
+
+export function orderRefundedTemplate(ctx: TemplateContext & {
+  orderNumber: string;
+  refundAmount: number;
+  currency: string;
+  reason?: string;
+  orderStatusUrl?: string;
+}): { subject: string; html: string } {
+  const subject = `Refund processed for order ${ctx.orderNumber} — ${ctx.businessName}`;
+  const body = [
+    heading('Refund Processed'),
+    paragraph(`Hi ${ctx.customerName},`),
+    paragraph(`A refund has been processed for your order. Here are the details:`),
+    detailTable([
+      detailRow('Order #', ctx.orderNumber),
+      detailRow('Refund Amount', formatCurrency(ctx.refundAmount, ctx.currency)),
+      ctx.reason ? detailRow('Reason', ctx.reason) : '',
+    ].join('')),
+    paragraph('The refund should appear in your account within 5-10 business days, depending on your payment method.'),
+    ctx.orderStatusUrl ? ctaButton('View Order Details', ctx.orderStatusUrl) : '',
+    paragraph('If you have any questions, please don\'t hesitate to contact us.'),
+  ].join('');
+  return { subject, html: baseLayout(ctx, subject, body) };
+}
+
+export function orderCancelledTemplate(ctx: TemplateContext & {
+  orderNumber: string;
+  reason?: string;
+  orderStatusUrl?: string;
+}): { subject: string; html: string } {
+  const subject = `Order ${ctx.orderNumber} has been cancelled — ${ctx.businessName}`;
+  const body = [
+    heading('Order Cancelled'),
+    paragraph(`Hi ${ctx.customerName},`),
+    paragraph(`Your order has been cancelled.`),
+    detailTable([
+      detailRow('Order #', ctx.orderNumber),
+      ctx.reason ? detailRow('Reason', ctx.reason) : '',
+    ].join('')),
+    paragraph('If a payment was made, a refund will be processed shortly.'),
+    ctx.orderStatusUrl ? ctaButton('View Order Details', ctx.orderStatusUrl) : '',
+    paragraph('If you have any questions, please contact us.'),
+  ].join('');
+  return { subject, html: baseLayout(ctx, subject, body) };
+}
+
+export function sellerNewOrderTemplate(ctx: TemplateContext & {
+  orderNumber: string;
+  customerName: string;
+  itemCount: number;
+  total: number;
+  currency: string;
+}): { subject: string; html: string } {
+  const subject = `New order ${ctx.orderNumber} received`;
+  const body = [
+    heading('New Order Received &#128276;'),
+    paragraph(`You have a new order!`),
+    detailTable([
+      detailRow('Order #', ctx.orderNumber),
+      detailRow('Customer', ctx.customerName),
+      detailRow('Items', String(ctx.itemCount)),
+      detailRow('Total', formatCurrency(ctx.total, ctx.currency)),
+    ].join('')),
+    paragraph('Log in to your dashboard to review and fulfill this order.'),
+  ].join('');
+  return { subject, html: baseLayout(ctx, subject, body) };
+}
+
+export function sellerLowStockTemplate(ctx: TemplateContext & {
+  productName: string;
+  currentStock: number;
+  reorderLevel: number;
+}): { subject: string; html: string } {
+  const subject = `Low stock alert: ${ctx.productName}`;
+  const body = [
+    heading('Low Stock Alert &#9888;'),
+    paragraph(`A product in your inventory is running low.`),
+    detailTable([
+      detailRow('Product', ctx.productName),
+      detailRow('Current Stock', String(ctx.currentStock)),
+      detailRow('Reorder Level', String(ctx.reorderLevel)),
+    ].join('')),
+    paragraph('Consider restocking to avoid running out.'),
+  ].join('');
+  return { subject, html: baseLayout(ctx, subject, body) };
+}

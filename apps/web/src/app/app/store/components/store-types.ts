@@ -1,4 +1,4 @@
-import { Store, ShoppingBag, BarChart3 } from "lucide-react";
+import { Store, ShoppingBag, BarChart3, Truck } from "lucide-react";
 
 export type Banner = { text: string; type: "success" | "error" | "info" | "warning" };
 
@@ -11,11 +11,12 @@ export type DriftedItem = {
   commerceDuration: number | null;
 };
 
-export type TabKey = "storefront" | "products" | "performance";
+export type TabKey = "storefront" | "products" | "fulfillment" | "performance";
 
 export const VIEW_TABS: { key: TabKey; label: string; icon: React.ElementType; tooltip?: string }[] = [
   { key: "storefront", label: "Storefront", icon: Store, tooltip: "Configure your public online store page — branding, layout, and share link." },
   { key: "products", label: "Products & Hours", icon: ShoppingBag, tooltip: "Manage which products and services appear on your storefront and set hours." },
+  { key: "fulfillment", label: "Fulfillment", icon: Truck, tooltip: "Configure delivery methods, shipping zones, and manage order fulfillment." },
   { key: "performance", label: "Performance", icon: BarChart3, tooltip: "Store traffic, conversion rates, and top-selling products." },
 ];
 
