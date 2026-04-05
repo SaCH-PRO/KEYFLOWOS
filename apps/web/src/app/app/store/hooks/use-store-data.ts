@@ -328,11 +328,18 @@ export function useStoreData() {
     }
   }
 
+  const ARRAY_CONFIG_KEYS = new Set(['sections', 'faqEntries']);
+
   function handleConfigChange(section: string, updates: Record<string, any>) {
-    setStorefrontConfig((prev) => ({
-      ...prev,
-      [section]: { ...(prev as any)[section], ...updates },
-    }));
+    setStorefrontConfig((prev) => {
+      if (ARRAY_CONFIG_KEYS.has(section)) {
+        return { ...prev, [section]: updates };
+      }
+      return {
+        ...prev,
+        [section]: { ...(prev as any)[section], ...updates },
+      };
+    });
   }
 
   function handleReorderProducts(orderedIds: string[]) {
