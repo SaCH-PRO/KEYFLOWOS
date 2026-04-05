@@ -17,7 +17,7 @@ export const StoreSkeleton = React.memo(function StoreSkeleton() {
       </div>
 
       <div className="flex gap-1">
-        {["Overview", "Customize", "Products", "Hours", "Settings"].map((tab, i) => (
+        {["My Store", "Orders", "Insights"].map((tab, i) => (
           <div
             key={tab}
             className="h-10 rounded-t-xl bg-white/[0.04] border-x border-t border-transparent"

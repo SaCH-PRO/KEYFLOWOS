@@ -75,24 +75,32 @@ export function useStoreData() {
 
   useEffect(() => {
     const initWorkspace = async () => {
+      const stored = getStoredBusinessId();
+      if (stored) {
+        setBusinessId(stored);
+      }
       try {
         const fresh = await refreshWorkspace();
         if (fresh) {
           setBusinessId(fresh);
           return;
         }
-        const stored = getStoredBusinessId();
-        if (stored) {
-          setBusinessId(stored);
+      } catch {}
+      if (!stored) {
+        try {
+          await new Promise((r) => setTimeout(r, 1000));
+          const retry = await refreshWorkspace();
+          if (retry) {
+            setBusinessId(retry);
+            return;
+          }
+        } catch {}
+        const fallback = getStoredBusinessId();
+        if (fallback) {
+          setBusinessId(fallback);
         } else {
           setLoading(false);
-        }
-      } catch {
-        const stored = getStoredBusinessId();
-        if (stored) {
-          setBusinessId(stored);
-        } else {
-          setLoading(false);
+          setLoadError("Could not find your workspace. Please refresh the page.");
         }
       }
     };

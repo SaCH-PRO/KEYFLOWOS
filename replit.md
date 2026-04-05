@@ -22,7 +22,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 **Technical Implementations & Features:**
 - **AI-Powered Automation:** Business Autopilot System for archetype inference, revenue model detection, task orchestration, and legal/compliance.
 - **Command Center:** Simplified "Today" surface with greeting header, cash flow forecast, priority queue, and collapsible AI briefing card.
-- **Modules:** Commerce (invoices, payments, revenue analysis), CRM (contact management, lead scoring, churn detection), Bookings (scheduling, capacity, staff management), Marketing (campaigns, content calendar, audience scoring), Store (storefront setup, order engine, layout builder, SEO), Expenses (budgets, vendors, analytics), Projects (Kanban, task tracking), and Automations (playbook editor, templates, activity logs).
+- **Modules:** Commerce (invoices, payments, revenue analysis), CRM (contact management, lead scoring, churn detection), Bookings (scheduling, capacity, staff management), Marketing (campaigns, content calendar, audience scoring), Store (accordion-based filing tab UI with collapsible grouped sections — Setup/Design/Content/Settings — 3 top tabs: My Store, Orders, Insights), Expenses (budgets, vendors, analytics), Projects (Kanban, task tracking), and Automations (playbook editor, templates, activity logs).
 - **AI Copilot System:** Global AI entry point with route-aware context detection, chat drawer, and suggestion nudges.
 - **Billing & Payment:** Multi-method payments, shareable `PaymentLink`s, and subscription billing.
 - **Core Workflows:** Quote-to-Invoice, multi-gateway payment, subscription & billing, and expense tracking.

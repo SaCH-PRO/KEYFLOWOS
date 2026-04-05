@@ -356,11 +356,50 @@ export default function GuidanceDashboard({ onEditProfile }: GuidanceDashboardPr
 
   if (!assessment) {
     return (
-      <div className="kf-card p-8 text-center space-y-3">
-        <Compass className="w-8 h-8 text-muted-foreground mx-auto" />
-        <p className="text-sm font-medium">No assessment yet</p>
-        <p className="text-xs text-muted-foreground">Complete the business guidance wizard to see your dashboard.</p>
-        <Button onClick={onEditProfile}>Start Assessment</Button>
+      <div
+        className="rounded-2xl overflow-hidden"
+        style={{
+          background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.06), hsl(var(--kf-accent2) / 0.04))",
+          border: "1px solid hsl(var(--kf-border) / 0.4)",
+        }}
+      >
+        <div className="p-8 flex flex-col items-center text-center space-y-4">
+          <div
+            className="w-16 h-16 rounded-2xl flex items-center justify-center"
+            style={{ background: "hsl(var(--kf-accent1) / 0.12)" }}
+          >
+            <Compass className="w-8 h-8" style={{ color: "hsl(var(--kf-accent1))" }} />
+          </div>
+          <div className="space-y-1.5">
+            <h3 className="text-lg font-bold" style={{ color: "hsl(var(--kf-foreground))" }}>
+              Your Business Command Center
+            </h3>
+            <p className="text-sm max-w-sm" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+              Complete the Business Guidance assessment to unlock your personalized dashboard
+              with health scores, financial insights, and growth roadmap.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 justify-center">
+            {["Health Score", "Risk Analysis", "Financial Insights", "Growth Roadmap"].map((tag) => (
+              <span
+                key={tag}
+                className="px-2.5 py-1 rounded-lg text-[11px] font-medium"
+                style={{
+                  background: "hsl(var(--kf-accent1) / 0.1)",
+                  color: "hsl(var(--kf-accent1))",
+                }}
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+          <Button onClick={onEditProfile} className="min-h-[44px]">
+            <span className="flex items-center gap-2">
+              <Target className="w-4 h-4" />
+              Start Assessment
+            </span>
+          </Button>
+        </div>
       </div>
     );
   }
