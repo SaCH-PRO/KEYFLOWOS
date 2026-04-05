@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { TransactionalEmailService } from '../notifications/transactional-email.service';
+import { TransactionalEmailService, NotificationType } from '../notifications/transactional-email.service';
 
 @Injectable()
 export class MarketplaceService {
@@ -345,7 +345,7 @@ export class MarketplaceService {
 
     await this.emailService.send({
       businessId,
-      type: 'seller_new_order' as any,
+      type: 'seller_new_order',
       recipientEmail: business.email,
       recipientName: business.name ?? 'Store Owner',
       templateData: {
@@ -820,46 +820,12 @@ export class MarketplaceService {
 
     if (orders.length > 0) {
       const order = orders[0];
-      const meta = (order as any).metadata ?? {};
+      const meta = (order.metadata as Record<string, unknown>) ?? {};
       return {
         ...order,
-        statusTimeline: meta.statusTimeline ?? [],
-        fulfillmentNotes: meta.fulfillmentNotes ?? [],
+        statusTimeline: (meta.statusTimeline as unknown[]) ?? [],
+        fulfillmentNotes: (meta.fulfillmentNotes as unknown[]) ?? [],
       };
-    }
-
-    const allOrders = await this.prisma.client.marketplaceOrder.findMany({
-      include: {
-        items: { include: { product: true } },
-        shipments: true,
-        business: {
-          select: {
-            name: true,
-            email: true,
-            phone: true,
-            logoUrl: true,
-            primaryColor: true,
-            secondaryColor: true,
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    for (const order of allOrders) {
-      const expectedToken = this.generateOrderToken(order.id);
-      if (expectedToken === token) {
-        const meta = (order as any).metadata ?? {};
-        await this.prisma.client.marketplaceOrder.update({
-          where: { id: order.id },
-          data: { metadata: { ...meta, publicToken: token } },
-        });
-        return {
-          ...order,
-          statusTimeline: meta.statusTimeline ?? [],
-          fulfillmentNotes: meta.fulfillmentNotes ?? [],
-        };
-      }
     }
 
     throw new NotFoundException('Order not found');
@@ -948,7 +914,7 @@ export class MarketplaceService {
               status: 'IN_TRANSIT',
               shippedAt: new Date(),
               estimatedDelivery: data.estimatedDelivery ? new Date(data.estimatedDelivery) : undefined,
-              destinationAddress: order.shippingAddress as any,
+              destinationAddress: order.shippingAddress ?? undefined,
             },
           });
         }
@@ -1036,7 +1002,7 @@ export class MarketplaceService {
                 carrier: data.carrier,
                 trackingNumber: data.trackingNumber,
                 status: 'PREPARING',
-                destinationAddress: order.shippingAddress as any,
+                destinationAddress: order.shippingAddress ?? undefined,
               },
             });
           }
@@ -1092,7 +1058,7 @@ export class MarketplaceService {
     }));
 
     const itemsTotal = items.reduce((sum: number, i: any) => sum + (i.total ?? 0), 0);
-    const shippingFee = (order as any).shippingFee ?? 0;
+    const shippingFee = order.shippingFee ?? 0;
 
     const templateData: Record<string, any> = {
       orderNumber: order.orderNumber ?? order.id,
@@ -1113,7 +1079,7 @@ export class MarketplaceService {
 
     await this.emailService.send({
       businessId,
-      type: type as any,
+      type: type as NotificationType,
       recipientEmail: customerEmail,
       recipientName: customerName,
       templateData,
