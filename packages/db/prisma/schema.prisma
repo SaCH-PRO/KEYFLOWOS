@@ -139,6 +139,7 @@ model Business {
   preOrders        PreOrder[]
   purchaseOrders   PurchaseOrder[]
   marketplaceOrders MarketplaceOrder[]
+  promoCodes       PromoCode[]
   crmSequences      CrmSequence[]
   crossModuleWorkflows CrossModuleWorkflow[]
   scheduledAgentJobs   ScheduledAgentJob[]
@@ -1665,6 +1666,9 @@ model MarketplaceOrder {
   notes       String?
   metadata    Json?
 
+  promoCodeId String?  @map("promo_code_id")
+  promoCode   PromoCode? @relation(fields: [promoCodeId], references: [id])
+
   items       MarketplaceOrderItem[]
   shipments   Shipment[]
 
@@ -2311,4 +2315,29 @@ model ProgressSnapshot {
   @@index([guidanceProfileId])
   @@index([guidanceProfileId, snapshotDate])
   @@map("progress_snapshots")
+}
+
+model PromoCode {
+  id            String   @id @default(cuid())
+  businessId    String   @map("business_id")
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  code          String
+  type          String   @default("PERCENT")
+  value         Float    @default(0)
+  minOrderValue Float?   @map("min_order_value")
+  maxUses       Int?     @map("max_uses")
+  currentUses   Int      @default(0) @map("current_uses")
+  validFrom     DateTime? @map("valid_from")
+  validTo       DateTime? @map("valid_to")
+  active        Boolean  @default(true)
+
+  orders        MarketplaceOrder[]
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, code])
+  @@index([businessId])
+  @@map("promo_codes")
 }
