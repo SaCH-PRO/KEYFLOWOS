@@ -12,6 +12,11 @@ import type {
   InvoicePaidPayload,
   InvoiceStatusPayload,
   PostPublishedPayload,
+  StoreOrderCreatedPayload,
+  StoreOrderPaidPayload,
+  StoreOrderShippedPayload,
+  StoreOrderDeliveredPayload,
+  StoreOrderCancelledPayload,
 } from '../../core/event-bus/events.types';
 
 interface WebhookRecord {
@@ -178,6 +183,41 @@ export class WebhookDispatcherService {
   async onPostPublished(payload: PostPublishedPayload) {
     await this.dispatch('post.published', payload.businessId, {
       post: payload.post,
+    });
+  }
+
+  @OnEvent('store_order.created')
+  async onStoreOrderCreated(payload: StoreOrderCreatedPayload) {
+    await this.dispatch('store_order.created', payload.businessId, {
+      order: payload.order,
+    });
+  }
+
+  @OnEvent('store_order.paid')
+  async onStoreOrderPaid(payload: StoreOrderPaidPayload) {
+    await this.dispatch('store_order.paid', payload.businessId, {
+      order: payload.order,
+    });
+  }
+
+  @OnEvent('store_order.shipped')
+  async onStoreOrderShipped(payload: StoreOrderShippedPayload) {
+    await this.dispatch('store_order.shipped', payload.businessId, {
+      order: payload.order,
+    });
+  }
+
+  @OnEvent('store_order.delivered')
+  async onStoreOrderDelivered(payload: StoreOrderDeliveredPayload) {
+    await this.dispatch('store_order.delivered', payload.businessId, {
+      order: payload.order,
+    });
+  }
+
+  @OnEvent('store_order.cancelled')
+  async onStoreOrderCancelled(payload: StoreOrderCancelledPayload) {
+    await this.dispatch('store_order.cancelled', payload.businessId, {
+      order: payload.order,
     });
   }
 

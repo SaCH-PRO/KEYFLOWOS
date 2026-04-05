@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CommerceService } from '../commerce/commerce.service';
@@ -284,6 +284,116 @@ export class PaymentsService {
       this.logger.error(`PayPal order creation failed: ${error.message}`, error.stack);
       throw new Error('Failed to create PayPal order');
     }
+  }
+
+  async createStorePayment(input: {
+    orderId: string;
+    amount: number;
+    currency: string;
+    method: string;
+    businessId: string;
+    returnUrl?: string;
+  }): Promise<{ paymentId?: string; redirectUrl?: string; status: string }> {
+    if (input.method === 'CASH' || input.method === 'MANUAL') {
+      const payment = await this.prisma.client.payment.create({
+        data: {
+          provider: 'manual',
+          providerPaymentId: `manual_${input.orderId}_${Date.now()}`,
+          amount: input.amount,
+          currency: input.currency,
+          status: 'PENDING',
+          method: input.method.toLowerCase(),
+          invoiceId: input.orderId,
+          businessId: input.businessId,
+        },
+      });
+      return { paymentId: payment.id, status: 'PENDING_PAYMENT' };
+    }
+
+    if (input.method === 'WIPAY') {
+      const business = await this.prisma.client.business.findUnique({
+        where: { id: input.businessId },
+        select: { metaData: true },
+      });
+      const meta = (business?.metaData as Record<string, any>) || {};
+      const developerId = meta.wipayApiKey || process.env.WIPAY_API_KEY || '1';
+      const isSandbox = !meta.wipayApiKey && !process.env.WIPAY_API_KEY;
+      const apiUrl = isSandbox
+        ? 'https://sandbox.wipayfinancial.com/v1/gateway'
+        : 'https://tt.wipayfinancial.com/v1/gateway_live';
+
+      const params = new URLSearchParams();
+      params.append('total', input.amount.toFixed(2));
+      params.append('phone', '0000000000');
+      params.append('email', 'customer@store.com');
+      params.append('name', 'Store Customer');
+      params.append('order_id', input.orderId);
+      params.append('return_url', input.returnUrl || '');
+      params.append('developer_id', developerId);
+      params.append('environment', isSandbox ? 'sandbox' : 'live');
+
+      const accountNumber = meta.wipayAccountNumber || process.env.WIPAY_ACCOUNT_NUMBER;
+      if (accountNumber) params.append('account_number', accountNumber);
+
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString(),
+        redirect: 'manual',
+      });
+
+      const locationHeader = response.headers.get('location');
+      if (locationHeader) {
+        return { status: 'REDIRECT', redirectUrl: locationHeader };
+      }
+
+      const body = await response.text();
+      const urlMatch = body.match(/https?:\/\/[^\s"'<>]+/);
+      if (urlMatch) {
+        return { status: 'REDIRECT', redirectUrl: urlMatch[0] };
+      }
+
+      if (response.ok) {
+        return { status: 'REDIRECT', redirectUrl: `${apiUrl}?${params.toString()}` };
+      }
+
+      this.logger.error(`WiPay store checkout failed: ${response.status} - ${body}`);
+      throw new Error('Failed to create WiPay checkout');
+    }
+
+    if (input.method === 'PAYPAL') {
+      const business = await this.prisma.client.business.findUnique({
+        where: { id: input.businessId },
+        select: { metaData: true, name: true },
+      });
+      const meta = (business?.metaData as Record<string, any>) || {};
+      const paypalClientId = meta.paypalClientId || process.env.PAYPAL_CLIENT_ID;
+      const paypalClientSecret = meta.paypalClientSecret || process.env.PAYPAL_CLIENT_SECRET;
+      const paypal = this.getPaypalClient(paypalClientId, paypalClientSecret);
+      if (!paypal) throw new Error('PayPal is not configured');
+
+      const { result } = await paypal.ordersController.createOrder({
+        body: {
+          intent: CheckoutPaymentIntent.Capture,
+          purchaseUnits: [
+            {
+              referenceId: input.orderId,
+              description: `Store Order - ${business?.name ?? 'Store'}`,
+              amount: {
+                currencyCode: input.currency === 'USD' ? 'USD' : 'USD',
+                value: input.amount.toFixed(2),
+              },
+            },
+          ],
+        },
+        prefer: 'return=representation',
+      });
+
+      if (!result.id) throw new Error('PayPal order creation returned no ID');
+      return { paymentId: result.id, status: 'PAYPAL_CREATED' };
+    }
+
+    throw new BadRequestException(`Unsupported payment method: ${input.method}`);
   }
 
   async capturePaypalOrder(orderId: string, invoiceId: string): Promise<any> {

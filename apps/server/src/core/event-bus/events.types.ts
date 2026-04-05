@@ -170,6 +170,31 @@ export class ExpenseCreatedPayload {
   businessId!: string;
 }
 
+export class StoreOrderCreatedPayload {
+  order!: any;
+  businessId!: string;
+}
+
+export class StoreOrderPaidPayload {
+  order!: any;
+  businessId!: string;
+}
+
+export class StoreOrderShippedPayload {
+  order!: any;
+  businessId!: string;
+}
+
+export class StoreOrderDeliveredPayload {
+  order!: any;
+  businessId!: string;
+}
+
+export class StoreOrderCancelledPayload {
+  order!: any;
+  businessId!: string;
+}
+
 // Master event map for reference and typing
 export interface KeyFlowEventMap {
   'contact.created': ContactCreatedPayload;
@@ -200,4 +225,9 @@ export interface KeyFlowEventMap {
   'lead_form.created': LeadFormCreatedPayload;
   'lead_form.submitted': LeadFormSubmittedPayload;
   'expense.created': ExpenseCreatedPayload;
+  'store_order.created': StoreOrderCreatedPayload;
+  'store_order.paid': StoreOrderPaidPayload;
+  'store_order.shipped': StoreOrderShippedPayload;
+  'store_order.delivered': StoreOrderDeliveredPayload;
+  'store_order.cancelled': StoreOrderCancelledPayload;
 }
