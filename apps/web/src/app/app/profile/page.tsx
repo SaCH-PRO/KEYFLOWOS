@@ -18,6 +18,8 @@ import {
   type DocumentRecommendation,
 } from "@/lib/client";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
+import GuidanceCard from "./components/guidance-card";
+import BusinessGuidanceWizard from "./components/guidance-wizard";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -218,6 +220,7 @@ export default function ProfileSettingsPage() {
   const [interestInput, setInterestInput] = useState("");
   const [recommendations, setRecommendations] = useState<DocumentRecommendation[]>([]);
   const [loadingRecs, setLoadingRecs] = useState(false);
+  const [showGuidanceWizard, setShowGuidanceWizard] = useState(false);
 
   const isDirty = JSON.stringify(form) !== JSON.stringify(initialForm);
   const isBizDirty = JSON.stringify(bizForm) !== JSON.stringify(initialBizForm);
@@ -449,6 +452,15 @@ export default function ProfileSettingsPage() {
   const removeInterest = (interest: string) => {
     setBizForm((f) => ({ ...f, interests: f.interests.filter((i) => i !== interest) }));
   };
+
+  if (showGuidanceWizard) {
+    return (
+      <BusinessGuidanceWizard
+        onClose={() => setShowGuidanceWizard(false)}
+        onComplete={() => {}}
+      />
+    );
+  }
 
   if (loading) return (
     <div className="max-w-2xl mx-auto">
@@ -795,6 +807,8 @@ export default function ProfileSettingsPage() {
           </div>
         </div>
       </motion.div>
+
+      <GuidanceCard onLaunchWizard={() => setShowGuidanceWizard(true)} />
 
       {recommendations.length > 0 && (
         <motion.div variants={fadeUp} className="kf-card p-6 space-y-4">
