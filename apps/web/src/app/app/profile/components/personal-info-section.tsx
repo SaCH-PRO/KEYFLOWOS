@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { User, Mail, Phone, Sparkles, Camera, CheckCircle2, AlertCircle } from "lucide-react";
+import { DataUsageHint } from "./ai-field-badge";
 import { Button, Input } from "@keyflow/ui";
 import { API_BASE, getAuthHeaders, apiPatch } from "@/lib/api";
 import { setCachedUser } from "@/lib/workspace";
@@ -179,6 +180,7 @@ export default function PersonalInfoSection({
             onChange={(e) => onFormChange((f) => ({ ...f, name: e.target.value }))}
             placeholder="Your display name"
           />
+          <DataUsageHint text="Shown in the header, greeting, and community posts" />
         </label>
         <label className="block text-xs text-muted-foreground">
           <div className="flex items-center gap-1.5 mb-1.5 font-medium">
@@ -191,6 +193,7 @@ export default function PersonalInfoSection({
             onChange={(e) => onFormChange((f) => ({ ...f, phone: e.target.value }))}
             placeholder="+1 868 123 4567"
           />
+          <DataUsageHint text="Used for booking confirmations and account recovery" />
         </label>
       </div>
 

@@ -151,6 +151,7 @@ export class IdentityService {
     skills?: string[];
     businessStage?: string;
     interests?: string[];
+    teamSize?: string;
   }) {
     if (input.slug) {
       const existing = await this.prisma.client.business.findFirst({

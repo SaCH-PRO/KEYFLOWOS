@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { IdentityService } from './identity.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -111,9 +111,54 @@ export class IdentityController {
       skills?: string[];
       businessStage?: string;
       interests?: string[];
+      teamSize?: string;
     },
   ) {
     return this.identity.updateBusiness(businessId, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/ai-generate-field')
+  async generateField(
+    @Param('businessId') businessId: string,
+    @Body() body: { field: string; context?: { name?: string; tagline?: string; description?: string; teamSize?: string; industry?: string; skills?: string[]; businessStage?: string } },
+  ) {
+    const biz = await this.identity.getBusiness(businessId);
+    const ctx = body.context || {};
+    const bizName = ctx.name || biz.name || 'my business';
+    const industry = ctx.industry || biz.industry || '';
+    const stage = ctx.businessStage || biz.businessStage || '';
+
+    const prompts: Record<string, string> = {
+      tagline: `Write a catchy, professional tagline (max 100 chars) for a ${industry || 'small'} business called "${bizName}"${stage ? ` at the ${stage} stage` : ''}. Return ONLY the tagline text, no quotes.`,
+      description: `Write a compelling business description (2-3 sentences, max 300 chars) for "${bizName}"${industry ? ` in the ${industry} industry` : ''}${ctx.tagline ? `. Tagline: "${ctx.tagline}"` : ''}. Focus on what the business does, who it serves, and its value. Return ONLY the description text.`,
+      skills: `Based on the ${industry || 'business'} industry and ${stage || 'startup'} stage, suggest 5-8 relevant professional skills as a JSON array of strings. Return ONLY the JSON array.`,
+    };
+
+    const prompt = prompts[body.field];
+    if (!prompt) throw new BadRequestException('Invalid field: must be tagline, description, or skills');
+
+    const result = await this.aiUsage.callAi({
+      businessId,
+      feature: 'profile-field-generate',
+      messages: [
+        { role: 'system', content: 'You are a professional copywriter for Caribbean small businesses. Be concise and compelling.' },
+        { role: 'user', content: prompt },
+      ],
+      maxTokens: 200,
+      temperature: 0.8,
+    });
+
+    if (body.field === 'skills') {
+      try {
+        const cleaned = result.content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        return { skills: JSON.parse(cleaned) };
+      } catch {
+        return { skills: [] };
+      }
+    }
+
+    return { [body.field]: result.content.replace(/^["']|["']$/g, '').trim() };
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

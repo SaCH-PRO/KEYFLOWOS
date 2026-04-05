@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { User, CheckCircle2, AlertCircle, Compass } from "lucide-react";
-import { apiGet } from "@/lib/api";
+import { apiGet, apiPatch } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 import GuidanceCard from "./components/guidance-card";
@@ -11,8 +11,10 @@ import BusinessGuidanceWizard from "./components/guidance-wizard";
 import GuidanceDashboard from "./components/guidance-dashboard";
 import { getGuidanceStatus } from "./components/guidance-storage";
 import PersonalInfoSection from "./components/personal-info-section";
+import MyBusinessSection from "./components/my-business-section";
 import ProfessionalProfileSection from "./components/professional-profile-section";
 import SecuritySection from "./components/security-section";
+import { loadGuidanceDraft } from "./components/guidance-storage";
 
 interface IdentityMe {
   id: string;
@@ -105,6 +107,8 @@ export default function ProfileSettingsPage() {
   const [hasBackendAssessment, setHasBackendAssessment] = useState(false);
 
   const [isBizDirty, setIsBizDirty] = useState(false);
+  const [isBizInfoDirty, setIsBizInfoDirty] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const isDirty = useMemo(
     () =>
@@ -116,10 +120,11 @@ export default function ProfileSettingsPage() {
     [form, initialForm],
   );
 
-  const hasUnsavedChanges = useMemo(() => isDirty || isBizDirty, [isDirty, isBizDirty]);
+  const hasUnsavedChanges = useMemo(() => isDirty || isBizDirty || isBizInfoDirty, [isDirty, isBizDirty, isBizInfoDirty]);
   useUnsavedChanges(hasUnsavedChanges);
 
   const handleBizDirtyChange = useCallback((dirty: boolean) => setIsBizDirty(dirty), []);
+  const handleBizInfoDirtyChange = useCallback((dirty: boolean) => setIsBizInfoDirty(dirty), []);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -183,6 +188,42 @@ export default function ProfileSettingsPage() {
                 if (data?.latestAssessment) setHasBackendAssessment(true);
               })
               .catch(() => {});
+            const draft = loadGuidanceDraft();
+            const updates: Record<string, unknown> = {};
+            if (draft.industry) updates.industry = draft.industry;
+            if (draft.businessStage) {
+              const stageMap: Record<string, string> = {
+                "idea": "IDEA", "pre-launch": "STARTUP", "launched": "STARTUP",
+                "growing": "GROWTH", "scaling": "SCALING", "established": "ESTABLISHED",
+              };
+              updates.businessStage = stageMap[draft.businessStage] || draft.businessStage.toUpperCase();
+            }
+            if (draft.teamSize !== null && draft.teamSize !== undefined) {
+              const ts = Number(draft.teamSize);
+              if (ts <= 1) updates.teamSize = "SOLO";
+              else if (ts <= 5) updates.teamSize = "SMALL_TEAM";
+              else if (ts <= 15) updates.teamSize = "GROWING";
+              else if (ts <= 50) updates.teamSize = "MEDIUM";
+              else updates.teamSize = "LARGE";
+            }
+            if (draft.founderLocation) {
+              const parts = draft.founderLocation.split(",").map((s: string) => s.trim());
+              if (parts.length >= 2) {
+                updates.city = parts[0];
+                updates.country = parts[parts.length - 1];
+              } else if (parts.length === 1) {
+                updates.country = parts[0];
+              }
+            }
+            if (draft.businessName) updates.name = draft.businessName;
+            if (draft.offerDescription) updates.description = draft.offerDescription;
+            if (Object.keys(updates).length > 0) {
+              apiPatch(`/identity/businesses/${businessId}`, updates)
+                .then((res) => {
+                  if (!res.error) setRefreshKey((k) => k + 1);
+                })
+                .catch(() => {});
+            }
           }
         }}
       />
@@ -286,7 +327,17 @@ export default function ProfileSettingsPage() {
             </motion.div>
 
             <motion.div variants={fadeUp} className="kf-card p-6">
+              <MyBusinessSection
+                key={`biz-info-${refreshKey}`}
+                businessId={businessId}
+                onDirtyChange={handleBizInfoDirtyChange}
+                onStatus={setStatus}
+              />
+            </motion.div>
+
+            <motion.div variants={fadeUp} className="kf-card p-6">
               <ProfessionalProfileSection
+                key={`prof-${refreshKey}`}
                 businessId={businessId}
                 userName={form.name || `${form.firstName} ${form.lastName}`.trim()}
                 onCompletenessChange={setProfileCompleteness}

@@ -14,6 +14,7 @@ import {
   type DocumentRecommendation,
 } from "@/lib/client";
 import { AccordionSection, AccordionGroup } from "../../store/components/accordion-section";
+import { AiFieldBadge, DataUsageHint } from "./ai-field-badge";
 
 const INDUSTRY_OPTIONS = [
   "Technology", "Healthcare", "Finance", "Education", "Retail",
@@ -87,6 +88,7 @@ export default function ProfessionalProfileSection({
   const [interestInput, setInterestInput] = useState("");
   const [savingBusiness, setSavingBusiness] = useState(false);
   const [generatingProfile, setGeneratingProfile] = useState(false);
+  const [generatingSkills, setGeneratingSkills] = useState(false);
   const [recommendations, setRecommendations] = useState<DocumentRecommendation[]>([]);
 
   const isBizDirty =
@@ -191,6 +193,32 @@ export default function ProfessionalProfileSection({
     setGeneratingProfile(false);
   };
 
+  const handleGenerateSkills = async () => {
+    if (!businessId) return;
+    setGeneratingSkills(true);
+    onStatus(null);
+    try {
+      const res = await apiPatch<{ skills?: string[] }>(`/identity/businesses/${businessId}/ai-generate-field`, {
+        field: "skills",
+        context: { industry: bizForm.industry, businessStage: bizForm.businessStage },
+      });
+      if (res.data?.skills && Array.isArray(res.data.skills)) {
+        const newSkills = res.data.skills.filter((s: string) => !bizForm.skills.includes(s));
+        if (newSkills.length > 0) {
+          setBizForm((f) => ({ ...f, skills: [...f.skills, ...newSkills] }));
+          onStatus({ type: "success", message: `Added ${newSkills.length} AI-suggested skills! Review and save.` });
+        } else {
+          onStatus({ type: "success", message: "No new skills to suggest — you've got great coverage!" });
+        }
+      } else {
+        onStatus({ type: "error", message: "Failed to generate skills" });
+      }
+    } catch {
+      onStatus({ type: "error", message: "Failed to generate skills" });
+    }
+    setGeneratingSkills(false);
+  };
+
   const addSkill = () => {
     const skill = skillInput.trim();
     if (skill && !bizForm.skills.includes(skill)) {
@@ -246,6 +274,7 @@ export default function ProfessionalProfileSection({
               <div className="flex items-center gap-1.5 mb-1.5 font-medium">
                 <Sparkles className="h-3 w-3" />
                 Professional Headline
+                <AiFieldBadge />
               </div>
               <Input
                 value={bizForm.headline}
@@ -253,12 +282,16 @@ export default function ProfessionalProfileSection({
                 placeholder="e.g., Caribbean Tech Entrepreneur | Building SaaS for SMBs"
                 maxLength={120}
               />
-              <p className="text-[10px] mt-1 text-right">{bizForm.headline.length}/120</p>
+              <div className="flex justify-between mt-1">
+                <DataUsageHint text="Shown on your community profile and public storefront" />
+                <p className="text-[10px]">{bizForm.headline.length}/120</p>
+              </div>
             </label>
             <label className="block text-xs text-muted-foreground">
               <div className="flex items-center gap-1.5 mb-1.5 font-medium">
                 <FileText className="h-3 w-3" />
                 Bio
+                <AiFieldBadge />
               </div>
               <textarea
                 value={bizForm.bio}
@@ -268,7 +301,10 @@ export default function ProfessionalProfileSection({
                 rows={3}
                 className="w-full bg-transparent border border-border rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/30 resize-none"
               />
-              <p className="text-[10px] mt-1 text-right">{bizForm.bio.length}/500</p>
+              <div className="flex justify-between mt-1">
+                <DataUsageHint text="Displayed on your community profile and public pages" />
+                <p className="text-[10px]">{bizForm.bio.length}/500</p>
+              </div>
             </label>
           </div>
         </AccordionSection>
@@ -295,6 +331,7 @@ export default function ProfessionalProfileSection({
                   <option key={opt} value={opt}>{opt}</option>
                 ))}
               </select>
+              <DataUsageHint text="Powers AI recommendations, document guidance, and templates" />
             </label>
             <label className="block text-xs text-muted-foreground">
               <div className="flex items-center gap-1.5 mb-1.5 font-medium">
@@ -311,6 +348,7 @@ export default function ProfessionalProfileSection({
                   <option key={stage.value} value={stage.value}>{stage.label}</option>
                 ))}
               </select>
+              <DataUsageHint text="Tailors document recommendations and growth strategies" />
             </label>
           </div>
         </AccordionSection>
@@ -324,9 +362,24 @@ export default function ProfessionalProfileSection({
         >
           <div className="space-y-4 p-1">
             <div className="space-y-2">
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium">
-                <Tag className="h-3 w-3" />
-                Skills & Expertise
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium">
+                  <Tag className="h-3 w-3" />
+                  Skills & Expertise
+                  <AiFieldBadge />
+                </div>
+                <button
+                  onClick={handleGenerateSkills}
+                  disabled={generatingSkills}
+                  className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-all"
+                  style={{
+                    background: "hsl(var(--kf-accent1) / 0.1)",
+                    color: "hsl(var(--kf-accent1))",
+                  }}
+                >
+                  {generatingSkills ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
+                  {generatingSkills ? "..." : "Suggest Skills"}
+                </button>
               </div>
               <div className="flex gap-2">
                 <Input
@@ -413,29 +466,32 @@ export default function ProfessionalProfileSection({
           icon={MapPin}
           accentColor="hsl(var(--kf-accent2))"
         >
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-1">
-            <label className="block text-xs text-muted-foreground">
-              <div className="flex items-center gap-1.5 mb-1.5 font-medium">
-                <MapPin className="h-3 w-3" />
-                City
-              </div>
-              <Input
-                value={bizForm.city}
-                onChange={(e) => setBizForm((f) => ({ ...f, city: e.target.value }))}
-                placeholder="Port of Spain"
-              />
-            </label>
-            <label className="block text-xs text-muted-foreground">
-              <div className="flex items-center gap-1.5 mb-1.5 font-medium">
-                <MapPin className="h-3 w-3" />
-                Country
-              </div>
-              <Input
-                value={bizForm.country}
-                onChange={(e) => setBizForm((f) => ({ ...f, country: e.target.value }))}
-                placeholder="Trinidad & Tobago"
-              />
-            </label>
+          <div className="space-y-4 p-1">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className="block text-xs text-muted-foreground">
+                <div className="flex items-center gap-1.5 mb-1.5 font-medium">
+                  <MapPin className="h-3 w-3" />
+                  City
+                </div>
+                <Input
+                  value={bizForm.city}
+                  onChange={(e) => setBizForm((f) => ({ ...f, city: e.target.value }))}
+                  placeholder="Port of Spain"
+                />
+              </label>
+              <label className="block text-xs text-muted-foreground">
+                <div className="flex items-center gap-1.5 mb-1.5 font-medium">
+                  <MapPin className="h-3 w-3" />
+                  Country
+                </div>
+                <Input
+                  value={bizForm.country}
+                  onChange={(e) => setBizForm((f) => ({ ...f, country: e.target.value }))}
+                  placeholder="Trinidad & Tobago"
+                />
+              </label>
+            </div>
+            <DataUsageHint text="Used on invoices, tax compliance guidance, and local business permits" />
           </div>
         </AccordionSection>
       </AccordionGroup>
