@@ -228,8 +228,29 @@ export default function ProfileSettingsPage() {
   const [guidanceStatus, setGuidanceStatusState] = useState<"not_started" | "in_progress" | "complete">("not_started");
   const [hasBackendAssessment, setHasBackendAssessment] = useState(false);
 
-  const isDirty = JSON.stringify(form) !== JSON.stringify(initialForm);
-  const isBizDirty = JSON.stringify(bizForm) !== JSON.stringify(initialBizForm);
+  const isDirty = useMemo(
+    () =>
+      form.email !== initialForm.email ||
+      form.name !== initialForm.name ||
+      form.firstName !== initialForm.firstName ||
+      form.lastName !== initialForm.lastName ||
+      form.phone !== initialForm.phone,
+    [form, initialForm],
+  );
+  const isBizDirty = useMemo(
+    () =>
+      bizForm.headline !== initialBizForm.headline ||
+      bizForm.bio !== initialBizForm.bio ||
+      bizForm.industry !== initialBizForm.industry ||
+      bizForm.businessStage !== initialBizForm.businessStage ||
+      bizForm.city !== initialBizForm.city ||
+      bizForm.country !== initialBizForm.country ||
+      bizForm.skills.length !== initialBizForm.skills.length ||
+      bizForm.skills.some((s, i) => s !== initialBizForm.skills[i]) ||
+      bizForm.interests.length !== initialBizForm.interests.length ||
+      bizForm.interests.some((s, i) => s !== initialBizForm.interests[i]),
+    [bizForm, initialBizForm],
+  );
   const hasUnsavedChanges = useMemo(() => isDirty || isBizDirty, [isDirty, isBizDirty]);
   useUnsavedChanges(hasUnsavedChanges);
 
