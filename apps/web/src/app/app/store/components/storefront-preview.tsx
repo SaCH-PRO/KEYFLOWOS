@@ -18,9 +18,10 @@ import {
   Plus,
   ArrowRight,
 } from "lucide-react";
-import { Service, Product, StorefrontConfig } from "@/lib/client";
+import { Service, Product, StorefrontConfig, StorefrontSection, FaqEntry, StorefrontPolicies, BadgeType as BadgeTypeEnum } from "@/lib/client";
 import { formatPrice } from "@/lib/format";
 import { getThemeStyles, type ThemeKey } from "@/lib/storefront-themes";
+import { DEFAULT_SECTIONS, FONT_PAIRINGS } from "./store-types";
 
 type BusinessData = {
   name?: string;
@@ -233,8 +234,11 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
           </div>
         )}
         <div className={`p-2 space-y-1 ${ts.spacing === "relaxed" ? "p-3" : "p-2"}`}>
-          <TypeBadge type={item.itemType} primaryColor={pc} secondaryColor={sc} accentColor={ac} radius={ts.badgeRadius} />
-          <h4 className={`${ts.nameSizeSm} ${ts.headerWeight} text-white leading-tight truncate ${ts.textStyle} ${ts.fontClass}`}>{item.name}</h4>
+          <div className="flex items-center gap-1 flex-wrap">
+            <TypeBadge type={item.itemType} primaryColor={pc} secondaryColor={sc} accentColor={ac} radius={ts.badgeRadius} />
+            {renderBadge(item.id)}
+          </div>
+          <h4 className={`${ts.nameSizeSm} ${ts.headerWeight} text-white leading-tight truncate ${ts.textStyle} ${ts.fontClass}`} style={headingFont ? { fontFamily: headingFont } : undefined}>{item.name}</h4>
           {showPrices && (
             <span className={`text-[10px] ${ts.priceWeight} block`} style={{ color: itemAccent }}>
               {formatPrice(item.price, item.currency)}
@@ -286,8 +290,11 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
         <div className="flex-1 min-w-0 space-y-0.5">
           <div className="flex items-start justify-between gap-1">
             <div className="min-w-0">
-              <TypeBadge type={item.itemType} primaryColor={pc} secondaryColor={sc} accentColor={ac} radius={ts.badgeRadius} />
-              <h4 className={`${ts.nameSizeSm} ${ts.headerWeight} text-white leading-tight truncate mt-0.5 ${ts.textStyle} ${ts.fontClass}`}>{item.name}</h4>
+              <div className="flex items-center gap-1 flex-wrap">
+                <TypeBadge type={item.itemType} primaryColor={pc} secondaryColor={sc} accentColor={ac} radius={ts.badgeRadius} />
+                {renderBadge(item.id)}
+              </div>
+              <h4 className={`${ts.nameSizeSm} ${ts.headerWeight} text-white leading-tight truncate mt-0.5 ${ts.textStyle} ${ts.fontClass}`} style={headingFont ? { fontFamily: headingFont } : undefined}>{item.name}</h4>
             </div>
             <div className="flex flex-col items-end gap-1 flex-shrink-0">
               {showPrices && (
@@ -309,6 +316,269 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
       </div>
     );
   }
+
+  const sections: StorefrontSection[] = config?.sections?.length ? config.sections : DEFAULT_SECTIONS;
+  const faqEntries: FaqEntry[] = config?.faqEntries ?? [];
+  const policies: StorefrontPolicies = config?.policies ?? {};
+  const badges: Record<string, BadgeTypeEnum> = config?.merchandising?.badges ?? {};
+  const featuredIds: string[] = config?.merchandising?.featuredItemIds ?? [];
+  const contactOptions = config?.contactOptions ?? {};
+
+  const fontPairingId = config?.appearance?.fontPairing ?? "inter-inter";
+  const fontPairing = FONT_PAIRINGS.find((p) => p.id === fontPairingId);
+  const headingFont = fontPairing ? `'${fontPairing.heading}', sans-serif` : undefined;
+  const bodyFont = fontPairing ? `'${fontPairing.body}', sans-serif` : undefined;
+
+  const BADGE_COLORS: Record<string, { label: string; color: string }> = {
+    popular: { label: "Popular", color: "#eab308" },
+    new: { label: "New", color: "#22c55e" },
+    best_seller: { label: "Best Seller", color: "#8b5cf6" },
+    limited: { label: "Limited", color: "#ef4444" },
+    sale: { label: "Sale", color: "#ec4899" },
+  };
+
+  function renderBadge(itemId: string) {
+    const badge = badges[itemId];
+    if (!badge) return null;
+    const cfg = BADGE_COLORS[badge];
+    if (!cfg) return null;
+    return (
+      <span
+        className="text-[7px] font-bold px-1.5 py-0.5 rounded-full uppercase"
+        style={{ background: `${cfg.color}20`, color: cfg.color }}
+      >
+        {cfg.label}
+      </span>
+    );
+  }
+
+  function renderFeaturedSection() {
+    if (featuredIds.length === 0) return null;
+    const featuredItems = featuredIds
+      .map((id) => allItems.find((i) => i.id === id))
+      .filter(Boolean) as PreviewItem[];
+    if (featuredItems.length === 0) return null;
+    return (
+      <div className="space-y-2">
+        <h3 className="text-[10px] text-white/40 font-medium uppercase tracking-wider" style={headingFont ? { fontFamily: headingFont } : undefined}>Featured</h3>
+        <div className="grid grid-cols-2 gap-1.5">
+          {featuredItems.slice(0, 4).map((item) => (
+            <div key={item.id} className={`overflow-hidden ${ts.cardRadius}`} style={{ background: ts.cardBg, border: ts.cardBorder }}>
+              <div className={`w-full h-12 flex items-center justify-center text-sm ${ts.headerWeight}`}
+                style={{ background: item.itemType === "service" ? ts.serviceBg : ts.productBg, color: `${item.itemType === "service" ? ts.serviceAccent : ts.productAccent}50` }}>
+                {item.name.charAt(0).toUpperCase()}
+              </div>
+              <div className="p-1.5 space-y-0.5">
+                <div className="flex items-center gap-1">
+                  {renderBadge(item.id)}
+                </div>
+                <h4 className="text-[9px] font-medium text-white truncate" style={headingFont ? { fontFamily: headingFont } : undefined}>{item.name}</h4>
+                {showPrices && <span className="text-[8px] font-bold" style={{ color: pc }}>{formatPrice(item.price, item.currency)}</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  function renderFaqSection() {
+    if (faqEntries.length === 0) return null;
+    return (
+      <div className="space-y-1.5">
+        <h3 className="text-[10px] text-white/40 font-medium uppercase tracking-wider" style={headingFont ? { fontFamily: headingFont } : undefined}>FAQ</h3>
+        {faqEntries.slice(0, 3).map((entry) => (
+          <div key={entry.id} className={`${ts.cardRadius} px-2.5 py-2`} style={{ background: ts.cardBg, border: ts.cardBorder }}>
+            <p className="text-[9px] font-medium text-white/70" style={headingFont ? { fontFamily: headingFont } : undefined}>{entry.question}</p>
+            <p className="text-[8px] text-white/35 mt-0.5 line-clamp-1" style={bodyFont ? { fontFamily: bodyFont } : undefined}>{entry.answer}</p>
+          </div>
+        ))}
+        {faqEntries.length > 3 && <p className="text-[8px] text-white/25 text-center">+{faqEntries.length - 3} more</p>}
+      </div>
+    );
+  }
+
+  function renderPoliciesSection() {
+    const activePolicies = (["refund", "privacy", "delivery", "terms"] as const).filter((k) => policies[k]?.enabled);
+    if (activePolicies.length === 0) return null;
+    const labels: Record<string, string> = { refund: "Refund", privacy: "Privacy", delivery: "Delivery", terms: "Terms" };
+    return (
+      <div className="space-y-1.5">
+        <h3 className="text-[10px] text-white/40 font-medium uppercase tracking-wider" style={headingFont ? { fontFamily: headingFont } : undefined}>Policies</h3>
+        <div className="flex flex-wrap gap-1">
+          {activePolicies.map((key) => (
+            <span key={key} className={`text-[8px] px-2 py-1 text-white/40 ${ts.cardRadius}`} style={{ background: ts.cardBg, border: ts.cardBorder }}>
+              {labels[key]} Policy
+            </span>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  function renderContactSection() {
+    const hasContact = contactOptions.whatsappNumber || contactOptions.email || contactOptions.phone || businessData?.phone;
+    if (!hasContact) return null;
+    return (
+      <div className="space-y-1.5">
+        <h3 className="text-[10px] text-white/40 font-medium uppercase tracking-wider" style={headingFont ? { fontFamily: headingFont } : undefined}>Contact</h3>
+        <div className={`${ts.cardRadius} p-2.5 space-y-1.5`} style={{ background: ts.cardBg, border: ts.cardBorder }}>
+          {(contactOptions.whatsappNumber || businessData?.phone) && (
+            <div className="flex items-center gap-1.5 text-[9px] text-emerald-300" style={bodyFont ? { fontFamily: bodyFont } : undefined}>
+              <MessageCircle className="w-2.5 h-2.5" /> Chat on WhatsApp
+            </div>
+          )}
+          {(contactOptions.email || businessData?.email) && (
+            <div className="flex items-center gap-1.5 text-[9px] text-white/40" style={bodyFont ? { fontFamily: bodyFont } : undefined}>
+              <Mail className="w-2.5 h-2.5" /> {contactOptions.email || businessData?.email}
+            </div>
+          )}
+          {(contactOptions.phone || businessData?.phone) && (
+            <div className="flex items-center gap-1.5 text-[9px] text-white/40" style={bodyFont ? { fontFamily: bodyFont } : undefined}>
+              <Phone className="w-2.5 h-2.5" /> {contactOptions.phone || businessData?.phone}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function renderHeroExtras() {
+    return (
+      <>
+        {showHours && (
+          <div
+            className={`${ts.cardRadius} p-2.5 space-y-1`}
+            style={{ background: ts.cardBg, border: ts.cardBorder }}
+          >
+            <div className={`flex items-center gap-1.5 text-[9px] text-white/45 ${ts.bodyWeight} mb-1`}>
+              <Clock className="w-2.5 h-2.5" /> Hours
+            </div>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+              {["Mon-Fri"].map((d) => (
+                <div key={d} className="flex justify-between text-[8px]">
+                  <span className="text-white/25">{d}</span>
+                  <span className="text-white/45">9:00–17:00</span>
+                </div>
+              ))}
+              {["Sat-Sun"].map((d) => (
+                <div key={d} className="flex justify-between text-[8px]">
+                  <span className="text-white/25">{d}</span>
+                  <span className="text-white/25">Closed</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {showWhatsApp && businessData?.phone && (
+          <div
+            className={`flex items-center gap-2 px-3 py-2 cursor-pointer transition-all ${ts.cardRadius}`}
+            style={{
+              background: "rgba(16, 185, 129, 0.06)",
+              border: "1px solid rgba(16, 185, 129, 0.12)",
+            }}
+          >
+            <MessageCircle className="w-3.5 h-3.5 text-emerald-400" />
+            <span className={`text-[10px] text-emerald-300 ${ts.bodyWeight} ${ts.fontClass}`}>Chat on WhatsApp</span>
+          </div>
+        )}
+
+        {config?.promotions?.bannerEnabled && config.promotions.bannerText && (
+          <div
+            className={`${ts.cardRadius} px-3 py-2 text-center text-[9px] font-medium flex items-center justify-center gap-1`}
+            style={{
+              backgroundColor: `${config.promotions.bannerColor || '#f59e0b'}15`,
+              color: config.promotions.bannerColor || '#f59e0b',
+              border: `1px solid ${config.promotions.bannerColor || '#f59e0b'}25`,
+            }}
+          >
+            <span className="animate-pulse">🔥</span>
+            <span className="truncate">{config.promotions.bannerText}</span>
+          </div>
+        )}
+      </>
+    );
+  }
+
+  function renderCatalogSection() {
+    if (allItems.length === 0) {
+      return (
+        <div className="text-center py-6 space-y-2">
+          <Store className="w-6 h-6 text-white/15 mx-auto" />
+          <p className={`text-[10px] text-white/35 ${ts.fontClass}`}>Add items to see your store</p>
+        </div>
+      );
+    }
+    return (
+      <div className="space-y-3">
+        {isSectionEnabled("categories") && (
+          <div className="flex items-center gap-1 flex-wrap">
+            {tabs.map((tab) => {
+              const tabProps = getTabClass(tab.key === "all");
+              return (
+                <span key={tab.key} className={tabProps.className} style={tabProps.style}>
+                  {tab.label}
+                </span>
+              );
+            })}
+            <div className="flex-1" />
+            <div className="relative">
+              <Search className="absolute left-1.5 top-1/2 -translate-y-1/2 w-2.5 h-2.5 text-white/25" />
+              <div
+                className={`pl-5 pr-2 py-0.5 text-[8px] text-white/20 w-16 ${ts.searchRadius}`}
+                style={{ background: ts.searchBg, border: `1px solid ${ts.searchBorder}` }}
+              >
+                Search
+              </div>
+            </div>
+          </div>
+        )}
+        {cardStyle === "grid" ? (
+          <div className="grid grid-cols-2 gap-2">
+            {allItems.map(renderGridItem)}
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            {allItems.map(renderListItem)}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderTestimonialsSection() {
+    const testimonials = config?.socialProof?.testimonials;
+    if (!testimonials || testimonials.length === 0) return null;
+    return (
+      <div className="space-y-1.5">
+        <h3 className="text-[10px] text-white/40 font-medium uppercase tracking-wider" style={headingFont ? { fontFamily: headingFont } : undefined}>Reviews</h3>
+        {testimonials.slice(0, 2).map((t: { id: string; name: string; text: string; rating: number }) => (
+          <div key={t.id} className={`${ts.cardRadius} px-2.5 py-2`} style={{ background: ts.cardBg, border: ts.cardBorder }}>
+            <div className="flex items-center gap-1 mb-0.5">
+              <span className="text-[8px] text-yellow-400">{"★".repeat(t.rating)}</span>
+            </div>
+            <p className="text-[8px] text-white/40 line-clamp-1" style={bodyFont ? { fontFamily: bodyFont } : undefined}>{t.text}</p>
+            <p className="text-[7px] text-white/25 mt-0.5">— {t.name}</p>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  function isSectionEnabled(type: string) {
+    const section = sections.find((s) => s.type === type);
+    return section ? section.enabled : true;
+  }
+
+  const sectionRenderers: Record<string, () => React.ReactNode> = {
+    featured: renderFeaturedSection,
+    catalog: renderCatalogSection,
+    testimonials: renderTestimonialsSection,
+    faq: renderFaqSection,
+    policies: renderPoliciesSection,
+    contact: renderContactSection,
+  };
 
   return (
     <motion.div
@@ -376,11 +646,11 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
                         {(businessData?.name || "S").charAt(0)}
                       </div>
                     )}
-                    <h2 className={`text-base mt-2 text-white ${ts.headerWeight} ${ts.textStyle} ${ts.fontClass}`}>
+                    <h2 className={`text-base mt-2 text-white ${ts.headerWeight} ${ts.textStyle} ${ts.fontClass}`} style={headingFont ? { fontFamily: headingFont } : undefined}>
                       {headline}
                     </h2>
                     {subheadline && (
-                      <p className={`text-[10px] text-white/45 mt-0.5 ${ts.fontClass} ${ts.bodyWeight}`}>{subheadline}</p>
+                      <p className={`text-[10px] text-white/45 mt-0.5 ${ts.fontClass} ${ts.bodyWeight}`} style={bodyFont ? { fontFamily: bodyFont } : undefined}>{subheadline}</p>
                     )}
                     {(businessData?.address || businessData?.phone || businessData?.email) && (
                       <div className="flex items-center justify-center gap-2.5 text-[9px] text-white/35 flex-wrap mt-1.5">
@@ -399,97 +669,14 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
                   </div>
                 </div>
 
-                {showHours && (
-                  <div
-                    className={`${ts.cardRadius} p-2.5 space-y-1`}
-                    style={{ background: ts.cardBg, border: ts.cardBorder }}
-                  >
-                    <div className={`flex items-center gap-1.5 text-[9px] text-white/45 ${ts.bodyWeight} mb-1`}>
-                      <Clock className="w-2.5 h-2.5" /> Hours
-                    </div>
-                    <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-                      {["Mon-Fri"].map((d) => (
-                        <div key={d} className="flex justify-between text-[8px]">
-                          <span className="text-white/25">{d}</span>
-                          <span className="text-white/45">9:00–17:00</span>
-                        </div>
-                      ))}
-                      {["Sat-Sun"].map((d) => (
-                        <div key={d} className="flex justify-between text-[8px]">
-                          <span className="text-white/25">{d}</span>
-                          <span className="text-white/25">Closed</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                {isSectionEnabled("hero") && renderHeroExtras()}
 
-                {showWhatsApp && businessData?.phone && (
-                  <div
-                    className={`flex items-center gap-2 px-3 py-2 cursor-pointer transition-all ${ts.cardRadius}`}
-                    style={{
-                      background: "rgba(16, 185, 129, 0.06)",
-                      border: "1px solid rgba(16, 185, 129, 0.12)",
-                    }}
-                  >
-                    <MessageCircle className="w-3.5 h-3.5 text-emerald-400" />
-                    <span className={`text-[10px] text-emerald-300 ${ts.bodyWeight} ${ts.fontClass}`}>Chat on WhatsApp</span>
-                  </div>
-                )}
-
-                {config?.promotions?.bannerEnabled && config.promotions.bannerText && (
-                  <div
-                    className={`${ts.cardRadius} px-3 py-2 text-center text-[9px] font-medium flex items-center justify-center gap-1`}
-                    style={{
-                      backgroundColor: `${config.promotions.bannerColor || '#f59e0b'}15`,
-                      color: config.promotions.bannerColor || '#f59e0b',
-                      border: `1px solid ${config.promotions.bannerColor || '#f59e0b'}25`,
-                    }}
-                  >
-                    <span className="animate-pulse">🔥</span>
-                    <span className="truncate">{config.promotions.bannerText}</span>
-                  </div>
-                )}
-
-                {allItems.length === 0 ? (
-                  <div className="text-center py-6 space-y-2">
-                    <Store className="w-6 h-6 text-white/15 mx-auto" />
-                    <p className={`text-[10px] text-white/35 ${ts.fontClass}`}>Add items to see your store</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-1 flex-wrap">
-                      {tabs.map((tab) => {
-                        const tabProps = getTabClass(tab.key === "all");
-                        return (
-                          <span key={tab.key} className={tabProps.className} style={tabProps.style}>
-                            {tab.label}
-                          </span>
-                        );
-                      })}
-                      <div className="flex-1" />
-                      <div className="relative">
-                        <Search className="absolute left-1.5 top-1/2 -translate-y-1/2 w-2.5 h-2.5 text-white/25" />
-                        <div
-                          className={`pl-5 pr-2 py-0.5 text-[8px] text-white/20 w-16 ${ts.searchRadius}`}
-                          style={{ background: ts.searchBg, border: `1px solid ${ts.searchBorder}` }}
-                        >
-                          Search
-                        </div>
-                      </div>
-                    </div>
-
-                    {cardStyle === "grid" ? (
-                      <div className="grid grid-cols-2 gap-2">
-                        {allItems.map(renderGridItem)}
-                      </div>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {allItems.map(renderListItem)}
-                      </div>
-                    )}
-                  </div>
-                )}
+                {sections.filter((s) => s.enabled && s.type !== "hero" && s.type !== "categories" && sectionRenderers[s.type]).map((s) => {
+                  const renderer = sectionRenderers[s.type];
+                  const content = renderer();
+                  if (!content) return null;
+                  return <div key={s.type}>{content}</div>;
+                })}
 
                 {hero.ctaLabel && (
                   <div

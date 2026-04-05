@@ -3120,6 +3120,46 @@ export async function deleteProjectTask(businessId: string, taskId: string): Pro
   );
 }
 
+export type StorefrontSectionType = 'hero' | 'featured' | 'categories' | 'catalog' | 'testimonials' | 'faq' | 'policies' | 'contact';
+
+export interface StorefrontSection {
+  type: StorefrontSectionType;
+  enabled: boolean;
+  config?: Record<string, any>;
+}
+
+export interface FaqEntry {
+  id: string;
+  question: string;
+  answer: string;
+  order: number;
+}
+
+export interface PolicyConfig {
+  enabled: boolean;
+  content: string;
+}
+
+export interface StorefrontPolicies {
+  refund?: PolicyConfig;
+  privacy?: PolicyConfig;
+  delivery?: PolicyConfig;
+  terms?: PolicyConfig;
+}
+
+export type DeliveryMethod = 'shipping' | 'pickup' | 'digital';
+
+export type StoreStatus = 'active' | 'paused' | 'coming_soon';
+
+export type BadgeType = 'popular' | 'new' | 'best_seller' | 'limited' | 'sale';
+
+export interface FontPairing {
+  id: string;
+  name: string;
+  heading: string;
+  body: string;
+}
+
 export interface StorefrontConfig {
   hero: {
     headline?: string;
@@ -3139,11 +3179,12 @@ export interface StorefrontConfig {
     secondaryColor?: string;
     density?: 'comfortable' | 'compact';
     fontFamily?: 'system' | 'sans' | 'serif';
+    fontPairing?: string;
   };
   merchandising: {
     featuredItemIds?: string[];
     collections?: { id: string; name: string; itemIds: string[] }[];
-    badges?: Record<string, 'popular' | 'new' | 'best_seller' | 'limited'>;
+    badges?: Record<string, BadgeType>;
   };
   promotions: {
     bannerEnabled?: boolean;
@@ -3166,6 +3207,21 @@ export interface StorefrontConfig {
   };
   catalog?: {
     productOrder?: string[];
+  };
+  sections?: StorefrontSection[];
+  faqEntries?: FaqEntry[];
+  policies?: StorefrontPolicies;
+  storeSettings?: {
+    deliveryOptions?: DeliveryMethod[];
+    minimumOrderValue?: number;
+    storeStatus?: StoreStatus;
+    currencyDisplay?: string;
+  };
+  contactOptions?: {
+    whatsappNumber?: string;
+    email?: string;
+    phone?: string;
+    showContactForm?: boolean;
   };
 }
 

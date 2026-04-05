@@ -84,13 +84,30 @@ export class SiteService {
     const meta = (business.metaData as Record<string, any>) ?? {};
     const existing = meta.storefront ?? {};
 
+    const ARRAY_KEYS = new Set(['sections', 'faqEntries']);
+    const DIRECT_REPLACE_KEYS = new Set(['policies', 'storeSettings', 'contactOptions']);
+
     const merged: Record<string, any> = { ...existing };
     for (const key of Object.keys(config)) {
-      if (config[key] && typeof config[key] === 'object' && !Array.isArray(config[key])) {
+      if (ARRAY_KEYS.has(key) || Array.isArray(config[key])) {
+        merged[key] = config[key];
+      } else if (DIRECT_REPLACE_KEYS.has(key)) {
+        merged[key] = { ...(existing[key] ?? {}), ...config[key] };
+      } else if (config[key] && typeof config[key] === 'object' && !Array.isArray(config[key])) {
         merged[key] = { ...(existing[key] ?? {}), ...config[key] };
       } else {
         merged[key] = config[key];
       }
+    }
+
+    if (merged.faqEntries && Array.isArray(merged.faqEntries)) {
+      merged.faqEntries = merged.faqEntries.slice(0, 50);
+    }
+    if (merged.sections && Array.isArray(merged.sections)) {
+      merged.sections = merged.sections.slice(0, 20);
+    }
+    if (merged.merchandising?.featuredItemIds) {
+      merged.merchandising.featuredItemIds = merged.merchandising.featuredItemIds.slice(0, 8);
     }
 
     const updated = await this.prisma.client.business.update({

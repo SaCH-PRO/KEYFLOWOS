@@ -29,7 +29,9 @@ type Props = {
   saving: boolean;
 };
 
-type BadgeType = "popular" | "new" | "best_seller" | "limited";
+type BadgeType = "popular" | "new" | "best_seller" | "limited" | "sale";
+
+const MAX_FEATURED = 8;
 
 const BADGE_OPTIONS: { value: BadgeType | "none"; label: string; color: string; icon: React.ElementType }[] = [
   { value: "none", label: "None", color: "hsl(var(--kf-muted-foreground))", icon: Tag },
@@ -37,6 +39,7 @@ const BADGE_OPTIONS: { value: BadgeType | "none"; label: string; color: string; 
   { value: "new", label: "New", color: "hsl(160 84% 39%)", icon: Sparkles },
   { value: "best_seller", label: "Best Seller", color: "hsl(263 70% 58%)", icon: Award },
   { value: "limited", label: "Limited", color: "hsl(0 72% 51%)", icon: Clock },
+  { value: "sale", label: "Sale", color: "hsl(340 82% 52%)", icon: Tag },
 ];
 
 const BANNER_COLORS = [
@@ -167,6 +170,7 @@ export function MerchandisingPanel({ config, products, services, onConfigChange,
   );
 
   function addFeatured(id: string) {
+    if (featuredIds.length >= MAX_FEATURED) return;
     onConfigChange("merchandising", { featuredItemIds: [...featuredIds, id] });
     setAddDropdownOpen(false);
     setAddSearch("");
@@ -231,8 +235,8 @@ export function MerchandisingPanel({ config, products, services, onConfigChange,
 
       <CollapsibleSection
         icon={Star}
-        title="Featured Items"
-        subtitle="Highlight key products and services on your storefront"
+        title={`Featured Items (${featuredIds.length}/${MAX_FEATURED})`}
+        subtitle="Pin up to 8 key products and services on your storefront"
         accent="hsl(var(--kf-accent2) / 0.15)"
       >
         <div className="space-y-2">
@@ -297,10 +301,11 @@ export function MerchandisingPanel({ config, products, services, onConfigChange,
             <button
               type="button"
               onClick={() => setAddDropdownOpen(!addDropdownOpen)}
-              className="kf-btn-secondary text-xs inline-flex items-center gap-1.5 w-full justify-center"
+              disabled={featuredIds.length >= MAX_FEATURED}
+              className="kf-btn-secondary text-xs inline-flex items-center gap-1.5 w-full justify-center disabled:opacity-40"
             >
               <Plus className="w-3.5 h-3.5" />
-              Add Featured
+              {featuredIds.length >= MAX_FEATURED ? "Maximum Reached" : "Add Featured"}
             </button>
             <AnimatePresence>
               {addDropdownOpen && (

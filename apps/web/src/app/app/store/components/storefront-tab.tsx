@@ -9,6 +9,11 @@ import { StorefrontPreview } from "./storefront-preview";
 import { SocialProofPanel } from "./social-proof-panel";
 import { MerchandisingPanel } from "./merchandising-panel";
 import { ReadinessChecklist } from "./readiness-checklist";
+import { SectionLayoutManager } from "./section-layout-manager";
+import { FaqManager } from "./faq-manager";
+import { PolicyEditor } from "./policy-editor";
+import { FontBrandingPanel } from "./font-branding-panel";
+import { StoreSettingsPanel } from "./store-settings-panel";
 import type { Service, Product, StorefrontConfig } from "@/lib/client";
 
 type Props = {
@@ -135,6 +140,21 @@ export function StorefrontTab({
         />
       </div>
 
+      <SectionLayoutManager
+        config={storefrontConfig}
+        onConfigChange={onConfigChange}
+        onSave={onSaveConfig}
+        saving={configSaving}
+      />
+
+      <FontBrandingPanel
+        config={storefrontConfig}
+        onConfigChange={onConfigChange}
+        onSave={onSaveConfig}
+        saving={configSaving}
+        businessData={businessData}
+      />
+
       <MerchandisingPanel
         config={storefrontConfig}
         products={commerceProducts}
@@ -149,6 +169,27 @@ export function StorefrontTab({
         configSaving={configSaving}
         onConfigChange={onConfigChange}
         onSaveConfig={onSaveConfig}
+      />
+
+      <FaqManager
+        config={storefrontConfig}
+        onConfigChange={onConfigChange}
+        onSave={onSaveConfig}
+        saving={configSaving}
+      />
+
+      <PolicyEditor
+        config={storefrontConfig}
+        onConfigChange={onConfigChange}
+        onSave={onSaveConfig}
+        saving={configSaving}
+      />
+
+      <StoreSettingsPanel
+        config={storefrontConfig}
+        onConfigChange={onConfigChange}
+        onSave={onSaveConfig}
+        saving={configSaving}
       />
 
       <SeoSettingsPanel
