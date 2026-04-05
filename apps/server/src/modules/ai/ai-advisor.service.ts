@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from './ai-usage.service';
 
@@ -7,8 +7,8 @@ export class AiAdvisorService {
   private readonly logger = new Logger(AiAdvisorService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly aiUsage: AiUsageService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {}
 
   async getBusinessContext(businessId: string) {

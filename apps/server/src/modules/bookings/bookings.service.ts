@@ -56,7 +56,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     let businesses: Array<{ id: string; bookingReminderMins: number | null }>;
     try {
       businesses = await this.prisma.client.business.findMany({
-        where: { bookingReminderMins: { not: null, gt: 0 } },
+        where: { bookingReminderMins: { gt: 0 } },
         select: { id: true, bookingReminderMins: true },
       });
     } catch (e) {
