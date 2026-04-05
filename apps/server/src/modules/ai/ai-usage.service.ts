@@ -1,4 +1,4 @@
-import { Injectable, Logger, ForbiddenException, HttpException } from '@nestjs/common';
+import { Inject, Injectable, Logger, ForbiddenException, HttpException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { AI_CREDIT_COSTS, AI_OVERAGE_RATE_TTD, AI_OVERAGE_RATE_USD } from '../subscriptions/plans';
@@ -55,8 +55,8 @@ export class AiUsageService {
   };
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly subscriptionsService: SubscriptionsService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(SubscriptionsService) private readonly subscriptionsService: SubscriptionsService,
   ) {
     this.openai = new OpenAI({
       apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
