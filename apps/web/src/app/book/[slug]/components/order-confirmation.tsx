@@ -14,6 +14,7 @@ import {
   FileText,
 } from "lucide-react";
 import { formatPrice } from "@/lib/format";
+import { ShareButtons } from "./share-buttons";
 
 type Props = {
   isOrder: boolean;
@@ -264,13 +265,17 @@ export function OrderConfirmation({
           </button>
         )}
 
-        <button
-          onClick={handleShare}
-          className="w-full py-3 rounded-2xl border border-white/[0.06] text-sm font-medium text-white/50 hover:text-white/80 hover:bg-white/[0.03] transition-all duration-200 flex items-center justify-center gap-2"
-        >
-          <Share2 className="w-3.5 h-3.5" />
-          Share with Friends
-        </button>
+        <div className="space-y-2">
+          <p className="text-xs text-white/40">Share with friends</p>
+          <div className="flex justify-center">
+            <ShareButtons
+              url={typeof window !== "undefined" ? window.location.href : ""}
+              title={isOrder ? `Just ordered from ${businessName}!` : `Just booked with ${businessName}!`}
+              description={`Check out ${businessName}`}
+              primaryColor={primaryColor}
+            />
+          </div>
+        </div>
 
         <button
           onClick={onContinueShopping}

@@ -32,6 +32,10 @@ import { TestimonialsSection } from "./components/testimonials-section";
 import { FeaturedSection } from "./components/featured-section";
 import { CategoryNav } from "./components/category-nav";
 import { OrganizationSchema, BreadcrumbListSchema } from "./components/structured-data";
+import { useWishlist } from "./components/use-wishlist";
+import { WishlistDrawer } from "./components/wishlist-drawer";
+import { ShareStoreButton } from "./components/share-buttons";
+import { Heart } from "lucide-react";
 
 const DEFAULT_SECTIONS: StorefrontSectionKey[] = [
   "hero", "trust", "featured", "categories", "catalog", "testimonials", "faq", "contact", "policies",
@@ -69,6 +73,10 @@ export default function PublicBookingPage() {
   const [activeCategory, setActiveCategory] = useState<string | null>(
     searchParams.get("category")
   );
+  const [wishlistOpen, setWishlistOpen] = useState(false);
+  const [reviewAggregates, setReviewAggregates] = useState<Record<string, { averageRating: number; reviewCount: number }>>({});
+
+  const wishlist = useWishlist(slug);
 
   const appearance = storefrontConfig?.appearance;
   const primaryColor = appearance?.primaryColor || business?.primaryColor || "#F97316";
@@ -199,6 +207,12 @@ export default function PublicBookingPage() {
       setStaff(staffRes.data ?? []);
       setProducts(productsRes.data ?? []);
       setLoading(false);
+
+      apiGet<Record<string, { averageRating: number; reviewCount: number }>>(
+        `/site/storefront/public/${encodeURIComponent(slug)}/review-aggregates`
+      ).then((aggRes) => {
+        if (aggRes.data) setReviewAggregates(aggRes.data);
+      }).catch(() => {});
     };
     loadBusiness();
   }, [slug]);
@@ -586,12 +600,43 @@ export default function PublicBookingPage() {
         return null;
       case "trust":
         return (
-          <TrustBar
-            key="trust"
-            primaryColor={primaryColor}
-            secondaryColor={secondaryColor}
-            businessName={business?.name}
-          />
+          <div key="trust" className="flex items-center justify-between">
+            <TrustBar
+              primaryColor={primaryColor}
+              secondaryColor={secondaryColor}
+              businessName={business?.name}
+            />
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <ShareStoreButton
+                url={pageUrl}
+                storeName={business?.name || ""}
+                primaryColor={primaryColor}
+              />
+              <button
+                onClick={() => setWishlistOpen(true)}
+                className="relative w-10 h-10 rounded-xl flex items-center justify-center transition-all hover:scale-105"
+                style={{
+                  backgroundColor: wishlist.count > 0 ? `${primaryColor}15` : "rgba(255,255,255,0.05)",
+                  border: wishlist.count > 0 ? `1px solid ${primaryColor}25` : "1px solid rgba(255,255,255,0.06)",
+                }}
+                title="Wishlist"
+              >
+                <Heart
+                  className="w-5 h-5"
+                  style={{ color: wishlist.count > 0 ? primaryColor : "rgba(255,255,255,0.4)" }}
+                  fill={wishlist.count > 0 ? primaryColor : "none"}
+                />
+                {wishlist.count > 0 && (
+                  <span
+                    className="absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
+                    style={{ backgroundColor: primaryColor }}
+                  >
+                    {wishlist.count}
+                  </span>
+                )}
+              </button>
+            </div>
+          </div>
         );
       case "featured":
         return featuredItems.length > 0 ? (
@@ -635,6 +680,18 @@ export default function PublicBookingPage() {
             featuredItemIds={storefrontConfig?.merchandising?.featuredItemIds}
             onItemClick={handleItemClick}
             config={storefrontConfig}
+            reviewAggregates={reviewAggregates}
+            isWishlisted={wishlist.isWishlisted}
+            onToggleWishlist={(item) =>
+              wishlist.toggle({
+                id: item.id,
+                name: item.name,
+                price: item.price,
+                currency: item.currency,
+                imageUrl: item.imageUrl,
+                itemType: item.itemType,
+              })
+            }
           />
         );
       case "testimonials":
@@ -768,8 +825,28 @@ export default function PublicBookingPage() {
           onSelectItem={(item) => setSelectedItem(item)}
           badges={storefrontConfig?.merchandising?.badges}
           slug={slug}
+          isWishlisted={wishlist.isWishlisted(selectedItem.id)}
+          onToggleWishlist={() =>
+            wishlist.toggle({
+              id: selectedItem.id,
+              name: selectedItem.name,
+              price: selectedItem.price,
+              currency: selectedItem.currency,
+              imageUrl: selectedItem.imageUrl,
+              itemType: selectedItem.itemType,
+            })
+          }
         />
       )}
+
+      <WishlistDrawer
+        open={wishlistOpen}
+        onClose={() => setWishlistOpen(false)}
+        items={wishlist.items}
+        onRemove={wishlist.remove}
+        onAddToCart={addToCart}
+        primaryColor={primaryColor}
+      />
 
       <CartDrawer
         cart={cart}

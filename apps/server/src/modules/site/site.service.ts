@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 
@@ -938,5 +938,188 @@ export class SiteService {
         error: 'AI recommendations unavailable at this time.',
       };
     }
+  }
+
+  async submitReview(slug: string, data: {
+    productId: string;
+    customerName: string;
+    customerEmail?: string;
+    rating: number;
+    reviewText?: string;
+    orderReference?: string;
+  }) {
+    const business = await this.prisma.client.business.findFirst({
+      where: { slug, deletedAt: null, storeEnabled: true },
+      select: { id: true },
+    });
+    if (!business) throw new NotFoundException('Storefront not found');
+
+    if (!data.productId || typeof data.productId !== 'string') {
+      throw new BadRequestException('Product ID is required');
+    }
+    if (!data.rating || data.rating < 1 || data.rating > 5) {
+      throw new BadRequestException('Rating must be between 1 and 5');
+    }
+    if (!data.customerName || data.customerName.trim().length === 0) {
+      throw new BadRequestException('Customer name is required');
+    }
+    if (data.customerName.trim().length > 100) {
+      throw new BadRequestException('Customer name is too long');
+    }
+    if (data.reviewText && data.reviewText.length > 2000) {
+      throw new BadRequestException('Review text is too long');
+    }
+
+    const productExists = await this.prisma.client.product.findFirst({
+      where: { id: data.productId, businessId: business.id, deletedAt: null },
+      select: { id: true },
+    });
+    const serviceExists = !productExists
+      ? await this.prisma.client.service.findFirst({
+          where: { id: data.productId, businessId: business.id, deletedAt: null },
+          select: { id: true },
+        })
+      : null;
+
+    if (!productExists && !serviceExists) {
+      throw new BadRequestException('Product or service not found');
+    }
+
+    const review = await this.prisma.client.productReview.create({
+      data: {
+        productId: data.productId,
+        businessId: business.id,
+        customerName: data.customerName.trim().slice(0, 100),
+        customerEmail: data.customerEmail?.trim().slice(0, 255) || null,
+        rating: Math.round(data.rating),
+        reviewText: data.reviewText?.trim().slice(0, 2000) || null,
+        status: 'PENDING',
+        orderReference: data.orderReference?.trim().slice(0, 100) || null,
+      },
+    });
+
+    return { id: review.id, status: review.status };
+  }
+
+  async getProductReviews(slug: string, productId: string) {
+    const business = await this.prisma.client.business.findFirst({
+      where: { slug, deletedAt: null, storeEnabled: true },
+      select: { id: true },
+    });
+    if (!business) throw new NotFoundException('Storefront not found');
+
+    const reviews = await this.prisma.client.productReview.findMany({
+      where: {
+        businessId: business.id,
+        productId,
+        status: 'APPROVED',
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+
+    const totalCount = reviews.length;
+    const averageRating = totalCount > 0
+      ? Math.round((reviews.reduce((sum, r) => sum + r.rating, 0) / totalCount) * 10) / 10
+      : 0;
+
+    return {
+      reviews: reviews.map((r) => ({
+        id: r.id,
+        customerName: r.customerName,
+        rating: r.rating,
+        reviewText: r.reviewText,
+        sellerResponse: r.sellerResponse,
+        createdAt: r.createdAt,
+      })),
+      averageRating,
+      totalCount,
+    };
+  }
+
+  async getReviewAggregates(slug: string) {
+    const business = await this.prisma.client.business.findFirst({
+      where: { slug, deletedAt: null, storeEnabled: true },
+      select: { id: true },
+    });
+    if (!business) throw new NotFoundException('Storefront not found');
+
+    const reviews = await this.prisma.client.productReview.findMany({
+      where: {
+        businessId: business.id,
+        status: 'APPROVED',
+      },
+      select: { productId: true, rating: true },
+    });
+
+    const aggregates: Record<string, { total: number; sum: number; count: number }> = {};
+    for (const r of reviews) {
+      if (!aggregates[r.productId]) {
+        aggregates[r.productId] = { total: 0, sum: 0, count: 0 };
+      }
+      aggregates[r.productId].total++;
+      aggregates[r.productId].sum += r.rating;
+      aggregates[r.productId].count++;
+    }
+
+    const result: Record<string, { averageRating: number; reviewCount: number }> = {};
+    for (const [productId, agg] of Object.entries(aggregates)) {
+      result[productId] = {
+        averageRating: Math.round((agg.sum / agg.count) * 10) / 10,
+        reviewCount: agg.count,
+      };
+    }
+
+    return result;
+  }
+
+  async listBusinessReviews(businessId: string, filters?: {
+    status?: string;
+    rating?: number;
+  }) {
+    const where: any = { businessId };
+    if (filters?.status) where.status = filters.status;
+    if (filters?.rating) where.rating = filters.rating;
+
+    const reviews = await this.prisma.client.productReview.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+
+    const stats = {
+      total: reviews.length,
+      pending: reviews.filter((r) => r.status === 'PENDING').length,
+      approved: reviews.filter((r) => r.status === 'APPROVED').length,
+      hidden: reviews.filter((r) => r.status === 'HIDDEN').length,
+      averageRating: reviews.length > 0
+        ? Math.round((reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length) * 10) / 10
+        : 0,
+    };
+
+    return { reviews, stats };
+  }
+
+  async moderateReview(businessId: string, reviewId: string, data: {
+    status?: string;
+    sellerResponse?: string;
+  }) {
+    const review = await this.prisma.client.productReview.findFirst({
+      where: { id: reviewId, businessId },
+    });
+    if (!review) throw new NotFoundException('Review not found');
+
+    const updateData: any = {};
+    if (data.status && ['APPROVED', 'HIDDEN', 'PENDING'].includes(data.status)) {
+      updateData.status = data.status;
+    }
+    if (data.sellerResponse !== undefined) {
+      updateData.sellerResponse = data.sellerResponse?.trim() || null;
+    }
+
+    return this.prisma.client.productReview.update({
+      where: { id: reviewId },
+      data: updateData,
+    });
   }
 }

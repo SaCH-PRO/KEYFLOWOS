@@ -75,10 +75,15 @@ export type ServiceBookingData = {
 };
 
 export type FilterTab = "all" | "service" | "product" | "package";
-export type SortOption = "default" | "price_asc" | "price_desc" | "duration";
+export type SortOption = "default" | "price_asc" | "price_desc" | "duration" | "highest_rated";
 
 export type CategoryInfo = {
   key: string;
   label: string;
   count: number;
+};
+
+export type ReviewAggregate = {
+  averageRating: number;
+  reviewCount: number;
 };
