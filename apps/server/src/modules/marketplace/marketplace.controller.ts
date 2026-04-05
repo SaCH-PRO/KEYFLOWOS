@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { MarketplaceService } from './marketplace.service';
@@ -241,4 +241,34 @@ export class MarketplaceController {
   ) {
     return this.marketplaceService.updatePurchaseOrder(businessId, poId, body);
   }
+
+  @Post('businesses/:businessId/orders/:orderId/fulfill')
+  fulfillOrder(
+    @Param('businessId') businessId: string,
+    @Param('orderId') orderId: string,
+    @Body() body: { action: string; [key: string]: any },
+  ) {
+    const { action, ...data } = body;
+    return this.marketplaceService.fulfillOrder(businessId, orderId, action, data);
+  }
+
+  @Get('businesses/:businessId/orders/:orderId/token')
+  async getOrderToken(
+    @Param('businessId') businessId: string,
+    @Param('orderId') orderId: string,
+  ) {
+    const token = await this.marketplaceService.getOrderToken(businessId, orderId);
+    return { token };
+  }
+
+  @Get('businesses/:businessId/delivery-config')
+  getDeliveryConfig(@Param('businessId') businessId: string) {
+    return this.marketplaceService.getDeliveryConfig(businessId);
+  }
+
+  @Put('businesses/:businessId/delivery-config')
+  updateDeliveryConfig(@Param('businessId') businessId: string, @Body() body: any) {
+    return this.marketplaceService.updateDeliveryConfig(businessId, body);
+  }
+
 }

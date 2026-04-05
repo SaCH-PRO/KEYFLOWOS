@@ -137,6 +137,22 @@ export async function apiPostSimple<T>(path: string, body: unknown): Promise<Api
   return apiPost<T>({ path, body });
 }
 
+export async function apiPut<T>(path: string, body: unknown): Promise<ApiResponse<T>> {
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: "PUT",
+      headers: buildHeaders(),
+      body: JSON.stringify(body),
+    });
+    const data: unknown = await res.json().catch(() => null);
+    if (!res.ok) return handleErrorResponse<T>(data, res.statusText);
+    return { data: data as T, error: null };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Network error";
+    return { data: null, error: message };
+  }
+}
+
 export function isPlanLimitError<T>(res: ApiResponse<T>): res is ApiResponse<T> & { planLimitReached: PlanLimitError } {
   return res.planLimitReached != null;
 }

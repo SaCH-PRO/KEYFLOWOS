@@ -1,11 +1,17 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { TransactionalEmailService } from '../notifications/transactional-email.service';
 
 @Injectable()
 export class MarketplaceService {
   private readonly logger = new Logger(MarketplaceService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => TransactionalEmailService))
+    private readonly emailService: TransactionalEmailService,
+  ) {}
 
   private generateOrderNumber(): string {
     const prefix = 'MKT';
@@ -299,7 +305,7 @@ export class MarketplaceService {
     const discountAmount = data.discountAmount || 0;
     const total = subtotal + shippingFee + taxAmount + dutyAmount - discountAmount;
 
-    return this.prisma.client.marketplaceOrder.create({
+    const order = await this.prisma.client.marketplaceOrder.create({
       data: {
         businessId,
         orderNumber,
@@ -321,6 +327,42 @@ export class MarketplaceService {
         items: { create: orderItems },
       },
       include: { items: { include: { product: true } }, shipments: true },
+    });
+
+    this.sendSellerNewOrderNotification(businessId, order, orderItems).catch((err) =>
+      this.logger.error(`Failed to send seller new order notification: ${(err as Error).message}`),
+    );
+
+    return order;
+  }
+
+  private async sendSellerNewOrderNotification(businessId: string, order: any, items: any[]) {
+    const business = await this.prisma.client.business.findFirst({
+      where: { id: businessId },
+      select: { email: true, name: true },
+    });
+    if (!business?.email) return;
+
+    await this.emailService.send({
+      businessId,
+      type: 'seller_new_order' as any,
+      recipientEmail: business.email,
+      recipientName: business.name ?? 'Store Owner',
+      templateData: {
+        orderNumber: order.orderNumber,
+        customerName: order.customerName ?? 'Customer',
+        customerEmail: order.customerEmail ?? '',
+        items: items.map((i) => ({
+          name: i.name,
+          quantity: i.quantity,
+          unitPrice: i.unitPrice,
+          total: i.total,
+        })),
+        total: order.total,
+        currency: order.currency ?? 'TTD',
+        businessName: business.name ?? 'Store',
+      },
+      dedupeKey: `seller-new-order-${order.id}`,
     });
   }
 
@@ -748,5 +790,369 @@ export class MarketplaceService {
       warehouses: { count: warehouses },
       revenue: { monthly: monthlyRevenue._sum.total || 0 },
     };
+  }
+
+  private generateOrderToken(orderId: string): string {
+    return createHash('sha256').update(`${orderId}-${process.env.DATABASE_URL || 'salt'}`).digest('hex').slice(0, 32);
+  }
+
+  async getOrderByToken(token: string) {
+    const orders = await this.prisma.client.marketplaceOrder.findMany({
+      where: {
+        metadata: { path: ['publicToken'], equals: token },
+      },
+      include: {
+        items: { include: { product: true } },
+        shipments: true,
+        business: {
+          select: {
+            name: true,
+            email: true,
+            phone: true,
+            logoUrl: true,
+            primaryColor: true,
+            secondaryColor: true,
+          },
+        },
+      },
+      take: 1,
+    });
+
+    if (orders.length > 0) {
+      const order = orders[0];
+      const meta = (order as any).metadata ?? {};
+      return {
+        ...order,
+        statusTimeline: meta.statusTimeline ?? [],
+        fulfillmentNotes: meta.fulfillmentNotes ?? [],
+      };
+    }
+
+    const allOrders = await this.prisma.client.marketplaceOrder.findMany({
+      include: {
+        items: { include: { product: true } },
+        shipments: true,
+        business: {
+          select: {
+            name: true,
+            email: true,
+            phone: true,
+            logoUrl: true,
+            primaryColor: true,
+            secondaryColor: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    for (const order of allOrders) {
+      const expectedToken = this.generateOrderToken(order.id);
+      if (expectedToken === token) {
+        const meta = (order as any).metadata ?? {};
+        await this.prisma.client.marketplaceOrder.update({
+          where: { id: order.id },
+          data: { metadata: { ...meta, publicToken: token } },
+        });
+        return {
+          ...order,
+          statusTimeline: meta.statusTimeline ?? [],
+          fulfillmentNotes: meta.fulfillmentNotes ?? [],
+        };
+      }
+    }
+
+    throw new NotFoundException('Order not found');
+  }
+
+  async getOrderToken(businessId: string, orderId: string): Promise<string> {
+    const order = await this.prisma.client.marketplaceOrder.findFirst({
+      where: { id: orderId, businessId },
+      select: { id: true, metadata: true },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+
+    const meta = (order.metadata as Record<string, any>) ?? {};
+    if (meta.publicToken) return meta.publicToken;
+
+    const token = this.generateOrderToken(orderId);
+    await this.prisma.client.marketplaceOrder.update({
+      where: { id: orderId },
+      data: { metadata: { ...meta, publicToken: token } },
+    });
+    return token;
+  }
+
+  async fulfillOrder(businessId: string, orderId: string, action: string, data?: any) {
+    const order = await this.prisma.client.marketplaceOrder.findFirst({
+      where: { id: orderId, businessId },
+      include: { items: { include: { product: true } }, shipments: true },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+
+    const meta = (order.metadata as Record<string, any>) ?? {};
+    const timeline: any[] = meta.statusTimeline ?? [];
+    const now = new Date().toISOString();
+
+    const validTransitions: Record<string, string[]> = {
+      PENDING: ['CONFIRMED', 'CANCELLED'],
+      CONFIRMED: ['PROCESSING', 'CANCELLED'],
+      PROCESSING: ['SHIPPED', 'CANCELLED'],
+      SHIPPED: ['DELIVERED'],
+      DELIVERED: [],
+      CANCELLED: [],
+      REFUNDED: [],
+    };
+
+    let newStatus = order.status;
+    const updateData: Record<string, unknown> = {};
+
+    switch (action) {
+      case 'confirm':
+        if (!validTransitions[order.status]?.includes('CONFIRMED')) {
+          throw new BadRequestException(`Cannot confirm order in ${order.status} status`);
+        }
+        newStatus = 'CONFIRMED';
+        timeline.push({ status: 'CONFIRMED', timestamp: now, note: data?.note });
+        break;
+
+      case 'process':
+        if (!validTransitions[order.status]?.includes('PROCESSING')) {
+          throw new BadRequestException(`Cannot process order in ${order.status} status`);
+        }
+        newStatus = 'PROCESSING';
+        timeline.push({ status: 'PROCESSING', timestamp: now, note: data?.note });
+        break;
+
+      case 'ship':
+        if (!validTransitions[order.status]?.includes('SHIPPED')) {
+          throw new BadRequestException(`Cannot ship order in ${order.status} status`);
+        }
+        newStatus = 'SHIPPED';
+        timeline.push({
+          status: 'SHIPPED',
+          timestamp: now,
+          carrier: data?.carrier,
+          trackingNumber: data?.trackingNumber,
+          trackingUrl: data?.trackingUrl,
+          note: data?.note,
+        });
+
+        if (data?.carrier || data?.trackingNumber) {
+          await this.prisma.client.shipment.create({
+            data: {
+              businessId,
+              orderId,
+              carrier: data.carrier,
+              trackingNumber: data.trackingNumber,
+              status: 'IN_TRANSIT',
+              shippedAt: new Date(),
+              estimatedDelivery: data.estimatedDelivery ? new Date(data.estimatedDelivery) : undefined,
+              destinationAddress: order.shippingAddress as any,
+            },
+          });
+        }
+        break;
+
+      case 'deliver':
+        if (!validTransitions[order.status]?.includes('DELIVERED')) {
+          throw new BadRequestException(`Cannot deliver order in ${order.status} status`);
+        }
+        newStatus = 'DELIVERED';
+        timeline.push({ status: 'DELIVERED', timestamp: now, note: data?.note });
+
+        if (order.shipments?.length > 0) {
+          for (const shipment of order.shipments) {
+            if (shipment.status !== 'DELIVERED') {
+              await this.prisma.client.shipment.update({
+                where: { id: shipment.id },
+                data: { status: 'DELIVERED', deliveredAt: new Date() },
+              });
+            }
+          }
+        }
+        break;
+
+      case 'cancel':
+        if (!validTransitions[order.status]?.includes('CANCELLED')) {
+          throw new BadRequestException(`Cannot cancel order in ${order.status} status`);
+        }
+        newStatus = 'CANCELLED';
+        timeline.push({ status: 'CANCELLED', timestamp: now, reason: data?.reason, note: data?.note });
+
+        for (const item of order.items) {
+          if (item.productId) {
+            const inv = await this.prisma.client.inventoryItem.findFirst({
+              where: { productId: item.productId, businessId },
+            });
+            if (inv) {
+              await this.prisma.client.inventoryItem.update({
+                where: { id: inv.id },
+                data: {
+                  quantity: inv.quantity + item.quantity,
+                  availableQuantity: (inv.availableQuantity ?? inv.quantity) + item.quantity,
+                },
+              });
+            }
+          }
+        }
+        break;
+
+      case 'refund':
+        newStatus = 'REFUNDED';
+        timeline.push({
+          status: 'REFUNDED',
+          timestamp: now,
+          refundAmount: data?.refundAmount ?? order.total,
+          reason: data?.reason,
+          note: data?.note,
+        });
+        updateData.paymentStatus = 'REFUNDED';
+        break;
+
+      case 'add_tracking':
+        timeline.push({
+          status: 'TRACKING_UPDATED',
+          timestamp: now,
+          carrier: data?.carrier,
+          trackingNumber: data?.trackingNumber,
+          trackingUrl: data?.trackingUrl,
+        });
+
+        if (data?.carrier || data?.trackingNumber) {
+          const existingShipment = order.shipments?.find(s => s.orderId === orderId);
+          if (existingShipment) {
+            await this.prisma.client.shipment.update({
+              where: { id: existingShipment.id },
+              data: {
+                carrier: data.carrier ?? existingShipment.carrier,
+                trackingNumber: data.trackingNumber ?? existingShipment.trackingNumber,
+              },
+            });
+          } else {
+            await this.prisma.client.shipment.create({
+              data: {
+                businessId,
+                orderId,
+                carrier: data.carrier,
+                trackingNumber: data.trackingNumber,
+                status: 'PREPARING',
+                destinationAddress: order.shippingAddress as any,
+              },
+            });
+          }
+        }
+        break;
+
+      default:
+        throw new BadRequestException(`Unknown fulfillment action: ${action}`);
+    }
+
+    updateData.status = newStatus;
+    updateData.metadata = { ...meta, statusTimeline: timeline };
+
+    const updated = await this.prisma.client.marketplaceOrder.update({
+      where: { id: orderId },
+      data: updateData,
+      include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },
+    });
+
+    this.sendFulfillmentNotification(businessId, updated, newStatus, data).catch((err) =>
+      this.logger.error(`Failed to send fulfillment notification: ${(err as Error).message}`),
+    );
+
+    return updated;
+  }
+
+  private async sendFulfillmentNotification(
+    businessId: string,
+    order: any,
+    status: string,
+    data?: any,
+  ) {
+    const customerEmail = order.customerEmail;
+    const customerName = order.customerName || 'Customer';
+    if (!customerEmail) return;
+
+    const notificationMap: Record<string, string> = {
+      CONFIRMED: 'order_confirmed',
+      SHIPPED: 'order_shipped',
+      DELIVERED: 'order_delivered',
+      CANCELLED: 'order_cancelled',
+      REFUNDED: 'order_refunded',
+    };
+
+    const type = notificationMap[status];
+    if (!type) return;
+
+    const items = (order.items ?? []).map((i: any) => ({
+      name: i.product?.name ?? i.name ?? 'Item',
+      quantity: i.quantity,
+      unitPrice: i.unitPrice ?? i.price ?? 0,
+      total: i.total ?? (i.quantity * (i.unitPrice ?? i.price ?? 0)),
+    }));
+
+    const itemsTotal = items.reduce((sum: number, i: any) => sum + (i.total ?? 0), 0);
+    const shippingFee = (order as any).shippingFee ?? 0;
+
+    const templateData: Record<string, any> = {
+      orderNumber: order.orderNumber ?? order.id,
+      customerName,
+      items,
+      subtotal: itemsTotal,
+      shippingFee,
+      total: order.total ?? 0,
+      currency: order.currency ?? 'USD',
+      businessName: order.business?.name ?? 'Store',
+      trackingUrl: data?.trackingUrl,
+      carrier: data?.carrier,
+      trackingNumber: data?.trackingNumber,
+      reason: data?.reason,
+      refundAmount: data?.refundAmount ?? order.total,
+      deliveredAt: status === 'DELIVERED' ? new Date().toISOString() : undefined,
+    };
+
+    await this.emailService.send({
+      businessId,
+      type: type as any,
+      recipientEmail: customerEmail,
+      recipientName: customerName,
+      templateData,
+      dedupeKey: `${type}-${order.id}`,
+    });
+  }
+
+  async getDeliveryConfig(businessId: string) {
+    const business = await this.prisma.client.business.findFirst({
+      where: { id: businessId, deletedAt: null },
+      select: { metaData: true },
+    });
+    if (!business) throw new NotFoundException('Business not found');
+    const meta = (business.metaData as Record<string, any>) ?? {};
+    return meta.storefront?.deliveryConfig ?? {
+      shipping: { enabled: false, zones: [] },
+      localPickup: { enabled: false, address: '', hours: '' },
+      digital: { enabled: false },
+      service: { enabled: false },
+    };
+  }
+
+  async updateDeliveryConfig(businessId: string, config: Record<string, any>) {
+    const business = await this.prisma.client.business.findFirst({
+      where: { id: businessId, deletedAt: null },
+      select: { metaData: true },
+    });
+    if (!business) throw new NotFoundException('Business not found');
+
+    const meta = (business.metaData as Record<string, any>) ?? {};
+    const storefront = meta.storefront ?? {};
+    storefront.deliveryConfig = config;
+
+    await this.prisma.client.business.update({
+      where: { id: businessId },
+      data: { metaData: { ...meta, storefront } },
+    });
+
+    return config;
   }
 }

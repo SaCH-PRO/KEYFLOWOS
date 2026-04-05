@@ -9,6 +9,13 @@ import {
   bookingCancelledTemplate,
   invoiceSentTemplate,
   paymentReceiptTemplate,
+  orderConfirmedTemplate,
+  orderShippedTemplate,
+  orderDeliveredTemplate,
+  orderRefundedTemplate,
+  orderCancelledTemplate,
+  sellerNewOrderTemplate,
+  sellerLowStockTemplate,
 } from './email-templates';
 
 export type NotificationType =
@@ -17,7 +24,14 @@ export type NotificationType =
   | 'booking_rescheduled'
   | 'booking_cancelled'
   | 'invoice_sent'
-  | 'payment_receipt';
+  | 'payment_receipt'
+  | 'order_confirmed'
+  | 'order_shipped'
+  | 'order_delivered'
+  | 'order_refunded'
+  | 'order_cancelled'
+  | 'seller_new_order'
+  | 'seller_low_stock';
 
 export interface NotificationPreferences {
   booking_confirmed?: boolean;
@@ -26,6 +40,13 @@ export interface NotificationPreferences {
   booking_cancelled?: boolean;
   invoice_sent?: boolean;
   payment_receipt?: boolean;
+  order_confirmed?: boolean;
+  order_shipped?: boolean;
+  order_delivered?: boolean;
+  order_refunded?: boolean;
+  order_cancelled?: boolean;
+  seller_new_order?: boolean;
+  seller_low_stock?: boolean;
 }
 
 const DEFAULT_PREFERENCES: NotificationPreferences = {
@@ -35,6 +56,13 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   booking_cancelled: true,
   invoice_sent: true,
   payment_receipt: true,
+  order_confirmed: true,
+  order_shipped: true,
+  order_delivered: true,
+  order_refunded: true,
+  order_cancelled: true,
+  seller_new_order: true,
+  seller_low_stock: true,
 };
 
 const QUEUE_DRAIN_INTERVAL_MS = 5 * 60 * 1000;
@@ -236,6 +264,74 @@ export class TransactionalEmailService implements OnModuleInit {
             currency: data.currency,
             paidAt: data.paidAt,
             invoiceUrl: data.invoiceUrl,
+          });
+          break;
+        case 'order_confirmed':
+          rendered = orderConfirmedTemplate({
+            ...baseCtx,
+            orderNumber: data.orderNumber,
+            items: data.items,
+            subtotal: data.subtotal,
+            shippingFee: data.shippingFee,
+            total: data.total,
+            currency: data.currency,
+            estimatedDelivery: data.estimatedDelivery,
+            orderStatusUrl: data.orderStatusUrl,
+          });
+          break;
+        case 'order_shipped':
+          rendered = orderShippedTemplate({
+            ...baseCtx,
+            orderNumber: data.orderNumber,
+            carrier: data.carrier,
+            trackingNumber: data.trackingNumber,
+            trackingUrl: data.trackingUrl,
+            estimatedDelivery: data.estimatedDelivery,
+            orderStatusUrl: data.orderStatusUrl,
+          });
+          break;
+        case 'order_delivered':
+          rendered = orderDeliveredTemplate({
+            ...baseCtx,
+            orderNumber: data.orderNumber,
+            deliveredAt: data.deliveredAt,
+            orderStatusUrl: data.orderStatusUrl,
+          });
+          break;
+        case 'order_refunded':
+          rendered = orderRefundedTemplate({
+            ...baseCtx,
+            orderNumber: data.orderNumber,
+            refundAmount: data.refundAmount,
+            currency: data.currency,
+            reason: data.reason,
+            orderStatusUrl: data.orderStatusUrl,
+          });
+          break;
+        case 'order_cancelled':
+          rendered = orderCancelledTemplate({
+            ...baseCtx,
+            orderNumber: data.orderNumber,
+            reason: data.reason,
+            orderStatusUrl: data.orderStatusUrl,
+          });
+          break;
+        case 'seller_new_order':
+          rendered = sellerNewOrderTemplate({
+            ...baseCtx,
+            orderNumber: data.orderNumber,
+            customerName: data.customerName,
+            itemCount: data.itemCount,
+            total: data.total,
+            currency: data.currency,
+          });
+          break;
+        case 'seller_low_stock':
+          rendered = sellerLowStockTemplate({
+            ...baseCtx,
+            productName: data.productName,
+            currentStock: data.currentStock,
+            reorderLevel: data.reorderLevel,
           });
           break;
         default:
