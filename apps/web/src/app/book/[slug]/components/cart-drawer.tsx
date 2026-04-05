@@ -107,7 +107,7 @@ export function CartDrawer({
   const hasPhysicalItems = cart.some((c) => c.itemType === "product");
   const discount = calculateDiscount(cartTotal, promoCode);
   const estimatedTax = Math.round(cartTotal * 0.125 * 100) / 100;
-  const shippingEstimate = hasPhysicalItems ? 0 : 0;
+  const shippingEstimate = 0;
   const orderTotal = cartTotal - discount + estimatedTax + shippingEstimate;
 
   const serviceItems = cart.filter((c) => c.itemType === "service");
