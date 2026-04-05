@@ -43,16 +43,15 @@ interface UsageSummary {
 export class AiUsageService {
   private readonly logger = new Logger(AiUsageService.name);
   private readonly openai: OpenAI;
-  private readonly defaultModel = 'gpt-5.2';
+  private readonly defaultModel = 'gpt-4o';
 
   private readonly RATE_LIMIT_PER_MINUTE = 30;
   private readonly rateLimitMap = new Map<string, number[]>();
   private rateLimitCleanupTimer: ReturnType<typeof setInterval>;
 
   private readonly TOKEN_COST_PER_1K: Record<string, { input: number; output: number }> = {
-    'gpt-5.2': { input: 0.005, output: 0.015 },
-    'gpt-5-mini': { input: 0.0004, output: 0.0016 },
-    'gpt-5-nano': { input: 0.0001, output: 0.0004 },
+    'gpt-4o': { input: 0.005, output: 0.015 },
+    'gpt-4o-mini': { input: 0.0004, output: 0.0016 },
   };
 
   constructor(
@@ -131,7 +130,7 @@ export class AiUsageService {
       const completionTokens = response.usage?.completion_tokens ?? 0;
       const totalTokens = promptTokens + completionTokens;
 
-      const costs = this.TOKEN_COST_PER_1K[model] || this.TOKEN_COST_PER_1K['gpt-5.2'];
+      const costs = this.TOKEN_COST_PER_1K[model] || this.TOKEN_COST_PER_1K['gpt-4o'];
       const estimatedCost =
         (promptTokens / 1000) * costs.input +
         (completionTokens / 1000) * costs.output;

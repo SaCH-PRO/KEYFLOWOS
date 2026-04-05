@@ -904,7 +904,7 @@ export class SiteService {
       const result = await this.ai.callAi({
         businessId,
         feature: 'storefront_advisor',
-        model: 'gpt-5-mini',
+        model: 'gpt-4o-mini',
         maxTokens: 600,
         temperature: 0.7,
         messages: [

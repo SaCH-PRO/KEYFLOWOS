@@ -1031,7 +1031,7 @@ export class CrmActionsService {
       const result = await this.aiUsage.callAi({
         businessId,
         feature: 'crm_next_actions',
-        model: 'gpt-5-mini',
+        model: 'gpt-4o-mini',
         maxTokens: 800,
         temperature: 0.4,
         messages: [
