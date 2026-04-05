@@ -146,6 +146,7 @@ model Business {
   customerNotificationLogs CustomerNotificationLog[]
   apiKeys              ApiKey[]
   guidanceProfile      BusinessGuidanceProfile?
+  guidanceAssessments  GuidanceAssessment[]
 
   // Customer notification preferences (JSON: { booking_confirmed: true, ... })
   notificationPreferences Json? @default("{}") @map("notification_preferences")
@@ -2250,39 +2251,77 @@ model AssessmentResult {
   @@map("assessment_results")
 }
 
-model GuidanceRecommendation {
-  id                 String   @id @default(cuid())
-  guidanceProfileId  String   @map("guidance_profile_id")
-  title              String
-  description        String
-  category           String
-  priority           String   @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
-  impact             String   @default("MEDIUM") // LOW, MEDIUM, HIGH
-  effort             String   @default("MEDIUM") // LOW, MEDIUM, HIGH
-  status             String   @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, DISMISSED
-  actionUrl          String?  @map("action_url")
-  completedAt        DateTime? @map("completed_at")
-  dismissedAt        DateTime? @map("dismissed_at")
-  createdAt          DateTime @default(now()) @map("created_at")
-  updatedAt          DateTime @updatedAt @map("updated_at")
+model GuidanceAssessment {
+  id            String   @id @default(cuid())
+  businessId    String   @map("business_id")
+  businessType  String?  @map("business_type")
+  businessStage String?  @map("business_stage")
+  scores        Json?
+  flags         Json?
+  aiSummary     Json?    @map("ai_summary")
+  status        String   @default("COMPLETED")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
-  guidanceProfile BusinessGuidanceProfile @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+  business        Business                 @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  recommendations GuidanceRecommendation[] @relation("AssessmentRecommendations")
+  roadmapItems    RoadmapItem[]            @relation("AssessmentRoadmapItems")
+
+  @@index([businessId])
+  @@index([businessId, createdAt])
+  @@map("guidance_assessments")
+}
+
+model GuidanceRecommendation {
+  id                  String   @id @default(cuid())
+  guidanceProfileId   String?  @map("guidance_profile_id")
+  assessmentId        String?  @map("assessment_id")
+  templateId          String?  @map("template_id")
+  title               String
+  description         String
+  category            String
+  priority            String   @default("MEDIUM")
+  impactLevel         String?  @map("impact_level")
+  urgency             String?  @default("planned")
+  rationale           String?
+  suggestedAction     String?  @map("suggested_action")
+  estimatedDifficulty String?  @map("estimated_difficulty")
+  impact              String?  @default("MEDIUM")
+  effort              String?  @default("MEDIUM")
+  status              String   @default("PENDING")
+  actionUrl           String?  @map("action_url")
+  scoreValue          Int?     @map("score_value")
+  triggerScoreKey     String?  @map("trigger_score_key")
+  completedAt         DateTime? @map("completed_at")
+  dismissedAt         DateTime? @map("dismissed_at")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  guidanceProfile BusinessGuidanceProfile? @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+  assessment      GuidanceAssessment?      @relation("AssessmentRecommendations", fields: [assessmentId], references: [id], onDelete: Cascade)
 
   @@index([guidanceProfileId])
   @@index([guidanceProfileId, status])
   @@index([guidanceProfileId, priority])
+  @@index([assessmentId])
   @@map("guidance_recommendations")
 }
 
 model RoadmapItem {
   id                 String   @id @default(cuid())
-  guidanceProfileId  String   @map("guidance_profile_id")
-  title              String
-  description        String
-  category           String
-  sequenceOrder      Int      @map("sequence_order")
+  guidanceProfileId  String?  @map("guidance_profile_id")
+  assessmentId       String?  @map("assessment_id")
+  title              String?
+  description        String?
+  category           String?
+  sequenceOrder      Int?     @map("sequence_order")
+  orderIndex         Int?     @map("order_index")
+  actionTitle        String?  @map("action_title")
+  whyItMatters       String?  @map("why_it_matters")
+  expectedOutcome    String?  @map("expected_outcome")
+  linkedScoreArea    String?  @map("linked_score_area")
   estimatedDays      Int?     @map("estimated_days")
-  status             String   @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, SKIPPED
+  status             String   @default("PENDING")
   dependsOn          String[] @default([]) @map("depends_on")
   startDate          DateTime? @map("start_date")
   dueDate            DateTime? @map("due_date")
@@ -2290,11 +2329,13 @@ model RoadmapItem {
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
-  guidanceProfile BusinessGuidanceProfile @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+  guidanceProfile BusinessGuidanceProfile? @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+  assessment      GuidanceAssessment?      @relation("AssessmentRoadmapItems", fields: [assessmentId], references: [id], onDelete: Cascade)
 
   @@index([guidanceProfileId])
   @@index([guidanceProfileId, sequenceOrder])
   @@index([guidanceProfileId, status])
+  @@index([assessmentId])
   @@map("roadmap_items")
 }
 
