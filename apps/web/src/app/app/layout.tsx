@@ -651,7 +651,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                       <p className="text-[10px] text-muted-foreground truncate mt-0.5">{getCachedUser()?.email}</p>
                     </div>
                     <Link
-                      href="/app/settings/profile"
+                      href="/app/profile"
                       onClick={() => setUserMenuOpen(false)}
                       className="flex items-center gap-2.5 px-3 py-2.5 text-xs text-foreground/80 hover:bg-muted transition-colors min-h-[44px]"
                       role="menuitem"
@@ -721,7 +721,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
             {displayName && (
               <Link
-                href="/app/settings/profile"
+                href="/app/profile"
                 onClick={() => setMobileDrawerOpen(false)}
                 className="px-3 py-2.5 border-b border-border flex items-center gap-2.5 hover:bg-muted transition-colors min-h-[44px]"
               >

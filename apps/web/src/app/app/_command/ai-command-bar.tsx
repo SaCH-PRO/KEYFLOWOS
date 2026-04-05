@@ -39,6 +39,7 @@ const MODULE_PROMPTS: Record<string, ModuleQuickPrompts> = {
   "/app/community": { module: "Community", prompts: ["Trending topics", "My engagement", "Find collaborators"] },
   "/app/settings": { module: "Settings", prompts: ["Setup checklist", "Security review", "Integration status"] },
   "/app/marketplace": { module: "Marketplace", prompts: ["Discover partners", "Trending services", "Competitor analysis"] },
+  "/app/profile": { module: "Profile", prompts: ["Complete my profile", "AI profile generator", "Document guidance"] },
 };
 
 function getModuleContext(pathname: string): ModuleQuickPrompts {

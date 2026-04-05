@@ -205,6 +205,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     { id: "nav-learn", label: "Learn", hint: "MasterClass courses", icon: GraduationCap, onSelect: () => router.push("/app/learn") },
     { id: "nav-community", label: "Community", hint: "Forum & founder circles", icon: Users, onSelect: () => router.push("/app/community") },
     { id: "nav-settings", label: "Settings", hint: "Business settings", icon: Settings, onSelect: () => router.push("/app/settings") },
+    { id: "nav-profile", label: "My Profile", hint: "Personal info & identity", icon: User, onSelect: () => router.push("/app/profile") },
   ], [router]);
 
   const filteredQuick = useMemo(() => {
