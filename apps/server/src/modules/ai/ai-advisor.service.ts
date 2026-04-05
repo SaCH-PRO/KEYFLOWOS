@@ -331,6 +331,15 @@ Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
   }
 
   async predictCashFlow(businessId: string, days = 30) {
+    if (!this.prisma?.client) {
+      this.logger.error('PrismaService not available in predictCashFlow');
+      return {
+        currentBalance: 0, projectedBalance: 0, daysUntilNegative: null,
+        trend: 'stable', alerts: ['Cash flow data unavailable — service initializing.'],
+        dailyRevenueRate: 0, dailyExpenseRate: 0, projectionDays: days,
+      };
+    }
+    try {
     const now = new Date();
     const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
 
@@ -406,6 +415,14 @@ Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
       dailyExpenseRate: Math.round(dailyExpenseRate * 100) / 100,
       projectionDays: days,
     };
+    } catch (e) {
+      this.logger.error(`predictCashFlow failed: ${(e as Error).message}`);
+      return {
+        currentBalance: 0, projectedBalance: 0, daysUntilNegative: null,
+        trend: 'stable', alerts: ['Unable to compute cash flow forecast at this time.'],
+        dailyRevenueRate: 0, dailyExpenseRate: 0, projectionDays: days,
+      };
+    }
   }
 
   async simulateScenario(businessId: string, scenario: string, variables?: Record<string, any>) {

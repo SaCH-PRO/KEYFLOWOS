@@ -94,6 +94,7 @@ export default function StorePage() {
   useKeyboardShortcuts(shortcuts, !s.loading);
 
   if (s.loading) return <div className="space-y-6"><PageHeader icon={Store} title="Store Setup" subtitle="Configure your public storefront" /><StoreSkeleton /></div>;
+  if (s.loadError) return <div className="space-y-6"><PageHeader icon={Store} title="Store Setup" subtitle="Configure your public storefront" /><WorkspaceError title="Failed to load store" description={s.loadError} /></div>;
   if (!s.businessId) return <WorkspaceError />;
 
   const cfg = s.storefrontConfig;

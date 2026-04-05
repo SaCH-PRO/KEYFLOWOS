@@ -19,10 +19,15 @@ type BusinessHoursMap = Record<string, DayHours>;
 
 const REMINDER_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
+type BookingWithRelations = Prisma.BookingGetPayload<{
+  include: { contact: true; service: true };
+}>;
+
 @Injectable()
 export class BookingsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(BookingsService.name);
   private reminderInterval: ReturnType<typeof setInterval> | null = null;
+  private emailWarnedBusinesses = new Set<string>();
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -48,10 +53,18 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async processBookingReminders() {
-    const businesses = await this.prisma.client.business.findMany({
-      where: { bookingReminderMins: { not: null, gt: 0 } },
-      select: { id: true, bookingReminderMins: true },
-    });
+    let businesses: Array<{ id: string; bookingReminderMins: number | null }>;
+    try {
+      businesses = await this.prisma.client.business.findMany({
+        where: { bookingReminderMins: { not: null, gt: 0 } },
+        select: { id: true, bookingReminderMins: true },
+      });
+    } catch (e) {
+      this.logger.warn(`Booking reminder check skipped — DB unavailable: ${(e as Error).message}`);
+      return;
+    }
+
+    if (businesses.length === 0) return;
 
     for (const biz of businesses) {
       const reminderMins = biz.bookingReminderMins ?? 60;
@@ -59,27 +72,34 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       const windowStart = new Date(now.getTime() + (reminderMins - 5) * 60_000);
       const windowEnd = new Date(now.getTime() + (reminderMins + 5) * 60_000);
 
-      const upcomingBookings = await this.prisma.client.booking.findMany({
-        where: {
-          businessId: biz.id,
-          startTime: { gte: windowStart, lte: windowEnd },
-          status: { in: ['CONFIRMED', 'PENDING'] },
-          reminderSentAt: null,
-        },
-        include: {
-          contact: true,
-          service: true,
-        },
-      });
+      let upcomingBookings: BookingWithRelations[];
+      try {
+        upcomingBookings = await this.prisma.client.booking.findMany({
+          where: {
+            businessId: biz.id,
+            startTime: { gte: windowStart, lte: windowEnd },
+            status: { in: ['CONFIRMED', 'PENDING'] },
+            reminderSentAt: null,
+          },
+          include: {
+            contact: true,
+            service: true,
+          },
+        });
+      } catch (e) {
+        this.logger.warn(`Skipping reminders for business ${biz.id}: ${(e as Error).message}`);
+        continue;
+      }
 
       for (const booking of upcomingBookings) {
         if (!booking.contact?.email) continue;
 
-        try {
-          const endTime = new Date(
-            new Date(booking.startTime).getTime() + (booking.service?.duration || 60) * 60_000,
-          );
+        const endTime = new Date(
+          new Date(booking.startTime).getTime() + (booking.service?.duration || 60) * 60_000,
+        );
 
+        let emailSent = false;
+        try {
           await this.emailService.send({
             businessId: biz.id,
             type: 'booking_reminder',
@@ -95,15 +115,26 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
             },
             dedupeKey: `booking-reminder-${booking.id}`,
           });
-
-          await this.prisma.client.booking.update({
-            where: { id: booking.id },
-            data: { reminderSentAt: now },
-          });
-
-          this.logger.debug(`Sent booking reminder for booking ${booking.id}`);
+          emailSent = true;
+          this.emailWarnedBusinesses.delete(biz.id);
         } catch (e) {
-          this.logger.error(`Failed to send reminder for booking ${booking.id}: ${(e as Error).message}`);
+          const msg = (e as Error).message;
+          if (!this.emailWarnedBusinesses.has(biz.id)) {
+            this.emailWarnedBusinesses.add(biz.id);
+            this.logger.warn(`Email transport unavailable for business ${biz.id}, suppressing further warnings until resolved: ${msg}`);
+          }
+        }
+
+        if (emailSent) {
+          try {
+            await this.prisma.client.booking.update({
+              where: { id: booking.id },
+              data: { reminderSentAt: now },
+            });
+            this.logger.debug(`Sent booking reminder for booking ${booking.id}`);
+          } catch (e) {
+            this.logger.error(`Failed to mark reminder sent for booking ${booking.id}: ${(e as Error).message}`);
+          }
         }
       }
     }

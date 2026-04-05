@@ -61,6 +61,7 @@ export function useStoreData() {
   const [driftedItems, setDriftedItems] = useState<DriftedItem[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [overviewAnalytics, setOverviewAnalytics] = useState<StoreAnalytics | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [storefrontConfig, setStorefrontConfig] = useState<StorefrontConfig>({
     hero: {},
@@ -74,13 +75,26 @@ export function useStoreData() {
 
   useEffect(() => {
     const initWorkspace = async () => {
-      const fresh = await refreshWorkspace();
-      if (fresh) {
-        setBusinessId(fresh);
-        return;
+      try {
+        const fresh = await refreshWorkspace();
+        if (fresh) {
+          setBusinessId(fresh);
+          return;
+        }
+        const stored = getStoredBusinessId();
+        if (stored) {
+          setBusinessId(stored);
+        } else {
+          setLoading(false);
+        }
+      } catch {
+        const stored = getStoredBusinessId();
+        if (stored) {
+          setBusinessId(stored);
+        } else {
+          setLoading(false);
+        }
       }
-      const stored = getStoredBusinessId();
-      if (stored) setBusinessId(stored);
     };
     void initWorkspace();
   }, []);
@@ -88,6 +102,7 @@ export function useStoreData() {
   const loadData = useCallback(async (showLoader = false) => {
     if (!businessId) return;
     if (showLoader) setLoading(true);
+    setLoadError(null);
     try {
       const [servicesRes, staffRes, bizRes, productsRes] = await Promise.all([
         fetchServices(businessId),
@@ -139,6 +154,7 @@ export function useStoreData() {
       if (analyticsRes.data) setOverviewAnalytics(analyticsRes.data);
     } catch (e) {
       console.error("Failed to load store data:", e);
+      setLoadError("Failed to load store data. Please refresh the page.");
       toast.error("Failed to load store data");
     } finally {
       setLoading(false);
@@ -373,6 +389,7 @@ export function useStoreData() {
   return {
     businessId,
     loading,
+    loadError,
     services,
     staff,
     commerceProducts,
