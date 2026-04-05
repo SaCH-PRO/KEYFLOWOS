@@ -144,6 +144,7 @@ model Business {
   scheduledAgentJobs   ScheduledAgentJob[]
   customerNotificationLogs CustomerNotificationLog[]
   apiKeys              ApiKey[]
+  guidanceProfile      BusinessGuidanceProfile?
 
   // Customer notification preferences (JSON: { booking_confirmed: true, ... })
   notificationPreferences Json? @default("{}") @map("notification_preferences")
@@ -1956,4 +1957,358 @@ model ApiKey {
   @@index([businessId])
   @@index([prefix])
   @@map("api_keys")
+}
+
+// ---
+// MODULE: BUSINESS GUIDANCE ENGINE
+// ---
+model BusinessGuidanceProfile {
+  id         String   @id @default(cuid())
+  businessId String   @unique @map("business_id")
+  status     String   @default("DRAFT") // DRAFT, IN_PROGRESS, SUBMITTED, ASSESSED
+  currentStep String? @map("current_step")
+  completedSteps String[] @default([]) @map("completed_steps")
+  submittedAt DateTime? @map("submitted_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  identity   BusinessIdentityProfile?
+  founder    FounderProfile?
+  offer      OfferProfile?
+  customer   CustomerProfile?
+  revenue    RevenueProfile?
+  finance    FinanceProfile?
+  operations OperationsProfile?
+  compliance ComplianceGuidanceProfile?
+  growth     GrowthProfile?
+  goals      GoalsProfile?
+  assessmentResults AssessmentResult[]
+  recommendations   GuidanceRecommendation[]
+  roadmapItems      RoadmapItem[]
+  progressSnapshots ProgressSnapshot[]
+
+  @@index([businessId])
+  @@map("business_guidance_profiles")
+}
+
+model BusinessIdentityProfile {
+  id                String   @id @default(cuid())
+  guidanceProfileId String   @unique @map("guidance_profile_id")
+  missionStatement  String?  @map("mission_statement")
+  visionStatement   String?  @map("vision_statement")
+  coreValues        String[] @default([]) @map("core_values")
+  targetMarket      String?  @map("target_market")
+  uniqueSellingPoint String? @map("unique_selling_point")
+  brandPersonality  String?  @map("brand_personality")
+  notes             String?
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  guidanceProfile BusinessGuidanceProfile @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([guidanceProfileId])
+  @@map("business_identity_profiles")
+}
+
+model FounderProfile {
+  id                 String   @id @default(cuid())
+  guidanceProfileId  String   @unique @map("guidance_profile_id")
+  yearsExperience    Int?     @map("years_experience")
+  technicalSkills    String[] @default([]) @map("technical_skills")
+  leadershipStyle    String?  @map("leadership_style")
+  previousExits      Int?     @default(0) @map("previous_exits")
+  educationLevel     String?  @map("education_level")
+  motivations        String[] @default([])
+  weeklyHoursAvailable Int?   @map("weekly_hours_available")
+  coFounders         Int?     @default(0) @map("co_founders")
+  notes              String?
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  guidanceProfile BusinessGuidanceProfile @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([guidanceProfileId])
+  @@map("founder_profiles")
+}
+
+model OfferProfile {
+  id                String   @id @default(cuid())
+  guidanceProfileId String   @unique @map("guidance_profile_id")
+  primaryOffer      String?  @map("primary_offer")
+  offerType         String?  @map("offer_type") // PRODUCT, SERVICE, DIGITAL, HYBRID
+  valueProposition  String?  @map("value_proposition")
+  differentiators   String[] @default([])
+  pricingModel      String?  @map("pricing_model")
+  priceRangeLow     Float?   @map("price_range_low")
+  priceRangeHigh    Float?   @map("price_range_high")
+  deliveryMethod    String?  @map("delivery_method") // IN_PERSON, ONLINE, HYBRID
+  productionCost    Float?   @map("production_cost")
+  marginPercent     Float?   @map("margin_percent")
+  notes             String?
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  guidanceProfile BusinessGuidanceProfile @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([guidanceProfileId])
+  @@map("offer_profiles")
+}
+
+model CustomerProfile {
+  id                  String   @id @default(cuid())
+  guidanceProfileId   String   @unique @map("guidance_profile_id")
+  targetDemographic   String?  @map("target_demographic")
+  ageRangeLow         Int?     @map("age_range_low")
+  ageRangeHigh        Int?     @map("age_range_high")
+  incomeLevel         String?  @map("income_level")
+  geographicFocus     String?  @map("geographic_focus")
+  customerPainPoints  String[] @default([]) @map("customer_pain_points")
+  acquisitionChannels String[] @default([]) @map("acquisition_channels")
+  retentionStrategy   String?  @map("retention_strategy")
+  customerLifetimeValue Float? @map("customer_lifetime_value")
+  currentCustomerCount  Int?   @map("current_customer_count")
+  monthlyNewCustomers   Int?   @map("monthly_new_customers")
+  churnRatePercent      Float? @map("churn_rate_percent")
+  notes               String?
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  guidanceProfile BusinessGuidanceProfile @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([guidanceProfileId])
+  @@map("customer_profiles")
+}
+
+model RevenueProfile {
+  id                 String   @id @default(cuid())
+  guidanceProfileId  String   @unique @map("guidance_profile_id")
+  monthlyRevenue     Float?   @map("monthly_revenue")
+  annualRevenue      Float?   @map("annual_revenue")
+  revenueStreams     String[] @default([]) @map("revenue_streams")
+  recurringPercent   Float?   @map("recurring_percent")
+  seasonalVariation  Boolean? @default(false) @map("seasonal_variation")
+  peakMonths         String[] @default([]) @map("peak_months")
+  averageOrderValue  Float?   @map("average_order_value")
+  revenueGrowthRate  Float?   @map("revenue_growth_rate")
+  targetMonthlyRevenue Float? @map("target_monthly_revenue")
+  breakEvenDate      DateTime? @map("break_even_date")
+  notes              String?
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  guidanceProfile BusinessGuidanceProfile @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([guidanceProfileId])
+  @@map("revenue_profiles")
+}
+
+model FinanceProfile {
+  id                  String   @id @default(cuid())
+  guidanceProfileId   String   @unique @map("guidance_profile_id")
+  startupCapital      Float?   @map("startup_capital")
+  currentCashReserve  Float?   @map("current_cash_reserve")
+  monthlyBurnRate     Float?   @map("monthly_burn_rate")
+  monthlyFixedCosts   Float?   @map("monthly_fixed_costs")
+  monthlyVariableCosts Float?  @map("monthly_variable_costs")
+  debtTotal           Float?   @map("debt_total")
+  fundingRaised       Float?   @map("funding_raised")
+  fundingSources      String[] @default([]) @map("funding_sources")
+  profitMarginPercent Float?   @map("profit_margin_percent")
+  runwayMonths        Int?     @map("runway_months")
+  hasAccountant       Boolean? @default(false) @map("has_accountant")
+  hasBookkeeper       Boolean? @default(false) @map("has_bookkeeper")
+  taxCompliant        Boolean? @map("tax_compliant")
+  notes               String?
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  guidanceProfile BusinessGuidanceProfile @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([guidanceProfileId])
+  @@map("finance_profiles")
+}
+
+model OperationsProfile {
+  id                  String   @id @default(cuid())
+  guidanceProfileId   String   @unique @map("guidance_profile_id")
+  teamSize            Int?     @map("team_size")
+  fullTimeEmployees   Int?     @map("full_time_employees")
+  partTimeEmployees   Int?     @map("part_time_employees")
+  contractors         Int?
+  operatingHoursPerWeek Int?   @map("operating_hours_per_week")
+  toolsUsed           String[] @default([]) @map("tools_used")
+  automationLevel     String?  @map("automation_level") // NONE, LOW, MEDIUM, HIGH
+  bottlenecks         String[] @default([])
+  keyProcesses        String[] @default([]) @map("key_processes")
+  supplyChainComplexity String? @map("supply_chain_complexity") // SIMPLE, MODERATE, COMPLEX
+  qualityControlProcess String? @map("quality_control_process")
+  notes               String?
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  guidanceProfile BusinessGuidanceProfile @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([guidanceProfileId])
+  @@map("operations_profiles")
+}
+
+model ComplianceGuidanceProfile {
+  id                  String   @id @default(cuid())
+  guidanceProfileId   String   @unique @map("guidance_profile_id")
+  businessRegistered  Boolean? @map("business_registered")
+  registrationType    String?  @map("registration_type")
+  taxIdNumber         String?  @map("tax_id_number")
+  hasBusinessInsurance Boolean? @map("has_business_insurance")
+  insuranceTypes      String[] @default([]) @map("insurance_types")
+  licensesHeld        String[] @default([]) @map("licenses_held")
+  licensesNeeded      String[] @default([]) @map("licenses_needed")
+  dataProtectionCompliant Boolean? @map("data_protection_compliant")
+  industryRegulations String[] @default([]) @map("industry_regulations")
+  lastComplianceReview DateTime? @map("last_compliance_review")
+  notes               String?
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  guidanceProfile BusinessGuidanceProfile @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([guidanceProfileId])
+  @@map("compliance_guidance_profiles")
+}
+
+model GrowthProfile {
+  id                  String   @id @default(cuid())
+  guidanceProfileId   String   @unique @map("guidance_profile_id")
+  growthStage         String?  @map("growth_stage") // PRE_LAUNCH, LAUNCH, TRACTION, SCALING, MATURE
+  marketingChannels   String[] @default([]) @map("marketing_channels")
+  marketingBudget     Float?   @map("marketing_budget")
+  customerAcquisitionCost Float? @map("customer_acquisition_cost")
+  brandAwareness      String?  @map("brand_awareness") // LOW, MEDIUM, HIGH
+  competitorCount     Int?     @map("competitor_count")
+  competitiveAdvantage String? @map("competitive_advantage")
+  marketSize          String?  @map("market_size")
+  marketSharePercent  Float?   @map("market_share_percent")
+  partnershipCount    Int?     @map("partnership_count")
+  referralProgram     Boolean? @default(false) @map("referral_program")
+  notes               String?
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  guidanceProfile BusinessGuidanceProfile @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([guidanceProfileId])
+  @@map("growth_profiles")
+}
+
+model GoalsProfile {
+  id                  String   @id @default(cuid())
+  guidanceProfileId   String   @unique @map("guidance_profile_id")
+  shortTermGoals      String[] @default([]) @map("short_term_goals")
+  longTermGoals       String[] @default([]) @map("long_term_goals")
+  revenueTarget12m    Float?   @map("revenue_target_12m")
+  customerTarget12m   Int?     @map("customer_target_12m")
+  hiringPlans         String?  @map("hiring_plans")
+  expansionPlans      String?  @map("expansion_plans")
+  exitStrategy        String?  @map("exit_strategy")
+  biggestChallenges   String[] @default([]) @map("biggest_challenges")
+  helpNeeded          String[] @default([]) @map("help_needed")
+  timelineUrgency     String?  @map("timeline_urgency") // LOW, MEDIUM, HIGH, CRITICAL
+  notes               String?
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  guidanceProfile BusinessGuidanceProfile @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([guidanceProfileId])
+  @@map("goals_profiles")
+}
+
+model AssessmentResult {
+  id                 String   @id @default(cuid())
+  guidanceProfileId  String   @map("guidance_profile_id")
+  overallScore       Float?   @map("overall_score")
+  categoryScores     Json?    @map("category_scores")
+  strengths          String[] @default([])
+  weaknesses         String[] @default([])
+  risks              String[] @default([])
+  opportunities      String[] @default([])
+  metrics            Json?
+  flags              String[] @default([])
+  version            Int      @default(1)
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  guidanceProfile BusinessGuidanceProfile @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([guidanceProfileId])
+  @@index([guidanceProfileId, createdAt])
+  @@map("assessment_results")
+}
+
+model GuidanceRecommendation {
+  id                 String   @id @default(cuid())
+  guidanceProfileId  String   @map("guidance_profile_id")
+  title              String
+  description        String
+  category           String
+  priority           String   @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
+  impact             String   @default("MEDIUM") // LOW, MEDIUM, HIGH
+  effort             String   @default("MEDIUM") // LOW, MEDIUM, HIGH
+  status             String   @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, DISMISSED
+  actionUrl          String?  @map("action_url")
+  completedAt        DateTime? @map("completed_at")
+  dismissedAt        DateTime? @map("dismissed_at")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  guidanceProfile BusinessGuidanceProfile @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([guidanceProfileId])
+  @@index([guidanceProfileId, status])
+  @@index([guidanceProfileId, priority])
+  @@map("guidance_recommendations")
+}
+
+model RoadmapItem {
+  id                 String   @id @default(cuid())
+  guidanceProfileId  String   @map("guidance_profile_id")
+  title              String
+  description        String
+  category           String
+  sequenceOrder      Int      @map("sequence_order")
+  estimatedDays      Int?     @map("estimated_days")
+  status             String   @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, SKIPPED
+  dependsOn          String[] @default([]) @map("depends_on")
+  startDate          DateTime? @map("start_date")
+  dueDate            DateTime? @map("due_date")
+  completedAt        DateTime? @map("completed_at")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  guidanceProfile BusinessGuidanceProfile @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([guidanceProfileId])
+  @@index([guidanceProfileId, sequenceOrder])
+  @@index([guidanceProfileId, status])
+  @@map("roadmap_items")
+}
+
+model ProgressSnapshot {
+  id                 String   @id @default(cuid())
+  guidanceProfileId  String   @map("guidance_profile_id")
+  overallScore       Float?   @map("overall_score")
+  categoryScores     Json?    @map("category_scores")
+  completedRecommendations Int @default(0) @map("completed_recommendations")
+  totalRecommendations Int    @default(0) @map("total_recommendations")
+  completedRoadmapItems Int   @default(0) @map("completed_roadmap_items")
+  totalRoadmapItems  Int      @default(0) @map("total_roadmap_items")
+  snapshotDate       DateTime @map("snapshot_date")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  guidanceProfile BusinessGuidanceProfile @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([guidanceProfileId])
+  @@index([guidanceProfileId, snapshotDate])
+  @@map("progress_snapshots")
 }
