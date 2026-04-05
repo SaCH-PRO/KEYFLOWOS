@@ -596,7 +596,7 @@ export function PerformanceTab({
                   transition={{ delay: 0.1 }}
                   className="w-full rounded-xl px-4 py-2.5 flex items-center gap-2.5 cursor-pointer transition-colors hover:bg-[hsl(var(--kf-muted)/0.08)] text-left"
                   style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border)/0.5)" }}
-                  onClick={() => onTabChange("products")}
+                  onClick={() => onTabChange("setup")}
                   aria-label={`${driftedCount} items have outdated pricing. Go to Products tab to fix.`}
                 >
                   <span className="w-2 h-2 rounded-full animate-pulse flex-shrink-0" style={{ background: "hsl(var(--kf-accent1))" }} />

@@ -59,12 +59,12 @@ function ReadinessChecklist({
   const [open, setOpen] = useState(false);
 
   const checks = [
-    { label: "Custom URL", hint: "Set a memorable slug for your store", done: hasSlug, tab: "storefront" },
-    { label: "Logo uploaded", hint: "Add your brand logo in Storefront", done: hasLogo, tab: "storefront" },
-    { label: "Cover image", hint: "Upload a hero image for your storefront", done: hasHeroImage, tab: "storefront" },
-    { label: "Business hours", hint: "Set your operating hours", done: hoursConfigured, tab: "products" },
-    { label: "Products listed", hint: "Add services or products to your catalog", done: servicesCount > 0 || productsCount > 0, tab: "products" },
-    { label: "Testimonials", hint: "Add social proof from your clients", done: hasTestimonials, tab: "storefront" },
+    { label: "Custom URL", hint: "Set a memorable slug for your store", done: hasSlug, tab: "setup" },
+    { label: "Logo uploaded", hint: "Add your brand logo in Appearance", done: hasLogo, tab: "setup" },
+    { label: "Cover image", hint: "Upload a hero image for your storefront", done: hasHeroImage, tab: "setup" },
+    { label: "Business hours", hint: "Set your operating hours", done: hoursConfigured, tab: "setup" },
+    { label: "Products listed", hint: "Add services or products to your catalog", done: servicesCount > 0 || productsCount > 0, tab: "setup" },
+    { label: "Testimonials", hint: "Add social proof from your clients", done: hasTestimonials, tab: "setup" },
   ];
 
   const completed = checks.filter((c) => c.done).length;
@@ -375,7 +375,7 @@ export function StoreCommandHero({
             background: "hsl(var(--kf-card))",
             border: "1px solid hsl(var(--kf-border)/0.5)",
           }}
-          onClick={() => onTabChange("products")}
+          onClick={() => onTabChange("setup")}
         >
           <span className="w-2 h-2 rounded-full animate-pulse flex-shrink-0" style={{ background: "hsl(var(--kf-accent1))" }} />
           <span className="text-xs text-muted-foreground flex-1">
