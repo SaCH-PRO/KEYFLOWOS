@@ -76,3 +76,9 @@ export type ServiceBookingData = {
 
 export type FilterTab = "all" | "service" | "product" | "package";
 export type SortOption = "default" | "price_asc" | "price_desc" | "duration";
+
+export type CategoryInfo = {
+  key: string;
+  label: string;
+  count: number;
+};

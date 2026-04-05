@@ -79,6 +79,9 @@ export function SecurityFooter({ primaryColor, businessName }: FooterBadgeProps)
       <p className="text-center text-[10px] text-white/15">
         &copy; {new Date().getFullYear()} {businessName}. All rights reserved.
       </p>
+      <p className="text-center text-[10px] text-white/10">
+        Powered by KeyFlowOS
+      </p>
     </div>
   );
 }

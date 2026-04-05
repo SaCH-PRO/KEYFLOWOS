@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { useParams } from "next/navigation";
+import { useEffect, useState, useCallback, useMemo } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { apiGet, apiPost, API_BASE } from "@/lib/api";
 import { formatPrice } from "@/lib/format";
 import { Loader2, CheckCircle2, Globe, Star, MessageCircle, Shield, Award, Flame, Sparkles, CalendarPlus, Clock, MapPin, X } from "lucide-react";
 import { ItemDetailModal } from "./components/item-detail-modal";
-import { trackStoreEvent, StorefrontConfig } from "@/lib/client";
+import { trackStoreEvent, StorefrontConfig, type StorefrontSectionKey } from "@/lib/client";
 import { getThemeStyles, type ThemeKey } from "@/lib/storefront-themes";
 
 import type {
@@ -25,9 +25,22 @@ import { CartDrawer } from "./components/cart-drawer";
 import { CheckoutFlow } from "./components/checkout-flow";
 import { TrustBar, SecurityFooter } from "./components/trust-bar";
 import { OrderConfirmation } from "./components/order-confirmation";
+import { FaqSection } from "./components/faq-section";
+import { PoliciesFooterLinks } from "./components/policies-section";
+import { ContactSection } from "./components/contact-section";
+import { TestimonialsSection } from "./components/testimonials-section";
+import { FeaturedSection } from "./components/featured-section";
+import { CategoryNav } from "./components/category-nav";
+import { OrganizationSchema, BreadcrumbListSchema } from "./components/structured-data";
+
+const DEFAULT_SECTIONS: StorefrontSectionKey[] = [
+  "hero", "trust", "featured", "categories", "catalog", "testimonials", "faq", "contact", "policies",
+];
 
 export default function PublicBookingPage() {
   const params = useParams();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const slug = params.slug as string;
 
   const [business, setBusiness] = useState<Business | null>(null);
@@ -53,6 +66,9 @@ export default function PublicBookingPage() {
   const [selectedItem, setSelectedItem] = useState<CatalogItem | null>(null);
   const [storefrontConfig, setStorefrontConfig] = useState<StorefrontConfig | null>(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [activeCategory, setActiveCategory] = useState<string | null>(
+    searchParams.get("category")
+  );
 
   const appearance = storefrontConfig?.appearance;
   const primaryColor = appearance?.primaryColor || business?.primaryColor || "#F97316";
@@ -134,6 +150,12 @@ export default function PublicBookingPage() {
     setSelectedItem(item);
     if (business?.id) trackStoreEvent(business.id, 'item_view', item.id);
   }, [business]);
+
+  const handleCategoryChange = useCallback((category: string | null) => {
+    setActiveCategory(category);
+    const url = category ? `/book/${slug}?category=${category}` : `/book/${slug}`;
+    window.history.replaceState(null, "", url);
+  }, [slug]);
 
   const cartTotal = cart.reduce((sum, c) => sum + c.price * c.quantity, 0);
   const cartCount = cart.reduce((sum, c) => sum + c.quantity, 0);
@@ -294,6 +316,33 @@ export default function PublicBookingPage() {
     }
     return items;
   })();
+
+  const filteredCatalogItems = useMemo(() => {
+    if (!activeCategory) return catalogItems;
+    return catalogItems.filter((i) => i.itemType === activeCategory);
+  }, [catalogItems, activeCategory]);
+
+  const featuredItems = useMemo(() => {
+    const ids = storefrontConfig?.merchandising?.featuredItemIds;
+    if (!ids || ids.length === 0) return [];
+    const idSet = new Set(ids);
+    return catalogItems.filter((i) => idSet.has(i.id));
+  }, [catalogItems, storefrontConfig]);
+
+  const sectionOrder = useMemo<StorefrontSectionKey[]>(() => {
+    const configured = storefrontConfig?.sections;
+    if (configured && configured.length > 0) {
+      return configured.filter((s) => s.visible).map((s) => s.key);
+    }
+    return DEFAULT_SECTIONS;
+  }, [storefrontConfig]);
+
+  const isSectionVisible = useCallback((key: StorefrontSectionKey) => {
+    return sectionOrder.includes(key);
+  }, [sectionOrder]);
+
+  const pageUrl = typeof window !== "undefined" ? window.location.href : "";
+  const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
 
   const handleCheckoutSubmit = async (data: {
     serviceBookings: Record<string, ServiceBookingData>;
@@ -531,24 +580,131 @@ export default function PublicBookingPage() {
     );
   }
 
+  const renderSection = (key: StorefrontSectionKey) => {
+    switch (key) {
+      case "hero":
+        return null;
+      case "trust":
+        return (
+          <TrustBar
+            key="trust"
+            primaryColor={primaryColor}
+            secondaryColor={secondaryColor}
+            businessName={business?.name}
+          />
+        );
+      case "featured":
+        return featuredItems.length > 0 ? (
+          <FeaturedSection
+            key="featured"
+            items={featuredItems}
+            primaryColor={primaryColor}
+            secondaryColor={secondaryColor}
+            accentColor={accentColor}
+            isInCart={isInCart}
+            addToCart={addToCart}
+            onItemClick={handleItemClick}
+            badges={storefrontConfig?.merchandising?.badges}
+          />
+        ) : null;
+      case "categories":
+        return (
+          <CategoryNav
+            key="categories"
+            catalogItems={catalogItems}
+            activeCategory={activeCategory}
+            onCategoryChange={handleCategoryChange}
+            primaryColor={primaryColor}
+            slug={slug}
+          />
+        );
+      case "catalog":
+        return (
+          <CatalogGrid
+            key="catalog"
+            catalogItems={filteredCatalogItems}
+            primaryColor={primaryColor}
+            secondaryColor={secondaryColor}
+            accentColor={accentColor}
+            isInCart={isInCart}
+            addToCart={addToCart}
+            removeFromCart={removeFromCart}
+            onUpdateQuantity={updateQuantity}
+            cartItems={cart}
+            badges={storefrontConfig?.merchandising?.badges}
+            featuredItemIds={storefrontConfig?.merchandising?.featuredItemIds}
+            onItemClick={handleItemClick}
+            config={storefrontConfig}
+          />
+        );
+      case "testimonials":
+        return storefrontConfig?.socialProof?.testimonials?.length ? (
+          <TestimonialsSection
+            key="testimonials"
+            testimonials={storefrontConfig.socialProof.testimonials}
+            primaryColor={primaryColor}
+            secondaryColor={secondaryColor}
+          />
+        ) : null;
+      case "faq":
+        return storefrontConfig?.faq?.entries?.length ? (
+          <FaqSection
+            key="faq"
+            entries={storefrontConfig.faq.entries}
+            heading={storefrontConfig.faq.heading}
+            primaryColor={primaryColor}
+            accentColor={accentColor}
+          />
+        ) : null;
+      case "contact":
+        return business ? (
+          <ContactSection
+            key="contact"
+            business={business}
+            heading={storefrontConfig?.contact?.heading}
+            customMessage={storefrontConfig?.contact?.customMessage}
+            showWhatsApp={storefrontConfig?.contact?.showWhatsApp}
+            showEmail={storefrontConfig?.contact?.showEmail}
+            showPhone={storefrontConfig?.contact?.showPhone}
+            showAddress={storefrontConfig?.contact?.showAddress}
+            primaryColor={primaryColor}
+            secondaryColor={secondaryColor}
+          />
+        ) : null;
+      case "policies":
+        return storefrontConfig?.policies?.pages?.length ? (
+          <PoliciesFooterLinks
+            key="policies"
+            policies={storefrontConfig.policies.pages}
+            primaryColor={primaryColor}
+          />
+        ) : null;
+      default:
+        return null;
+    }
+  };
+
   return (
     <main className={`min-h-screen text-white relative ${fontFamilyClass}`} style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
-      <BusinessHero
-        business={business!}
-        primaryColor={primaryColor}
-        secondaryColor={secondaryColor}
-        accentColor={accentColor}
-        config={storefrontConfig}
-        catalogCount={catalogItems.length}
-      />
+      {business && (
+        <>
+          <OrganizationSchema business={business} url={pageUrl} />
+          <BreadcrumbListSchema items={[{ name: business.name, url: pageUrl }]} />
+        </>
+      )}
 
-      <div className={`max-w-4xl mx-auto ${densityPadding} pb-32 ${appearance?.density === "compact" ? "space-y-5" : "space-y-8"}`}>
-        <TrustBar
+      {isSectionVisible("hero") && (
+        <BusinessHero
+          business={business!}
           primaryColor={primaryColor}
           secondaryColor={secondaryColor}
-          businessName={business?.name}
+          accentColor={accentColor}
+          config={storefrontConfig}
+          catalogCount={catalogItems.length}
         />
+      )}
 
+      <div className={`max-w-4xl mx-auto ${densityPadding} pb-32 ${appearance?.density === "compact" ? "space-y-5" : "space-y-8"}`}>
         {storefrontConfig?.promotions?.bannerEnabled && storefrontConfig.promotions.bannerText && !bannerDismissed && (
           <div
             className="rounded-2xl px-5 py-3.5 text-center text-sm font-medium flex items-center justify-center gap-2 backdrop-blur-sm relative"
@@ -570,57 +726,7 @@ export default function PublicBookingPage() {
           </div>
         )}
 
-        <CatalogGrid
-          catalogItems={catalogItems}
-          primaryColor={primaryColor}
-          secondaryColor={secondaryColor}
-          accentColor={accentColor}
-          isInCart={isInCart}
-          addToCart={addToCart}
-          removeFromCart={removeFromCart}
-          onUpdateQuantity={updateQuantity}
-          cartItems={cart}
-          badges={storefrontConfig?.merchandising?.badges}
-          featuredItemIds={storefrontConfig?.merchandising?.featuredItemIds}
-          onItemClick={handleItemClick}
-          config={storefrontConfig}
-        />
-
-        {storefrontConfig?.socialProof?.testimonials && storefrontConfig.socialProof.testimonials.length > 0 && (
-          <div className="space-y-5 pt-4">
-            <div className="flex items-center gap-3">
-              <div
-                className="w-8 h-8 rounded-xl flex items-center justify-center"
-                style={{ background: `${primaryColor}15` }}
-              >
-                <MessageCircle className="w-4 h-4" style={{ color: primaryColor }} />
-              </div>
-              <h3 className="text-lg font-semibold text-white/80">What Our Clients Say</h3>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {storefrontConfig.socialProof.testimonials.map((t, idx) => (
-                <div
-                  key={t.id}
-                  className="group rounded-2xl p-5 space-y-3 transition-all duration-300"
-                  style={{ animationDelay: `${idx * 100}ms`, border: `1px solid ${primaryColor}12`, background: `${primaryColor}04` }}
-                >
-                  <div className="flex gap-1">
-                    {Array.from({ length: 5 }).map((_, i) => (
-                      <Star
-                        key={i}
-                        className="w-4 h-4 transition-transform group-hover:scale-110"
-                        fill={i < t.rating ? secondaryColor : 'transparent'}
-                        color={i < t.rating ? secondaryColor : '#ffffff20'}
-                      />
-                    ))}
-                  </div>
-                  <p className="text-sm text-white/55 italic leading-relaxed">&ldquo;{t.text}&rdquo;</p>
-                  <p className="text-xs text-white/35 font-medium">&mdash; {t.name}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {sectionOrder.map((key) => renderSection(key))}
 
         {storefrontConfig?.socialProof?.guaranteeText && (
           <div className="rounded-2xl p-4 flex items-center gap-3 text-sm backdrop-blur-sm" style={{ border: `1px solid ${accentColor}18`, background: `${accentColor}06` }}>
@@ -661,6 +767,7 @@ export default function PublicBookingPage() {
           onClose={() => setSelectedItem(null)}
           onSelectItem={(item) => setSelectedItem(item)}
           badges={storefrontConfig?.merchandising?.badges}
+          slug={slug}
         />
       )}
 

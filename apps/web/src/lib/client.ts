@@ -3120,11 +3120,15 @@ export async function deleteProjectTask(businessId: string, taskId: string): Pro
   );
 }
 
-export type StorefrontSectionType = 'hero' | 'featured' | 'categories' | 'catalog' | 'testimonials' | 'faq' | 'policies' | 'contact';
+export type StorefrontSectionType = 'hero' | 'trust' | 'featured' | 'categories' | 'catalog' | 'testimonials' | 'faq' | 'policies' | 'contact';
+
+export type StorefrontSectionKey = StorefrontSectionType;
 
 export interface StorefrontSection {
-  type: StorefrontSectionType;
-  enabled: boolean;
+  key: StorefrontSectionKey;
+  visible: boolean;
+  type?: StorefrontSectionType;
+  enabled?: boolean;
   config?: Record<string, any>;
 }
 
@@ -3132,7 +3136,14 @@ export interface FaqEntry {
   id: string;
   question: string;
   answer: string;
-  order: number;
+  order?: number;
+}
+
+export interface PolicyPage {
+  key: 'refund' | 'privacy' | 'delivery' | 'terms';
+  title: string;
+  content: string;
+  enabled: boolean;
 }
 
 export interface PolicyConfig {
@@ -3210,7 +3221,13 @@ export interface StorefrontConfig {
   };
   sections?: StorefrontSection[];
   faqEntries?: FaqEntry[];
-  policies?: StorefrontPolicies;
+  faq?: {
+    heading?: string;
+    entries?: FaqEntry[];
+  };
+  policies?: {
+    pages?: PolicyPage[];
+  } & Partial<StorefrontPolicies>;
   storeSettings?: {
     deliveryOptions?: DeliveryMethod[];
     minimumOrderValue?: number;
@@ -3222,6 +3239,14 @@ export interface StorefrontConfig {
     email?: string;
     phone?: string;
     showContactForm?: boolean;
+  };
+  contact?: {
+    heading?: string;
+    showWhatsApp?: boolean;
+    showEmail?: boolean;
+    showPhone?: boolean;
+    showAddress?: boolean;
+    customMessage?: string;
   };
 }
 
