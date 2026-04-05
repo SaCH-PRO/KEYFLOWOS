@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { X, Clock, ShoppingBag, Plus, CheckCircle2, Star, Shield, Zap, ChevronLeft, ChevronRight, MessageCircle } from "lucide-react";
+import { X, Clock, ShoppingBag, Plus, CheckCircle2, Star, Shield, Zap, ChevronLeft, ChevronRight, MessageCircle, ExternalLink } from "lucide-react";
 import { formatPrice } from "@/lib/format";
 import type { CatalogItem } from "./types";
 
@@ -18,6 +18,7 @@ type Props = {
   onClose: () => void;
   onSelectItem: (item: CatalogItem) => void;
   badges?: Record<string, string>;
+  slug?: string;
 };
 
 const badgeConfig: Record<string, { label: string; bg: string; text: string }> = {
@@ -54,6 +55,7 @@ export function ItemDetailModal({
   onClose,
   onSelectItem,
   badges,
+  slug,
 }: Props) {
   const itemAccent = item.itemType === "service" ? primaryColor : item.itemType === "product" ? secondaryColor : brandAccent;
   const badgeKey = badges?.[item.id];
@@ -132,7 +134,7 @@ export function ItemDetailModal({
                 href={waLink}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-medium bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 transition-all"
+                className="flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-medium bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 transition-all min-h-[44px]"
               >
                 <MessageCircle className="w-4 h-4" />
                 Ask about this
@@ -142,7 +144,7 @@ export function ItemDetailModal({
             {isInCart ? (
               <button
                 onClick={() => removeFromCart(item.id, item.itemType)}
-                className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-medium transition-all text-emerald-400 bg-emerald-400/10 hover:bg-red-400/10 hover:text-red-400"
+                className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-medium transition-all text-emerald-400 bg-emerald-400/10 hover:bg-red-400/10 hover:text-red-400 min-h-[44px]"
               >
                 <CheckCircle2 className="w-4 h-4" />
                 In Cart — Remove
@@ -150,7 +152,7 @@ export function ItemDetailModal({
             ) : (
               <button
                 onClick={() => addToCart(item)}
-                className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-medium transition-all hover:scale-[1.02]"
+                className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-medium transition-all hover:scale-[1.02] min-h-[44px]"
                 style={{ backgroundColor: `${primaryColor}20`, color: primaryColor }}
               >
                 <Plus className="w-4 h-4" />
@@ -158,6 +160,16 @@ export function ItemDetailModal({
               </button>
             )}
           </div>
+
+          {slug && (
+            <a
+              href={`/book/${slug}/product/${item.id}`}
+              className="flex items-center justify-center gap-2 text-xs text-white/40 hover:text-white/60 transition-colors min-h-[44px]"
+            >
+              <ExternalLink className="w-3 h-3" />
+              View Full Details
+            </a>
+          )}
 
           {relatedItems.length > 0 && (
             <div className="pt-4 border-t border-white/10 space-y-3">
