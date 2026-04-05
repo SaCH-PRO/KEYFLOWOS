@@ -25,7 +25,7 @@ export class IdentityController {
 
   @UseGuards(AuthGuard)
   @Patch('me')
-  async updateMe(@Req() req: Request, @Body() body: { firstName?: string; lastName?: string; phone?: string; name?: string }) {
+  async updateMe(@Req() req: Request, @Body() body: { firstName?: string; lastName?: string; phone?: string; name?: string; avatarUrl?: string }) {
     const user = (req as any).user as { id?: string } | undefined;
     if (!user?.id) throw new UnauthorizedException('Missing authenticated user');
     return this.identity.updateUser(user.id, body);
@@ -79,18 +79,18 @@ export class IdentityController {
       slug?: string;
       timezone?: string;
       currency?: string;
-      logo?: string;
+      logoUrl?: string;
       address?: string;
       phone?: string;
       email?: string;
       website?: string;
-      facebookHandle?: string;
-      instagramHandle?: string;
-      twitterHandle?: string;
-      linkedinHandle?: string;
-      tiktokHandle?: string;
-      youtubeHandle?: string;
-      whatsappNumber?: string;
+      facebook?: string;
+      instagram?: string;
+      twitter?: string;
+      linkedin?: string;
+      tiktok?: string;
+      youtube?: string;
+      whatsapp?: string;
       primaryColor?: string;
       secondaryColor?: string;
       defaultTaxRate?: number;
@@ -104,6 +104,7 @@ export class IdentityController {
       description?: string;
       city?: string;
       country?: string;
+      industry?: string;
       metaData?: Record<string, any>;
       headline?: string;
       bio?: string;

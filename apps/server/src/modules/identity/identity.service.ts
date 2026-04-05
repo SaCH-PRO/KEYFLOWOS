@@ -78,7 +78,7 @@ export class IdentityService {
     return business;
   }
 
-  async updateUser(userId: string, input: { firstName?: string; lastName?: string; phone?: string; name?: string }) {
+  async updateUser(userId: string, input: { firstName?: string; lastName?: string; phone?: string; name?: string; avatarUrl?: string }) {
     const user = await this.prisma.client.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
@@ -87,6 +87,7 @@ export class IdentityService {
     if (input.lastName !== undefined) data.lastName = input.lastName;
     if (input.phone !== undefined) data.phone = input.phone;
     if (input.name !== undefined) data.name = input.name;
+    if (input.avatarUrl !== undefined) data.avatarUrl = input.avatarUrl;
 
     return this.prisma.client.user.update({
       where: { id: userId },
@@ -143,6 +144,7 @@ export class IdentityService {
     description?: string;
     city?: string;
     country?: string;
+    industry?: string;
     metaData?: Record<string, any>;
     headline?: string;
     bio?: string;
