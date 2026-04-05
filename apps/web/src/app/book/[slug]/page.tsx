@@ -17,8 +17,13 @@ import type {
   CatalogItem,
   CartItem,
   ServiceBookingData,
+  PromoCode,
+  PaymentMethod,
+  DeliveryAddress,
+  ShippingZone,
+  StoreOrderResponse,
 } from "./components/types";
-import { loadCart, saveCart } from "./components/utils";
+import { loadCart, saveCart, loadPromoCode, savePromoCode } from "./components/utils";
 import { BusinessHero } from "./components/business-hero";
 import { CatalogGrid } from "./components/catalog-grid";
 import { CartDrawer } from "./components/cart-drawer";
@@ -57,8 +62,11 @@ export default function PublicBookingPage() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [checkoutMode, setCheckoutMode] = useState(false);
+  const [promoCode, setPromoCode] = useState<PromoCode | null>(null);
 
   const [success, setSuccess] = useState(false);
+  const [paymentFailed, setPaymentFailed] = useState(false);
+  const [paymentPending, setPaymentPending] = useState(false);
   const [bookingResults, setBookingResults] = useState<{ bookingId: string; invoiceId?: string }[]>([]);
   const [confirmedDetails, setConfirmedDetails] = useState<{
     serviceNames: string[];
@@ -66,7 +74,24 @@ export default function PublicBookingPage() {
     times: string[];
     businessName: string;
   } | null>(null);
+  const [confirmedOrderItems, setConfirmedOrderItems] = useState<CartItem[]>([]);
+  const [confirmedOrderTotal, setConfirmedOrderTotal] = useState(0);
+  const [confirmedPaymentMethod, setConfirmedPaymentMethod] = useState<PaymentMethod | undefined>();
+  const [confirmedOrderNumber, setConfirmedOrderNumber] = useState<string | null>(null);
+  const [confirmedOrderId, setConfirmedOrderId] = useState<string | null>(null);
+  const [confirmedEstimatedDelivery, setConfirmedEstimatedDelivery] = useState<string | null>(null);
+  const [confirmedCustomerEmail, setConfirmedCustomerEmail] = useState<string | null>(null);
+  const [completedBookingResults, setCompletedBookingResults] = useState<{ bookingId: string; invoiceId?: string }[]>([]);
+  const [failedOrderPayload, setFailedOrderPayload] = useState<{
+    items: { productId: string; quantity: number }[];
+    customer: { name: string; email?: string; phone?: string };
+    promoCode?: string;
+    shipping?: { zoneId?: string; address?: DeliveryAddress };
+    paymentMethod: string;
+    returnUrl?: string;
+  } | null>(null);
 
+  const [shippingZones, setShippingZones] = useState<ShippingZone[]>([]);
   const [selectedItem, setSelectedItem] = useState<CatalogItem | null>(null);
   const [storefrontConfig, setStorefrontConfig] = useState<StorefrontConfig | null>(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
@@ -170,6 +195,50 @@ export default function PublicBookingPage() {
   const cartCurrency = cart[0]?.currency || business?.currency || "TTD";
   const serviceItemsInCart = cart.filter((c) => c.requiresBooking);
 
+  const handleApplyPromo = useCallback(
+    async (code: string): Promise<{ success: boolean; error?: string }> => {
+      try {
+        const productItems = cart.filter((c) => !c.requiresBooking);
+        const items = productItems.map((c) => ({ productId: c.id, quantity: c.quantity }));
+
+        const res = await apiPost<{
+          valid: boolean;
+          promo?: { code: string; type: string; value: number; discount: number; freeShipping: boolean };
+          subtotal?: number;
+          discountAmount?: number;
+          total?: number;
+          message?: string;
+        }>({
+          path: `/site/storefront/public/${encodeURIComponent(slug)}/validate-promo`,
+          body: { code, items },
+        });
+
+        if (res.error || !res.data?.valid) {
+          return { success: false, error: res.data?.message || res.error || "Invalid promo code" };
+        }
+
+        const promo = res.data.promo;
+        const newPromo: PromoCode = {
+          code,
+          discountType: promo?.type === "FIXED" ? "fixed" : "percentage",
+          discountValue: promo?.value || 0,
+          description: promo?.freeShipping ? "Free shipping included" : undefined,
+        };
+        setPromoCode(newPromo);
+        savePromoCode(slug, newPromo);
+        return { success: true };
+      } catch {
+        return { success: false, error: "Could not validate promo code. Please try again." };
+      }
+    },
+    [slug, cart]
+  );
+
+  const handleRemovePromo = useCallback(() => {
+    setPromoCode(null);
+    savePromoCode(slug, null);
+  }, [slug]);
+
   useEffect(() => {
     const loadBusiness = async () => {
       setLoading(true);
@@ -192,6 +261,7 @@ export default function PublicBookingPage() {
       const sfRes = await apiGet<any>(`/site/storefront/public/${encodeURIComponent(slug)}`);
       if (sfRes.data?.storefront) setStorefrontConfig(sfRes.data.storefront);
       else if (sfRes.data?.storefrontConfig) setStorefrontConfig(sfRes.data.storefrontConfig);
+      if (sfRes.data?.shippingZones) setShippingZones(sfRes.data.shippingZones);
 
       if (res.data?.id) trackStoreEvent(res.data.id, 'page_view');
 
@@ -218,8 +288,87 @@ export default function PublicBookingPage() {
   }, [slug]);
 
   useEffect(() => {
-    if (slug) setCart(loadCart(slug));
+    if (slug) {
+      setCart(loadCart(slug));
+      setPromoCode(loadPromoCode(slug));
+    }
   }, [slug]);
+
+  useEffect(() => {
+    if (!slug || !business) return;
+    const restorePendingCheckout = async () => {
+      const pendingKey = `kf_pending_checkout_${slug}`;
+      const raw = localStorage.getItem(pendingKey);
+      if (!raw) return;
+      const pending = JSON.parse(raw);
+      localStorage.removeItem(pendingKey);
+
+      type PaymentOutcome = "success" | "failed" | "pending";
+      let outcome: PaymentOutcome = "pending";
+
+      if (pending.orderId && pending.customerEmail) {
+        try {
+          const { data: orderStatus } = await apiGet<{
+            paymentStatus: string;
+            status: string;
+          }>(`/site/storefront/public/order/${pending.orderId}?email=${encodeURIComponent(pending.customerEmail)}`);
+          if (orderStatus) {
+            const ps = orderStatus.paymentStatus?.toUpperCase();
+            if (ps === "PAID" || ps === "COMPLETED" || ps === "CAPTURED") {
+              outcome = "success";
+            } else if (ps === "FAILED" || ps === "CANCELLED" || ps === "CANCELED" || ps === "VOIDED") {
+              outcome = "failed";
+            }
+          }
+        } catch {
+          outcome = "pending";
+        }
+      } else {
+        outcome = "success";
+      }
+
+      setConfirmedOrderItems(pending.items ?? []);
+      setConfirmedOrderTotal(pending.orderTotal ?? 0);
+      setConfirmedPaymentMethod(pending.paymentMethod ?? undefined);
+      setConfirmedOrderNumber(pending.orderNumber ?? null);
+      setConfirmedOrderId(pending.orderId ?? null);
+      setConfirmedCustomerEmail(pending.customerEmail ?? null);
+      setCompletedBookingResults(pending.bookingResults ?? []);
+      setConfirmedDetails(pending.confirmedDetails ?? null);
+
+      const allResults = [...(pending.bookingResults ?? [])];
+      if (pending.orderNumber) {
+        allResults.push({ bookingId: pending.orderNumber });
+      }
+      setBookingResults(allResults);
+
+      if (pending.shippingZoneId) {
+        const zone = shippingZones.find((z: ShippingZone) => z.id === pending.shippingZoneId);
+        setConfirmedEstimatedDelivery(
+          zone?.estimatedDays
+            ? `${zone.estimatedDays} business days${zone.carrier ? ` via ${zone.carrier}` : ""}`
+            : null
+        );
+      }
+
+      if (outcome === "success") {
+        setPaymentFailed(false);
+        setPaymentPending(false);
+        updateCart([]);
+        handleRemovePromo();
+      } else if (outcome === "failed") {
+        setFailedOrderPayload(pending.orderPayload ?? null);
+        setPaymentFailed(true);
+        setPaymentPending(false);
+      } else {
+        setFailedOrderPayload(pending.orderPayload ?? null);
+        setPaymentFailed(false);
+        setPaymentPending(true);
+      }
+      setSuccess(true);
+    };
+    restorePendingCheckout().catch(() => {});
+  }, [slug, business]);
 
   useEffect(() => {
     if (!business) return;
@@ -358,55 +507,158 @@ export default function PublicBookingPage() {
   const pageUrl = typeof window !== "undefined" ? window.location.href : "";
   const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
 
+  const submitStoreOrder = async (payload: {
+    items: { productId: string; quantity: number }[];
+    customer: { name: string; email?: string; phone?: string };
+    promoCode?: string;
+    shipping?: { zoneId?: string; address?: DeliveryAddress };
+    paymentMethod: string;
+    returnUrl?: string;
+  }): Promise<StoreOrderResponse | null> => {
+    const { data: orderRes, error: orderErr } = await apiPost<StoreOrderResponse>({
+      path: `/site/storefront/public/${encodeURIComponent(slug)}/checkout`,
+      body: payload,
+    });
+    if (orderErr) throw new Error(orderErr);
+    return orderRes ?? null;
+  };
+
+  const handleStoreOrderResult = (
+    storeOrder: StoreOrderResponse | null,
+    bookingRefs: { bookingId: string; invoiceId?: string }[],
+    paymentMethodUI: PaymentMethod,
+    shippingZoneId: string | null,
+    orderPayload: typeof failedOrderPayload,
+    serviceDetails: { serviceNames: string[]; dates: string[]; times: string[]; businessName: string } | null,
+  ) => {
+    const allResults = [...bookingRefs];
+    if (storeOrder?.order) {
+      allResults.push({ bookingId: storeOrder.order.orderNumber });
+    }
+
+    if (storeOrder?.payment?.redirectUrl) {
+      setCompletedBookingResults(bookingRefs);
+      setFailedOrderPayload(orderPayload);
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem(`kf_pending_checkout_${slug}`, JSON.stringify({
+            bookingResults: bookingRefs,
+            orderPayload,
+            orderNumber: storeOrder?.order?.orderNumber ?? null,
+            orderId: storeOrder?.order?.id ?? null,
+            orderTotal: storeOrder?.order?.total ?? cartTotal,
+            paymentMethod: paymentMethodUI,
+            shippingZoneId,
+            items: [...cart],
+            customerEmail: orderPayload?.customer?.email ?? null,
+            confirmedDetails: serviceDetails,
+          }));
+        } catch {}
+      }
+      window.location.href = storeOrder.payment.redirectUrl;
+      return true;
+    }
+
+    if (storeOrder?.payment?.status === "PAYPAL_AWAITING_APPROVAL" || storeOrder?.payment?.status === "PAYPAL_CREATED") {
+      setConfirmedOrderItems([...cart]);
+      setConfirmedOrderTotal(storeOrder.order?.total ?? cartTotal);
+      setConfirmedPaymentMethod(paymentMethodUI);
+      setConfirmedOrderNumber(storeOrder.order?.orderNumber ?? null);
+      setConfirmedOrderId(storeOrder.order?.id ?? null);
+      setConfirmedCustomerEmail(orderPayload?.customer?.email ?? null);
+      setCompletedBookingResults(bookingRefs);
+      setFailedOrderPayload(orderPayload);
+      setBookingResults(allResults);
+      setPaymentFailed(true);
+      setSuccess(true);
+      return true;
+    }
+
+    if (storeOrder?.payment?.status === "FAILED") {
+      setConfirmedOrderItems([...cart]);
+      setConfirmedOrderTotal(storeOrder.order.total);
+      setConfirmedPaymentMethod(paymentMethodUI);
+      setConfirmedOrderNumber(storeOrder.order.orderNumber);
+      setConfirmedOrderId(storeOrder.order.id);
+      setConfirmedCustomerEmail(orderPayload?.customer?.email ?? null);
+      setCompletedBookingResults(bookingRefs);
+      setFailedOrderPayload(orderPayload);
+      setBookingResults(allResults);
+      setPaymentFailed(true);
+      setSuccess(true);
+      return true;
+    }
+
+    const selectedZone = shippingZones.find((z) => z.id === shippingZoneId);
+    setConfirmedOrderItems([...cart]);
+    setConfirmedOrderTotal(storeOrder?.order?.total ?? cartTotal);
+    setConfirmedPaymentMethod(paymentMethodUI);
+    setConfirmedOrderNumber(storeOrder?.order?.orderNumber ?? null);
+    setConfirmedOrderId(storeOrder?.order?.id ?? null);
+    setConfirmedCustomerEmail(orderPayload?.customer?.email ?? null);
+    setConfirmedEstimatedDelivery(
+      selectedZone?.estimatedDays
+        ? `${selectedZone.estimatedDays} business days${selectedZone.carrier ? ` via ${selectedZone.carrier}` : ""}`
+        : null
+    );
+    setBookingResults(allResults);
+    setSuccess(true);
+    setPaymentFailed(false);
+    setPaymentPending(false);
+    setCompletedBookingResults([]);
+    setFailedOrderPayload(null);
+    updateCart([]);
+    handleRemovePromo();
+    if (business?.id) trackStoreEvent(business.id, 'checkout_complete');
+    return false;
+  };
+
   const handleCheckoutSubmit = async (data: {
     serviceBookings: Record<string, ServiceBookingData>;
     firstName: string;
     lastName: string;
     email: string;
     phone: string;
+    paymentMethod: PaymentMethod;
+    deliveryAddress: DeliveryAddress | null;
+    shippingZoneId: string | null;
+    termsAccepted: boolean;
   }) => {
     if (!business) return;
-    const results: { bookingId: string; invoiceId?: string }[] = [];
-    const nonBookingItems = cart.filter((c) => !c.requiresBooking);
-    const notesExtra =
-      nonBookingItems.length > 0
-        ? `\nAdditional items: ${nonBookingItems.map((c) => `${c.name} x${c.quantity}`).join(", ")}`
-        : "";
 
-    for (const si of serviceItemsInCart) {
-      const bd = data.serviceBookings[`${si.id}_${si.itemType}`];
-      if (!bd) continue;
+    const bookingRefs = completedBookingResults.length > 0
+      ? [...completedBookingResults]
+      : [];
 
-      const svc = services.find((s) => s.id === (si.sourceServiceId || si.id));
-      const dur = svc?.durationMins ?? svc?.duration ?? 60;
-      const startTime = new Date(`${bd.date}T${bd.time}`).toISOString();
+    if (bookingRefs.length === 0) {
+      for (const si of serviceItemsInCart) {
+        const bd = data.serviceBookings[`${si.id}_${si.itemType}`];
+        if (!bd) continue;
 
-      for (let q = 0; q < si.quantity; q++) {
-        const { data: resData, error: err } = await apiPost<{
-          bookingId: string;
-          invoiceId?: string;
-          success: boolean;
-        }>({
-          path: `/bookings/public/businesses/${business.id}`,
-          body: {
-            serviceId: si.sourceServiceId || si.id,
-            staffId: bd.staffId || undefined,
-            startTime,
-            firstName: data.firstName || undefined,
-            lastName: data.lastName || undefined,
-            email: data.email || undefined,
-            phone: data.phone || undefined,
-            notes: notesExtra.trim() || undefined,
-          },
-        });
+        const startTime = new Date(`${bd.date}T${bd.time}`).toISOString();
 
-        if (err) throw new Error(err);
-        if (resData) results.push({ bookingId: resData.bookingId, invoiceId: resData.invoiceId });
+        for (let q = 0; q < si.quantity; q++) {
+          const { data: resData, error: err } = await apiPost<{
+            bookingId: string;
+            invoiceId?: string;
+            success: boolean;
+          }>({
+            path: `/bookings/public/businesses/${business.id}`,
+            body: {
+              serviceId: si.sourceServiceId || si.id,
+              staffId: bd.staffId || undefined,
+              startTime,
+              firstName: data.firstName || undefined,
+              lastName: data.lastName || undefined,
+              email: data.email || undefined,
+              phone: data.phone || undefined,
+            },
+          });
+
+          if (err) throw new Error(err);
+          if (resData) bookingRefs.push({ bookingId: resData.bookingId, invoiceId: resData.invoiceId });
+        }
       }
-    }
-
-    if (serviceItemsInCart.length === 0 && nonBookingItems.length > 0) {
-      results.push({ bookingId: "order-" + Date.now().toString(36) });
     }
 
     const svcNames: string[] = [];
@@ -420,17 +672,85 @@ export default function PublicBookingPage() {
         svcTimes.push(bd.time);
       }
     }
-    setConfirmedDetails({
+    const computedServiceDetails = svcNames.length > 0 ? {
       serviceNames: svcNames,
       dates: svcDates,
       times: svcTimes,
       businessName: business?.name || "",
-    });
-    setBookingResults(results);
-    setSuccess(true);
-    updateCart([]);
-    if (business?.id) trackStoreEvent(business.id, 'checkout_complete');
+    } : null;
+    setConfirmedDetails(computedServiceDetails);
+
+    const nonBookingItems = cart.filter((c) => !c.requiresBooking);
+    let storeOrder: StoreOrderResponse | null = null;
+
+    if (nonBookingItems.length > 0) {
+      const paymentMethodMap: Record<PaymentMethod, string> = {
+        wipay: "WIPAY",
+        paypal: "PAYPAL",
+        cash: "CASH",
+      };
+
+      const orderPayload = {
+        items: nonBookingItems.map((c) => ({ productId: c.id, quantity: c.quantity })),
+        customer: {
+          name: `${data.firstName} ${data.lastName}`.trim(),
+          email: data.email || undefined,
+          phone: data.phone || undefined,
+        },
+        promoCode: promoCode?.code || undefined,
+        shipping: data.deliveryAddress
+          ? {
+              zoneId: data.shippingZoneId || undefined,
+              address: data.deliveryAddress,
+            }
+          : undefined,
+        paymentMethod: paymentMethodMap[data.paymentMethod],
+        returnUrl: typeof window !== "undefined" ? window.location.href : undefined,
+      };
+
+      storeOrder = await submitStoreOrder(orderPayload);
+      const handled = handleStoreOrderResult(storeOrder, bookingRefs, data.paymentMethod, data.shippingZoneId, orderPayload, computedServiceDetails);
+      if (handled) return;
+    } else {
+      setConfirmedOrderItems([...cart]);
+      setConfirmedOrderTotal(cartTotal);
+      setConfirmedPaymentMethod(data.paymentMethod);
+      setConfirmedOrderNumber(null);
+      setConfirmedOrderId(null);
+      setConfirmedEstimatedDelivery(null);
+      setConfirmedCustomerEmail(data.email || null);
+      setBookingResults(bookingRefs);
+      setSuccess(true);
+      setPaymentFailed(false);
+      setPaymentPending(false);
+      updateCart([]);
+      handleRemovePromo();
+      if (business?.id) trackStoreEvent(business.id, 'checkout_complete');
+    }
   };
+
+  const handleRetryPayment = useCallback(async () => {
+    if (!failedOrderPayload) {
+      setSuccess(false);
+      setPaymentFailed(false);
+      setPaymentPending(false);
+      return;
+    }
+
+    try {
+      const storeOrder = await submitStoreOrder(failedOrderPayload);
+      handleStoreOrderResult(
+        storeOrder,
+        completedBookingResults,
+        confirmedPaymentMethod || "cash",
+        failedOrderPayload.shipping?.zoneId || null,
+        failedOrderPayload,
+        confirmedDetails,
+      );
+    } catch {
+      setPaymentFailed(true);
+    }
+  }, [failedOrderPayload, completedBookingResults, confirmedPaymentMethod, confirmedDetails]);
 
   if (loading) {
     return (
@@ -468,7 +788,8 @@ export default function PublicBookingPage() {
   }
 
   if (success) {
-    const isOrder = bookingResults.length > 0 && bookingResults[0].bookingId.startsWith("order-");
+    const hasStoreOrder = confirmedOrderNumber !== null;
+    const isOrder = hasStoreOrder || (bookingResults.length > 0 && bookingResults.every((br) => br.bookingId.startsWith("ORD-")));
     const firstDate = confirmedDetails?.dates[0];
     const firstTime = confirmedDetails?.times[0];
     const calendarUrl = firstDate && firstTime && confirmedDetails
@@ -496,32 +817,34 @@ export default function PublicBookingPage() {
 
     return (
       <main className="min-h-screen text-white flex items-center justify-center px-4 relative overflow-hidden" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
-        <div className="absolute inset-0 pointer-events-none">
-          {Array.from({ length: 40 }).map((_, i) => {
-            const colors = [primaryColor, secondaryColor, accentColor, "#f59e0b", "#10b981", "#ec4899"];
-            const color = colors[i % colors.length];
-            const left = ((i * 37 + 13) % 100);
-            const delay = ((i * 7) % 20) / 10;
-            const duration = 2.5 + ((i * 11) % 20) / 10;
-            const size = 4 + ((i * 13) % 8);
-            const shape = i % 3 === 0 ? "rounded-full" : i % 3 === 1 ? "rounded-sm" : "";
-            return (
-              <div
-                key={i}
-                className={`absolute ${shape}`}
-                style={{
-                  left: `${left}%`,
-                  top: "-10px",
-                  width: `${size}px`,
-                  height: `${size}px`,
-                  backgroundColor: color,
-                  opacity: 0.8,
-                  animation: `confettiFall ${duration}s ease-in ${delay}s both`,
-                }}
-              />
-            );
-          })}
-        </div>
+        {!paymentFailed && (
+          <div className="absolute inset-0 pointer-events-none">
+            {Array.from({ length: 40 }).map((_, i) => {
+              const colors = [primaryColor, secondaryColor, accentColor, "#f59e0b", "#10b981", "#ec4899"];
+              const color = colors[i % colors.length];
+              const left = ((i * 37 + 13) % 100);
+              const delay = ((i * 7) % 20) / 10;
+              const duration = 2.5 + ((i * 11) % 20) / 10;
+              const size = 4 + ((i * 13) % 8);
+              const shape = i % 3 === 0 ? "rounded-full" : i % 3 === 1 ? "rounded-sm" : "";
+              return (
+                <div
+                  key={i}
+                  className={`absolute ${shape}`}
+                  style={{
+                    left: `${left}%`,
+                    top: "-10px",
+                    width: `${size}px`,
+                    height: `${size}px`,
+                    backgroundColor: color,
+                    opacity: 0.8,
+                    animation: `confettiFall ${duration}s ease-in ${delay}s both`,
+                  }}
+                />
+              );
+            })}
+          </div>
+        )}
 
         <div
           className="absolute inset-0 pointer-events-none opacity-15"
@@ -534,6 +857,7 @@ export default function PublicBookingPage() {
           isOrder={isOrder}
           businessName={business?.name || ""}
           businessAddress={business?.address}
+          businessWhatsapp={business?.whatsapp}
           primaryColor={primaryColor}
           secondaryColor={secondaryColor}
           accentColor={accentColor}
@@ -541,12 +865,30 @@ export default function PublicBookingPage() {
           bookingResults={bookingResults}
           calendarUrl={calendarUrl}
           apiBase={API_BASE}
+          orderItems={confirmedOrderItems}
+          orderTotal={confirmedOrderTotal}
+          orderCurrency={cartCurrency}
+          paymentMethod={confirmedPaymentMethod}
+          orderNumber={confirmedOrderNumber}
+          orderId={confirmedOrderId}
+          estimatedDelivery={confirmedEstimatedDelivery}
+          paymentFailed={paymentFailed}
+          paymentPending={paymentPending}
+          customerEmail={confirmedCustomerEmail}
           onContinueShopping={() => {
             setSuccess(false);
             setCheckoutMode(false);
             setBookingResults([]);
             setConfirmedDetails(null);
+            setConfirmedOrderItems([]);
+            setPaymentFailed(false);
+            setPaymentPending(false);
+            setConfirmedOrderNumber(null);
+            setConfirmedOrderId(null);
+            setConfirmedEstimatedDelivery(null);
+            setConfirmedCustomerEmail(null);
           }}
+          onRetryPayment={handleRetryPayment}
           formatDate={formatDate}
           formatTime={formatTime}
         />
@@ -586,6 +928,8 @@ export default function PublicBookingPage() {
           accentColor={accentColor}
           cartTotal={cartTotal}
           cartCurrency={cartCurrency}
+          promoCode={promoCode}
+          shippingZones={shippingZones}
           onBack={() => setCheckoutMode(false)}
           onUpdateQuantity={updateQuantity}
           onSubmit={handleCheckoutSubmit}
@@ -857,6 +1201,8 @@ export default function PublicBookingPage() {
         primaryColor={primaryColor}
         secondaryColor={secondaryColor}
         accentColor={accentColor}
+        promoCode={promoCode}
+        slug={slug}
         onClose={() => setCartOpen(false)}
         onOpen={() => setCartOpen(true)}
         onUpdateQuantity={updateQuantity}
@@ -867,6 +1213,8 @@ export default function PublicBookingPage() {
           setError(null);
           if (business?.id) trackStoreEvent(business.id, 'checkout_start');
         }}
+        onApplyPromo={handleApplyPromo}
+        onRemovePromo={handleRemovePromo}
       />
     </main>
   );

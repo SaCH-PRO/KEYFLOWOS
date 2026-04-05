@@ -1,4 +1,4 @@
-import type { BusinessHours, CartItem } from "./types";
+import type { BusinessHours, CartItem, PromoCode } from "./types";
 
 const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
@@ -37,7 +37,10 @@ export function loadCart(slug: string): CartItem[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item: any) => item && typeof item.id === "string" && typeof item.name === "string");
+    return parsed.filter((item: unknown) => {
+      const obj = item as Record<string, unknown>;
+      return obj && typeof obj.id === "string" && typeof obj.name === "string";
+    });
   } catch {
     return [];
   }
@@ -48,6 +51,54 @@ export function saveCart(slug: string, cart: CartItem[]) {
   try {
     localStorage.setItem(`kf_cart_${slug}`, JSON.stringify(cart));
   } catch {}
+}
+
+export function loadPromoCode(slug: string): PromoCode | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(`kf_promo_${slug}`);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+export function savePromoCode(slug: string, promo: PromoCode | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (promo) {
+      localStorage.setItem(`kf_promo_${slug}`, JSON.stringify(promo));
+    } else {
+      localStorage.removeItem(`kf_promo_${slug}`);
+    }
+  } catch {}
+}
+
+export function loadCheckoutDetails(): { firstName: string; lastName: string; email: string; phone: string } {
+  if (typeof window === "undefined") return { firstName: "", lastName: "", email: "", phone: "" };
+  try {
+    const s = localStorage.getItem("kf_checkout_details");
+    return s ? JSON.parse(s) : { firstName: "", lastName: "", email: "", phone: "" };
+  } catch {
+    return { firstName: "", lastName: "", email: "", phone: "" };
+  }
+}
+
+export function saveCheckoutDetails(details: { firstName: string; lastName: string; email: string; phone: string }) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem("kf_checkout_details", JSON.stringify(details));
+  } catch {}
+}
+
+export function calculateDiscount(subtotal: number, promo: PromoCode | null): number {
+  if (!promo) return 0;
+  if (promo.minimumOrder && subtotal < promo.minimumOrder) return 0;
+  if (promo.discountType === "percentage") {
+    return Math.round(subtotal * (promo.discountValue / 100) * 100) / 100;
+  }
+  return Math.min(promo.discountValue, subtotal);
 }
 
 export function typeBadge(itemType: "service" | "product" | "package", primaryColor: string, secondaryColor: string, accentColor?: string) {

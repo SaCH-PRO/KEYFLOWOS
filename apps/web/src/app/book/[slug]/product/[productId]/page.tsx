@@ -517,11 +517,15 @@ export default function ProductDetailPage() {
         primaryColor={primaryColor}
         secondaryColor={secondaryColor}
         accentColor={accentColor}
+        promoCode={null}
+        slug={slug}
         onClose={() => setCartOpen(false)}
         onOpen={() => setCartOpen(true)}
         onUpdateQuantity={updateQuantity}
         onRemoveFromCart={removeFromCart}
         onCheckout={() => router.push(`/book/${slug}`)}
+        onApplyPromo={async () => ({ success: false, error: "Visit the storefront to apply promo codes" })}
+        onRemovePromo={() => {}}
       />
     </main>
   );
