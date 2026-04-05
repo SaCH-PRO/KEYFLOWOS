@@ -438,6 +438,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
   }) {
     const createData: Prisma.BookingUncheckedCreateInput = {
       businessId: input.businessId,
+      contactId: input.contactId ?? '',
       serviceId: input.serviceId,
       startTime: input.startTime,
       endTime: input.endTime,

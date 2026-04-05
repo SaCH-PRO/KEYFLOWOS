@@ -9,7 +9,6 @@ import { GuidanceRecommendationService } from './guidance-recommendation.service
 import { GuidanceRoadmapService } from './guidance-roadmap.service';
 import { GuidanceAiFeedbackService } from './guidance-ai-feedback.service';
 import { GuidanceAssessmentService } from './guidance-assessment.service';
-import { PrismaModule } from '../../core/prisma/prisma.module';
 import { AiModule } from '../ai/ai.module';
 import { AiUsageService } from '../ai/ai-usage.service';
 

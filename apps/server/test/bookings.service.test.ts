@@ -55,6 +55,7 @@ describe('BookingsService', () => {
       { createInvoiceForService: vi.fn() } as any,
       automation as any,
       { checkAndEnforceLimit: vi.fn() } as any,
+      { sendTransactionalEmail: vi.fn() } as any,
     );
 
     const booking = await service.createBooking({
@@ -87,6 +88,7 @@ describe('BookingsService', () => {
       { createInvoiceForService: vi.fn() } as any,
       automation as any,
       { checkAndEnforceLimit: vi.fn() } as any,
+      { sendTransactionalEmail: vi.fn() } as any,
     );
 
     await service.createBooking({
@@ -126,6 +128,7 @@ describe('BookingsService', () => {
       { createInvoiceForService } as any,
       automation as any,
       { checkAndEnforceLimit: vi.fn() } as any,
+      { sendTransactionalEmail: vi.fn() } as any,
     );
 
     const result = await service.publicCreateBooking({
