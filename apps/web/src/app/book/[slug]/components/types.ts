@@ -22,6 +22,7 @@ export type Business = {
   instagram?: string | null;
   twitter?: string | null;
   whatsapp?: string | null;
+  refundPolicy?: string | null;
 };
 
 export type Service = {
@@ -72,6 +73,72 @@ export type ServiceBookingData = {
   staffId: string;
   date: string;
   time: string;
+};
+
+export type PromoCode = {
+  code: string;
+  discountType: "percentage" | "fixed";
+  discountValue: number;
+  minimumOrder?: number;
+  description?: string;
+};
+
+export type DeliveryAddress = {
+  street: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  country: string;
+};
+
+export type PaymentMethod = "wipay" | "paypal" | "cash";
+
+export type CheckoutCustomerInfo = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+};
+
+export type OrderSummary = {
+  subtotal: number;
+  discount: number;
+  tax: number;
+  shipping: number;
+  total: number;
+};
+
+export type ShippingZone = {
+  id: string;
+  name: string;
+  countries: string[];
+  regions: string[];
+  baseFee: number;
+  freeAbove: number | null;
+  currency: string;
+  estimatedDays: number | null;
+  carrier: string | null;
+};
+
+export type StoreOrderResponse = {
+  order: {
+    id: string;
+    orderNumber: string;
+    status: string;
+    paymentStatus: string;
+    subtotal: number;
+    shippingFee: number;
+    taxAmount: number;
+    discountAmount: number;
+    total: number;
+    currency: string;
+    items: { name: string; quantity: number; unitPrice: number; total: number }[];
+  };
+  payment: {
+    paymentId?: string;
+    redirectUrl?: string;
+    status: string;
+  } | null;
 };
 
 export type FilterTab = "all" | "service" | "product" | "package";

@@ -153,7 +153,7 @@ export class SiteService {
     const meta = (business.metaData as Record<string, any>) ?? {};
     const storefront = meta.storefront ?? {};
 
-    const [services, products] = await Promise.all([
+    const [services, products, shippingZones] = await Promise.all([
       this.prisma.client.service.findMany({
         where: { businessId: business.id, deletedAt: null },
         orderBy: { createdAt: 'desc' },
@@ -161,6 +161,21 @@ export class SiteService {
       this.prisma.client.product.findMany({
         where: { businessId: business.id, deletedAt: null, isActive: true },
         orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.client.shippingZone.findMany({
+        where: { businessId: business.id, isActive: true },
+        orderBy: { name: 'asc' },
+        select: {
+          id: true,
+          name: true,
+          countries: true,
+          regions: true,
+          baseFee: true,
+          freeAbove: true,
+          currency: true,
+          estimatedDays: true,
+          carrier: true,
+        },
       }),
     ]);
 
@@ -171,6 +186,7 @@ export class SiteService {
       storefront,
       services,
       products,
+      shippingZones,
     };
   }
 

@@ -390,7 +390,16 @@ export class PaymentsService {
       });
 
       if (!result.id) throw new Error('PayPal order creation returned no ID');
-      return { paymentId: result.id, status: 'PAYPAL_CREATED' };
+
+      const links = result.links as Array<{ href: string; rel: string; method?: string }> | undefined;
+      const approveLink = links?.find(
+        (l) => l.rel === 'approve' || l.rel === 'payer-action',
+      );
+      if (approveLink?.href) {
+        return { paymentId: result.id, status: 'REDIRECT', redirectUrl: approveLink.href };
+      }
+
+      return { paymentId: result.id, status: 'PAYPAL_AWAITING_APPROVAL' };
     }
 
     throw new BadRequestException(`Unsupported payment method: ${input.method}`);
