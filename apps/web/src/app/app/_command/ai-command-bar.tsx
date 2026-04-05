@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { usePathname } from "next/navigation";
 import { Terminal, Mic, MicOff, CornerDownLeft, Loader2, Brain } from "lucide-react";
 import { sendAiChat } from "@/lib/client";
+import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import type { ChatMessage } from "./types";
 import { AiChatDrawer } from "./ai-chat-drawer";
@@ -39,10 +40,18 @@ const MODULE_PROMPTS: Record<string, ModuleQuickPrompts> = {
   "/app/community": { module: "Community", prompts: ["Trending topics", "My engagement", "Find collaborators"] },
   "/app/settings": { module: "Settings", prompts: ["Setup checklist", "Security review", "Integration status"] },
   "/app/marketplace": { module: "Marketplace", prompts: ["Discover partners", "Trending services", "Competitor analysis"] },
-  "/app/profile": { module: "Profile", prompts: ["Complete my profile", "AI profile generator", "Document guidance"] },
+  "/app/profile": { module: "Profile", prompts: ["Complete my profile", "AI profile generator"] },
 };
 
-function getModuleContext(pathname: string): ModuleQuickPrompts {
+const PROFILE_GUIDANCE_PROMPTS: ModuleQuickPrompts = {
+  module: "Business Guidance",
+  prompts: ["Business health summary", "Score breakdown", "Top recommendations", "Improve weakest area", "Financial outlook"],
+};
+
+function getModuleContext(pathname: string, hasAssessment: boolean): ModuleQuickPrompts {
+  if ((pathname === "/app/profile" || pathname.startsWith("/app/profile/")) && hasAssessment) {
+    return PROFILE_GUIDANCE_PROMPTS;
+  }
   const sorted = Object.keys(MODULE_PROMPTS).sort((a, b) => b.length - a.length);
   for (const key of sorted) {
     if (pathname === key || pathname.startsWith(key + "/")) {
@@ -60,9 +69,24 @@ export function AiCommandBar() {
   const [chatOpen, setChatOpen] = useState(false);
   const [voiceListening, setVoiceListening] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(false);
+  const [hasGuidanceAssessment, setHasGuidanceAssessment] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const moduleCtx = useMemo(() => getModuleContext(pathname), [pathname]);
+  useEffect(() => {
+    if (!pathname.startsWith("/app/profile")) return;
+    const localStatus = typeof window !== "undefined" ? localStorage.getItem("kf_guidance_status") : null;
+    if (localStatus === "complete") setHasGuidanceAssessment(true);
+    const bid = getStoredBusinessId();
+    if (bid) {
+      apiGet<{ latestAssessment: unknown }>(`/business-guidance/${bid}/dashboard`)
+        .then(({ data }) => {
+          setHasGuidanceAssessment(!!data?.latestAssessment);
+        })
+        .catch(() => {});
+    }
+  }, [pathname]);
+
+  const moduleCtx = useMemo(() => getModuleContext(pathname, hasGuidanceAssessment), [pathname, hasGuidanceAssessment]);
 
   useEffect(() => {
     setVoiceSupported(
@@ -195,7 +219,7 @@ export function AiCommandBar() {
 
 export function AiCopilotTrigger() {
   const pathname = usePathname();
-  const moduleCtx = useMemo(() => getModuleContext(pathname), [pathname]);
+  const moduleCtx = useMemo(() => getModuleContext(pathname, false), [pathname]);
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([WELCOME]);
   const [sending, setSending] = useState(false);
