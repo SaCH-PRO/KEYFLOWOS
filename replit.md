@@ -39,7 +39,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Expenses Module:** Decomposed into a modular structure with dedicated components for filters, stats, list, forms, budgets, vendors, categories, and analytics, organized into three tabs: Expenses, Budgets, and Analytics.
 - **Projects Module:** Focused kanban board for project management with task tracking, due date pickers (project and task level), overdue indicators, task assignment support, and archive/unarchive functionality for completed projects.
 - **Automations Module:** Dedicated `/app/automations` page with three tabs: My Automations (unified list of playbooks + cross-module intelligence workflows with search, toggle, and config), Templates (pre-built automation recipes with preview modal showing trigger→condition→action flow), and Activity Log (execution history with search/filter by status). Playbook editor supports AND/OR condition grouping for complex rules.
-- **Settings Consolidation:** All configuration settings are centralized in a dedicated Settings section, with deep-links from other modules to avoid duplication.
+- **Settings Consolidation:** All configuration settings are centralized in a dedicated Settings section (Business, Team, Connections, Notifications, Compliance, Webhooks, Templates, Developers), with deep-links from other modules to avoid duplication. Profile is separated into its own top-level `/app/profile` route. `/app/settings` defaults to Business tab. `/app/settings/profile` redirects to `/app/profile`.
 - **Cross-Module Contact Journey:** Enhanced `ContactJourneyTimeline` component provides a unified lifecycle timeline for contacts, merging events, notes, tasks, invoices, and bookings into chronological entries with cross-module CTAs.
 - **Financial Copilot Agent:** Monitors revenue, expenses, and cash flow with anomaly detection, providing a Financial Pulse dashboard and weekly AI-powered briefings.
 - **Customer Notification System:** Transactional email system for sending branded customer-facing emails via connected Gmail. Supports 6 notification types with event-driven triggers, cron jobs, and customizable preferences.
@@ -48,7 +48,8 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Tiered Monetization:** Plan comparison grid (Free/Flow/KeyFlow) with feature-by-feature breakdown across 7 categories, integrated into billing settings.
 - **Observability:** Request correlation ID middleware, global logging interceptor, and health check endpoints.
 - **Learn Module:** MasterClass functionality with My Learning, Catalog, and Certificates.
-- **Community Module:** Features Feed and Cohorts with social functionalities. Includes comprehensive user profile & community identity: rich professional fields (headline, bio, skills, businessStage, interests) on Business model with auto-computed profileCompleteness, AI profile generator endpoint, document guidance engine, clickable author names in posts/comments that open ProfileCard slide-out panels, public profile page at `/app/community/profile/[businessId]`, and an upgraded profile settings page with professional profile section, AI generation, document recommendations, and completeness ring indicator.
+- **Profile Module:** Consolidated at `/app/profile` (previously under Settings). Manages personal information, professional identity (headline, bio, skills, businessStage, interests), password/security, avatar upload, AI profile generator, document guidance engine, and profile completeness ring. Accessible via user avatar dropdown in header and command palette. Public community profile view remains at `/app/community/profile/[businessId]`.
+- **Community Module:** Features Feed and Cohorts with social functionalities. Clickable author names in posts/comments open ProfileCard slide-out panels, public profile page at `/app/community/profile/[businessId]`.
 - **Error Boundaries:** Dedicated `error.tsx` boundaries for all core modules.
 
 ## Module Entity Ownership
@@ -67,7 +68,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 | Analytics / KPIs | Reports (`/app/reports`) | All modules (compact KPI cards + "View Full Report" links) | Reports is single analytics source; module tabs show operational summaries only |
 
 **Navigation & Command System:**
-- Sidebar groups: OPERATE (Command, Contacts, Commerce, Bookings), GROW (Marketing, Marketplace), MANAGE (Expenses, Projects, Automations, Reports), SETUP (Store Setup), Bottom (Learn, Community, Settings)
+- Sidebar groups: OPERATE (Command, Contacts, Commerce, Bookings), GROW (Marketing, Marketplace), MANAGE (Expenses, Projects, Automations, Reports), SETUP (Store Setup), Bottom (Learn, Community, Settings). Profile is accessible via user avatar dropdown menu (desktop) and mobile drawer user section.
 - Breadcrumb navigation (`Breadcrumbs` component) on all app pages with human-readable labels and clickable parent links
 - Command Palette (⌘K): Recent items (last 5 pages, localStorage), Quick Actions (New Contact/Invoice/Booking/Expense/Project with shortcuts), Navigate section (all routes), and universal search (contacts, invoices, bookings, products, projects)
 - AI Copilot: Route-aware quick-action chips (3 per module) shown persistently, enhanced MODULE_PROMPTS map covering all modules
