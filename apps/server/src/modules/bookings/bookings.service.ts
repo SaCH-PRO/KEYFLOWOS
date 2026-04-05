@@ -429,7 +429,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
 
   async createBooking(input: {
     businessId: string;
-    contactId?: string;
+    contactId: string;
     serviceId: string;
     staffId: string;
     startTime: Date;
@@ -438,12 +438,11 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
   }) {
     const createData: Prisma.BookingUncheckedCreateInput = {
       businessId: input.businessId,
-      contactId: input.contactId ?? '',
+      contactId: input.contactId,
       serviceId: input.serviceId,
       startTime: input.startTime,
       endTime: input.endTime,
     };
-    if (input.contactId) createData.contactId = input.contactId;
     if (input.staffId) createData.staffId = input.staffId;
     if (input.notes) createData.notes = input.notes;
 
