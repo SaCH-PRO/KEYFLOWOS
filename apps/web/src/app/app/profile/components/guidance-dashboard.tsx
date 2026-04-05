@@ -147,9 +147,9 @@ function scoreBg(score: number | null): string {
 
 function scoreBarColor(score: number | null): string {
   if (score === null) return "hsl(var(--muted))";
-  if (score < 40) return "#ef4444";
-  if (score < 70) return "#f59e0b";
-  return "#10b981";
+  if (score < 40) return "hsl(var(--kf-error))";
+  if (score < 70) return "hsl(var(--kf-warning))";
+  return "hsl(var(--kf-success))";
 }
 
 function scoreLabel(score: number | null): string {
@@ -221,7 +221,7 @@ function HealthGauge({ score, size = 120 }: { score: number | null; size?: numbe
   const radius = (size / 2) - 10;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (value / 100) * circumference;
-  const color = value >= 70 ? "#10b981" : value >= 40 ? "#f59e0b" : "#ef4444";
+  const color = value >= 70 ? "hsl(var(--kf-success))" : value >= 40 ? "hsl(var(--kf-warning))" : "hsl(var(--kf-error))";
 
   return (
     <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
