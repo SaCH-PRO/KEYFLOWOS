@@ -982,15 +982,14 @@ export class MarketplaceService {
 
         for (const item of order.items) {
           if (item.productId) {
-            const inv = await this.prisma.client.inventoryItem.findFirst({
+            const inv = await this.prisma.client.inventoryStock.findFirst({
               where: { productId: item.productId, businessId },
             });
             if (inv) {
-              await this.prisma.client.inventoryItem.update({
+              await this.prisma.client.inventoryStock.update({
                 where: { id: inv.id },
                 data: {
                   quantity: inv.quantity + item.quantity,
-                  availableQuantity: (inv.availableQuantity ?? inv.quantity) + item.quantity,
                 },
               });
             }

@@ -161,7 +161,7 @@ export class CrmListsService {
         if (revenueIds.length === 0) {
           return [];
         }
-        where.id = where.id ? { ...where.id, in: revenueIds } : { in: revenueIds };
+        where.id = { in: revenueIds };
       }
       return this.prisma.client.contact.findMany({
         where,

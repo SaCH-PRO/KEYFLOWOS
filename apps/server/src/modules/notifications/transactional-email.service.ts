@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GmailService } from '../commerce/gmail.service';
 import {
@@ -437,7 +438,7 @@ export class TransactionalEmailService implements OnModuleInit {
       where: {
         status: 'QUEUED',
         createdAt: { gte: cutoff },
-        templateData: { not: null },
+        templateData: { not: Prisma.DbNull },
       },
       orderBy: { createdAt: 'asc' },
       take: QUEUE_DRAIN_BATCH_SIZE,
