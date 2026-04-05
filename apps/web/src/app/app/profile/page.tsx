@@ -7,6 +7,7 @@ import {
   Eye, EyeOff, Moon, Sun, Monitor, Camera, Lock, Sparkles,
   Briefcase, MapPin, Tag, Heart, FileText, ChevronRight,
   Wand2, RefreshCw, X, Scale, DollarSign, Palette, Building2,
+  Compass,
 } from "lucide-react";
 import { Button, Input, Card } from "@keyflow/ui";
 import { useTheme } from "next-themes";
@@ -20,6 +21,8 @@ import {
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 import GuidanceCard from "./components/guidance-card";
 import BusinessGuidanceWizard from "./components/guidance-wizard";
+import GuidanceDashboard from "./components/guidance-dashboard";
+import { getGuidanceStatus } from "./components/guidance-storage";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -221,6 +224,9 @@ export default function ProfileSettingsPage() {
   const [recommendations, setRecommendations] = useState<DocumentRecommendation[]>([]);
   const [loadingRecs, setLoadingRecs] = useState(false);
   const [showGuidanceWizard, setShowGuidanceWizard] = useState(false);
+  const [activeTab, setActiveTab] = useState<"profile" | "guidance">("profile");
+  const [guidanceStatus, setGuidanceStatusState] = useState<"not_started" | "in_progress" | "complete">("not_started");
+  const [hasBackendAssessment, setHasBackendAssessment] = useState(false);
 
   const isDirty = JSON.stringify(form) !== JSON.stringify(initialForm);
   const isBizDirty = JSON.stringify(bizForm) !== JSON.stringify(initialBizForm);
@@ -230,6 +236,20 @@ export default function ProfileSettingsPage() {
   useEffect(() => {
     const bid = getStoredBusinessId();
     if (bid) setBusinessId(bid);
+    const localStatus = getGuidanceStatus();
+    setGuidanceStatusState(localStatus);
+    if (bid) {
+      apiGet<{ status: string; latestAssessment: unknown }>(`/business-guidance/${bid}/dashboard`)
+        .then(({ data }) => {
+          if (data?.latestAssessment) {
+            setHasBackendAssessment(true);
+            setGuidanceStatusState("complete");
+          } else if (data?.status === "IN_PROGRESS" || data?.status === "DRAFT") {
+            setGuidanceStatusState("in_progress");
+          }
+        })
+        .catch(() => {});
+    }
   }, []);
 
   useEffect(() => {
@@ -456,8 +476,24 @@ export default function ProfileSettingsPage() {
   if (showGuidanceWizard) {
     return (
       <BusinessGuidanceWizard
-        onClose={() => setShowGuidanceWizard(false)}
-        onComplete={() => {}}
+        onClose={() => {
+          setShowGuidanceWizard(false);
+          const status = getGuidanceStatus();
+          setGuidanceStatusState(status);
+          if (status === "complete") setActiveTab("guidance");
+        }}
+        onComplete={() => {
+          setShowGuidanceWizard(false);
+          setGuidanceStatusState("complete");
+          setActiveTab("guidance");
+          if (businessId) {
+            apiGet<{ status: string; latestAssessment: unknown }>(`/business-guidance/${businessId}/dashboard`)
+              .then(({ data }) => {
+                if (data?.latestAssessment) setHasBackendAssessment(true);
+              })
+              .catch(() => {});
+          }
+        }}
       />
     );
   }
@@ -484,6 +520,43 @@ export default function ProfileSettingsPage() {
           <p className="text-sm text-muted-foreground">Manage your personal information, professional identity, and security</p>
         </div>
       </motion.div>
+
+      <motion.div variants={fadeUp} className="flex gap-1 p-1 rounded-xl bg-muted/15 border border-border/20">
+        <button
+          onClick={() => setActiveTab("profile")}
+          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all min-h-[44px] ${
+            activeTab === "profile"
+              ? "bg-card text-foreground shadow-sm border border-border/30"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <User className="w-4 h-4" />
+          Profile
+        </button>
+        <button
+          onClick={() => setActiveTab("guidance")}
+          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all min-h-[44px] ${
+            activeTab === "guidance"
+              ? "bg-card text-foreground shadow-sm border border-border/30"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <Compass className="w-4 h-4" />
+          Business Guidance
+          {guidanceStatus === "complete" && (
+            <span className="w-2 h-2 rounded-full bg-emerald-400" />
+          )}
+        </button>
+      </motion.div>
+
+      {activeTab === "guidance" ? (
+        guidanceStatus === "complete" || hasBackendAssessment ? (
+          <GuidanceDashboard onEditProfile={() => setShowGuidanceWizard(true)} />
+        ) : (
+          <GuidanceCard onLaunchWizard={() => setShowGuidanceWizard(true)} />
+        )
+      ) : (
+      <>
       <AnimatePresence>
         {status && (
           <motion.div
@@ -808,8 +881,6 @@ export default function ProfileSettingsPage() {
         </div>
       </motion.div>
 
-      <GuidanceCard onLaunchWizard={() => setShowGuidanceWizard(true)} />
-
       {recommendations.length > 0 && (
         <motion.div variants={fadeUp} className="kf-card p-6 space-y-4">
           <div className="flex items-center gap-2 text-sm font-semibold">
@@ -944,6 +1015,8 @@ export default function ProfileSettingsPage() {
           ))}
         </div>
       </motion.div>
+      </>
+      )}
     </motion.div>
   );
 }
