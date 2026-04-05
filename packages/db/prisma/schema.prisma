@@ -2382,3 +2382,25 @@ model PromoCode {
   @@index([businessId])
   @@map("promo_codes")
 }
+
+model ProductReview {
+  id             String   @id @default(cuid())
+  productId      String   @map("product_id")
+  businessId     String   @map("business_id")
+  customerName   String   @map("customer_name")
+  customerEmail  String?  @map("customer_email")
+  rating         Int
+  reviewText     String?  @map("review_text")
+  status         String   @default("PENDING")
+  sellerResponse String?  @map("seller_response")
+  orderReference String?  @map("order_reference")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt      @map("updated_at")
+
+  @@index([businessId])
+  @@index([businessId, productId])
+  @@index([businessId, status])
+  @@index([productId, status])
+  @@map("product_reviews")
+}

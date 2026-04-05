@@ -262,4 +262,55 @@ export class SiteController {
   ) {
     return this.promoCodeService.delete(businessId, promoId);
   }
+
+  @Post('storefront/public/:slug/reviews')
+  submitReview(
+    @Param('slug') slug: string,
+    @Body() body: {
+      productId: string;
+      customerName: string;
+      customerEmail?: string;
+      rating: number;
+      reviewText?: string;
+      orderReference?: string;
+    },
+  ) {
+    return this.siteService.submitReview(slug, body);
+  }
+
+  @Get('storefront/public/:slug/products/:productId/reviews')
+  getProductReviews(
+    @Param('slug') slug: string,
+    @Param('productId') productId: string,
+  ) {
+    return this.siteService.getProductReviews(slug, productId);
+  }
+
+  @Get('storefront/public/:slug/review-aggregates')
+  getReviewAggregates(@Param('slug') slug: string) {
+    return this.siteService.getReviewAggregates(slug);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/reviews')
+  listBusinessReviews(
+    @Param('businessId') businessId: string,
+    @Query('status') status?: string,
+    @Query('rating') rating?: string,
+  ) {
+    return this.siteService.listBusinessReviews(businessId, {
+      status,
+      rating: rating ? parseInt(rating, 10) : undefined,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/reviews/:reviewId')
+  moderateReview(
+    @Param('businessId') businessId: string,
+    @Param('reviewId') reviewId: string,
+    @Body() body: { status?: string; sellerResponse?: string },
+  ) {
+    return this.siteService.moderateReview(businessId, reviewId, body);
+  }
 }

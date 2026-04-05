@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { X, Clock, ShoppingBag, Plus, CheckCircle2, Star, Shield, Zap, ChevronLeft, ChevronRight, MessageCircle, ExternalLink } from "lucide-react";
+import { X, Clock, ShoppingBag, Plus, CheckCircle2, Star, Shield, Zap, ChevronLeft, ChevronRight, MessageCircle, ExternalLink, Heart } from "lucide-react";
 import { formatPrice } from "@/lib/format";
 import type { CatalogItem } from "./types";
+import { ReviewSection } from "./review-display";
+import { ShareButtons } from "./share-buttons";
 
 type Props = {
   item: CatalogItem;
@@ -19,6 +21,8 @@ type Props = {
   onSelectItem: (item: CatalogItem) => void;
   badges?: Record<string, string>;
   slug?: string;
+  isWishlisted?: boolean;
+  onToggleWishlist?: () => void;
 };
 
 const badgeConfig: Record<string, { label: string; bg: string; text: string }> = {
@@ -56,6 +60,8 @@ export function ItemDetailModal({
   onSelectItem,
   badges,
   slug,
+  isWishlisted,
+  onToggleWishlist,
 }: Props) {
   const itemAccent = item.itemType === "service" ? primaryColor : item.itemType === "product" ? secondaryColor : brandAccent;
   const badgeKey = badges?.[item.id];
@@ -113,19 +119,48 @@ export function ItemDetailModal({
             <p className="text-sm text-white/60 leading-relaxed whitespace-pre-line">{item.description}</p>
           )}
 
-          <div className="flex flex-wrap gap-3 py-2">
-            <div className="flex items-center gap-1.5 text-xs text-white/40">
-              <Star className="w-3.5 h-3.5" style={{ color: primaryColor }} />
-              Quality Guaranteed
+          <div className="flex items-center justify-between py-2">
+            <div className="flex flex-wrap gap-3">
+              <div className="flex items-center gap-1.5 text-xs text-white/40">
+                <Star className="w-3.5 h-3.5" style={{ color: primaryColor }} />
+                Quality Guaranteed
+              </div>
+              <div className="flex items-center gap-1.5 text-xs text-white/40">
+                <Shield className="w-3.5 h-3.5" style={{ color: primaryColor }} />
+                Secure Booking
+              </div>
+              <div className="flex items-center gap-1.5 text-xs text-white/40">
+                <Zap className="w-3.5 h-3.5" style={{ color: primaryColor }} />
+                Instant Confirmation
+              </div>
             </div>
-            <div className="flex items-center gap-1.5 text-xs text-white/40">
-              <Shield className="w-3.5 h-3.5" style={{ color: primaryColor }} />
-              Secure Booking
-            </div>
-            <div className="flex items-center gap-1.5 text-xs text-white/40">
-              <Zap className="w-3.5 h-3.5" style={{ color: primaryColor }} />
-              Instant Confirmation
-            </div>
+            {onToggleWishlist && (
+              <button
+                onClick={onToggleWishlist}
+                className="w-10 h-10 rounded-xl flex items-center justify-center transition-all hover:scale-110"
+                style={{
+                  backgroundColor: isWishlisted ? `${primaryColor}15` : "rgba(255,255,255,0.05)",
+                }}
+                title={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
+              >
+                <Heart
+                  className="w-5 h-5 transition-colors"
+                  style={{ color: isWishlisted ? primaryColor : "rgba(255,255,255,0.3)" }}
+                  fill={isWishlisted ? primaryColor : "none"}
+                />
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="text-xs text-white/40">Share this item</div>
+            <ShareButtons
+              url={typeof window !== "undefined" ? window.location.href : ""}
+              title={`${item.name} — ${formatPrice(item.price, item.currency)}`}
+              description={item.description || undefined}
+              primaryColor={primaryColor}
+              compact
+            />
           </div>
 
           <div className="flex flex-col sm:flex-row gap-3">
@@ -162,13 +197,18 @@ export function ItemDetailModal({
           </div>
 
           {slug && (
-            <a
-              href={`/book/${slug}/product/${item.id}`}
-              className="flex items-center justify-center gap-2 text-xs text-white/40 hover:text-white/60 transition-colors min-h-[44px]"
-            >
-              <ExternalLink className="w-3 h-3" />
-              View Full Details
-            </a>
+            <div className="space-y-4">
+              <a
+                href={`/book/${slug}/product/${item.id}`}
+                className="flex items-center justify-center gap-2 text-xs text-white/40 hover:text-white/60 transition-colors min-h-[44px]"
+              >
+                <ExternalLink className="w-3 h-3" />
+                View Full Details
+              </a>
+              <div className="pt-4 border-t border-white/10">
+                <ReviewSection slug={slug} productId={item.id} productName={item.name} primaryColor={primaryColor} />
+              </div>
+            </div>
           )}
 
           {relatedItems.length > 0 && (

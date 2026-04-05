@@ -20,10 +20,12 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { formatPrice } from "@/lib/format";
-import type { CatalogItem, FilterTab, SortOption } from "./types";
+import type { CatalogItem, FilterTab, SortOption, ReviewAggregate } from "./types";
 import { typeBadge } from "./utils";
 import { getThemeStyles, getTabClasses, getButtonStyles, getItemAccent, type ThemeKey } from "@/lib/storefront-themes";
 import type { StorefrontConfig } from "@/lib/client";
+import { Heart } from "lucide-react";
+import { StarRatingDisplay } from "./review-display";
 
 type Props = {
   catalogItems: CatalogItem[];
@@ -39,6 +41,9 @@ type Props = {
   featuredItemIds?: string[];
   onItemClick?: (item: CatalogItem) => void;
   config?: StorefrontConfig | null;
+  reviewAggregates?: Record<string, ReviewAggregate>;
+  isWishlisted?: (itemId: string) => boolean;
+  onToggleWishlist?: (item: CatalogItem) => void;
 };
 
 const catalogBadgeConfig: Record<string, { label: string; icon: typeof Star; gradient: string }> = {
@@ -69,6 +74,9 @@ export function CatalogGrid({
   featuredItemIds,
   onItemClick,
   config,
+  reviewAggregates,
+  isWishlisted,
+  onToggleWishlist,
 }: Props) {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
@@ -127,8 +135,10 @@ export function CatalogGrid({
     else if (sortOption === "price_desc") items = [...items].sort((a, b) => b.price - a.price);
     else if (sortOption === "duration")
       items = [...items].sort((a, b) => (a.duration ?? 9999) - (b.duration ?? 9999));
+    else if (sortOption === "highest_rated" && reviewAggregates)
+      items = [...items].sort((a, b) => (reviewAggregates[b.id]?.averageRating ?? 0) - (reviewAggregates[a.id]?.averageRating ?? 0));
     return items;
-  }, [sortedCatalog, activeTab, searchQuery, sortOption]);
+  }, [sortedCatalog, activeTab, searchQuery, sortOption, reviewAggregates]);
 
   if (catalogItems.length === 0) {
     return (
@@ -159,6 +169,7 @@ export function CatalogGrid({
     price_asc: "Price: Low → High",
     price_desc: "Price: High → Low",
     duration: "Duration",
+    highest_rated: "Highest Rated",
   };
 
   function renderGridCard(item: CatalogItem) {
@@ -168,6 +179,9 @@ export function CatalogGrid({
     const itemColor = ia.color;
     const isFeatured = featuredItemIds?.includes(item.id);
     const itemBadge = badges?.[item.id] ? catalogBadgeConfig[badges[item.id]] : null;
+    const reviewAgg = reviewAggregates?.[item.id];
+    const wishlisted = isWishlisted?.(item.id);
+    const hasHighRating = reviewAgg && reviewAgg.averageRating >= 4;
 
     return (
       <div
@@ -253,6 +267,24 @@ export function CatalogGrid({
               Featured
             </span>
           )}
+
+          {onToggleWishlist && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleWishlist(item); }}
+              className="absolute top-2.5 left-2.5 w-8 h-8 rounded-full backdrop-blur-md flex items-center justify-center transition-all hover:scale-110 z-10"
+              style={{
+                backgroundColor: wishlisted ? `${primaryColor}30` : "rgba(0,0,0,0.4)",
+                border: wishlisted ? `1px solid ${primaryColor}40` : "1px solid rgba(255,255,255,0.1)",
+              }}
+              title={wishlisted ? "Remove from wishlist" : "Save for later"}
+            >
+              <Heart
+                className="w-3.5 h-3.5 transition-colors"
+                style={{ color: wishlisted ? primaryColor : "rgba(255,255,255,0.6)" }}
+                fill={wishlisted ? primaryColor : "none"}
+              />
+            </button>
+          )}
         </div>
 
         <div className={`${ts.spacing === "relaxed" ? "p-5" : "p-4"} space-y-3`}>
@@ -283,6 +315,10 @@ export function CatalogGrid({
             <p className={`${ts.descSize} text-white/45 line-clamp-2 leading-relaxed ${ts.bodyWeight}`}>
               {item.description}
             </p>
+          )}
+
+          {reviewAgg && reviewAgg.reviewCount > 0 && (
+            <StarRatingDisplay rating={reviewAgg.averageRating} count={reviewAgg.reviewCount} />
           )}
 
           <div className="flex items-center justify-between pt-1">
@@ -331,6 +367,10 @@ export function CatalogGrid({
             )}
           </div>
         </div>
+
+        {hasHighRating && (
+          <div className="absolute bottom-0 left-0 right-0 h-[2px]" style={{ background: `linear-gradient(90deg, #f59e0b, ${primaryColor})` }} />
+        )}
       </div>
     );
   }
@@ -342,6 +382,7 @@ export function CatalogGrid({
     const itemColor = ia.color;
     const isFeatured = featuredItemIds?.includes(item.id);
     const itemBadge = badges?.[item.id] ? catalogBadgeConfig[badges[item.id]] : null;
+    const reviewAgg = reviewAggregates?.[item.id];
 
     return (
       <div
@@ -423,6 +464,9 @@ export function CatalogGrid({
           </div>
           {item.description && (
             <p className={`${ts.descSize} text-white/45 line-clamp-2 leading-relaxed ${ts.bodyWeight}`}>{item.description}</p>
+          )}
+          {reviewAgg && reviewAgg.reviewCount > 0 && (
+            <StarRatingDisplay rating={reviewAgg.averageRating} count={reviewAgg.reviewCount} />
           )}
           <div className="flex items-center justify-between pt-0.5">
             {showDuration && item.duration ? (
