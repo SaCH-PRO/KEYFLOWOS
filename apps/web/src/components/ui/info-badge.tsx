@@ -22,7 +22,7 @@ export function InfoBadge({
   children,
 }: InfoBadgeProps) {
   const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -50,7 +50,7 @@ export function InfoBadge({
   };
 
   return (
-    <div ref={containerRef} className="relative inline-flex items-center">
+    <span ref={containerRef} className="relative inline-flex items-center">
       <button
         onClick={() => setOpen(!open)}
         className="inline-flex items-center justify-center rounded-full transition-colors hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none"
@@ -71,35 +71,35 @@ export function InfoBadge({
       </button>
       <AnimatePresence>
         {open && (
-          <motion.div
+          <motion.span
             initial={{ opacity: 0, scale: 0.95, y: side === "top" ? 4 : -4 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95 }}
             transition={{ duration: 0.15 }}
-            className={`absolute z-[60] ${positionClasses[side]}`}
+            className={`absolute z-[60] block ${positionClasses[side]}`}
             style={{ width: 280 }}
           >
-            <div
-              className="rounded-xl p-3 shadow-2xl"
+            <span
+              className="block rounded-xl p-3 shadow-2xl"
               style={{
                 background: "hsl(var(--kf-bg))",
                 border: "1px solid hsl(var(--kf-accent2) / 0.2)",
                 boxShadow: "0 12px 32px hsl(0 0% 0% / 0.35)",
               }}
             >
-              <div className="flex items-start justify-between gap-2 mb-1.5">
-                <div className="flex items-center gap-1.5">
+              <span className="flex items-start justify-between gap-2 mb-1.5">
+                <span className="flex items-center gap-1.5">
                   <Info className="w-3.5 h-3.5 shrink-0" style={{ color: "hsl(var(--kf-accent2))" }} />
                   <span className="text-xs font-semibold">{title}</span>
-                </div>
+                </span>
                 <button
                   onClick={() => setOpen(false)}
                   className="p-0.5 rounded hover:bg-muted/40 transition-colors shrink-0"
                 >
                   <X className="w-3 h-3 text-muted-foreground" />
                 </button>
-              </div>
-              <p className="text-[11px] text-muted-foreground leading-relaxed">{body}</p>
+              </span>
+              <span className="block text-[11px] text-muted-foreground leading-relaxed">{body}</span>
               {learnMoreHref && (
                 <a
                   href={learnMoreHref}
@@ -109,10 +109,10 @@ export function InfoBadge({
                   Learn more →
                 </a>
               )}
-            </div>
-          </motion.div>
+            </span>
+          </motion.span>
         )}
       </AnimatePresence>
-    </div>
+    </span>
   );
 }
