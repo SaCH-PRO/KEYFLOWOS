@@ -76,7 +76,7 @@ export class OnboardingConciergeService {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    private readonly aiUsage: AiUsageService,
+    @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {}
 
   async getSetupStatus(businessId: string): Promise<SetupStatus> {

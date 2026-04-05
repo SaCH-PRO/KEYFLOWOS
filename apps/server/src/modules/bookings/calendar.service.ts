@@ -21,7 +21,7 @@ export class CalendarService {
   private readonly logger = new Logger(CalendarService.name);
   private readonly clientId = process.env.GOOGLE_CLIENT_ID;
   private readonly clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  private readonly redirectUri = process.env.CALENDAR_REDIRECT_URI || process.env.GOOGLE_REDIRECT_URI?.replace('/crm/google/callback', '/bookings/calendar/callback');
+  private readonly redirectUri = process.env.CALENDAR_REDIRECT_URI || process.env.GOOGLE_REDIRECT_URI?.replace('/api/crm/google/callback', '/api/bookings/calendar/callback');
   private readonly stateSecret = process.env.GOOGLE_STATE_SECRET;
 
   constructor(

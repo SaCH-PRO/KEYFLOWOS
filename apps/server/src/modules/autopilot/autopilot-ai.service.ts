@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 
@@ -50,8 +50,8 @@ export class AutopilotAiService {
   private readonly logger = new Logger(AutopilotAiService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly aiUsage: AiUsageService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {}
 
   async generateDraft(businessId: string, action: AutopilotActionInput): Promise<AutopilotDraft> {
