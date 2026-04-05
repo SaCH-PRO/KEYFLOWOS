@@ -34,15 +34,29 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **AI Copilot System:** Consolidated global AI entry point with route-aware module context detection, self-contained chat drawer, and AI suggestion nudges.
 - **Billing & Payment:** Supports multi-method payments, shareable `PaymentLink`s, and subscription billing history.
 - **Core Workflows:** Quote-to-Invoice, multi-gateway payment, subscription & billing, and expense tracking.
-- **User & Security:** Multi-Tenant System with `businessId` isolation, personalized authentication (Google OAuth), notification system, and AI prompt injection guards.
+- **User & Security:** Multi-Tenant System with `businessId` isolation, personalized authentication (Google OAuth), notification system, input sanitization, DTO validation, rate limiting, and AI prompt injection guards.
 - **Cross-Module Intelligence Agents:**
     - **Client Momentum Agent:** Calculates per-contact momentum scores for prioritized actions.
     - **Campaign Intelligence Agent:** Provides post-campaign analysis, AI briefings, and send-time optimization.
-    - **Financial Copilot Agent:** Monitors revenue, expenses, and cash flow with anomaly detection and provides a Financial Pulse dashboard.
-    - **Cross-Module Intelligence Agent:** Event-driven workflow engine triggering cross-module actions.
+    - **Financial Copilot Agent:** Monitors revenue, expenses, and cash flow with anomaly detection, providing a Financial Pulse dashboard and weekly AI-powered briefings.
+    - **Cross-Module Intelligence Agent:** An event-driven workflow engine that listens to key module events and triggers cross-module actions.
+- **Data Integrity:** Ensures atomic operations for campaign sending, lead form submissions, and valid tax/discount bounds.
+- **Store Module:** Redesigned with Storefront, Products & Hours, and Performance tabs. Features a consolidated setup surface for the storefront, detailed product and hour management, comprehensive performance analytics, SEO settings panel (meta title/description with Google search preview), and Share Store button with URL copy.
+- **Expenses Module:** Decomposed into a modular structure with dedicated components for filters, stats, list, forms, budgets, vendors, categories, and analytics, organized into three tabs: Expenses, Budgets, and Analytics.
+- **Projects Module:** Focused kanban board for project management with task tracking, due date pickers (project and task level), overdue indicators, task assignment support, and archive/unarchive functionality for completed projects.
+- **Automations Module:** Dedicated `/app/automations` page with three tabs: My Automations (unified list of playbooks + cross-module intelligence workflows with search, toggle, and config), Templates (pre-built automation recipes with preview modal showing trigger→condition→action flow), and Activity Log (execution history with search/filter by status). Playbook editor supports AND/OR condition grouping for complex rules.
+- **Settings Consolidation:** All configuration settings are centralized in a dedicated Settings section (Business, Team, Connections, Notifications, Compliance, Webhooks, Templates, Developers), with deep-links from other modules to avoid duplication. Profile is separated into its own top-level `/app/profile` route. `/app/settings` defaults to Business tab. `/app/settings/profile` redirects to `/app/profile`.
+- **Cross-Module Contact Journey:** Enhanced `ContactJourneyTimeline` component provides a unified lifecycle timeline for contacts, merging events, notes, tasks, invoices, and bookings into chronological entries with cross-module CTAs.
+- **Customer Notification System:** Transactional email system for sending branded customer-facing emails via connected Gmail. Supports 6 notification types with event-driven triggers, cron jobs, and customizable preferences.
+- **Platform Features:** Gamification system, online store & public booking page, module event bus, reusable keyboard shortcuts, and a webhook dispatcher system. Developer settings with API key management (scoped permissions, HMAC-signed keys) and expanded webhook events (29 events across Commerce, Bookings, CRM, Marketing, and Operations groups).
+- **Tiered Monetization:** Plan comparison grid (Free/Flow/KeyFlow) with feature-by-feature breakdown across 7 categories, integrated into billing settings.
+- **Observability:** Request correlation ID middleware, global logging interceptor, and health check endpoints.
+- **Learn Module:** MasterClass functionality with My Learning, Catalog, and Certificates.
 - **Business Guidance Engine:** Schema and backend foundation for structured business profiles with diagnostic scoring, financial analysis, and recommendations, including assessment results, guidance recommendations, and roadmap items.
+- **Business Guidance Wizard:** Multi-step (13 steps) business profiling wizard accessible from the Profile page. Collects comprehensive business data across 10 structured sections (Founder Context, Business Identity, Offer Definition, Customer Definition, Revenue Model, Cost & Finance, Operations, Legal & Compliance, Growth & Acquisition, Constraints & Goals) with a Welcome screen, Review step, and Generate Analysis completion. Features draft save/resume via localStorage, visual stepper progress indicator, animated step transitions, conditional field visibility, tooltips, slider ratings, tag inputs, multi-select, and mobile-responsive 44px touch targets. Components located at `apps/web/src/app/app/profile/components/`.
+- **Profile Module:** Consolidated at `/app/profile` (previously under Settings). Manages personal information, professional identity (headline, bio, skills, businessStage, interests), password/security, avatar upload, AI profile generator, document guidance engine, and profile completeness ring. Accessible via user avatar dropdown in header and command palette. Public community profile view remains at `/app/community/profile/[businessId]`.
+- **Community Module:** Features Feed and Cohorts with social functionalities. Clickable author names in posts/comments open ProfileCard slide-out panels, public profile page at `/app/community/profile/[businessId]`.
 - **Navigation & Command System:** Sidebar navigation, breadcrumbs, Command Palette (⌘K) for quick actions and universal search, and persistent AI Copilot quick-action chips.
-- **Settings Consolidation:** All configuration settings centralized in a dedicated Settings section with deep-links. Profile is a separate top-level route.
 - **Error Boundaries:** Dedicated `error.tsx` boundaries for all core modules.
 
 ## External Dependencies
