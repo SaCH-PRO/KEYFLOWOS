@@ -1,8 +1,10 @@
 import { Module } from '@nestjs/common';
+import { PrismaModule } from '../../core/prisma/prisma.module';
 import { BusinessGuidanceController } from './business-guidance.controller';
 import { GuidanceProfileService } from './guidance-profile.service';
 import { GuidanceScoringService } from './guidance-scoring.service';
 import { GuidanceFinancialService } from './guidance-financial.service';
+import { GuidanceFlagsService } from './guidance-flags.service';
 import { GuidanceRecommendationService } from './guidance-recommendation.service';
 import { GuidanceRoadmapService } from './guidance-roadmap.service';
 import { GuidanceAiFeedbackService } from './guidance-ai-feedback.service';
@@ -18,6 +20,7 @@ import { AiUsageService } from '../ai/ai-usage.service';
     GuidanceProfileService,
     GuidanceScoringService,
     GuidanceFinancialService,
+    GuidanceFlagsService,
     GuidanceRecommendationService,
     GuidanceRoadmapService,
     GuidanceAiFeedbackService,
@@ -31,6 +34,7 @@ import { AiUsageService } from '../ai/ai-usage.service';
     GuidanceProfileService,
     GuidanceScoringService,
     GuidanceFinancialService,
+    GuidanceFlagsService,
     GuidanceRecommendationService,
     GuidanceRoadmapService,
     GuidanceAiFeedbackService,
