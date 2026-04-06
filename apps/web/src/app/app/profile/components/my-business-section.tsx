@@ -158,7 +158,7 @@ export default function MyBusinessSection({
         const val = field === "tagline" ? res.data.tagline : res.data.description;
         if (val) {
           setForm((f) => ({ ...f, [field]: val }));
-          onStatus({ type: "success", message: `AI generated ${field}! Review and save.` });
+          onStatus({ type: "success", message: `AI generated ${field} using your business intelligence! Review and save.` });
         }
       }
     } catch {

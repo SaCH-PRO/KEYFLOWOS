@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { IdentityService } from './identity.service';
+import { BusinessContextService } from './business-context.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -13,6 +14,7 @@ export class IdentityController {
   constructor(
     @Inject(IdentityService) private readonly identity: IdentityService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
+    @Inject(BusinessContextService) private readonly bizContext: BusinessContextService,
   ) {}
 
   @UseGuards(AuthGuard)
@@ -121,31 +123,53 @@ export class IdentityController {
   @Patch('businesses/:businessId/ai-generate-field')
   async generateField(
     @Param('businessId') businessId: string,
-    @Body() body: { field: string; context?: { name?: string; tagline?: string; description?: string; teamSize?: string; industry?: string; skills?: string[]; businessStage?: string } },
+    @Body() body: { field: string; context?: Record<string, string> },
   ) {
-    const biz = await this.identity.getBusiness(businessId);
-    const ctx = body.context || {};
-    const bizName = ctx.name || biz.name || 'my business';
-    const industry = ctx.industry || biz.industry || '';
-    const stage = ctx.businessStage || biz.businessStage || '';
+    const ctx = await this.bizContext.gatherContext(businessId);
+    const contextBlock = this.bizContext.buildContextBlock(ctx, body.context);
 
-    const prompts: Record<string, string> = {
-      tagline: `Write a catchy, professional tagline (max 100 chars) for a ${industry || 'small'} business called "${bizName}"${stage ? ` at the ${stage} stage` : ''}. Return ONLY the tagline text, no quotes.`,
-      description: `Write a compelling business description (2-3 sentences, max 300 chars) for "${bizName}"${industry ? ` in the ${industry} industry` : ''}${ctx.tagline ? `. Tagline: "${ctx.tagline}"` : ''}. Focus on what the business does, who it serves, and its value. Return ONLY the description text.`,
-      skills: `Based on the ${industry || 'business'} industry and ${stage || 'startup'} stage, suggest 5-8 relevant professional skills as a JSON array of strings. Return ONLY the JSON array.`,
+    const fieldPrompts: Record<string, string> = {
+      tagline: [
+        `Using everything you know about this business, write a catchy, professional tagline (max 100 chars).`,
+        `The tagline should capture the essence of what the business does and who it serves.`,
+        `If the business has services/products, reference its specialty. If it has a location, consider local flavor.`,
+        `Return ONLY the tagline text, no quotes or explanation.`,
+      ].join(' '),
+      description: [
+        `Using everything you know about this business, write a compelling business description (2-3 sentences, max 400 chars).`,
+        `Focus on: what the business does, who it serves, what makes it unique, and the value it delivers.`,
+        `If the business has a tagline, expand on it. Incorporate details about services/products, location, and expertise naturally.`,
+        `Return ONLY the description text, no quotes or explanation.`,
+      ].join(' '),
+      skills: [
+        `Based on everything you know about this business — its industry, services, products, and stage — suggest 5-8 highly relevant professional skills.`,
+        `These should be specific, actionable skills that reflect what the business actually does, not generic buzzwords.`,
+        `Return ONLY a JSON array of skill strings.`,
+      ].join(' '),
     };
 
-    const prompt = prompts[body.field];
+    const prompt = fieldPrompts[body.field];
     if (!prompt) throw new BadRequestException('Invalid field: must be tagline, description, or skills');
 
     const result = await this.aiUsage.callAi({
       businessId,
       feature: 'profile-field-generate',
       messages: [
-        { role: 'system', content: 'You are a professional copywriter for Caribbean small businesses. Be concise and compelling.' },
-        { role: 'user', content: prompt },
+        {
+          role: 'system',
+          content: [
+            'You are a professional copywriter specializing in Caribbean small businesses.',
+            'You write concise, compelling, authentic copy that avoids generic marketing language.',
+            'You understand the Caribbean market — Trinidad & Tobago, Jamaica, Barbados, and the wider region.',
+            'Use the business context provided to create personalized, data-informed content.',
+          ].join(' '),
+        },
+        {
+          role: 'user',
+          content: `BUSINESS CONTEXT:\n${contextBlock}\n\nTASK:\n${prompt}`,
+        },
       ],
-      maxTokens: 200,
+      maxTokens: 300,
       temperature: 0.8,
     });
 
@@ -162,31 +186,45 @@ export class IdentityController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai-context')
+  async getBusinessContext(@Param('businessId') businessId: string) {
+    const ctx = await this.bizContext.gatherContext(businessId);
+    return { context: ctx };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/generate-profile')
   async generateProfile(
     @Param('businessId') businessId: string,
     @Body() body: { name?: string; industry?: string; skills?: string[]; businessStage?: string; description?: string },
   ) {
+    const ctx = await this.bizContext.gatherContext(businessId);
+    const overrides: Record<string, string> = {};
+    if (body.name) overrides.name = body.name;
+    if (body.industry) overrides.industry = body.industry;
+    if (body.businessStage) overrides.businessStage = body.businessStage;
+    if (body.description) overrides.description = body.description;
+    const contextBlock = this.bizContext.buildContextBlock(ctx, overrides);
+
     const prompt = [
-      `Generate a professional profile for a business/entrepreneur with the following info:`,
-      body.name ? `Business Name: ${body.name}` : '',
-      body.industry ? `Industry: ${body.industry}` : '',
-      body.skills?.length ? `Skills/Expertise: ${body.skills.join(', ')}` : '',
-      body.businessStage ? `Business Stage: ${body.businessStage}` : '',
-      body.description ? `Description: ${body.description}` : '',
+      `BUSINESS CONTEXT:\n${contextBlock}`,
       '',
+      `Generate a professional profile for this business/entrepreneur.`,
       'Return a JSON object with exactly two fields:',
       '1. "headline": A concise professional headline (max 120 chars) that captures what this business/person does',
       '2. "bio": A polished professional bio (2-3 sentences, max 300 chars) that presents them compellingly to a community of entrepreneurs',
       '',
-      'Return ONLY the JSON object, no markdown formatting.',
-    ].filter(Boolean).join('\n');
+      'Use the full business context to create personalized, data-informed content. Return ONLY the JSON object, no markdown formatting.',
+    ].join('\n');
 
     const result = await this.aiUsage.callAi({
       businessId,
       feature: 'profile-generate',
       messages: [
-        { role: 'system', content: 'You are a professional copywriter specializing in business profiles. Return only valid JSON.' },
+        {
+          role: 'system',
+          content: 'You are a professional copywriter specializing in Caribbean small businesses. Use the business context to create personalized content. Return only valid JSON.',
+        },
         { role: 'user', content: prompt },
       ],
       maxTokens: 300,
