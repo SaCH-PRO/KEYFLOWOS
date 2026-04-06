@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { PLANS, TRIAL_DURATION_DAYS, PlanDefinition, FEATURE_REGISTRY, FEATURE_CATEGORIES, AI_OVERAGE_RATE_TTD, AI_OVERAGE_RATE_USD } from './plans';
 
@@ -6,7 +6,7 @@ import { PLANS, TRIAL_DURATION_DAYS, PlanDefinition, FEATURE_REGISTRY, FEATURE_C
 export class SubscriptionsService {
   private readonly logger = new Logger(SubscriptionsService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private prisma: PrismaService) {}
 
   private get db() {
     return this.prisma.client;
