@@ -77,12 +77,14 @@ const ICON_MAP: Record<string, React.ElementType> = {
 };
 
 const RECOMMENDED_SLUGS = [
-  "business-plan",
   "privacy-policy",
-  "terms-of-service",
   "service-agreement",
-  "operating-agreement",
   "brand-guidelines",
+  "employee-handbook",
+  "sop",
+  "proposal-template",
+  "company-profile",
+  "website-terms",
 ];
 
 function RiskBadge({ tier }: { tier: string }) {
