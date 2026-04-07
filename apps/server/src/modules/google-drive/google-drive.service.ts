@@ -6,6 +6,7 @@ interface OAuthState {
   businessId: string;
   nonce: string;
   exp: number;
+  flow?: string;
 }
 
 export interface DriveFile {
@@ -33,7 +34,7 @@ export class GoogleDriveService {
   private readonly logger = new Logger(GoogleDriveService.name);
   private readonly clientId = process.env.GOOGLE_CLIENT_ID;
   private readonly clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  private readonly redirectUri = process.env.DRIVE_REDIRECT_URI || (process.env.GOOGLE_REDIRECT_URI ? process.env.GOOGLE_REDIRECT_URI.replace(/\/api\/[^/]+\/[^/]+\/callback/, '/api/drive/callback') : undefined);
+  private readonly redirectUri = process.env.DRIVE_REDIRECT_URI || process.env.GOOGLE_REDIRECT_URI;
   private readonly stateSecret = process.env.GOOGLE_STATE_SECRET;
 
   constructor(
@@ -100,6 +101,7 @@ export class GoogleDriveService {
       businessId,
       nonce: Math.random().toString(36).substring(2),
       exp: Date.now() + 10 * 60 * 1000,
+      flow: 'drive',
     };
 
     const signedState = this.signState(state);
