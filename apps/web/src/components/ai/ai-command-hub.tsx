@@ -500,10 +500,10 @@ export function AiCommandHub({
                 </div>
               )}
 
-              {!ai.toolLoading && !ai.toolError && ai.toolResult && ai.activeTool && (
+              {!ai.toolLoading && !ai.toolError && !!ai.toolResult && ai.activeTool && (
                 <div>
                   {toolResultRenderer && ai.activeToolId
-                    ? toolResultRenderer(ai.activeToolId, ai.toolResult)
+                    ? (toolResultRenderer(ai.activeToolId, ai.toolResult) as React.ReactNode)
                     : (
                       <div className="rounded-xl border border-border/40 p-3 bg-white/[0.02]">
                         <pre className="text-[11px] text-muted-foreground/70 whitespace-pre-wrap overflow-auto max-h-[300px]">

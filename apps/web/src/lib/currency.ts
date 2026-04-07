@@ -29,8 +29,8 @@ export type CurrencyCode = (typeof SUPPORTED_CURRENCIES)[number]["code"];
 
 const currencyMap = new Map(SUPPORTED_CURRENCIES.map((c) => [c.code, c]));
 
-export function getCurrencyInfo(code: string) {
-  return currencyMap.get(code) ?? currencyMap.get("TTD")!;
+export function getCurrencyInfo(code: string | CurrencyCode) {
+  return currencyMap.get(code as CurrencyCode) ?? currencyMap.get("TTD")!;
 }
 
 export function getCurrencySymbol(code: string): string {

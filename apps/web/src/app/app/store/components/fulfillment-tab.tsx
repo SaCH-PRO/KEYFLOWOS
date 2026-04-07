@@ -104,8 +104,8 @@ export function FulfillmentTab({ businessId }: { businessId: string }) {
                   <FulfillmentPanel
                     key={order.id}
                     businessId={businessId}
-                    order={order}
-                    onUpdate={handleOrderUpdate}
+                    order={order as any}
+                    onUpdate={handleOrderUpdate as any}
                   />
                 ))}
               </div>
@@ -119,8 +119,8 @@ export function FulfillmentTab({ businessId }: { businessId: string }) {
                   <FulfillmentPanel
                     key={order.id}
                     businessId={businessId}
-                    order={order}
-                    onUpdate={handleOrderUpdate}
+                    order={order as any}
+                    onUpdate={handleOrderUpdate as any}
                   />
                 ))}
               </div>

@@ -22,14 +22,14 @@ export const VIEW_TABS: { key: TabKey; label: string; icon: React.ElementType; t
 export type Testimonial = { id: string; name: string; text: string; rating: number; date: string };
 
 export const DEFAULT_SECTIONS: import("@/lib/client").StorefrontSection[] = [
-  { type: "hero", enabled: true },
-  { type: "featured", enabled: true },
-  { type: "categories", enabled: true },
-  { type: "catalog", enabled: true },
-  { type: "testimonials", enabled: true },
-  { type: "faq", enabled: false },
-  { type: "policies", enabled: false },
-  { type: "contact", enabled: true },
+  { key: "hero", visible: true, type: "hero", enabled: true },
+  { key: "featured", visible: true, type: "featured", enabled: true },
+  { key: "categories", visible: true, type: "categories", enabled: true },
+  { key: "catalog", visible: true, type: "catalog", enabled: true },
+  { key: "testimonials", visible: true, type: "testimonials", enabled: true },
+  { key: "faq", visible: false, type: "faq", enabled: false },
+  { key: "policies", visible: false, type: "policies", enabled: false },
+  { key: "contact", visible: true, type: "contact", enabled: true },
 ];
 
 export const SECTION_LABELS: Record<import("@/lib/client").StorefrontSectionType, { label: string; description: string }> = {
@@ -41,6 +41,7 @@ export const SECTION_LABELS: Record<import("@/lib/client").StorefrontSectionType
   faq: { label: "FAQ", description: "Frequently asked questions" },
   policies: { label: "Policies", description: "Refund, privacy, delivery, terms" },
   contact: { label: "Contact", description: "WhatsApp, email, phone" },
+  trust: { label: "Trust & Security", description: "Badges, certifications, guarantees" },
 };
 
 export const FONT_PAIRINGS: import("@/lib/client").FontPairing[] = [

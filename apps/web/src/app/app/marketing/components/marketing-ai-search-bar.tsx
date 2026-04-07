@@ -86,7 +86,7 @@ function MarketingAiSearchBarInner({ businessId, onResults, onApplyFilters }: Ma
     try {
       const result = await marketingAiSearch(q, businessId);
       if (result.data) {
-        const data = result.data as Record<string, unknown>;
+        const data = result.data as unknown as Record<string, unknown>;
         if (data.action && typeof data.action === "string") {
           setActionData({
             action: data.action as string,

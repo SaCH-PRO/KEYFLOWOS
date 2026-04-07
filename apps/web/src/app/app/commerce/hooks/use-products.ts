@@ -40,11 +40,11 @@ function buildProductPayload(form: ProductForm, imageUrl: string | null) {
   return {
     name: form.name,
     price: Number(form.price),
-    description: form.description || null,
+    description: form.description || undefined,
     category: form.category,
     duration: durationValue,
-    imageUrl,
-    sku: form.sku || null,
+    imageUrl: imageUrl ?? undefined,
+    sku: form.sku || undefined,
     isActive: form.isActive,
   };
 }

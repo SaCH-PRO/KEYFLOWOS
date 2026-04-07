@@ -124,7 +124,7 @@ export function useProjectsAiHub(
     tools: projectTools,
   }), []);
 
-  const ai = useModuleAi(config, context);
+  const ai = useModuleAi(config);
 
   const handleAction = useCallback((actionKey: string) => {
     console.log("[ProjectsAI] action:", actionKey);

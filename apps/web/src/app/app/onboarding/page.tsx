@@ -418,7 +418,7 @@ function HelpDrawer({
                   disabled={sending}
                 />
                 <button
-                  onClick={handleSend}
+                  onClick={() => handleSend()}
                   disabled={!input.trim() || sending}
                   className="p-2 rounded-xl disabled:opacity-30 transition-all"
                   style={{

@@ -743,10 +743,10 @@ export class DocumentsService {
     if (!user || !user.email) {
       const business = await this.prisma.client.business.findUnique({
         where: { id: businessId },
-        select: { users: { select: { email: true, name: true, firstName: true }, take: 1 } },
+        include: { members: { include: { user: { select: { email: true, name: true, firstName: true } } }, take: 1 } },
       });
-      if (!business || business.users.length === 0) return false;
-      user = business.users[0];
+      if (!business || business.members.length === 0) return false;
+      user = business.members[0].user;
     }
 
     if (!user?.email) return false;

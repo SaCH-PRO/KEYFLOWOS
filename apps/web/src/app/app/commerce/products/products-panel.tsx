@@ -202,9 +202,9 @@ export const ProductsPanel = React.memo(function ProductsPanel({
       case "name-desc": sorted.sort((a, b) => b.name.localeCompare(a.name)); break;
       case "price-asc": sorted.sort((a, b) => a.price - b.price); break;
       case "price-desc": sorted.sort((a, b) => b.price - a.price); break;
-      case "oldest": sorted.sort((a, b) => new Date(a.createdAt ?? 0).getTime() - new Date(b.createdAt ?? 0).getTime()); break;
+      case "oldest": sorted.sort((a, b) => new Date(String(a.createdAt ?? 0)).getTime() - new Date(String(b.createdAt ?? 0)).getTime()); break;
       case "newest":
-      default: sorted.sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime()); break;
+      default: sorted.sort((a, b) => new Date(String(b.createdAt ?? 0)).getTime() - new Date(String(a.createdAt ?? 0)).getTime()); break;
     }
     return sorted;
   }, [searchedProducts, sortBy]);

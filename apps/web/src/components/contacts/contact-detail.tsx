@@ -234,7 +234,7 @@ export function ContactDetail({
     });
   };
 
-  const handleDeleteNote = (noteId: string) => {
+  const handleDeleteNote = async (noteId: string) => {
     if (!onDeleteNote) return;
     setConfirmState({
       open: true,
@@ -244,7 +244,7 @@ export function ContactDetail({
     });
   };
 
-  const handleDeleteTask = (taskId: string) => {
+  const handleDeleteTask = async (taskId: string) => {
     if (!onDeleteTask) return;
     setConfirmState({
       open: true,

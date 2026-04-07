@@ -30,7 +30,6 @@ function SectionCard({
     <Card
       className={`space-y-3 rounded-xl border border-slate-200 bg-white shadow-sm hover:shadow-md transition-shadow ${className}`}
       padding="lg"
-      shadow="sm"
     >
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-semibold text-slate-900">{title}</p>

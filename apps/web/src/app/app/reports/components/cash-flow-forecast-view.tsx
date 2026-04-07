@@ -187,7 +187,7 @@ export function CashFlowForecastView({ businessId, currency = "TTD" }: CashFlowF
                       borderRadius: 8,
                       fontSize: 12,
                     }}
-                    formatter={(value: number) => [formatCurrency(value, currency), "Balance"]}
+                    formatter={((value: number) => [formatCurrency(value, currency), "Balance"]) as any}
                     labelFormatter={(label) => `Day: ${label}`}
                   />
                   <ReferenceLine y={0} stroke="hsl(var(--kf-error) / 0.5)" strokeDasharray="4 4" />

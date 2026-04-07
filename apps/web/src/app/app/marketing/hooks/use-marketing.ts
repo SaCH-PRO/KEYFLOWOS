@@ -110,7 +110,7 @@ export function useMarketing(): UseMarketingReturn {
   const [serverStats, setServerStats] = useState<ServerMarketingStats | null>(null);
   const [dataVersion, setDataVersion] = useState(0);
 
-  const signalTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const signalTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const bumpVersion = useCallback(() => setDataVersion((v) => v + 1), []);
 
   useEffect(() => {

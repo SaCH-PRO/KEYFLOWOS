@@ -305,7 +305,7 @@ export function StorefrontTab({
             servicesCount={services.length}
             productsCount={commerceProducts.length}
             onTabChange={onTabChange}
-            slug={businessData?.slug || currentSlug}
+            slug={businessData?.slug ?? currentSlug ?? undefined}
           />
         </AccordionSection>
 

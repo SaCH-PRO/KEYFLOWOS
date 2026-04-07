@@ -206,7 +206,7 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
                   {autopilotActions && autopilotActions.length > 0 && onApproveAutopilot && onDenyAutopilot && (
                     <AutopilotActions
                       actions={autopilotActions}
-                      paused={autopilotPaused ?? false}
+                      isPaused={autopilotPaused ?? false}
                       onApprove={onApproveAutopilot}
                       onDeny={onDenyAutopilot}
                       onTogglePause={onToggleAutopilotPause ?? (() => {})}

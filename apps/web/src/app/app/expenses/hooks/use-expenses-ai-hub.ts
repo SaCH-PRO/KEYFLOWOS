@@ -147,7 +147,7 @@ export function useExpensesAiHub(
     tools: expenseTools,
   }), []);
 
-  const ai = useModuleAi(config, context);
+  const ai = useModuleAi(config);
 
   const handleAction = useCallback((actionKey: string) => {
     console.log("[ExpensesAI] action:", actionKey);

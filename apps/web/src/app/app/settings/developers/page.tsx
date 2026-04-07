@@ -78,9 +78,9 @@ export default function DevelopersSettingsPage() {
     if (!businessId || !form.name.trim()) return;
     setCreating(true);
     try {
-      const res = await apiPost<{ key: string; apiKey: ApiKey }>(`/api/businesses/${businessId}/api-keys`, {
-        name: form.name,
-        scopes: Array.from(form.scopes),
+      const res = await apiPost<{ key: string; apiKey: ApiKey }>({
+        path: `/api/businesses/${businessId}/api-keys`,
+        body: { name: form.name, scopes: Array.from(form.scopes) },
       });
       if (res.data) {
         setNewKey(res.data.key);

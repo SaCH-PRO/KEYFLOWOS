@@ -16,7 +16,7 @@ export function ProgressDrawer({ gamification, momentum }: ProgressDrawerProps) 
   if (!gamification) return null;
 
   const xpPercent = gamification.xpToNextLevel > 0 ? Math.round((gamification.currentXp / gamification.xpToNextLevel) * 100) : 0;
-  const activeChallenge = gamification.challenges.find((c) => c.status === "IN_PROGRESS" || c.status === "ACTIVE");
+  const activeChallenge = gamification.challenges.find((c) => (c as unknown as Record<string, unknown>).status === "IN_PROGRESS" || (c as unknown as Record<string, unknown>).status === "ACTIVE");
 
   return (
     <>

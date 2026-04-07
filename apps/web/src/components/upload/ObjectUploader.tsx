@@ -6,7 +6,7 @@ import DashboardModal from "@uppy/react/dashboard-modal";
 import "@uppy/core/css/style.min.css";
 import "@uppy/dashboard/css/style.min.css";
 import AwsS3 from "@uppy/aws-s3";
-import { Button } from "@/components/ui/button";
+import { Button } from "@keyflow/ui";
 
 interface ObjectUploaderProps {
   maxNumberOfFiles?: number;
