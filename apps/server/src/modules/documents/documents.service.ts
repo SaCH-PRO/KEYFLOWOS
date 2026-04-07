@@ -1,14 +1,18 @@
-import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Inject, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { BusinessContextService } from '../identity/business-context.service';
+import { TransactionalEmailService } from '../notifications/transactional-email.service';
 
 @Injectable()
 export class DocumentsService {
+  private readonly logger = new Logger(DocumentsService.name);
+
   constructor(
     @Inject(PrismaService) private prisma: PrismaService,
     @Inject(AiUsageService) private aiUsage: AiUsageService,
     @Inject(BusinessContextService) private bizContext: BusinessContextService,
+    @Inject(TransactionalEmailService) private emailService: TransactionalEmailService,
   ) {}
 
   async getCategories(businessId?: string) {
@@ -89,6 +93,7 @@ export class DocumentsService {
       contextInputs?: Record<string, string>;
       toneSettings?: { style?: string; riskAppetite?: string; length?: string; formality?: string };
     },
+    actorUserId?: string,
   ) {
     const docType = await this.prisma.client.documentType.findUnique({
       where: { slug: body.documentTypeSlug },
@@ -222,6 +227,10 @@ export class DocumentsService {
         },
       });
     }
+
+    this.sendDocumentEmail(businessId, instance, actorUserId).catch((err) => {
+      this.logger.warn(`Document email failed: ${(err as Error).message}`);
+    });
 
     return instance;
   }
@@ -576,6 +585,55 @@ export class DocumentsService {
       default:
         return 'LOW-RISK DOCUMENT: Use clear, engaging language appropriate to the brand. Prioritize readability and personality.';
     }
+  }
+
+  private async sendDocumentEmail(businessId: string, instance: {
+    id: string;
+    title: string;
+    currentVersionNum: number;
+    documentType: { name: string; riskTier: string; category: { name: string } };
+    sections: Array<{ sectionName: string; content: string }>;
+  }, actorUserId?: string) {
+    let user: { email: string | null; name: string | null; firstName: string | null } | null = null;
+
+    if (actorUserId) {
+      user = await this.prisma.client.user.findUnique({
+        where: { id: actorUserId },
+        select: { email: true, name: true, firstName: true },
+      });
+    }
+
+    if (!user || !user.email) {
+      const business = await this.prisma.client.business.findUnique({
+        where: { id: businessId },
+        select: { users: { select: { email: true, name: true, firstName: true }, take: 1 } },
+      });
+      if (!business || business.users.length === 0) return;
+      user = business.users[0];
+    }
+
+    if (!user?.email) return;
+
+    const documentUrl = `${process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : 'https://keyflowos.com'}/app/documents/${instance.id}`;
+
+    await this.emailService.send({
+      businessId,
+      type: 'document_generated',
+      recipientEmail: user.email,
+      recipientName: user.name || user.firstName || 'there',
+      templateData: {
+        documentTitle: instance.title,
+        documentTypeName: instance.documentType.name,
+        categoryName: instance.documentType.category.name,
+        riskTier: instance.documentType.riskTier,
+        documentId: instance.id,
+        version: instance.currentVersionNum,
+        sections: instance.sections.map((s) => ({ name: s.sectionName, content: s.content })),
+        documentUrl,
+      },
+    });
+
+    this.logger.log(`Document email sent for ${instance.title} to ${user.email}`);
   }
 
   private async logChange(

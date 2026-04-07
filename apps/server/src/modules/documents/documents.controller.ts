@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Inject, Req } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { DocumentsService } from './documents.service';
@@ -49,8 +49,9 @@ export class DocumentsController {
       contextInputs?: Record<string, string>;
       toneSettings?: { style?: string; riskAppetite?: string; length?: string; formality?: string };
     },
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.documentsService.generateDocument(businessId, body);
+    return this.documentsService.generateDocument(businessId, body, req.user?.id);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

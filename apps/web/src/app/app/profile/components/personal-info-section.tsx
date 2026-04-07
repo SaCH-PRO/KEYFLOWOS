@@ -152,33 +152,45 @@ export default function PersonalInfoSection({
           <div className="flex items-center gap-1.5 mb-1.5 font-medium">
             <User className="h-3 w-3" />
             First Name
+            {!form.firstName && (
+              <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
+            )}
           </div>
           <Input
             value={form.firstName}
             onChange={(e) => onFormChange((f) => ({ ...f, firstName: e.target.value }))}
             placeholder="John"
+            style={!form.firstName ? { borderColor: "hsl(var(--kf-warning) / 0.3)" } : undefined}
           />
         </label>
         <label className="block text-xs text-muted-foreground">
           <div className="flex items-center gap-1.5 mb-1.5 font-medium">
             <User className="h-3 w-3" />
             Last Name
+            {!form.lastName && (
+              <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
+            )}
           </div>
           <Input
             value={form.lastName}
             onChange={(e) => onFormChange((f) => ({ ...f, lastName: e.target.value }))}
             placeholder="Doe"
+            style={!form.lastName ? { borderColor: "hsl(var(--kf-warning) / 0.3)" } : undefined}
           />
         </label>
         <label className="block text-xs text-muted-foreground">
           <div className="flex items-center gap-1.5 mb-1.5 font-medium">
             <Sparkles className="h-3 w-3" />
             Display Name
+            {!form.name && (
+              <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
+            )}
           </div>
           <Input
             value={form.name}
             onChange={(e) => onFormChange((f) => ({ ...f, name: e.target.value }))}
             placeholder="Your display name"
+            style={!form.name ? { borderColor: "hsl(var(--kf-warning) / 0.3)" } : undefined}
           />
           <DataUsageHint text="Shown in the header, greeting, and community posts" />
         </label>
@@ -186,12 +198,16 @@ export default function PersonalInfoSection({
           <div className="flex items-center gap-1.5 mb-1.5 font-medium">
             <Phone className="h-3 w-3" />
             Phone Number
+            {!form.phone && (
+              <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
+            )}
           </div>
           <Input
             type="tel"
             value={form.phone}
             onChange={(e) => onFormChange((f) => ({ ...f, phone: e.target.value }))}
             placeholder="+1 868 123 4567"
+            style={!form.phone ? { borderColor: "hsl(var(--kf-warning) / 0.3)" } : undefined}
           />
           <DataUsageHint text="Used for booking confirmations and account recovery" />
         </label>

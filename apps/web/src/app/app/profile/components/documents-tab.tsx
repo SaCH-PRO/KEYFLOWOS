@@ -8,7 +8,7 @@ import {
   ChevronRight, Search, Building2, DollarSign,
   Palette, Settings, Users, Lock, Globe, TrendingUp,
   Truck, Award, Home, Package, Scale, Globe2,
-  ShieldCheck, UserCheck, Sparkles, Eye,
+  ShieldCheck, UserCheck, Sparkles, Eye, Compass, Zap,
 } from "lucide-react";
 
 interface DocumentCategory {
@@ -64,6 +64,15 @@ const ICON_MAP: Record<string, React.ElementType> = {
   Users, UserCheck, Lock, Globe, TrendingUp, Truck, ShieldCheck,
   Award, Home, Package, Scale, Globe2,
 };
+
+const RECOMMENDED_SLUGS = [
+  "business-plan",
+  "privacy-policy",
+  "terms-of-service",
+  "service-agreement",
+  "operating-agreement",
+  "brand-guidelines",
+];
 
 function RiskBadge({ tier }: { tier: string }) {
   const colors: Record<string, string> = {
@@ -155,7 +164,13 @@ function CategoryCard({ category, onSelectType }: { category: DocumentCategory; 
   );
 }
 
-export default function DocumentsTab({ businessId }: { businessId: string | null }) {
+interface DocumentsTabProps {
+  businessId: string | null;
+  onGoToGuidance?: () => void;
+  guidanceComplete?: boolean;
+}
+
+export default function DocumentsTab({ businessId, onGoToGuidance, guidanceComplete }: DocumentsTabProps) {
   const router = useRouter();
   const [categories, setCategories] = useState<DocumentCategory[]>([]);
   const [instances, setInstances] = useState<DocumentInstance[]>([]);
@@ -228,6 +243,11 @@ export default function DocumentsTab({ businessId }: { businessId: string | null
   const triggeredCategories = filteredCategories.filter((c) => c.tier === "TRIGGERED_CORE");
   const advancedCategories = filteredCategories.filter((c) => c.tier === "ADVANCED");
 
+  const recommendedTypes = categories
+    .flatMap((c) => c.documentTypes.map((dt) => ({ ...dt, categoryName: c.name })))
+    .filter((dt) => RECOMMENDED_SLUGS.includes(dt.slug))
+    .filter((dt) => !dt._count || dt._count.instances === 0);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[300px]">
@@ -241,6 +261,24 @@ export default function DocumentsTab({ businessId }: { businessId: string | null
 
   return (
     <div className="space-y-5">
+      {!guidanceComplete && onGoToGuidance && (
+        <div
+          className="flex items-center gap-3 p-3 rounded-xl cursor-pointer hover:opacity-90 transition-opacity"
+          style={{
+            background: "linear-gradient(135deg, hsl(var(--kf-accent2) / 0.08), hsl(var(--kf-accent1) / 0.05))",
+            border: "1px solid hsl(var(--kf-accent2) / 0.2)",
+          }}
+          onClick={onGoToGuidance}
+        >
+          <Compass className="w-5 h-5 flex-shrink-0" style={{ color: "hsl(var(--kf-accent2))" }} />
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium text-[hsl(var(--foreground))]">Complete Business Guidance first</div>
+            <div className="text-xs text-[hsl(var(--muted-foreground))]">AI generates better documents with your guidance assessment data</div>
+          </div>
+          <ChevronRight className="w-4 h-4 text-[hsl(var(--muted-foreground))] flex-shrink-0" />
+        </div>
+      )}
+
       {health && health.total > 0 && (
         <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
           {[
@@ -310,6 +348,39 @@ export default function DocumentsTab({ businessId }: { businessId: string | null
 
       {view === "catalog" && (
         <div className="space-y-6">
+          {recommendedTypes.length > 0 && !searchQuery && !selectedCategory && (
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <Zap className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+                <h2 className="text-xs font-semibold uppercase tracking-wider" style={{ color: "hsl(var(--kf-accent1))" }}>Recommended for You</h2>
+                <span className="text-[10px] text-[hsl(var(--muted-foreground))]">Essential documents every business needs</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                {recommendedTypes.map((dt) => (
+                  <button
+                    key={dt.id}
+                    type="button"
+                    onClick={() => { setSelectedType(dt); setShowGenerator(true); setGenTitle(""); setGenContext(""); }}
+                    className="flex items-center gap-3 p-3 rounded-xl text-left min-h-[44px] transition-all hover:scale-[1.01]"
+                    style={{
+                      background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.06), hsl(var(--kf-accent2) / 0.04))",
+                      border: "1px solid hsl(var(--kf-accent1) / 0.15)",
+                    }}
+                  >
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "hsl(var(--kf-accent1) / 0.1)" }}>
+                      <Sparkles className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-[hsl(var(--foreground))] truncate">{dt.name}</div>
+                      <div className="text-[10px] text-[hsl(var(--muted-foreground))] truncate">{(dt as unknown as { categoryName: string }).categoryName}</div>
+                    </div>
+                    <Plus className="w-4 h-4 flex-shrink-0" style={{ color: "hsl(var(--kf-accent1))" }} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {coreCategories.length > 0 && (
             <div>
               <div className="flex items-center gap-2 mb-3">

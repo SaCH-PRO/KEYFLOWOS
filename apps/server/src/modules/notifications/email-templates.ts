@@ -396,3 +396,99 @@ export function sellerLowStockTemplate(ctx: TemplateContext & {
   ].join('');
   return { subject, html: baseLayout(ctx, subject, body) };
 }
+
+function keyflowSignature(opts: {
+  documentId: string;
+  version: number;
+  riskTier: string;
+  generatedAt: string;
+}): string {
+  return `
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;">
+<tr><td style="padding:0;">
+  <div style="height:3px;background:linear-gradient(90deg,#F97316,#14B8A6);border-radius:2px;"></div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:12px;">
+  <tr>
+    <td style="vertical-align:middle;">
+      <span style="font-size:13px;font-weight:700;color:#F97316;">&#9670;</span>
+      <span style="font-size:13px;font-weight:600;color:#fafafa;margin-left:4px;">Prepared with KEYFLOWOS</span>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding-top:4px;">
+      <span style="font-size:11px;color:#71717a;">
+        Doc ${opts.documentId.slice(-8).toUpperCase()}
+        &middot; v${opts.version}
+        &middot; Generated ${opts.generatedAt}
+        &middot; Risk: ${opts.riskTier}
+        &middot; Status: DRAFT
+      </span>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding-top:2px;">
+      <span style="font-size:10px;color:#52525b;">AI-Assisted &middot; Review before use</span>
+    </td>
+  </tr>
+  </table>
+</td></tr>
+</table>`;
+}
+
+export function documentGeneratedTemplate(ctx: TemplateContext & {
+  documentTitle: string;
+  documentTypeName: string;
+  categoryName: string;
+  riskTier: string;
+  documentId: string;
+  version: number;
+  sections: Array<{ name: string; content: string }>;
+  documentUrl: string;
+}): { subject: string; html: string } {
+  const subject = `Your ${ctx.documentTypeName} is ready — ${ctx.businessName}`;
+
+  const sectionBlocks = ctx.sections.map((s) =>
+    `<div style="margin-bottom:16px;">
+      <h3 style="margin:0 0 6px;color:#fafafa;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">${s.name}</h3>
+      <div style="color:#d4d4d8;font-size:13px;line-height:1.7;white-space:pre-wrap;">${s.content.length > 600 ? s.content.slice(0, 600) + '...' : s.content}</div>
+    </div>`
+  ).join('');
+
+  const riskColors: Record<string, string> = {
+    RED: '#ef4444',
+    YELLOW: '#f59e0b',
+    GREEN: '#22c55e',
+  };
+  const riskColor = riskColors[ctx.riskTier] || riskColors.GREEN;
+
+  const now = new Date();
+  const generatedAt = now.toLocaleDateString('en-TT', { year: 'numeric', month: 'short', day: 'numeric' });
+
+  const body = [
+    heading(`${ctx.documentTitle}`),
+    paragraph(`Hi ${ctx.customerName},`),
+    paragraph(`Your <strong>${ctx.documentTypeName}</strong> has been generated and is ready for review.`),
+    detailTable([
+      detailRow('Document', ctx.documentTitle),
+      detailRow('Category', ctx.categoryName),
+      detailRow('Risk Tier', `<span style="color:${riskColor};font-weight:600;">${ctx.riskTier}</span>`),
+      detailRow('Version', `v${ctx.version}`),
+    ].join('')),
+    `<div style="margin:20px 0;padding:20px;background-color:#111113;border-radius:10px;border:1px solid #27272a;">`,
+    `<h3 style="margin:0 0 12px;color:#a1a1aa;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1px;">Document Preview</h3>`,
+    sectionBlocks,
+    `</div>`,
+    ctaButton('View & Edit in KEYFLOWOS', ctx.documentUrl),
+    ctx.riskTier === 'RED'
+      ? paragraph(`<span style="color:${riskColor};">&#9888; This is a high-risk document. Please review carefully before use.</span>`)
+      : '',
+    keyflowSignature({
+      documentId: ctx.documentId,
+      version: ctx.version,
+      riskTier: ctx.riskTier,
+      generatedAt,
+    }),
+  ].join('');
+
+  return { subject, html: baseLayout(ctx, subject, body) };
+}
