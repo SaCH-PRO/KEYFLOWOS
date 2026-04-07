@@ -171,6 +171,12 @@ model Business {
   calendarTokenExpiry  DateTime? @map("calendar_token_expiry")
   calendarId           String?   @map("calendar_id")
 
+  // Google Drive Integration for document viewing/editing
+  driveEmail        String?   @map("drive_email")
+  driveAccessToken  String?   @map("drive_access_token")
+  driveRefreshToken String?   @map("drive_refresh_token")
+  driveTokenExpiry  DateTime? @map("drive_token_expiry")
+
   // Store Settings
   storeEnabled      Boolean @default(true) @map("store_enabled")
   onboardingComplete Boolean @default(false) @map("onboarding_complete")

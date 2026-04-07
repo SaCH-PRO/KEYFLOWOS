@@ -41,6 +41,7 @@ import { SeedModule } from './core/seed/seed.module';
 import { OnboardingConciergeModule } from './modules/onboarding-concierge/onboarding-concierge.module';
 import { BusinessGuidanceModule } from './modules/business-guidance/business-guidance.module';
 import { DocumentsModule } from './modules/documents/documents.module';
+import { GoogleDriveModule } from './modules/google-drive/google-drive.module';
 
 @Module({
   imports: [
@@ -83,6 +84,7 @@ import { DocumentsModule } from './modules/documents/documents.module';
     OnboardingConciergeModule,
     BusinessGuidanceModule,
     DocumentsModule,
+    GoogleDriveModule,
   ],
   controllers: [AppController],
   providers: [
