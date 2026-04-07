@@ -9,6 +9,7 @@ import {
   Palette, Settings, Users, Lock, Globe, TrendingUp,
   Truck, Award, Home, Package, Scale, Globe2,
   ShieldCheck, UserCheck, Sparkles, Eye, Compass, Zap,
+  Mail, ExternalLink, X, Check,
 } from "lucide-react";
 
 interface DocumentCategory {
@@ -36,6 +37,15 @@ interface DocumentType {
   _count?: { instances: number };
 }
 
+interface DocumentSection {
+  sectionKey: string;
+  sectionName: string;
+  content: string;
+  riskScore: string;
+  editableMode: string;
+  sortOrder: number;
+}
+
 interface DocumentInstance {
   id: string;
   title: string;
@@ -46,6 +56,7 @@ interface DocumentInstance {
   createdAt: string;
   updatedAt: string;
   documentType: { name: string; riskTier: string; category: { name: string; slug: string } };
+  sections?: DocumentSection[];
   _count: { versions: number; reviewTasks: number };
 }
 
@@ -185,6 +196,10 @@ export default function DocumentsTab({ businessId, onGoToGuidance, guidanceCompl
   const [genTitle, setGenTitle] = useState("");
   const [genContext, setGenContext] = useState("");
   const [genTone, setGenTone] = useState("professional");
+  const [previewDoc, setPreviewDoc] = useState<DocumentInstance | null>(null);
+  const [showPreview, setShowPreview] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -223,11 +238,33 @@ export default function DocumentsTab({ businessId, onGoToGuidance, guidanceCompl
         toneSettings: { style: genTone },
       });
       if (res.data) {
-        router.push(`/app/documents/${res.data.id}`);
+        setPreviewDoc(res.data);
+        setShowPreview(true);
+        setEmailSent(false);
+        setShowGenerator(false);
+        loadData();
       }
     } catch {}
     setGenerating(null);
-    setShowGenerator(false);
+  };
+
+  const [emailError, setEmailError] = useState<string | null>(null);
+
+  const handleSendEmail = async () => {
+    if (!businessId || !previewDoc) return;
+    setSendingEmail(true);
+    setEmailError(null);
+    try {
+      const res = await apiPostSimple<{ sent: boolean; reason?: string }>(`/documents/businesses/${businessId}/instances/${previewDoc.id}/send-email`, {});
+      if (res.data?.sent) {
+        setEmailSent(true);
+      } else {
+        setEmailError(res.data?.reason || "Could not send email");
+      }
+    } catch {
+      setEmailError("Failed to send email");
+    }
+    setSendingEmail(false);
   };
 
   const filteredCategories = categories.filter((c) => {
@@ -567,6 +604,98 @@ export default function DocumentsTab({ businessId, onGoToGuidance, guidanceCompl
                   </>
                 )}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPreview && previewDoc && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => { setShowPreview(false); setPreviewDoc(null); }}>
+          <div
+            className="bg-[hsl(var(--card))] rounded-2xl border border-[hsl(var(--border))] max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[hsl(var(--border))]">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "hsl(var(--kf-accent1) / 0.1)" }}>
+                  <FileText className="w-5 h-5" style={{ color: "hsl(var(--kf-accent1))" }} />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base font-semibold text-[hsl(var(--foreground))] truncate">{previewDoc.title}</h3>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-xs text-[hsl(var(--muted-foreground))]">{previewDoc.documentType.category.name}</span>
+                    <RiskBadge tier={previewDoc.documentType.riskTier} />
+                    <StatusBadge status={previewDoc.status} />
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setShowPreview(false); setPreviewDoc(null); }}
+                className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-[hsl(var(--muted))] transition-colors flex-shrink-0"
+              >
+                <X className="w-4 h-4 text-[hsl(var(--muted-foreground))]" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+              {(previewDoc.sections || []).map((section) => (
+                <div key={section.sectionKey} className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-sm font-semibold text-[hsl(var(--foreground))]">{section.sectionName}</h4>
+                    {section.riskScore === "RED" && (
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-[hsl(var(--kf-error))]/15 text-[hsl(var(--kf-error))]">Review Required</span>
+                    )}
+                  </div>
+                  <div className="text-sm text-[hsl(var(--muted-foreground))] leading-relaxed whitespace-pre-wrap rounded-lg p-3 bg-[hsl(var(--background))] border border-[hsl(var(--border))]">
+                    {section.content}
+                  </div>
+                </div>
+              ))}
+              {(!previewDoc.sections || previewDoc.sections.length === 0) && (
+                <div className="text-center py-8 text-[hsl(var(--muted-foreground))] text-sm">
+                  No sections generated. Try regenerating this document.
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-4 border-t border-[hsl(var(--border))] space-y-2">
+              {emailError && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs" style={{ background: "hsl(var(--kf-error) / 0.1)", color: "hsl(var(--kf-error))" }}>
+                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                  {emailError}
+                </div>
+              )}
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleSendEmail}
+                  disabled={sendingEmail || emailSent}
+                  className="flex-1 px-4 py-2.5 rounded-lg text-sm font-medium min-h-[44px] flex items-center justify-center gap-2 transition-all"
+                  style={{
+                    background: emailSent ? "hsl(var(--kf-success) / 0.12)" : "hsl(var(--kf-accent2) / 0.12)",
+                    color: emailSent ? "hsl(var(--kf-success))" : "hsl(var(--kf-accent2))",
+                    border: `1px solid ${emailSent ? "hsl(var(--kf-success) / 0.3)" : "hsl(var(--kf-accent2) / 0.3)"}`,
+                    opacity: sendingEmail ? 0.6 : 1,
+                  }}
+                >
+                  {emailSent ? (
+                    <><Check className="w-4 h-4" /> Sent to Email</>
+                  ) : sendingEmail ? (
+                    <><div className="animate-spin rounded-full h-4 w-4 border-b-2" style={{ borderColor: "hsl(var(--kf-accent2))" }} /> Sending...</>
+                  ) : (
+                    <><Mail className="w-4 h-4" /> Send to Email</>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowPreview(false); setPreviewDoc(null); router.push(`/app/documents/${previewDoc.id}`); }}
+                  className="flex-1 px-4 py-2.5 rounded-lg bg-[hsl(var(--kf-accent1))] text-white text-sm font-medium min-h-[44px] flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  Open Full Document
+                </button>
+              </div>
             </div>
           </div>
         </div>

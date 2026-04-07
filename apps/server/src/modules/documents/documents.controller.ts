@@ -55,6 +55,16 @@ export class DocumentsController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/instances/:instanceId/send-email')
+  sendDocumentEmail(
+    @Param('businessId') businessId: string,
+    @Param('instanceId') instanceId: string,
+    @Req() req: { user?: { id?: string } },
+  ) {
+    return this.documentsService.sendDocumentEmailPublic(businessId, instanceId, req.user?.id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/instances/:instanceId/tweak')
   tweakDocument(
     @Param('businessId') businessId: string,
