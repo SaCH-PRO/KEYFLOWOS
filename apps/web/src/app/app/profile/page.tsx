@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState, useMemo, useCallback } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { User, CheckCircle2, AlertCircle, Compass } from "lucide-react";
+import { User, CheckCircle2, AlertCircle, Compass, FileText } from "lucide-react";
 import { apiGet, apiPatch } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
@@ -14,7 +15,7 @@ import PersonalInfoSection from "./components/personal-info-section";
 import MyBusinessSection from "./components/my-business-section";
 import ProfessionalProfileSection from "./components/professional-profile-section";
 import SecuritySection from "./components/security-section";
-import DocumentHealthSection from "./components/document-health-section";
+import DocumentsTab from "./components/documents-tab";
 import { loadGuidanceDraft } from "./components/guidance-storage";
 
 interface IdentityMe {
@@ -93,7 +94,19 @@ function SkeletonProfile() {
   );
 }
 
+type TabId = "profile" | "documents" | "guidance";
+
+const TAB_CONFIG: { id: TabId; label: string; icon: React.ElementType }[] = [
+  { id: "profile", label: "Profile", icon: User },
+  { id: "documents", label: "Documents", icon: FileText },
+  { id: "guidance", label: "Guidance", icon: Compass },
+];
+
 export default function ProfileSettingsPage() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const initialTab = (searchParams.get("tab") as TabId) || "profile";
+
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [form, setForm] = useState({ email: "", name: "", firstName: "", lastName: "", phone: "" });
@@ -103,7 +116,13 @@ export default function ProfileSettingsPage() {
   const [profileCompleteness, setProfileCompleteness] = useState(0);
 
   const [showGuidanceWizard, setShowGuidanceWizard] = useState(false);
-  const [activeTab, setActiveTab] = useState<"profile" | "guidance">("profile");
+  const [activeTab, setActiveTab] = useState<TabId>(TAB_CONFIG.some(t => t.id === initialTab) ? initialTab : "profile");
+
+  const handleTabChange = useCallback((tab: TabId) => {
+    setActiveTab(tab);
+    const url = tab === "profile" ? "/app/profile" : `/app/profile?tab=${tab}`;
+    router.replace(url, { scroll: false });
+  }, [router]);
   const [guidanceStatus, setGuidanceStatusState] = useState<"not_started" | "in_progress" | "complete">("not_started");
   const [hasBackendAssessment, setHasBackendAssessment] = useState(false);
 
@@ -177,12 +196,12 @@ export default function ProfileSettingsPage() {
           setShowGuidanceWizard(false);
           const s = getGuidanceStatus();
           setGuidanceStatusState(s);
-          if (s === "complete") setActiveTab("guidance");
+          if (s === "complete") handleTabChange("guidance");
         }}
         onComplete={() => {
           setShowGuidanceWizard(false);
           setGuidanceStatusState("complete");
-          setActiveTab("guidance");
+          handleTabChange("guidance");
           if (businessId) {
             apiGet<{ status: string; latestAssessment: unknown }>(`/business-guidance/${businessId}/dashboard`)
               .then(({ data }) => {
@@ -237,53 +256,49 @@ export default function ProfileSettingsPage() {
     </div>
   );
 
+  const maxWidth = activeTab === "documents" ? "max-w-4xl" : "max-w-2xl";
+
   return (
-    <motion.div variants={stagger} initial="hidden" animate="show" className="space-y-6 max-w-2xl mx-auto">
+    <motion.div variants={stagger} initial="hidden" animate="show" className={`space-y-6 ${maxWidth} mx-auto transition-all`}>
       <motion.div variants={fadeUp} className="flex items-center gap-3">
         <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white shadow-lg">
           <User className="w-5 h-5" />
         </div>
         <div className="flex-1 min-w-0">
           <h1 className="text-2xl font-bold tracking-tight">My Profile</h1>
-          <p className="text-sm text-muted-foreground">Manage your personal information, professional identity, and security</p>
+          <p className="text-sm text-muted-foreground">Manage your profile, documents, and business guidance</p>
         </div>
         <ProfileCompletenessRing percentage={profileCompleteness} />
       </motion.div>
 
       <motion.div variants={fadeUp} className="flex gap-1 p-1 rounded-xl" style={{ background: "hsl(var(--kf-muted) / 0.15)", border: "1px solid hsl(var(--kf-border) / 0.2)" }}>
-        <button
-          onClick={() => setActiveTab("profile")}
-          className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all min-h-[44px]"
-          style={{
-            background: activeTab === "profile" ? "hsl(var(--kf-card))" : "transparent",
-            color: activeTab === "profile" ? "hsl(var(--kf-foreground))" : "hsl(var(--kf-muted-foreground))",
-            boxShadow: activeTab === "profile" ? "0 1px 3px hsl(0 0% 0% / 0.1)" : "none",
-            border: activeTab === "profile" ? "1px solid hsl(var(--kf-border) / 0.3)" : "1px solid transparent",
-          }}
-        >
-          <User className="w-4 h-4" />
-          Profile
-        </button>
-        <button
-          onClick={() => setActiveTab("guidance")}
-          className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all min-h-[44px]"
-          style={{
-            background: activeTab === "guidance" ? "hsl(var(--kf-card))" : "transparent",
-            color: activeTab === "guidance" ? "hsl(var(--kf-foreground))" : "hsl(var(--kf-muted-foreground))",
-            boxShadow: activeTab === "guidance" ? "0 1px 3px hsl(0 0% 0% / 0.1)" : "none",
-            border: activeTab === "guidance" ? "1px solid hsl(var(--kf-border) / 0.3)" : "1px solid transparent",
-          }}
-        >
-          <Compass className="w-4 h-4" />
-          Business Guidance
-          {guidanceStatus === "complete" && (
-            <span className="w-2 h-2 rounded-full" style={{ background: "hsl(var(--kf-success))" }} />
-          )}
-        </button>
+        {TAB_CONFIG.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => handleTabChange(tab.id)}
+              className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-all min-h-[44px]"
+              style={{
+                background: isActive ? "hsl(var(--kf-card))" : "transparent",
+                color: isActive ? "hsl(var(--kf-foreground))" : "hsl(var(--kf-muted-foreground))",
+                boxShadow: isActive ? "0 1px 3px hsl(0 0% 0% / 0.1)" : "none",
+                border: isActive ? "1px solid hsl(var(--kf-border) / 0.3)" : "1px solid transparent",
+              }}
+            >
+              <Icon className="w-4 h-4" />
+              <span className="hidden sm:inline">{tab.label}</span>
+              {tab.id === "guidance" && guidanceStatus === "complete" && (
+                <span className="w-2 h-2 rounded-full" style={{ background: "hsl(var(--kf-success))" }} />
+              )}
+            </button>
+          );
+        })}
       </motion.div>
 
       <AnimatePresence mode="wait">
-        {activeTab === "guidance" ? (
+        {activeTab === "guidance" && (
           <motion.div key="guidance" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
             {guidanceStatus === "complete" || hasBackendAssessment ? (
               <GuidanceDashboard onEditProfile={() => setShowGuidanceWizard(true)} />
@@ -291,7 +306,15 @@ export default function ProfileSettingsPage() {
               <GuidanceCard onLaunchWizard={() => setShowGuidanceWizard(true)} />
             )}
           </motion.div>
-        ) : (
+        )}
+
+        {activeTab === "documents" && (
+          <motion.div key="documents" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+            <DocumentsTab businessId={businessId} />
+          </motion.div>
+        )}
+
+        {activeTab === "profile" && (
           <motion.div key="profile" variants={stagger} initial="hidden" animate="show" exit={{ opacity: 0, y: -8 }} className="space-y-6">
             <AnimatePresence>
               {status && (
@@ -345,10 +368,6 @@ export default function ProfileSettingsPage() {
                 onDirtyChange={handleBizDirtyChange}
                 onStatus={setStatus}
               />
-            </motion.div>
-
-            <motion.div variants={fadeUp} className="kf-card p-6">
-              <DocumentHealthSection businessId={businessId} />
             </motion.div>
 
             <motion.div variants={fadeUp}>
