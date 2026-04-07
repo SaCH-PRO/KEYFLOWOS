@@ -7,7 +7,8 @@ import { apiGet, apiPostSimple, apiPatch, apiDelete } from "@/lib/api";
 import {
   ArrowLeft, FileText, Shield, AlertTriangle, CheckCircle2,
   Sparkles, Edit3, Save, Clock, Eye, ChevronDown, ChevronUp,
-  Trash2, History, Copy,
+  Trash2, History, Copy, Cpu, Zap, Layers, DollarSign, Brain,
+  Scale, Palette, Globe, BookOpen,
 } from "lucide-react";
 
 interface DocumentSection {
@@ -97,6 +98,210 @@ function SourceBadge({ source }: { source: string }) {
   };
   const badge = labels[source] || labels.AI_GENERATED;
   return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs ${badge.class}`}>{badge.label}</span>;
+}
+
+const LAYER_LABELS: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
+  "category-directive": { label: "Category Standards", icon: <BookOpen className="w-3 h-3" />, color: "text-[hsl(var(--kf-info))]" },
+  "document-blueprint": { label: "Document Blueprint", icon: <Layers className="w-3 h-3" />, color: "text-[hsl(var(--kf-accent1))]" },
+  "legal-framework": { label: "Legal Framework", icon: <Scale className="w-3 h-3" />, color: "text-[hsl(var(--kf-error))]" },
+  "financial-standards": { label: "Financial Standards", icon: <DollarSign className="w-3 h-3" />, color: "text-[hsl(var(--kf-warning))]" },
+  "modern-practices": { label: "Modern Practices", icon: <Zap className="w-3 h-3" />, color: "text-[hsl(var(--kf-success))]" },
+  "legal-sensitivity": { label: "Legal Sensitivity", icon: <Shield className="w-3 h-3" />, color: "text-[hsl(var(--kf-error))]" },
+  "financial-sensitivity": { label: "Financial Sensitivity", icon: <DollarSign className="w-3 h-3" />, color: "text-[hsl(var(--kf-warning))]" },
+  "brand-sensitivity": { label: "Brand Sensitivity", icon: <Palette className="w-3 h-3" />, color: "text-[hsl(var(--kf-accent2))]" },
+  "jurisdiction-sensitivity": { label: "Jurisdiction Aware", icon: <Globe className="w-3 h-3" />, color: "text-[hsl(var(--kf-info))]" },
+};
+
+function AiInsightsPanel({ meta, createdAt }: { meta: Record<string, unknown>; createdAt: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const m = meta as Record<string, unknown>;
+  const qualityLayers = (m.qualityLayers as string[]) || [];
+  const hasBlueprint = m.hasBlueprint as boolean;
+  const promptTokens = (m.promptTokens as number) || 0;
+  const completionTokens = (m.completionTokens as number) || 0;
+  const totalTokens = (m.totalTokens as number) || 0;
+  const estimatedCost = (m.estimatedCost as number) || 0;
+  const creditsUsed = (m.creditsUsed as number) || 0;
+  const blueprintSections = (m.blueprintSections as number) || 0;
+  const sectionsGenerated = (m.sectionsGenerated as number) || 0;
+  const tokenBudget = (m.tokenBudget as number) || 0;
+  const temperature = (m.temperature as number) || 0;
+  const missingFields = (m.missingFields as string[]) || [];
+  const model = (m.model as string) || "gpt-4o";
+  const riskTier = (m.riskTier as string) || "GREEN";
+  const profileVersion = (m.profileVersionNumber as number) || 1;
+  const generatedAt = (m.generatedAt as string) || createdAt;
+
+  const hasDetailedMeta = totalTokens > 0;
+
+  return (
+    <div className="rounded-xl bg-[hsl(var(--card))] border border-[hsl(var(--border))] overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between p-4 hover:bg-[hsl(var(--muted))]/30 transition-colors min-h-[44px]"
+      >
+        <div className="flex items-center gap-2">
+          <Brain className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+          <span className="text-sm font-semibold text-[hsl(var(--foreground))]">AI Generation Insights</span>
+          {hasDetailedMeta && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))]">
+              {qualityLayers.length} quality layer{qualityLayers.length !== 1 ? "s" : ""} applied
+            </span>
+          )}
+        </div>
+        {expanded ? <ChevronUp className="w-4 h-4 text-[hsl(var(--muted-foreground))]" /> : <ChevronDown className="w-4 h-4 text-[hsl(var(--muted-foreground))]" />}
+      </button>
+
+      {expanded && (
+        <div className="px-4 pb-4 space-y-4 border-t border-[hsl(var(--border))]">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4">
+            <div className="p-3 rounded-lg bg-[hsl(var(--background))]">
+              <div className="flex items-center gap-1.5 mb-1">
+                <Cpu className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]" />
+                <span className="text-[10px] uppercase tracking-wider text-[hsl(var(--muted-foreground))]">Model</span>
+              </div>
+              <div className="text-sm font-semibold text-[hsl(var(--foreground))]">{model}</div>
+            </div>
+            <div className="p-3 rounded-lg bg-[hsl(var(--background))]">
+              <div className="flex items-center gap-1.5 mb-1">
+                <Shield className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]" />
+                <span className="text-[10px] uppercase tracking-wider text-[hsl(var(--muted-foreground))]">Risk Tier</span>
+              </div>
+              <div><RiskBadge tier={riskTier} /></div>
+            </div>
+            <div className="p-3 rounded-lg bg-[hsl(var(--background))]">
+              <div className="flex items-center gap-1.5 mb-1">
+                <FileText className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]" />
+                <span className="text-[10px] uppercase tracking-wider text-[hsl(var(--muted-foreground))]">Sections</span>
+              </div>
+              <div className="text-sm font-semibold text-[hsl(var(--foreground))]">
+                {sectionsGenerated > 0 ? sectionsGenerated : "—"}
+                {blueprintSections > 0 && <span className="text-xs text-[hsl(var(--muted-foreground))] font-normal"> / {blueprintSections} planned</span>}
+              </div>
+            </div>
+            <div className="p-3 rounded-lg bg-[hsl(var(--background))]">
+              <div className="flex items-center gap-1.5 mb-1">
+                <Clock className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]" />
+                <span className="text-[10px] uppercase tracking-wider text-[hsl(var(--muted-foreground))]">Generated</span>
+              </div>
+              <div className="text-sm font-semibold text-[hsl(var(--foreground))]">{new Date(generatedAt).toLocaleDateString()}</div>
+            </div>
+          </div>
+
+          {hasDetailedMeta && (
+            <>
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <Zap className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+                  <span className="text-xs font-semibold text-[hsl(var(--foreground))] uppercase tracking-wider">Token Usage & Cost</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                  <div className="p-2.5 rounded-lg bg-[hsl(var(--background))] text-center">
+                    <div className="text-xs text-[hsl(var(--muted-foreground))]">Input</div>
+                    <div className="text-sm font-bold text-[hsl(var(--foreground))]">{promptTokens.toLocaleString()}</div>
+                    <div className="text-[10px] text-[hsl(var(--muted-foreground))]">tokens</div>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-[hsl(var(--background))] text-center">
+                    <div className="text-xs text-[hsl(var(--muted-foreground))]">Output</div>
+                    <div className="text-sm font-bold text-[hsl(var(--foreground))]">{completionTokens.toLocaleString()}</div>
+                    <div className="text-[10px] text-[hsl(var(--muted-foreground))]">tokens</div>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-[hsl(var(--background))] text-center">
+                    <div className="text-xs text-[hsl(var(--muted-foreground))]">Total</div>
+                    <div className="text-sm font-bold text-[hsl(var(--foreground))]">{totalTokens.toLocaleString()}</div>
+                    <div className="text-[10px] text-[hsl(var(--muted-foreground))]">tokens</div>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-[hsl(var(--background))] text-center">
+                    <div className="text-xs text-[hsl(var(--muted-foreground))]">API Cost</div>
+                    <div className="text-sm font-bold text-[hsl(var(--kf-success))]">${estimatedCost.toFixed(4)}</div>
+                    <div className="text-[10px] text-[hsl(var(--muted-foreground))]">USD</div>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-[hsl(var(--background))] text-center">
+                    <div className="text-xs text-[hsl(var(--muted-foreground))]">Credits</div>
+                    <div className="text-sm font-bold text-[hsl(var(--kf-accent1))]">{creditsUsed}</div>
+                    <div className="text-[10px] text-[hsl(var(--muted-foreground))]">used</div>
+                  </div>
+                </div>
+                {tokenBudget > 0 && (
+                  <div className="mt-2">
+                    <div className="flex items-center justify-between text-[10px] text-[hsl(var(--muted-foreground))] mb-1">
+                      <span>Token utilization</span>
+                      <span>{completionTokens.toLocaleString()} / {tokenBudget.toLocaleString()} budget</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-[hsl(var(--muted))] overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-[hsl(var(--kf-accent1))] transition-all"
+                        style={{ width: `${Math.min(100, (completionTokens / tokenBudget) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {qualityLayers.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Layers className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+                    <span className="text-xs font-semibold text-[hsl(var(--foreground))] uppercase tracking-wider">Quality Layers Applied</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {qualityLayers.map((layer) => {
+                      const info = LAYER_LABELS[layer] || { label: layer, icon: <Layers className="w-3 h-3" />, color: "text-[hsl(var(--muted-foreground))]" };
+                      return (
+                        <span
+                          key={layer}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[hsl(var(--background))] border border-[hsl(var(--border))] text-xs ${info.color}`}
+                        >
+                          {info.icon}
+                          {info.label}
+                        </span>
+                      );
+                    })}
+                  </div>
+                  {hasBlueprint && (
+                    <p className="mt-2 text-[10px] text-[hsl(var(--muted-foreground))] leading-relaxed">
+                      This document was generated using a specialized blueprint with {blueprintSections} predefined sections,
+                      each with specific quality guidance, risk scores, and editing restrictions.
+                    </p>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2 border-t border-[hsl(var(--border))]">
+            <div className="text-xs">
+              <span className="text-[hsl(var(--muted-foreground))]">Profile Version</span>
+              <div className="text-[hsl(var(--foreground))] font-medium">v{profileVersion}</div>
+            </div>
+            {temperature > 0 && (
+              <div className="text-xs">
+                <span className="text-[hsl(var(--muted-foreground))]">Temperature</span>
+                <div className="text-[hsl(var(--foreground))] font-medium">{temperature} {temperature <= 0.4 ? "(precise)" : temperature <= 0.7 ? "(balanced)" : "(creative)"}</div>
+              </div>
+            )}
+            <div className="text-xs">
+              <span className="text-[hsl(var(--muted-foreground))]">Blueprint</span>
+              <div className="text-[hsl(var(--foreground))] font-medium">{hasBlueprint ? "Yes" : "Standard"}</div>
+            </div>
+          </div>
+
+          {missingFields.length > 0 && (
+            <div className="p-2.5 rounded-lg bg-[hsl(var(--kf-warning))]/10 border border-[hsl(var(--kf-warning))]/20">
+              <div className="flex items-center gap-1.5 mb-1">
+                <AlertTriangle className="w-3.5 h-3.5 text-[hsl(var(--kf-warning))]" />
+                <span className="text-xs font-medium text-[hsl(var(--kf-warning))]">Missing Profile Fields</span>
+              </div>
+              <p className="text-[10px] text-[hsl(var(--kf-warning))]/80">
+                The following fields were not set in your business profile, so the AI used industry-appropriate defaults: {missingFields.join(", ")}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function DocumentDetailPage() {
@@ -476,34 +681,7 @@ export default function DocumentDetailPage() {
         </div>
       )}
 
-      {doc.generationMeta && (
-        <div className="rounded-xl bg-[hsl(var(--card))] border border-[hsl(var(--border))] p-4">
-          <h3 className="text-sm font-semibold text-[hsl(var(--foreground))] mb-2">Generation Details</h3>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-            <div>
-              <span className="text-[hsl(var(--muted-foreground))]">Model</span>
-              <div className="text-[hsl(var(--foreground))] font-medium">{(doc.generationMeta as Record<string, string>).model || "gpt-4o"}</div>
-            </div>
-            <div>
-              <span className="text-[hsl(var(--muted-foreground))]">Profile Version</span>
-              <div className="text-[hsl(var(--foreground))] font-medium">v{(doc.generationMeta as Record<string, number>).profileVersionNumber || 1}</div>
-            </div>
-            <div>
-              <span className="text-[hsl(var(--muted-foreground))]">Risk Tier</span>
-              <div><RiskBadge tier={(doc.generationMeta as Record<string, string>).riskTier || "GREEN"} /></div>
-            </div>
-            <div>
-              <span className="text-[hsl(var(--muted-foreground))]">Generated</span>
-              <div className="text-[hsl(var(--foreground))] font-medium">{new Date((doc.generationMeta as Record<string, string>).generatedAt || doc.createdAt).toLocaleDateString()}</div>
-            </div>
-          </div>
-          {((doc.generationMeta as Record<string, string[]>).missingFields || []).length > 0 && (
-            <div className="mt-3 p-2 rounded-lg bg-[hsl(var(--kf-warning))]/10 text-xs text-[hsl(var(--kf-warning))]">
-              Missing profile fields: {((doc.generationMeta as Record<string, string[]>).missingFields).join(", ")}
-            </div>
-          )}
-        </div>
-      )}
+      {doc.generationMeta && <AiInsightsPanel meta={doc.generationMeta} createdAt={doc.createdAt} />}
     </div>
   );
 }
