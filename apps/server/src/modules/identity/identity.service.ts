@@ -1,8 +1,9 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Injectable()
 export class IdentityService {
+  private readonly logger = new Logger(IdentityService.name);
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   listBusinesses(userId?: string) {
@@ -176,12 +177,30 @@ export class IdentityService {
       data.metaData = { ...existingMeta, ...metaData };
     }
     
+    const oldBusiness = await this.prisma.client.business.findUnique({ where: { id: businessId } });
+
     const result = await this.prisma.client.business.update({
       where: { id: businessId },
       data,
     });
 
     await this.updateProfileCompleteness(businessId);
+
+    if (oldBusiness) {
+      const changedFields = Object.keys(rest).filter((k) => {
+        const key = k as keyof typeof rest;
+        if (rest[key] === undefined) return false;
+        const oldVal = (oldBusiness as any)[k];
+        const newVal = rest[key];
+        return JSON.stringify(oldVal) !== JSON.stringify(newVal);
+      });
+      if (changedFields.length > 0) {
+        this.detectDocumentImpact(businessId, changedFields).catch((err) =>
+          this.logger.warn(`Document impact detection failed: ${err.message}`),
+        );
+      }
+    }
+
     return this.prisma.client.business.findUnique({ where: { id: businessId } });
   }
 
@@ -396,5 +415,31 @@ export class IdentityService {
     });
 
     return { user, business };
+  }
+
+  private async detectDocumentImpact(businessId: string, changedFields: string[]) {
+    const rules = await this.prisma.client.impactRule.findMany({
+      where: { profileField: { in: changedFields } },
+    });
+    if (rules.length === 0) return;
+
+    const docTypeIds = [...new Set(rules.map((r) => r.documentTypeId))];
+    const affected = await this.prisma.client.documentInstance.findMany({
+      where: { businessId, documentTypeId: { in: docTypeIds }, status: { not: 'ARCHIVED' } },
+    });
+
+    for (const doc of affected) {
+      await this.prisma.client.documentInstance.update({
+        where: { id: doc.id },
+        data: {
+          healthStatus: 'IMPACTED',
+          healthReason: `Profile field(s) changed: ${changedFields.join(', ')}`,
+        },
+      });
+    }
+
+    if (affected.length > 0) {
+      this.logger.log(`Document impact: ${affected.length} document(s) affected by profile change [${changedFields.join(', ')}]`);
+    }
   }
 }

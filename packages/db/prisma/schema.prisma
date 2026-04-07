@@ -148,6 +148,13 @@ model Business {
   guidanceProfile      BusinessGuidanceProfile?
   guidanceAssessments  GuidanceAssessment[]
 
+  // Document Engine
+  profileVersions      BusinessProfileVersion[]
+  documentInstances    DocumentInstance[]
+  documentChangeLogs   DocumentChangeLog[]
+  orgStandards         OrgStandard[]
+  reviewTasks          ReviewTask[]
+
   // Customer notification preferences (JSON: { booking_confirmed: true, ... })
   notificationPreferences Json? @default("{}") @map("notification_preferences")
 
@@ -2403,4 +2410,303 @@ model ProductReview {
   @@index([businessId, status])
   @@index([productId, status])
   @@map("product_reviews")
+}
+
+// ---
+// MODULE: BUSINESS DOCUMENTATION ENGINE
+// Managed drafting, governance, versioning, and audit system
+// ---
+
+model BusinessProfileVersion {
+  id            String   @id @default(cuid())
+  businessId    String   @map("business_id")
+  business      Business @relation(fields: [businessId], references: [id])
+  versionNumber Int      @map("version_number")
+  snapshot      Json
+  changedFields String[] @default([]) @map("changed_fields")
+  changedBy     String?  @map("changed_by")
+  changeReason  String?  @map("change_reason")
+
+  documentInstances DocumentInstance[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([businessId, versionNumber])
+  @@index([businessId])
+  @@map("business_profile_versions")
+}
+
+model DocumentCategory {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  description String?
+  icon        String?
+  sortOrder   Int     @default(0) @map("sort_order")
+  tier        String  @default("UNIVERSAL_CORE")
+  trigger     String?
+
+  documentTypes DocumentType[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@map("document_categories")
+}
+
+model DocumentType {
+  id                  String  @id @default(cuid())
+  categoryId          String  @map("category_id")
+  category            DocumentCategory @relation(fields: [categoryId], references: [id])
+  name                String
+  slug                String  @unique
+  description         String?
+  riskTier            String  @default("GREEN") @map("risk_tier")
+  jurisdictionSensitive Boolean @default(false) @map("jurisdiction_sensitive")
+  requiredProfileFields String[] @default([]) @map("required_profile_fields")
+  conditionalQuestions  Json?    @map("conditional_questions")
+  requiredReviews     String[] @default([]) @map("required_reviews")
+  renewalTrigger      String?  @map("renewal_trigger")
+  expiryDays          Int?     @map("expiry_days")
+  linkedDocumentSlugs String[] @default([]) @map("linked_document_slugs")
+  brandSensitive      Boolean  @default(false) @map("brand_sensitive")
+  financialSensitive  Boolean  @default(false) @map("financial_sensitive")
+  legalSensitive      Boolean  @default(false) @map("legal_sensitive")
+  sortOrder           Int      @default(0)     @map("sort_order")
+
+  templates          DocumentTemplate[]
+  instances          DocumentInstance[]
+  impactRules        ImpactRule[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@index([categoryId])
+  @@map("document_types")
+}
+
+model DocumentTemplate {
+  id              String  @id @default(cuid())
+  documentTypeId  String  @map("document_type_id")
+  documentType    DocumentType @relation(fields: [documentTypeId], references: [id])
+  name            String
+  version         Int     @default(1)
+  isActive        Boolean @default(true) @map("is_active")
+  structure       Json
+  systemPrompt    String? @map("system_prompt")
+  toneOptions     String[] @default(["formal", "friendly", "premium"]) @map("tone_options")
+  jurisdictions   String[] @default([])
+
+  clauses         DocumentClause[]
+  instances       DocumentInstance[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@index([documentTypeId])
+  @@map("document_templates")
+}
+
+model DocumentClause {
+  id              String  @id @default(cuid())
+  templateId      String  @map("template_id")
+  template        DocumentTemplate @relation(fields: [templateId], references: [id])
+  sectionKey      String  @map("section_key")
+  name            String
+  purpose         String?
+  editableMode    String  @default("GUIDED") @map("editable_mode")
+  riskScore       String  @default("GREEN") @map("risk_score")
+  reviewRequired  Boolean @default(false) @map("review_required")
+  locked          Boolean @default(false)
+  dependsOnFields String[] @default([]) @map("depends_on_fields")
+  sortOrder       Int     @default(0) @map("sort_order")
+
+  variants        ClauseVariant[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@index([templateId])
+  @@map("document_clauses")
+}
+
+model ClauseVariant {
+  id          String  @id @default(cuid())
+  clauseId    String  @map("clause_id")
+  clause      DocumentClause @relation(fields: [clauseId], references: [id])
+  label       String
+  content     String
+  isDefault   Boolean @default(false) @map("is_default")
+  conditions  Json?
+  riskNote    String? @map("risk_note")
+  sortOrder   Int     @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@index([clauseId])
+  @@map("clause_variants")
+}
+
+model DocumentInstance {
+  id                String  @id @default(cuid())
+  businessId        String  @map("business_id")
+  business          Business @relation(fields: [businessId], references: [id])
+  documentTypeId    String  @map("document_type_id")
+  documentType      DocumentType @relation(fields: [documentTypeId], references: [id])
+  templateId        String? @map("template_id")
+  template          DocumentTemplate? @relation(fields: [templateId], references: [id])
+  profileVersionId  String? @map("profile_version_id")
+  profileVersion    BusinessProfileVersion? @relation(fields: [profileVersionId], references: [id])
+  title             String
+  status            String  @default("DRAFT")
+  healthStatus      String  @default("CURRENT") @map("health_status")
+  healthReason      String? @map("health_reason")
+  currentVersionNum Int     @default(1) @map("current_version_num")
+  contextInputs     Json?   @map("context_inputs")
+  toneSettings      Json?   @map("tone_settings")
+  generationMeta    Json?   @map("generation_meta")
+  effectiveDate     DateTime? @map("effective_date")
+  expiryDate        DateTime? @map("expiry_date")
+
+  versions          DocumentVersion[]
+  sections          DocumentSection[]
+  changeLogs        DocumentChangeLog[]
+  reviewTasks       ReviewTask[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId])
+  @@index([businessId, documentTypeId])
+  @@index([businessId, status])
+  @@index([businessId, healthStatus])
+  @@map("document_instances")
+}
+
+model DocumentVersion {
+  id              String  @id @default(cuid())
+  instanceId      String  @map("instance_id")
+  instance        DocumentInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  versionNumber   Int     @map("version_number")
+  content         Json
+  sectionSnapshots Json?  @map("section_snapshots")
+  status          String  @default("DRAFT")
+  approvalStatus  String? @map("approval_status")
+  approvedBy      String? @map("approved_by")
+  approvedAt      DateTime? @map("approved_at")
+  effectiveDate   DateTime? @map("effective_date")
+  supersededDate  DateTime? @map("superseded_date")
+  createdBy       String?   @map("created_by")
+  changeNotes     String?   @map("change_notes")
+  basedOnProfile  Int?      @map("based_on_profile_version")
+  basedOnTemplate Int?      @map("based_on_template_version")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([instanceId, versionNumber])
+  @@index([instanceId])
+  @@map("document_versions")
+}
+
+model DocumentSection {
+  id              String  @id @default(cuid())
+  instanceId      String  @map("instance_id")
+  instance        DocumentInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  sectionKey      String  @map("section_key")
+  sectionName     String  @map("section_name")
+  content         String
+  contentSource   String  @default("AI_GENERATED") @map("content_source")
+  editableMode    String  @default("GUIDED") @map("editable_mode")
+  dependsOnFields String[] @default([]) @map("depends_on_fields")
+  riskScore       String  @default("GREEN") @map("risk_score")
+  reviewRequired  Boolean @default(false) @map("review_required")
+  lastModifiedBy  String? @map("last_modified_by")
+  approvedBy      String? @map("approved_by")
+  approvedAt      DateTime? @map("approved_at")
+  selectedVariantId String? @map("selected_variant_id")
+  sortOrder       Int     @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@unique([instanceId, sectionKey])
+  @@index([instanceId])
+  @@map("document_sections")
+}
+
+model DocumentChangeLog {
+  id              String  @id @default(cuid())
+  businessId      String  @map("business_id")
+  business        Business @relation(fields: [businessId], references: [id])
+  instanceId      String? @map("instance_id")
+  instance        DocumentInstance? @relation(fields: [instanceId], references: [id], onDelete: SetNull)
+  changeType      String  @map("change_type")
+  auditLevel      String  @default("CHANGE") @map("audit_level")
+  sectionKey      String? @map("section_key")
+  previousValue   String? @map("previous_value")
+  newValue        String? @map("new_value")
+  changedBy       String? @map("changed_by")
+  reason          String?
+  metadata        Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([businessId])
+  @@index([instanceId])
+  @@map("document_change_logs")
+}
+
+model ReviewTask {
+  id              String  @id @default(cuid())
+  businessId      String  @map("business_id")
+  business        Business @relation(fields: [businessId], references: [id])
+  instanceId      String  @map("instance_id")
+  instance        DocumentInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  sectionKey      String? @map("section_key")
+  reviewType      String  @map("review_type")
+  assignedTo      String? @map("assigned_to")
+  status          String  @default("PENDING")
+  notes           String?
+  resolvedAt      DateTime? @map("resolved_at")
+  resolvedBy      String?   @map("resolved_by")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId])
+  @@index([instanceId])
+  @@index([businessId, status])
+  @@map("review_tasks")
+}
+
+model ImpactRule {
+  id              String  @id @default(cuid())
+  documentTypeId  String  @map("document_type_id")
+  documentType    DocumentType @relation(fields: [documentTypeId], references: [id])
+  profileField    String  @map("profile_field")
+  impactLevel     String  @default("MEDIUM") @map("impact_level")
+  description     String?
+  autoUpdate      Boolean @default(false) @map("auto_update")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([documentTypeId])
+  @@index([profileField])
+  @@map("impact_rules")
+}
+
+model OrgStandard {
+  id          String  @id @default(cuid())
+  businessId  String  @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id])
+  category    String
+  rule        String
+  isActive    Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId])
+  @@map("org_standards")
 }

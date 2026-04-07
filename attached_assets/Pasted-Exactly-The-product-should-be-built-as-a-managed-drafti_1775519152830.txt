@@ -1,0 +1,888 @@
+Exactly. The product should be built as a **managed drafting and governance system**, not just a document generator.
+
+The right model is:
+
+**Profile → rules → draft → guided tweaking → review → approval → versioning → audit → renewal**
+
+That gives the user three big benefits:
+
+1. They can generate strong first drafts from one business profile.
+2. They can adapt each document to their real-world situation.
+3. Every change is traceable, reviewable, and reusable later.
+
+## What the system should become
+
+Think of it as a **Business Documentation Engine** with 5 layers:
+
+### 1. Canonical business profile
+
+This is the source of truth.
+
+It stores:
+
+* company identity
+* ownership and management
+* jurisdiction(s)
+* products/services
+* customer types
+* pricing model
+* employment model
+* regulatory exposure
+* tax and finance posture
+* brand positioning
+* IP ownership
+* risk preferences
+* approval authorities
+
+This profile should be versioned. If the user changes “we now have 12 staff” or “we now operate in Canada too,” the system should know which documents are affected.
+
+### 2. Context layer
+
+This is where a user adds document-specific circumstances.
+
+Example:
+
+* “Generate a client service agreement for a 12-month engagement”
+* “Create a privacy policy for our SaaS app collecting emails and payment data”
+* “Write a brand bio for a premium but playful tone”
+* “Generate a shareholder agreement for 3 founders with 20/30/50 ownership”
+* “Create an employment offer letter for a remote contractor in Jamaica”
+
+This matters because one business profile alone is not enough. You also need the **specific transaction, scenario, or communication context**.
+
+### 3. Rules engine
+
+This is the brain.
+
+It decides:
+
+* which questions to ask
+* what sections are required
+* what clauses are optional
+* what wording is unsafe or noncompliant
+* what must be reviewed by a human
+* which documents need updating when a fact changes
+
+This is the part that makes your product defensible.
+
+### 4. Drafting engine
+
+This generates the output from:
+
+* structured facts
+* approved clause libraries
+* document logic
+* tone/brand settings
+* jurisdiction rules
+* user-specific instructions
+
+It should never generate high-risk documents from a blank page if a controlled template exists. It should assemble from approved building blocks first, then use AI to adapt wording within allowed boundaries.
+
+### 5. Audit and lifecycle layer
+
+This stores:
+
+* what inputs were used
+* when the doc was generated
+* what version of the template/clause set was used
+* what the user changed
+* who approved it
+* whether the doc is current, expired, or impacted by profile changes
+
+That is what makes the system useful long term.
+
+---
+
+# The key design principle
+
+The user should not just “generate a document.”
+
+They should be able to:
+
+* generate it
+* tune it
+* save it as their preferred version
+* compare changes
+* see what assumptions were used
+* see what fields drove the wording
+* update it later without starting over
+* create a new version for a new situation
+* trace why each clause exists
+
+That is the difference between a gimmick and a real business platform.
+
+---
+
+# The best system structure
+
+## A. Three editing modes
+
+Give users three levels of control.
+
+### 1. Simple mode
+
+For non-experts.
+
+They answer guided questions and choose options like:
+
+* formal / friendly / premium / technical
+* strict / balanced / customer-friendly
+* short / detailed
+* local only / international
+* low risk / moderate risk / protective
+
+The system handles the drafting.
+
+### 2. Guided professional mode
+
+For power users and founders.
+
+They can adjust:
+
+* clause options
+* fallback language
+* payment terms
+* notice periods
+* warranty limits
+* governing law
+* refund logic
+* brand voice
+* compliance toggles
+
+### 3. Expert mode
+
+For lawyers, consultants, finance leads, or internal ops.
+
+They can:
+
+* edit clause libraries
+* set house style
+* lock clauses
+* define organization-approved variants
+* add approval rules
+* create custom templates
+* override defaults for certain industries or countries
+
+This three-tier editing model is important because beginners need simplicity, but professionals need control.
+
+---
+
+# The document should be editable in 4 ways
+
+## 1. Fact-driven edits
+
+The user changes a field, and the system updates the document.
+
+Example:
+
+* change company address
+* add a cofounder
+* update refund policy
+* change service territory
+* switch from sole proprietor to LLC
+
+The system should then say:
+“7 documents may be affected.”
+
+## 2. Option-driven edits
+
+The user adjusts settings for this document only.
+
+Example:
+
+* make the agreement more supplier-protective
+* shorten the bio
+* make the tone more luxury
+* add arbitration
+* remove auto-renewal
+* increase deposit to 50%
+
+## 3. Inline edits
+
+The user edits text directly.
+
+This is important because sometimes users want specific wording. But inline edits should be tracked and marked as:
+
+* user-authored
+* AI-authored
+* template-authored
+* reviewer-approved
+
+## 4. Clause replacement
+
+The user chooses between approved clause options.
+
+Example:
+
+* payment due on receipt / net 7 / net 30
+* exclusive jurisdiction / arbitration / mediation-first
+* limited license / full assignment
+* fixed fee / hourly / milestone billing
+
+This is safer than free-text rewriting for high-risk sections.
+
+---
+
+# The right internal architecture
+
+## 1. Core entities
+
+Your database should at minimum have these objects:
+
+### BusinessProfile
+
+The permanent business facts.
+
+### ProfileVersion
+
+A snapshot of the profile at a point in time.
+
+### DocumentType
+
+The definition of a document, like:
+
+* employment offer letter
+* website terms
+* invoice template
+* founder bio
+* privacy notice
+* board resolution
+* service agreement
+
+### Template
+
+The structured blueprint of a document.
+
+### Clause
+
+A reusable block with metadata.
+
+### ClauseVariant
+
+Different acceptable versions of the clause.
+
+### GenerationRun
+
+A record of one draft generation event.
+
+### DocumentInstance
+
+A specific user-owned document.
+
+### DocumentVersion
+
+Each saved revision.
+
+### ReviewTask
+
+A required review or approval step.
+
+### ChangeEvent
+
+A logged change to profile, document, or clause.
+
+### ImpactMap
+
+Rules that say which profile fields affect which docs.
+
+---
+
+# Each document type should carry metadata
+
+For every document, store:
+
+* `document_type_id`
+* `name`
+* `category`
+* `risk_tier`
+* `jurisdiction_sensitive`
+* `required_profile_fields`
+* `conditional_questions`
+* `required_reviews`
+* `renewal_trigger`
+* `expiry_trigger`
+* `linked_documents`
+* `editable_sections`
+* `locked_sections`
+* `brand_sensitive`
+* `financial_sensitive`
+* `legal_sensitive`
+* `evidence_requirements`
+
+This lets the system behave intelligently instead of treating everything the same.
+
+---
+
+# Risk tiers are essential
+
+Not all documents should be treated equally.
+
+## Green
+
+Low-risk content:
+
+* tagline
+* slogan
+* founder bio
+* company description
+* sales one-pager
+* FAQs
+* onboarding email
+* capability statement draft
+
+These can be more flexible.
+
+## Yellow
+
+Medium-risk operational/business docs:
+
+* employee handbook
+* proposal
+* vendor intake form
+* SOP
+* policy manual
+* board pack
+* investor update
+* pricing terms summary
+
+These need stronger structure and versioning.
+
+## Red
+
+High-risk docs:
+
+* contracts
+* employment agreements
+* shareholder agreements
+* regulated disclosures
+* tax-facing letters
+* securities docs
+* privacy-sensitive legal docs
+* compliance representations
+
+These should use stricter controls:
+
+* locked clause architecture
+* limited freeform editing
+* mandatory warnings
+* review queue
+* jurisdiction checks
+* approval before finalization
+
+---
+
+# How the generation pipeline should work
+
+## Step 1: pull business facts
+
+Use the latest approved profile version.
+
+## Step 2: detect missing critical fields
+
+Ask only what is needed for this document.
+
+## Step 3: apply jurisdiction logic
+
+Different places require different wording, assumptions, and alerts.
+
+## Step 4: select template family
+
+Pick the correct base structure.
+
+## Step 5: select clause variants
+
+Based on:
+
+* risk appetite
+* business model
+* customer type
+* contract type
+* local rules
+* brand tone
+* industry
+
+## Step 6: generate natural language
+
+Use AI to produce readable text from structured content.
+
+## Step 7: explain assumptions
+
+Show the user:
+
+* what was assumed
+* what requires confirmation
+* what may need legal/finance review
+
+## Step 8: allow guided tweaking
+
+Let the user adjust the document without breaking structure.
+
+## Step 9: validate
+
+Check for:
+
+* missing required sections
+* contradictory terms
+* undefined terms
+* empty variables
+* inconsistent dates
+* weak signatures/approval logic
+* policy mismatch
+
+## Step 10: save version + impact links
+
+Store what was generated and what business facts it depends on.
+
+---
+
+# The tweaking experience should be intelligent
+
+This is one of the most valuable features.
+
+Instead of making the user edit blindly, the interface should allow prompts like:
+
+* “Make this more investor-friendly”
+* “Reduce legal jargon”
+* “Stronger late-payment protection”
+* “Adapt this for freelancers instead of employees”
+* “Shorten this to one page”
+* “Make the tone more premium and less playful”
+* “Add a confidentiality clause”
+* “Remove exclusivity”
+* “Align this with our refund policy”
+
+But the system should not just rewrite raw text. It should translate those requests into structured changes where possible.
+
+For example:
+“Stronger late-payment protection” should map to:
+
+* late fee clause variant B
+* suspension rights enabled
+* shorter payment window
+* collection costs clause added
+
+That is far better than asking the model to freestyle.
+
+---
+
+# Your UI should show clause-level transparency
+
+A very strong product pattern would be:
+
+For each major section, show:
+
+* section purpose
+* current setting
+* why this wording was chosen
+* other available variants
+* risk note
+* edit history
+* impacted profile fields
+
+Example:
+
+**Payment Terms**
+Current setting: 50% upfront, balance due in 14 days
+Based on: service business / project work / medium risk / founder-selected settings
+Alternatives:
+
+* 100% upfront
+* milestone billing
+* net 30
+* recurring monthly
+  Risk note: allowing net 30 may increase collection risk
+
+That kind of interface builds trust and makes tweaking safer.
+
+---
+
+# Versioning should be first-class
+
+The system should support:
+
+* draft v1
+* approved v1
+* signed v1
+* updated v2
+* country-specific v3
+* customer-friendly v4
+* litigation hold copy
+* archived legacy copy
+
+Each version should record:
+
+* created by
+* based on which profile version
+* based on which template version
+* changed sections
+* approval status
+* effective date
+* superseded date
+
+Also allow:
+
+* compare versions
+* restore prior version
+* clone for a new matter
+* generate redline view
+
+This is especially important for legal, HR, and finance-related documents.
+
+---
+
+# Auditing should work at 3 levels
+
+## 1. Fact audit
+
+What facts were used?
+
+Example:
+
+* company name
+* incorporation date
+* directors
+* VAT number
+* pricing model
+* employee count
+
+## 2. Logic audit
+
+Why was this wording selected?
+
+Example:
+
+* service agreement template chosen
+* contractor mode selected
+* IP assignment included because deliverables are custom
+* arbitration included due to jurisdiction preference
+
+## 3. Change audit
+
+What changed after generation?
+
+Example:
+
+* user manually edited termination clause
+* finance manager changed refund wording
+* lawyer approved limitation of liability
+* founder replaced slogan language
+
+This gives the system serious long-term value.
+
+---
+
+# You need an “impact engine”
+
+This is one of the smartest features you can build.
+
+Whenever the business profile changes, the system should detect affected documents.
+
+Examples:
+
+* company address changes → update invoice, contracts, privacy policy, footer, website terms
+* refund policy changes → update terms, FAQs, support macros, sales pages
+* ownership changes → update cap table summary, shareholder docs, board records, bios
+* staff count changes → update handbook applicability, HR forms, org chart
+* expansion to new country → update tax, privacy, legal, hiring, contract flows
+* rebrand → update bios, slogans, pitch materials, signatures, policy names
+
+The user should see:
+“12 documents affected. 4 high priority. 3 require review.”
+
+That turns the platform into a living documentation system.
+
+---
+
+# Add a “document health” model
+
+Each document can have a score such as:
+
+* current
+* stale
+* impacted
+* missing information
+* inconsistent with profile
+* pending review
+* expired
+* signed but outdated
+* superseded
+
+For example:
+
+**Privacy Policy**
+Status: impacted
+Reason: data processing changed on March 12
+Action: review recommended
+
+**Founder Bio**
+Status: stale
+Reason: team size and company traction outdated
+
+**Service Agreement**
+Status: current
+Reason: aligned with current pricing and dispute settings
+
+This helps users maintain documents over time.
+
+---
+
+# Use a layered source model for drafting
+
+For best quality, each output should draw from:
+
+## Layer 1: structured facts
+
+The business profile and scenario intake.
+
+## Layer 2: approved templates
+
+Document structures that meet your internal standard.
+
+## Layer 3: controlled clause library
+
+Reusable clause blocks with metadata.
+
+## Layer 4: style instructions
+
+Brand voice, tone, reading level, formatting.
+
+## Layer 5: AI composition
+
+Used to:
+
+* smooth language
+* adapt tone
+* connect clauses naturally
+* simplify or expand content
+* generate alternatives
+
+The higher the risk, the less freedom AI should have.
+
+---
+
+# A practical edit-permissions model
+
+Not every part of every doc should be equally editable.
+
+## Freely editable
+
+* bios
+* descriptions
+* marketing copy
+* internal memos
+* FAQs
+
+## Guided editable
+
+* proposals
+* policies
+* handbooks
+* investor narratives
+* pricing summaries
+
+## Restricted editable
+
+* indemnities
+* liability limits
+* governing law
+* IP ownership
+* tax representations
+* privacy/legal declarations
+* employment termination clauses
+
+For restricted sections, edits should happen by:
+
+* choosing approved variants
+* requesting redraft with controls
+* sending to reviewer
+
+---
+
+# What the user experience should feel like
+
+A good workflow would look like this:
+
+### 1. Setup
+
+User completes the business profile.
+
+### 2. Choose a document
+
+“Generate service agreement.”
+
+### 3. Fill only missing context
+
+Ask only necessary additional questions.
+
+### 4. Generate draft
+
+Show:
+
+* final draft
+* key assumptions
+* risk status
+* clause choices
+
+### 5. Tweak
+
+User can:
+
+* change tone
+* adjust clause settings
+* ask for shorter/stronger/friendlier
+* edit inline
+* compare with alternatives
+
+### 6. Validate
+
+System checks contradictions and missing items.
+
+### 7. Approve/save
+
+Save as a version with status.
+
+### 8. Monitor
+
+Later profile changes trigger updates.
+
+That is a very strong product loop.
+
+---
+
+# A useful internal data pattern
+
+For each document section, store something like:
+
+* `section_id`
+* `section_name`
+* `section_type`
+* `content_source`
+
+  * template
+  * clause library
+  * AI generated
+  * user edited
+* `editable_mode`
+* `depends_on_fields`
+* `risk_score`
+* `review_required`
+* `last_modified_by`
+* `last_modified_at`
+* `approved_by`
+* `approved_at`
+
+This will make future auditing much easier.
+
+---
+
+# You should also support “organization standards”
+
+A business should be able to set its own house rules.
+
+Examples:
+
+* always use Oxford comma
+* always use plain English
+* never use aggressive legal tone
+* always prefer mediation before arbitration
+* all proposals should sound premium and concise
+* all bios should mention mission and geography
+* all invoices must include tax ID and bank instructions
+* all employment docs require HR approval
+
+These standards become part of the drafting rules.
+
+---
+
+# Strong differentiator: reusable preferences
+
+Users should be able to teach the system their preferred version.
+
+For example:
+
+* “we prefer net 14, not net 30”
+* “our privacy wording must mention customer support emails”
+* “use founder-led, premium, modern tone”
+* “do not use the word affordable”
+* “our service agreements always include portfolio usage rights”
+* “we never use automatic renewal without opt-out notice”
+
+These become saved preferences that apply across future documents.
+
+So the system improves over time without retraining the model every time.
+
+---
+
+# What not to do
+
+Avoid these mistakes:
+
+* one giant universal prompt
+* one giant intake form with 500 fields upfront
+* free-text editing for every legal section
+* no version history
+* no clause metadata
+* no review gates
+* no impact mapping
+* no separation between profile facts and document-specific facts
+* no explanation of assumptions
+* no status tracking after generation
+
+Those choices make the product look impressive early and fall apart later.
+
+---
+
+# The strongest product framing
+
+Don’t describe it as:
+
+“AI that writes all your business docs.”
+
+Describe it as:
+
+**“A living business documentation system that generates, adapts, tracks, and updates your documents from a structured business profile.”**
+
+That is much more credible and scalable.
+
+---
+
+# What I would build next
+
+The next concrete layer should be a **system spec** with these 6 parts:
+
+## 1. Profile schema
+
+Every field, type, validation, ownership, and dependency.
+
+## 2. Document taxonomy
+
+Every document type, risk tier, trigger, and required inputs.
+
+## 3. Clause architecture
+
+Reusable clause families and variants.
+
+## 4. Workflow states
+
+Draft, review, approved, signed, stale, impacted, archived.
+
+## 5. Audit model
+
+Who changed what, why, when, and based on which facts.
+
+## 6. UX flows
+
+Generation, tweak, compare, approve, update, renew.
+
+The strongest immediate next deliverable would be a **v1 product specification** covering:
+
+* database model
+* user flow
+* admin flow
+* versioning rules
+* document states
+* permissions
+* audit logic
+* prompt/orchestration logic
+
+I can turn this into a structured product spec with tables, object schemas, and workflow diagrams.
