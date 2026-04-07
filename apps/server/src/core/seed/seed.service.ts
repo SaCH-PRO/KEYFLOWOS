@@ -19,52 +19,65 @@ export class SeedService implements OnApplicationBootstrap {
 
   private async seedDocumentTaxonomy() {
     try {
-      const catCount = await this.prisma.client.documentCategory.count();
-      if (catCount > 0) {
-        const ruleCount = await this.prisma.client.impactRule.count();
-        if (ruleCount === 0) {
-          await this.seedImpactRules();
-        }
-        this.logger.log('Document taxonomy already exists, skipping seed');
-        return;
-      }
+      const existingCats = await this.prisma.client.documentCategory.findMany();
+      const existingTypes = await this.prisma.client.documentType.findMany();
+      const existingCatSlugs = new Set(existingCats.map((c) => c.slug));
+      const existingTypeSlugs = new Set(existingTypes.map((t) => t.slug));
+
+      let newCats = 0;
+      let newTypes = 0;
 
       for (const cat of DOCUMENT_CATEGORIES) {
-        const created = await this.prisma.client.documentCategory.create({
-          data: {
-            name: cat.name,
-            slug: cat.slug,
-            description: cat.description,
-            icon: cat.icon,
-            sortOrder: cat.sortOrder,
-            tier: cat.tier,
-            trigger: cat.trigger,
-          },
-        });
+        let catRecord = existingCats.find((c) => c.slug === cat.slug);
+        if (!catRecord) {
+          catRecord = await this.prisma.client.documentCategory.create({
+            data: {
+              name: cat.name,
+              slug: cat.slug,
+              description: cat.description,
+              icon: cat.icon,
+              sortOrder: cat.sortOrder,
+              tier: cat.tier,
+              trigger: cat.trigger,
+            },
+          });
+          newCats++;
+        }
 
         const typesForCat = DOCUMENT_TYPES.filter((t) => t.categorySlug === cat.slug);
         for (const dt of typesForCat) {
-          await this.prisma.client.documentType.create({
-            data: {
-              categoryId: created.id,
-              name: dt.name,
-              slug: dt.slug,
-              description: dt.description,
-              riskTier: dt.riskTier,
-              requiredProfileFields: dt.requiredProfileFields,
-              brandSensitive: dt.brandSensitive,
-              financialSensitive: dt.financialSensitive,
-              legalSensitive: dt.legalSensitive,
-              jurisdictionSensitive: dt.jurisdictionSensitive,
-              sortOrder: dt.sortOrder,
-            },
-          });
+          if (!existingTypeSlugs.has(dt.slug)) {
+            await this.prisma.client.documentType.create({
+              data: {
+                categoryId: catRecord.id,
+                name: dt.name,
+                slug: dt.slug,
+                description: dt.description,
+                riskTier: dt.riskTier,
+                requiredProfileFields: dt.requiredProfileFields,
+                brandSensitive: dt.brandSensitive,
+                financialSensitive: dt.financialSensitive,
+                legalSensitive: dt.legalSensitive,
+                jurisdictionSensitive: dt.jurisdictionSensitive,
+                sortOrder: dt.sortOrder,
+              },
+            });
+            existingTypeSlugs.add(dt.slug);
+            newTypes++;
+          }
         }
       }
 
-      await this.seedImpactRules();
+      const ruleCount = await this.prisma.client.impactRule.count();
+      if (ruleCount === 0 || newTypes > 0) {
+        await this.seedImpactRules();
+      }
 
-      this.logger.log(`Seeded ${DOCUMENT_CATEGORIES.length} document categories and ${DOCUMENT_TYPES.length} document types`);
+      if (newCats > 0 || newTypes > 0) {
+        this.logger.log(`Seeded ${newCats} new categories and ${newTypes} new document types`);
+      } else {
+        this.logger.log('Document taxonomy up to date');
+      }
     } catch (error) {
       this.logger.warn('Document taxonomy seed failed: ' + (error as Error).message);
     }
@@ -73,12 +86,18 @@ export class SeedService implements OnApplicationBootstrap {
   private async seedImpactRules() {
     const allDocTypes = await this.prisma.client.documentType.findMany();
     const typeSlugToId = new Map(allDocTypes.map((t) => [t.slug, t.id]));
+    const existingRules = await this.prisma.client.impactRule.findMany({
+      select: { documentTypeId: true, profileField: true },
+    });
+    const existingRuleKeys = new Set(existingRules.map((r) => `${r.documentTypeId}:${r.profileField}`));
     let ruleCount = 0;
 
     for (const dt of DOCUMENT_TYPES) {
       const docTypeId = typeSlugToId.get(dt.slug);
       if (!docTypeId) continue;
       for (const field of dt.requiredProfileFields) {
+        const key = `${docTypeId}:${field}`;
+        if (existingRuleKeys.has(key)) continue;
         await this.prisma.client.impactRule.create({
           data: {
             profileField: field,
@@ -87,11 +106,12 @@ export class SeedService implements OnApplicationBootstrap {
             description: `Changes to "${field}" may affect ${dt.name}`,
           },
         });
+        existingRuleKeys.add(key);
         ruleCount++;
       }
     }
 
-    this.logger.log(`Seeded ${ruleCount} impact rules`);
+    this.logger.log(`Seeded ${ruleCount} new impact rules`);
   }
 
   private async seedTemplates() {
