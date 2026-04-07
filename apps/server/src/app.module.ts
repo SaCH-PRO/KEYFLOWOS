@@ -40,6 +40,7 @@ import { MomentumModule } from './modules/momentum/momentum.module';
 import { SeedModule } from './core/seed/seed.module';
 import { OnboardingConciergeModule } from './modules/onboarding-concierge/onboarding-concierge.module';
 import { BusinessGuidanceModule } from './modules/business-guidance/business-guidance.module';
+import { DocumentsModule } from './modules/documents/documents.module';
 
 @Module({
   imports: [
@@ -81,6 +82,7 @@ import { BusinessGuidanceModule } from './modules/business-guidance/business-gui
     SeedModule,
     OnboardingConciergeModule,
     BusinessGuidanceModule,
+    DocumentsModule,
   ],
   controllers: [AppController],
   providers: [

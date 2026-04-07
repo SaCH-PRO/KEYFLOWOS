@@ -189,6 +189,7 @@ const navGroups: { label: string; items: NavItem[] }[] = [
     items: [
       { label: "Expenses", href: "/app/expenses", icon: Receipt },
       { label: "Projects", href: "/app/projects", icon: FolderKanban },
+      { label: "Documents", href: "/app/documents", icon: FileText },
       { label: "Automations", href: "/app/automations", icon: Zap },
       { label: "Reports", href: "/app/reports", icon: BarChart3 },
     ],
@@ -258,7 +259,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         const labelMap: Record<string, string> = {
           app: "Command", crm: "CRM", pipeline: "Contacts", commerce: "Commerce",
           bookings: "Bookings", marketing: "Marketing", expenses: "Expenses",
-          projects: "Projects", automations: "Automations", reports: "Reports",
+          projects: "Projects", documents: "Documents", automations: "Automations", reports: "Reports",
           store: "Store Setup", settings: "Settings", learn: "Learn",
           community: "Community", marketplace: "Marketplace",
         };

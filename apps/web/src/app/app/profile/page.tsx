@@ -14,6 +14,7 @@ import PersonalInfoSection from "./components/personal-info-section";
 import MyBusinessSection from "./components/my-business-section";
 import ProfessionalProfileSection from "./components/professional-profile-section";
 import SecuritySection from "./components/security-section";
+import DocumentHealthSection from "./components/document-health-section";
 import { loadGuidanceDraft } from "./components/guidance-storage";
 
 interface IdentityMe {
@@ -344,6 +345,10 @@ export default function ProfileSettingsPage() {
                 onDirtyChange={handleBizDirtyChange}
                 onStatus={setStatus}
               />
+            </motion.div>
+
+            <motion.div variants={fadeUp} className="kf-card p-6">
+              <DocumentHealthSection businessId={businessId} />
             </motion.div>
 
             <motion.div variants={fadeUp}>

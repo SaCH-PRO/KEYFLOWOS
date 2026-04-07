@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { DOCUMENT_CATEGORIES, DOCUMENT_TYPES } from '../../modules/documents/document-taxonomy';
 
 @Injectable()
 export class SeedService implements OnApplicationBootstrap {
@@ -13,6 +14,84 @@ export class SeedService implements OnApplicationBootstrap {
     await this.seedTemplates();
     await this.seedCourses();
     await this.seedCohorts();
+    await this.seedDocumentTaxonomy();
+  }
+
+  private async seedDocumentTaxonomy() {
+    try {
+      const catCount = await this.prisma.client.documentCategory.count();
+      if (catCount > 0) {
+        const ruleCount = await this.prisma.client.impactRule.count();
+        if (ruleCount === 0) {
+          await this.seedImpactRules();
+        }
+        this.logger.log('Document taxonomy already exists, skipping seed');
+        return;
+      }
+
+      for (const cat of DOCUMENT_CATEGORIES) {
+        const created = await this.prisma.client.documentCategory.create({
+          data: {
+            name: cat.name,
+            slug: cat.slug,
+            description: cat.description,
+            icon: cat.icon,
+            sortOrder: cat.sortOrder,
+            tier: cat.tier,
+            trigger: cat.trigger,
+          },
+        });
+
+        const typesForCat = DOCUMENT_TYPES.filter((t) => t.categorySlug === cat.slug);
+        for (const dt of typesForCat) {
+          await this.prisma.client.documentType.create({
+            data: {
+              categoryId: created.id,
+              name: dt.name,
+              slug: dt.slug,
+              description: dt.description,
+              riskTier: dt.riskTier,
+              requiredProfileFields: dt.requiredProfileFields,
+              brandSensitive: dt.brandSensitive,
+              financialSensitive: dt.financialSensitive,
+              legalSensitive: dt.legalSensitive,
+              jurisdictionSensitive: dt.jurisdictionSensitive,
+              sortOrder: dt.sortOrder,
+            },
+          });
+        }
+      }
+
+      await this.seedImpactRules();
+
+      this.logger.log(`Seeded ${DOCUMENT_CATEGORIES.length} document categories and ${DOCUMENT_TYPES.length} document types`);
+    } catch (error) {
+      this.logger.warn('Document taxonomy seed failed: ' + (error as Error).message);
+    }
+  }
+
+  private async seedImpactRules() {
+    const allDocTypes = await this.prisma.client.documentType.findMany();
+    const typeSlugToId = new Map(allDocTypes.map((t) => [t.slug, t.id]));
+    let ruleCount = 0;
+
+    for (const dt of DOCUMENT_TYPES) {
+      const docTypeId = typeSlugToId.get(dt.slug);
+      if (!docTypeId) continue;
+      for (const field of dt.requiredProfileFields) {
+        await this.prisma.client.impactRule.create({
+          data: {
+            profileField: field,
+            documentTypeId: docTypeId,
+            impactLevel: dt.riskTier === 'RED' ? 'HIGH' : dt.riskTier === 'YELLOW' ? 'MEDIUM' : 'LOW',
+            description: `Changes to "${field}" may affect ${dt.name}`,
+          },
+        });
+        ruleCount++;
+      }
+    }
+
+    this.logger.log(`Seeded ${ruleCount} impact rules`);
   }
 
   private async seedTemplates() {
