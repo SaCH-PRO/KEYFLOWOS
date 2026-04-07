@@ -275,12 +275,16 @@ export default function ProfessionalProfileSection({
                 <Sparkles className="h-3 w-3" />
                 Professional Headline
                 <AiFieldBadge />
+                {!bizForm.headline && (
+                  <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
+                )}
               </div>
               <Input
                 value={bizForm.headline}
                 onChange={(e) => setBizForm((f) => ({ ...f, headline: e.target.value }))}
                 placeholder="e.g., Caribbean Tech Entrepreneur | Building SaaS for SMBs"
                 maxLength={120}
+                style={!bizForm.headline ? { borderColor: "hsl(var(--kf-warning) / 0.3)" } : undefined}
               />
               <div className="flex justify-between mt-1">
                 <DataUsageHint text="Shown on your community profile and public storefront" />
@@ -292,6 +296,9 @@ export default function ProfessionalProfileSection({
                 <FileText className="h-3 w-3" />
                 Bio
                 <AiFieldBadge />
+                {!bizForm.bio && (
+                  <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
+                )}
               </div>
               <textarea
                 value={bizForm.bio}
@@ -300,6 +307,7 @@ export default function ProfessionalProfileSection({
                 maxLength={500}
                 rows={3}
                 className="w-full bg-transparent border border-border rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/30 resize-none"
+                style={!bizForm.bio ? { borderColor: "hsl(var(--kf-warning) / 0.3)" } : undefined}
               />
               <div className="flex justify-between mt-1">
                 <DataUsageHint text="Displayed on your community profile and public pages" />
@@ -320,11 +328,15 @@ export default function ProfessionalProfileSection({
               <div className="flex items-center gap-1.5 mb-1.5 font-medium">
                 <Briefcase className="h-3 w-3" />
                 Industry
+                {!bizForm.industry && (
+                  <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
+                )}
               </div>
               <select
                 value={bizForm.industry}
                 onChange={(e) => setBizForm((f) => ({ ...f, industry: e.target.value }))}
                 className="w-full bg-transparent border border-border rounded-xl px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/30 min-h-[44px]"
+                style={!bizForm.industry ? { borderColor: "hsl(var(--kf-warning) / 0.3)" } : undefined}
               >
                 <option value="">Select industry</option>
                 {INDUSTRY_OPTIONS.map((opt) => (
@@ -337,11 +349,15 @@ export default function ProfessionalProfileSection({
               <div className="flex items-center gap-1.5 mb-1.5 font-medium">
                 <Shield className="h-3 w-3" />
                 Business Stage
+                {!bizForm.businessStage && (
+                  <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
+                )}
               </div>
               <select
                 value={bizForm.businessStage}
                 onChange={(e) => setBizForm((f) => ({ ...f, businessStage: e.target.value }))}
                 className="w-full bg-transparent border border-border rounded-xl px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/30 min-h-[44px]"
+                style={!bizForm.businessStage ? { borderColor: "hsl(var(--kf-warning) / 0.3)" } : undefined}
               >
                 <option value="">Select stage</option>
                 {BUSINESS_STAGES.map((stage) => (
@@ -472,22 +488,30 @@ export default function ProfessionalProfileSection({
                 <div className="flex items-center gap-1.5 mb-1.5 font-medium">
                   <MapPin className="h-3 w-3" />
                   City
+                  {!bizForm.city && (
+                    <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
+                  )}
                 </div>
                 <Input
                   value={bizForm.city}
                   onChange={(e) => setBizForm((f) => ({ ...f, city: e.target.value }))}
                   placeholder="Port of Spain"
+                  style={!bizForm.city ? { borderColor: "hsl(var(--kf-warning) / 0.3)" } : undefined}
                 />
               </label>
               <label className="block text-xs text-muted-foreground">
                 <div className="flex items-center gap-1.5 mb-1.5 font-medium">
                   <MapPin className="h-3 w-3" />
                   Country
+                  {!bizForm.country && (
+                    <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
+                  )}
                 </div>
                 <Input
                   value={bizForm.country}
                   onChange={(e) => setBizForm((f) => ({ ...f, country: e.target.value }))}
                   placeholder="Trinidad & Tobago"
+                  style={!bizForm.country ? { borderColor: "hsl(var(--kf-warning) / 0.3)" } : undefined}
                 />
               </label>
             </div>

@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Building2, Users, Link2, Shield, Settings, Webhook, Bell, Code2, Palette } from "lucide-react";
+import { Building2, Users, Link2, Shield, Lock, Settings, Webhook, Bell, Code2, Palette } from "lucide-react";
 
 const navItems = [
   { href: "/app/settings/business", label: "Business", icon: Building2, description: "Company info" },
   { href: "/app/settings/team", label: "Team", icon: Users, description: "Staff & roles" },
   { href: "/app/settings/connections", label: "Connections", icon: Link2, description: "Integrations" },
   { href: "/app/settings/notifications", label: "Notifications", icon: Bell, description: "Customer emails" },
+  { href: "/app/settings/security", label: "Security", icon: Lock, description: "Password & theme" },
   { href: "/app/settings/compliance", label: "Compliance", icon: Shield, description: "Legal & tax" },
   { href: "/app/settings/webhooks", label: "Webhooks", icon: Webhook, description: "Event hooks" },
   { href: "/app/settings/templates", label: "Templates", icon: Palette, description: "Gallery" },

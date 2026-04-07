@@ -17,6 +17,7 @@ import {
   orderCancelledTemplate,
   sellerNewOrderTemplate,
   sellerLowStockTemplate,
+  documentGeneratedTemplate,
 } from './email-templates';
 
 export type NotificationType =
@@ -32,7 +33,8 @@ export type NotificationType =
   | 'order_refunded'
   | 'order_cancelled'
   | 'seller_new_order'
-  | 'seller_low_stock';
+  | 'seller_low_stock'
+  | 'document_generated';
 
 export interface NotificationPreferences {
   booking_confirmed?: boolean;
@@ -48,6 +50,7 @@ export interface NotificationPreferences {
   order_cancelled?: boolean;
   seller_new_order?: boolean;
   seller_low_stock?: boolean;
+  document_generated?: boolean;
 }
 
 const DEFAULT_PREFERENCES: NotificationPreferences = {
@@ -64,6 +67,7 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   order_cancelled: true,
   seller_new_order: true,
   seller_low_stock: true,
+  document_generated: true,
 };
 
 const QUEUE_DRAIN_INTERVAL_MS = 5 * 60 * 1000;
@@ -333,6 +337,19 @@ export class TransactionalEmailService implements OnModuleInit {
             productName: data.productName,
             currentStock: data.currentStock,
             reorderLevel: data.reorderLevel,
+          });
+          break;
+        case 'document_generated':
+          rendered = documentGeneratedTemplate({
+            ...baseCtx,
+            documentTitle: data.documentTitle,
+            documentTypeName: data.documentTypeName,
+            categoryName: data.categoryName,
+            riskTier: data.riskTier,
+            documentId: data.documentId,
+            version: data.version,
+            sections: data.sections,
+            documentUrl: data.documentUrl,
           });
           break;
         default:

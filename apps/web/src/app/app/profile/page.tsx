@@ -3,7 +3,11 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { User, CheckCircle2, AlertCircle, Compass, FileText } from "lucide-react";
+import {
+  User, CheckCircle2, AlertCircle, Compass, FileText,
+  ChevronDown, ChevronRight, Sparkles, TrendingUp, Zap,
+  Building2, Briefcase, Shield, Target,
+} from "lucide-react";
 import { apiGet, apiPatch } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
@@ -14,7 +18,6 @@ import { getGuidanceStatus } from "./components/guidance-storage";
 import PersonalInfoSection from "./components/personal-info-section";
 import MyBusinessSection from "./components/my-business-section";
 import ProfessionalProfileSection from "./components/professional-profile-section";
-import SecuritySection from "./components/security-section";
 import DocumentsTab from "./components/documents-tab";
 import { loadGuidanceDraft } from "./components/guidance-storage";
 
@@ -37,34 +40,204 @@ const fadeUp = {
   show: { opacity: 1, y: 0, transition: { duration: 0.3 } },
 };
 
-function ProfileCompletenessRing({ percentage }: { percentage: number }) {
-  const radius = 36;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (percentage / 100) * circumference;
-  const color = percentage >= 80
-    ? "hsl(var(--kf-success))"
-    : percentage >= 50
-      ? "hsl(var(--kf-warning))"
-      : "hsl(var(--kf-error))";
+interface CompletenessItem {
+  label: string;
+  done: boolean;
+  tab: TabId;
+  icon: React.ElementType;
+}
+
+function JourneyIndicator({
+  items,
+  onGoTo,
+}: {
+  items: CompletenessItem[];
+  onGoTo: (tab: TabId) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const completed = items.filter((i) => i.done).length;
+  const total = items.length;
+  const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+  const color =
+    pct >= 80
+      ? "hsl(var(--kf-success))"
+      : pct >= 50
+        ? "hsl(var(--kf-warning))"
+        : "hsl(var(--kf-error))";
 
   return (
-    <div className="relative w-20 h-20 flex items-center justify-center flex-shrink-0">
-      <svg className="w-20 h-20 -rotate-90" viewBox="0 0 88 88">
-        <circle cx="44" cy="44" r={radius} fill="none" stroke="hsl(var(--muted))" strokeWidth="5" opacity="0.3" />
-        <circle
-          cx="44" cy="44" r={radius} fill="none"
-          stroke={color}
-          strokeWidth="5"
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          className="transition-all duration-1000 ease-out"
-        />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-lg font-bold">{percentage}%</span>
-        <span className="text-[9px] text-muted-foreground">Complete</span>
+    <div
+      className="rounded-xl overflow-hidden transition-all"
+      style={{
+        background: "hsl(var(--kf-card))",
+        border: "1px solid hsl(var(--kf-border) / 0.3)",
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-3 px-4 py-3 min-h-[44px]"
+      >
+        <div className="relative w-10 h-10 flex items-center justify-center flex-shrink-0">
+          <svg className="w-10 h-10 -rotate-90" viewBox="0 0 40 40">
+            <circle cx="20" cy="20" r="16" fill="none" stroke="hsl(var(--muted))" strokeWidth="3" opacity="0.2" />
+            <circle
+              cx="20" cy="20" r="16" fill="none"
+              stroke={color}
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeDasharray={2 * Math.PI * 16}
+              strokeDashoffset={2 * Math.PI * 16 - (pct / 100) * 2 * Math.PI * 16}
+              className="transition-all duration-700"
+            />
+          </svg>
+          <span className="absolute text-[10px] font-bold" style={{ color }}>{pct}%</span>
+        </div>
+        <div className="flex-1 text-left min-w-0">
+          <div className="text-sm font-semibold text-[hsl(var(--foreground))]">
+            Business Foundation
+          </div>
+          <div className="text-xs text-[hsl(var(--muted-foreground))]">
+            {completed}/{total} steps complete
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="h-1.5 w-20 rounded-full overflow-hidden" style={{ background: "hsl(var(--muted) / 0.3)" }}>
+            <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: color }} />
+          </div>
+          {expanded ? (
+            <ChevronDown className="w-4 h-4 text-[hsl(var(--muted-foreground))]" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-[hsl(var(--muted-foreground))]" />
+          )}
+        </div>
+      </button>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="px-4 pb-3 space-y-1 border-t border-[hsl(var(--border))]  pt-2">
+              {items.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() => onGoTo(item.tab)}
+                    className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left hover:bg-[hsl(var(--muted))] transition-colors min-h-[36px]"
+                  >
+                    {item.done ? (
+                      <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "hsl(var(--kf-success))" }} />
+                    ) : (
+                      <div
+                        className="w-3.5 h-3.5 rounded-full border-2 flex-shrink-0"
+                        style={{ borderColor: "hsl(var(--muted-foreground) / 0.4)" }}
+                      />
+                    )}
+                    <Icon className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] flex-shrink-0" />
+                    <span
+                      className="text-xs flex-1"
+                      style={{
+                        color: item.done ? "hsl(var(--muted-foreground))" : "hsl(var(--foreground))",
+                        textDecoration: item.done ? "line-through" : "none",
+                      }}
+                    >
+                      {item.label}
+                    </span>
+                    {!item.done && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-accent1) / 0.1)", color: "hsl(var(--kf-accent1))" }}>
+                        Quick win
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function BusinessContextCard({
+  form,
+  businessId,
+}: {
+  form: { name: string; firstName: string; lastName: string };
+  businessId: string | null;
+}) {
+  const [bizData, setBizData] = useState<{
+    name?: string;
+    industry?: string;
+    businessStage?: string;
+    teamSize?: string;
+    city?: string;
+    country?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!businessId) return;
+    apiGet<Record<string, unknown>>(`/identity/businesses/${businessId}`)
+      .then(({ data }) => {
+        if (data) setBizData(data as typeof bizData);
+      })
+      .catch(() => {});
+  }, [businessId]);
+
+  const items = [
+    { label: "Business", value: bizData?.name, icon: Building2 },
+    { label: "Industry", value: bizData?.industry, icon: Briefcase },
+    { label: "Stage", value: bizData?.businessStage?.replace(/_/g, " "), icon: TrendingUp },
+    { label: "Team", value: bizData?.teamSize?.replace(/_/g, " "), icon: User },
+    { label: "Location", value: [bizData?.city, bizData?.country].filter(Boolean).join(", "), icon: Target },
+  ].filter((i) => i.value);
+
+  if (items.length === 0) return null;
+
+  return (
+    <div
+      className="rounded-xl p-4"
+      style={{
+        background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.06), hsl(var(--kf-accent2) / 0.04))",
+        border: "1px solid hsl(var(--kf-accent1) / 0.12)",
+      }}
+    >
+      <div className="flex items-center gap-2 mb-3">
+        <Sparkles className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+        <span className="text-xs font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>
+          What KEYFLOWOS sees
+        </span>
       </div>
+      <div className="flex flex-wrap gap-2">
+        {items.map((item) => {
+          const Icon = item.icon;
+          return (
+            <div
+              key={item.label}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs"
+              style={{
+                background: "hsl(var(--kf-card))",
+                border: "1px solid hsl(var(--kf-border) / 0.2)",
+              }}
+            >
+              <Icon className="w-3 h-3 text-[hsl(var(--muted-foreground))]" />
+              <span className="text-[hsl(var(--muted-foreground))]">{item.label}:</span>
+              <span className="font-medium text-[hsl(var(--foreground))]">{item.value}</span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-[10px] text-[hsl(var(--muted-foreground))] mt-2">
+        This data powers AI-generated documents, guidance, and recommendations.
+      </p>
     </div>
   );
 }
@@ -114,6 +287,7 @@ export default function ProfileSettingsPage() {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [profileCompleteness, setProfileCompleteness] = useState(0);
+  const [docCount, setDocCount] = useState(0);
 
   const [showGuidanceWizard, setShowGuidanceWizard] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>(TAB_CONFIG.some(t => t.id === initialTab) ? initialTab : "profile");
@@ -146,6 +320,19 @@ export default function ProfileSettingsPage() {
   const handleBizDirtyChange = useCallback((dirty: boolean) => setIsBizDirty(dirty), []);
   const handleBizInfoDirtyChange = useCallback((dirty: boolean) => setIsBizInfoDirty(dirty), []);
 
+  const completenessItems: CompletenessItem[] = useMemo(() => {
+    const hasName = !!(form.firstName || form.name);
+    const hasPhone = !!form.phone;
+    return [
+      { label: "Add your name", done: hasName, tab: "profile" as TabId, icon: User },
+      { label: "Add phone number", done: hasPhone, tab: "profile" as TabId, icon: User },
+      { label: "Complete business profile", done: profileCompleteness >= 60, tab: "profile" as TabId, icon: Building2 },
+      { label: "Set industry & stage", done: profileCompleteness >= 40, tab: "profile" as TabId, icon: Briefcase },
+      { label: "Generate your first document", done: docCount > 0, tab: "documents" as TabId, icon: FileText },
+      { label: "Complete business guidance", done: guidanceStatus === "complete", tab: "guidance" as TabId, icon: Compass },
+    ];
+  }, [form, profileCompleteness, docCount, guidanceStatus]);
+
   useEffect(() => {
     const bid = getStoredBusinessId();
     if (bid) setBusinessId(bid);
@@ -160,6 +347,11 @@ export default function ProfileSettingsPage() {
           } else if (data?.status === "IN_PROGRESS" || data?.status === "DRAFT") {
             setGuidanceStatusState("in_progress");
           }
+        })
+        .catch(() => {});
+      apiGet<unknown[]>(`/documents/businesses/${bid}/instances`)
+        .then(({ data }) => {
+          if (data) setDocCount(data.length);
         })
         .catch(() => {});
     }
@@ -258,8 +450,32 @@ export default function ProfileSettingsPage() {
 
   const maxWidth = activeTab === "documents" ? "max-w-4xl" : "max-w-2xl";
 
+  const tabBadge = (tabId: TabId) => {
+    if (tabId === "guidance" && guidanceStatus === "complete") {
+      return <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: "hsl(var(--kf-success))" }} />;
+    }
+    if (tabId === "documents" && docCount > 0) {
+      return (
+        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: "hsl(var(--kf-accent1) / 0.15)", color: "hsl(var(--kf-accent1))" }}>
+          {docCount}
+        </span>
+      );
+    }
+    if (tabId === "profile" && profileCompleteness > 0 && profileCompleteness < 100) {
+      return (
+        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0" style={{
+          background: profileCompleteness >= 80 ? "hsl(var(--kf-success) / 0.15)" : "hsl(var(--kf-warning) / 0.15)",
+          color: profileCompleteness >= 80 ? "hsl(var(--kf-success))" : "hsl(var(--kf-warning))",
+        }}>
+          {profileCompleteness}%
+        </span>
+      );
+    }
+    return null;
+  };
+
   return (
-    <motion.div variants={stagger} initial="hidden" animate="show" className={`space-y-6 ${maxWidth} mx-auto transition-all`}>
+    <motion.div variants={stagger} initial="hidden" animate="show" className={`space-y-4 ${maxWidth} mx-auto transition-all`}>
       <motion.div variants={fadeUp} className="flex items-center gap-3">
         <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white shadow-lg">
           <User className="w-5 h-5" />
@@ -268,13 +484,17 @@ export default function ProfileSettingsPage() {
           <h1 className="text-2xl font-bold tracking-tight">My Profile</h1>
           <p className="text-sm text-muted-foreground">Manage your profile, documents, and business guidance</p>
         </div>
-        <ProfileCompletenessRing percentage={profileCompleteness} />
+      </motion.div>
+
+      <motion.div variants={fadeUp}>
+        <JourneyIndicator items={completenessItems} onGoTo={handleTabChange} />
       </motion.div>
 
       <motion.div variants={fadeUp} className="flex gap-1 p-1 rounded-xl" style={{ background: "hsl(var(--kf-muted) / 0.15)", border: "1px solid hsl(var(--kf-border) / 0.2)" }}>
         {TAB_CONFIG.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
+          const badge = tabBadge(tab.id);
           return (
             <button
               key={tab.id}
@@ -289,9 +509,7 @@ export default function ProfileSettingsPage() {
             >
               <Icon className="w-4 h-4" />
               <span className="hidden sm:inline">{tab.label}</span>
-              {tab.id === "guidance" && guidanceStatus === "complete" && (
-                <span className="w-2 h-2 rounded-full" style={{ background: "hsl(var(--kf-success))" }} />
-              )}
+              {badge}
             </button>
           );
         })}
@@ -301,7 +519,10 @@ export default function ProfileSettingsPage() {
         {activeTab === "guidance" && (
           <motion.div key="guidance" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
             {guidanceStatus === "complete" || hasBackendAssessment ? (
-              <GuidanceDashboard onEditProfile={() => setShowGuidanceWizard(true)} />
+              <GuidanceDashboard
+                onEditProfile={() => setShowGuidanceWizard(true)}
+                onGoToDocuments={() => handleTabChange("documents")}
+              />
             ) : (
               <GuidanceCard onLaunchWizard={() => setShowGuidanceWizard(true)} />
             )}
@@ -310,12 +531,16 @@ export default function ProfileSettingsPage() {
 
         {activeTab === "documents" && (
           <motion.div key="documents" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-            <DocumentsTab businessId={businessId} />
+            <DocumentsTab
+              businessId={businessId}
+              onGoToGuidance={() => handleTabChange("guidance")}
+              guidanceComplete={guidanceStatus === "complete"}
+            />
           </motion.div>
         )}
 
         {activeTab === "profile" && (
-          <motion.div key="profile" variants={stagger} initial="hidden" animate="show" exit={{ opacity: 0, y: -8 }} className="space-y-6">
+          <motion.div key="profile" variants={stagger} initial="hidden" animate="show" exit={{ opacity: 0, y: -8 }} className="space-y-4">
             <AnimatePresence>
               {status && (
                 <motion.div
@@ -334,6 +559,10 @@ export default function ProfileSettingsPage() {
                 </motion.div>
               )}
             </AnimatePresence>
+
+            <motion.div variants={fadeUp}>
+              <BusinessContextCard form={form} businessId={businessId} />
+            </motion.div>
 
             <motion.div variants={fadeUp} className="kf-card p-6">
               <PersonalInfoSection
@@ -371,7 +600,18 @@ export default function ProfileSettingsPage() {
             </motion.div>
 
             <motion.div variants={fadeUp}>
-              <SecuritySection onStatus={setStatus} />
+              <div
+                className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer hover:bg-[hsl(var(--muted))] transition-colors min-h-[44px]"
+                style={{ border: "1px solid hsl(var(--kf-border) / 0.2)" }}
+                onClick={() => router.push("/app/settings/security")}
+              >
+                <Shield className="w-4 h-4 text-[hsl(var(--muted-foreground))]" />
+                <div className="flex-1">
+                  <div className="text-sm font-medium text-[hsl(var(--foreground))]">Security & Preferences</div>
+                  <div className="text-xs text-[hsl(var(--muted-foreground))]">Password, theme, and account security</div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-[hsl(var(--muted-foreground))]" />
+              </div>
             </motion.div>
           </motion.div>
         )}

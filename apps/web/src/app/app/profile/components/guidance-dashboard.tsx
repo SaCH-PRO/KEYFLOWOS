@@ -7,7 +7,7 @@ import {
   Target, Lightbulb, Clock, ChevronRight, RefreshCw, Edit3,
   Building2, Users, DollarSign, Briefcase, Award, Activity,
   CheckCircle2, XCircle, AlertCircle, ArrowUp, ArrowDown,
-  Compass, Zap, Flag, Star,
+  Compass, Zap, Flag, Star, FileText,
 } from "lucide-react";
 import { Button } from "@keyflow/ui";
 import { apiGet, apiPostSimple } from "@/lib/api";
@@ -247,9 +247,10 @@ function HealthGauge({ score, size = 120 }: { score: number | null; size?: numbe
 
 interface GuidanceDashboardProps {
   onEditProfile: () => void;
+  onGoToDocuments?: () => void;
 }
 
-export default function GuidanceDashboard({ onEditProfile }: GuidanceDashboardProps) {
+export default function GuidanceDashboard({ onEditProfile, onGoToDocuments }: GuidanceDashboardProps) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -448,6 +449,16 @@ export default function GuidanceDashboard({ onEditProfile }: GuidanceDashboardPr
             <RefreshCw className={`w-4 h-4 ${reanalyzing ? "animate-spin" : ""}`} />
             {reanalyzing ? "Analyzing..." : "Re-analyze"}
           </Button>
+          {onGoToDocuments && (
+            <Button
+              onClick={onGoToDocuments}
+              className="min-h-[44px] flex items-center gap-1.5"
+              style={{ background: "hsl(var(--kf-accent2))", color: "#fff" }}
+            >
+              <FileText className="w-4 h-4" />
+              Generate Documents
+            </Button>
+          )}
         </div>
       </motion.div>
 

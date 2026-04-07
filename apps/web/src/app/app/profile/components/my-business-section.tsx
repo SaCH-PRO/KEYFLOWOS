@@ -197,11 +197,15 @@ export default function MyBusinessSection({
               <div className="flex items-center gap-1.5 mb-1.5 font-medium">
                 <Building2 className="h-3 w-3" />
                 Business Name
+                {!form.name && (
+                  <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
+                )}
               </div>
               <Input
                 value={form.name}
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                 placeholder="Your Business Name"
+                style={!form.name ? { borderColor: "hsl(var(--kf-warning) / 0.3)" } : undefined}
               />
               <p className="text-[10px] mt-1 opacity-60">Appears on invoices, storefront, and all customer-facing pages</p>
             </label>
@@ -212,6 +216,9 @@ export default function MyBusinessSection({
                   <SparklesIcon className="h-3 w-3" />
                   Tagline
                   <AiFieldBadge />
+                  {!form.tagline && (
+                    <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -232,6 +239,7 @@ export default function MyBusinessSection({
                 onChange={(e) => setForm((f) => ({ ...f, tagline: e.target.value }))}
                 placeholder="A short tagline for your business"
                 maxLength={100}
+                style={!form.tagline ? { borderColor: "hsl(var(--kf-warning) / 0.3)" } : undefined}
               />
               <div className="flex justify-between mt-1">
                 <p className="text-[10px] opacity-60">Shown on your storefront hero section</p>
@@ -245,6 +253,9 @@ export default function MyBusinessSection({
                   <FileText className="h-3 w-3" />
                   Business Description
                   <AiFieldBadge />
+                  {!form.description && (
+                    <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -267,6 +278,7 @@ export default function MyBusinessSection({
                 maxLength={500}
                 rows={3}
                 className="w-full bg-transparent border border-border rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent2))]/30 resize-none"
+                style={!form.description ? { borderColor: "hsl(var(--kf-warning) / 0.3)" } : undefined}
               />
               <div className="flex justify-between mt-1">
                 <p className="text-[10px] opacity-60">Used on your storefront and in AI-powered recommendations</p>
@@ -287,11 +299,15 @@ export default function MyBusinessSection({
               <div className="flex items-center gap-1.5 mb-1.5 font-medium">
                 <Users className="h-3 w-3" />
                 Team Size
+                {!form.teamSize && (
+                  <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
+                )}
               </div>
               <select
                 value={form.teamSize}
                 onChange={(e) => setForm((f) => ({ ...f, teamSize: e.target.value }))}
                 className="w-full bg-transparent border border-border rounded-xl px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/30 min-h-[44px]"
+                style={!form.teamSize ? { borderColor: "hsl(var(--kf-warning) / 0.3)" } : undefined}
               >
                 <option value="">Select team size</option>
                 {TEAM_SIZE_OPTIONS.map((opt) => (
