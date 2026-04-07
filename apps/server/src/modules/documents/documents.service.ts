@@ -228,10 +228,6 @@ export class DocumentsService {
       });
     }
 
-    this.sendDocumentEmail(businessId, instance, actorUserId).catch((err) => {
-      this.logger.warn(`Document email failed: ${(err as Error).message}`);
-    });
-
     return instance;
   }
 
@@ -587,13 +583,22 @@ export class DocumentsService {
     }
   }
 
+  async sendDocumentEmailPublic(businessId: string, instanceId: string, actorUserId?: string) {
+    const instance = await this.getInstance(businessId, instanceId);
+    const result = await this.sendDocumentEmail(businessId, instance, actorUserId);
+    if (!result) {
+      return { sent: false, reason: 'No recipient email address found' };
+    }
+    return { sent: true };
+  }
+
   private async sendDocumentEmail(businessId: string, instance: {
     id: string;
     title: string;
     currentVersionNum: number;
     documentType: { name: string; riskTier: string; category: { name: string } };
     sections: Array<{ sectionName: string; content: string }>;
-  }, actorUserId?: string) {
+  }, actorUserId?: string): Promise<boolean> {
     let user: { email: string | null; name: string | null; firstName: string | null } | null = null;
 
     if (actorUserId) {
@@ -608,11 +613,11 @@ export class DocumentsService {
         where: { id: businessId },
         select: { users: { select: { email: true, name: true, firstName: true }, take: 1 } },
       });
-      if (!business || business.users.length === 0) return;
+      if (!business || business.users.length === 0) return false;
       user = business.users[0];
     }
 
-    if (!user?.email) return;
+    if (!user?.email) return false;
 
     const documentUrl = `${process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : 'https://keyflowos.com'}/app/documents/${instance.id}`;
 
@@ -634,6 +639,7 @@ export class DocumentsService {
     });
 
     this.logger.log(`Document email sent for ${instance.title} to ${user.email}`);
+    return true;
   }
 
   private async logChange(
