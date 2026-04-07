@@ -3,6 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { BusinessContextService } from '../identity/business-context.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
+import { getDocumentBlueprint, getCategoryDirective, getSensitivityLayers } from './document-blueprints';
 
 @Injectable()
 export class DocumentsService {
@@ -113,29 +114,103 @@ export class DocumentsService {
       : 'professional, clear, modern';
 
     const riskInstructions = this.getRiskInstructions(docType.riskTier);
+    const blueprint = getDocumentBlueprint(body.documentTypeSlug);
+    const categoryDirective = getCategoryDirective(docType.category.slug);
+    const sensitivityLayers = getSensitivityLayers({
+      brandSensitive: (docType as Record<string, unknown>).brandSensitive as boolean || false,
+      financialSensitive: (docType as Record<string, unknown>).financialSensitive as boolean || false,
+      legalSensitive: (docType as Record<string, unknown>).legalSensitive as boolean || false,
+      jurisdictionSensitive: (docType as Record<string, unknown>).jurisdictionSensitive as boolean || false,
+    });
 
-    const systemPrompt = [
-      `You are a professional business document drafting engine for Caribbean and international small businesses.`,
-      `You generate structured, well-organized documents from business intelligence data.`,
+    const systemPromptParts = [
+      `You are a senior business document architect operating at the highest professional standard.`,
+      `You produce comprehensive, authoritative documents for Caribbean and international small-to-medium businesses.`,
+      ``,
+      `QUALITY STANDARDS:`,
+      `- COMPREHENSIVE: Every section must be substantive and thorough — no placeholder text, no "insert here" gaps, no single-sentence sections. Each section should contain real, actionable content specific to this business.`,
+      `- APPLICABLE: All content must be immediately usable by the business without further drafting. Use the business's actual details, industry context, and operational reality — not generic templates.`,
+      `- MODERN: Reflect current best practices, digital-first operations, remote/hybrid work realities, modern compliance standards, and contemporary business language. Reference current legislation and frameworks.`,
+      `- RELIABLE: Every factual claim must be defensible, every legal clause must be structurally sound, every financial figure must be internally consistent. The document should withstand scrutiny from regulators, auditors, clients, or counterparties.`,
+      ``,
       riskInstructions,
+    ];
+
+    if (categoryDirective) {
+      systemPromptParts.push('', `CATEGORY STANDARDS:`, categoryDirective);
+    }
+
+    if (sensitivityLayers.length > 0) {
+      systemPromptParts.push('', ...sensitivityLayers);
+    }
+
+    if (blueprint?.qualityDirective) {
+      systemPromptParts.push('', `DOCUMENT-SPECIFIC DIRECTIVE:`, blueprint.qualityDirective);
+    }
+    if (blueprint?.legalFramework) {
+      systemPromptParts.push('', `LEGAL FRAMEWORK:`, blueprint.legalFramework);
+    }
+    if (blueprint?.financialStandards) {
+      systemPromptParts.push('', `FINANCIAL STANDARDS:`, blueprint.financialStandards);
+    }
+    if (blueprint?.modernPractices) {
+      systemPromptParts.push('', `MODERN PRACTICES:`, blueprint.modernPractices);
+    }
+
+    systemPromptParts.push(
+      '',
       `Tone: ${toneStr}`,
+      '',
+      `STRUCTURAL RULES:`,
+      `- Each section must contain at least 3-5 paragraphs or equivalent substantive content (lists, clauses, tables).`,
+      `- Use numbered clauses (1.1, 1.2) for legal/policy documents, narrative paragraphs for brand/messaging documents, and step-by-step instructions for operational documents.`,
+      `- Never use placeholder brackets like [Company Name] — always substitute the actual business details from the context provided.`,
+      `- For legal documents: use defined terms consistently (capitalize defined terms), include recitals, and use "shall" for obligations, "may" for permissions.`,
+      `- For financial documents: use precise numeric formatting, include currency codes, and show all calculations.`,
+      `- For brand documents: write in the brand's authentic voice, use specific examples from the business, and avoid corporate jargon.`,
+      '',
       `Output format: Return a JSON object with this structure:`,
       `{ "title": "document title", "sections": [ { "key": "section_key", "name": "Section Name", "content": "section content text", "riskScore": "GREEN|YELLOW|RED", "editableMode": "FREE|GUIDED|RESTRICTED" } ] }`,
       `Return ONLY valid JSON, no markdown formatting.`,
-    ].join('\n');
+    );
 
-    const userPrompt = [
+    const systemPrompt = systemPromptParts.join('\n');
+
+    const userPromptParts = [
       `BUSINESS CONTEXT:\n${contextBlock}`,
       '',
       `DOCUMENT TYPE: ${docType.name}`,
-      `CATEGORY: ${docType.category.name}`,
+      `CATEGORY: ${docType.category.name} (${docType.category.tier})`,
       `RISK TIER: ${docType.riskTier}`,
       docType.description ? `PURPOSE: ${docType.description}` : '',
-      body.contextInputs ? `ADDITIONAL CONTEXT:\n${JSON.stringify(body.contextInputs, null, 2)}` : '',
-      missingFields.length > 0 ? `NOTE: Missing profile fields (use reasonable defaults): ${missingFields.join(', ')}` : '',
+    ];
+
+    if (blueprint?.sections) {
+      userPromptParts.push('', `REQUIRED SECTIONS (generate ALL of these in this order):`);
+      for (const sec of blueprint.sections) {
+        const risk = sec.riskScore ? ` [Risk: ${sec.riskScore}]` : '';
+        const mode = sec.editableMode ? ` [EditMode: ${sec.editableMode}]` : '';
+        userPromptParts.push(`- ${sec.key} | "${sec.name}"${risk}${mode}: ${sec.guidance}`);
+      }
+    }
+
+    if (body.contextInputs) {
+      userPromptParts.push('', `ADDITIONAL CONTEXT:\n${JSON.stringify(body.contextInputs, null, 2)}`);
+    }
+    if (missingFields.length > 0) {
+      userPromptParts.push(`NOTE: Missing profile fields (infer reasonable, industry-appropriate defaults): ${missingFields.join(', ')}`);
+    }
+
+    userPromptParts.push(
       '',
-      `Generate a complete, well-structured ${docType.name} document with appropriate sections. Each section should be substantive and specific to this business.`,
-    ].filter(Boolean).join('\n');
+      blueprint
+        ? `Generate a complete, authoritative ${docType.name} document following the section structure above. Each section must be substantive, specific to this business, and meet the quality standards specified. Do not skip any section.`
+        : `Generate a complete, well-structured ${docType.name} document with comprehensive sections appropriate for this document type. Each section should be substantive (minimum 3 paragraphs or equivalent) and specific to this business. Consider what a professional consultant or attorney would include in a best-practice version of this document.`,
+    );
+
+    const userPrompt = userPromptParts.filter(Boolean).join('\n');
+
+    const tokenBudget = blueprint ? 6000 : (docType.riskTier === 'RED' ? 5000 : 4500);
 
     const result = await this.aiUsage.callAi({
       businessId,
@@ -144,8 +219,8 @@ export class DocumentsService {
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      maxTokens: 4000,
-      temperature: 0.7,
+      maxTokens: tokenBudget,
+      temperature: 0.4,
     });
 
     let parsed: { title?: string; sections?: Array<{ key: string; name: string; content: string; riskScore?: string; editableMode?: string }> };
@@ -246,12 +321,22 @@ export class DocumentsService {
     const currentContent = targetSections.map((s) => `### ${s.sectionName}\n${s.content}`).join('\n\n');
 
     const systemPrompt = [
-      'You are a professional document editor for Caribbean and international small businesses.',
-      'You adapt business documents based on user instructions while maintaining structure and compliance.',
+      'You are a senior document editor operating at the highest professional standard for Caribbean and international businesses.',
+      'You adapt business documents based on user instructions while maintaining structure, compliance, and quality.',
+      '',
+      'EDITING STANDARDS:',
+      '- Maintain the same comprehensive quality as the original — never reduce section depth or remove substantive content.',
+      '- Preserve all defined terms, clause numbering, and cross-references when making changes.',
+      '- Ensure edits are internally consistent with unchanged sections.',
+      '- Apply the user\'s instruction precisely but also improve adjacent content if the change creates inconsistencies.',
+      '',
       `Document risk tier: ${inst.documentType.riskTier}`,
       inst.documentType.riskTier === 'RED'
-        ? 'This is a HIGH-RISK document. Translate the instruction into structured changes where possible. Do not freestyle legal clauses.'
-        : '',
+        ? 'HIGH-RISK: Translate the instruction into structured clause changes. Do not freestyle legal language. Maintain conservative, precise phrasing. If the instruction would weaken legal protections, note this in the content.'
+        : inst.documentType.riskTier === 'YELLOW'
+          ? 'MEDIUM-RISK: Apply changes with professional precision. Maintain any caveats or conditions that protect the business.'
+          : 'STANDARD: Apply changes naturally while maintaining brand voice and readability.',
+      '',
       'Return a JSON object: { "sections": [ { "key": "section_key", "content": "updated content" } ] }',
       'Return ONLY valid JSON.',
     ].filter(Boolean).join('\n');
@@ -575,11 +660,37 @@ export class DocumentsService {
   private getRiskInstructions(riskTier: string): string {
     switch (riskTier) {
       case 'RED':
-        return 'HIGH-RISK DOCUMENT: Use conservative, precise language. Include appropriate disclaimers. Mark sections that need legal/professional review. Never use casual or informal phrasing in legal clauses. Use controlled clause structures where possible.';
+        return [
+          'HIGH-RISK DOCUMENT — ELEVATED DRAFTING STANDARDS:',
+          '- Use conservative, precise legal/regulatory language throughout. Every word carries weight.',
+          '- Structure with numbered clauses and sub-clauses (1.1, 1.1.1) for legal enforceability and cross-referencing.',
+          '- Define all key terms upon first use or in a dedicated Definitions section. Capitalize defined terms consistently.',
+          '- Include appropriate disclaimers, limitation of liability, and professional review recommendations.',
+          '- Mark sections containing legal conclusions, liability allocation, or financial commitments with riskScore: "RED" and editableMode: "RESTRICTED".',
+          '- Never use casual language, colloquialisms, or ambiguous phrasing in operative clauses.',
+          '- Include a final note: "This document was generated using AI-assisted drafting and should be reviewed by a qualified professional before execution or reliance."',
+          '- Use "shall" for binding obligations, "may" for discretionary permissions, "will" for statements of fact or intent.',
+          '- Address edge cases and exception handling — what happens when things go wrong.',
+        ].join('\n');
       case 'YELLOW':
-        return 'MEDIUM-RISK DOCUMENT: Use professional language with clear structure. Include relevant caveats where appropriate. Balance completeness with readability.';
+        return [
+          'MEDIUM-RISK DOCUMENT — PROFESSIONAL DRAFTING STANDARDS:',
+          '- Use professional, structured language that balances precision with accessibility.',
+          '- Include relevant caveats, conditions, and exceptions where they strengthen the document.',
+          '- Structure with clear headings and logical flow. Use numbered lists for procedures and policies.',
+          '- Address foreseeable scenarios and provide clear guidance for each.',
+          '- Mark financially or legally sensitive sections with riskScore: "YELLOW".',
+          '- Include review dates and version control where applicable.',
+        ].join('\n');
       default:
-        return 'LOW-RISK DOCUMENT: Use clear, engaging language appropriate to the brand. Prioritize readability and personality.';
+        return [
+          'STANDARD DOCUMENT — PROFESSIONAL QUALITY:',
+          '- Use clear, engaging language appropriate to the business\'s brand and audience.',
+          '- Prioritize readability, practical utility, and brand personality.',
+          '- Structure content for easy scanning: use headings, bullet points, and concise paragraphs.',
+          '- Personalize extensively using business context — this should feel custom-crafted, not templated.',
+          '- Include actionable recommendations and concrete examples where applicable.',
+        ].join('\n');
     }
   }
 
