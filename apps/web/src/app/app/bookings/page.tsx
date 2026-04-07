@@ -5,7 +5,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Calendar,
   Briefcase,
-  BarChart3,
   X,
   Share2,
   Link2,
@@ -50,7 +49,6 @@ import BookingSideSheet from "./components/booking-side-sheet";
 import TodayStrip from "./components/today-strip";
 import ScheduleFilters from "./components/schedule-filters";
 import CatalogCapacityTab from "./components/catalog-capacity-tab";
-import PerformanceTab from "./components/performance-tab";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { ShareLinkModal } from "@/components/ui/share-link-modal";
 import { SetupModeBanner } from "@/components/ui/setup-mode-banner";
@@ -62,8 +60,7 @@ import { PlanLimitBanner } from "@/components/ui/upgrade-prompt";
 
 const TABS: { key: Tab; label: string; icon: React.ElementType; tooltip?: string }[] = [
   { key: "schedule", label: "Schedule", icon: Calendar, tooltip: "View and manage upcoming bookings. Filter by status, date, or service." },
-  { key: "catalog", label: "Setup: Catalog & Capacity", icon: Briefcase, tooltip: "Configure bookable services, staff availability, and capacity limits." },
-  { key: "performance", label: "Performance", icon: BarChart3, tooltip: "Booking analytics: utilization rates, popular services, and revenue trends." },
+  { key: "catalog", label: "Setup", icon: Briefcase, tooltip: "Configure bookable services, staff availability, and capacity limits." },
 ];
 
 const slideVariants = {
@@ -132,8 +129,7 @@ export default function BookingsPage() {
       groupName: "Bookings",
       shortcuts: [
         { key: "1", action: () => handleTabChange("schedule"), description: "Schedule tab" },
-        { key: "2", action: () => handleTabChange("catalog"), description: "Catalog tab" },
-        { key: "3", action: () => handleTabChange("performance"), description: "Performance tab" },
+        { key: "2", action: () => handleTabChange("catalog"), description: "Setup tab" },
         { key: "n", action: () => setShowCreateBooking(true), description: "New booking" },
         { key: "r", action: () => void loadData(), description: "Refresh data" },
         { key: "Escape", action: () => {
@@ -577,14 +573,6 @@ export default function BookingsPage() {
               businessId={businessId}
             />
             </div>
-          )}
-          {tab === "performance" && (
-            <PerformanceTab
-              bookings={bookings}
-              services={services}
-              stats={stats}
-              scheduleHealth={scheduleHealth}
-            />
           )}
         </motion.div>
       </AnimatePresence>

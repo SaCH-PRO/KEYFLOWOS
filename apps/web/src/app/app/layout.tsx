@@ -31,10 +31,7 @@ import {
   MoreHorizontal,
   Receipt,
   Megaphone,
-  GraduationCap,
   FolderKanban,
-  Globe,
-  Link2,
   FileText,
   User,
 } from "lucide-react";
@@ -169,9 +166,9 @@ interface NavItem {
 
 const navGroups: { label: string; items: NavItem[] }[] = [
   {
-    label: "OPERATE",
+    label: "CORE",
     items: [
-      { label: "Command", href: "/app", icon: Zap },
+      { label: "Today", href: "/app", icon: Zap, exactMatch: true },
       { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
       { label: "Commerce", href: "/app/commerce", icon: CreditCard },
       { label: "Bookings", href: "/app/bookings", icon: Calendar },
@@ -181,7 +178,7 @@ const navGroups: { label: string; items: NavItem[] }[] = [
     label: "GROW",
     items: [
       { label: "Marketing", href: "/app/marketing", icon: Megaphone },
-      { label: "Marketplace", href: "/app/marketplace", icon: Globe },
+      { label: "Store", href: "/app/store", icon: Store },
     ],
   },
   {
@@ -189,26 +186,17 @@ const navGroups: { label: string; items: NavItem[] }[] = [
     items: [
       { label: "Expenses", href: "/app/expenses", icon: Receipt },
       { label: "Projects", href: "/app/projects", icon: FolderKanban },
-      { label: "Automations", href: "/app/automations", icon: Zap },
       { label: "Reports", href: "/app/reports", icon: BarChart3 },
-    ],
-  },
-  {
-    label: "SETUP",
-    items: [
-      { label: "Store Setup", href: "/app/store", icon: Store },
     ],
   },
 ];
 
 const bottomNavItems = [
-  { label: "Learn", href: "/app/learn", icon: GraduationCap },
-  { label: "Community", href: "/app/community", icon: Users },
   { label: "Settings", href: "/app/settings", icon: Settings },
 ];
 
 const mobileBottomNav = [
-  { label: "Command", href: "/app", icon: Zap },
+  { label: "Today", href: "/app", icon: Zap },
   { label: "Commerce", href: "/app/commerce", icon: CreditCard },
   { label: "Bookings", href: "/app/bookings", icon: Calendar },
   { label: "Contacts", href: "/app/crm/pipeline", icon: Users },

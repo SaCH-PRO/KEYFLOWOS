@@ -1,4 +1,4 @@
-import { Store, ShoppingBag, BarChart3, Truck, MessageSquare } from "lucide-react";
+import { Store, Truck } from "lucide-react";
 
 export type Banner = { text: string; type: "success" | "error" | "info" | "warning" };
 
@@ -11,12 +11,11 @@ export type DriftedItem = {
   commerceDuration: number | null;
 };
 
-export type TabKey = "setup" | "orders" | "insights";
+export type TabKey = "setup" | "orders";
 
 export const VIEW_TABS: { key: TabKey; label: string; icon: React.ElementType; tooltip?: string }[] = [
   { key: "setup", label: "My Store", icon: Store, tooltip: "Configure your storefront — branding, products, hours, and settings." },
   { key: "orders", label: "Orders", icon: Truck, tooltip: "Manage orders, fulfillment, delivery, and promo codes." },
-  { key: "insights", label: "Insights", icon: BarChart3, tooltip: "Analytics, reviews, and customer data." },
 ];
 
 export type Testimonial = { id: string; name: string; text: string; rating: number; date: string };

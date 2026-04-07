@@ -20,9 +20,7 @@ import { StoreSkeleton } from "./components/store-skeleton";
 import { StoreHeaderActions } from "./components/store-header-actions";
 import { StorefrontTab } from "./components/storefront-tab";
 import { ProductsHoursTab } from "./components/products-hours-tab";
-import { PerformanceTab } from "./components/performance-tab";
 import { FulfillmentTab } from "./components/fulfillment-tab";
-import { ReviewsPanel } from "./components/reviews-panel";
 import { VIEW_TABS, type TabKey } from "./components/store-types";
 
 type HeroSection = { imageUrl?: string; coverImageUrl?: string };
@@ -38,7 +36,6 @@ const SLIDE = {
 const GUIDE_STEPS = [
   { title: "Configure Storefront", description: "Set your URL, customize appearance, and add social proof." },
   { title: "Manage Orders", description: "Track orders, fulfillment, shipping, and delivery." },
-  { title: "View Insights", description: "Monitor readiness, conversions, and customer reviews." },
 ];
 
 export default function StorePage() {
@@ -85,7 +82,6 @@ export default function StorePage() {
     shortcuts: [
       { key: "1", description: "My Store", action: () => handleTabChange("setup") },
       { key: "2", description: "Orders", action: () => handleTabChange("orders") },
-      { key: "3", description: "Insights", action: () => handleTabChange("insights") },
       { key: "r", description: "Refresh", action: () => { void s.loadData(); } },
     ],
   }], [handleTabChange, s.loadData]);
@@ -119,14 +115,6 @@ export default function StorePage() {
               </div>
             )}
             {activeTab === "orders" && <FulfillmentTab businessId={s.businessId} />}
-            {activeTab === "insights" && (
-              <div className="space-y-6">
-                <div data-walkthrough="store-analytics">
-                  <PerformanceTab businessId={s.businessId} storeEnabled={s.storeEnabled} publicUrl={s.getPublicBookingUrl()} servicesCount={s.services.length} productsCount={s.commerceProducts.length} driftedCount={s.driftedItems.length} analytics={s.overviewAnalytics} businessName={s.businessData?.name} onTabChange={handleTabChange} onToggleStore={s.toggleStoreEnabled} />
-                </div>
-                <ReviewsPanel businessId={s.businessId} products={[...s.commerceProducts.map((p: any) => ({ id: p.id, name: p.name })), ...s.services.map((svc: any) => ({ id: svc.id, name: svc.name }))]} />
-              </div>
-            )}
           </motion.div>
         </AnimatePresence>
       </div>
