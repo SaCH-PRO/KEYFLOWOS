@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import {
   CreditCard,
   FileText,
@@ -19,7 +18,7 @@ import {
 import { toast } from "sonner";
 import Link from "next/link";
 import { PageHeader } from "@/components/ui/page-header";
-import { TabNav } from "@/components/ui/tab-nav";
+import { ModuleAccordion, type AccordionSection } from "@/components/ui/module-accordion";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { useCommerceShell } from "./hooks/use-commerce-shell";
@@ -36,7 +35,6 @@ import { InfoBadge } from "@/components/ui/info-badge";
 import { COMMERCE_WALKTHROUGH, METRIC_DEFINITIONS } from "@/lib/walkthrough-definitions";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useModuleEmit, useModuleEvent } from "@/hooks/use-module-events";
-import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { useRouter } from "next/navigation";
 import { formatCurrencyCompact } from "@/lib/currency";
 import { usePlan } from "@/hooks/use-plan";
@@ -77,8 +75,8 @@ export default function CommercePage() {
 
   const emitEvent = useModuleEmit();
   const router = useRouter();
-  const [slideDirection, setSlideDirection] = useState(0);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [accordionOpen, setAccordionOpen] = useState<string[]>(["invoices"]);
   const COMMERCE_TAB_KEYS = TABS.map((t) => t.key);
 
   const { tab } = overview;
@@ -87,18 +85,9 @@ export default function CommercePage() {
   const { invoices, quotes } = shell;
 
   const handleTabChange = useCallback((t: string) => {
-    if (t === tab) return;
-    const oldIndex = COMMERCE_TAB_KEYS.indexOf(tab);
-    const newIndex = COMMERCE_TAB_KEYS.indexOf(t);
-    setSlideDirection(newIndex > oldIndex ? 1 : -1);
     overview.handleTabChange(t);
-  }, [tab, overview.handleTabChange]);
-
-  const { swipeHandlers } = useSwipeTabs({
-    tabs: COMMERCE_TAB_KEYS,
-    activeTab: tab,
-    onTabChange: handleTabChange,
-  });
+    setAccordionOpen((prev) => prev.includes(t) ? prev : [...prev, t]);
+  }, [overview.handleTabChange]);
 
   useModuleEvent("commerce:create_quote_for_contact", useCallback((event: any) => {
     const { contactId, items } = event.data ?? {};
@@ -249,14 +238,6 @@ export default function CommercePage() {
       />
 
 
-      <div data-walkthrough="commerce-tabs">
-        <TabNav
-          tabs={TABS}
-          activeTab={tab}
-          onTabChange={handleWrappedTabChange}
-        />
-      </div>
-
       {(() => {
         const il = checkLimit("invoices");
         return <PlanLimitBanner resourceKey="invoices" label="invoices" currentUsage={il.current} limit={il.limit} isUnlimited={il.isUnlimited} nearLimit={il.nearLimit} atLimit={il.atLimit} upgradeTo={il.upgradeTo} />;
@@ -268,119 +249,106 @@ export default function CommercePage() {
         </div>
       )}
 
-      <div {...swipeHandlers} className="touch-pan-y">
-        <AnimatePresence mode="wait" custom={slideDirection}>
-          {tab === "invoices" && (
-            <motion.div key="invoices" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2" data-walkthrough="commerce-kpi">
-                  <MetricExplainer label={METRIC_DEFINITIONS.outstanding.label} explanation={METRIC_DEFINITIONS.outstanding.explanation} formula={METRIC_DEFINITIONS.outstanding.formula} goodValue={METRIC_DEFINITIONS.outstanding.goodValue}>
-                    <div className="rounded-xl border border-border/50 bg-card p-3 flex items-center gap-2.5">
-                      <div className="p-1.5 rounded-lg bg-amber-500/10 shrink-0">
-                        <Clock className="w-3.5 h-3.5 text-amber-400" />
-                      </div>
-                      <div className="min-w-0">
-                        <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Outstanding</span>
-                        <span className="text-sm font-bold text-amber-400">{formatCurrencyCompact(financialSummary.outstanding, businessCurrency)}</span>
-                      </div>
-                    </div>
-                  </MetricExplainer>
-                  <MetricExplainer label={METRIC_DEFINITIONS.overdue.label} explanation={METRIC_DEFINITIONS.overdue.explanation} formula={METRIC_DEFINITIONS.overdue.formula} goodValue={METRIC_DEFINITIONS.overdue.goodValue}>
-                    <div className="rounded-xl border border-border/50 bg-card p-3 flex items-center gap-2.5">
-                      <div className="p-1.5 rounded-lg bg-red-500/10 shrink-0">
-                        <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
-                      </div>
-                      <div className="min-w-0">
-                        <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Overdue</span>
-                        <span className="text-sm font-bold text-red-400">{formatCurrencyCompact(financialSummary.overdue, businessCurrency)}</span>
-                      </div>
-                    </div>
-                  </MetricExplainer>
-                  <MetricExplainer label={METRIC_DEFINITIONS.collected_this_month.label} explanation={METRIC_DEFINITIONS.collected_this_month.explanation} formula={METRIC_DEFINITIONS.collected_this_month.formula} goodValue={METRIC_DEFINITIONS.collected_this_month.goodValue}>
-                    <div className="rounded-xl border border-border/50 bg-card p-3 flex items-center gap-2.5">
-                      <div className="p-1.5 rounded-lg bg-emerald-500/10 shrink-0">
-                        <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
-                      </div>
-                      <div className="min-w-0">
-                        <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">This Month</span>
-                        <span className="text-sm font-bold text-emerald-400">{formatCurrencyCompact(financialSummary.collectedThisMonth, businessCurrency)}</span>
-                      </div>
-                    </div>
-                  </MetricExplainer>
-                </div>
-                <InvoicesPanel
-                  invoices={shell.invoices}
-                  contacts={shell.contacts}
-                  products={shell.products}
-                  businessId={businessId}
-                  loading={shell.loading}
-                  triggerNew={billing.triggerNewInvoice}
-                  setProducts={shell.setProducts}
-                  setInvoices={shell.setInvoices}
-                  gmailStatus={shell.integrations.gmailStatus}
-                  currency={businessCurrency}
-                  prefillContactId={billing.pendingPrefill?.contactId}
-                  prefillItems={billing.pendingPrefill?.items}
-                  prefillToken={billing.pendingPrefill?._token}
-                  onPrefillApplied={billing.clearPrefill}
-                  renderTimelineBadge={renderTimelineBadge}
-                  onViewContact={copilot.handleViewContact}
-                  onViewClientIntel={copilot.handleViewClientIntel}
-                  onAiDraftReminder={copilot.handleAiDraftReminder}
-                />
-              </div>
-            </motion.div>
-          )}
-          {tab === "quotes" && (
-            <motion.div key="quotes" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2" data-walkthrough="commerce-kpi">
+        <MetricExplainer label={METRIC_DEFINITIONS.outstanding.label} explanation={METRIC_DEFINITIONS.outstanding.explanation} formula={METRIC_DEFINITIONS.outstanding.formula} goodValue={METRIC_DEFINITIONS.outstanding.goodValue}>
+          <div className="rounded-xl border border-border/50 bg-card p-3 flex items-center gap-2.5">
+            <div className="p-1.5 rounded-lg bg-amber-500/10 shrink-0"><Clock className="w-3.5 h-3.5 text-amber-400" /></div>
+            <div className="min-w-0">
+              <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Outstanding</span>
+              <span className="text-sm font-bold text-amber-400">{formatCurrencyCompact(financialSummary.outstanding, businessCurrency)}</span>
+            </div>
+          </div>
+        </MetricExplainer>
+        <MetricExplainer label={METRIC_DEFINITIONS.overdue.label} explanation={METRIC_DEFINITIONS.overdue.explanation} formula={METRIC_DEFINITIONS.overdue.formula} goodValue={METRIC_DEFINITIONS.overdue.goodValue}>
+          <div className="rounded-xl border border-border/50 bg-card p-3 flex items-center gap-2.5">
+            <div className="p-1.5 rounded-lg bg-red-500/10 shrink-0"><AlertTriangle className="w-3.5 h-3.5 text-red-400" /></div>
+            <div className="min-w-0">
+              <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">Overdue</span>
+              <span className="text-sm font-bold text-red-400">{formatCurrencyCompact(financialSummary.overdue, businessCurrency)}</span>
+            </div>
+          </div>
+        </MetricExplainer>
+        <MetricExplainer label={METRIC_DEFINITIONS.collected_this_month.label} explanation={METRIC_DEFINITIONS.collected_this_month.explanation} formula={METRIC_DEFINITIONS.collected_this_month.formula} goodValue={METRIC_DEFINITIONS.collected_this_month.goodValue}>
+          <div className="rounded-xl border border-border/50 bg-card p-3 flex items-center gap-2.5">
+            <div className="p-1.5 rounded-lg bg-emerald-500/10 shrink-0"><DollarSign className="w-3.5 h-3.5 text-emerald-400" /></div>
+            <div className="min-w-0">
+              <span className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-wider block">This Month</span>
+              <span className="text-sm font-bold text-emerald-400">{formatCurrencyCompact(financialSummary.collectedThisMonth, businessCurrency)}</span>
+            </div>
+          </div>
+        </MetricExplainer>
+      </div>
+
+      <ModuleAccordion
+        openKeys={accordionOpen}
+        onOpenChange={setAccordionOpen}
+        sections={[
+          {
+            key: "invoices", label: "Invoices", icon: FileText,
+            badge: shell.invoices.length || undefined,
+            content: (
+              <InvoicesPanel
+                invoices={shell.invoices} contacts={shell.contacts} products={shell.products}
+                businessId={businessId} loading={shell.loading}
+                triggerNew={billing.triggerNewInvoice} setProducts={shell.setProducts}
+                setInvoices={shell.setInvoices} gmailStatus={shell.integrations.gmailStatus}
+                currency={businessCurrency}
+                prefillContactId={billing.pendingPrefill?.contactId}
+                prefillItems={billing.pendingPrefill?.items}
+                prefillToken={billing.pendingPrefill?._token}
+                onPrefillApplied={billing.clearPrefill}
+                renderTimelineBadge={renderTimelineBadge}
+                onViewContact={copilot.handleViewContact}
+                onViewClientIntel={copilot.handleViewClientIntel}
+                onAiDraftReminder={copilot.handleAiDraftReminder}
+              />
+            ),
+          },
+          {
+            key: "quotes", label: "Quotes", icon: CreditCard,
+            badge: shell.quotes.length || undefined,
+            content: (
               <QuotesPanel
-                quotes={shell.quotes}
-                contacts={shell.contacts}
-                products={shell.products}
-                businessId={businessId}
-                loading={shell.loading}
+                quotes={shell.quotes} contacts={shell.contacts} products={shell.products}
+                businessId={businessId} loading={shell.loading}
                 gmailStatus={shell.integrations.gmailStatus}
-                setProducts={shell.setProducts}
-                setQuotes={shell.setQuotes}
-                setInvoices={shell.setInvoices}
-                triggerNew={billing.triggerNewQuote}
+                setProducts={shell.setProducts} setQuotes={shell.setQuotes}
+                setInvoices={shell.setInvoices} triggerNew={billing.triggerNewQuote}
                 onSwitchToInvoices={() => handleTabChange("invoices")}
                 currency={businessCurrency}
-                prefillContactId={tab === "quotes" ? billing.pendingPrefill?.contactId : undefined}
-                prefillItems={tab === "quotes" ? billing.pendingPrefill?.items : undefined}
+                prefillContactId={billing.pendingPrefill?.contactId}
+                prefillItems={billing.pendingPrefill?.items}
                 prefillToken={billing.pendingPrefill?._token}
                 onPrefillApplied={billing.clearPrefill}
                 renderTimelineBadge={renderTimelineBadge}
                 onViewContact={copilot.handleViewContact}
                 onViewClientIntel={copilot.handleViewClientIntel}
               />
-            </motion.div>
-          )}
-          {tab === "payments" && (
-            <motion.div key="payments" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
+            ),
+          },
+          {
+            key: "payments", label: "Payments", icon: DollarSign,
+            content: (
               <PaymentsTab
-                invoices={shell.invoices}
-                currency={businessCurrency}
-                businessId={businessId}
-                contacts={shell.contacts}
+                invoices={shell.invoices} currency={businessCurrency}
+                businessId={businessId} contacts={shell.contacts}
                 setInvoices={shell.setInvoices}
                 onNavigateToInvoices={() => handleTabChange("invoices")}
               />
-            </motion.div>
-          )}
-          {tab === "recurring" && (
-            <motion.div key="recurring" custom={slideDirection} initial={{ opacity: 0, x: slideDirection * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: slideDirection * -60 }} transition={{ duration: 0.2, ease: "easeOut" }}>
+            ),
+          },
+          {
+            key: "recurring", label: "Recurring", icon: RefreshCw,
+            content: (
               <RecurringPanel
-                businessId={businessId}
-                contacts={shell.contacts}
-                products={shell.products}
-                triggerNew={billing.triggerNewSchedule}
+                businessId={businessId} contacts={shell.contacts}
+                products={shell.products} triggerNew={billing.triggerNewSchedule}
                 currency={businessCurrency}
               />
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+            ),
+          },
+        ] satisfies AccordionSection[]}
+      />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
         {[

@@ -5,7 +5,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Megaphone,
   Mail,
-  BarChart3,
   PenSquare,
   Users,
   CalendarDays,
@@ -30,7 +29,6 @@ import { CampaignsPanel } from "./components/campaigns-panel";
 import { LeadFormsPanel } from "./components/lead-forms-panel";
 import { CampaignActionQueue } from "./components/campaign-action-queue";
 import { FormOptimizationQueue } from "./components/form-optimization-queue";
-import MarketingInsightsTab from "./insights/marketing-insights-tab";
 import { SocialTabContent } from "./components/social-tab-content";
 import { MarketingCalendarTab } from "./components/marketing-calendar-tab";
 import { AudienceHealthSection } from "./components/campaign-intelligence-cards";
@@ -39,13 +37,12 @@ import type { EmailCampaign, LeadForm } from "@/lib/client";
 
 type CreateMode = "email" | "social";
 
-type MarketingTab = "create" | "calendar" | "audience" | "performance";
+type MarketingTab = "create" | "calendar" | "audience";
 
 const TABS: { key: MarketingTab; label: string; icon: React.ElementType; tooltip?: string }[] = [
   { key: "create", label: "Create & Schedule", icon: PenSquare, tooltip: "Create email, SMS, or social campaigns and schedule them for delivery." },
   { key: "calendar", label: "Calendar", icon: CalendarDays, tooltip: "Visual calendar of all scheduled and sent campaigns." },
   { key: "audience", label: "Audiences & Forms", icon: Users, tooltip: "Build audience segments and lead capture forms for targeting." },
-  { key: "performance", label: "Performance", icon: BarChart3, tooltip: "Track open rates, click-through rates, and campaign ROI." },
 ];
 
 const TAB_KEYS = TABS.map((t) => t.key);
@@ -55,7 +52,8 @@ const LEGACY_TAB_MAP: Record<string, MarketingTab> = {
   social: "create",
   campaigns: "create",
   forms: "audience",
-  insights: "performance",
+  insights: "create",
+  performance: "create",
 };
 
 const slideVariants = {
@@ -169,7 +167,6 @@ export default function MarketingPage() {
         { key: "1", description: "Create & Schedule", action: () => handleTabChange("create") },
         { key: "2", description: "Calendar", action: () => handleTabChange("calendar") },
         { key: "3", description: "Audiences & Forms", action: () => handleTabChange("audience") },
-        { key: "4", description: "Performance", action: () => handleTabChange("performance") },
         { key: "n", description: "New item", action: handleNewItem },
         { key: "r", description: "Refresh", action: () => { void mk.loadData(); } },
         { key: "/", description: "Search", action: () => setShowSearch(true) },
@@ -306,9 +303,6 @@ export default function MarketingPage() {
                   <LeadFormsPanel businessId={mk.businessId} forms={mk.forms} setForms={mk.setForms} onViewContact={mk.handleViewContact} onAiOptimize={() => handleAiAction("lead-form-optimizer")} />
                 </div>
               </div>
-            )}
-            {activeTab === "performance" && (
-              <MarketingInsightsTab campaigns={mk.campaigns} forms={mk.forms} submissions={mk.submissions} socialPosts={mk.socialPosts} stats={mk.stats} businessId={mk.businessId} />
             )}
           </motion.div>
         </AnimatePresence>

@@ -19,8 +19,6 @@ import { FeatureGuide } from "@/components/ui/feature-guide";
 import { ModuleWalkthrough, WalkthroughTrigger } from "@/components/ui/module-walkthrough";
 import { InfoBadge } from "@/components/ui/info-badge";
 import { CRM_WALKTHROUGH } from "@/lib/walkthrough-definitions";
-import { ContactsDatabase } from "./contacts-database";
-import { InsightsTab } from "./insights-tab";
 import { PipelineTabContent } from "./pipeline-tab-content";
 import { useContactsPipeline } from "./use-contacts-pipeline";
 import { useCrmAiHub } from "./hooks/use-crm-ai-hub";
@@ -40,7 +38,7 @@ export default function ContactsPage() {
   const emitEvent = useModuleEmit();
   const [slideDirection, setSlideDirection] = useState(0);
 
-  const CRM_TABS = ["contacts", "insights", "studio"];
+  const CRM_TABS = ["contacts"];
 
   const {
     workspaceLoading, workspaceError, businessId,
@@ -81,8 +79,6 @@ export default function ContactsPage() {
         { key: "n", description: "New contact", action: () => state.setShowAddMenu(true) },
         { key: "f", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('input[aria-label="Search contacts"]'); el?.focus(); } },
         { key: "1", description: "Contacts tab", action: () => setCrmViewTab("contacts") },
-        { key: "2", description: "Insights tab", action: () => setCrmViewTab("insights") },
-        { key: "3", description: "Studio tab", action: () => setCrmViewTab("studio") },
         { key: "r", description: "Refresh contacts", action: () => { void loadContacts(); void loadFlowData(); } },
         { key: "b", description: "Open broadcast", action: () => state.setShowBroadcast(true) },
       ],
@@ -220,93 +216,18 @@ export default function ContactsPage() {
         return <PlanLimitBanner resourceKey="contacts" label="contacts" currentUsage={cl.current} limit={cl.limit} isUnlimited={cl.isUnlimited} nearLimit={cl.nearLimit} atLimit={cl.atLimit} upgradeTo={cl.upgradeTo} />;
       })()}
 
-      <div data-walkthrough="crm-tabs">
-        <TabNav
-          tabs={[
-            { key: "contacts", label: "Contacts", icon: Users, tooltip: "Your full contact database — search, filter, and manage client relationships." },
-            { key: "insights", label: "Insights", icon: BarChart3, tooltip: "AI-powered analytics: lead scoring, churn risk, and engagement patterns." },
-            { key: "studio", label: "Studio", icon: Layers, tooltip: "Visual pipeline builder for custom contact workflows and stages." },
-          ]}
-          activeTab={crmViewTab}
-          onTabChange={handleTabChange}
-        />
-      </div>
-
-      <div {...swipeHandlers} className="touch-pan-y">
-        <AnimatePresence mode="wait" custom={slideDirection}>
-          {crmViewTab === "contacts" && (
-            <motion.div
-              key="contacts"
-              custom={slideDirection}
-              initial={{ opacity: 0, x: slideDirection * 60 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: slideDirection * -60 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-            >
-              <PipelineTabContent
-                state={state}
-                nextActions={nextActions}
-                autopilotActions={autopilotActions}
-                autopilotPaused={autopilotPaused}
-                onCompleteNextAction={handleCompleteNextAction}
-                onViewEngageContact={handleViewEngageContact}
-                onDoAction={handleDoAction}
-                onToggleAutopilotPause={handleToggleAutopilotPause}
-                onApproveAutopilot={handleApproveAutopilot}
-                onDenyAutopilot={handleDenyAutopilot}
-              />
-            </motion.div>
-          )}
-
-          {crmViewTab === "insights" && (
-            <motion.div
-              key="insights"
-              custom={slideDirection}
-              initial={{ opacity: 0, x: slideDirection * 60 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: slideDirection * -60 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-            >
-              <InsightsTab
-                flowIntelligence={flowIntelligence}
-                revenueData={revenueData}
-                contacts={contacts}
-                loading={flowDataLoading}
-                businessId={businessId}
-                onViewCold={handleViewCold}
-                onViewReady={handleViewReady}
-                onViewExpiringQuotes={handleViewExpiringQuotes}
-                onViewOverdueInvoices={handleViewOverdueInvoices}
-                onRefresh={handleInsightsRefresh}
-                onNavigatePipeline={handleNavigatePipeline}
-              />
-            </motion.div>
-          )}
-
-          {crmViewTab === "studio" && businessId && (
-            <motion.div
-              key="studio"
-              custom={slideDirection}
-              initial={{ opacity: 0, x: slideDirection * 60 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: slideDirection * -60 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-            >
-              <ContactsDatabase
-                businessId={businessId}
-                contacts={databaseContacts}
-                onRefresh={handleRefreshContacts}
-                activeListId={activeListId}
-                onSelectList={handleSelectList}
-                onListsLoaded={setListsCount}
-                onSelectContact={handleSelectDbContact}
-                favoriteIds={state.favoriteIds}
-                onToggleFavorite={state.handleToggleFavorite}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+      <PipelineTabContent
+        state={state}
+        nextActions={nextActions}
+        autopilotActions={autopilotActions}
+        autopilotPaused={autopilotPaused}
+        onCompleteNextAction={handleCompleteNextAction}
+        onViewEngageContact={handleViewEngageContact}
+        onDoAction={handleDoAction}
+        onToggleAutopilotPause={handleToggleAutopilotPause}
+        onApproveAutopilot={handleApproveAutopilot}
+        onDenyAutopilot={handleDenyAutopilot}
+      />
 
       <BroadcastDrawer
         isOpen={showBroadcast}

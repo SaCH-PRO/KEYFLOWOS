@@ -3,11 +3,11 @@
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import { AnimatePresence } from "framer-motion";
-import { Receipt, DollarSign, Target, Store, Download, ArrowUp, ArrowDown, Minus, BarChart3 } from "lucide-react";
+import { Receipt, DollarSign, Target, Store, Download, ArrowUp, ArrowDown, Minus } from "lucide-react";
 import { deleteExpense, getExpenseExportUrl, Expense } from "@/lib/client";
 import { getAuthHeaders } from "@/lib/api";
 import { PageHeader } from "@/components/ui/page-header";
-import { TabNav } from "@/components/ui/tab-nav";
+import { ModuleAccordion, type AccordionSection } from "@/components/ui/module-accordion";
 
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { FeatureGuide } from "@/components/ui/feature-guide";
@@ -22,7 +22,6 @@ import { ExpenseList } from "./components/expense-list";
 import { ExpenseFormModal } from "./components/expense-form-modal";
 import { ExpenseBudgetsTab } from "./components/expense-budgets-tab";
 import { ExpenseCategoriesTab } from "./components/expense-categories-tab";
-import { ExpenseAnalyticsTab } from "./components/expense-analytics-tab";
 import { ExpenseDetailModal } from "./components/expense-detail-modal";
 import { ExpenseTaxCalc } from "./components/expense-tax-calc";
 
@@ -37,8 +36,6 @@ function ChangeIndicator({ value }: { value: number }) {
   );
 }
 
-type Tab = "expenses" | "budgets" | "analytics";
-
 const GUIDE_STEPS = [
   { title: "Add Expenses", description: "Record business expenses with amount, vendor, date, and payment method." },
   { title: "Set Budgets", description: "Create monthly spending budgets per category and get alerts when approaching limits." },
@@ -50,7 +47,6 @@ const GUIDE_STEPS = [
 
 export default function ExpensesPage() {
   const d = useExpensesData();
-  const [activeTab, setActiveTab] = useState<Tab>("expenses");
   const [showModal, setShowModal] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
@@ -129,33 +125,32 @@ export default function ExpensesPage() {
           </MetricExplainer>
         </div>
       </div>
-      <div data-walkthrough="expenses-tabs">
-        <TabNav tabs={[
-          { key: "expenses", label: "Expenses", icon: Receipt, tooltip: "Log and track all business expenses by category and vendor." },
-          { key: "budgets", label: "Budgets", icon: Target, tooltip: "Set spending limits per category and monitor budget utilization." },
-          { key: "analytics", label: "Analytics", icon: BarChart3, tooltip: "Spending trends, category breakdowns, and cost projections." },
-        ]} activeTab={activeTab} onTabChange={(k) => setActiveTab(k as Tab)} layoutId="expenses-tab-underline" />
-      </div>
-      {(activeTab === "expenses" || activeTab === "analytics") && (
-        <ExpenseFilters period={d.period} setPeriod={d.setPeriod} customStart={d.customStart} setCustomStart={d.setCustomStart} customEnd={d.customEnd} setCustomEnd={d.setCustomEnd} searchQuery={d.searchQuery} setSearchQuery={d.setSearchQuery} />
-      )}
-      <AnimatePresence mode="wait">
-        {activeTab === "expenses" && (
-          <div className="space-y-4">
-            <ExpenseList expenses={d.expenses} totalExpenses={d.totalExpenses} categories={d.categories} filterCategory={d.filterCategory} setFilterCategory={d.setFilterCategory} filterPayment={d.filterPayment} setFilterPayment={d.setFilterPayment} page={d.page} setPage={d.setPage} pageSize={d.pageSize} setPageSize={d.setPageSize} onEdit={openEditModal} onDelete={handleDelete} onViewDetail={setDetailExpense} onAdd={openAddModal} />
-            <ExpenseTaxCalc summary={d.summary} />
-          </div>
-        )}
-        {activeTab === "budgets" && (
-          <div className="space-y-6" data-walkthrough="expenses-budgets">
-            {d.businessId && <ExpenseBudgetsTab businessId={d.businessId} budgets={d.budgets} categories={d.categories} onReload={d.loadData} />}
-            {d.businessId && <ExpenseCategoriesTab businessId={d.businessId} categories={d.categories} setCategories={d.setCategories} />}
-          </div>
-        )}
-        {activeTab === "analytics" && (
-          <ExpenseAnalyticsTab summary={d.summary} vendors={d.vendors} loading={d.loading} />
-        )}
-      </AnimatePresence>
+      <ModuleAccordion
+        defaultOpen={["expenses"]}
+        sections={[
+          {
+            key: "expenses", label: "Expenses", icon: Receipt,
+            badge: d.totalExpenses || undefined,
+            content: (
+              <div className="space-y-4">
+                <ExpenseFilters period={d.period} setPeriod={d.setPeriod} customStart={d.customStart} setCustomStart={d.setCustomStart} customEnd={d.customEnd} setCustomEnd={d.setCustomEnd} searchQuery={d.searchQuery} setSearchQuery={d.setSearchQuery} />
+                <ExpenseList expenses={d.expenses} totalExpenses={d.totalExpenses} categories={d.categories} filterCategory={d.filterCategory} setFilterCategory={d.setFilterCategory} filterPayment={d.filterPayment} setFilterPayment={d.setFilterPayment} page={d.page} setPage={d.setPage} pageSize={d.pageSize} setPageSize={d.setPageSize} onEdit={openEditModal} onDelete={handleDelete} onViewDetail={setDetailExpense} onAdd={openAddModal} />
+                <ExpenseTaxCalc summary={d.summary} />
+              </div>
+            ),
+          },
+          {
+            key: "budgets", label: "Budgets & Categories", icon: Target,
+            badge: d.budgets.length || undefined,
+            content: d.businessId ? (
+              <div className="space-y-6" data-walkthrough="expenses-budgets">
+                <ExpenseBudgetsTab businessId={d.businessId} budgets={d.budgets} categories={d.categories} onReload={d.loadData} />
+                <ExpenseCategoriesTab businessId={d.businessId} categories={d.categories} setCategories={d.setCategories} />
+              </div>
+            ) : null,
+          },
+        ] satisfies AccordionSection[]}
+      />
       <AnimatePresence>{showModal && d.businessId && <ExpenseFormModal businessId={d.businessId} categories={d.categories} editingExpense={editingExpense} onClose={() => setShowModal(false)} onSaved={d.loadData} />}</AnimatePresence>
       <AnimatePresence>{detailExpense && <ExpenseDetailModal expense={detailExpense} onClose={() => setDetailExpense(null)} onEdit={openEditModal} />}</AnimatePresence>
 
