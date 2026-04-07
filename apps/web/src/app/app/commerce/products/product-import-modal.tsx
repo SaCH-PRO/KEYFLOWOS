@@ -413,7 +413,7 @@ export const ProductImportModal = React.memo(function ProductImportModal({
                               />
                               <select
                                 value={item.category || "PRODUCT"}
-                                onChange={e => updateExtractedItem(i, { category: e.target.value })}
+                                onChange={e => updateExtractedItem(i, { category: e.target.value as "SERVICE" | "PACKAGE" | "PRODUCT" })}
                                 className="flex-1 px-2 py-1.5 rounded-lg bg-white/5 border border-border text-sm focus:outline-none"
                               >
                                 <option value="SERVICE">Service</option>

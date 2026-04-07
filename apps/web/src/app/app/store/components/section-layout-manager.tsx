@@ -37,6 +37,7 @@ const SECTION_ICONS: Record<StorefrontSectionType, React.ElementType> = {
   faq: HelpCircle,
   policies: FileText,
   contact: Phone,
+  trust: Star,
 };
 
 export function SectionLayoutManager({ config, onConfigChange, onSave, saving }: Props) {
@@ -109,8 +110,9 @@ export function SectionLayoutManager({ config, onConfigChange, onSave, saving }:
       <div className="p-5 space-y-2">
         <AnimatePresence>
           {sections.map((section, idx) => {
-            const meta = SECTION_LABELS[section.type];
-            const Icon = SECTION_ICONS[section.type];
+            const sType = section.type ?? "hero";
+            const meta = SECTION_LABELS[sType];
+            const Icon = SECTION_ICONS[sType];
             return (
               <motion.div
                 key={section.type}

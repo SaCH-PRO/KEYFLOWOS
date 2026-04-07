@@ -36,12 +36,12 @@ export class BusinessContextService {
       db.business.findUnique({ where: { id: businessId } }),
       db.service.findMany({
         where: { businessId, deletedAt: null },
-        select: { name: true, price: true, duration: true, category: true },
+        select: { name: true, price: true, duration: true },
         take: 20,
       }),
       db.product.findMany({
         where: { businessId, deletedAt: null },
-        select: { name: true, price: true, category: true, type: true },
+        select: { name: true, price: true, category: true },
         take: 20,
       }),
       db.contact.aggregate({
@@ -59,9 +59,9 @@ export class BusinessContextService {
       }),
       db.businessGuidanceProfile.findUnique({
         where: { businessId },
-        select: {
-          offerProfile: { select: { coreOffer: true, targetAudience: true, uniqueValue: true } },
-          customerProfile: { select: { targetDemographic: true, painPoints: true } },
+        include: {
+          offer: { select: { primaryOffer: true, valueProposition: true, differentiators: true } },
+          customer: { select: { targetDemographic: true, customerPainPoints: true } },
         },
       }).catch(() => null),
     ]);
@@ -78,7 +78,7 @@ export class BusinessContextService {
     let servicesSummary = '';
     if (serviceData.length > 0) {
       const serviceNames = serviceData.map(s => s.name);
-      const categories = [...new Set(serviceData.map(s => s.category).filter(Boolean))];
+      const categories: string[] = [];
       const avgPrice = serviceData.reduce((sum, s) => sum + (Number(s.price) || 0), 0) / serviceData.length;
       servicesSummary = `Offers ${serviceData.length} service(s): ${serviceNames.slice(0, 8).join(', ')}${serviceNames.length > 8 ? ` (+${serviceNames.length - 8} more)` : ''}`;
       if (categories.length > 0) servicesSummary += `. Categories: ${categories.join(', ')}`;
@@ -88,9 +88,9 @@ export class BusinessContextService {
     let productsSummary = '';
     if (productData.length > 0) {
       const productNames = productData.map(p => p.name);
-      const types = [...new Set(productData.map(p => p.type).filter(Boolean))];
+      const categories = [...new Set(productData.map(p => p.category).filter(Boolean))];
       productsSummary = `Sells ${productData.length} product(s): ${productNames.slice(0, 8).join(', ')}${productNames.length > 8 ? ` (+${productNames.length - 8} more)` : ''}`;
-      if (types.length > 0) productsSummary += `. Types: ${types.join(', ')}`;
+      if (categories.length > 0) productsSummary += `. Categories: ${categories.join(', ')}`;
     }
 
     const contactCount = contactStats._count || 0;
@@ -119,13 +119,13 @@ export class BusinessContextService {
     let guidanceInsights = '';
     if (guidanceProfile) {
       const parts: string[] = [];
-      const offer = guidanceProfile.offerProfile;
-      const customer = guidanceProfile.customerProfile;
-      if (offer?.coreOffer) parts.push(`Core offer: ${offer.coreOffer}`);
-      if (offer?.targetAudience) parts.push(`Target audience: ${offer.targetAudience}`);
-      if (offer?.uniqueValue) parts.push(`Unique value: ${offer.uniqueValue}`);
+      const offer = guidanceProfile.offer;
+      const customer = guidanceProfile.customer;
+      if (offer?.primaryOffer) parts.push(`Core offer: ${offer.primaryOffer}`);
+      if (offer?.valueProposition) parts.push(`Value proposition: ${offer.valueProposition}`);
+      if (offer?.differentiators?.length) parts.push(`Differentiators: ${offer.differentiators.join(', ')}`);
       if (customer?.targetDemographic) parts.push(`Demographics: ${customer.targetDemographic}`);
-      if (customer?.painPoints) parts.push(`Customer pain points: ${customer.painPoints}`);
+      if (customer?.customerPainPoints?.length) parts.push(`Customer pain points: ${customer.customerPainPoints.join(', ')}`);
       guidanceInsights = parts.join('. ');
     }
 

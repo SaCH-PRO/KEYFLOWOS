@@ -211,7 +211,7 @@ export function WorkflowConfig({ businessId }: { businessId: string | null }) {
                                     <input
                                       type="number"
                                       className="w-20 rounded-lg border border-border/60 bg-slate-900 px-2 py-1 text-xs text-right"
-                                      value={wf.config[field.key] ?? field.default}
+                                      value={String(wf.config[field.key] ?? field.default ?? "")}
                                       onChange={(e) =>
                                         handleConfigUpdate(wf, {
                                           ...wf.config,
@@ -223,7 +223,7 @@ export function WorkflowConfig({ businessId }: { businessId: string | null }) {
                                     <input
                                       type="text"
                                       className="w-32 rounded-lg border border-border/60 bg-slate-900 px-2 py-1 text-xs"
-                                      value={wf.config[field.key] ?? field.default}
+                                      value={String(wf.config[field.key] ?? field.default ?? "")}
                                       onChange={(e) =>
                                         handleConfigUpdate(wf, {
                                           ...wf.config,

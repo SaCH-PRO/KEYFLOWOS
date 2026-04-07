@@ -406,7 +406,7 @@ export function AiSearchBar({ onSelectContact, onApplyFilters, onExecuteCommand 
               </div>
             </div>
 
-            {commandResult.action === "ambiguous_contact" && commandResult.params?.candidates && (
+            {commandResult.action === "ambiguous_contact" && Array.isArray(commandResult.params?.candidates) && (
               <div className="space-y-1 ml-12">
                 <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider">Did you mean?</span>
                 {(commandResult.params.candidates as Array<{ id: string; name: string }>).map((c) => (

@@ -161,9 +161,9 @@ export default function StudioPage() {
           hasProfile: !!(biz?.name && biz?.name !== "My Business"),
           hasLogo: !!biz?.logoUrl,
           hasServices: (svcRes.data?.length ?? 0) > 0,
-          hasContacts: (contactRes.data?.length ?? 0) > 0,
+          hasContacts: (contactRes.data?.contacts?.length ?? 0) > 0,
           hasProducts: (prodRes.data?.length ?? 0) > 0,
-          hasHours: !!(biz?.businessHours && Object.values(biz.businessHours as Record<string, { enabled?: boolean }>).some((h) => h?.enabled)),
+          hasHours: !!((biz as any)?.businessHours && Object.values((biz as any).businessHours as Record<string, { enabled?: boolean }>).some((h) => h?.enabled)),
           hasComplianceChecked: !!biz?.complianceStatus,
         });
       } catch {

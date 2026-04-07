@@ -671,8 +671,8 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
 
                 {isSectionEnabled("hero") && renderHeroExtras()}
 
-                {sections.filter((s) => s.enabled && s.type !== "hero" && s.type !== "categories" && sectionRenderers[s.type]).map((s) => {
-                  const renderer = sectionRenderers[s.type];
+                {sections.filter((s) => s.enabled && s.type !== "hero" && s.type !== "categories" && s.type && sectionRenderers[s.type!]).map((s) => {
+                  const renderer = sectionRenderers[s.type!];
                   const content = renderer();
                   if (!content) return null;
                   return <div key={s.type}>{content}</div>;

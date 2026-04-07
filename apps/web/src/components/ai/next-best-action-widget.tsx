@@ -55,21 +55,21 @@ const IMPACT_STYLES: Record<string, { bg: string; text: string }> = {
 function deriveActions(aiActions: AiNextAction[]): CrossModuleAction[] {
   return aiActions.slice(0, 6).map((a, i) => {
     const module = inferModule(a);
+    const typeLabel = a.type.replace(/_/g, " ");
     return {
-      id: a.id ?? `nba-${i}`,
+      id: `nba-${i}`,
       module,
-      title: a.title ?? a.action ?? "Recommended action",
-      description: a.reason ?? a.description ?? "",
+      title: `${typeLabel}: ${a.contactName}`,
+      description: a.reason ?? "",
       impact: a.priority === "high" ? "high" : a.priority === "low" ? "low" : "medium",
       type: inferType(a),
       link: moduleLink(module),
-      estimatedValue: a.estimatedImpact ?? undefined,
     };
   });
 }
 
 function inferModule(a: AiNextAction): CrossModuleAction["module"] {
-  const text = `${a.title} ${a.action} ${a.reason} ${a.description}`.toLowerCase();
+  const text = `${a.type} ${a.reason} ${a.contactName}`.toLowerCase();
   if (text.includes("invoice") || text.includes("payment") || text.includes("revenue")) return "commerce";
   if (text.includes("booking") || text.includes("appointment") || text.includes("schedule")) return "bookings";
   if (text.includes("campaign") || text.includes("email") || text.includes("marketing")) return "marketing";
@@ -78,7 +78,7 @@ function inferModule(a: AiNextAction): CrossModuleAction["module"] {
 }
 
 function inferType(a: AiNextAction): CrossModuleAction["type"] {
-  const text = `${a.title} ${a.action} ${a.reason}`.toLowerCase();
+  const text = `${a.type} ${a.reason} ${a.contactName}`.toLowerCase();
   if (text.includes("revenue") || text.includes("upsell") || text.includes("invoice")) return "revenue";
   if (text.includes("churn") || text.includes("retain") || text.includes("follow")) return "retention";
   if (text.includes("growth") || text.includes("campaign") || text.includes("lead")) return "growth";

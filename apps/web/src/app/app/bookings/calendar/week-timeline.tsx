@@ -187,7 +187,7 @@ export default function WeekTimeline({
                             <div className="font-medium truncate flex items-center gap-0.5">
                               {formatTime(b.startTime)}
                               {b.notes && (
-                                <StickyNote className="w-2 h-2 opacity-60 shrink-0" title="Has notes" />
+                                <StickyNote className="w-2 h-2 opacity-60 shrink-0" aria-label="Has notes" />
                               )}
                             </div>
                             <div className="truncate opacity-80">

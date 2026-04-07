@@ -182,7 +182,7 @@ export default function DayTimeline({
                                 {b.status}
                               </span>
                               {b.notes && (
-                                <StickyNote className="w-3 h-3 text-muted-foreground opacity-60" title="Has notes" />
+                                <StickyNote className="w-3 h-3 text-muted-foreground opacity-60" aria-label="Has notes" />
                               )}
                             </div>
                             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">

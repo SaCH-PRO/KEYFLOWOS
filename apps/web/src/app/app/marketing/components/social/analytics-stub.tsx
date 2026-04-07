@@ -56,8 +56,8 @@ export function AnalyticsPanel({ posts }: Props) {
   const loadAnalytics = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await fetchSocialAnalytics();
-      setAnalytics(data);
+      const result = await fetchSocialAnalytics();
+      if (result.data) setAnalytics(result.data);
     } catch {
     } finally {
       setLoading(false);

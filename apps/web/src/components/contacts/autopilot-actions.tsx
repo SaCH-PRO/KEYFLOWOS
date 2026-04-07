@@ -61,7 +61,7 @@ const TONE_COLORS: Record<string, string> = {
 
 const stagger = {
   container: { hidden: {}, visible: { transition: { staggerChildren: 0.04 } } },
-  item: { hidden: { opacity: 0, x: -8 }, visible: { opacity: 1, x: 0, transition: { duration: 0.35, ease: [0.25, 0.46, 0.45, 0.94] } } },
+  item: { hidden: { opacity: 0, x: -8 }, visible: { opacity: 1, x: 0, transition: { duration: 0.35, ease: [0.25, 0.46, 0.45, 0.94] as const } } },
 };
 
 function DraftPreview({ draft, onSendWhatsApp, onSendEmail, onMarkDone, onCopy, sending }: {

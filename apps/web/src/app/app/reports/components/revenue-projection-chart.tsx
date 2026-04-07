@@ -194,10 +194,10 @@ export function RevenueProjectionChart({
                     borderRadius: 8,
                     fontSize: 12,
                   }}
-                  formatter={(value: number, name: string) => [
+                  formatter={((value: number, name: string) => [
                     formatCurrency(value, currency),
                     name === "historical" ? "Historical" : "Projected",
-                  ]}
+                  ]) as any}
                   labelFormatter={(label) => {
                     if (label === "Today") return "Today (current)";
                     if (label.startsWith("-")) return `${label} ago`;

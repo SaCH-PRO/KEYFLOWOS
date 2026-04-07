@@ -232,9 +232,9 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
     setFormColor(list.color || LIST_COLORS[0]);
     setFormType(list.type as "MANUAL" | "SMART");
     if (list.filters) {
-      setFormFilterStatus(list.filters.status || []);
-      setFormFilterTags((list.filters.tags || []).join(", "));
-      setFormFilterSource(list.filters.source || "");
+      setFormFilterStatus((list.filters.status as string[]) || []);
+      setFormFilterTags(Array.isArray(list.filters.tags) ? (list.filters.tags as string[]).join(", ") : "");
+      setFormFilterSource(String(list.filters.source || ""));
       setFormFilterDays(list.filters.createdWithinDays ?? "");
       setFormFilterAfter(list.filters.createdAfter ?? "");
       setFormFilterBefore(list.filters.createdBefore ?? "");
@@ -426,7 +426,7 @@ export function ContactLists({ businessId, onSelectList, activeListId, onListsLo
                   key={c}
                   onClick={() => setFormColor(c)}
                   className={`w-5 h-5 rounded-full transition-all ${formColor === c ? "ring-2 ring-offset-2 ring-offset-background" : ""}`}
-                  style={{ backgroundColor: c, ringColor: c }}
+                  style={{ backgroundColor: c, outlineColor: c }}
                   aria-label={`Color ${c}`}
                   aria-pressed={formColor === c}
                 />

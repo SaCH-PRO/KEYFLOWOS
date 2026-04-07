@@ -36,8 +36,8 @@ export function useContactsPipeline() {
     businessId, contacts, setContacts,
     selectedContactId, setSelectedContactId,
     contactDetail, setContactDetail,
-    selectedIds, setSelectedIds, setSelectMode,
-    setShowMobileDetail: detail.setShowMobileDetail,
+    selectedIds, setSelectedIds, setSelectMode: setSelectMode as React.Dispatch<React.SetStateAction<boolean>>,
+    setShowMobileDetail: (v: boolean) => detail.setShowMobileDetail(v),
     loadContacts, loadDetail, loadFlowData,
   });
 
