@@ -189,7 +189,6 @@ const navGroups: { label: string; items: NavItem[] }[] = [
     items: [
       { label: "Expenses", href: "/app/expenses", icon: Receipt },
       { label: "Projects", href: "/app/projects", icon: FolderKanban },
-      { label: "Documents", href: "/app/documents", icon: FileText },
       { label: "Automations", href: "/app/automations", icon: Zap },
       { label: "Reports", href: "/app/reports", icon: BarChart3 },
     ],
