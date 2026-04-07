@@ -9,8 +9,9 @@ import {
   Palette, Settings, Users, Lock, Globe, TrendingUp,
   Truck, Award, Home, Package, Scale, Globe2,
   ShieldCheck, UserCheck, Sparkles, Eye, Compass, Zap,
-  Mail, ExternalLink, X, Check,
+  Mail, ExternalLink, X, Check, HardDrive,
 } from "lucide-react";
+import GoogleDriveBrowser from "./google-drive-browser";
 
 interface DocumentCategory {
   id: string;
@@ -190,7 +191,7 @@ export default function DocumentsTab({ businessId, onGoToGuidance, guidanceCompl
   const [health, setHealth] = useState<HealthData | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState<string | null>(null);
-  const [view, setView] = useState<"catalog" | "documents">("catalog");
+  const [view, setView] = useState<"catalog" | "documents" | "drive">("catalog");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [showGenerator, setShowGenerator] = useState(false);
@@ -228,6 +229,13 @@ export default function DocumentsTab({ businessId, onGoToGuidance, guidanceCompl
   }, [businessId]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("drive") === "success" || params.get("drive") === "error") {
+      setView("drive");
+    }
+  }, []);
 
   const handleGenerate = async () => {
     if (!businessId || !selectedType) return;
@@ -360,29 +368,45 @@ export default function DocumentsTab({ businessId, onGoToGuidance, guidanceCompl
           >
             My Documents ({instances.length})
           </button>
+          <button
+            type="button"
+            onClick={() => setView("drive")}
+            className={`px-3 py-2 text-xs font-medium min-h-[44px] transition-colors flex items-center gap-1.5 ${
+              view === "drive"
+                ? "bg-[hsl(var(--kf-accent1))] text-white"
+                : "bg-[hsl(var(--card))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
+            }`}
+          >
+            <HardDrive className="w-3.5 h-3.5" />
+            Google Drive
+          </button>
         </div>
 
-        <div className="relative flex-1 min-w-[140px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[hsl(var(--muted-foreground))]" />
-          <input
-            type="text"
-            placeholder="Search..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 rounded-lg bg-[hsl(var(--card))] border border-[hsl(var(--border))] text-sm min-h-[44px] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))]"
-          />
-        </div>
+        {view !== "drive" && (
+          <>
+            <div className="relative flex-1 min-w-[140px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[hsl(var(--muted-foreground))]" />
+              <input
+                type="text"
+                placeholder="Search..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 rounded-lg bg-[hsl(var(--card))] border border-[hsl(var(--border))] text-sm min-h-[44px] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))]"
+              />
+            </div>
 
-        <select
-          value={selectedCategory || ""}
-          onChange={(e) => setSelectedCategory(e.target.value || null)}
-          className="px-3 py-2 rounded-lg bg-[hsl(var(--card))] border border-[hsl(var(--border))] text-xs min-h-[44px] text-[hsl(var(--foreground))]"
-        >
-          <option value="">All Categories</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.slug}>{c.name}</option>
-          ))}
-        </select>
+            <select
+              value={selectedCategory || ""}
+              onChange={(e) => setSelectedCategory(e.target.value || null)}
+              className="px-3 py-2 rounded-lg bg-[hsl(var(--card))] border border-[hsl(var(--border))] text-xs min-h-[44px] text-[hsl(var(--foreground))]"
+            >
+              <option value="">All Categories</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.slug}>{c.name}</option>
+              ))}
+            </select>
+          </>
+        )}
       </div>
 
       {view === "catalog" && (
@@ -519,6 +543,17 @@ export default function DocumentsTab({ businessId, onGoToGuidance, guidanceCompl
               </button>
             ))
           )}
+        </div>
+      )}
+
+      {view === "drive" && businessId && (
+        <GoogleDriveBrowser businessId={businessId} />
+      )}
+
+      {view === "drive" && !businessId && (
+        <div className="text-center py-12 bg-[hsl(var(--card))] rounded-xl border border-[hsl(var(--border))]">
+          <HardDrive className="w-10 h-10 mx-auto text-[hsl(var(--muted-foreground))] mb-3" />
+          <p className="text-sm text-[hsl(var(--muted-foreground))]">Set up your business profile to connect Google Drive</p>
         </div>
       )}
 
