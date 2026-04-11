@@ -31,6 +31,7 @@ type Props = {
   accentColor: string;
   promoCode: PromoCode | null;
   slug: string;
+  taxRate?: number;
   onClose: () => void;
   onOpen: () => void;
   onUpdateQuantity: (itemId: string, itemType: string, delta: number) => void;
@@ -51,6 +52,7 @@ export function CartDrawer({
   accentColor,
   promoCode,
   slug,
+  taxRate,
   onClose,
   onOpen,
   onUpdateQuantity,
@@ -106,7 +108,8 @@ export function CartDrawer({
   const hasBookingItems = cart.some((c) => c.requiresBooking);
   const hasPhysicalItems = cart.some((c) => c.itemType === "product");
   const discount = calculateDiscount(cartTotal, promoCode);
-  const estimatedTax = Math.round(cartTotal * 0.125 * 100) / 100;
+  const effectiveTaxRate = taxRate ?? 0;
+  const estimatedTax = effectiveTaxRate > 0 ? Math.round(cartTotal * (effectiveTaxRate / 100) * 100) / 100 : 0;
   const shippingEstimate = 0;
   const orderTotal = cartTotal - discount + estimatedTax + shippingEstimate;
 
@@ -314,10 +317,12 @@ export function CartDrawer({
                         <span className="text-emerald-400/70">-{formatPrice(discount, cartCurrency)}</span>
                       </div>
                     )}
-                    <div className="flex justify-between items-center text-[11px]">
-                      <span className="text-white/30">Est. Tax (12.5%)</span>
-                      <span className="text-white/30">{formatPrice(estimatedTax, cartCurrency)}</span>
-                    </div>
+                    {estimatedTax > 0 && (
+                      <div className="flex justify-between items-center text-[11px]">
+                        <span className="text-white/30">Est. Tax ({effectiveTaxRate}%)</span>
+                        <span className="text-white/30">{formatPrice(estimatedTax, cartCurrency)}</span>
+                      </div>
+                    )}
                     {hasPhysicalItems && (
                       <div className="flex justify-between items-center text-[11px]">
                         <span className="text-white/30">Shipping</span>
