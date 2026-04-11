@@ -465,7 +465,10 @@ export default function BusinessBuilderCard() {
         }
         setServerLoaded(true);
       })
-      .catch(() => setServerLoaded(true));
+      .catch((err) => {
+        console.error("Failed to load business plan:", err);
+        setServerLoaded(true);
+      });
   }, [businessId, serverLoaded]);
 
   useEffect(() => {
@@ -507,7 +510,9 @@ export default function BusinessBuilderCard() {
           setFormPreFilled(true);
         }
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.error("Failed to pre-fill business form:", err);
+      });
   }, [businessId, formPreFilled, serverLoaded]);
 
   const handleGenerate = async () => {
@@ -526,7 +531,9 @@ export default function BusinessBuilderCard() {
         setViewMode("results");
         apiGet<{ plan: ServerPlan | null }>(`/ai/businesses/${businessId}/ai/business-plan`)
           .then(({ data }) => { if (data?.plan) setServerPlanId(data.plan.id); })
-          .catch(() => {});
+          .catch((err) => {
+            console.error("Failed to fetch generated plan id:", err);
+          });
       } else {
         setError(res.data?.error || res.error || "Failed to generate. Please try again.");
       }

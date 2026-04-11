@@ -1,14 +1,16 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useRef } from "react";
 import {
-  Building2, Clock, Users, Globe, FileText,
+  Building2, Clock, Users, FileText,
   AlertCircle, Sparkles as SparklesIcon, Wand2, RefreshCw,
 } from "lucide-react";
 import { Button, Input } from "@keyflow/ui";
-import { apiGet, apiPatch } from "@/lib/api";
+import { apiPatch, apiPost } from "@/lib/api";
 import { AccordionSection, AccordionGroup } from "../../store/components/accordion-section";
 import { AiFieldBadge } from "./ai-field-badge";
+import { useProfileSection } from "@/hooks/use-profile-section";
+import { useState } from "react";
 
 const TEAM_SIZE_OPTIONS = [
   { value: "SOLO", label: "Solo / Just me" },
@@ -55,62 +57,71 @@ interface BusinessData {
   businessHours?: BusinessHours | null;
 }
 
+const EMPTY_BIZ_INFO: BizInfo = {
+  name: "",
+  tagline: "",
+  description: "",
+  teamSize: "",
+  businessHours: DEFAULT_HOURS,
+};
+
+function isBizInfoDirty(current: BizInfo, initial: BizInfo): boolean {
+  return (
+    current.name !== initial.name ||
+    current.tagline !== initial.tagline ||
+    current.description !== initial.description ||
+    current.teamSize !== initial.teamSize ||
+    JSON.stringify(current.businessHours) !== JSON.stringify(initial.businessHours)
+  );
+}
+
 interface MyBusinessSectionProps {
   businessId: string | null;
+  businessData?: {
+    name?: string;
+    tagline?: string | null;
+    description?: string | null;
+    teamSize?: string | null;
+    businessHours?: BusinessHours | null;
+  } | null;
+  businessLoading?: boolean;
   onDirtyChange?: (dirty: boolean) => void;
   onStatus: (status: { type: "success" | "error"; message: string } | null) => void;
-  onAiGenerate?: (field: string) => void;
+  onSaved?: (saved: Partial<BizInfo>) => void;
 }
 
 export default function MyBusinessSection({
   businessId,
+  businessData,
+  businessLoading,
   onDirtyChange,
   onStatus,
-  onAiGenerate,
+  onSaved,
 }: MyBusinessSectionProps) {
-  const [form, setForm] = useState<BizInfo>({
-    name: "",
-    tagline: "",
-    description: "",
-    teamSize: "",
-    businessHours: DEFAULT_HOURS,
+  const { form, setForm, setInitialForm, isDirty, saving, setSaving } = useProfileSection<BizInfo>({
+    initialState: EMPTY_BIZ_INFO,
+    isDirtyFn: isBizInfoDirty,
+    onDirtyChange,
   });
-  const [initialForm, setInitialForm] = useState<BizInfo>(form);
-  const [saving, setSaving] = useState(false);
+
   const [generatingTagline, setGeneratingTagline] = useState(false);
   const [generatingDesc, setGeneratingDesc] = useState(false);
-
-  const isDirty =
-    form.name !== initialForm.name ||
-    form.tagline !== initialForm.tagline ||
-    form.description !== initialForm.description ||
-    form.teamSize !== initialForm.teamSize ||
-    JSON.stringify(form.businessHours) !== JSON.stringify(initialForm.businessHours);
+  const initializedRef = useRef(false);
 
   useEffect(() => {
-    onDirtyChange?.(isDirty);
-  }, [isDirty, onDirtyChange]);
-
-  useEffect(() => {
-    if (!businessId) return;
-    const load = async () => {
-      try {
-        const { data } = await apiGet<BusinessData>(`/identity/businesses/${businessId}`);
-        if (data) {
-          const f: BizInfo = {
-            name: data.name || "",
-            tagline: data.tagline || "",
-            description: data.description || "",
-            teamSize: data.teamSize || "",
-            businessHours: data.businessHours || DEFAULT_HOURS,
-          };
-          setForm(f);
-          setInitialForm(f);
-        }
-      } catch {}
+    if (!businessId || businessLoading || !businessData) return;
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+    const f: BizInfo = {
+      name: businessData.name || "",
+      tagline: businessData.tagline || "",
+      description: businessData.description || "",
+      teamSize: businessData.teamSize || "",
+      businessHours: businessData.businessHours || DEFAULT_HOURS,
     };
-    load();
-  }, [businessId]);
+    setForm(f);
+    setInitialForm(f);
+  }, [businessId, businessLoading, businessData, setForm, setInitialForm]);
 
   const handleSave = async () => {
     if (!businessId) return;
@@ -129,9 +140,10 @@ export default function MyBusinessSection({
       } else {
         onStatus({ type: "success", message: "Business info updated" });
         setInitialForm({ ...form });
+        onSaved?.({ ...form });
       }
-    } catch {
-      onStatus({ type: "error", message: "Network error" });
+    } catch (err) {
+      onStatus({ type: "error", message: err instanceof Error ? err.message : "Network error" });
     }
     setSaving(false);
   };
@@ -142,17 +154,19 @@ export default function MyBusinessSection({
     setLoading(true);
     onStatus(null);
     try {
-      const res = await apiPatch<{ tagline?: string; description?: string }>(`/identity/businesses/${businessId}/ai-generate-field`, {
-        field,
-        context: {
-          name: form.name,
-          tagline: form.tagline,
-          description: form.description,
-          teamSize: form.teamSize,
+      const res = await apiPost<{ tagline?: string; description?: string }>({
+        path: `/identity/businesses/${businessId}/ai-generate-field`,
+        body: {
+          field,
+          context: {
+            name: form.name,
+            tagline: form.tagline,
+            description: form.description,
+            teamSize: form.teamSize,
+          },
         },
       });
       if (res.error) {
-        onAiGenerate?.(field);
         onStatus({ type: "error", message: res.error || "AI generation failed" });
       } else if (res.data) {
         const val = field === "tagline" ? res.data.tagline : res.data.description;
@@ -161,8 +175,8 @@ export default function MyBusinessSection({
           onStatus({ type: "success", message: `AI generated ${field} using your business intelligence! Review and save.` });
         }
       }
-    } catch {
-      onStatus({ type: "error", message: "AI generation failed" });
+    } catch (err) {
+      onStatus({ type: "error", message: err instanceof Error ? err.message : "AI generation failed" });
     }
     setLoading(false);
   };
@@ -177,10 +191,19 @@ export default function MyBusinessSection({
     }));
   };
 
+  if (businessLoading) {
+    return (
+      <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground" aria-busy="true" aria-label="Loading business info">
+        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current" aria-hidden="true" />
+        Loading business info...
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2 text-sm font-semibold">
-        <Building2 className="h-4 w-4" style={{ color: "hsl(var(--kf-accent2))" }} />
+        <Building2 className="h-4 w-4" style={{ color: "hsl(var(--kf-accent2))" }} aria-hidden="true" />
         My Business
       </div>
 
@@ -195,7 +218,7 @@ export default function MyBusinessSection({
           <div className="space-y-4 p-1">
             <label className="block text-xs text-muted-foreground">
               <div className="flex items-center gap-1.5 mb-1.5 font-medium">
-                <Building2 className="h-3 w-3" />
+                <Building2 className="h-3 w-3" aria-hidden="true" />
                 Business Name
                 {!form.name && (
                   <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
@@ -213,7 +236,7 @@ export default function MyBusinessSection({
             <div className="block text-xs text-muted-foreground">
               <div className="flex items-center justify-between mb-1.5">
                 <div className="flex items-center gap-1.5 font-medium">
-                  <SparklesIcon className="h-3 w-3" />
+                  <SparklesIcon className="h-3 w-3" aria-hidden="true" />
                   Tagline
                   <AiFieldBadge />
                   {!form.tagline && (
@@ -224,13 +247,14 @@ export default function MyBusinessSection({
                   type="button"
                   onClick={() => handleAiGenerateField("tagline")}
                   disabled={generatingTagline || !form.name}
+                  aria-label="Generate tagline with AI"
                   className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-all min-h-[44px]"
                   style={{
                     background: "hsl(var(--kf-accent1) / 0.1)",
                     color: "hsl(var(--kf-accent1))",
                   }}
                 >
-                  {generatingTagline ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
+                  {generatingTagline ? <RefreshCw className="h-3 w-3 animate-spin" aria-hidden="true" /> : <Wand2 className="h-3 w-3" aria-hidden="true" />}
                   {generatingTagline ? "..." : "Generate"}
                 </button>
               </div>
@@ -243,14 +267,14 @@ export default function MyBusinessSection({
               />
               <div className="flex justify-between mt-1">
                 <p className="text-[10px] opacity-60">Shown on your storefront hero section</p>
-                <p className="text-[10px]">{form.tagline.length}/100</p>
+                <p className="text-[10px]" aria-label={`${form.tagline.length} of 100 characters`}>{form.tagline.length}/100</p>
               </div>
             </div>
 
             <div className="block text-xs text-muted-foreground">
               <div className="flex items-center justify-between mb-1.5">
                 <div className="flex items-center gap-1.5 font-medium">
-                  <FileText className="h-3 w-3" />
+                  <FileText className="h-3 w-3" aria-hidden="true" />
                   Business Description
                   <AiFieldBadge />
                   {!form.description && (
@@ -261,13 +285,14 @@ export default function MyBusinessSection({
                   type="button"
                   onClick={() => handleAiGenerateField("description")}
                   disabled={generatingDesc || !form.name}
+                  aria-label="Generate business description with AI"
                   className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-all min-h-[44px]"
                   style={{
                     background: "hsl(var(--kf-accent1) / 0.1)",
                     color: "hsl(var(--kf-accent1))",
                   }}
                 >
-                  {generatingDesc ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
+                  {generatingDesc ? <RefreshCw className="h-3 w-3 animate-spin" aria-hidden="true" /> : <Wand2 className="h-3 w-3" aria-hidden="true" />}
                   {generatingDesc ? "..." : "Generate"}
                 </button>
               </div>
@@ -277,12 +302,13 @@ export default function MyBusinessSection({
                 placeholder="Describe what your business does, who you serve, and what makes you unique..."
                 maxLength={500}
                 rows={3}
+                aria-label="Business description"
                 className="w-full bg-transparent border border-border rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent2))]/30 resize-none"
                 style={!form.description ? { borderColor: "hsl(var(--kf-warning) / 0.3)" } : undefined}
               />
               <div className="flex justify-between mt-1">
                 <p className="text-[10px] opacity-60">Used on your storefront and in AI-powered recommendations</p>
-                <p className="text-[10px]">{form.description.length}/500</p>
+                <p className="text-[10px]" aria-label={`${form.description.length} of 500 characters`}>{form.description.length}/500</p>
               </div>
             </div>
           </div>
@@ -297,7 +323,7 @@ export default function MyBusinessSection({
           <div className="p-1">
             <label className="block text-xs text-muted-foreground">
               <div className="flex items-center gap-1.5 mb-1.5 font-medium">
-                <Users className="h-3 w-3" />
+                <Users className="h-3 w-3" aria-hidden="true" />
                 Team Size
                 {!form.teamSize && (
                   <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
@@ -306,6 +332,7 @@ export default function MyBusinessSection({
               <select
                 value={form.teamSize}
                 onChange={(e) => setForm((f) => ({ ...f, teamSize: e.target.value }))}
+                aria-label="Team size"
                 className="w-full bg-transparent border border-border rounded-xl px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/30 min-h-[44px]"
                 style={!form.teamSize ? { borderColor: "hsl(var(--kf-warning) / 0.3)" } : undefined}
               >
@@ -335,6 +362,7 @@ export default function MyBusinessSection({
                       type="checkbox"
                       checked={!day.closed}
                       onChange={(e) => updateHours(key, { closed: !e.target.checked })}
+                      aria-label={`${label} open`}
                       className="w-4 h-4 rounded accent-[hsl(var(--kf-accent2))]"
                     />
                     {label}
@@ -345,13 +373,15 @@ export default function MyBusinessSection({
                         type="time"
                         value={day.open}
                         onChange={(e) => updateHours(key, { open: e.target.value })}
+                        aria-label={`${label} opening time`}
                         className="bg-transparent border border-border rounded-lg px-2 py-1.5 text-xs text-foreground min-h-[36px]"
                       />
-                      <span className="text-xs text-muted-foreground">to</span>
+                      <span className="text-xs text-muted-foreground" aria-hidden="true">to</span>
                       <input
                         type="time"
                         value={day.close}
                         onChange={(e) => updateHours(key, { close: e.target.value })}
+                        aria-label={`${label} closing time`}
                         className="bg-transparent border border-border rounded-lg px-2 py-1.5 text-xs text-foreground min-h-[36px]"
                       />
                     </div>
@@ -368,8 +398,8 @@ export default function MyBusinessSection({
 
       <div className="flex items-center justify-between pt-2 border-t border-border/30">
         {isDirty && (
-          <p className="text-xs flex items-center gap-1" style={{ color: "hsl(var(--kf-warning))" }}>
-            <AlertCircle className="h-3 w-3" />
+          <p className="text-xs flex items-center gap-1" style={{ color: "hsl(var(--kf-warning))" }} role="status">
+            <AlertCircle className="h-3 w-3" aria-hidden="true" />
             You have unsaved changes
           </p>
         )}
