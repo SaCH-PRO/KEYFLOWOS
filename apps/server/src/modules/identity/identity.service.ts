@@ -1,18 +1,17 @@
-import { BadRequestException, Inject, Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { computeProfileCompleteness } from './profile-completeness.constants';
 
 @Injectable()
 export class IdentityService {
   private readonly logger = new Logger(IdentityService.name);
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  listBusinesses(userId?: string) {
-    if (userId) {
-      return this.prisma.client.business.findMany({
-        where: { ownerId: userId, deletedAt: null },
-      });
-    }
-    return this.prisma.client.business.findMany({ where: { deletedAt: null } });
+  listBusinesses(userId: string) {
+    if (!userId) throw new UnauthorizedException('User ID is required to list businesses');
+    return this.prisma.client.business.findMany({
+      where: { ownerId: userId, deletedAt: null },
+    });
   }
 
   async getBusiness(businessId: string) {
@@ -84,11 +83,11 @@ export class IdentityService {
     if (!user) throw new NotFoundException('User not found');
 
     const data: Record<string, unknown> = {};
-    if (input.firstName !== undefined) data.firstName = input.firstName;
-    if (input.lastName !== undefined) data.lastName = input.lastName;
-    if (input.phone !== undefined) data.phone = input.phone;
-    if (input.name !== undefined) data.name = input.name;
-    if (input.avatarUrl !== undefined) data.avatarUrl = input.avatarUrl;
+    if (input.firstName !== undefined) data.firstName = input.firstName.trim();
+    if (input.lastName !== undefined) data.lastName = input.lastName.trim();
+    if (input.phone !== undefined) data.phone = input.phone.trim();
+    if (input.name !== undefined) data.name = input.name.trim();
+    if (input.avatarUrl !== undefined) data.avatarUrl = input.avatarUrl.trim();
 
     return this.prisma.client.user.update({
       where: { id: userId },
@@ -106,11 +105,14 @@ export class IdentityService {
     return { available: false, slug };
   }
 
-  createBusiness(input: { name: string; ownerId?: string }) {
+  createBusiness(input: { name: string; ownerId: string }) {
+    if (!input.ownerId) {
+      throw new UnauthorizedException('Owner ID is required to create a business');
+    }
     return this.prisma.client.business.create({
       data: {
-        name: input.name,
-        ownerId: input.ownerId ?? '',
+        name: input.name.trim(),
+        ownerId: input.ownerId,
       },
     });
   }
@@ -156,76 +158,101 @@ export class IdentityService {
   }) {
     if (input.slug) {
       const existing = await this.prisma.client.business.findFirst({
-        where: { slug: input.slug, NOT: { id: businessId } },
+        where: { slug: input.slug.trim(), NOT: { id: businessId } },
       });
       if (existing) throw new BadRequestException('Slug is already taken');
     }
-    
+
+    const oldBusiness = await this.prisma.client.business.findUnique({ where: { id: businessId } });
+    if (!oldBusiness) throw new NotFoundException('Business not found');
+
     const { lastHealthCheck, metaData, ...rest } = input;
-    const data: Record<string, unknown> = { ...rest };
-    
+
+    const stringFields: (keyof typeof rest)[] = [
+      'name', 'slug', 'timezone', 'currency', 'logoUrl', 'address', 'phone',
+      'email', 'website', 'facebook', 'instagram', 'twitter', 'linkedin',
+      'tiktok', 'youtube', 'whatsapp', 'primaryColor', 'secondaryColor',
+      'complianceStatus', 'tagline', 'description', 'city', 'country',
+      'industry', 'headline', 'bio', 'businessStage', 'teamSize',
+    ];
+
+    const data: Record<string, unknown> = {};
+    for (const key of stringFields) {
+      if (rest[key] !== undefined) {
+        const val = rest[key];
+        data[key] = typeof val === 'string' ? val.trim() : val;
+      }
+    }
+
+    const nonStringFields: (keyof typeof rest)[] = [
+      'defaultTaxRate', 'complianceData', 'storeEnabled', 'businessHours', 'onboardingComplete',
+    ];
+    for (const key of nonStringFields) {
+      if (rest[key] !== undefined) {
+        data[key] = rest[key];
+      }
+    }
+
+    if (rest.skills !== undefined) {
+      data.skills = rest.skills.map((s) => s.trim());
+    }
+    if (rest.interests !== undefined) {
+      data.interests = rest.interests.map((s) => s.trim());
+    }
+
     if (lastHealthCheck) {
       data.lastHealthCheck = new Date(lastHealthCheck);
     }
 
     if (metaData) {
-      const existing = await this.prisma.client.business.findUnique({
-        where: { id: businessId },
-        select: { metaData: true },
-      });
-      const existingMeta = (existing?.metaData as Record<string, any>) || {};
+      const existingMeta = (oldBusiness.metaData as Record<string, any>) || {};
       data.metaData = { ...existingMeta, ...metaData };
     }
-    
-    const oldBusiness = await this.prisma.client.business.findUnique({ where: { id: businessId } });
+
+    const getStr = (key: string): string | null => {
+      const v = data[key] ?? (oldBusiness as Record<string, unknown>)[key];
+      return typeof v === 'string' ? v : null;
+    };
+    const getStrArr = (key: string): string[] => {
+      const v = data[key] ?? (oldBusiness as Record<string, unknown>)[key];
+      return Array.isArray(v) ? (v as string[]) : [];
+    };
+    data.profileCompleteness = computeProfileCompleteness({
+      name: getStr('name'),
+      logoUrl: getStr('logoUrl'),
+      headline: getStr('headline'),
+      bio: getStr('bio'),
+      industry: getStr('industry'),
+      skills: getStrArr('skills'),
+      businessStage: getStr('businessStage'),
+      city: getStr('city'),
+      country: getStr('country'),
+      interests: getStrArr('interests'),
+      tagline: getStr('tagline'),
+      description: getStr('description'),
+    });
 
     const result = await this.prisma.client.business.update({
       where: { id: businessId },
       data,
     });
 
-    await this.updateProfileCompleteness(businessId);
+    const oldBusinessRecord = oldBusiness as Record<string, unknown>;
+    const changedFields = Object.keys(rest).filter((k) => {
+      const key = k as keyof typeof rest;
+      if (rest[key] === undefined) return false;
+      const oldVal = oldBusinessRecord[k];
+      const newVal = rest[key];
+      return JSON.stringify(oldVal) !== JSON.stringify(newVal);
+    });
 
-    if (oldBusiness) {
-      const changedFields = Object.keys(rest).filter((k) => {
-        const key = k as keyof typeof rest;
-        if (rest[key] === undefined) return false;
-        const oldVal = (oldBusiness as any)[k];
-        const newVal = rest[key];
-        return JSON.stringify(oldVal) !== JSON.stringify(newVal);
-      });
-      if (changedFields.length > 0) {
-        this.detectDocumentImpact(businessId, changedFields).catch((err) =>
-          this.logger.warn(`Document impact detection failed: ${err.message}`),
-        );
-      }
+    if (changedFields.length > 0) {
+      this.detectDocumentImpact(businessId, changedFields, oldBusiness.name).catch((err) =>
+        this.logger.warn(`Document impact detection failed for business "${oldBusiness.name}" (${businessId}): ${err?.message ?? err}`),
+      );
     }
 
-    return this.prisma.client.business.findUnique({ where: { id: businessId } });
-  }
-
-  private async updateProfileCompleteness(businessId: string) {
-    const biz = await this.prisma.client.business.findUnique({ where: { id: businessId } });
-    if (!biz) return;
-
-    const fields = [
-      !!biz.name,
-      !!biz.logoUrl,
-      !!biz.headline,
-      !!biz.bio,
-      !!biz.industry,
-      biz.skills && biz.skills.length > 0,
-      !!biz.businessStage,
-      !!biz.city || !!biz.country,
-      biz.interests && biz.interests.length > 0,
-      !!biz.tagline || !!biz.description,
-    ];
-    const completeness = Math.round((fields.filter(Boolean).length / fields.length) * 100);
-
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: { profileCompleteness: completeness },
-    });
+    return result;
   }
 
   async getBusinessCommunityProfile(businessId: string) {
@@ -350,12 +377,12 @@ export class IdentityService {
 
     if (existingUser) {
       const updateData: Record<string, unknown> = {};
-      if (input.firstName && !existingUser.firstName) updateData.firstName = input.firstName;
-      if (input.lastName && !existingUser.lastName) updateData.lastName = input.lastName;
-      if (input.phone && !existingUser.phone) updateData.phone = input.phone;
-      if (input.avatarUrl && !existingUser.avatarUrl) updateData.avatarUrl = input.avatarUrl;
+      if (input.firstName && !existingUser.firstName) updateData.firstName = input.firstName.trim();
+      if (input.lastName && !existingUser.lastName) updateData.lastName = input.lastName.trim();
+      if (input.phone && !existingUser.phone) updateData.phone = input.phone.trim();
+      if (input.avatarUrl && !existingUser.avatarUrl) updateData.avatarUrl = input.avatarUrl.trim();
       if (desiredName && !existingUser.name) {
-        updateData.name = desiredName;
+        updateData.name = desiredName.trim();
       }
 
       if (Object.keys(updateData).length > 0) {
@@ -368,16 +395,16 @@ export class IdentityService {
       }
     } else {
       const userData: Record<string, unknown> = {};
-      if (input.firstName) userData.firstName = input.firstName;
-      if (input.lastName) userData.lastName = input.lastName;
-      if (input.phone) userData.phone = input.phone;
-      if (input.avatarUrl) userData.avatarUrl = input.avatarUrl;
+      if (input.firstName) userData.firstName = input.firstName.trim();
+      if (input.lastName) userData.lastName = input.lastName.trim();
+      if (input.phone) userData.phone = input.phone.trim();
+      if (input.avatarUrl) userData.avatarUrl = input.avatarUrl.trim();
 
       user = await this.prisma.client.user.create({
         data: {
           id: input.userId,
           email: input.email,
-          name: desiredName ?? input.email,
+          name: desiredName?.trim() ?? input.email,
           role: 'USER',
           ...userData,
         },
@@ -389,7 +416,7 @@ export class IdentityService {
       orderBy: { createdAt: 'asc' },
     });
 
-    const businessName = input.company || `${input.firstName || desiredName}'s Workspace`;
+    const businessName = (input.company || `${input.firstName || desiredName}'s Workspace`).trim();
 
     const business =
       existingBusiness ||
@@ -417,7 +444,7 @@ export class IdentityService {
     return { user, business };
   }
 
-  private async detectDocumentImpact(businessId: string, changedFields: string[]) {
+  private async detectDocumentImpact(businessId: string, changedFields: string[], businessName: string) {
     const rules = await this.prisma.client.impactRule.findMany({
       where: { profileField: { in: changedFields } },
     });
@@ -439,7 +466,9 @@ export class IdentityService {
     }
 
     if (affected.length > 0) {
-      this.logger.log(`Document impact: ${affected.length} document(s) affected by profile change [${changedFields.join(', ')}]`);
+      this.logger.log(
+        `Document impact: ${affected.length} document(s) affected by profile change [${changedFields.join(', ')}] for business "${businessName}" (${businessId})`,
+      );
     }
   }
 }

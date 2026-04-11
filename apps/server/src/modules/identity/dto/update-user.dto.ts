@@ -1,21 +1,6 @@
 import { IsEmail, IsOptional, IsPhoneNumber, IsString, IsUrl, MaxLength } from 'class-validator';
 
-export class BootstrapDto {
-  @IsEmail({}, { message: 'email must be a valid email address' })
-  @IsOptional()
-  @MaxLength(255)
-  email?: string;
-
-  @IsString()
-  @IsOptional()
-  @MaxLength(100)
-  username?: string;
-
-  @IsString()
-  @IsOptional()
-  @MaxLength(200)
-  name?: string;
-
+export class UpdateUserDto {
   @IsString()
   @IsOptional()
   @MaxLength(100)
@@ -26,6 +11,11 @@ export class BootstrapDto {
   @MaxLength(100)
   lastName?: string;
 
+  @IsString()
+  @IsOptional()
+  @MaxLength(200)
+  name?: string;
+
   @IsOptional()
   @IsPhoneNumber(undefined, { message: 'phone must be a valid phone number' })
   @MaxLength(30)
@@ -35,9 +25,4 @@ export class BootstrapDto {
   @IsOptional()
   @MaxLength(2048)
   avatarUrl?: string;
-
-  @IsString()
-  @IsOptional()
-  @MaxLength(200)
-  company?: string;
 }

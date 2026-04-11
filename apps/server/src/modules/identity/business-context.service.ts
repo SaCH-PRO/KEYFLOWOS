@@ -23,6 +23,8 @@ export interface BusinessContext {
   guidanceInsights: string;
 }
 
+const MAX_CONTEXT_CHARS = 3000;
+
 @Injectable()
 export class BusinessContextService {
   private readonly logger = new Logger(BusinessContextService.name);
@@ -36,7 +38,7 @@ export class BusinessContextService {
       db.business.findUnique({ where: { id: businessId } }),
       db.service.findMany({
         where: { businessId, deletedAt: null },
-        select: { name: true, price: true, duration: true },
+        select: { name: true, price: true, duration: true, description: true },
         take: 20,
       }),
       db.product.findMany({
@@ -78,11 +80,14 @@ export class BusinessContextService {
     let servicesSummary = '';
     if (serviceData.length > 0) {
       const serviceNames = serviceData.map(s => s.name);
-      const categories: string[] = [];
       const avgPrice = serviceData.reduce((sum, s) => sum + (Number(s.price) || 0), 0) / serviceData.length;
       servicesSummary = `Offers ${serviceData.length} service(s): ${serviceNames.slice(0, 8).join(', ')}${serviceNames.length > 8 ? ` (+${serviceNames.length - 8} more)` : ''}`;
-      if (categories.length > 0) servicesSummary += `. Categories: ${categories.join(', ')}`;
       if (avgPrice > 0) servicesSummary += `. Average price: ${biz.currency || 'TTD'} ${avgPrice.toFixed(0)}`;
+      const durationsMin = serviceData.map(s => s.duration).filter(Boolean);
+      if (durationsMin.length > 0) {
+        const avgDuration = Math.round(durationsMin.reduce((a, b) => a + b, 0) / durationsMin.length);
+        servicesSummary += `. Average duration: ${avgDuration} min`;
+      }
     }
 
     let productsSummary = '';
@@ -193,7 +198,16 @@ export class BusinessContextService {
     if (merged.socialPresence) lines.push(`Online presence: ${merged.socialPresence}`);
     if (merged.guidanceInsights) lines.push(`Guidance insights: ${merged.guidanceInsights}`);
 
-    return lines.join('\n');
+    const block = lines.join('\n');
+
+    if (block.length > MAX_CONTEXT_CHARS) {
+      this.logger.warn(
+        `Business context for is ${block.length} chars, truncating to ${MAX_CONTEXT_CHARS} chars to prevent oversized AI prompts`,
+      );
+      return block.slice(0, MAX_CONTEXT_CHARS) + '\n[...context truncated for length]';
+    }
+
+    return block;
   }
 
   private emptyContext(): BusinessContext {
