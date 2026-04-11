@@ -9,9 +9,10 @@ import {
   FileText, Calendar, ShoppingBag, Megaphone,
   CheckCircle2, ArrowRight, Zap, Brain, Loader2,
   X, ArrowLeft, ChevronDown, AlertTriangle, Shield,
-  Globe, Briefcase, Flag, Send,
+  Globe, Briefcase, Flag, Send, Pencil, Save, ExternalLink,
+  Plus, FolderOpen,
 } from "lucide-react";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiGet, apiPost, apiPut } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 
 type ProgressKey =
@@ -63,6 +64,7 @@ interface ActionItem {
   category: string;
   timeframe: string;
   details: string;
+  module?: string;
 }
 
 interface Risk {
@@ -98,6 +100,74 @@ interface IntakeForm {
   stage: string;
   challenges: string;
 }
+
+interface ServerPlan {
+  id: string;
+  version: number;
+  name: string;
+  status: string;
+  intake: IntakeForm;
+  model: GeneratedModel;
+  createdAt: string;
+}
+
+const DOCUMENT_SLUG_NAMES: Record<string, string> = {
+  "company-description": "Company Description",
+  "registration-record": "Registration Record",
+  "owner-register": "Owner & Director Register",
+  "license-register": "License & Permit Register",
+  "invoice-template": "Invoice Template",
+  "tax-calendar": "Tax Calendar",
+  "chart-of-accounts": "Chart of Accounts",
+  "financial-statement": "Financial Statement",
+  "budget-template": "Budget Template",
+  "receipt-template": "Receipt Template",
+  "expense-report": "Expense Report",
+  "proposal-template": "Proposal Template",
+  "service-agreement": "Service Agreement",
+  "payment-terms": "Payment Terms",
+  "pricing-sheet": "Pricing Sheet",
+  "client-onboarding": "Client Onboarding",
+  "refund-policy": "Refund Policy",
+  "company-tagline": "Company Tagline",
+  "founder-bio": "Founder Bio",
+  "company-profile": "Company Profile",
+  "elevator-pitch": "Elevator Pitch",
+  "mission-vision": "Mission & Vision",
+  "tone-guide": "Tone Guide",
+  "sales-one-pager": "Sales One-Pager",
+  "faq-document": "FAQ Document",
+  "sop": "Standard Operating Procedure",
+  "approval-matrix": "Approval Matrix",
+  "business-continuity": "Business Continuity Plan",
+  "meeting-agenda": "Meeting Agenda",
+  "project-handoff": "Project Handoff",
+  "communication-plan": "Communication Plan",
+  "offer-letter": "Offer Letter",
+  "employee-handbook": "Employee Handbook",
+  "nda-employee": "Employee NDA",
+  "job-description": "Job Description",
+  "contractor-agreement": "Contractor Agreement",
+  "contractor-sow": "Contractor SOW",
+  "contractor-ip": "Contractor IP Agreement",
+  "privacy-policy": "Privacy Policy",
+  "data-handling": "Data Handling Policy",
+  "cookie-policy": "Cookie Policy",
+  "website-terms": "Website Terms",
+  "ecommerce-terms": "E-Commerce Terms",
+};
+
+const MODULE_ROUTES: Record<string, string> = {
+  projects: "/app/projects",
+  bookings: "/app/bookings",
+  commerce: "/app/commerce",
+  marketing: "/app/marketing",
+  expenses: "/app/expenses",
+  contacts: "/app/contacts",
+  store: "/app/store",
+  documents: "/app/profile?tab=documents",
+  reports: "/app/reports",
+};
 
 const INTAKE_STEPS = [
   { id: "idea", label: "Business Idea", icon: Lightbulb, field: "businessIdea" as const, placeholder: "Describe your business idea in detail — what product or service will you offer?", hint: "Be specific about what you're building. E.g. 'A mobile car detailing service targeting luxury car owners in Port of Spain'" },
@@ -169,6 +239,37 @@ function safeArray(val: unknown): unknown[] {
   return Array.isArray(val) ? val : [];
 }
 
+function validateModel(raw: unknown): GeneratedModel {
+  const m = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const canvas = (m.canvas && typeof m.canvas === "object" ? m.canvas : {}) as Record<string, string>;
+  const fin = (m.financialOutlook && typeof m.financialOutlook === "object" ? m.financialOutlook : {}) as Record<string, unknown>;
+  return {
+    summary: typeof m.summary === "string" ? m.summary : "",
+    canvas: {
+      valueProposition: canvas.valueProposition || "",
+      customerSegments: canvas.customerSegments || "",
+      channels: canvas.channels || "",
+      customerRelationships: canvas.customerRelationships || "",
+      revenueStreams: canvas.revenueStreams || "",
+      keyResources: canvas.keyResources || "",
+      keyActivities: canvas.keyActivities || "",
+      keyPartnerships: canvas.keyPartnerships || "",
+      costStructure: canvas.costStructure || "",
+    },
+    roadmap: Array.isArray(m.roadmap) ? m.roadmap : [],
+    actionPlan: Array.isArray(m.actionPlan) ? m.actionPlan : [],
+    financialOutlook: {
+      startupCosts: typeof fin.startupCosts === "string" ? fin.startupCosts : "Not estimated",
+      monthlyBurn: typeof fin.monthlyBurn === "string" ? fin.monthlyBurn : "Not estimated",
+      breakEvenTimeline: typeof fin.breakEvenTimeline === "string" ? fin.breakEvenTimeline : "Not estimated",
+      yearOneRevenue: typeof fin.yearOneRevenue === "string" ? fin.yearOneRevenue : "Not estimated",
+      keyMetrics: Array.isArray(fin.keyMetrics) ? fin.keyMetrics : [],
+    },
+    risks: Array.isArray(m.risks) ? m.risks : [],
+    recommendedDocuments: Array.isArray(m.recommendedDocuments) ? m.recommendedDocuments : [],
+  };
+}
+
 function useBusinessProgress(businessId: string | null) {
   const [progress, setProgress] = useState<Record<ProgressKey, boolean> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -186,8 +287,15 @@ function useBusinessProgress(businessId: string | null) {
       settle(apiGet<unknown[]>(`/documents/businesses/${businessId}/instances`)),
       settle(apiGet<unknown[]>(`/expenses/businesses/${businessId}?limit=1`)),
       settle(apiGet<unknown[]>(`/projects/businesses/${businessId}?limit=1`)),
-    ]).then(([bizRes, servicesRes, contactsRes, invoicesRes, docsRes, expensesRes, projectsRes]) => {
+      settle(apiGet<unknown[]>(`/bookings/businesses/${businessId}?limit=1`)),
+      settle(apiGet<unknown[]>(`/businesses/${businessId}/campaigns?limit=1`)),
+      settle(apiGet<Record<string, unknown>>(`/commerce/businesses/${businessId}/recurring-invoices?limit=1`)),
+    ]).then(([bizRes, servicesRes, contactsRes, invoicesRes, docsRes, expensesRes, projectsRes, bookingsRes, campaignsRes, recurringRes]) => {
       const biz = bizRes.ok ? (bizRes.value.data as Record<string, unknown> | null) : null;
+      const hasRecurringData = recurringRes.ok && recurringRes.value.data;
+      const recurringArr = hasRecurringData ? safeArray(
+        Array.isArray(recurringRes.value.data) ? recurringRes.value.data : (recurringRes.value.data as Record<string, unknown>)?.invoices
+      ) : [];
       setProgress({
         hasProfile: !!(biz?.name && biz?.industry),
         hasServices: safeArray(servicesRes.ok ? servicesRes.value.data : []).length > 0,
@@ -195,12 +303,16 @@ function useBusinessProgress(businessId: string | null) {
         storeEnabled: !!biz?.storeEnabled,
         hasDocs: safeArray(docsRes.ok ? docsRes.value.data : []).length > 0,
         hasContacts: safeArray(contactsRes.ok ? contactsRes.value.data : []).length > 0,
-        hasBookings: false,
+        hasBookings: safeArray(bookingsRes.ok ? bookingsRes.value.data : []).length > 0,
         hasInvoices: safeArray(invoicesRes.ok ? invoicesRes.value.data : []).length > 0,
         hasExpenses: safeArray(expensesRes.ok ? expensesRes.value.data : []).length > 0,
         hasProjects: safeArray(projectsRes.ok ? projectsRes.value.data : []).length > 0,
-        hasSequences: false, hasRecurring: false, hasCampaigns: false,
-        hasReports: false, hasAI: false, hasAutomations: false,
+        hasSequences: false,
+        hasRecurring: recurringArr.length > 0,
+        hasCampaigns: safeArray(campaignsRes.ok ? campaignsRes.value.data : []).length > 0,
+        hasReports: safeArray(invoicesRes.ok ? invoicesRes.value.data : []).length > 0 || safeArray(expensesRes.ok ? expensesRes.value.data : []).length > 0,
+        hasAI: safeArray(docsRes.ok ? docsRes.value.data : []).length > 0 || safeArray(contactsRes.ok ? contactsRes.value.data : []).length > 0,
+        hasAutomations: false,
       });
       setLoading(false);
     });
@@ -226,19 +338,34 @@ export default function BusinessBuilderCard() {
   const [formPreFilled, setFormPreFilled] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generatedModel, setGeneratedModel] = useState<GeneratedModel | null>(null);
+  const [serverPlanId, setServerPlanId] = useState<string | null>(null);
+  const [planVersion, setPlanVersion] = useState<number>(0);
   const [resultTab, setResultTab] = useState<ResultTab>("canvas");
   const [expandedPhase, setExpandedPhase] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  const savedModel = typeof window !== "undefined" ? localStorage.getItem(`kf-biz-model-${businessId}`) : null;
-  useEffect(() => {
-    if (savedModel && !generatedModel) {
-      try { setGeneratedModel(JSON.parse(savedModel)); } catch { /* ignore */ }
-    }
-  }, [savedModel, generatedModel]);
+  const [serverLoaded, setServerLoaded] = useState(false);
 
   useEffect(() => {
-    if (!businessId || formPreFilled) return;
+    if (!businessId || serverLoaded) return;
+    apiGet<{ plan: ServerPlan | null }>(`/ai/businesses/${businessId}/ai/business-plan`)
+      .then(({ data }) => {
+        if (data?.plan) {
+          const validModel = validateModel(data.plan.model);
+          setGeneratedModel(validModel);
+          setServerPlanId(data.plan.id);
+          setPlanVersion(data.plan.version);
+          if (data.plan.intake) {
+            setIntakeForm(data.plan.intake);
+            setFormPreFilled(true);
+          }
+        }
+        setServerLoaded(true);
+      })
+      .catch(() => setServerLoaded(true));
+  }, [businessId, serverLoaded]);
+
+  useEffect(() => {
+    if (!businessId || formPreFilled || !serverLoaded) return;
     apiGet<Record<string, unknown>>(`/identity/businesses/${businessId}`)
       .then(({ data }) => {
         if (!data) return;
@@ -275,7 +402,7 @@ export default function BusinessBuilderCard() {
         }
       })
       .catch(() => {});
-  }, [businessId, formPreFilled]);
+  }, [businessId, formPreFilled, serverLoaded]);
 
   const handleGenerate = async () => {
     if (!businessId || !intakeForm.businessIdea.trim()) return;
@@ -287,9 +414,13 @@ export default function BusinessBuilderCard() {
         body: intakeForm,
       });
       if (res.data?.success && res.data.model) {
-        setGeneratedModel(res.data.model);
-        localStorage.setItem(`kf-biz-model-${businessId}`, JSON.stringify(res.data.model));
+        const validModel = validateModel(res.data.model);
+        setGeneratedModel(validModel);
+        setPlanVersion((v) => v + 1);
         setViewMode("results");
+        apiGet<{ plan: ServerPlan | null }>(`/ai/businesses/${businessId}/ai/business-plan`)
+          .then(({ data }) => { if (data?.plan) setServerPlanId(data.plan.id); })
+          .catch(() => {});
       } else {
         setError(res.data?.error || res.error || "Failed to generate. Please try again.");
       }
@@ -297,6 +428,21 @@ export default function BusinessBuilderCard() {
       setError("Something went wrong. Please try again.");
     }
     setGenerating(false);
+  };
+
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const handleSaveEdit = async (updatedModel: GeneratedModel) => {
+    setGeneratedModel(updatedModel);
+    setSaveError(null);
+    if (serverPlanId && businessId) {
+      try {
+        await apiPut(`/ai/businesses/${businessId}/ai/business-plan/${serverPlanId}`, { model: updatedModel });
+      } catch {
+        setSaveError("Changes saved locally but failed to sync to server.");
+        setTimeout(() => setSaveError(null), 4000);
+      }
+    }
   };
 
   const getPhaseProgress = useCallback((phase: Phase) => {
@@ -327,10 +473,13 @@ export default function BusinessBuilderCard() {
     return <ResultsPanel
       model={generatedModel}
       tab={resultTab}
+      version={planVersion}
+      businessId={businessId}
+      saveError={saveError}
       onTabChange={setResultTab}
       onBack={() => setViewMode("overview")}
       onRegenerate={() => { setViewMode("intake"); setIntakeStep(0); }}
-      onGoToDocuments={() => router.push("/app/profile?tab=documents")}
+      onSaveEdit={handleSaveEdit}
     />;
   }
 
@@ -409,7 +558,9 @@ export default function BusinessBuilderCard() {
             </div>
             <div className="flex-1 min-w-0">
               <span className="text-sm font-medium text-[hsl(var(--kf-foreground))]">View Business Plan</span>
-              <p className="text-[11px] text-[hsl(var(--kf-muted-foreground))]">{generatedModel.summary?.slice(0, 60)}...</p>
+              <p className="text-[11px] text-[hsl(var(--kf-muted-foreground))]">
+                {planVersion > 0 ? `v${planVersion} · ` : ""}{generatedModel.summary?.slice(0, 55)}...
+              </p>
             </div>
             <ChevronRight className="w-4 h-4 text-[hsl(var(--kf-muted-foreground))]" />
           </button>
@@ -490,8 +641,6 @@ function IntakeWizard({ step, form, prefilled, generating, error, onFormChange, 
   const handleNext = () => {
     if (isStageStep) {
       onGenerate();
-    } else if (isLastInputStep) {
-      onStepChange(step + 1);
     } else {
       onStepChange(step + 1);
     }
@@ -571,7 +720,7 @@ function IntakeWizard({ step, form, prefilled, generating, error, onFormChange, 
                 }}
               />
               {step > 0 && !form[currentStep.field].trim() && (
-                <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))] italic">This field is optional — skip it if you're unsure</p>
+                <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))] italic">This field is optional — skip it if you&apos;re unsure</p>
               )}
             </motion.div>
           )}
@@ -630,14 +779,23 @@ const RESULT_TABS: { id: ResultTab; label: string; icon: React.ElementType }[] =
   { id: "risks", label: "Risks", icon: Shield },
 ];
 
-function ResultsPanel({ model, tab, onTabChange, onBack, onRegenerate, onGoToDocuments }: {
+function ResultsPanel({ model, tab, version, businessId, saveError, onTabChange, onBack, onRegenerate, onSaveEdit }: {
   model: GeneratedModel;
   tab: ResultTab;
+  version: number;
+  businessId: string | null;
+  saveError: string | null;
   onTabChange: (t: ResultTab) => void;
   onBack: () => void;
   onRegenerate: () => void;
-  onGoToDocuments: () => void;
+  onSaveEdit: (m: GeneratedModel) => void;
 }) {
+  const router = useRouter();
+
+  const handleDocumentClick = (slug: string) => {
+    router.push(`/app/profile?tab=documents&generate=${slug}`);
+  };
+
   return (
     <div className="rounded-2xl overflow-hidden" style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border) / 0.3)" }}>
       <div className="p-4 flex items-center gap-3" style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.08), hsl(var(--kf-accent2) / 0.06))", borderBottom: "1px solid hsl(var(--kf-border) / 0.15)" }}>
@@ -646,7 +804,9 @@ function ResultsPanel({ model, tab, onTabChange, onBack, onRegenerate, onGoToDoc
         </button>
         <div className="flex-1">
           <h3 className="text-sm font-semibold text-[hsl(var(--kf-foreground))]">Your Business Model</h3>
-          <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))]">AI-generated strategy and execution plan</p>
+          <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))]">
+            {version > 0 ? `Version ${version} · ` : ""}AI-generated strategy and execution plan
+          </p>
         </div>
         <button onClick={onRegenerate} className="px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors" style={{ color: "hsl(var(--kf-accent1))", border: "1px solid hsl(var(--kf-accent1) / 0.2)" }}>
           Regenerate
@@ -656,6 +816,12 @@ function ResultsPanel({ model, tab, onTabChange, onBack, onRegenerate, onGoToDoc
       <div className="p-4" style={{ borderBottom: "1px solid hsl(var(--kf-border) / 0.1)" }}>
         <p className="text-sm text-[hsl(var(--kf-foreground))] leading-relaxed">{model.summary}</p>
       </div>
+
+      {saveError && (
+        <div className="mx-4 mt-3 px-3 py-2 rounded-lg text-xs" style={{ background: "hsl(var(--kf-warning) / 0.08)", border: "1px solid hsl(var(--kf-warning) / 0.2)", color: "hsl(var(--kf-warning))" }}>
+          {saveError}
+        </div>
+      )}
 
       <div className="flex gap-0.5 p-1.5 mx-3 mt-3 rounded-lg" style={{ background: "hsl(var(--kf-muted) / 0.1)" }}>
         {RESULT_TABS.map((t) => {
@@ -672,9 +838,9 @@ function ResultsPanel({ model, tab, onTabChange, onBack, onRegenerate, onGoToDoc
 
       <div className="p-4">
         <AnimatePresence mode="wait">
-          {tab === "canvas" && <CanvasView key="canvas" canvas={model.canvas} />}
+          {tab === "canvas" && <CanvasView key="canvas" canvas={model.canvas} model={model} onSaveEdit={onSaveEdit} />}
           {tab === "roadmap" && <RoadmapView key="roadmap" roadmap={model.roadmap} />}
-          {tab === "actions" && <ActionsView key="actions" actions={model.actionPlan} />}
+          {tab === "actions" && <ActionsView key="actions" actions={model.actionPlan} businessId={businessId} />}
           {tab === "financials" && <FinancialsView key="financials" outlook={model.financialOutlook} />}
           {tab === "risks" && <RisksView key="risks" risks={model.risks} />}
         </AnimatePresence>
@@ -688,13 +854,28 @@ function ResultsPanel({ model, tab, onTabChange, onBack, onRegenerate, onGoToDoc
               <span className="text-xs font-semibold text-[hsl(var(--kf-foreground))]">Recommended Documents</span>
             </div>
             <div className="flex flex-wrap gap-1.5 mb-3">
-              {model.recommendedDocuments.map((doc) => (
-                <span key={doc} className="text-[10px] px-2 py-1 rounded-md font-medium" style={{ background: "hsl(var(--kf-accent2) / 0.1)", color: "hsl(var(--kf-accent2))" }}>{doc}</span>
-              ))}
+              {model.recommendedDocuments.map((slug) => {
+                const name = DOCUMENT_SLUG_NAMES[slug] || slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+                return (
+                  <button
+                    key={slug}
+                    onClick={() => handleDocumentClick(slug)}
+                    className="text-[10px] px-2 py-1 rounded-md font-medium flex items-center gap-1 transition-all hover:scale-105"
+                    style={{ background: "hsl(var(--kf-accent2) / 0.1)", color: "hsl(var(--kf-accent2))" }}
+                  >
+                    <Plus className="w-2.5 h-2.5" />
+                    {name}
+                  </button>
+                );
+              })}
             </div>
-            <button onClick={onGoToDocuments} className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-semibold text-white transition-all min-h-[36px]" style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent2)), hsl(var(--kf-accent1)))" }}>
-              <FileText className="w-3.5 h-3.5" />
-              Generate Documents
+            <button
+              onClick={() => router.push("/app/profile?tab=documents")}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-semibold text-white transition-all min-h-[36px]"
+              style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent2)), hsl(var(--kf-accent1)))" }}
+            >
+              <FolderOpen className="w-3.5 h-3.5" />
+              View All Documents
             </button>
           </div>
         </div>
@@ -703,16 +884,61 @@ function ResultsPanel({ model, tab, onTabChange, onBack, onRegenerate, onGoToDoc
   );
 }
 
-function CanvasView({ canvas }: { canvas: BusinessModelCanvas }) {
+function CanvasView({ canvas, model, onSaveEdit }: { canvas: BusinessModelCanvas; model: GeneratedModel; onSaveEdit: (m: GeneratedModel) => void }) {
+  const [editingKey, setEditingKey] = useState<keyof BusinessModelCanvas | null>(null);
+  const [editValue, setEditValue] = useState("");
+
+  const startEdit = (key: keyof BusinessModelCanvas) => {
+    setEditingKey(key);
+    setEditValue(canvas[key]);
+  };
+
+  const saveEdit = () => {
+    if (!editingKey) return;
+    const updatedCanvas = { ...canvas, [editingKey]: editValue };
+    onSaveEdit({ ...model, canvas: updatedCanvas });
+    setEditingKey(null);
+    setEditValue("");
+  };
+
+  const cancelEdit = () => {
+    setEditingKey(null);
+    setEditValue("");
+  };
+
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="grid grid-cols-2 gap-2">
       {CANVAS_LABELS.map(({ key, label, icon: Icon, colorVar }) => (
-        <div key={key} className={`rounded-xl p-3 ${key === "valueProposition" ? "col-span-2" : ""}`} style={{ background: `hsl(var(${colorVar}) / 0.04)`, border: `1px solid hsl(var(${colorVar}) / 0.12)` }}>
+        <div key={key} className={`rounded-xl p-3 group relative ${key === "valueProposition" ? "col-span-2" : ""}`} style={{ background: `hsl(var(${colorVar}) / 0.04)`, border: `1px solid hsl(var(${colorVar}) / 0.12)` }}>
           <div className="flex items-center gap-1.5 mb-1.5">
             <Icon className="w-3 h-3" style={{ color: `hsl(var(${colorVar}))` }} />
             <span className="text-[10px] font-semibold" style={{ color: `hsl(var(${colorVar}))` }}>{label}</span>
+            {editingKey !== key && (
+              <button onClick={() => startEdit(key)} className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-[hsl(var(--kf-muted)/0.15)]">
+                <Pencil className="w-2.5 h-2.5 text-[hsl(var(--kf-muted-foreground))]" />
+              </button>
+            )}
           </div>
-          <p className="text-[11px] text-[hsl(var(--kf-foreground))] leading-relaxed">{canvas[key]}</p>
+          {editingKey === key ? (
+            <div className="space-y-2">
+              <textarea
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                rows={3}
+                className="w-full resize-none rounded-lg px-3 py-2 text-[11px] focus:outline-none focus:ring-1"
+                style={{ background: "hsl(var(--kf-muted) / 0.1)", border: "1px solid hsl(var(--kf-border) / 0.2)", color: "hsl(var(--kf-foreground))" }}
+                autoFocus
+              />
+              <div className="flex gap-1.5 justify-end">
+                <button onClick={cancelEdit} className="px-2 py-1 rounded text-[10px] font-medium" style={{ color: "hsl(var(--kf-muted-foreground))" }}>Cancel</button>
+                <button onClick={saveEdit} className="px-2 py-1 rounded text-[10px] font-medium flex items-center gap-1" style={{ background: `hsl(var(${colorVar}) / 0.15)`, color: `hsl(var(${colorVar}))` }}>
+                  <Save className="w-2.5 h-2.5" />Save
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-[11px] text-[hsl(var(--kf-foreground))] leading-relaxed">{canvas[key]}</p>
+          )}
         </div>
       ))}
     </motion.div>
@@ -753,23 +979,101 @@ function RoadmapView({ roadmap }: { roadmap: RoadmapPhase[] }) {
   );
 }
 
-function ActionsView({ actions }: { actions: ActionItem[] }) {
+function ActionsView({ actions, businessId }: { actions: ActionItem[]; businessId: string | null }) {
+  const router = useRouter();
+  const [creatingTask, setCreatingTask] = useState<number | null>(null);
+  const [createdTasks, setCreatedTasks] = useState<Set<number>>(new Set());
+  const [taskError, setTaskError] = useState<string | null>(null);
+
   const priorityColor = (p: string) => p === "HIGH" ? "--kf-error" : p === "MEDIUM" ? "--kf-warning" : "--kf-success";
+
+  const handleCreateTask = async (action: ActionItem, idx: number) => {
+    if (!businessId) return;
+    setCreatingTask(idx);
+    try {
+      const projRes = await apiGet<{ id: string }[]>(`/projects/businesses/${businessId}?limit=1`);
+      let projectId: string | null = null;
+      if (projRes.data && Array.isArray(projRes.data) && projRes.data.length > 0) {
+        projectId = projRes.data[0].id;
+      } else {
+        const newProj = await apiPost<{ id: string }>({
+          path: `/projects/businesses/${businessId}`,
+          body: { name: "Business Builder Actions", description: "Tasks generated from your AI business plan" },
+        });
+        projectId = newProj.data?.id ?? null;
+      }
+      if (projectId) {
+        await apiPost({
+          path: `/projects/businesses/${businessId}/projects/${projectId}/tasks`,
+          body: {
+            title: action.action,
+            description: `${action.details}\n\nCategory: ${action.category}\nTimeframe: ${action.timeframe}\nPriority: ${action.priority}`,
+            priority: action.priority,
+            status: "TODO",
+          },
+        });
+        setCreatedTasks((prev) => new Set(prev).add(idx));
+      }
+    } catch {
+      setTaskError("Failed to create task. Please try again.");
+      setTimeout(() => setTaskError(null), 4000);
+    }
+    setCreatingTask(null);
+  };
+
+  const handleGoToModule = (mod: string) => {
+    const route = MODULE_ROUTES[mod];
+    if (route) router.push(route);
+  };
+
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-1.5">
+      {taskError && (
+        <div className="px-3 py-2 rounded-lg text-xs" style={{ background: "hsl(var(--kf-error) / 0.08)", border: "1px solid hsl(var(--kf-error) / 0.2)", color: "hsl(var(--kf-error))" }}>
+          {taskError}
+        </div>
+      )}
       {actions.map((action, i) => (
-        <div key={i} className="rounded-xl px-3 py-2.5 flex items-start gap-3" style={{ background: "hsl(var(--kf-muted) / 0.04)", border: "1px solid hsl(var(--kf-border) / 0.1)" }}>
-          <div className="flex flex-col items-center gap-1 flex-shrink-0 mt-0.5">
-            <span className="text-[8px] font-bold px-1.5 py-0.5 rounded" style={{ background: `hsl(var(${priorityColor(action.priority)}) / 0.12)`, color: `hsl(var(${priorityColor(action.priority)}))` }}>{action.priority}</span>
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-0.5">
-              <span className="text-xs font-medium text-[hsl(var(--kf-foreground))]">{action.action}</span>
+        <div key={i} className="rounded-xl px-3 py-2.5" style={{ background: "hsl(var(--kf-muted) / 0.04)", border: "1px solid hsl(var(--kf-border) / 0.1)" }}>
+          <div className="flex items-start gap-3">
+            <div className="flex flex-col items-center gap-1 flex-shrink-0 mt-0.5">
+              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded" style={{ background: `hsl(var(${priorityColor(action.priority)}) / 0.12)`, color: `hsl(var(${priorityColor(action.priority)}))` }}>{action.priority}</span>
             </div>
-            <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))]">{action.details}</p>
-            <div className="flex gap-2 mt-1">
-              <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--kf-muted) / 0.1)", color: "hsl(var(--kf-muted-foreground))" }}>{action.category}</span>
-              <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--kf-muted) / 0.1)", color: "hsl(var(--kf-muted-foreground))" }}>{action.timeframe}</span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-0.5">
+                <span className="text-xs font-medium text-[hsl(var(--kf-foreground))]">{action.action}</span>
+              </div>
+              <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))]">{action.details}</p>
+              <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--kf-muted) / 0.1)", color: "hsl(var(--kf-muted-foreground))" }}>{action.category}</span>
+                <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--kf-muted) / 0.1)", color: "hsl(var(--kf-muted-foreground))" }}>{action.timeframe}</span>
+                {action.module && (
+                  <button
+                    onClick={() => handleGoToModule(action.module!)}
+                    className="text-[9px] px-1.5 py-0.5 rounded flex items-center gap-1 transition-colors hover:opacity-80"
+                    style={{ background: "hsl(var(--kf-accent2) / 0.1)", color: "hsl(var(--kf-accent2))" }}
+                  >
+                    <ExternalLink className="w-2 h-2" />
+                    {action.module}
+                  </button>
+                )}
+                {createdTasks.has(i) ? (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded flex items-center gap-1" style={{ background: "hsl(var(--kf-success) / 0.1)", color: "hsl(var(--kf-success))" }}>
+                    <CheckCircle2 className="w-2 h-2" />
+                    Task created
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => handleCreateTask(action, i)}
+                    disabled={creatingTask === i}
+                    className="text-[9px] px-1.5 py-0.5 rounded flex items-center gap-1 transition-colors hover:opacity-80 disabled:opacity-50"
+                    style={{ background: "hsl(var(--kf-accent1) / 0.1)", color: "hsl(var(--kf-accent1))" }}
+                  >
+                    {creatingTask === i ? <Loader2 className="w-2 h-2 animate-spin" /> : <Plus className="w-2 h-2" />}
+                    Create task
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
