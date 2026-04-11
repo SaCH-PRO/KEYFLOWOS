@@ -221,6 +221,8 @@ export class DocumentsService {
       ],
       maxTokens: tokenBudget,
       temperature: 0.4,
+      outputCategory: 'documents',
+      
     });
 
     let parsed: { title?: string; sections?: Array<{ key: string; name: string; content: string; riskScore?: string; editableMode?: string }> };
@@ -379,6 +381,8 @@ export class DocumentsService {
       ],
       maxTokens: 4000,
       temperature: 0.6,
+      outputCategory: 'documents',
+      
     });
 
     let updates: Array<{ key: string; content: string }>;

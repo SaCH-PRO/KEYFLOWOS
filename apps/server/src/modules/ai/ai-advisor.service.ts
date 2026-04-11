@@ -222,6 +222,7 @@ export class AiAdvisorService {
         messages,
         maxTokens: 500,
         temperature: 0.7,
+        outputCategory: 'general',
       });
 
       return {
@@ -305,6 +306,7 @@ Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
         ],
         maxTokens: 600,
         temperature: 0.5,
+        outputCategory: 'briefings',
       });
 
       try {
@@ -458,6 +460,7 @@ Use the business's actual data to make projections realistic. Currency should ma
           { role: 'user', content: prompt },
         ],
         maxTokens: 2000,
+        outputCategory: 'reports',
       });
       return { simulation: result.content || 'Unable to run simulation.', usage: result.usage };
     } catch (e) {
@@ -689,6 +692,7 @@ ALL financial figures in TTD. Be specific, be thorough, be actionable. This plan
         ],
         maxTokens: 8000,
         temperature: 0.7,
+        outputCategory: 'documents',
       });
 
       const raw = result.content || '';

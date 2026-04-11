@@ -611,6 +611,8 @@ Current Position:
         ],
         maxTokens: 800,
         temperature: 0.5,
+        outputCategory: 'briefings',
+        
       });
 
       try {

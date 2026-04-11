@@ -107,6 +107,8 @@ Only include filters relevant to the query. Current date: ${new Date().toISOStri
       ],
       maxTokens: 600,
       temperature: 0.2,
+      outputCategory: 'general',
+      responseMode: 'structured_json',
     });
 
     const duration = Date.now() - start;
@@ -212,6 +214,7 @@ Respond in valid JSON:
       ],
       maxTokens: 2000,
       temperature: 0.6,
+      outputCategory: 'marketing',
     });
 
     const duration = Date.now() - start;
@@ -298,6 +301,7 @@ Respond in valid JSON:
       ],
       maxTokens: 2000,
       temperature: 0.4,
+      outputCategory: 'reports',
     });
 
     const duration = Date.now() - start;
@@ -380,6 +384,7 @@ Respond in valid JSON:
       ],
       maxTokens: 2000,
       temperature: 0.4,
+      outputCategory: 'marketing',
     });
 
     const duration = Date.now() - start;
@@ -457,6 +462,7 @@ Respond in valid JSON:
       ],
       maxTokens: 1500,
       temperature: 0.6,
+      outputCategory: 'marketing',
     });
 
     const duration = Date.now() - start;
@@ -557,6 +563,7 @@ Respond in valid JSON:
       ],
       maxTokens: 2000,
       temperature: 0.4,
+      outputCategory: 'marketing',
     });
 
     const duration = Date.now() - start;

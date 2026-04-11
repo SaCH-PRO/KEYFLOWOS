@@ -326,6 +326,7 @@ export class OnboardingConciergeService {
         messages,
         maxTokens: 600,
         temperature: 0.7,
+        outputCategory: 'general',
       });
 
       const parsed = this.parseAiResponse(result.content, setupStatus);

@@ -1058,6 +1058,7 @@ Rules:
             content: `Here are the contacts needing attention:\n${contactSummaries.join('\n')}`,
           },
         ],
+        outputCategory: 'general',
       });
 
       const parsed = JSON.parse(result.content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim());

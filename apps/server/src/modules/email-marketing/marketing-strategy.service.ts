@@ -494,6 +494,7 @@ Respond in valid JSON:
       ],
       maxTokens: 4000,
       temperature: 0.5,
+      outputCategory: 'documents',
     });
 
     const duration = Date.now() - start;

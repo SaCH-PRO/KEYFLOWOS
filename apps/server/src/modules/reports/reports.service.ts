@@ -226,6 +226,7 @@ Use ${currency} for all monetary values. Be specific with numbers. Keep each sec
         ],
         maxTokens: 1500,
         temperature: 0.4,
+        outputCategory: 'reports',
       });
 
       aiNarrative = result.content;

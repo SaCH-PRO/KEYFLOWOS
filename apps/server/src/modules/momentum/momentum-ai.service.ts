@@ -119,6 +119,7 @@ export class MomentumAiService {
           { role: 'system', content: systemPrompt },
           { role: 'user', content: `Generate a ${input.type.replace(/_/g, ' ')} message for ${input.contactName}.` },
         ],
+        outputCategory: 'messages',
       });
 
       const parsed = this.parseJson(result.content);
