@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Param, Query, Res, UseGuards, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Query, Body, Res, UseGuards, Inject } from '@nestjs/common';
 import { Response } from 'express';
 import { GoogleDriveService } from './google-drive.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
@@ -94,5 +94,36 @@ export class GoogleDriveController {
   ) {
     const url = this.driveService.getEmbedUrl(fileId, mimeType);
     return { url };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/save-document')
+  saveDocument(
+    @Param('businessId') businessId: string,
+    @Body() body: {
+      title: string;
+      sections: Array<{ sectionName: string; content: string }>;
+      documentType: string;
+      category: string;
+      version: number;
+    },
+  ) {
+    return this.driveService.saveDocumentToDrive(businessId, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/export-html')
+  exportHtml(
+    @Param('businessId') businessId: string,
+    @Body() body: {
+      title: string;
+      sections: Array<{ sectionName: string; content: string }>;
+      documentType: string;
+      category: string;
+      version: number;
+    },
+  ) {
+    const html = this.driveService.buildDocumentHtml(body);
+    return { html };
   }
 }
