@@ -58,6 +58,7 @@ type Props = {
   cartCurrency: string;
   promoCode: PromoCode | null;
   shippingZones: ShippingZone[];
+  taxRate?: number;
   onBack: () => void;
   onUpdateQuantity: (itemId: string, itemType: string, delta: number) => void;
   onSubmit: (data: {
@@ -90,6 +91,7 @@ export function CheckoutFlow({
   cartCurrency,
   promoCode,
   shippingZones,
+  taxRate,
   onBack,
   onUpdateQuantity,
   onSubmit,
@@ -141,7 +143,8 @@ export function CheckoutFlow({
   }, [checkoutSteps.length, checkoutStep]);
 
   const discount = calculateDiscount(cartTotal, promoCode);
-  const estimatedTax = Math.round(cartTotal * 0.125 * 100) / 100;
+  const effectiveTaxRate = taxRate ?? 0;
+  const estimatedTax = effectiveTaxRate > 0 ? Math.round(cartTotal * (effectiveTaxRate / 100) * 100) / 100 : 0;
   const activeZone = shippingZones.find((z) => z.id === selectedShippingZone);
   const shippingFee = (() => {
     if (!hasPhysicalProducts || !activeZone) return 0;
@@ -289,6 +292,32 @@ export function CheckoutFlow({
             })}
           </div>
         </div>
+
+        {currentStepKey !== "payment" && (
+          <div
+            className="rounded-2xl border border-white/[0.06] p-4 flex items-center justify-between"
+            style={{ background: "linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)" }}
+          >
+            <div className="flex items-center gap-3">
+              <ShoppingBag className="w-4 h-4 text-white/30" />
+              <div>
+                <span className="text-xs text-white/50">
+                  {cart.reduce((s, c) => s + c.quantity, 0)} {cart.reduce((s, c) => s + c.quantity, 0) === 1 ? "item" : "items"}
+                </span>
+                <span className="text-xs text-white/25 mx-2">·</span>
+                <span className="text-xs text-white/40">Subtotal</span>
+              </div>
+            </div>
+            <div className="text-right">
+              <span className="text-sm font-bold tabular-nums" style={{ color: primaryColor }}>
+                {formatPrice(orderTotal, cartCurrency)}
+              </span>
+              {estimatedTax > 0 && (
+                <p className="text-[9px] text-white/25">incl. {effectiveTaxRate}% tax</p>
+              )}
+            </div>
+          </div>
+        )}
 
         <div
           key={currentStepKey}
@@ -763,10 +792,12 @@ export function CheckoutFlow({
                         <span className="text-emerald-400/70 tabular-nums">-{formatPrice(discount, cartCurrency)}</span>
                       </div>
                     )}
-                    <div className="flex justify-between text-[11px]">
-                      <span className="text-white/30">Tax (12.5%)</span>
-                      <span className="text-white/30 tabular-nums">{formatPrice(estimatedTax, cartCurrency)}</span>
-                    </div>
+                    {estimatedTax > 0 && (
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-white/30">Tax ({effectiveTaxRate}%)</span>
+                        <span className="text-white/30 tabular-nums">{formatPrice(estimatedTax, cartCurrency)}</span>
+                      </div>
+                    )}
                     {hasPhysicalProducts && (
                       <div className="flex justify-between text-[11px]">
                         <span className="text-white/30">Shipping{activeZone ? ` (${activeZone.name})` : ""}</span>

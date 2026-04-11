@@ -609,6 +609,26 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
             </div>
           </div>
 
+          <div className="flex items-center justify-between px-4 py-1">
+            <span
+              className="text-[8px] font-medium px-1.5 py-0.5 rounded-full"
+              style={{ background: `${pc}15`, color: pc }}
+            >
+              {theme.charAt(0).toUpperCase() + theme.slice(1)} Theme
+            </span>
+            {slug && (
+              <a
+                href={`/book/${slug}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[8px] font-medium flex items-center gap-0.5"
+                style={{ color: "hsl(var(--kf-accent2))" }}
+              >
+                View Live <ArrowRight className="w-2 h-2" />
+              </a>
+            )}
+          </div>
+
           <div
             className="rounded-[1.8rem] overflow-hidden"
             style={{ border: "1px solid hsl(var(--kf-border) / 0.3)" }}

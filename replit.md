@@ -32,7 +32,9 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **User & Security:** Multi-Tenant System with `businessId` isolation, personalized authentication (Google OAuth), notification system, input sanitization, DTO validation, rate limiting, and AI prompt injection guards.
 - **Cross-Module Intelligence Agents:** Client Momentum, Campaign Intelligence, Financial Copilot, and an event-driven workflow engine for cross-module actions.
 - **Data Integrity:** Ensures atomic operations for campaign sending, lead forms, and tax/discount bounds.
-- **Public Storefront (`/book/[slug]`):** Premium, mobile-first, conversion-optimized storefront with section-based layout, product detail pages, category navigation, featured products, FAQ, policy pages, contact section, testimonials, and structured data.
+- **Public Storefront (`/book/[slug]`):** Premium, mobile-first, conversion-optimized storefront with section-based layout, product detail pages, category navigation, featured products, FAQ, policy pages, contact section, testimonials, structured data, dynamic Google Font pairing loading, persistent checkout order summary, configurable tax rate (0 = hidden), and email capture for order notifications.
+- **Store Setup Wizard:** 5-step guided setup (URL, catalog, design, hours, go-live) with done/pending status badges, step connectors, and completion celebration with share CTA. Replaces generic checklist.
+- **Trust Bar:** Dynamic trust metrics with optional `completedOrdersCount` and `businessHoursToday` props, graceful fallbacks to static labels.
 - **Business Guidance Engine:** AI-powered recommendation engine and strategic advisor with a 13-step profiling wizard, diagnostic scoring, financial analysis, and roadmap generation. Includes a Guidance Dashboard with key metrics and insights.
 - **Financial Copilot Agent:** Monitors revenue, expenses, and cash flow with anomaly detection and weekly AI-powered briefings.
 - **Customer Notification System:** Transactional email system for branded customer-facing emails.

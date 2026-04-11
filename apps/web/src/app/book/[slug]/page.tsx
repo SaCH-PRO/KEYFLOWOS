@@ -949,6 +949,7 @@ export default function PublicBookingPage() {
           cartCurrency={cartCurrency}
           promoCode={promoCode}
           shippingZones={shippingZones}
+          taxRate={(storefrontConfig?.storeSettings as Record<string, unknown>)?.taxRate as number | undefined}
           onBack={() => setCheckoutMode(false)}
           onUpdateQuantity={updateQuantity}
           onSubmit={handleCheckoutSubmit}
@@ -968,6 +969,14 @@ export default function PublicBookingPage() {
               primaryColor={primaryColor}
               secondaryColor={secondaryColor}
               businessName={business?.name}
+              businessHoursToday={(() => {
+                if (!business?.businessHours) return null;
+                const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+                const today = days[new Date().getDay()];
+                const h = business.businessHours[today];
+                if (!h || h.closed) return "Closed";
+                return `${h.open} – ${h.close}`;
+              })()}
             />
             <div className="flex items-center gap-2 flex-shrink-0">
               <ShareStoreButton
