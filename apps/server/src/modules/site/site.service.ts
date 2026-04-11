@@ -152,6 +152,8 @@ export class SiteService {
 
     const meta = (business.metaData as Record<string, any>) ?? {};
     const storefront = meta.storefront ?? {};
+    const storefrontEvents: StorefrontEvent[] = meta.storefrontEvents ?? [];
+    const completedOrdersCount = storefrontEvents.filter((e) => e.type === 'checkout_complete').length;
 
     const [services, products, shippingZones] = await Promise.all([
       this.prisma.client.service.findMany({
@@ -187,6 +189,7 @@ export class SiteService {
       services,
       products,
       shippingZones,
+      completedOrdersCount,
     };
   }
 
