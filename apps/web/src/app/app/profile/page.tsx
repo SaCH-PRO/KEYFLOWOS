@@ -4,21 +4,17 @@ import { useEffect, useState, useMemo, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  User, CheckCircle2, AlertCircle, Compass, FileText,
+  User, CheckCircle2, AlertCircle, FileText,
   ChevronDown, ChevronRight, Sparkles, TrendingUp, Zap,
   Building2, Briefcase, Shield, Target,
 } from "lucide-react";
-import { apiGet, apiPatch } from "@/lib/api";
+import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
-import GuidanceCard from "./components/guidance-card";
-import BusinessGuidanceWizard from "./components/guidance-wizard";
-import GuidanceDashboard from "./components/guidance-dashboard";
 import PersonalInfoSection from "./components/personal-info-section";
 import MyBusinessSection from "./components/my-business-section";
 import ProfessionalProfileSection from "./components/professional-profile-section";
 import DocumentsTab from "./components/documents-tab";
-import { loadGuidanceDraft } from "./components/guidance-storage";
 
 interface IdentityMe {
   id: string;
@@ -266,12 +262,11 @@ function SkeletonProfile() {
   );
 }
 
-type TabId = "profile" | "documents" | "guidance";
+type TabId = "profile" | "documents";
 
 const TAB_CONFIG: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: "profile", label: "Profile", icon: User },
   { id: "documents", label: "Documents", icon: FileText },
-  { id: "guidance", label: "Guidance", icon: Compass },
 ];
 
 export default function ProfileSettingsPage() {
@@ -288,7 +283,6 @@ export default function ProfileSettingsPage() {
   const [profileCompleteness, setProfileCompleteness] = useState(0);
   const [docCount, setDocCount] = useState(0);
 
-  const [showGuidanceWizard, setShowGuidanceWizard] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>(TAB_CONFIG.some(t => t.id === initialTab) ? initialTab : "profile");
 
   const handleTabChange = useCallback((tab: TabId) => {
@@ -296,8 +290,6 @@ export default function ProfileSettingsPage() {
     const url = tab === "profile" ? "/app/profile" : `/app/profile?tab=${tab}`;
     router.replace(url, { scroll: false });
   }, [router]);
-  const [guidanceStatus, setGuidanceStatusState] = useState<"not_started" | "in_progress" | "complete">("not_started");
-  const [hasBackendAssessment, setHasBackendAssessment] = useState(false);
 
   const [isBizDirty, setIsBizDirty] = useState(false);
   const [isBizInfoDirty, setIsBizInfoDirty] = useState(false);
@@ -328,35 +320,18 @@ export default function ProfileSettingsPage() {
       { label: "Complete business profile", done: profileCompleteness >= 60, tab: "profile" as TabId, icon: Building2 },
       { label: "Set industry & stage", done: profileCompleteness >= 40, tab: "profile" as TabId, icon: Briefcase },
       { label: "Generate your first document", done: docCount > 0, tab: "documents" as TabId, icon: FileText },
-      { label: "Complete business guidance", done: guidanceStatus === "complete", tab: "guidance" as TabId, icon: Compass },
     ];
-  }, [form, profileCompleteness, docCount, guidanceStatus]);
+  }, [form, profileCompleteness, docCount]);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
     if (bid) setBusinessId(bid);
     if (bid) {
-      apiGet<{ status: string; latestAssessment: unknown }>(`/business-guidance/${bid}/dashboard`)
-        .then(({ data }) => {
-          if (data?.latestAssessment) {
-            setHasBackendAssessment(true);
-            setGuidanceStatusState("complete");
-          } else if (data?.status === "IN_PROGRESS" || data?.status === "DRAFT" || data?.status === "SUBMITTED") {
-            setGuidanceStatusState("in_progress");
-          } else {
-            setGuidanceStatusState("not_started");
-          }
-        })
-        .catch(() => {
-          setGuidanceStatusState("not_started");
-        });
       apiGet<unknown[]>(`/documents/businesses/${bid}/instances`)
         .then(({ data }) => {
           if (data) setDocCount(data.length);
         })
         .catch(() => {});
-    } else {
-      setGuidanceStatusState("not_started");
     }
   }, []);
 
@@ -383,78 +358,6 @@ export default function ProfileSettingsPage() {
     };
     load();
   }, []);
-
-  if (showGuidanceWizard) {
-    return (
-      <BusinessGuidanceWizard
-        onClose={() => {
-          setShowGuidanceWizard(false);
-          if (businessId) {
-            apiGet<{ status: string; latestAssessment: unknown }>(`/business-guidance/${businessId}/dashboard`)
-              .then(({ data }) => {
-                if (data?.latestAssessment) {
-                  setHasBackendAssessment(true);
-                  setGuidanceStatusState("complete");
-                  handleTabChange("guidance");
-                } else if (data?.status === "IN_PROGRESS" || data?.status === "DRAFT" || data?.status === "SUBMITTED") {
-                  setGuidanceStatusState("in_progress");
-                }
-              })
-              .catch(() => {});
-          }
-        }}
-        onComplete={() => {
-          setShowGuidanceWizard(false);
-          setGuidanceStatusState("complete");
-          setHasBackendAssessment(true);
-          handleTabChange("guidance");
-          if (businessId) {
-            apiGet<{ status: string; latestAssessment: unknown }>(`/business-guidance/${businessId}/dashboard`)
-              .then(({ data }) => {
-                if (data?.latestAssessment) setHasBackendAssessment(true);
-              })
-              .catch(() => {});
-            const draft = loadGuidanceDraft();
-            const updates: Record<string, unknown> = {};
-            if (draft.industry) updates.industry = draft.industry;
-            if (draft.businessStage) {
-              const stageMap: Record<string, string> = {
-                "idea": "IDEA", "pre-launch": "STARTUP", "launched": "STARTUP",
-                "growing": "GROWTH", "scaling": "SCALING", "established": "ESTABLISHED",
-              };
-              updates.businessStage = stageMap[draft.businessStage] || draft.businessStage.toUpperCase();
-            }
-            if (draft.teamSize !== null && draft.teamSize !== undefined) {
-              const ts = Number(draft.teamSize);
-              if (ts <= 1) updates.teamSize = "SOLO";
-              else if (ts <= 5) updates.teamSize = "SMALL_TEAM";
-              else if (ts <= 15) updates.teamSize = "GROWING";
-              else if (ts <= 50) updates.teamSize = "MEDIUM";
-              else updates.teamSize = "LARGE";
-            }
-            if (draft.founderLocation) {
-              const parts = draft.founderLocation.split(",").map((s: string) => s.trim());
-              if (parts.length >= 2) {
-                updates.city = parts[0];
-                updates.country = parts[parts.length - 1];
-              } else if (parts.length === 1) {
-                updates.country = parts[0];
-              }
-            }
-            if (draft.businessName) updates.name = draft.businessName;
-            if (draft.offerDescription) updates.description = draft.offerDescription;
-            if (Object.keys(updates).length > 0) {
-              apiPatch(`/identity/businesses/${businessId}`, updates)
-                .then((res) => {
-                  if (!res.error) setRefreshKey((k) => k + 1);
-                })
-                .catch(() => {});
-            }
-          }
-        }}
-      />
-    );
-  }
 
   if (loading) return (
     <div className="max-w-2xl mx-auto">
@@ -496,7 +399,7 @@ export default function ProfileSettingsPage() {
         </div>
         <div className="flex-1 min-w-0">
           <h1 className="text-2xl font-bold tracking-tight">My Profile</h1>
-          <p className="text-sm text-muted-foreground">Manage your profile, documents, and business guidance</p>
+          <p className="text-sm text-muted-foreground">Manage your profile and documents</p>
         </div>
       </motion.div>
 
@@ -530,25 +433,10 @@ export default function ProfileSettingsPage() {
       </motion.div>
 
       <AnimatePresence mode="wait">
-        {activeTab === "guidance" && (
-          <motion.div key="guidance" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-            {guidanceStatus === "complete" || hasBackendAssessment ? (
-              <GuidanceDashboard
-                onEditProfile={() => setShowGuidanceWizard(true)}
-                onGoToDocuments={() => handleTabChange("documents")}
-              />
-            ) : (
-              <GuidanceCard onLaunchWizard={() => setShowGuidanceWizard(true)} status={guidanceStatus} />
-            )}
-          </motion.div>
-        )}
-
         {activeTab === "documents" && (
           <motion.div key="documents" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
             <DocumentsTab
               businessId={businessId}
-              onGoToGuidance={() => handleTabChange("guidance")}
-              guidanceComplete={guidanceStatus === "complete"}
             />
           </motion.div>
         )}

@@ -8,7 +8,7 @@ import {
   ChevronRight, Search, Building2, DollarSign,
   Palette, Settings, Users, Lock, Globe, TrendingUp,
   Truck, Award, Home, Package, Scale, Globe2,
-  ShieldCheck, UserCheck, Sparkles, Eye, Compass, Zap,
+  ShieldCheck, UserCheck, Sparkles, Eye, Zap,
   Mail, ExternalLink, X, Check, HardDrive,
 } from "lucide-react";
 import GoogleDriveBrowser from "./google-drive-browser";
@@ -180,11 +180,9 @@ function CategoryCard({ category, onSelectType }: { category: DocumentCategory; 
 
 interface DocumentsTabProps {
   businessId: string | null;
-  onGoToGuidance?: () => void;
-  guidanceComplete?: boolean;
 }
 
-export default function DocumentsTab({ businessId, onGoToGuidance, guidanceComplete }: DocumentsTabProps) {
+export default function DocumentsTab({ businessId }: DocumentsTabProps) {
   const router = useRouter();
   const [categories, setCategories] = useState<DocumentCategory[]>([]);
   const [instances, setInstances] = useState<DocumentInstance[]>([]);
@@ -308,24 +306,6 @@ export default function DocumentsTab({ businessId, onGoToGuidance, guidanceCompl
 
   return (
     <div className="space-y-5">
-      {!guidanceComplete && onGoToGuidance && (
-        <div
-          className="flex items-center gap-3 p-3 rounded-xl cursor-pointer hover:opacity-90 transition-opacity"
-          style={{
-            background: "linear-gradient(135deg, hsl(var(--kf-accent2) / 0.08), hsl(var(--kf-accent1) / 0.05))",
-            border: "1px solid hsl(var(--kf-accent2) / 0.2)",
-          }}
-          onClick={onGoToGuidance}
-        >
-          <Compass className="w-5 h-5 flex-shrink-0" style={{ color: "hsl(var(--kf-accent2))" }} />
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium text-[hsl(var(--foreground))]">Complete Business Guidance first</div>
-            <div className="text-xs text-[hsl(var(--muted-foreground))]">AI generates better documents with your guidance assessment data</div>
-          </div>
-          <ChevronRight className="w-4 h-4 text-[hsl(var(--muted-foreground))] flex-shrink-0" />
-        </div>
-      )}
-
       {health && health.total > 0 && (
         <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
           {[
