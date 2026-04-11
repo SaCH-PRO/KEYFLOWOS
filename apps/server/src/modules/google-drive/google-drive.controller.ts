@@ -1,6 +1,8 @@
-import { Controller, Get, Post, Delete, Param, Query, Body, Res, UseGuards, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Query, Body, Req, Res, UseGuards, Inject } from '@nestjs/common';
 import { Response } from 'express';
 import { GoogleDriveService } from './google-drive.service';
+import { TransactionalEmailService } from '../notifications/transactional-email.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 
@@ -8,6 +10,8 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 export class GoogleDriveController {
   constructor(
     @Inject(GoogleDriveService) private readonly driveService: GoogleDriveService,
+    @Inject(TransactionalEmailService) private readonly emailService: TransactionalEmailService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -125,5 +129,67 @@ export class GoogleDriveController {
   ) {
     const html = this.driveService.buildDocumentHtml(body);
     return { html };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/email-content')
+  async emailContent(
+    @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string } },
+    @Body() body: {
+      title: string;
+      sections: Array<{ sectionName: string; content: string }>;
+      documentType: string;
+      category: string;
+      version: number;
+    },
+  ) {
+    let user: { email: string | null; name: string | null; firstName: string | null } | null = null;
+
+    if (req.user?.id) {
+      user = await this.prisma.client.user.findUnique({
+        where: { id: req.user.id },
+        select: { email: true, name: true, firstName: true },
+      });
+    }
+
+    if (!user || !user.email) {
+      const business = await this.prisma.client.business.findUnique({
+        where: { id: businessId },
+        include: { members: { include: { user: { select: { email: true, name: true, firstName: true } } }, take: 1 } },
+      });
+      if (!business || business.members.length === 0) return { sent: false, reason: 'No recipient email found' };
+      user = business.members[0].user;
+    }
+
+    if (!user?.email) return { sent: false, reason: 'No recipient email found' };
+
+    try {
+      const result = await this.emailService.send({
+        businessId,
+        type: 'document_generated',
+        recipientEmail: user.email,
+        recipientName: user.name || user.firstName || 'there',
+        templateData: {
+          documentTitle: body.title,
+          documentTypeName: body.documentType,
+          categoryName: body.category,
+          riskTier: 'GREEN',
+          documentId: '',
+          version: body.version,
+          sections: body.sections.slice(0, 20).map((s) => ({
+            name: String(s.sectionName || '').slice(0, 200),
+            content: String(s.content || '').slice(0, 10000),
+          })),
+          documentUrl: '',
+        },
+      });
+
+      if (result?.status === 'SENT') return { sent: true };
+      if (result?.status === 'QUEUED') return { sent: false, reason: 'Email queued — connect Gmail to send immediately' };
+      return { sent: false, reason: 'Email delivery failed. Please try again.' };
+    } catch {
+      return { sent: false, reason: 'Failed to send email. Please try again.' };
+    }
   }
 }
