@@ -5,9 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   User, CheckCircle2, AlertCircle, FileText,
-  ChevronDown, ChevronRight, Sparkles, TrendingUp, Zap,
-  Building2, Briefcase, Shield, Target, Palette, Bot,
-  Globe,
+  ChevronRight, Shield, Building2, Briefcase, Palette, Globe,
 } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -20,6 +18,10 @@ import BusinessBuilderCard from "./components/business-builder-card";
 import SecuritySection from "./components/security-section";
 import ComplianceSection from "./components/compliance-section";
 import BrandIdentityTab from "./components/brand-identity-tab";
+import { JourneyIndicator, type CompletenessItem } from "./components/journey-indicator";
+import { BusinessContextCard } from "./components/business-context-card";
+import { SkeletonProfile } from "./components/skeleton-profile";
+import { ProfileSectionErrorBoundary } from "./components/profile-section-error-boundary";
 
 interface IdentityMe {
   id: string;
@@ -31,6 +33,48 @@ interface IdentityMe {
   avatarUrl?: string | null;
 }
 
+interface BusinessData {
+  id?: string;
+  name?: string;
+  logoUrl?: string | null;
+  industry?: string;
+  businessStage?: string;
+  teamSize?: string;
+  city?: string;
+  country?: string;
+  tagline?: string | null;
+  description?: string | null;
+  businessHours?: Record<string, { open: string; close: string; closed: boolean }> | null;
+  headline?: string | null;
+  bio?: string | null;
+  skills?: string[];
+  interests?: string[];
+  profileCompleteness?: number;
+}
+
+interface ProfileCompletenessField {
+  key: string;
+  label: string;
+  description: string;
+}
+
+function checkFieldCompletion(key: string, bd: BusinessData | null): boolean {
+  if (!bd) return false;
+  switch (key) {
+    case "name": return !!bd.name;
+    case "logoUrl": return !!bd.logoUrl;
+    case "headline": return !!bd.headline;
+    case "bio": return !!bd.bio;
+    case "industry": return !!bd.industry;
+    case "skills": return (bd.skills?.length ?? 0) > 0;
+    case "businessStage": return !!bd.businessStage;
+    case "location": return !!(bd.city || bd.country);
+    case "interests": return (bd.interests?.length ?? 0) > 0;
+    case "taglineOrDescription": return !!(bd.tagline || bd.description);
+    default: return false;
+  }
+}
+
 const stagger = {
   hidden: { opacity: 0 },
   show: { opacity: 1, transition: { staggerChildren: 0.06 } },
@@ -39,252 +83,6 @@ const fadeUp = {
   hidden: { opacity: 0, y: 12 },
   show: { opacity: 1, y: 0, transition: { duration: 0.3 } },
 };
-
-interface CompletenessItem {
-  label: string;
-  done: boolean;
-  tab: TabId;
-  icon: React.ElementType;
-}
-
-function JourneyIndicator({
-  items,
-  onGoTo,
-}: {
-  items: CompletenessItem[];
-  onGoTo: (tab: TabId) => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const completed = items.filter((i) => i.done).length;
-  const total = items.length;
-  const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-
-  const color =
-    pct >= 80
-      ? "hsl(var(--kf-success))"
-      : pct >= 50
-        ? "hsl(var(--kf-warning))"
-        : "hsl(var(--kf-error))";
-
-  return (
-    <div
-      className="rounded-xl overflow-hidden transition-all"
-      style={{
-        background: "hsl(var(--kf-card))",
-        border: "1px solid hsl(var(--kf-border) / 0.3)",
-      }}
-    >
-      <button
-        type="button"
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-3 px-4 py-3 min-h-[44px]"
-      >
-        <div className="relative w-10 h-10 flex items-center justify-center flex-shrink-0">
-          <svg className="w-10 h-10 -rotate-90" viewBox="0 0 40 40">
-            <circle cx="20" cy="20" r="16" fill="none" stroke="hsl(var(--muted))" strokeWidth="3" opacity="0.2" />
-            <circle
-              cx="20" cy="20" r="16" fill="none"
-              stroke={color}
-              strokeWidth="3"
-              strokeLinecap="round"
-              strokeDasharray={2 * Math.PI * 16}
-              strokeDashoffset={2 * Math.PI * 16 - (pct / 100) * 2 * Math.PI * 16}
-              className="transition-all duration-700"
-            />
-          </svg>
-          <span className="absolute text-[10px] font-bold" style={{ color }}>{pct}%</span>
-        </div>
-        <div className="flex-1 text-left min-w-0">
-          <div className="text-sm font-semibold text-[hsl(var(--foreground))]">
-            Business Foundation
-          </div>
-          <div className="text-xs text-[hsl(var(--muted-foreground))]">
-            {completed}/{total} steps complete
-          </div>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <div className="h-1.5 w-20 rounded-full overflow-hidden" style={{ background: "hsl(var(--muted) / 0.3)" }}>
-            <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: color }} />
-          </div>
-          {expanded ? (
-            <ChevronDown className="w-4 h-4 text-[hsl(var(--muted-foreground))]" />
-          ) : (
-            <ChevronRight className="w-4 h-4 text-[hsl(var(--muted-foreground))]" />
-          )}
-        </div>
-      </button>
-
-      <AnimatePresence>
-        {expanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="overflow-hidden"
-          >
-            <div className="px-4 pb-3 space-y-1 border-t border-[hsl(var(--border))]  pt-2">
-              {items.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <button
-                    key={item.label}
-                    type="button"
-                    onClick={() => onGoTo(item.tab)}
-                    className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left hover:bg-[hsl(var(--muted))] transition-colors min-h-[36px]"
-                  >
-                    {item.done ? (
-                      <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "hsl(var(--kf-success))" }} />
-                    ) : (
-                      <div
-                        className="w-3.5 h-3.5 rounded-full border-2 flex-shrink-0"
-                        style={{ borderColor: "hsl(var(--muted-foreground) / 0.4)" }}
-                      />
-                    )}
-                    <Icon className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] flex-shrink-0" />
-                    <span
-                      className="text-xs flex-1"
-                      style={{
-                        color: item.done ? "hsl(var(--muted-foreground))" : "hsl(var(--foreground))",
-                        textDecoration: item.done ? "line-through" : "none",
-                      }}
-                    >
-                      {item.label}
-                    </span>
-                    {!item.done && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-accent1) / 0.1)", color: "hsl(var(--kf-accent1))" }}>
-                        Quick win
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (typeof window !== "undefined") window.location.href = "/app/onboarding";
-                }}
-                className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left hover:bg-[hsl(var(--muted))] transition-colors min-h-[36px] mt-2 border-t border-[hsl(var(--border))] pt-2"
-              >
-                <div
-                  className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0"
-                  style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
-                >
-                  <Bot className="w-3 h-3 text-white" />
-                </div>
-                <span className="text-xs flex-1 text-[hsl(var(--foreground))]">
-                  Re-run Setup Assistant
-                </span>
-                <ChevronRight className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]" />
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-function BusinessContextCard({
-  form,
-  businessId,
-}: {
-  form: { name: string; firstName: string; lastName: string };
-  businessId: string | null;
-}) {
-  const [bizData, setBizData] = useState<{
-    name?: string;
-    industry?: string;
-    businessStage?: string;
-    teamSize?: string;
-    city?: string;
-    country?: string;
-  } | null>(null);
-
-  useEffect(() => {
-    if (!businessId) return;
-    apiGet<Record<string, unknown>>(`/identity/businesses/${businessId}`)
-      .then(({ data }) => {
-        if (data) setBizData(data as typeof bizData);
-      })
-      .catch(() => {});
-  }, [businessId]);
-
-  const items = [
-    { label: "Business", value: bizData?.name, icon: Building2 },
-    { label: "Industry", value: bizData?.industry, icon: Briefcase },
-    { label: "Stage", value: bizData?.businessStage?.replace(/_/g, " "), icon: TrendingUp },
-    { label: "Team", value: bizData?.teamSize?.replace(/_/g, " "), icon: User },
-    { label: "Location", value: [bizData?.city, bizData?.country].filter(Boolean).join(", "), icon: Target },
-  ].filter((i) => i.value);
-
-  if (items.length === 0) return null;
-
-  return (
-    <div
-      className="rounded-xl p-4"
-      style={{
-        background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.06), hsl(var(--kf-accent2) / 0.04))",
-        border: "1px solid hsl(var(--kf-accent1) / 0.12)",
-      }}
-    >
-      <div className="flex items-center gap-2 mb-3">
-        <Sparkles className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
-        <span className="text-xs font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>
-          What KEYFLOWOS sees
-        </span>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {items.map((item) => {
-          const Icon = item.icon;
-          return (
-            <div
-              key={item.label}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs"
-              style={{
-                background: "hsl(var(--kf-card))",
-                border: "1px solid hsl(var(--kf-border) / 0.2)",
-              }}
-            >
-              <Icon className="w-3 h-3 text-[hsl(var(--muted-foreground))]" />
-              <span className="text-[hsl(var(--muted-foreground))]">{item.label}:</span>
-              <span className="font-medium text-[hsl(var(--foreground))]">{item.value}</span>
-            </div>
-          );
-        })}
-      </div>
-      <p className="text-[10px] text-[hsl(var(--muted-foreground))] mt-2">
-        This data powers AI-generated documents and recommendations.
-      </p>
-    </div>
-  );
-}
-
-function SkeletonProfile() {
-  return (
-    <div className="space-y-6 max-w-2xl animate-pulse">
-      <div className="flex items-center gap-4">
-        <div className="w-20 h-20 rounded-2xl bg-muted/40" />
-        <div className="space-y-2 flex-1">
-          <div className="h-5 w-40 bg-muted/40 rounded-lg" />
-          <div className="h-3 w-56 bg-muted/30 rounded-lg" />
-        </div>
-      </div>
-      <div className="kf-card p-6 space-y-4">
-        <div className="h-4 w-24 bg-muted/40 rounded" />
-        <div className="grid grid-cols-2 gap-4">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="space-y-2">
-              <div className="h-3 w-20 bg-muted/30 rounded" />
-              <div className="h-10 bg-muted/20 rounded-xl" />
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 type TabId = "profile" | "brand" | "documents";
 
@@ -300,23 +98,41 @@ export default function ProfileSettingsPage() {
   const initialTab = (searchParams.get("tab") as TabId) || "profile";
 
   const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
-  const [form, setForm] = useState({ email: "", name: "", firstName: "", lastName: "", phone: "" });
-  const [initialForm, setInitialForm] = useState({ email: "", name: "", firstName: "", lastName: "", phone: "" });
+  const [status, setStatusRaw] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [dismissTimer, setDismissTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const [savedForm, setSavedForm] = useState({ email: "", name: "", firstName: "", lastName: "", phone: "" });
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [businessId, setBusinessId] = useState<string | null>(null);
+  const [businessData, setBusinessData] = useState<BusinessData | null>(null);
+  const [businessLoading, setBusinessLoading] = useState(false);
   const [profileCompleteness, setProfileCompleteness] = useState(0);
   const [docCount, setDocCount] = useState(0);
   const [complianceProgress, setComplianceProgress] = useState({ completed: 0, total: 5 });
-  const [bizData, setBizData] = useState<{
+  const [bizBrandData, setBizBrandData] = useState<{
     primaryColor?: string | null;
     facebook?: string | null;
     instagram?: string | null;
     twitter?: string | null;
     linkedin?: string | null;
   } | null>(null);
+  const [completenessFields, setCompletenessFields] = useState<ProfileCompletenessField[]>([]);
 
   const [activeTab, setActiveTab] = useState<TabId>(TAB_CONFIG.some(t => t.id === initialTab) ? initialTab : "profile");
+
+  const setStatus = useCallback((s: { type: "success" | "error"; message: string } | null) => {
+    setStatusRaw(s);
+    if (dismissTimer) clearTimeout(dismissTimer);
+    if (s) {
+      const timer = setTimeout(() => setStatusRaw(null), 4000);
+      setDismissTimer(timer);
+    }
+  }, [dismissTimer]);
+
+  useEffect(() => {
+    return () => {
+      if (dismissTimer) clearTimeout(dismissTimer);
+    };
+  }, [dismissTimer]);
 
   const handleTabChange = useCallback((tab: TabId) => {
     setActiveTab(tab);
@@ -324,67 +140,103 @@ export default function ProfileSettingsPage() {
     router.replace(url, { scroll: false });
   }, [router]);
 
+  const [isPersonalDirty, setIsPersonalDirty] = useState(false);
   const [isBizDirty, setIsBizDirty] = useState(false);
   const [isBizInfoDirty, setIsBizInfoDirty] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
 
-  const isDirty = useMemo(
-    () =>
-      form.email !== initialForm.email ||
-      form.name !== initialForm.name ||
-      form.firstName !== initialForm.firstName ||
-      form.lastName !== initialForm.lastName ||
-      form.phone !== initialForm.phone,
-    [form, initialForm],
-  );
-
-  const hasUnsavedChanges = useMemo(() => isDirty || isBizDirty || isBizInfoDirty, [isDirty, isBizDirty, isBizInfoDirty]);
+  const hasUnsavedChanges = useMemo(() => isPersonalDirty || isBizDirty || isBizInfoDirty, [isPersonalDirty, isBizDirty, isBizInfoDirty]);
   useUnsavedChanges(hasUnsavedChanges);
 
+  const handlePersonalDirtyChange = useCallback((dirty: boolean) => setIsPersonalDirty(dirty), []);
   const handleBizDirtyChange = useCallback((dirty: boolean) => setIsBizDirty(dirty), []);
   const handleBizInfoDirtyChange = useCallback((dirty: boolean) => setIsBizInfoDirty(dirty), []);
   const handleComplianceChange = useCallback((completed: number, total: number) => setComplianceProgress({ completed, total }), []);
 
   const completenessItems: CompletenessItem[] = useMemo(() => {
-    const hasName = !!(form.firstName || form.name);
-    const hasPhone = !!form.phone;
-    const hasBranding = !!bizData?.primaryColor;
-    const hasSocial = !!(bizData?.facebook || bizData?.instagram || bizData?.twitter || bizData?.linkedin);
+    const hasPersonalName = !!(savedForm.firstName || savedForm.name);
+    const hasPhone = !!savedForm.phone;
+    const hasBranding = !!bizBrandData?.primaryColor;
+    const hasSocial = !!(bizBrandData?.facebook || bizBrandData?.instagram || bizBrandData?.twitter || bizBrandData?.linkedin);
     const complianceDone = complianceProgress.completed >= complianceProgress.total;
+    const bizItems: CompletenessItem[] = completenessFields.length > 0
+      ? completenessFields.map((field) => ({
+          label: field.label,
+          done: checkFieldCompletion(field.key, businessData),
+          tab: "profile" as TabId,
+          icon: Building2,
+        }))
+      : [
+          { label: "Set industry & business stage", done: !!(businessData?.industry && businessData?.businessStage), tab: "profile" as TabId, icon: Briefcase },
+          { label: "Complete professional profile", done: profileCompleteness >= 60, tab: "profile" as TabId, icon: Building2 },
+        ];
     return [
-      { label: "Add your name", done: hasName, tab: "profile" as TabId, icon: User },
+      { label: "Add your name", done: hasPersonalName, tab: "profile" as TabId, icon: User },
       { label: "Add phone number", done: hasPhone, tab: "profile" as TabId, icon: User },
-      { label: "Complete business profile", done: profileCompleteness >= 60, tab: "profile" as TabId, icon: Building2 },
-      { label: "Set industry & stage", done: profileCompleteness >= 40, tab: "profile" as TabId, icon: Briefcase },
+      ...bizItems,
       { label: "Set up branding", done: hasBranding, tab: "brand" as TabId, icon: Palette },
       { label: "Connect social accounts", done: hasSocial, tab: "brand" as TabId, icon: Globe },
       { label: "Complete compliance checklist", done: complianceDone, tab: "profile" as TabId, icon: Shield },
       { label: "Generate your first document", done: docCount > 0, tab: "documents" as TabId, icon: FileText },
     ];
-  }, [form, profileCompleteness, docCount, bizData, complianceProgress]);
+  }, [savedForm, businessData, profileCompleteness, docCount, bizBrandData, complianceProgress, completenessFields]);
+
+  useEffect(() => {
+    apiGet<{ fields: ProfileCompletenessField[] }>("/identity/profile-completeness-fields")
+      .then(({ data, error }) => {
+        if (error) console.error("Failed to load completeness field definitions:", error);
+        else if (data?.fields) setCompletenessFields(data.fields);
+      })
+      .catch((err) => {
+        console.error("Failed to load completeness field definitions:", err);
+      });
+  }, []);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
     if (bid) {
       setBusinessId(bid);
+      setBusinessLoading(true);
       apiGet<unknown[]>(`/documents/businesses/${bid}/instances`)
         .then(({ data }) => {
           if (data) setDocCount(data.length);
         })
-        .catch(() => {});
+        .catch((err) => {
+          console.error("Failed to load document count:", err);
+        });
+      apiGet<BusinessData>(`/identity/businesses/${bid}`)
+        .then(({ data, error }) => {
+          if (error) {
+            setStatus({ type: "error", message: `Failed to load business data: ${error}` });
+            return;
+          }
+          if (data) {
+            setBusinessData(data);
+            setProfileCompleteness(data.profileCompleteness || 0);
+          }
+        })
+        .catch(() => {
+          setStatus({ type: "error", message: "Failed to load business data. Please refresh." });
+        })
+        .finally(() => {
+          setBusinessLoading(false);
+        });
       apiGet<Record<string, unknown>>(`/identity/businesses/${bid}`)
         .then(({ data }) => {
-          if (data) setBizData(data as typeof bizData);
+          if (data) setBizBrandData(data as typeof bizBrandData);
         })
-        .catch(() => {});
+        .catch((err) => {
+          console.error("Failed to load brand data:", err);
+        });
     }
   }, []);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const { data } = await apiGet<IdentityMe>("/identity/me");
-        if (data) {
+        const { data, error } = await apiGet<IdentityMe>("/identity/me");
+        if (error) {
+          setStatus({ type: "error", message: `Failed to load profile: ${error}` });
+        } else if (data) {
           const f = {
             email: data.email || "",
             name: data.name || "",
@@ -392,12 +244,12 @@ export default function ProfileSettingsPage() {
             lastName: data.lastName || "",
             phone: data.phone || "",
           };
-          setForm(f);
-          setInitialForm(f);
+          setSavedForm(f);
           setAvatarUrl(data.avatarUrl || null);
         }
       } catch (e) {
         console.error("Failed to load profile:", e);
+        setStatus({ type: "error", message: "Failed to load your profile. Please refresh the page." });
       }
       setLoading(false);
     };
@@ -437,7 +289,7 @@ export default function ProfileSettingsPage() {
     <motion.div variants={stagger} initial="hidden" animate="show" className={`space-y-4 ${maxWidth} mx-auto transition-all`}>
       <motion.div variants={fadeUp} className="flex items-center gap-3">
         <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white shadow-lg">
-          <User className="w-5 h-5" />
+          <User className="w-5 h-5" aria-hidden="true" />
         </div>
         <div className="flex-1 min-w-0">
           <h1 className="text-2xl font-bold tracking-tight">My Profile</h1>
@@ -449,7 +301,7 @@ export default function ProfileSettingsPage() {
         <JourneyIndicator items={completenessItems} onGoTo={handleTabChange} />
       </motion.div>
 
-      <motion.div variants={fadeUp} className="flex gap-1 p-1 rounded-xl" style={{ background: "hsl(var(--kf-muted) / 0.15)", border: "1px solid hsl(var(--kf-border) / 0.2)" }}>
+      <motion.div variants={fadeUp} className="flex gap-1 p-1 rounded-xl" style={{ background: "hsl(var(--kf-muted) / 0.15)", border: "1px solid hsl(var(--kf-border) / 0.2)" }} role="tablist" aria-label="Profile sections">
         {TAB_CONFIG.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -457,6 +309,9 @@ export default function ProfileSettingsPage() {
           return (
             <button
               key={tab.id}
+              role="tab"
+              aria-selected={isActive}
+              aria-controls={`tabpanel-${tab.id}`}
               onClick={() => handleTabChange(tab.id)}
               className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-all min-h-[44px]"
               style={{
@@ -466,7 +321,7 @@ export default function ProfileSettingsPage() {
                 border: isActive ? "1px solid hsl(var(--kf-border) / 0.3)" : "1px solid transparent",
               }}
             >
-              <Icon className="w-4 h-4" />
+              <Icon className="w-4 h-4" aria-hidden="true" />
               <span className="hidden sm:inline">{tab.label}</span>
               {badge}
             </button>
@@ -476,10 +331,10 @@ export default function ProfileSettingsPage() {
 
       <AnimatePresence mode="wait">
         {activeTab === "documents" && (
-          <motion.div key="documents" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-            <DocumentsTab
-              businessId={businessId}
-            />
+          <motion.div key="documents" id="tabpanel-documents" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+            <ProfileSectionErrorBoundary sectionName="Documents">
+              <DocumentsTab businessId={businessId} />
+            </ProfileSectionErrorBoundary>
           </motion.div>
         )}
 
@@ -490,7 +345,7 @@ export default function ProfileSettingsPage() {
         )}
 
         {activeTab === "profile" && (
-          <motion.div key="profile" variants={stagger} initial="hidden" animate="show" exit={{ opacity: 0, y: -8 }} className="space-y-4">
+          <motion.div key="profile" id="tabpanel-profile" role="tabpanel" variants={stagger} initial="hidden" animate="show" exit={{ opacity: 0, y: -8 }} className="space-y-4">
             <AnimatePresence>
               {status && (
                 <motion.div
@@ -498,71 +353,111 @@ export default function ProfileSettingsPage() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
                   className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm"
+                  role="status"
+                  aria-live="polite"
                   style={{
                     border: `1px solid ${status.type === "success" ? "hsl(var(--kf-success) / 0.4)" : "hsl(var(--kf-error) / 0.4)"}`,
                     background: status.type === "success" ? "hsl(var(--kf-success) / 0.08)" : "hsl(var(--kf-error) / 0.08)",
                     color: status.type === "success" ? "hsl(var(--kf-success))" : "hsl(var(--kf-error))",
                   }}
                 >
-                  {status.type === "success" ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
+                  {status.type === "success" ? <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" /> : <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />}
                   {status.message}
                 </motion.div>
               )}
             </AnimatePresence>
 
             <motion.div variants={fadeUp}>
-              <BusinessContextCard form={form} businessId={businessId} />
+              <BusinessContextCard businessData={businessData} />
             </motion.div>
 
             <motion.div variants={fadeUp}>
-              <BusinessBuilderCard />
+              <ProfileSectionErrorBoundary sectionName="Business Builder">
+                <BusinessBuilderCard />
+              </ProfileSectionErrorBoundary>
             </motion.div>
 
             <motion.div variants={fadeUp} className="kf-card p-6">
-              <PersonalInfoSection
-                form={form}
-                initialForm={initialForm}
-                avatarUrl={avatarUrl}
-                isDirty={isDirty}
-                onFormChange={(updater) => setForm(updater)}
-                onSaved={(newForm, newAvatar) => {
-                  setInitialForm({ ...newForm });
-                  if (newAvatar !== undefined) setAvatarUrl(newAvatar);
-                }}
-                onStatus={setStatus}
-              />
+              <ProfileSectionErrorBoundary sectionName="Personal Info">
+                <PersonalInfoSection
+                  initialData={savedForm}
+                  avatarUrl={avatarUrl}
+                  onDirtyChange={handlePersonalDirtyChange}
+                  onSaved={(newForm, newAvatar) => {
+                    setSavedForm({ ...newForm });
+                    if (newAvatar !== undefined) setAvatarUrl(newAvatar);
+                  }}
+                  onStatus={setStatus}
+                />
+              </ProfileSectionErrorBoundary>
             </motion.div>
 
             <motion.div variants={fadeUp} className="kf-card p-6">
-              <MyBusinessSection
-                key={`biz-info-${refreshKey}`}
-                businessId={businessId}
-                onDirtyChange={handleBizInfoDirtyChange}
-                onStatus={setStatus}
-              />
+              <ProfileSectionErrorBoundary sectionName="My Business">
+                <MyBusinessSection
+                  businessId={businessId}
+                  businessData={businessData}
+                  businessLoading={businessLoading}
+                  onDirtyChange={handleBizInfoDirtyChange}
+                  onStatus={setStatus}
+                  onSaved={(saved) => setBusinessData((prev) => prev ? { ...prev, ...saved } : prev)}
+                />
+              </ProfileSectionErrorBoundary>
             </motion.div>
 
             <motion.div variants={fadeUp} className="kf-card p-6">
-              <ProfessionalProfileSection
-                key={`prof-${refreshKey}`}
-                businessId={businessId}
-                userName={form.name || `${form.firstName} ${form.lastName}`.trim()}
-                onCompletenessChange={setProfileCompleteness}
-                onDirtyChange={handleBizDirtyChange}
-                onStatus={setStatus}
-              />
+              <ProfileSectionErrorBoundary sectionName="Professional Profile">
+                <ProfessionalProfileSection
+                  businessId={businessId}
+                  businessData={businessData}
+                  businessLoading={businessLoading}
+                  userName={savedForm.name || `${savedForm.firstName} ${savedForm.lastName}`.trim()}
+                  onCompletenessChange={(pct) => {
+                    setProfileCompleteness(pct);
+                  }}
+                  onDirtyChange={handleBizDirtyChange}
+                  onStatus={setStatus}
+                  onSaved={(saved) => {
+                    setBusinessData((prev) => prev ? { ...prev, ...saved } : prev);
+                    if (saved.profileCompleteness !== undefined) setProfileCompleteness(saved.profileCompleteness);
+                  }}
+                />
+              </ProfileSectionErrorBoundary>
             </motion.div>
 
             <motion.div variants={fadeUp} className="kf-card p-6">
-              <SecuritySection onStatus={setStatus} />
+              <ProfileSectionErrorBoundary sectionName="Security">
+                <SecuritySection onStatus={setStatus} />
+              </ProfileSectionErrorBoundary>
             </motion.div>
 
             <motion.div variants={fadeUp} className="kf-card p-6">
-              <ComplianceSection
-                businessId={businessId}
-                onStatus={setStatus}
-                onComplianceChange={handleComplianceChange}
-              />
+              <ProfileSectionErrorBoundary sectionName="Compliance">
+                <ComplianceSection
+                  businessId={businessId}
+                  onStatus={setStatus}
+                  onComplianceChange={handleComplianceChange}
+                />
+              </ProfileSectionErrorBoundary>
+            </motion.div>
+
+            <motion.div variants={fadeUp}>
+              <div
+                className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer hover:bg-[hsl(var(--muted))] transition-colors min-h-[44px]"
+                style={{ border: "1px solid hsl(var(--kf-border) / 0.2)" }}
+                onClick={() => router.push("/app/settings/security")}
+                role="button"
+                tabIndex={0}
+                aria-label="Go to Security & Preferences"
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") router.push("/app/settings/security"); }}
+              >
+                <Shield className="w-4 h-4 text-[hsl(var(--muted-foreground))]" aria-hidden="true" />
+                <div className="flex-1">
+                  <div className="text-sm font-medium text-[hsl(var(--foreground))]">Security & Preferences</div>
+                  <div className="text-xs text-[hsl(var(--muted-foreground))]">Password, theme, and account security</div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-[hsl(var(--muted-foreground))]" aria-hidden="true" />
+              </div>
             </motion.div>
           </motion.div>
         )}

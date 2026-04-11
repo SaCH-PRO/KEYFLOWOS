@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Briefcase, Sparkles, FileText, Tag, MapPin, Heart, Shield,
   Wand2, RefreshCw, AlertCircle, ChevronRight, X,
   Scale, DollarSign, Palette, Building2,
 } from "lucide-react";
 import { Button, Input } from "@keyflow/ui";
-import { apiGet, apiPatch } from "@/lib/api";
+import { apiPatch, apiPost } from "@/lib/api";
 import {
   generateAiProfile,
   fetchDocumentGuidance,
@@ -15,6 +15,7 @@ import {
 } from "@/lib/client";
 import { AccordionSection, AccordionGroup } from "../../store/components/accordion-section";
 import { AiFieldBadge, DataUsageHint } from "./ai-field-badge";
+import { useProfileSection } from "@/hooks/use-profile-section";
 
 const INDUSTRY_OPTIONS = [
   "Technology", "Healthcare", "Finance", "Education", "Retail",
@@ -64,73 +65,88 @@ interface BusinessProfile {
   country?: string | null;
 }
 
+const EMPTY_BIZ_FORM: BizForm = {
+  headline: "", bio: "", industry: "", skills: [], businessStage: "",
+  interests: [], city: "", country: "",
+};
+
+function isBizFormDirty(current: BizForm, initial: BizForm): boolean {
+  return (
+    current.headline !== initial.headline ||
+    current.bio !== initial.bio ||
+    current.industry !== initial.industry ||
+    current.businessStage !== initial.businessStage ||
+    current.city !== initial.city ||
+    current.country !== initial.country ||
+    current.skills.length !== initial.skills.length ||
+    current.skills.some((s, i) => s !== initial.skills[i]) ||
+    current.interests.length !== initial.interests.length ||
+    current.interests.some((s, i) => s !== initial.interests[i])
+  );
+}
+
 interface ProfessionalProfileSectionProps {
   businessId: string | null;
+  businessData?: {
+    headline?: string | null;
+    bio?: string | null;
+    industry?: string | null;
+    skills?: string[];
+    businessStage?: string | null;
+    interests?: string[];
+    city?: string | null;
+    country?: string | null;
+    profileCompleteness?: number;
+  } | null;
+  businessLoading?: boolean;
   userName: string;
   onCompletenessChange: (pct: number) => void;
   onDirtyChange?: (dirty: boolean) => void;
   onStatus: (status: { type: "success" | "error"; message: string } | null) => void;
+  onSaved?: (saved: Partial<BizForm & { profileCompleteness: number }>) => void;
 }
 
 export default function ProfessionalProfileSection({
   businessId,
+  businessData,
+  businessLoading,
   userName,
   onCompletenessChange,
   onDirtyChange,
   onStatus,
+  onSaved,
 }: ProfessionalProfileSectionProps) {
-  const [bizForm, setBizForm] = useState<BizForm>({
-    headline: "", bio: "", industry: "", skills: [], businessStage: "",
-    interests: [], city: "", country: "",
+  const { form: bizForm, setForm: setBizForm, setInitialForm: setInitialBizForm, isDirty: isBizDirty, saving: savingBusiness, setSaving: setSavingBusiness } = useProfileSection<BizForm>({
+    initialState: EMPTY_BIZ_FORM,
+    isDirtyFn: isBizFormDirty,
+    onDirtyChange,
   });
-  const [initialBizForm, setInitialBizForm] = useState<BizForm>(bizForm);
+
   const [skillInput, setSkillInput] = useState("");
   const [interestInput, setInterestInput] = useState("");
-  const [savingBusiness, setSavingBusiness] = useState(false);
   const [generatingProfile, setGeneratingProfile] = useState(false);
   const [generatingSkills, setGeneratingSkills] = useState(false);
   const [recommendations, setRecommendations] = useState<DocumentRecommendation[]>([]);
-
-  const isBizDirty =
-    bizForm.headline !== initialBizForm.headline ||
-    bizForm.bio !== initialBizForm.bio ||
-    bizForm.industry !== initialBizForm.industry ||
-    bizForm.businessStage !== initialBizForm.businessStage ||
-    bizForm.city !== initialBizForm.city ||
-    bizForm.country !== initialBizForm.country ||
-    bizForm.skills.length !== initialBizForm.skills.length ||
-    bizForm.skills.some((s, i) => s !== initialBizForm.skills[i]) ||
-    bizForm.interests.length !== initialBizForm.interests.length ||
-    bizForm.interests.some((s, i) => s !== initialBizForm.interests[i]);
+  const initializedRef = useRef(false);
 
   useEffect(() => {
-    onDirtyChange?.(isBizDirty);
-  }, [isBizDirty, onDirtyChange]);
-
-  useEffect(() => {
-    if (!businessId) return;
-    const loadBusiness = async () => {
-      try {
-        const { data } = await apiGet<BusinessProfile>(`/identity/businesses/${businessId}`);
-        if (data) {
-          const bf: BizForm = {
-            headline: data.headline || "",
-            bio: data.bio || "",
-            industry: data.industry || "",
-            skills: data.skills || [],
-            businessStage: data.businessStage || "",
-            interests: data.interests || [],
-            city: data.city || "",
-            country: data.country || "",
-          };
-          setBizForm(bf);
-          setInitialBizForm(bf);
-          onCompletenessChange(data.profileCompleteness || 0);
-        }
-      } catch {}
+    if (!businessId || businessLoading || !businessData) return;
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+    const bf: BizForm = {
+      headline: businessData.headline || "",
+      bio: businessData.bio || "",
+      industry: businessData.industry || "",
+      skills: businessData.skills || [],
+      businessStage: businessData.businessStage || "",
+      interests: businessData.interests || [],
+      city: businessData.city || "",
+      country: businessData.country || "",
     };
-    loadBusiness();
-  }, [businessId]);
+    setBizForm(bf);
+    setInitialBizForm(bf);
+    onCompletenessChange(businessData.profileCompleteness || 0);
+  }, [businessId, businessLoading, businessData]);
 
   useEffect(() => {
     if (!businessId) return;
@@ -138,7 +154,9 @@ export default function ProfessionalProfileSection({
       .then((res) => {
         if (res.data?.recommendations) setRecommendations(res.data.recommendations);
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.error("Failed to load document guidance:", err);
+      });
   }, [businessId]);
 
   const handleSave = async () => {
@@ -152,15 +170,19 @@ export default function ProfessionalProfileSection({
       } else if (data) {
         onStatus({ type: "success", message: "Professional profile updated" });
         setInitialBizForm({ ...bizForm });
-        onCompletenessChange(data.profileCompleteness || 0);
+        const pct = data.profileCompleteness || 0;
+        onCompletenessChange(pct);
+        onSaved?.({ ...bizForm, profileCompleteness: pct });
         fetchDocumentGuidance(businessId)
           .then((res) => {
             if (res.data?.recommendations) setRecommendations(res.data.recommendations);
           })
-          .catch(() => {});
+          .catch((err) => {
+            console.error("Failed to refresh document guidance:", err);
+          });
       }
-    } catch {
-      onStatus({ type: "error", message: "Network error" });
+    } catch (err) {
+      onStatus({ type: "error", message: err instanceof Error ? err.message : "Network error" });
     }
     setSavingBusiness(false);
   };
@@ -187,8 +209,8 @@ export default function ProfessionalProfileSection({
       } else {
         onStatus({ type: "error", message: res.error || "Failed to generate profile" });
       }
-    } catch {
-      onStatus({ type: "error", message: "Failed to generate profile" });
+    } catch (err) {
+      onStatus({ type: "error", message: err instanceof Error ? err.message : "Failed to generate profile" });
     }
     setGeneratingProfile(false);
   };
@@ -198,9 +220,12 @@ export default function ProfessionalProfileSection({
     setGeneratingSkills(true);
     onStatus(null);
     try {
-      const res = await apiPatch<{ skills?: string[] }>(`/identity/businesses/${businessId}/ai-generate-field`, {
-        field: "skills",
-        context: { industry: bizForm.industry, businessStage: bizForm.businessStage },
+      const res = await apiPost<{ skills?: string[] }>({
+        path: `/identity/businesses/${businessId}/ai-generate-field`,
+        body: {
+          field: "skills",
+          context: { industry: bizForm.industry, businessStage: bizForm.businessStage },
+        },
       });
       if (res.data?.skills && Array.isArray(res.data.skills)) {
         const newSkills = res.data.skills.filter((s: string) => !bizForm.skills.includes(s));
@@ -213,8 +238,8 @@ export default function ProfessionalProfileSection({
       } else {
         onStatus({ type: "error", message: "Failed to generate skills" });
       }
-    } catch {
-      onStatus({ type: "error", message: "Failed to generate skills" });
+    } catch (err) {
+      onStatus({ type: "error", message: err instanceof Error ? err.message : "Failed to generate skills" });
     }
     setGeneratingSkills(false);
   };
@@ -235,16 +260,26 @@ export default function ProfessionalProfileSection({
     setInterestInput("");
   };
 
+  if (businessLoading) {
+    return (
+      <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground" aria-busy="true" aria-label="Loading professional profile">
+        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current" aria-hidden="true" />
+        Loading professional profile...
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm font-semibold">
-          <Briefcase className="h-4 w-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+          <Briefcase className="h-4 w-4" style={{ color: "hsl(var(--kf-accent1))" }} aria-hidden="true" />
           Professional Profile
         </div>
         <button
           onClick={handleGenerateProfile}
           disabled={generatingProfile}
+          aria-label="Generate professional profile with AI"
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border min-h-[44px]"
           style={{
             background: "hsl(var(--kf-accent1) / 0.1)",
@@ -253,9 +288,9 @@ export default function ProfessionalProfileSection({
           }}
         >
           {generatingProfile ? (
-            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+            <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
           ) : (
-            <Wand2 className="h-3.5 w-3.5" />
+            <Wand2 className="h-3.5 w-3.5" aria-hidden="true" />
           )}
           {generatingProfile ? "Generating..." : "Generate with AI"}
         </button>
@@ -272,7 +307,7 @@ export default function ProfessionalProfileSection({
           <div className="space-y-4 p-1">
             <label className="block text-xs text-muted-foreground">
               <div className="flex items-center gap-1.5 mb-1.5 font-medium">
-                <Sparkles className="h-3 w-3" />
+                <Sparkles className="h-3 w-3" aria-hidden="true" />
                 Professional Headline
                 <AiFieldBadge />
                 {!bizForm.headline && (
@@ -288,12 +323,12 @@ export default function ProfessionalProfileSection({
               />
               <div className="flex justify-between mt-1">
                 <DataUsageHint text="Shown on your community profile and public storefront" />
-                <p className="text-[10px]">{bizForm.headline.length}/120</p>
+                <p className="text-[10px]" aria-label={`${bizForm.headline.length} of 120 characters`}>{bizForm.headline.length}/120</p>
               </div>
             </label>
             <label className="block text-xs text-muted-foreground">
               <div className="flex items-center gap-1.5 mb-1.5 font-medium">
-                <FileText className="h-3 w-3" />
+                <FileText className="h-3 w-3" aria-hidden="true" />
                 Bio
                 <AiFieldBadge />
                 {!bizForm.bio && (
@@ -306,12 +341,13 @@ export default function ProfessionalProfileSection({
                 placeholder="Tell the community about yourself and your business..."
                 maxLength={500}
                 rows={3}
+                aria-label="Professional bio"
                 className="w-full bg-transparent border border-border rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/30 resize-none"
                 style={!bizForm.bio ? { borderColor: "hsl(var(--kf-warning) / 0.3)" } : undefined}
               />
               <div className="flex justify-between mt-1">
                 <DataUsageHint text="Displayed on your community profile and public pages" />
-                <p className="text-[10px]">{bizForm.bio.length}/500</p>
+                <p className="text-[10px]" aria-label={`${bizForm.bio.length} of 500 characters`}>{bizForm.bio.length}/500</p>
               </div>
             </label>
           </div>
@@ -326,7 +362,7 @@ export default function ProfessionalProfileSection({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-1">
             <label className="block text-xs text-muted-foreground">
               <div className="flex items-center gap-1.5 mb-1.5 font-medium">
-                <Briefcase className="h-3 w-3" />
+                <Briefcase className="h-3 w-3" aria-hidden="true" />
                 Industry
                 {!bizForm.industry && (
                   <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
@@ -347,7 +383,7 @@ export default function ProfessionalProfileSection({
             </label>
             <label className="block text-xs text-muted-foreground">
               <div className="flex items-center gap-1.5 mb-1.5 font-medium">
-                <Shield className="h-3 w-3" />
+                <Shield className="h-3 w-3" aria-hidden="true" />
                 Business Stage
                 {!bizForm.businessStage && (
                   <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
@@ -380,20 +416,22 @@ export default function ProfessionalProfileSection({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium">
-                  <Tag className="h-3 w-3" />
+                  <Tag className="h-3 w-3" aria-hidden="true" />
                   Skills & Expertise
                   <AiFieldBadge />
                 </div>
                 <button
+                  type="button"
                   onClick={handleGenerateSkills}
                   disabled={generatingSkills}
+                  aria-label="Suggest skills with AI"
                   className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-all"
                   style={{
                     background: "hsl(var(--kf-accent1) / 0.1)",
                     color: "hsl(var(--kf-accent1))",
                   }}
                 >
-                  {generatingSkills ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
+                  {generatingSkills ? <RefreshCw className="h-3 w-3 animate-spin" aria-hidden="true" /> : <Wand2 className="h-3 w-3" aria-hidden="true" />}
                   {generatingSkills ? "..." : "Suggest Skills"}
                 </button>
               </div>
@@ -403,6 +441,7 @@ export default function ProfessionalProfileSection({
                   onChange={(e) => setSkillInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSkill(); } }}
                   placeholder="Add a skill and press Enter"
+                  aria-label="New skill"
                   className="flex-1"
                 />
                 <Button onClick={addSkill} disabled={!skillInput.trim()} className="px-3 min-h-[44px]">
@@ -410,10 +449,11 @@ export default function ProfessionalProfileSection({
                 </Button>
               </div>
               {bizForm.skills.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mt-2">
+                <div className="flex flex-wrap gap-1.5 mt-2" role="list" aria-label="Skills">
                   {bizForm.skills.map((skill) => (
                     <span
                       key={skill}
+                      role="listitem"
                       className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium"
                       style={{
                         background: "hsl(var(--kf-accent1) / 0.1)",
@@ -422,10 +462,12 @@ export default function ProfessionalProfileSection({
                     >
                       {skill}
                       <button
+                        type="button"
                         onClick={() => setBizForm((f) => ({ ...f, skills: f.skills.filter((s) => s !== skill) }))}
+                        aria-label={`Remove skill: ${skill}`}
                         className="hover:opacity-60 transition-opacity"
                       >
-                        <X className="w-3 h-3" />
+                        <X className="w-3 h-3" aria-hidden="true" />
                       </button>
                     </span>
                   ))}
@@ -435,7 +477,7 @@ export default function ProfessionalProfileSection({
 
             <div className="space-y-2">
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium">
-                <Heart className="h-3 w-3" />
+                <Heart className="h-3 w-3" aria-hidden="true" />
                 Interests
               </div>
               <div className="flex gap-2">
@@ -444,6 +486,7 @@ export default function ProfessionalProfileSection({
                   onChange={(e) => setInterestInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addInterest(); } }}
                   placeholder="Add an interest and press Enter"
+                  aria-label="New interest"
                   className="flex-1"
                 />
                 <Button onClick={addInterest} disabled={!interestInput.trim()} className="px-3 min-h-[44px]">
@@ -451,10 +494,11 @@ export default function ProfessionalProfileSection({
                 </Button>
               </div>
               {bizForm.interests.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mt-2">
+                <div className="flex flex-wrap gap-1.5 mt-2" role="list" aria-label="Interests">
                   {bizForm.interests.map((interest) => (
                     <span
                       key={interest}
+                      role="listitem"
                       className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium"
                       style={{
                         background: "hsl(var(--kf-accent2) / 0.1)",
@@ -463,10 +507,12 @@ export default function ProfessionalProfileSection({
                     >
                       {interest}
                       <button
+                        type="button"
                         onClick={() => setBizForm((f) => ({ ...f, interests: f.interests.filter((i) => i !== interest) }))}
+                        aria-label={`Remove interest: ${interest}`}
                         className="hover:opacity-60 transition-opacity"
                       >
-                        <X className="w-3 h-3" />
+                        <X className="w-3 h-3" aria-hidden="true" />
                       </button>
                     </span>
                   ))}
@@ -486,7 +532,7 @@ export default function ProfessionalProfileSection({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <label className="block text-xs text-muted-foreground">
                 <div className="flex items-center gap-1.5 mb-1.5 font-medium">
-                  <MapPin className="h-3 w-3" />
+                  <MapPin className="h-3 w-3" aria-hidden="true" />
                   City
                   {!bizForm.city && (
                     <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
@@ -501,7 +547,7 @@ export default function ProfessionalProfileSection({
               </label>
               <label className="block text-xs text-muted-foreground">
                 <div className="flex items-center gap-1.5 mb-1.5 font-medium">
-                  <MapPin className="h-3 w-3" />
+                  <MapPin className="h-3 w-3" aria-hidden="true" />
                   Country
                   {!bizForm.country && (
                     <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-warning) / 0.1)", color: "hsl(var(--kf-warning))" }}>Empty</span>
@@ -537,7 +583,7 @@ export default function ProfessionalProfileSection({
               return (
                 <div key={category} className="space-y-1.5">
                   <div className="flex items-center gap-2 text-xs font-semibold" style={{ color: config.color }}>
-                    <CatIcon className="w-3.5 h-3.5" />
+                    <CatIcon className="w-3.5 h-3.5" aria-hidden="true" />
                     {category}
                   </div>
                   {catRecs.map((rec) => (
@@ -560,7 +606,7 @@ export default function ProfessionalProfileSection({
                         </div>
                         <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">{rec.description}</p>
                       </div>
-                      <ChevronRight className="w-4 h-4 text-muted-foreground/50 mt-0.5 flex-shrink-0" />
+                      <ChevronRight className="w-4 h-4 text-muted-foreground/50 mt-0.5 flex-shrink-0" aria-hidden="true" />
                     </div>
                   ))}
                 </div>
@@ -572,8 +618,8 @@ export default function ProfessionalProfileSection({
 
       <div className="flex items-center justify-between pt-2 border-t border-border/30">
         {isBizDirty && (
-          <p className="text-xs flex items-center gap-1" style={{ color: "hsl(var(--kf-warning))" }}>
-            <AlertCircle className="h-3 w-3" />
+          <p className="text-xs flex items-center gap-1" style={{ color: "hsl(var(--kf-warning))" }} role="status">
+            <AlertCircle className="h-3 w-3" aria-hidden="true" />
             You have unsaved changes
           </p>
         )}

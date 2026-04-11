@@ -188,7 +188,9 @@ export default function DocumentsTab({ businessId }: DocumentsTabProps) {
   const [instances, setInstances] = useState<DocumentInstance[]>([]);
   const [health, setHealth] = useState<HealthData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [generating, setGenerating] = useState<string | null>(null);
+  const [generateError, setGenerateError] = useState<string | null>(null);
   const [view, setView] = useState<"catalog" | "documents" | "drive">("catalog");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -201,9 +203,11 @@ export default function DocumentsTab({ businessId }: DocumentsTabProps) {
   const [showPreview, setShowPreview] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       if (!businessId) {
         const catRes = await apiGet<DocumentCategory[]>(`/documents/categories`);
@@ -214,6 +218,7 @@ export default function DocumentsTab({ businessId }: DocumentsTabProps) {
 
       const catRes = await apiGet<DocumentCategory[]>(`/documents/categories?businessId=${businessId}`);
       if (catRes.data) setCategories(catRes.data);
+      else if (catRes.error) setLoadError(catRes.error);
 
       const [instRes, healthRes] = await Promise.all([
         apiGet<DocumentInstance[]>(`/documents/businesses/${businessId}/instances`),
@@ -221,8 +226,11 @@ export default function DocumentsTab({ businessId }: DocumentsTabProps) {
       ]);
 
       if (instRes.data) setInstances(instRes.data);
+      else if (instRes.error) setLoadError(instRes.error);
       if (healthRes.data) setHealth(healthRes.data);
-    } catch {}
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Failed to load documents");
+    }
     setLoading(false);
   }, [businessId]);
 
@@ -258,17 +266,20 @@ export default function DocumentsTab({ businessId }: DocumentsTabProps) {
         toneSettings: { style: genTone },
       });
       if (res.data) {
+        setGenerateError(null);
         setPreviewDoc(res.data);
         setShowPreview(true);
         setEmailSent(false);
         setShowGenerator(false);
         loadData();
+      } else if (res.error) {
+        setGenerateError(res.error);
       }
-    } catch {}
+    } catch (err) {
+      setGenerateError(err instanceof Error ? err.message : "Document generation failed");
+    }
     setGenerating(null);
   };
-
-  const [emailError, setEmailError] = useState<string | null>(null);
 
   const handleSendEmail = async () => {
     if (!businessId || !previewDoc) return;
@@ -318,6 +329,14 @@ export default function DocumentsTab({ businessId }: DocumentsTabProps) {
 
   return (
     <div className="space-y-5">
+      {loadError && (
+        <div className="flex items-center gap-2 p-3 rounded-xl text-sm" role="alert" style={{ background: "hsl(var(--kf-error) / 0.1)", color: "hsl(var(--kf-error))", border: "1px solid hsl(var(--kf-error) / 0.2)" }}>
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+          <span>{loadError}</span>
+          <button type="button" onClick={loadData} className="ml-auto text-xs underline underline-offset-2">Retry</button>
+        </div>
+      )}
+
       {health && health.total > 0 && (
         <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
           {[
@@ -607,10 +626,17 @@ export default function DocumentsTab({ businessId }: DocumentsTabProps) {
               </div>
             </div>
 
+            {generateError && (
+              <div className="flex items-center gap-2 p-3 rounded-xl text-sm" role="alert" style={{ background: "hsl(var(--kf-error) / 0.1)", color: "hsl(var(--kf-error))", border: "1px solid hsl(var(--kf-error) / 0.2)" }}>
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+                <span>{generateError}</span>
+              </div>
+            )}
+
             <div className="flex gap-3 pt-2">
               <button
                 type="button"
-                onClick={() => setShowGenerator(false)}
+                onClick={() => { setShowGenerator(false); setGenerateError(null); }}
                 className="flex-1 px-4 py-2 rounded-lg border border-[hsl(var(--border))] text-sm font-medium min-h-[44px] text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] transition-colors"
               >
                 Cancel
