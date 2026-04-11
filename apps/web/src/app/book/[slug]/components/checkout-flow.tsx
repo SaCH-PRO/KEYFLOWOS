@@ -680,7 +680,7 @@ export function CheckoutFlow({
                               <AlertTriangle className="w-4 h-4 flex-shrink-0" />
                               Closed on{" "}
                               {new Date(bd.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "long" })}
-                              s. Please pick another date.
+                              . Please pick another date.
                             </div>
                           )}
 
