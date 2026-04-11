@@ -131,6 +131,7 @@ Respond in valid JSON with this exact structure:
         ],
         maxTokens: 2000,
         temperature: 0.4,
+        outputCategory: 'general',
       });
 
       const parsed = this.parseJsonResponse(result.content);
@@ -428,6 +429,7 @@ ${tasks.filter(t => t.status === 'OPEN').map(t => `- ${t.title} (${t.priority ??
         ],
         maxTokens: 600,
         temperature: 0.3,
+        outputCategory: 'general',
       });
       const parsed = this.parseJson(result.content);
       const duration = Date.now() - start;
@@ -530,6 +532,8 @@ ${notes.slice(0, 8).map(n => `- ${n.body.substring(0, 150)}`).join('\n') || 'No 
         ],
         maxTokens: 600,
         temperature: 0.3,
+        outputCategory: 'general',
+        responseMode: 'structured_json',
       });
       const parsed = this.parseJson(result.content);
       const score = Math.max(0, Math.min(100, Number(parsed.score) || 50));
@@ -611,6 +615,7 @@ Respond in valid JSON:
         ],
         maxTokens: 500,
         temperature: 0.3,
+        outputCategory: 'general',
       });
       const parsed = this.parseJson(result.content);
       return {
@@ -700,6 +705,8 @@ Respond in valid JSON:
         ],
         maxTokens: 1500,
         temperature: 0.3,
+        outputCategory: 'general',
+        responseMode: 'structured_json',
       });
       const parsed = this.parseJson(result.content);
       return {
@@ -748,6 +755,8 @@ Respond in valid JSON:
         ],
         maxTokens: 400,
         temperature: 0.2,
+        outputCategory: 'general',
+        responseMode: 'structured_json',
       });
       const parsed = this.parseJson(result.content);
 
@@ -931,6 +940,8 @@ Respond in valid JSON:
         ],
         maxTokens: 600,
         temperature: 0.3,
+        outputCategory: 'general',
+        responseMode: 'structured_json',
       });
       const parsed = this.parseJson(result.content);
       const existingTags = new Set((contact.tags ?? []).map(t => t.toLowerCase()));
@@ -1085,6 +1096,7 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
         ],
         maxTokens: 1200,
         temperature: 0.3,
+        outputCategory: 'general',
       });
       const parsed = this.parseJson(result.content);
       return {
@@ -1143,6 +1155,8 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
       ],
       maxTokens: 500,
       temperature: 0.1,
+      outputCategory: 'general',
+      responseMode: 'structured_json',
     });
 
     const parsed = this.parseJson(result.content);
@@ -1632,6 +1646,7 @@ Respond in valid JSON:
         ],
         maxTokens: 800,
         temperature: 0.5,
+        outputCategory: 'messages',
       });
       const parsed = this.parseJson(result.content);
       return {

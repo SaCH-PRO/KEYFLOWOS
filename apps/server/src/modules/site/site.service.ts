@@ -910,6 +910,7 @@ export class SiteService {
         model: 'gpt-4o-mini',
         maxTokens: 600,
         temperature: 0.7,
+        outputCategory: 'general',
         messages: [
           {
             role: 'system',

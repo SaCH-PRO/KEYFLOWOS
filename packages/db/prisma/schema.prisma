@@ -158,6 +158,9 @@ model Business {
   orgStandards         OrgStandard[]
   reviewTasks          ReviewTask[]
 
+  // AI Output Templates
+  outputTemplates      OutputTemplate[]
+
   // Customer notification preferences (JSON: { booking_confirmed: true, ... })
   notificationPreferences Json? @default("{}") @map("notification_preferences")
 
@@ -2736,4 +2739,39 @@ model OrgStandard {
 
   @@index([businessId])
   @@map("org_standards")
+}
+
+// AI Output Templates — user-customizable formatting templates for AI-generated content
+model OutputTemplate {
+  id          String  @id @default(cuid())
+  businessId  String  @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id])
+
+  name        String
+  category    String  // documents | messages | reports | briefings | marketing | general
+
+  // Tone and style preferences
+  tone        String  @default("professional") // formal | professional | friendly | caribbean-casual
+  formality   String  @default("medium")       // high | medium | low
+  targetLength String @default("medium")       // brief | medium | comprehensive
+
+  // Structure preferences — JSON array of section names in preferred order
+  requiredSections Json @default("[]") @map("required_sections")
+
+  // Custom instructions appended to system prompt
+  customInstructions String? @map("custom_instructions")
+
+  // Whether this is the active default for its category
+  isDefault   Boolean @default(false) @map("is_default")
+
+  // Whether this is a system default (not user-created)
+  isSystemDefault Boolean @default(false) @map("is_system_default")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId])
+  @@index([businessId, category])
+  @@index([businessId, category, isDefault])
+  @@map("output_templates")
 }

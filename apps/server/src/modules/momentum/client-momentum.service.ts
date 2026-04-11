@@ -487,6 +487,7 @@ export class ClientMomentumService {
         model: 'gpt-4o-mini',
         maxTokens: 200,
         temperature: 0.5,
+        outputCategory: 'messages',
         messages: [
           {
             role: 'system',

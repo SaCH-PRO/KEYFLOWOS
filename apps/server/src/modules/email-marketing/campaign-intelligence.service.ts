@@ -253,6 +253,7 @@ Provide specific, actionable insights about what worked and what to improve. Com
           ],
           maxTokens: 300,
           temperature: 0.5,
+          outputCategory: 'reports',
         });
         aiBriefing = result.content;
       } catch (err) {

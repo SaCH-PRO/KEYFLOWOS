@@ -175,6 +175,7 @@ export class CommerceAiService {
       ],
       maxTokens: 2000,
       temperature: 0.4,
+      outputCategory: 'reports',
     });
 
     const duration = Date.now() - start;
@@ -225,6 +226,7 @@ Items: ${invoice.items.map((i: any) => `${i.description} ($${i.total})`).join(',
       ],
       maxTokens: 1500,
       temperature: 0.5,
+      outputCategory: 'messages',
     });
 
     try {
@@ -275,6 +277,7 @@ ${allProducts.map((p) => `  - ${p.name}: $${p.price}`).join('\n')}`;
       ],
       maxTokens: 1500,
       temperature: 0.4,
+      outputCategory: 'general',
     });
 
     try {
@@ -312,6 +315,7 @@ ${allProducts.map((p) => `  - ${p.name}: $${p.price}`).join('\n')}`;
       ],
       maxTokens: 2000,
       temperature: 0.3,
+      outputCategory: 'reports',
     });
 
     const duration = Date.now() - start;
@@ -416,6 +420,8 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
       ],
       maxTokens: 600,
       temperature: 0.2,
+      outputCategory: 'general',
+      responseMode: 'structured_json',
     });
 
     const duration = Date.now() - start;
@@ -785,6 +791,8 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
       ],
       maxTokens: 800,
       temperature: 0.2,
+      outputCategory: 'general',
+      responseMode: 'structured_json',
     });
 
     try {
@@ -975,6 +983,7 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
       ],
       maxTokens: 2000,
       temperature: 0.3,
+      outputCategory: 'general',
     });
 
     const duration = Date.now() - start;
@@ -1051,6 +1060,7 @@ Items: ${invoice.items.map((i: any) => `${i.description} ($${i.total})`).join(',
       ],
       maxTokens: 1500,
       temperature: 0.4,
+      outputCategory: 'general',
     });
 
     try {
@@ -1113,6 +1123,7 @@ Items: ${(quote.items ?? []).map((i: any) => `${i.description} ($${i.total})`).j
       ],
       maxTokens: 1500,
       temperature: 0.4,
+      outputCategory: 'messages',
     });
 
     try {
@@ -1178,6 +1189,7 @@ Items: ${(quote.items ?? []).map((i: any) => `${i.description} ($${i.total})`).j
       ],
       maxTokens: 2000,
       temperature: 0.3,
+      outputCategory: 'general',
     });
 
     const duration = Date.now() - start;
@@ -1252,6 +1264,7 @@ Funnel rates: Contact→Quote ${funnel.contactToQuoteRate}%, Quote→Invoice ${f
       ],
       maxTokens: 2000,
       temperature: 0.3,
+      outputCategory: 'reports',
     });
 
     const duration = Date.now() - start;

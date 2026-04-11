@@ -3,6 +3,19 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { AI_CREDIT_COSTS, AI_OVERAGE_RATE_TTD, AI_OVERAGE_RATE_USD } from '../subscriptions/plans';
 import OpenAI from 'openai';
+import { OutputCategory, ResolvedTemplate, injectQualityDirectives, validateAiOutput, buildQualityDirectiveSuffix } from './ai-quality';
+import { OutputTemplateService } from './output-template.service';
+
+/**
+ * responseMode controls quality directive injection and output validation:
+ * - 'user_text' (default): injects quality directives + validates output.
+ *   Use for all user-facing AI text: chat, reports, documents, marketing copy, briefings.
+ * - 'structured_json': skips quality directives and validation.
+ *   Use ONLY when the system prompt demands strict machine-parseable JSON output
+ *   (search parsers, command interpreters, data extractors) where formatting
+ *   directives would corrupt the JSON schema and break downstream JSON.parse() calls.
+ */
+type AiResponseMode = 'user_text' | 'structured_json';
 
 interface AiCallOptions {
   businessId: string;
@@ -11,6 +24,10 @@ interface AiCallOptions {
   model?: string;
   maxTokens?: number;
   temperature?: number;
+  outputCategory?: OutputCategory;
+  responseMode?: AiResponseMode;
+  /** @deprecated Use responseMode: 'structured_json' instead */
+  skipQualityDirectives?: boolean;
 }
 
 interface AiCallResult {
@@ -57,6 +74,7 @@ export class AiUsageService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(SubscriptionsService) private readonly subscriptionsService: SubscriptionsService,
+    @Inject(OutputTemplateService) private readonly outputTemplateService: OutputTemplateService,
   ) {
     this.openai = new OpenAI({
       apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -101,9 +119,36 @@ export class AiUsageService {
     this.rateLimitMap.set(businessId, recent);
   }
 
+  private injectDirectivesIntoMessages(
+    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+    template: ResolvedTemplate,
+  ): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
+    const modified = [...messages];
+    const systemIdx = modified.findIndex(m => m.role === 'system');
+
+    if (systemIdx >= 0) {
+      modified[systemIdx] = {
+        ...modified[systemIdx],
+        content: injectQualityDirectives(modified[systemIdx].content, template),
+      };
+    } else {
+      modified.unshift({
+        role: 'system',
+        content: buildQualityDirectiveSuffix(template),
+      });
+    }
+
+    return modified;
+  }
+
   async callAi(options: AiCallOptions): Promise<AiCallResult> {
-    const { businessId, feature, messages, maxTokens = 500, temperature = 0.7 } = options;
+    const { businessId, feature, maxTokens = 500, temperature = 0.7 } = options;
     const model = options.model || this.defaultModel;
+    const outputCategory: OutputCategory = options.outputCategory || 'general';
+
+    const isStructuredJson =
+      options.responseMode === 'structured_json' ||
+      options.skipQualityDirectives === true;
 
     this.checkRateLimit(businessId);
 
@@ -117,10 +162,22 @@ export class AiUsageService {
       );
     }
 
-    try {
+    let messages = options.messages;
+    let resolvedTemplate: ResolvedTemplate | null = null;
+
+    if (!isStructuredJson) {
+      try {
+        resolvedTemplate = await this.outputTemplateService.resolveTemplate(businessId, outputCategory);
+        messages = this.injectDirectivesIntoMessages(messages, resolvedTemplate);
+      } catch (err) {
+        this.logger.warn(`Quality directive injection failed for ${feature}: ${(err as Error).message}`);
+      }
+    }
+
+    const executeCall = async (msgs: typeof messages) => {
       const response = await this.openai.chat.completions.create({
         model,
-        messages,
+        messages: msgs,
         max_tokens: maxTokens,
         temperature,
       });
@@ -129,11 +186,42 @@ export class AiUsageService {
       const promptTokens = response.usage?.prompt_tokens ?? 0;
       const completionTokens = response.usage?.completion_tokens ?? 0;
       const totalTokens = promptTokens + completionTokens;
-
       const costs = this.TOKEN_COST_PER_1K[model] || this.TOKEN_COST_PER_1K['gpt-4o'];
       const estimatedCost =
         (promptTokens / 1000) * costs.input +
         (completionTokens / 1000) * costs.output;
+
+      return { content, promptTokens, completionTokens, totalTokens, estimatedCost };
+    };
+
+    try {
+      let { content, promptTokens, completionTokens, totalTokens, estimatedCost } = await executeCall(messages);
+
+      if (!isStructuredJson) {
+        const requiredSections = resolvedTemplate?.requiredSections ?? [];
+        const validation = validateAiOutput(content, outputCategory, requiredSections);
+        if (!validation.passed) {
+          this.logger.warn(`[Quality] ${feature} failed validation: ${validation.issues.join('; ')}. Retrying...`);
+          const retryMessages = [
+            ...messages,
+            { role: 'assistant' as const, content },
+            {
+              role: 'user' as const,
+              content: `The previous response did not meet quality standards. Issues: ${validation.issues.join('; ')}. Please provide a complete, specific, high-quality response that addresses all the quality requirements.`,
+            },
+          ];
+          try {
+            const retry = await executeCall(retryMessages);
+            content = retry.content;
+            promptTokens += retry.promptTokens;
+            completionTokens += retry.completionTokens;
+            totalTokens += retry.totalTokens;
+            estimatedCost += retry.estimatedCost;
+          } catch (retryErr) {
+            this.logger.warn(`Quality retry failed for ${feature}: ${(retryErr as Error).message}`);
+          }
+        }
+      }
 
       await this.prisma.client.aiUsageLog.create({
         data: {
@@ -148,6 +236,7 @@ export class AiUsageService {
           metadata: {
             maxTokens,
             temperature,
+            outputCategory,
           },
         },
       });

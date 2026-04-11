@@ -131,6 +131,7 @@ export class AutopilotAiService {
           { role: 'system', content: systemPrompt },
           { role: 'user', content: `Generate a ${action.type.replace(/_/g, ' ')} message for ${action.contactName}.` },
         ],
+        outputCategory: 'messages',
       });
 
       const parsed = this.parseJson(result.content);
