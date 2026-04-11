@@ -68,6 +68,11 @@ export class AiController {
       teamSize?: string;
       location?: string;
       legalStructure?: string;
+      industry?: string;
+      problemSolved?: string;
+      assets?: string;
+      competitiveContext?: string;
+      interactionMode?: string;
     },
   ) {
     const result = await this.advisor.generateBusinessModel(businessId, body);
