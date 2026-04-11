@@ -15,6 +15,7 @@ import PersonalInfoSection from "./components/personal-info-section";
 import MyBusinessSection from "./components/my-business-section";
 import ProfessionalProfileSection from "./components/professional-profile-section";
 import DocumentsTab from "./components/documents-tab";
+import BusinessBuilderCard from "./components/business-builder-card";
 
 interface IdentityMe {
   id: string;
@@ -231,7 +232,7 @@ function BusinessContextCard({
         })}
       </div>
       <p className="text-[10px] text-[hsl(var(--muted-foreground))] mt-2">
-        This data powers AI-generated documents, guidance, and recommendations.
+        This data powers AI-generated documents and recommendations.
       </p>
     </div>
   );
@@ -368,9 +369,6 @@ export default function ProfileSettingsPage() {
   const maxWidth = activeTab === "documents" ? "max-w-4xl" : "max-w-2xl";
 
   const tabBadge = (tabId: TabId) => {
-    if (tabId === "guidance" && guidanceStatus === "complete") {
-      return <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: "hsl(var(--kf-success))" }} />;
-    }
     if (tabId === "documents" && docCount > 0) {
       return (
         <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: "hsl(var(--kf-accent1) / 0.15)", color: "hsl(var(--kf-accent1))" }}>
@@ -464,6 +462,10 @@ export default function ProfileSettingsPage() {
 
             <motion.div variants={fadeUp}>
               <BusinessContextCard form={form} businessId={businessId} />
+            </motion.div>
+
+            <motion.div variants={fadeUp}>
+              <BusinessBuilderCard />
             </motion.div>
 
             <motion.div variants={fadeUp} className="kf-card p-6">
