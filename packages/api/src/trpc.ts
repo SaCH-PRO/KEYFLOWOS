@@ -5,10 +5,21 @@ export type EventBus = {
   emit: (event: string, payload: any) => void;
 };
 
+export type DiagnosticsRunner = {
+  runFullDiagnostics: () => Promise<any>;
+  checkInfrastructure: () => Promise<any>;
+  checkModules: () => Promise<any>;
+  checkIntegrations: () => Promise<any>;
+  checkCrossModuleFlows: () => Promise<any>;
+  checkEnvVars: () => Promise<any>;
+  runSingleCheck: (checkName: string) => Promise<any>;
+};
+
 // This context is created by NestJS and passed to your resolvers
 export type AppContext = {
   db: typeof DbClient;
   eventBus: EventBus;
+  diagnostics?: DiagnosticsRunner;
   // Auth context (populated by guards)
   user?: { id: string; email: string; role?: string };
   business?: { id: string; role: string };
