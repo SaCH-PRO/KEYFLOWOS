@@ -6,7 +6,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   User, CheckCircle2, AlertCircle, FileText,
   ChevronDown, ChevronRight, Sparkles, TrendingUp, Zap,
-  Building2, Briefcase, Shield, Target,
+  Building2, Briefcase, Shield, Target, Palette, Bot,
+  Globe,
 } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -16,6 +17,9 @@ import MyBusinessSection from "./components/my-business-section";
 import ProfessionalProfileSection from "./components/professional-profile-section";
 import DocumentsTab from "./components/documents-tab";
 import BusinessBuilderCard from "./components/business-builder-card";
+import SecuritySection from "./components/security-section";
+import ComplianceSection from "./components/compliance-section";
+import BrandIdentityTab from "./components/brand-identity-tab";
 
 interface IdentityMe {
   id: string;
@@ -155,6 +159,25 @@ function JourneyIndicator({
                   </button>
                 );
               })}
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof window !== "undefined") window.location.href = "/app/onboarding";
+                }}
+                className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left hover:bg-[hsl(var(--muted))] transition-colors min-h-[36px] mt-2 border-t border-[hsl(var(--border))] pt-2"
+              >
+                <div
+                  className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0"
+                  style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
+                >
+                  <Bot className="w-3 h-3 text-white" />
+                </div>
+                <span className="text-xs flex-1 text-[hsl(var(--foreground))]">
+                  Re-run Setup Assistant
+                </span>
+                <ChevronRight className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]" />
+              </button>
             </div>
           </motion.div>
         )}
@@ -263,10 +286,11 @@ function SkeletonProfile() {
   );
 }
 
-type TabId = "profile" | "documents";
+type TabId = "profile" | "brand" | "documents";
 
 const TAB_CONFIG: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: "profile", label: "Profile", icon: User },
+  { id: "brand", label: "Brand & Identity", icon: Palette },
   { id: "documents", label: "Documents", icon: FileText },
 ];
 
@@ -283,6 +307,14 @@ export default function ProfileSettingsPage() {
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [profileCompleteness, setProfileCompleteness] = useState(0);
   const [docCount, setDocCount] = useState(0);
+  const [complianceProgress, setComplianceProgress] = useState({ completed: 0, total: 5 });
+  const [bizData, setBizData] = useState<{
+    primaryColor?: string | null;
+    facebook?: string | null;
+    instagram?: string | null;
+    twitter?: string | null;
+    linkedin?: string | null;
+  } | null>(null);
 
   const [activeTab, setActiveTab] = useState<TabId>(TAB_CONFIG.some(t => t.id === initialTab) ? initialTab : "profile");
 
@@ -311,26 +343,38 @@ export default function ProfileSettingsPage() {
 
   const handleBizDirtyChange = useCallback((dirty: boolean) => setIsBizDirty(dirty), []);
   const handleBizInfoDirtyChange = useCallback((dirty: boolean) => setIsBizInfoDirty(dirty), []);
+  const handleComplianceChange = useCallback((completed: number, total: number) => setComplianceProgress({ completed, total }), []);
 
   const completenessItems: CompletenessItem[] = useMemo(() => {
     const hasName = !!(form.firstName || form.name);
     const hasPhone = !!form.phone;
+    const hasBranding = !!bizData?.primaryColor;
+    const hasSocial = !!(bizData?.facebook || bizData?.instagram || bizData?.twitter || bizData?.linkedin);
+    const complianceDone = complianceProgress.completed >= complianceProgress.total;
     return [
       { label: "Add your name", done: hasName, tab: "profile" as TabId, icon: User },
       { label: "Add phone number", done: hasPhone, tab: "profile" as TabId, icon: User },
       { label: "Complete business profile", done: profileCompleteness >= 60, tab: "profile" as TabId, icon: Building2 },
       { label: "Set industry & stage", done: profileCompleteness >= 40, tab: "profile" as TabId, icon: Briefcase },
+      { label: "Set up branding", done: hasBranding, tab: "brand" as TabId, icon: Palette },
+      { label: "Connect social accounts", done: hasSocial, tab: "brand" as TabId, icon: Globe },
+      { label: "Complete compliance checklist", done: complianceDone, tab: "profile" as TabId, icon: Shield },
       { label: "Generate your first document", done: docCount > 0, tab: "documents" as TabId, icon: FileText },
     ];
-  }, [form, profileCompleteness, docCount]);
+  }, [form, profileCompleteness, docCount, bizData, complianceProgress]);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
-    if (bid) setBusinessId(bid);
     if (bid) {
+      setBusinessId(bid);
       apiGet<unknown[]>(`/documents/businesses/${bid}/instances`)
         .then(({ data }) => {
           if (data) setDocCount(data.length);
+        })
+        .catch(() => {});
+      apiGet<Record<string, unknown>>(`/identity/businesses/${bid}`)
+        .then(({ data }) => {
+          if (data) setBizData(data as typeof bizData);
         })
         .catch(() => {});
     }
@@ -366,7 +410,7 @@ export default function ProfileSettingsPage() {
     </div>
   );
 
-  const maxWidth = activeTab === "documents" ? "max-w-4xl" : "max-w-2xl";
+  const maxWidth = activeTab === "documents" ? "max-w-4xl" : activeTab === "brand" ? "max-w-3xl" : "max-w-2xl";
 
   const tabBadge = (tabId: TabId) => {
     if (tabId === "documents" && docCount > 0) {
@@ -397,7 +441,7 @@ export default function ProfileSettingsPage() {
         </div>
         <div className="flex-1 min-w-0">
           <h1 className="text-2xl font-bold tracking-tight">My Profile</h1>
-          <p className="text-sm text-muted-foreground">Manage your profile and documents</p>
+          <p className="text-sm text-muted-foreground">Manage your profile, brand, and documents</p>
         </div>
       </motion.div>
 
@@ -436,6 +480,12 @@ export default function ProfileSettingsPage() {
             <DocumentsTab
               businessId={businessId}
             />
+          </motion.div>
+        )}
+
+        {activeTab === "brand" && (
+          <motion.div key="brand" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+            <BrandIdentityTab />
           </motion.div>
         )}
 
@@ -503,19 +553,16 @@ export default function ProfileSettingsPage() {
               />
             </motion.div>
 
-            <motion.div variants={fadeUp}>
-              <div
-                className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer hover:bg-[hsl(var(--muted))] transition-colors min-h-[44px]"
-                style={{ border: "1px solid hsl(var(--kf-border) / 0.2)" }}
-                onClick={() => router.push("/app/settings/security")}
-              >
-                <Shield className="w-4 h-4 text-[hsl(var(--muted-foreground))]" />
-                <div className="flex-1">
-                  <div className="text-sm font-medium text-[hsl(var(--foreground))]">Security & Preferences</div>
-                  <div className="text-xs text-[hsl(var(--muted-foreground))]">Password, theme, and account security</div>
-                </div>
-                <ChevronRight className="w-4 h-4 text-[hsl(var(--muted-foreground))]" />
-              </div>
+            <motion.div variants={fadeUp} className="kf-card p-6">
+              <SecuritySection onStatus={setStatus} />
+            </motion.div>
+
+            <motion.div variants={fadeUp} className="kf-card p-6">
+              <ComplianceSection
+                businessId={businessId}
+                onStatus={setStatus}
+                onComplianceChange={handleComplianceChange}
+              />
             </motion.div>
           </motion.div>
         )}
