@@ -148,6 +148,9 @@ model Business {
   guidanceProfile      BusinessGuidanceProfile?
   guidanceAssessments  GuidanceAssessment[]
 
+  // Business Builder
+  businessPlans        BusinessPlan[]
+
   // Document Engine
   profileVersions      BusinessProfileVersion[]
   documentInstances    DocumentInstance[]
@@ -1980,6 +1983,24 @@ model ApiKey {
 // ---
 // MODULE: BUSINESS GUIDANCE ENGINE
 // ---
+model BusinessPlan {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  version     Int      @default(1)
+  name        String   @default("Business Plan")
+  status      String   @default("ACTIVE")
+  intake      Json     @default("{}")
+  model       Json     @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, version])
+  @@index([businessId])
+  @@map("business_plans")
+}
+
 model BusinessGuidanceProfile {
   id         String   @id @default(cuid())
   businessId String   @unique @map("business_id")

@@ -233,7 +233,19 @@ export default function DocumentsTab({ businessId }: DocumentsTabProps) {
     if (params.get("drive") === "success" || params.get("drive") === "error") {
       setView("drive");
     }
-  }, []);
+    const generateSlug = params.get("generate");
+    if (generateSlug && categories.length > 0) {
+      const allTypes = categories.flatMap((c) => c.documentTypes);
+      const match = allTypes.find((t) => t.slug === generateSlug);
+      if (match) {
+        setSelectedType(match);
+        setShowGenerator(true);
+        const url = new URL(window.location.href);
+        url.searchParams.delete("generate");
+        window.history.replaceState({}, "", url.toString());
+      }
+    }
+  }, [categories]);
 
   const handleGenerate = async () => {
     if (!businessId || !selectedType) return;

@@ -1,14 +1,16 @@
-import { Body, Controller, Get, Inject, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { AiAdvisorService } from './ai-advisor.service';
 import { AiUsageService } from './ai-usage.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Controller('ai')
 export class AiController {
   constructor(
     @Inject(AiAdvisorService) private readonly advisor: AiAdvisorService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   @Get('health')
@@ -63,7 +65,72 @@ export class AiController {
       challenges?: string;
     },
   ) {
-    return this.advisor.generateBusinessModel(businessId, body);
+    const result = await this.advisor.generateBusinessModel(businessId, body);
+    if (result.success && result.model) {
+      const existing = await this.prisma.client.businessPlan.findFirst({
+        where: { businessId },
+        orderBy: { version: 'desc' },
+      });
+      await this.prisma.client.businessPlan.create({
+        data: {
+          businessId,
+          version: existing ? existing.version + 1 : 1,
+          name: `Business Plan v${existing ? existing.version + 1 : 1}`,
+          status: 'ACTIVE',
+          intake: body as any,
+          model: result.model as any,
+        },
+      });
+      if (existing) {
+        await this.prisma.client.businessPlan.update({
+          where: { id: existing.id },
+          data: { status: 'SUPERSEDED' },
+        });
+      }
+    }
+    return result;
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/business-plan')
+  async getBusinessPlan(@Param('businessId') businessId: string) {
+    const plan = await this.prisma.client.businessPlan.findFirst({
+      where: { businessId, status: 'ACTIVE' },
+      orderBy: { version: 'desc' },
+    });
+    return { plan };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/business-plan/history')
+  async getBusinessPlanHistory(@Param('businessId') businessId: string) {
+    const plans = await this.prisma.client.businessPlan.findMany({
+      where: { businessId },
+      orderBy: { version: 'desc' },
+      select: { id: true, version: true, name: true, status: true, createdAt: true },
+    });
+    return { plans };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Put('businesses/:businessId/ai/business-plan/:planId')
+  async updateBusinessPlan(
+    @Param('businessId') businessId: string,
+    @Param('planId') planId: string,
+    @Body() body: { model?: Record<string, unknown>; name?: string },
+  ) {
+    const plan = await this.prisma.client.businessPlan.findFirst({
+      where: { id: planId, businessId },
+    });
+    if (!plan) return { error: 'Plan not found' };
+    const updated = await this.prisma.client.businessPlan.update({
+      where: { id: planId },
+      data: {
+        ...(body.model ? { model: body.model as any } : {}),
+        ...(body.name ? { name: body.name } : {}),
+      },
+    });
+    return { plan: updated };
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

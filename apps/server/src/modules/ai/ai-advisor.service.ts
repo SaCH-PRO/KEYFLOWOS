@@ -603,7 +603,7 @@ Generate a comprehensive business model and execution plan. Return ONLY valid JS
       "mitigation": "How to mitigate this risk"
     }
   ],
-  "recommendedDocuments": ["Document type 1", "Document type 2"]
+  "recommendedDocuments": ["document-slug-1", "document-slug-2"]
 }
 
 Guidelines:
@@ -613,7 +613,20 @@ Guidelines:
 - Include 4-6 roadmap phases covering first 18 months
 - Include 8-12 action items across categories
 - Include 4-6 risks with mitigations
-- Recommend 3-5 business documents the user should generate`;
+- Recommend 5-8 business documents from these available slugs ONLY: company-description, registration-record, owner-register, license-register, invoice-template, tax-calendar, chart-of-accounts, financial-statement, budget-template, receipt-template, expense-report, proposal-template, service-agreement, payment-terms, pricing-sheet, client-onboarding, refund-policy, company-tagline, founder-bio, company-profile, elevator-pitch, mission-vision, tone-guide, sales-one-pager, faq-document, sop, approval-matrix, business-continuity, meeting-agenda, project-handoff, communication-plan, offer-letter, employee-handbook, nda-employee, job-description, contractor-agreement, contractor-sow, contractor-ip, privacy-policy, data-handling, cookie-policy, website-terms, ecommerce-terms
+- Each action item should have a "module" field indicating which KEYFLOWOS module can execute it: "projects", "bookings", "commerce", "marketing", "expenses", "contacts", "store", "documents", "reports"
+
+Enhance the actionPlan items to include a "module" field:
+"actionPlan": [
+  {
+    "priority": "HIGH|MEDIUM|LOW",
+    "action": "Specific action to take",
+    "category": "SETUP|MARKETING|FINANCE|OPERATIONS|LEGAL",
+    "timeframe": "This week|This month|This quarter",
+    "details": "Brief explanation of how to execute",
+    "module": "projects|bookings|commerce|marketing|expenses|contacts|store|documents|reports"
+  }
+]`;
 
     try {
       const result = await this.aiUsage.callAi({
@@ -644,7 +657,31 @@ Guidelines:
         return { success: false, error: 'AI generated an incomplete business model. Please try again.' };
       }
 
-      return { success: true, model: parsed, usage: result.usage };
+      const validated = {
+        summary: typeof parsed.summary === 'string' ? parsed.summary : '',
+        canvas: parsed.canvas && typeof parsed.canvas === 'object' ? parsed.canvas : {
+          valueProposition: '', customerSegments: '', channels: '',
+          customerRelationships: '', revenueStreams: '', keyResources: '',
+          keyActivities: '', keyPartnerships: '', costStructure: '',
+        },
+        roadmap: Array.isArray(parsed.roadmap) ? parsed.roadmap : [],
+        actionPlan: Array.isArray(parsed.actionPlan) ? parsed.actionPlan : [],
+        financialOutlook: parsed.financialOutlook && typeof parsed.financialOutlook === 'object' ? {
+          startupCosts: (parsed.financialOutlook as any).startupCosts ?? 'Not estimated',
+          monthlyBurn: (parsed.financialOutlook as any).monthlyBurn ?? 'Not estimated',
+          breakEvenTimeline: (parsed.financialOutlook as any).breakEvenTimeline ?? 'Not estimated',
+          yearOneRevenue: (parsed.financialOutlook as any).yearOneRevenue ?? 'Not estimated',
+          keyMetrics: Array.isArray((parsed.financialOutlook as any).keyMetrics) ? (parsed.financialOutlook as any).keyMetrics : [],
+        } : {
+          startupCosts: 'Not estimated', monthlyBurn: 'Not estimated',
+          breakEvenTimeline: 'Not estimated', yearOneRevenue: 'Not estimated',
+          keyMetrics: [],
+        },
+        risks: Array.isArray(parsed.risks) ? parsed.risks : [],
+        recommendedDocuments: Array.isArray(parsed.recommendedDocuments) ? parsed.recommendedDocuments : [],
+      };
+
+      return { success: true, model: validated, usage: result.usage };
     } catch (error) {
       this.logger.error(`Business model generation error: ${(error as Error).message}`);
       return { success: false, error: 'An error occurred generating your business model. Please try again.' };
