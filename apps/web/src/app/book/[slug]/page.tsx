@@ -101,6 +101,7 @@ export default function PublicBookingPage() {
   );
   const [wishlistOpen, setWishlistOpen] = useState(false);
   const [reviewAggregates, setReviewAggregates] = useState<Record<string, { averageRating: number; reviewCount: number }>>({});
+  const [completedOrdersCount, setCompletedOrdersCount] = useState<number>(0);
 
   const wishlist = useWishlist(slug);
 
@@ -267,6 +268,7 @@ export default function PublicBookingPage() {
       if (sfRes.data?.storefront) setStorefrontConfig(sfRes.data.storefront);
       else if (sfRes.data?.storefrontConfig) setStorefrontConfig(sfRes.data.storefrontConfig);
       if (sfRes.data?.shippingZones) setShippingZones(sfRes.data.shippingZones);
+      if (typeof sfRes.data?.completedOrdersCount === 'number') setCompletedOrdersCount(sfRes.data.completedOrdersCount);
 
       if (res.data?.id) trackStoreEvent(res.data.id, 'page_view');
 
@@ -969,6 +971,7 @@ export default function PublicBookingPage() {
               primaryColor={primaryColor}
               secondaryColor={secondaryColor}
               businessName={business?.name}
+              completedOrdersCount={completedOrdersCount}
               businessHoursToday={(() => {
                 if (!business?.businessHours) return null;
                 const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
@@ -1134,7 +1137,7 @@ export default function PublicBookingPage() {
       )}
 
       <div className={`max-w-4xl mx-auto ${densityPadding} pb-32 ${appearance?.density === "compact" ? "space-y-5" : "space-y-8"}`}>
-        {storefrontConfig?.promotions?.bannerEnabled && storefrontConfig.promotions.bannerText && !bannerDismissed && (
+        {storefrontConfig?.promotions?.bannerEnabled && storefrontConfig.promotions.bannerText && !bannerDismissed && (!storefrontConfig.promotions.bannerExpiry || new Date(storefrontConfig.promotions.bannerExpiry) > new Date()) && (
           <div
             className="rounded-2xl px-5 py-3.5 text-center text-sm font-medium flex items-center justify-center gap-2 backdrop-blur-sm relative"
             style={{
