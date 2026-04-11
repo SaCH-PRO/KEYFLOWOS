@@ -1,6 +1,5 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import {
   Compass, ArrowRight, BarChart3, CheckCircle2, Clock,
@@ -8,10 +7,8 @@ import {
 } from "lucide-react";
 import { Button } from "@keyflow/ui";
 import {
-  getGuidanceStatus,
   getGuidanceCompletionPercentage,
   loadGuidanceDraft,
-  type GuidanceStatus,
 } from "./guidance-storage";
 
 const fadeUp = {
@@ -21,6 +18,7 @@ const fadeUp = {
 
 interface GuidanceCardProps {
   onLaunchWizard: () => void;
+  status: "not_started" | "in_progress" | "complete";
 }
 
 const BENEFITS = [
@@ -30,15 +28,9 @@ const BENEFITS = [
   { icon: Lightbulb, label: "Growth Plan", desc: "Prioritized steps to scale your business" },
 ];
 
-export default function GuidanceCard({ onLaunchWizard }: GuidanceCardProps) {
-  const [status, setStatus] = useState<GuidanceStatus>("not_started");
-  const [percentage, setPercentage] = useState(0);
-
-  useEffect(() => {
-    setStatus(getGuidanceStatus());
-    const draft = loadGuidanceDraft();
-    setPercentage(getGuidanceCompletionPercentage(draft));
-  }, []);
+export default function GuidanceCard({ onLaunchWizard, status }: GuidanceCardProps) {
+  const draft = loadGuidanceDraft();
+  const percentage = getGuidanceCompletionPercentage(draft);
 
   return (
     <motion.div variants={fadeUp} className="space-y-4">
