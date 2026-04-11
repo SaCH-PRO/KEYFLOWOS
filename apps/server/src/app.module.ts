@@ -39,7 +39,6 @@ import { MarketplaceModule } from './modules/marketplace/marketplace.module';
 import { MomentumModule } from './modules/momentum/momentum.module';
 import { SeedModule } from './core/seed/seed.module';
 import { OnboardingConciergeModule } from './modules/onboarding-concierge/onboarding-concierge.module';
-import { BusinessGuidanceModule } from './modules/business-guidance/business-guidance.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { GoogleDriveModule } from './modules/google-drive/google-drive.module';
 
@@ -82,7 +81,6 @@ import { GoogleDriveModule } from './modules/google-drive/google-drive.module';
     MomentumModule,
     SeedModule,
     OnboardingConciergeModule,
-    BusinessGuidanceModule,
     DocumentsModule,
     GoogleDriveModule,
   ],
