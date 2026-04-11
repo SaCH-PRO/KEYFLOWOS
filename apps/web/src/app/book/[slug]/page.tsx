@@ -1231,6 +1231,7 @@ export default function PublicBookingPage() {
         accentColor={accentColor}
         promoCode={promoCode}
         slug={slug}
+        taxRate={(storefrontConfig?.storeSettings as Record<string, unknown>)?.taxRate as number | undefined}
         onClose={() => setCartOpen(false)}
         onOpen={() => setCartOpen(true)}
         onUpdateQuantity={updateQuantity}

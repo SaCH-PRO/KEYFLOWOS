@@ -506,15 +506,25 @@ export function OrderConfirmation({
               </div>
             </div>
             <form
-              onSubmit={(e) => {
+              onSubmit={async (e) => {
                 e.preventDefault();
                 const form = e.target as HTMLFormElement;
                 const emailInput = form.elements.namedItem("notifyEmail") as HTMLInputElement;
-                if (emailInput?.value) {
+                if (emailInput?.value && orderId) {
                   const btn = form.querySelector("button[type=submit]") as HTMLButtonElement;
                   if (btn) {
-                    btn.textContent = "Subscribed!";
+                    btn.textContent = "Saving...";
                     btn.disabled = true;
+                  }
+                  try {
+                    await fetch(`${apiBase}/site/storefront/public/order/${orderId}/notify`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ email: emailInput.value }),
+                    });
+                  } catch {}
+                  if (btn) {
+                    btn.textContent = "Subscribed!";
                     btn.style.opacity = "0.6";
                   }
                 }
