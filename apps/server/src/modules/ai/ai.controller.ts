@@ -50,6 +50,23 @@ export class AiController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/ai/business-model')
+  async generateBusinessModel(
+    @Param('businessId') businessId: string,
+    @Body() body: {
+      businessIdea: string;
+      targetMarket?: string;
+      valueProposition?: string;
+      revenueModel?: string;
+      goals?: string;
+      stage?: string;
+      challenges?: string;
+    },
+  ) {
+    return this.advisor.generateBusinessModel(businessId, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/ai/seo-score')
   async seoScore(
     @Param('businessId') businessId: string,
