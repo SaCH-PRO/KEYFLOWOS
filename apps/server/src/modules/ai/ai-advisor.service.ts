@@ -510,4 +510,144 @@ Use the business's actual data to make projections realistic. Currency should ma
 
     return { score: Math.min(score, 100), grade, issues, suggestions };
   }
+
+  async generateBusinessModel(
+    businessId: string,
+    intake: {
+      businessIdea: string;
+      targetMarket?: string;
+      valueProposition?: string;
+      revenueModel?: string;
+      goals?: string;
+      stage?: string;
+      challenges?: string;
+    },
+  ) {
+    const context = await this.getBusinessContext(businessId);
+    const businessName = context.business?.name ?? 'your business';
+    const industry = context.business?.industry ?? '';
+
+    const existingContext = [
+      businessName !== 'your business' ? `Business Name: ${businessName}` : null,
+      industry ? `Industry: ${industry}` : null,
+      context.business?.archetype ? `Archetype: ${context.business.archetype}` : null,
+      context.business?.revenueModel ? `Current Revenue Model: ${context.business.revenueModel}` : null,
+      context.business?.tagline ? `Tagline: ${context.business.tagline}` : null,
+      context.contacts?.total ? `Existing Contacts: ${context.contacts.total}` : null,
+      context.invoices?.totalRevenue ? `Revenue to Date: $${context.invoices.totalRevenue.toLocaleString()} TTD` : null,
+    ].filter(Boolean).join('\n');
+
+    const sanitize = (s: string) => s.replace(/[<>{}]/g, '').slice(0, 2000);
+
+    const intakeContext = [
+      `Business Idea: ${sanitize(intake.businessIdea)}`,
+      intake.targetMarket ? `Target Market: ${sanitize(intake.targetMarket)}` : null,
+      intake.valueProposition ? `Value Proposition: ${sanitize(intake.valueProposition)}` : null,
+      intake.revenueModel ? `Preferred Revenue Model: ${sanitize(intake.revenueModel)}` : null,
+      intake.goals ? `Goals: ${sanitize(intake.goals)}` : null,
+      intake.stage ? `Current Stage: ${sanitize(intake.stage)}` : null,
+      intake.challenges ? `Key Challenges: ${sanitize(intake.challenges)}` : null,
+    ].filter(Boolean).join('\n');
+
+    const systemPrompt = `You are a Senior Business Strategist and startup advisor specializing in Caribbean and international markets. You create comprehensive, actionable business plans.
+
+Existing Business Data:
+${existingContext || 'New business — no existing data.'}
+
+User Input:
+${intakeContext}
+
+Generate a comprehensive business model and execution plan. Return ONLY valid JSON with this exact structure:
+{
+  "summary": "2-3 sentence executive summary of the business concept",
+  "canvas": {
+    "valueProposition": "What unique value you deliver to customers",
+    "customerSegments": "Who your target customers are and their characteristics",
+    "channels": "How you reach and deliver to customers",
+    "customerRelationships": "How you acquire, retain, and grow customer base",
+    "revenueStreams": "How the business makes money — pricing, models, projections",
+    "keyResources": "Critical assets needed — people, tech, capital, IP",
+    "keyActivities": "Most important things the business must do",
+    "keyPartnerships": "Strategic partners, suppliers, and alliances needed",
+    "costStructure": "Major costs, fixed vs variable, and burn rate considerations"
+  },
+  "roadmap": [
+    {
+      "phase": "Phase name",
+      "timeline": "e.g. Month 1-3",
+      "objectives": ["Objective 1", "Objective 2"],
+      "milestones": ["Milestone 1", "Milestone 2"],
+      "estimatedCost": "Budget range in TTD"
+    }
+  ],
+  "actionPlan": [
+    {
+      "priority": "HIGH|MEDIUM|LOW",
+      "action": "Specific action to take",
+      "category": "SETUP|MARKETING|FINANCE|OPERATIONS|LEGAL",
+      "timeframe": "This week|This month|This quarter",
+      "details": "Brief explanation of how to execute"
+    }
+  ],
+  "financialOutlook": {
+    "startupCosts": "Estimated total startup investment in TTD",
+    "monthlyBurn": "Estimated monthly operating costs in TTD",
+    "breakEvenTimeline": "When the business should break even",
+    "yearOneRevenue": "Projected first-year revenue in TTD",
+    "keyMetrics": ["Metric 1 to track", "Metric 2 to track"]
+  },
+  "risks": [
+    {
+      "risk": "Description of the risk",
+      "impact": "HIGH|MEDIUM|LOW",
+      "mitigation": "How to mitigate this risk"
+    }
+  ],
+  "recommendedDocuments": ["Document type 1", "Document type 2"]
+}
+
+Guidelines:
+- Use TTD currency for all financial figures
+- Be specific and actionable — no generic advice
+- Tailor to Caribbean market realities (import costs, island logistics, local regulations)
+- Include 4-6 roadmap phases covering first 18 months
+- Include 8-12 action items across categories
+- Include 4-6 risks with mitigations
+- Recommend 3-5 business documents the user should generate`;
+
+    try {
+      const result = await this.aiUsage.callAi({
+        businessId,
+        feature: 'chat',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Generate a complete business model and execution plan for: ${intake.businessIdea}` },
+        ],
+        maxTokens: 4000,
+        temperature: 0.7,
+      });
+
+      const raw = result.content || '';
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        return { success: false, error: 'Failed to generate business model. Please try again.' };
+      }
+
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(jsonMatch[0]);
+      } catch {
+        return { success: false, error: 'AI returned an invalid response. Please try again.' };
+      }
+
+      if (!parsed.summary || !parsed.canvas || !parsed.roadmap) {
+        return { success: false, error: 'AI generated an incomplete business model. Please try again.' };
+      }
+
+      return { success: true, model: parsed, usage: result.usage };
+    } catch (error) {
+      this.logger.error(`Business model generation error: ${(error as Error).message}`);
+      return { success: false, error: 'An error occurred generating your business model. Please try again.' };
+    }
+  }
 }

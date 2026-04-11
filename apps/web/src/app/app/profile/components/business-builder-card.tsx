@@ -6,10 +6,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Lightbulb, Rocket, Settings, TrendingUp, ChevronRight,
   Sparkles, Target, DollarSign, Users, BarChart3,
-  FileText, Calendar, ShoppingBag, Mail, Megaphone,
+  FileText, Calendar, ShoppingBag, Megaphone,
   CheckCircle2, ArrowRight, Zap, Brain, Loader2,
+  X, ArrowLeft, ChevronDown, AlertTriangle, Shield,
+  Globe, Briefcase, Flag, Send,
 } from "lucide-react";
-import { apiGet } from "@/lib/api";
+import { apiGet, apiPost } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 
 type ProgressKey =
@@ -35,13 +37,100 @@ interface Phase {
   actions: PhaseAction[];
 }
 
-const PHASES: Phase[] = [
+interface BusinessModelCanvas {
+  valueProposition: string;
+  customerSegments: string;
+  channels: string;
+  customerRelationships: string;
+  revenueStreams: string;
+  keyResources: string;
+  keyActivities: string;
+  keyPartnerships: string;
+  costStructure: string;
+}
+
+interface RoadmapPhase {
+  phase: string;
+  timeline: string;
+  objectives: string[];
+  milestones: string[];
+  estimatedCost: string;
+}
+
+interface ActionItem {
+  priority: "HIGH" | "MEDIUM" | "LOW";
+  action: string;
+  category: string;
+  timeframe: string;
+  details: string;
+}
+
+interface Risk {
+  risk: string;
+  impact: "HIGH" | "MEDIUM" | "LOW";
+  mitigation: string;
+}
+
+interface FinancialOutlook {
+  startupCosts: string;
+  monthlyBurn: string;
+  breakEvenTimeline: string;
+  yearOneRevenue: string;
+  keyMetrics: string[];
+}
+
+interface GeneratedModel {
+  summary: string;
+  canvas: BusinessModelCanvas;
+  roadmap: RoadmapPhase[];
+  actionPlan: ActionItem[];
+  financialOutlook: FinancialOutlook;
+  risks: Risk[];
+  recommendedDocuments: string[];
+}
+
+interface IntakeForm {
+  businessIdea: string;
+  targetMarket: string;
+  valueProposition: string;
+  revenueModel: string;
+  goals: string;
+  stage: string;
+  challenges: string;
+}
+
+const INTAKE_STEPS = [
+  { id: "idea", label: "Business Idea", icon: Lightbulb, field: "businessIdea" as const, placeholder: "Describe your business idea in detail — what product or service will you offer?", hint: "Be specific about what you're building. E.g. 'A mobile car detailing service targeting luxury car owners in Port of Spain'" },
+  { id: "market", label: "Target Market", icon: Users, field: "targetMarket" as const, placeholder: "Who are your ideal customers? What demographics, behaviors, or needs define them?", hint: "E.g. 'Young professionals aged 25-40 in Trinidad who value convenience and premium service'" },
+  { id: "value", label: "Value Proposition", icon: Sparkles, field: "valueProposition" as const, placeholder: "What unique value do you bring? Why would customers choose you over alternatives?", hint: "Focus on what makes you different — your unfair advantage" },
+  { id: "revenue", label: "Revenue Model", icon: DollarSign, field: "revenueModel" as const, placeholder: "How will you make money? What pricing strategy will you use?", hint: "E.g. 'Per-service pricing ($500-2000 TTD per detail) + monthly subscription plans for regular customers'" },
+  { id: "goals", label: "Goals & Vision", icon: Flag, field: "goals" as const, placeholder: "What are your 6-month and 12-month goals? Where do you see this business going?", hint: "Include revenue targets, customer milestones, or expansion plans" },
+  { id: "challenges", label: "Challenges", icon: AlertTriangle, field: "challenges" as const, placeholder: "What obstacles or concerns do you foresee? What keeps you up at night?", hint: "E.g. 'Limited startup capital, finding reliable staff, seasonal demand fluctuations'" },
+];
+
+const STAGE_OPTIONS = [
+  { value: "IDEA", label: "Just an Idea", description: "I'm still thinking through the concept" },
+  { value: "PLANNING", label: "Planning", description: "I'm researching and laying groundwork" },
+  { value: "STARTUP", label: "Early Startup", description: "I've started but haven't launched yet" },
+  { value: "LAUNCHED", label: "Launched", description: "I'm live and getting first customers" },
+  { value: "GROWING", label: "Growing", description: "I have traction and want to scale" },
+];
+
+const CANVAS_LABELS: { key: keyof BusinessModelCanvas; label: string; icon: React.ElementType; colorVar: string }[] = [
+  { key: "valueProposition", label: "Value Proposition", icon: Sparkles, colorVar: "--kf-accent1" },
+  { key: "customerSegments", label: "Customer Segments", icon: Users, colorVar: "--kf-accent2" },
+  { key: "channels", label: "Channels", icon: Globe, colorVar: "--kf-info" },
+  { key: "customerRelationships", label: "Customer Relationships", icon: Users, colorVar: "--kf-success" },
+  { key: "revenueStreams", label: "Revenue Streams", icon: DollarSign, colorVar: "--kf-accent1" },
+  { key: "keyResources", label: "Key Resources", icon: Briefcase, colorVar: "--kf-accent2" },
+  { key: "keyActivities", label: "Key Activities", icon: Zap, colorVar: "--kf-info" },
+  { key: "keyPartnerships", label: "Key Partnerships", icon: Users, colorVar: "--kf-success" },
+  { key: "costStructure", label: "Cost Structure", icon: BarChart3, colorVar: "--kf-warning" },
+];
+
+const PROGRESS_PHASES: Phase[] = [
   {
-    id: "conceptualise",
-    label: "Conceptualise",
-    tagline: "Define your vision and foundation",
-    icon: Lightbulb,
-    colorVar: "--kf-accent2",
+    id: "conceptualise", label: "Conceptualise", tagline: "Define your vision and foundation", icon: Lightbulb, colorVar: "--kf-accent2",
     actions: [
       { label: "Business Profile", description: "Define your name, industry, and stage", icon: Target, route: "/app/profile", doneKey: "hasProfile" },
       { label: "Service Catalog", description: "Create your offerings and pricing", icon: ShoppingBag, route: "/app/bookings", doneKey: "hasServices" },
@@ -50,11 +139,7 @@ const PHASES: Phase[] = [
     ],
   },
   {
-    id: "execute",
-    label: "Execute",
-    tagline: "Launch and start serving customers",
-    icon: Rocket,
-    colorVar: "--kf-accent1",
+    id: "execute", label: "Execute", tagline: "Launch and start serving customers", icon: Rocket, colorVar: "--kf-accent1",
     actions: [
       { label: "Go Live", description: "Publish your storefront to the world", icon: Zap, route: "/app/store", doneKey: "storeEnabled" },
       { label: "First Contact", description: "Add or import your first customers", icon: Users, route: "/app/contacts", doneKey: "hasContacts" },
@@ -63,29 +148,19 @@ const PHASES: Phase[] = [
     ],
   },
   {
-    id: "maintain",
-    label: "Maintain",
-    tagline: "Streamline your daily operations",
-    icon: Settings,
-    colorVar: "--kf-info",
+    id: "maintain", label: "Maintain", tagline: "Streamline your daily operations", icon: Settings, colorVar: "--kf-info",
     actions: [
       { label: "Expense Tracking", description: "Monitor and categorize spending", icon: BarChart3, route: "/app/expenses", doneKey: "hasExpenses" },
-      { label: "Client Follow-ups", description: "Automate reminders and sequences", icon: Mail, route: "/app/contacts", doneKey: "hasSequences" },
       { label: "Recurring Revenue", description: "Set up subscriptions and billing", icon: DollarSign, route: "/app/commerce", doneKey: "hasRecurring" },
       { label: "Project Management", description: "Track tasks and deliverables", icon: Target, route: "/app/projects", doneKey: "hasProjects" },
     ],
   },
   {
-    id: "profit",
-    label: "Profit & Scale",
-    tagline: "Grow revenue and expand reach",
-    icon: TrendingUp,
-    colorVar: "--kf-success",
+    id: "profit", label: "Profit & Scale", tagline: "Grow revenue and expand reach", icon: TrendingUp, colorVar: "--kf-success",
     actions: [
       { label: "Marketing Campaigns", description: "Email campaigns and lead capture", icon: Megaphone, route: "/app/marketing", doneKey: "hasCampaigns" },
       { label: "Revenue Reports", description: "Track income, expenses, and margins", icon: BarChart3, route: "/app/reports", doneKey: "hasReports" },
       { label: "AI Insights", description: "Get recommendations to grow faster", icon: Brain, route: "/app", doneKey: "hasAI" },
-      { label: "Scale Operations", description: "Automations and team workflows", icon: Zap, route: "/app/settings", doneKey: "hasAutomations" },
     ],
   },
 ];
@@ -99,11 +174,7 @@ function useBusinessProgress(businessId: string | null) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!businessId) {
-      setLoading(false);
-      return;
-    }
-
+    if (!businessId) { setLoading(false); return; }
     const settle = <T,>(p: Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> =>
       p.then((v) => ({ ok: true as const, value: v })).catch(() => ({ ok: false as const }));
 
@@ -128,12 +199,8 @@ function useBusinessProgress(businessId: string | null) {
         hasInvoices: safeArray(invoicesRes.ok ? invoicesRes.value.data : []).length > 0,
         hasExpenses: safeArray(expensesRes.ok ? expensesRes.value.data : []).length > 0,
         hasProjects: safeArray(projectsRes.ok ? projectsRes.value.data : []).length > 0,
-        hasSequences: false,
-        hasRecurring: false,
-        hasCampaigns: false,
-        hasReports: false,
-        hasAI: false,
-        hasAutomations: false,
+        hasSequences: false, hasRecurring: false, hasCampaigns: false,
+        hasReports: false, hasAI: false, hasAutomations: false,
       });
       setLoading(false);
     });
@@ -142,11 +209,54 @@ function useBusinessProgress(businessId: string | null) {
   return { progress, loading };
 }
 
+type ViewMode = "overview" | "intake" | "results";
+type ResultTab = "canvas" | "roadmap" | "actions" | "financials" | "risks";
+
 export default function BusinessBuilderCard() {
   const router = useRouter();
-  const [expandedPhase, setExpandedPhase] = useState<string | null>(null);
   const businessId = typeof window !== "undefined" ? getStoredBusinessId() : null;
-  const { progress, loading } = useBusinessProgress(businessId);
+  const { progress, loading: progressLoading } = useBusinessProgress(businessId);
+
+  const [viewMode, setViewMode] = useState<ViewMode>("overview");
+  const [intakeStep, setIntakeStep] = useState(0);
+  const [intakeForm, setIntakeForm] = useState<IntakeForm>({
+    businessIdea: "", targetMarket: "", valueProposition: "",
+    revenueModel: "", goals: "", stage: "", challenges: "",
+  });
+  const [generating, setGenerating] = useState(false);
+  const [generatedModel, setGeneratedModel] = useState<GeneratedModel | null>(null);
+  const [resultTab, setResultTab] = useState<ResultTab>("canvas");
+  const [expandedPhase, setExpandedPhase] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const savedModel = typeof window !== "undefined" ? localStorage.getItem(`kf-biz-model-${businessId}`) : null;
+  useEffect(() => {
+    if (savedModel && !generatedModel) {
+      try { setGeneratedModel(JSON.parse(savedModel)); } catch { /* ignore */ }
+    }
+  }, [savedModel, generatedModel]);
+
+  const handleGenerate = async () => {
+    if (!businessId || !intakeForm.businessIdea.trim()) return;
+    setGenerating(true);
+    setError(null);
+    try {
+      const res = await apiPost<{ success: boolean; model: GeneratedModel; error?: string }>({
+        path: `/ai/businesses/${businessId}/ai/business-model`,
+        body: intakeForm,
+      });
+      if (res.data?.success && res.data.model) {
+        setGeneratedModel(res.data.model);
+        localStorage.setItem(`kf-biz-model-${businessId}`, JSON.stringify(res.data.model));
+        setViewMode("results");
+      } else {
+        setError(res.data?.error || res.error || "Failed to generate. Please try again.");
+      }
+    } catch {
+      setError("Something went wrong. Please try again.");
+    }
+    setGenerating(false);
+  };
 
   const getPhaseProgress = useCallback((phase: Phase) => {
     if (!progress) return { done: 0, total: phase.actions.length, pct: 0 };
@@ -154,54 +264,48 @@ export default function BusinessBuilderCard() {
     return { done, total: phase.actions.length, pct: Math.round((done / phase.actions.length) * 100) };
   }, [progress]);
 
-  const totalDone = PHASES.reduce((acc, p) => acc + getPhaseProgress(p).done, 0);
-  const totalActions = PHASES.reduce((acc, p) => acc + p.actions.length, 0);
+  const totalDone = PROGRESS_PHASES.reduce((acc, p) => acc + getPhaseProgress(p).done, 0);
+  const totalActions = PROGRESS_PHASES.reduce((acc, p) => acc + p.actions.length, 0);
   const overallPct = Math.round((totalDone / totalActions) * 100);
 
-  const activePhaseIndex = PHASES.findIndex((p) => {
-    const { pct } = getPhaseProgress(p);
-    return pct < 100;
-  });
-  const currentPhase = activePhaseIndex >= 0 ? PHASES[activePhaseIndex] : PHASES[PHASES.length - 1];
+  if (viewMode === "intake") {
+    return <IntakeWizard
+      step={intakeStep}
+      form={intakeForm}
+      generating={generating}
+      error={error}
+      onFormChange={setIntakeForm}
+      onStepChange={setIntakeStep}
+      onGenerate={handleGenerate}
+      onBack={() => { setViewMode("overview"); setIntakeStep(0); }}
+    />;
+  }
+
+  if (viewMode === "results" && generatedModel) {
+    return <ResultsPanel
+      model={generatedModel}
+      tab={resultTab}
+      onTabChange={setResultTab}
+      onBack={() => setViewMode("overview")}
+      onRegenerate={() => { setViewMode("intake"); setIntakeStep(0); }}
+      onGoToDocuments={() => router.push("/app/profile?tab=documents")}
+    />;
+  }
 
   return (
-    <div
-      className="rounded-2xl overflow-hidden"
-      style={{
-        background: "hsl(var(--kf-card))",
-        border: "1px solid hsl(var(--kf-border) / 0.3)",
-      }}
-    >
-      <div
-        className="p-5 relative overflow-hidden"
-        style={{
-          background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.08), hsl(var(--kf-accent2) / 0.06))",
-        }}
-      >
-        <div className="absolute top-0 right-0 w-48 h-48 opacity-[0.03]"
-          style={{
-            background: `radial-gradient(circle, hsl(var(--kf-accent1)), transparent 70%)`,
-          }}
-        />
-
+    <div className="rounded-2xl overflow-hidden" style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border) / 0.3)" }}>
+      <div className="p-5 relative overflow-hidden" style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.08), hsl(var(--kf-accent2) / 0.06))" }}>
+        <div className="absolute top-0 right-0 w-48 h-48 opacity-[0.03]" style={{ background: "radial-gradient(circle, hsl(var(--kf-accent1)), transparent 70%)" }} />
         <div className="flex items-start gap-4 relative">
-          <div
-            className="h-11 w-11 rounded-2xl flex items-center justify-center flex-shrink-0"
-            style={{
-              background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
-              boxShadow: "0 4px 12px hsl(var(--kf-accent1) / 0.3)",
-            }}
-          >
+          <div className="h-11 w-11 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))", boxShadow: "0 4px 12px hsl(var(--kf-accent1) / 0.3)" }}>
             <Rocket className="w-5 h-5 text-white" />
           </div>
           <div className="flex-1 min-w-0">
             <h3 className="text-base font-semibold text-[hsl(var(--kf-foreground))]">Business Builder</h3>
-            <p className="text-xs text-[hsl(var(--kf-muted-foreground))] mt-0.5">
-              From idea to profit — your complete business roadmap
-            </p>
+            <p className="text-xs text-[hsl(var(--kf-muted-foreground))] mt-0.5">From idea to profit — your AI-powered business command center</p>
           </div>
           <div className="flex flex-col items-end gap-1 flex-shrink-0">
-            {loading ? (
+            {progressLoading ? (
               <Loader2 className="w-5 h-5 animate-spin text-[hsl(var(--kf-muted-foreground))]" />
             ) : (
               <>
@@ -213,30 +317,18 @@ export default function BusinessBuilderCard() {
         </div>
 
         <div className="mt-4 flex items-center gap-1.5">
-          {PHASES.map((phase, i) => {
+          {PROGRESS_PHASES.map((phase, i) => {
             const { pct } = getPhaseProgress(phase);
-            const isActive = phase.id === currentPhase.id;
+            const activePhaseIndex = PROGRESS_PHASES.findIndex((p) => getPhaseProgress(p).pct < 100);
+            const isActive = i === (activePhaseIndex >= 0 ? activePhaseIndex : PROGRESS_PHASES.length - 1);
             return (
               <div key={phase.id} className="flex-1 flex flex-col items-center gap-1.5">
-                <div
-                  className="w-full h-1.5 rounded-full overflow-hidden"
-                  style={{ background: "hsl(var(--kf-muted) / 0.2)" }}
-                >
-                  <motion.div
-                    className="h-full rounded-full"
-                    style={{ background: `hsl(var(${phase.colorVar}))` }}
-                    initial={{ width: 0 }}
-                    animate={{ width: `${pct}%` }}
-                    transition={{ duration: 0.6, delay: i * 0.1 }}
-                  />
+                <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: "hsl(var(--kf-muted) / 0.2)" }}>
+                  <motion.div className="h-full rounded-full" style={{ background: `hsl(var(${phase.colorVar}))` }} initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ duration: 0.6, delay: i * 0.1 }} />
                 </div>
                 <div className="flex items-center gap-1">
                   {isActive && <div className="w-1 h-1 rounded-full animate-pulse" style={{ background: `hsl(var(${phase.colorVar}))` }} />}
-                  <span className={`text-[9px] font-medium ${isActive ? "" : "text-[hsl(var(--kf-muted-foreground))]"}`}
-                    style={isActive ? { color: `hsl(var(${phase.colorVar}))` } : undefined}
-                  >
-                    {phase.label}
-                  </span>
+                  <span className={`text-[9px] font-medium ${isActive ? "" : "text-[hsl(var(--kf-muted-foreground))]"}`} style={isActive ? { color: `hsl(var(${phase.colorVar}))` } : undefined}>{phase.label}</span>
                 </div>
               </div>
             );
@@ -244,103 +336,80 @@ export default function BusinessBuilderCard() {
         </div>
       </div>
 
-      <div className="divide-y" style={{ borderColor: "hsl(var(--kf-border) / 0.15)" }}>
-        {PHASES.map((phase) => {
+      <div className="p-4 space-y-3" style={{ borderTop: "1px solid hsl(var(--kf-border) / 0.1)" }}>
+        <button
+          onClick={() => setViewMode("intake")}
+          className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all text-left group min-h-[56px] hover:scale-[1.01]"
+          style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.1), hsl(var(--kf-accent2) / 0.06))", border: "1px solid hsl(var(--kf-accent1) / 0.2)" }}
+        >
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "hsl(var(--kf-accent1) / 0.15)" }}>
+            <Brain className="w-4.5 h-4.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <span className="text-sm font-semibold text-[hsl(var(--kf-foreground))]">
+              {generatedModel ? "Rebuild Business Model" : "Generate Business Model"}
+            </span>
+            <p className="text-[11px] text-[hsl(var(--kf-muted-foreground))]">
+              AI-powered business canvas, roadmap, and action plan
+            </p>
+          </div>
+          <ArrowRight className="w-4 h-4 text-[hsl(var(--kf-muted-foreground))] group-hover:translate-x-0.5 transition-transform flex-shrink-0" />
+        </button>
+
+        {generatedModel && (
+          <button
+            onClick={() => setViewMode("results")}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left group min-h-[48px]"
+            style={{ background: "hsl(var(--kf-success) / 0.06)", border: "1px solid hsl(var(--kf-success) / 0.15)" }}
+          >
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "hsl(var(--kf-success) / 0.12)" }}>
+              <CheckCircle2 className="w-4 h-4" style={{ color: "hsl(var(--kf-success))" }} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-medium text-[hsl(var(--kf-foreground))]">View Business Plan</span>
+              <p className="text-[11px] text-[hsl(var(--kf-muted-foreground))]">{generatedModel.summary?.slice(0, 60)}...</p>
+            </div>
+            <ChevronRight className="w-4 h-4 text-[hsl(var(--kf-muted-foreground))]" />
+          </button>
+        )}
+      </div>
+
+      <div className="divide-y" style={{ borderColor: "hsl(var(--kf-border) / 0.1)" }}>
+        {PROGRESS_PHASES.map((phase) => {
           const PhaseIcon = phase.icon;
           const { done, total, pct } = getPhaseProgress(phase);
           const isExpanded = expandedPhase === phase.id;
           const isComplete = pct === 100;
-
           return (
             <div key={phase.id}>
-              <button
-                onClick={() => setExpandedPhase(isExpanded ? null : phase.id)}
-                className="w-full flex items-center gap-3 px-5 py-3.5 hover:bg-[hsl(var(--kf-muted)/0.06)] transition-colors text-left min-h-[52px]"
-              >
-                <div
-                  className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
-                  style={{
-                    background: isComplete ? `hsl(var(${phase.colorVar}) / 0.1)` : "hsl(var(--kf-muted) / 0.1)",
-                    border: `1px solid ${isComplete ? `hsl(var(${phase.colorVar}) / 0.2)` : "hsl(var(--kf-border) / 0.15)"}`,
-                  }}
-                >
-                  {isComplete ? (
-                    <CheckCircle2 className="w-4 h-4" style={{ color: `hsl(var(${phase.colorVar}))` }} />
-                  ) : (
-                    <PhaseIcon className="w-4 h-4" style={{ color: `hsl(var(${phase.colorVar}))` }} />
-                  )}
+              <button onClick={() => setExpandedPhase(isExpanded ? null : phase.id)} className="w-full flex items-center gap-3 px-5 py-3 hover:bg-[hsl(var(--kf-muted)/0.06)] transition-colors text-left min-h-[48px]">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: isComplete ? `hsl(var(${phase.colorVar}) / 0.1)` : "hsl(var(--kf-muted) / 0.1)", border: `1px solid ${isComplete ? `hsl(var(${phase.colorVar}) / 0.2)` : "hsl(var(--kf-border) / 0.15)"}` }}>
+                  {isComplete ? <CheckCircle2 className="w-3.5 h-3.5" style={{ color: `hsl(var(${phase.colorVar}))` }} /> : <PhaseIcon className="w-3.5 h-3.5" style={{ color: `hsl(var(${phase.colorVar}))` }} />}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-[hsl(var(--kf-foreground))]">{phase.label}</span>
-                    {isComplete && (
-                      <span className="text-[9px] px-1.5 py-0.5 rounded-full font-medium"
-                        style={{ background: `hsl(var(${phase.colorVar}) / 0.1)`, color: `hsl(var(${phase.colorVar}))` }}
-                      >
-                        Done
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-[11px] text-[hsl(var(--kf-muted-foreground))]">{phase.tagline}</span>
+                  <span className="text-sm font-medium text-[hsl(var(--kf-foreground))]">{phase.label}</span>
+                  <span className="text-[10px] text-[hsl(var(--kf-muted-foreground))] ml-2">{phase.tagline}</span>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <span className="text-[11px] font-medium text-[hsl(var(--kf-muted-foreground))]">
-                    {done}/{total}
-                  </span>
-                  <ChevronRight
-                    className="w-4 h-4 text-[hsl(var(--kf-muted-foreground))] transition-transform"
-                    style={{ transform: isExpanded ? "rotate(90deg)" : "rotate(0)" }}
-                  />
-                </div>
+                <span className="text-[11px] font-medium text-[hsl(var(--kf-muted-foreground))]">{done}/{total}</span>
+                <ChevronRight className="w-3.5 h-3.5 text-[hsl(var(--kf-muted-foreground))] transition-transform" style={{ transform: isExpanded ? "rotate(90deg)" : "rotate(0)" }} />
               </button>
-
               <AnimatePresence>
                 {isExpanded && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="px-5 pb-4 space-y-1.5">
+                  <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }} className="overflow-hidden">
+                    <div className="px-5 pb-3 space-y-1">
                       {phase.actions.map((action) => {
                         const ActionIcon = action.icon;
                         const isDone = progress ? progress[action.doneKey] : false;
                         return (
-                          <button
-                            key={action.label}
-                            onClick={() => router.push(action.route)}
-                            className="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl hover:bg-[hsl(var(--kf-muted)/0.08)] transition-all text-left group min-h-[48px]"
-                            style={{
-                              border: isDone
-                                ? `1px solid hsl(var(${phase.colorVar}) / 0.15)`
-                                : "1px solid hsl(var(--kf-border) / 0.1)",
-                              background: isDone
-                                ? `hsl(var(${phase.colorVar}) / 0.04)`
-                                : "transparent",
-                            }}
-                          >
-                            <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-                              style={{
-                                background: isDone
-                                  ? `hsl(var(${phase.colorVar}) / 0.1)`
-                                  : "hsl(var(--kf-muted) / 0.08)",
-                              }}
-                            >
-                              {isDone ? (
-                                <CheckCircle2 className="w-3.5 h-3.5" style={{ color: `hsl(var(${phase.colorVar}))` }} />
-                              ) : (
-                                <ActionIcon className="w-3.5 h-3.5 text-[hsl(var(--kf-muted-foreground))]" />
-                              )}
+                          <button key={action.label} onClick={() => router.push(action.route)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-[hsl(var(--kf-muted)/0.08)] transition-all text-left group min-h-[40px]" style={{ border: isDone ? `1px solid hsl(var(${phase.colorVar}) / 0.15)` : "1px solid transparent", background: isDone ? `hsl(var(${phase.colorVar}) / 0.04)` : "transparent" }}>
+                            <div className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0" style={{ background: isDone ? `hsl(var(${phase.colorVar}) / 0.1)` : "hsl(var(--kf-muted) / 0.08)" }}>
+                              {isDone ? <CheckCircle2 className="w-3 h-3" style={{ color: `hsl(var(${phase.colorVar}))` }} /> : <ActionIcon className="w-3 h-3 text-[hsl(var(--kf-muted-foreground))]" />}
                             </div>
                             <div className="flex-1 min-w-0">
-                              <span className={`text-sm font-medium ${isDone ? "text-[hsl(var(--kf-muted-foreground))]" : "text-[hsl(var(--kf-foreground))]"}`}>
-                                {action.label}
-                              </span>
-                              <p className="text-[11px] text-[hsl(var(--kf-muted-foreground))]">{action.description}</p>
+                              <span className={`text-xs font-medium ${isDone ? "text-[hsl(var(--kf-muted-foreground))]" : "text-[hsl(var(--kf-foreground))]"}`}>{action.label}</span>
+                              <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))]">{action.description}</p>
                             </div>
-                            <ArrowRight className="w-3.5 h-3.5 text-[hsl(var(--kf-muted-foreground))] opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                            <ArrowRight className="w-3 h-3 text-[hsl(var(--kf-muted-foreground))] opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
                           </button>
                         );
                       })}
@@ -353,5 +422,372 @@ export default function BusinessBuilderCard() {
         })}
       </div>
     </div>
+  );
+}
+
+function IntakeWizard({ step, form, generating, error, onFormChange, onStepChange, onGenerate, onBack }: {
+  step: number;
+  form: IntakeForm;
+  generating: boolean;
+  error: string | null;
+  onFormChange: (f: IntakeForm) => void;
+  onStepChange: (s: number) => void;
+  onGenerate: () => void;
+  onBack: () => void;
+}) {
+  const isStageStep = step === INTAKE_STEPS.length;
+  const isLastInputStep = step === INTAKE_STEPS.length - 1;
+  const totalSteps = INTAKE_STEPS.length + 1;
+  const currentStep = INTAKE_STEPS[step];
+
+  const canProceed = step === 0
+    ? form.businessIdea.trim().length > 10
+    : true;
+
+  const handleNext = () => {
+    if (isStageStep) {
+      onGenerate();
+    } else if (isLastInputStep) {
+      onStepChange(step + 1);
+    } else {
+      onStepChange(step + 1);
+    }
+  };
+
+  return (
+    <div className="rounded-2xl overflow-hidden" style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border) / 0.3)" }}>
+      <div className="p-4 flex items-center gap-3" style={{ borderBottom: "1px solid hsl(var(--kf-border) / 0.15)" }}>
+        <button onClick={step > 0 ? () => onStepChange(step - 1) : onBack} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-[hsl(var(--kf-muted)/0.1)] transition-colors">
+          <ArrowLeft className="w-4 h-4 text-[hsl(var(--kf-muted-foreground))]" />
+        </button>
+        <div className="flex-1">
+          <h3 className="text-sm font-semibold text-[hsl(var(--kf-foreground))]">
+            {isStageStep ? "Business Stage" : currentStep.label}
+          </h3>
+          <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))]">Step {step + 1} of {totalSteps}</p>
+        </div>
+        <button onClick={onBack} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-[hsl(var(--kf-muted)/0.1)] transition-colors">
+          <X className="w-4 h-4 text-[hsl(var(--kf-muted-foreground))]" />
+        </button>
+      </div>
+
+      <div className="px-4 pt-2 pb-1 flex gap-1">
+        {Array.from({ length: totalSteps }).map((_, i) => (
+          <div key={i} className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: "hsl(var(--kf-muted) / 0.15)" }}>
+            <div className="h-full rounded-full transition-all duration-300" style={{ width: i < step ? "100%" : i === step ? "50%" : "0%", background: "hsl(var(--kf-accent1))" }} />
+          </div>
+        ))}
+      </div>
+
+      <div className="p-5">
+        <AnimatePresence mode="wait">
+          {isStageStep ? (
+            <motion.div key="stage" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-3">
+              <p className="text-xs text-[hsl(var(--kf-muted-foreground))]">Where are you in your business journey?</p>
+              <div className="space-y-2">
+                {STAGE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => onFormChange({ ...form, stage: opt.value })}
+                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all min-h-[48px]"
+                    style={{
+                      background: form.stage === opt.value ? "hsl(var(--kf-accent1) / 0.08)" : "transparent",
+                      border: `1px solid ${form.stage === opt.value ? "hsl(var(--kf-accent1) / 0.3)" : "hsl(var(--kf-border) / 0.15)"}`,
+                    }}
+                  >
+                    <div className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0" style={{ border: `2px solid ${form.stage === opt.value ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-muted-foreground) / 0.4)"}` }}>
+                      {form.stage === opt.value && <div className="w-2 h-2 rounded-full" style={{ background: "hsl(var(--kf-accent1))" }} />}
+                    </div>
+                    <div>
+                      <span className="text-sm font-medium text-[hsl(var(--kf-foreground))]">{opt.label}</span>
+                      <p className="text-[11px] text-[hsl(var(--kf-muted-foreground))]">{opt.description}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div key={currentStep.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-3">
+              <p className="text-xs text-[hsl(var(--kf-muted-foreground))]">{currentStep.hint}</p>
+              <textarea
+                value={form[currentStep.field]}
+                onChange={(e) => onFormChange({ ...form, [currentStep.field]: e.target.value })}
+                placeholder={currentStep.placeholder}
+                rows={5}
+                className="w-full resize-none rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 transition-all placeholder:text-[hsl(var(--kf-muted-foreground)/0.5)]"
+                style={{
+                  background: "hsl(var(--kf-muted) / 0.08)",
+                  border: "1px solid hsl(var(--kf-border) / 0.2)",
+                  color: "hsl(var(--kf-foreground))",
+                }}
+              />
+              {step > 0 && !form[currentStep.field].trim() && (
+                <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))] italic">This field is optional — skip it if you're unsure</p>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {error && (
+          <div className="mt-3 px-3 py-2 rounded-lg text-xs" style={{ background: "hsl(var(--kf-error) / 0.08)", border: "1px solid hsl(var(--kf-error) / 0.2)", color: "hsl(var(--kf-error))" }}>
+            {error}
+          </div>
+        )}
+
+        <div className="mt-4 flex gap-2">
+          {step > 0 && !isStageStep && (
+            <button
+              onClick={() => onStepChange(step + 1)}
+              className="px-4 py-2.5 rounded-xl text-xs font-medium transition-colors min-h-[40px]"
+              style={{ color: "hsl(var(--kf-muted-foreground))", border: "1px solid hsl(var(--kf-border) / 0.2)" }}
+            >
+              Skip
+            </button>
+          )}
+          <button
+            onClick={handleNext}
+            disabled={!canProceed || generating}
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all min-h-[40px] disabled:opacity-50"
+            style={{ background: canProceed ? "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" : "hsl(var(--kf-muted) / 0.3)" }}
+          >
+            {generating ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Generating your business model...</span>
+              </>
+            ) : isStageStep ? (
+              <>
+                <Sparkles className="w-4 h-4" />
+                <span>Generate Business Model</span>
+              </>
+            ) : (
+              <>
+                <span>{step === 0 ? "Continue" : "Next"}</span>
+                <ArrowRight className="w-4 h-4" />
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const RESULT_TABS: { id: ResultTab; label: string; icon: React.ElementType }[] = [
+  { id: "canvas", label: "Canvas", icon: BarChart3 },
+  { id: "roadmap", label: "Roadmap", icon: Flag },
+  { id: "actions", label: "Actions", icon: Zap },
+  { id: "financials", label: "Financials", icon: DollarSign },
+  { id: "risks", label: "Risks", icon: Shield },
+];
+
+function ResultsPanel({ model, tab, onTabChange, onBack, onRegenerate, onGoToDocuments }: {
+  model: GeneratedModel;
+  tab: ResultTab;
+  onTabChange: (t: ResultTab) => void;
+  onBack: () => void;
+  onRegenerate: () => void;
+  onGoToDocuments: () => void;
+}) {
+  return (
+    <div className="rounded-2xl overflow-hidden" style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border) / 0.3)" }}>
+      <div className="p-4 flex items-center gap-3" style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.08), hsl(var(--kf-accent2) / 0.06))", borderBottom: "1px solid hsl(var(--kf-border) / 0.15)" }}>
+        <button onClick={onBack} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-[hsl(var(--kf-muted)/0.1)] transition-colors">
+          <ArrowLeft className="w-4 h-4 text-[hsl(var(--kf-muted-foreground))]" />
+        </button>
+        <div className="flex-1">
+          <h3 className="text-sm font-semibold text-[hsl(var(--kf-foreground))]">Your Business Model</h3>
+          <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))]">AI-generated strategy and execution plan</p>
+        </div>
+        <button onClick={onRegenerate} className="px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors" style={{ color: "hsl(var(--kf-accent1))", border: "1px solid hsl(var(--kf-accent1) / 0.2)" }}>
+          Regenerate
+        </button>
+      </div>
+
+      <div className="p-4" style={{ borderBottom: "1px solid hsl(var(--kf-border) / 0.1)" }}>
+        <p className="text-sm text-[hsl(var(--kf-foreground))] leading-relaxed">{model.summary}</p>
+      </div>
+
+      <div className="flex gap-0.5 p-1.5 mx-3 mt-3 rounded-lg" style={{ background: "hsl(var(--kf-muted) / 0.1)" }}>
+        {RESULT_TABS.map((t) => {
+          const Icon = t.icon;
+          const isActive = tab === t.id;
+          return (
+            <button key={t.id} onClick={() => onTabChange(t.id)} className="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-md text-[11px] font-medium transition-all" style={{ background: isActive ? "hsl(var(--kf-card))" : "transparent", color: isActive ? "hsl(var(--kf-foreground))" : "hsl(var(--kf-muted-foreground))", boxShadow: isActive ? "0 1px 3px hsl(0 0% 0% / 0.1)" : "none" }}>
+              <Icon className="w-3 h-3" />
+              <span className="hidden sm:inline">{t.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="p-4">
+        <AnimatePresence mode="wait">
+          {tab === "canvas" && <CanvasView key="canvas" canvas={model.canvas} />}
+          {tab === "roadmap" && <RoadmapView key="roadmap" roadmap={model.roadmap} />}
+          {tab === "actions" && <ActionsView key="actions" actions={model.actionPlan} />}
+          {tab === "financials" && <FinancialsView key="financials" outlook={model.financialOutlook} />}
+          {tab === "risks" && <RisksView key="risks" risks={model.risks} />}
+        </AnimatePresence>
+      </div>
+
+      {model.recommendedDocuments?.length > 0 && (
+        <div className="px-4 pb-4">
+          <div className="rounded-xl p-4" style={{ background: "hsl(var(--kf-accent2) / 0.06)", border: "1px solid hsl(var(--kf-accent2) / 0.15)" }}>
+            <div className="flex items-center gap-2 mb-2">
+              <FileText className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
+              <span className="text-xs font-semibold text-[hsl(var(--kf-foreground))]">Recommended Documents</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {model.recommendedDocuments.map((doc) => (
+                <span key={doc} className="text-[10px] px-2 py-1 rounded-md font-medium" style={{ background: "hsl(var(--kf-accent2) / 0.1)", color: "hsl(var(--kf-accent2))" }}>{doc}</span>
+              ))}
+            </div>
+            <button onClick={onGoToDocuments} className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-semibold text-white transition-all min-h-[36px]" style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent2)), hsl(var(--kf-accent1)))" }}>
+              <FileText className="w-3.5 h-3.5" />
+              Generate Documents
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CanvasView({ canvas }: { canvas: BusinessModelCanvas }) {
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="grid grid-cols-2 gap-2">
+      {CANVAS_LABELS.map(({ key, label, icon: Icon, colorVar }) => (
+        <div key={key} className={`rounded-xl p-3 ${key === "valueProposition" ? "col-span-2" : ""}`} style={{ background: `hsl(var(${colorVar}) / 0.04)`, border: `1px solid hsl(var(${colorVar}) / 0.12)` }}>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <Icon className="w-3 h-3" style={{ color: `hsl(var(${colorVar}))` }} />
+            <span className="text-[10px] font-semibold" style={{ color: `hsl(var(${colorVar}))` }}>{label}</span>
+          </div>
+          <p className="text-[11px] text-[hsl(var(--kf-foreground))] leading-relaxed">{canvas[key]}</p>
+        </div>
+      ))}
+    </motion.div>
+  );
+}
+
+function RoadmapView({ roadmap }: { roadmap: RoadmapPhase[] }) {
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
+      {roadmap.map((phase, i) => (
+        <div key={i} className="relative pl-6">
+          {i < roadmap.length - 1 && <div className="absolute left-[9px] top-6 bottom-0 w-px" style={{ background: "hsl(var(--kf-accent1) / 0.2)" }} />}
+          <div className="absolute left-0 top-1 w-[18px] h-[18px] rounded-full flex items-center justify-center text-[9px] font-bold text-white" style={{ background: "hsl(var(--kf-accent1))" }}>{i + 1}</div>
+          <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-muted) / 0.06)", border: "1px solid hsl(var(--kf-border) / 0.12)" }}>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-semibold text-[hsl(var(--kf-foreground))]">{phase.phase}</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: "hsl(var(--kf-accent1) / 0.1)", color: "hsl(var(--kf-accent1))" }}>{phase.timeline}</span>
+            </div>
+            {phase.estimatedCost && <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))] mb-2">Budget: {phase.estimatedCost}</p>}
+            <div className="space-y-1">
+              {phase.objectives?.map((obj, j) => (
+                <div key={j} className="flex items-start gap-1.5">
+                  <Target className="w-2.5 h-2.5 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-accent2))" }} />
+                  <span className="text-[11px] text-[hsl(var(--kf-foreground))]">{obj}</span>
+                </div>
+              ))}
+              {phase.milestones?.map((m, j) => (
+                <div key={`m-${j}`} className="flex items-start gap-1.5">
+                  <Flag className="w-2.5 h-2.5 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-success))" }} />
+                  <span className="text-[11px] text-[hsl(var(--kf-muted-foreground))]">{m}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ))}
+    </motion.div>
+  );
+}
+
+function ActionsView({ actions }: { actions: ActionItem[] }) {
+  const priorityColor = (p: string) => p === "HIGH" ? "--kf-error" : p === "MEDIUM" ? "--kf-warning" : "--kf-success";
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-1.5">
+      {actions.map((action, i) => (
+        <div key={i} className="rounded-xl px-3 py-2.5 flex items-start gap-3" style={{ background: "hsl(var(--kf-muted) / 0.04)", border: "1px solid hsl(var(--kf-border) / 0.1)" }}>
+          <div className="flex flex-col items-center gap-1 flex-shrink-0 mt-0.5">
+            <span className="text-[8px] font-bold px-1.5 py-0.5 rounded" style={{ background: `hsl(var(${priorityColor(action.priority)}) / 0.12)`, color: `hsl(var(${priorityColor(action.priority)}))` }}>{action.priority}</span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-0.5">
+              <span className="text-xs font-medium text-[hsl(var(--kf-foreground))]">{action.action}</span>
+            </div>
+            <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))]">{action.details}</p>
+            <div className="flex gap-2 mt-1">
+              <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--kf-muted) / 0.1)", color: "hsl(var(--kf-muted-foreground))" }}>{action.category}</span>
+              <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--kf-muted) / 0.1)", color: "hsl(var(--kf-muted-foreground))" }}>{action.timeframe}</span>
+            </div>
+          </div>
+        </div>
+      ))}
+    </motion.div>
+  );
+}
+
+function FinancialsView({ outlook }: { outlook: FinancialOutlook }) {
+  const items = [
+    { label: "Startup Costs", value: outlook.startupCosts, icon: DollarSign, colorVar: "--kf-accent1" },
+    { label: "Monthly Burn", value: outlook.monthlyBurn, icon: TrendingUp, colorVar: "--kf-warning" },
+    { label: "Break-Even", value: outlook.breakEvenTimeline, icon: Target, colorVar: "--kf-success" },
+    { label: "Year 1 Revenue", value: outlook.yearOneRevenue, icon: BarChart3, colorVar: "--kf-accent2" },
+  ];
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
+      <div className="grid grid-cols-2 gap-2">
+        {items.map(({ label, value, icon: Icon, colorVar }) => (
+          <div key={label} className="rounded-xl p-3" style={{ background: `hsl(var(${colorVar}) / 0.04)`, border: `1px solid hsl(var(${colorVar}) / 0.12)` }}>
+            <div className="flex items-center gap-1.5 mb-1">
+              <Icon className="w-3 h-3" style={{ color: `hsl(var(${colorVar}))` }} />
+              <span className="text-[10px] font-medium text-[hsl(var(--kf-muted-foreground))]">{label}</span>
+            </div>
+            <p className="text-xs font-semibold text-[hsl(var(--kf-foreground))]">{value}</p>
+          </div>
+        ))}
+      </div>
+      {outlook.keyMetrics?.length > 0 && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-muted) / 0.05)", border: "1px solid hsl(var(--kf-border) / 0.12)" }}>
+          <span className="text-[10px] font-semibold text-[hsl(var(--kf-muted-foreground))] mb-2 block">Key Metrics to Track</span>
+          <div className="space-y-1">
+            {outlook.keyMetrics.map((m, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full" style={{ background: "hsl(var(--kf-accent1))" }} />
+                <span className="text-[11px] text-[hsl(var(--kf-foreground))]">{m}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+function RisksView({ risks }: { risks: Risk[] }) {
+  const impactColor = (p: string) => p === "HIGH" ? "--kf-error" : p === "MEDIUM" ? "--kf-warning" : "--kf-success";
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-2">
+      {risks.map((risk, i) => (
+        <div key={i} className="rounded-xl p-3" style={{ background: "hsl(var(--kf-muted) / 0.04)", border: "1px solid hsl(var(--kf-border) / 0.1)" }}>
+          <div className="flex items-start gap-2 mb-1.5">
+            <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" style={{ color: `hsl(var(${impactColor(risk.impact)}))` }} />
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-[hsl(var(--kf-foreground))]">{risk.risk}</span>
+                <span className="text-[8px] font-bold px-1.5 py-0.5 rounded" style={{ background: `hsl(var(${impactColor(risk.impact)}) / 0.12)`, color: `hsl(var(${impactColor(risk.impact)}))` }}>{risk.impact}</span>
+              </div>
+            </div>
+          </div>
+          <div className="ml-5 flex items-start gap-1.5">
+            <Shield className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-success))" }} />
+            <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))]">{risk.mitigation}</p>
+          </div>
+        </div>
+      ))}
+    </motion.div>
   );
 }
