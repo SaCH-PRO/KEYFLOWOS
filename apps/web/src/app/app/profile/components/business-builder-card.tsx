@@ -223,6 +223,7 @@ export default function BusinessBuilderCard() {
     businessIdea: "", targetMarket: "", valueProposition: "",
     revenueModel: "", goals: "", stage: "", challenges: "",
   });
+  const [formPreFilled, setFormPreFilled] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generatedModel, setGeneratedModel] = useState<GeneratedModel | null>(null);
   const [resultTab, setResultTab] = useState<ResultTab>("canvas");
@@ -235,6 +236,46 @@ export default function BusinessBuilderCard() {
       try { setGeneratedModel(JSON.parse(savedModel)); } catch { /* ignore */ }
     }
   }, [savedModel, generatedModel]);
+
+  useEffect(() => {
+    if (!businessId || formPreFilled) return;
+    apiGet<Record<string, unknown>>(`/identity/businesses/${businessId}`)
+      .then(({ data }) => {
+        if (!data) return;
+        const biz = data as Record<string, string | undefined>;
+
+        const ideaParts: string[] = [];
+        if (biz.businessIntent) ideaParts.push(biz.businessIntent);
+        else {
+          if (biz.name) ideaParts.push(biz.name);
+          if (biz.industry) ideaParts.push(`in the ${biz.industry.replace(/_/g, " ").toLowerCase()} industry`);
+          if (biz.description) ideaParts.push(`— ${biz.description}`);
+          else if (biz.tagline) ideaParts.push(`— ${biz.tagline}`);
+        }
+
+        const stageMap: Record<string, string> = {
+          IDEA: "IDEA", STARTUP: "STARTUP", GROWTH: "GROWING",
+          ESTABLISHED: "LAUNCHED", SCALING: "GROWING",
+        };
+
+        const ideaText = ideaParts.join(" ");
+        const hasAnyData = ideaText || biz.tagline || biz.revenueModel || biz.businessStage;
+
+        if (hasAnyData) {
+          setIntakeForm((prev) => ({
+            businessIdea: prev.businessIdea || ideaText,
+            targetMarket: prev.targetMarket || "",
+            valueProposition: prev.valueProposition || (biz.tagline || ""),
+            revenueModel: prev.revenueModel || (biz.revenueModel?.replace(/_/g, " ") || ""),
+            goals: prev.goals || "",
+            stage: prev.stage || (stageMap[biz.businessStage || ""] || ""),
+            challenges: prev.challenges || "",
+          }));
+          setFormPreFilled(true);
+        }
+      })
+      .catch(() => {});
+  }, [businessId, formPreFilled]);
 
   const handleGenerate = async () => {
     if (!businessId || !intakeForm.businessIdea.trim()) return;
@@ -272,6 +313,7 @@ export default function BusinessBuilderCard() {
     return <IntakeWizard
       step={intakeStep}
       form={intakeForm}
+      prefilled={formPreFilled}
       generating={generating}
       error={error}
       onFormChange={setIntakeForm}
@@ -425,9 +467,10 @@ export default function BusinessBuilderCard() {
   );
 }
 
-function IntakeWizard({ step, form, generating, error, onFormChange, onStepChange, onGenerate, onBack }: {
+function IntakeWizard({ step, form, prefilled, generating, error, onFormChange, onStepChange, onGenerate, onBack }: {
   step: number;
   form: IntakeForm;
+  prefilled: boolean;
   generating: boolean;
   error: string | null;
   onFormChange: (f: IntakeForm) => void;
@@ -509,6 +552,12 @@ function IntakeWizard({ step, form, generating, error, onFormChange, onStepChang
           ) : (
             <motion.div key={currentStep.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-3">
               <p className="text-xs text-[hsl(var(--kf-muted-foreground))]">{currentStep.hint}</p>
+              {form[currentStep.field].trim() && prefilled && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ background: "hsl(var(--kf-accent2) / 0.08)", border: "1px solid hsl(var(--kf-accent2) / 0.15)" }}>
+                  <Sparkles className="w-3 h-3" style={{ color: "hsl(var(--kf-accent2))" }} />
+                  <span className="text-[10px] font-medium" style={{ color: "hsl(var(--kf-accent2))" }}>Pre-filled from your business profile — edit as needed</span>
+                </div>
+              )}
               <textarea
                 value={form[currentStep.field]}
                 onChange={(e) => onFormChange({ ...form, [currentStep.field]: e.target.value })}
