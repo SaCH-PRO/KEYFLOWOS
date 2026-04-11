@@ -951,7 +951,7 @@ export default function PublicBookingPage() {
           cartCurrency={cartCurrency}
           promoCode={promoCode}
           shippingZones={shippingZones}
-          taxRate={(storefrontConfig?.storeSettings as Record<string, unknown>)?.taxRate as number | undefined}
+          taxRate={storefrontConfig?.storeSettings?.taxRate}
           onBack={() => setCheckoutMode(false)}
           onUpdateQuantity={updateQuantity}
           onSubmit={handleCheckoutSubmit}
