@@ -15,6 +15,7 @@ GMAIL_REDIRECT_URI = "https://d9c92da4-0dde-44b6-a1ad-551bf4dfbe2c-00-39zpddgeqe
 NEXT_PUBLIC_SITE_URL = "https://d9c92da4-0dde-44b6-a1ad-551bf4dfbe2c-00-39zpddgeqea4v.worf.replit.dev"
 CALENDAR_REDIRECT_URI = "https://d9c92da4-0dde-44b6-a1ad-551bf4dfbe2c-00-39zpddgeqea4v.worf.replit.dev:3001/bookings/calendar/callback"
 GOOGLE_REDIRECT_URI = "https://d9c92da4-0dde-44b6-a1ad-551bf4dfbe2c-00-39zpddgeqea4v.worf.replit.dev/api/crm/google/callback"
+DRIVE_REDIRECT_URI = "https://d9c92da4-0dde-44b6-a1ad-551bf4dfbe2c-00-39zpddgeqea4v.worf.replit.dev/api/drive/callback"
 
 [workflows]
 runButton = "Project"
