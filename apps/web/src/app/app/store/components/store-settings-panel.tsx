@@ -55,6 +55,7 @@ export function StoreSettingsPanel({ config, onConfigChange, onSave, saving }: P
   const storeStatus: StoreStatus = storeSettings.storeStatus ?? "active";
   const minOrder = storeSettings.minimumOrderValue ?? 0;
   const currency = storeSettings.currencyDisplay ?? "TTD";
+  const taxRate = storeSettings.taxRate ?? 0;
 
   function toggleDelivery(method: DeliveryMethod) {
     const updated = deliveryOptions.includes(method)
@@ -184,6 +185,23 @@ export function StoreSettingsPanel({ config, onConfigChange, onSave, saving }: P
                 <option key={c} value={c}>{c}</option>
               ))}
             </select>
+          </div>
+        </div>
+
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Tax Rate (%)</label>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={0.5}
+              value={taxRate}
+              onChange={(e) => onConfigChange("storeSettings", { taxRate: Number(e.target.value) || 0 })}
+              className="kf-input w-24 text-sm"
+              placeholder="0"
+            />
+            <span className="text-xs text-muted-foreground">Set to 0 to hide tax from checkout</span>
           </div>
         </div>
 

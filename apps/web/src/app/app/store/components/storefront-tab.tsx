@@ -304,6 +304,7 @@ export function StorefrontTab({
             hasSlug={!!businessData?.slug}
             servicesCount={services.length}
             productsCount={commerceProducts.length}
+            storeEnabled={storeEnabled}
             onTabChange={onTabChange}
             slug={businessData?.slug ?? currentSlug ?? undefined}
           />

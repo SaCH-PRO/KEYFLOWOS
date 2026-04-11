@@ -10,6 +10,12 @@ import {
   PartyPopper,
   ExternalLink,
   Copy,
+  Link2,
+  ShoppingBag,
+  Palette,
+  Clock,
+  Power,
+  Share2,
 } from "lucide-react";
 
 interface ReadinessChecklistProps {
@@ -20,9 +26,53 @@ interface ReadinessChecklistProps {
   hasSlug: boolean;
   servicesCount: number;
   productsCount: number;
+  storeEnabled?: boolean;
   onTabChange: (tab: string) => void;
   slug?: string;
 }
+
+const WIZARD_STEPS = [
+  {
+    key: "url",
+    icon: Link2,
+    title: "Set Your Store URL",
+    description: "Choose a memorable, shareable URL slug for your storefront",
+    action: "Set URL",
+    tab: "setup",
+  },
+  {
+    key: "catalog",
+    icon: ShoppingBag,
+    title: "Add Products or Services",
+    description: "List at least one product or service for customers to browse",
+    action: "Add Items",
+    tab: "setup",
+  },
+  {
+    key: "design",
+    icon: Palette,
+    title: "Customize Your Theme",
+    description: "Pick your colors, fonts, and storefront theme to match your brand",
+    action: "Customize",
+    tab: "setup",
+  },
+  {
+    key: "hours",
+    icon: Clock,
+    title: "Set Business Hours",
+    description: "Let customers know when you're available for bookings or orders",
+    action: "Set Hours",
+    tab: "setup",
+  },
+  {
+    key: "golive",
+    icon: Power,
+    title: "Go Live",
+    description: "Enable your store and start accepting orders from customers",
+    action: "Enable Store",
+    tab: "setup",
+  },
+];
 
 export function ReadinessChecklist({
   hasLogo,
@@ -32,29 +82,26 @@ export function ReadinessChecklist({
   hasSlug,
   servicesCount,
   productsCount,
+  storeEnabled,
   onTabChange,
   slug,
 }: ReadinessChecklistProps) {
-  const allChecks = [hasSlug, hasLogo, hasHeroImage, hoursConfigured, servicesCount > 0 || productsCount > 0, hasTestimonials];
-  const completedCount = allChecks.filter(Boolean).length;
-  const allComplete = completedCount === allChecks.length;
-  const [open, setOpen] = useState(completedCount < allChecks.length);
+  const stepStatus: Record<string, boolean> = {
+    url: hasSlug,
+    catalog: servicesCount > 0 || productsCount > 0,
+    design: hasLogo || hasHeroImage,
+    hours: hoursConfigured,
+    golive: !!storeEnabled,
+  };
+
+  const completedCount = Object.values(stepStatus).filter(Boolean).length;
+  const total = WIZARD_STEPS.length;
+  const allComplete = completedCount === total;
+  const [open, setOpen] = useState(completedCount < total);
   const [copied, setCopied] = useState(false);
 
+  const pct = Math.round((completedCount / total) * 100);
   const storeUrl = slug ? `${typeof window !== "undefined" ? window.location.origin : ""}/book/${slug}` : "";
-
-  const checks = [
-    { label: "Custom URL", hint: "Set a memorable slug for your store", done: hasSlug, tab: "setup" },
-    { label: "Logo uploaded", hint: "Add your brand logo in Appearance", done: hasLogo, tab: "setup" },
-    { label: "Cover image", hint: "Upload a hero image for your storefront", done: hasHeroImage, tab: "setup" },
-    { label: "Business hours", hint: "Set your operating hours", done: hoursConfigured, tab: "setup" },
-    { label: "Products listed", hint: "Add services or products to your catalog", done: servicesCount > 0 || productsCount > 0, tab: "setup" },
-    { label: "Testimonials", hint: "Add social proof from your clients", done: hasTestimonials, tab: "setup" },
-  ];
-
-  const completed = checks.filter((c) => c.done).length;
-  const total = checks.length;
-  const pct = Math.round((completed / total) * 100);
 
   const color =
     pct >= 80
@@ -62,6 +109,8 @@ export function ReadinessChecklist({
       : pct >= 50
       ? "hsl(var(--kf-accent1))"
       : "hsl(var(--kf-warning))";
+
+  const firstIncompleteIdx = WIZARD_STEPS.findIndex((s) => !stepStatus[s.key]);
 
   return (
     <motion.div
@@ -89,12 +138,14 @@ export function ReadinessChecklist({
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1.5">
-            <span className="text-sm font-semibold">Storefront Readiness</span>
+            <span className="text-sm font-semibold">
+              {allComplete ? "Store Ready!" : "Setup Wizard"}
+            </span>
             <span
               className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
               style={{ background: `${color}15`, color }}
             >
-              {completed}/{total}
+              {completedCount}/{total}
             </span>
           </div>
           <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "hsl(var(--kf-muted)/0.25)" }}>
@@ -127,51 +178,131 @@ export function ReadinessChecklist({
             className="overflow-hidden"
           >
             <div
-              className="px-4 pb-3 space-y-0.5"
+              className="px-4 pb-4 space-y-1"
               style={{ borderTop: "1px solid hsl(var(--kf-border)/0.25)" }}
             >
-              {checks.map((check, i) => (
-                <motion.button
-                  key={check.label}
-                  type="button"
-                  initial={{ opacity: 0, x: -6 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.03 }}
-                  onClick={() => onTabChange(check.tab)}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors hover:bg-[hsl(var(--kf-muted)/0.12)] group min-h-[44px]"
-                >
-                  {check.done ? (
-                    <CheckCircle2 className="w-4 h-4 flex-shrink-0" style={{ color: "hsl(var(--kf-success))" }} />
-                  ) : (
-                    <div
-                      className="w-4 h-4 rounded-full flex-shrink-0"
-                      style={{ border: "1.5px solid hsl(var(--kf-muted-foreground)/0.25)" }}
-                    />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <span
-                      className="text-xs font-medium block leading-tight"
-                      style={{
-                        color: check.done ? "hsl(var(--kf-muted-foreground))" : "hsl(var(--kf-foreground))",
-                        textDecoration: check.done ? "line-through" : "none",
-                        textDecorationColor: "hsl(var(--kf-muted-foreground)/0.3)",
-                      }}
-                    >
-                      {check.label}
-                    </span>
-                    {!check.done && (
-                      <span className="text-[10px] leading-tight block mt-0.5" style={{ color: "hsl(var(--kf-muted-foreground)/0.5)" }}>
-                        {check.hint}
-                      </span>
-                    )}
-                  </div>
-                  {!check.done && (
-                    <ArrowRight className="w-3.5 h-3.5 flex-shrink-0 opacity-0 group-hover:opacity-60 transition-opacity" style={{ color: "hsl(var(--kf-muted-foreground))" }} />
-                  )}
-                </motion.button>
-              ))}
+              {WIZARD_STEPS.map((step, i) => {
+                const done = stepStatus[step.key];
+                const isCurrent = i === firstIncompleteIdx;
+                const Icon = step.icon;
 
-              {allComplete && storeUrl && (
+                return (
+                  <motion.div
+                    key={step.key}
+                    initial={{ opacity: 0, x: -6 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: i * 0.04 }}
+                    className="relative"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onTabChange(step.tab)}
+                      className={`w-full flex items-start gap-3 px-3 py-3 rounded-xl text-left transition-all group min-h-[44px] ${
+                        isCurrent ? "bg-[hsl(var(--kf-accent1)/0.06)]" : "hover:bg-[hsl(var(--kf-muted)/0.08)]"
+                      }`}
+                      style={isCurrent ? { border: "1px solid hsl(var(--kf-accent1)/0.15)" } : undefined}
+                    >
+                      <div className="flex flex-col items-center mt-0.5">
+                        <div
+                          className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                          style={{
+                            background: done
+                              ? "hsl(var(--kf-success)/0.12)"
+                              : isCurrent
+                              ? "hsl(var(--kf-accent1)/0.12)"
+                              : "hsl(var(--kf-muted)/0.15)",
+                          }}
+                        >
+                          {done ? (
+                            <CheckCircle2 className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-success))" }} />
+                          ) : (
+                            <Icon
+                              className="w-3.5 h-3.5"
+                              style={{
+                                color: isCurrent ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-muted-foreground)/0.4)",
+                              }}
+                            />
+                          )}
+                        </div>
+                        {i < WIZARD_STEPS.length - 1 && (
+                          <div
+                            className="w-px h-3 mt-1"
+                            style={{
+                              background: done
+                                ? "hsl(var(--kf-success)/0.3)"
+                                : "hsl(var(--kf-border)/0.3)",
+                            }}
+                          />
+                        )}
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="text-xs font-semibold block leading-tight"
+                            style={{
+                              color: done
+                                ? "hsl(var(--kf-muted-foreground))"
+                                : isCurrent
+                                ? "hsl(var(--kf-foreground))"
+                                : "hsl(var(--kf-foreground)/0.7)",
+                              textDecoration: done ? "line-through" : "none",
+                              textDecorationColor: "hsl(var(--kf-muted-foreground)/0.3)",
+                            }}
+                          >
+                            {step.title}
+                          </span>
+                          {done && (
+                            <span
+                              className="text-[8px] font-bold px-1.5 py-0.5 rounded-full uppercase"
+                              style={{
+                                background: "hsl(var(--kf-success)/0.1)",
+                                color: "hsl(var(--kf-success))",
+                              }}
+                            >
+                              Done
+                            </span>
+                          )}
+                          {!done && (
+                            <span
+                              className="text-[8px] font-bold px-1.5 py-0.5 rounded-full uppercase"
+                              style={{
+                                background: isCurrent ? "hsl(var(--kf-accent1)/0.1)" : "hsl(var(--kf-muted)/0.15)",
+                                color: isCurrent ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-muted-foreground)/0.5)",
+                              }}
+                            >
+                              {isCurrent ? "Next" : "Pending"}
+                            </span>
+                          )}
+                        </div>
+                        <span
+                          className="text-[10px] leading-tight block mt-0.5"
+                          style={{ color: "hsl(var(--kf-muted-foreground)/0.5)" }}
+                        >
+                          {step.description}
+                        </span>
+                      </div>
+
+                      {!done && (
+                        <div className="flex items-center gap-1 flex-shrink-0 mt-1">
+                          <span
+                            className="text-[10px] font-medium opacity-0 group-hover:opacity-100 transition-opacity"
+                            style={{ color: "hsl(var(--kf-accent1))" }}
+                          >
+                            {step.action}
+                          </span>
+                          <ArrowRight
+                            className="w-3 h-3 flex-shrink-0 opacity-0 group-hover:opacity-60 transition-opacity"
+                            style={{ color: "hsl(var(--kf-muted-foreground))" }}
+                          />
+                        </div>
+                      )}
+                    </button>
+                  </motion.div>
+                );
+              })}
+
+              {allComplete && (
                 <motion.div
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -180,42 +311,49 @@ export function ReadinessChecklist({
                   style={{ borderTop: "1px solid hsl(var(--kf-border)/0.25)" }}
                 >
                   <div className="flex items-center gap-2 px-3">
-                    <PartyPopper className="w-4 h-4" style={{ color: "hsl(var(--kf-success))" }} />
-                    <span className="text-xs font-semibold" style={{ color: "hsl(var(--kf-success))" }}>
-                      Your storefront is ready to go!
-                    </span>
+                    <PartyPopper className="w-5 h-5" style={{ color: "hsl(var(--kf-success))" }} />
+                    <div>
+                      <span className="text-sm font-bold" style={{ color: "hsl(var(--kf-success))" }}>
+                        Your store is live!
+                      </span>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        Share your store link and start earning
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex gap-2 px-3">
-                    <a
-                      href={`/book/${slug}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-colors min-h-[44px]"
-                      style={{
-                        background: "hsl(var(--kf-accent1)/0.1)",
-                        color: "hsl(var(--kf-accent1))",
-                      }}
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      View Live
-                    </a>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard.writeText(storeUrl);
-                        setCopied(true);
-                        setTimeout(() => setCopied(false), 2000);
-                      }}
-                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-colors min-h-[44px]"
-                      style={{
-                        background: "hsl(var(--kf-muted)/0.12)",
-                        color: "hsl(var(--kf-foreground)/0.7)",
-                      }}
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                      {copied ? "Copied!" : "Copy Link"}
-                    </button>
-                  </div>
+                  {storeUrl && (
+                    <div className="flex gap-2 px-3">
+                      <a
+                        href={`/book/${slug}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-colors min-h-[44px]"
+                        style={{
+                          background: "hsl(var(--kf-accent1)/0.1)",
+                          color: "hsl(var(--kf-accent1))",
+                        }}
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        View Live
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(storeUrl);
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 2000);
+                        }}
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-colors min-h-[44px]"
+                        style={{
+                          background: "hsl(var(--kf-muted)/0.12)",
+                          color: "hsl(var(--kf-foreground)/0.7)",
+                        }}
+                      >
+                        {copied ? <CheckCircle2 className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-success))" }} /> : <Copy className="w-3.5 h-3.5" />}
+                        {copied ? "Copied!" : "Share Link"}
+                      </button>
+                    </div>
+                  )}
                 </motion.div>
               )}
             </div>
