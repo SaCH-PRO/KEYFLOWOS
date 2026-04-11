@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import type { StorefrontConfig } from "@/lib/client";
 import { getThemeStyles, type ThemeKey } from "@/lib/storefront-themes";
+import { FONT_PAIRINGS } from "./store-types";
 
 type Props = {
   config: StorefrontConfig;
@@ -587,29 +588,26 @@ export function AppearanceCustomizer({ config, onConfigChange, onSave, saving, b
           </div>
 
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-2 block">Font Family</label>
-            <div className="grid grid-cols-3 gap-2">
-              {([
-                { key: "system", label: "System", preview: "Aa" },
-                { key: "sans", label: "Sans Serif", preview: "Aa" },
-                { key: "serif", label: "Serif", preview: "Aa" },
-              ] as const).map((font) => {
-                const isActive = (appearance.fontFamily ?? "system") === font.key;
-                const fontClass = font.key === "serif" ? "font-serif" : font.key === "sans" ? "font-sans" : "";
+            <label className="text-xs font-medium text-muted-foreground mb-2 block">Font Pairing</label>
+            <p className="text-[10px] text-muted-foreground mb-2">Curated heading + body font combinations for your storefront</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {FONT_PAIRINGS.map((pairing) => {
+                const isActive = (appearance.fontPairing ?? "inter-inter") === pairing.id;
                 return (
                   <button
-                    key={font.key}
+                    key={pairing.id}
                     type="button"
-                    onClick={() => onConfigChange("appearance", { fontFamily: font.key })}
-                    className="flex flex-col items-center gap-1.5 py-3 rounded-xl text-xs font-medium transition-all"
+                    onClick={() => onConfigChange("appearance", { fontPairing: pairing.id })}
+                    className="flex flex-col items-start gap-1 p-3 rounded-xl text-xs font-medium transition-all text-left relative"
                     style={{
                       background: isActive ? "hsl(var(--kf-accent1)/0.1)" : "hsl(var(--kf-muted)/0.2)",
                       border: isActive ? "1px solid hsl(var(--kf-accent1)/0.3)" : "1px solid hsl(var(--kf-border)/0.5)",
                       color: isActive ? "hsl(var(--kf-accent1))" : undefined,
                     }}
                   >
-                    <span className={`text-lg ${fontClass}`}>{font.preview}</span>
-                    <span>{font.label}</span>
+                    <span className="text-base font-bold leading-tight" style={{ fontFamily: `'${pairing.heading}', sans-serif` }}>Aa</span>
+                    <span className="text-[10px] text-muted-foreground leading-tight" style={{ fontFamily: `'${pairing.body}', sans-serif` }}>Body text</span>
+                    <span className="text-[9px] mt-0.5 font-medium">{pairing.name}</span>
                   </button>
                 );
               })}

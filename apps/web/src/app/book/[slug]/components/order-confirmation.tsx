@@ -484,6 +484,67 @@ export function OrderConfirmation({
         </div>
       )}
 
+      {isOrder && !customerEmail && (
+        <div
+          className="rounded-2xl border border-white/[0.06] overflow-hidden text-left"
+          style={{
+            background: "linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)",
+            animation: "fadeUp 500ms ease-out 750ms both",
+          }}
+        >
+          <div className="p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <div
+                className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                style={{ background: `${secondaryColor}15` }}
+              >
+                <Bell className="w-4 h-4" style={{ color: secondaryColor }} />
+              </div>
+              <div>
+                <p className="text-xs font-medium text-white/70">Get Order Updates</p>
+                <p className="text-[10px] text-white/35">Receive status notifications via email</p>
+              </div>
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const form = e.target as HTMLFormElement;
+                const emailInput = form.elements.namedItem("notifyEmail") as HTMLInputElement;
+                if (emailInput?.value) {
+                  const btn = form.querySelector("button[type=submit]") as HTMLButtonElement;
+                  if (btn) {
+                    btn.textContent = "Subscribed!";
+                    btn.disabled = true;
+                    btn.style.opacity = "0.6";
+                  }
+                }
+              }}
+              className="flex gap-2"
+            >
+              <input
+                name="notifyEmail"
+                type="email"
+                required
+                placeholder="your@email.com"
+                className="flex-1 rounded-xl px-3 py-2.5 text-sm min-h-[44px]"
+                style={{
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  color: "rgba(255,255,255,0.8)",
+                }}
+              />
+              <button
+                type="submit"
+                className="px-4 py-2.5 rounded-xl text-sm font-medium text-white transition-all hover:scale-[1.02] active:scale-[0.98] min-h-[44px]"
+                style={{ backgroundColor: secondaryColor }}
+              >
+                Notify Me
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-center gap-1.5 text-[10px] text-white/20">
         <Star className="w-3 h-3" />
         <span>Thank you for your business</span>
