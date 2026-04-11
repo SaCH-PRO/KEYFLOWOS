@@ -7,17 +7,29 @@ type Props = {
   secondaryColor: string;
   businessName?: string;
   showPaymentBadge?: boolean;
+  completedOrdersCount?: number;
+  businessHoursToday?: string | null;
 };
 
-const trustItems = [
-  { icon: ShieldCheck, label: "Secure Checkout", key: "secure" },
-  { icon: Clock, label: "Instant Confirmation", key: "instant" },
-  { icon: CreditCard, label: "Secure Payments", key: "payments" },
-  { icon: Award, label: "Guaranteed by KeyFlowOS", key: "guarantee" },
-];
+function formatOrderCount(count: number): string {
+  if (count >= 1000) return `${(count / 1000).toFixed(1).replace(/\.0$/, "")}k+`;
+  if (count >= 100) return `${count}+`;
+  if (count >= 10) return `${count}+`;
+  return `${count}`;
+}
 
-export function TrustBar({ primaryColor, secondaryColor, showPaymentBadge = true }: Props) {
-  const visibleItems = showPaymentBadge ? trustItems : trustItems.filter((i) => i.key !== "payments");
+export function TrustBar({ primaryColor, secondaryColor, showPaymentBadge = true, completedOrdersCount, businessHoursToday }: Props) {
+  const trustItems = [
+    { icon: ShieldCheck, label: "Secure Checkout", key: "secure" },
+    ...(completedOrdersCount && completedOrdersCount > 0
+      ? [{ icon: Star, label: `${formatOrderCount(completedOrdersCount)} Orders Completed`, key: "orders" }]
+      : [{ icon: Clock, label: "Instant Confirmation", key: "instant" }]),
+    ...(showPaymentBadge ? [{ icon: CreditCard, label: "Secure Payments", key: "payments" }] : []),
+    ...(businessHoursToday
+      ? [{ icon: Clock, label: `Today: ${businessHoursToday}`, key: "hours" }]
+      : [{ icon: Award, label: "Guaranteed by KeyFlowOS", key: "guarantee" }]),
+  ];
+  const visibleItems = trustItems;
 
   return (
     <div

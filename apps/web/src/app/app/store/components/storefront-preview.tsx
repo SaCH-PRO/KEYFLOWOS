@@ -84,7 +84,6 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
 
   const ts = getThemeStyles(theme, pc, sc, ac);
 
-  const storeNames = new Set(services.map((s) => s.name));
   const unsortedItems: PreviewItem[] = [
     ...services.map((s) => ({
       id: s.id,
@@ -97,7 +96,7 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
       itemType: "service" as const,
     })),
     ...commerceProducts
-      .filter((p) => p.category === "PRODUCT" && storeNames.has(p.name))
+      .filter((p) => p.category === "PRODUCT")
       .map((p) => ({
         id: p.id,
         name: p.name,
@@ -109,7 +108,7 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
         itemType: "product" as const,
       })),
     ...commerceProducts
-      .filter((p) => p.category === "PACKAGE" && storeNames.has(p.name))
+      .filter((p) => p.category === "PACKAGE")
       .map((p) => ({
         id: p.id,
         name: p.name,

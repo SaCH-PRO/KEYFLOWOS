@@ -8,6 +8,7 @@ import { Loader2, CheckCircle2, Globe, Star, MessageCircle, Shield, Award, Flame
 import { ItemDetailModal } from "./components/item-detail-modal";
 import { trackStoreEvent, StorefrontConfig, type StorefrontSectionKey } from "@/lib/client";
 import { getThemeStyles, type ThemeKey } from "@/lib/storefront-themes";
+import { FONT_PAIRINGS } from "../../app/store/components/store-types";
 
 import type {
   Business,
@@ -110,7 +111,11 @@ export default function PublicBookingPage() {
   const themeKey = (appearance?.theme ?? "default") as ThemeKey;
   const ts = getThemeStyles(themeKey, primaryColor, secondaryColor, accentColor);
   const densityPadding = appearance?.density === "compact" ? "px-4 py-4" : "px-4 sm:px-8 py-8";
-  const fontFamilyClass = appearance?.fontFamily === "serif" ? "font-serif" : appearance?.fontFamily === "sans" ? "font-sans" : "";
+  const fontPairingId = appearance?.fontPairing ?? "inter-inter";
+  const fontPairing = FONT_PAIRINGS.find((p) => p.id === fontPairingId);
+  const headingFontStyle = fontPairing ? `'${fontPairing.heading}', sans-serif` : undefined;
+  const bodyFontStyle = fontPairing ? `'${fontPairing.body}', sans-serif` : undefined;
+  const fontFamilyClass = "";
 
   const updateCart = useCallback(
     (newCart: CartItem[]) => {
@@ -293,6 +298,20 @@ export default function PublicBookingPage() {
       setPromoCode(loadPromoCode(slug));
     }
   }, [slug]);
+
+  useEffect(() => {
+    if (!fontPairing || fontPairing.id === "inter-inter") return;
+    const families = [fontPairing.heading, fontPairing.body]
+      .filter((f, i, arr) => arr.indexOf(f) === i)
+      .map((f) => `family=${f.replace(/ /g, "+")}:wght@400;700`)
+      .join("&");
+    const href = `https://fonts.googleapis.com/css2?${families}&display=swap`;
+    if (document.querySelector(`link[href="${href}"]`)) return;
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = href;
+    document.head.appendChild(link);
+  }, [fontPairing]);
 
   useEffect(() => {
     if (!slug || !business) return;
@@ -1086,7 +1105,7 @@ export default function PublicBookingPage() {
   };
 
   return (
-    <main className={`min-h-screen text-white relative ${fontFamilyClass}`} style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
+    <main className="min-h-screen text-white relative" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient, fontFamily: bodyFontStyle }}>
       {business && (
         <>
           <OrganizationSchema business={business} url={pageUrl} />
