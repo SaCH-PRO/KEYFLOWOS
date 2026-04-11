@@ -3233,6 +3233,7 @@ export interface StorefrontConfig {
     minimumOrderValue?: number;
     storeStatus?: StoreStatus;
     currencyDisplay?: string;
+    taxRate?: number;
   };
   contactOptions?: {
     whatsappNumber?: string;
