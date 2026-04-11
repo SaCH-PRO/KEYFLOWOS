@@ -70,7 +70,10 @@ interface ActionItem {
 interface Risk {
   risk: string;
   impact: "HIGH" | "MEDIUM" | "LOW";
+  likelihood?: "HIGH" | "MEDIUM" | "LOW";
+  category?: string;
   mitigation: string;
+  contingency?: string;
 }
 
 interface FinancialOutlook {
@@ -79,11 +82,50 @@ interface FinancialOutlook {
   breakEvenTimeline: string;
   yearOneRevenue: string;
   keyMetrics: string[];
+  fundingStrategy: string;
+  cashFlowProjection: string;
+}
+
+interface LegalCompliance {
+  businessStructure: string;
+  registrations: string[];
+  taxObligations: string;
+  contracts: string[];
+  insuranceNeeds: string[];
+  complianceChecklist: string[];
+}
+
+interface SwotAnalysis {
+  strengths: string[];
+  weaknesses: string[];
+  opportunities: string[];
+  threats: string[];
+}
+
+interface CompetitiveAnalysis {
+  swot: SwotAnalysis;
+  competitorLandscape: string;
+  differentiators: string[];
+  marketEntry: string;
+}
+
+interface UnitEconomics {
+  customerAcquisitionCost: string;
+  lifetimeValue: string;
+  ltvCacRatio: string;
+  averageRevenue: string;
+  grossMargin: string;
+  contributionMargin: string;
+  paybackPeriod: string;
+  breakEvenUnits: string;
 }
 
 interface GeneratedModel {
   summary: string;
   canvas: BusinessModelCanvas;
+  legalCompliance: LegalCompliance;
+  competitiveAnalysis: CompetitiveAnalysis;
+  unitEconomics: UnitEconomics;
   roadmap: RoadmapPhase[];
   actionPlan: ActionItem[];
   financialOutlook: FinancialOutlook;
@@ -99,6 +141,11 @@ interface IntakeForm {
   goals: string;
   stage: string;
   challenges: string;
+  budget: string;
+  timeline: string;
+  teamSize: string;
+  location: string;
+  legalStructure: string;
 }
 
 interface ServerPlan {
@@ -171,11 +218,14 @@ const MODULE_ROUTES: Record<string, string> = {
 
 const INTAKE_STEPS = [
   { id: "idea", label: "Business Idea", icon: Lightbulb, field: "businessIdea" as const, placeholder: "Describe your business idea in detail — what product or service will you offer?", hint: "Be specific about what you're building. E.g. 'A mobile car detailing service targeting luxury car owners in Port of Spain'" },
-  { id: "market", label: "Target Market", icon: Users, field: "targetMarket" as const, placeholder: "Who are your ideal customers? What demographics, behaviors, or needs define them?", hint: "E.g. 'Young professionals aged 25-40 in Trinidad who value convenience and premium service'" },
-  { id: "value", label: "Value Proposition", icon: Sparkles, field: "valueProposition" as const, placeholder: "What unique value do you bring? Why would customers choose you over alternatives?", hint: "Focus on what makes you different — your unfair advantage" },
-  { id: "revenue", label: "Revenue Model", icon: DollarSign, field: "revenueModel" as const, placeholder: "How will you make money? What pricing strategy will you use?", hint: "E.g. 'Per-service pricing ($500-2000 TTD per detail) + monthly subscription plans for regular customers'" },
-  { id: "goals", label: "Goals & Vision", icon: Flag, field: "goals" as const, placeholder: "What are your 6-month and 12-month goals? Where do you see this business going?", hint: "Include revenue targets, customer milestones, or expansion plans" },
-  { id: "challenges", label: "Challenges", icon: AlertTriangle, field: "challenges" as const, placeholder: "What obstacles or concerns do you foresee? What keeps you up at night?", hint: "E.g. 'Limited startup capital, finding reliable staff, seasonal demand fluctuations'" },
+  { id: "market", label: "Target Market", icon: Users, field: "targetMarket" as const, placeholder: "Who are your ideal customers? What demographics, behaviors, or needs define them?", hint: "Think demographics (age, income, location), psychographics (values, lifestyle), and buying behavior. E.g. 'Young professionals aged 25-40 in Trinidad who value convenience and premium service'" },
+  { id: "value", label: "Value Proposition", icon: Sparkles, field: "valueProposition" as const, placeholder: "What unique value do you bring? Why would customers choose you over alternatives?", hint: "Focus on your unfair advantage — what problem you solve better than anyone else, and why competitors can't easily copy you" },
+  { id: "revenue", label: "Revenue Model", icon: DollarSign, field: "revenueModel" as const, placeholder: "How will you make money? Include pricing strategy and expected price points.", hint: "E.g. 'Per-service pricing ($500-2000 TTD per detail) + monthly subscription plans ($800 TTD/mo) for regular customers'" },
+  { id: "budget", label: "Budget & Funding", icon: BarChart3, field: "budget" as const, placeholder: "What's your available startup capital? Are you self-funding, seeking a loan, or looking for investors?", hint: "Be honest about your financial starting point. E.g. '$50,000 TTD personal savings + considering NEDCO small business loan'" },
+  { id: "team", label: "Team & Resources", icon: Users, field: "teamSize" as const, placeholder: "Who's on your team? What skills do you have, and what do you need to hire for?", hint: "E.g. 'Just me (marketing background) — will need a developer and an operations person within 6 months'" },
+  { id: "location", label: "Location & Market", icon: Globe, field: "location" as const, placeholder: "Where will you operate? What's your primary market geography?", hint: "E.g. 'Based in Port of Spain, serving all of Trinidad initially, expanding to Tobago and Caribbean islands within Year 2'" },
+  { id: "goals", label: "Goals & Vision", icon: Flag, field: "goals" as const, placeholder: "What are your 6-month and 12-month goals? Where do you see this business in 3 years?", hint: "Include revenue targets, customer milestones, hiring plans, or expansion goals. Be ambitious but realistic." },
+  { id: "challenges", label: "Challenges", icon: AlertTriangle, field: "challenges" as const, placeholder: "What obstacles or concerns do you foresee? What keeps you up at night about this venture?", hint: "Common Caribbean challenges: import costs, forex limitations, finding skilled staff, seasonal fluctuations, competition from established players" },
 ];
 
 const STAGE_OPTIONS = [
@@ -184,6 +234,21 @@ const STAGE_OPTIONS = [
   { value: "STARTUP", label: "Early Startup", description: "I've started but haven't launched yet" },
   { value: "LAUNCHED", label: "Launched", description: "I'm live and getting first customers" },
   { value: "GROWING", label: "Growing", description: "I have traction and want to scale" },
+];
+
+const LEGAL_STRUCTURE_OPTIONS = [
+  { value: "SOLE_TRADER", label: "Sole Trader", description: "Simplest structure — you and the business are one entity" },
+  { value: "PARTNERSHIP", label: "Partnership", description: "Two or more owners sharing profits and liability" },
+  { value: "LLC", label: "Limited Liability Company", description: "Separate legal entity protecting personal assets" },
+  { value: "LIMITED", label: "Limited Company", description: "Formal corporate structure with shareholders and directors" },
+  { value: "UNSURE", label: "Not Sure Yet", description: "I'd like the AI to recommend the best structure" },
+];
+
+const TIMELINE_OPTIONS = [
+  { value: "ASAP", label: "Ready to Launch", description: "Within the next 1-2 months" },
+  { value: "3_MONTHS", label: "3 Months", description: "Building foundations over the next quarter" },
+  { value: "6_MONTHS", label: "6 Months", description: "Taking time to plan and prepare properly" },
+  { value: "12_MONTHS", label: "12+ Months", description: "Long-term planning before launch" },
 ];
 
 const CANVAS_LABELS: { key: keyof BusinessModelCanvas; label: string; icon: React.ElementType; colorVar: string }[] = [
@@ -243,8 +308,15 @@ function validateModel(raw: unknown): GeneratedModel {
   const m = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const canvas = (m.canvas && typeof m.canvas === "object" ? m.canvas : {}) as Record<string, string>;
   const fin = (m.financialOutlook && typeof m.financialOutlook === "object" ? m.financialOutlook : {}) as Record<string, unknown>;
+  const legal = (m.legalCompliance && typeof m.legalCompliance === "object" ? m.legalCompliance : {}) as Record<string, unknown>;
+  const comp = (m.competitiveAnalysis && typeof m.competitiveAnalysis === "object" ? m.competitiveAnalysis : {}) as Record<string, unknown>;
+  const swotRaw = (comp.swot && typeof comp.swot === "object" ? comp.swot : {}) as Record<string, unknown>;
+  const unit = (m.unitEconomics && typeof m.unitEconomics === "object" ? m.unitEconomics : {}) as Record<string, unknown>;
+  const s = (v: unknown, f = "") => typeof v === "string" ? v : f;
+  const a = (v: unknown) => Array.isArray(v) ? v : [];
+
   return {
-    summary: typeof m.summary === "string" ? m.summary : "",
+    summary: s(m.summary),
     canvas: {
       valueProposition: canvas.valueProposition || "",
       customerSegments: canvas.customerSegments || "",
@@ -256,17 +328,48 @@ function validateModel(raw: unknown): GeneratedModel {
       keyPartnerships: canvas.keyPartnerships || "",
       costStructure: canvas.costStructure || "",
     },
-    roadmap: Array.isArray(m.roadmap) ? m.roadmap : [],
-    actionPlan: Array.isArray(m.actionPlan) ? m.actionPlan : [],
-    financialOutlook: {
-      startupCosts: typeof fin.startupCosts === "string" ? fin.startupCosts : "Not estimated",
-      monthlyBurn: typeof fin.monthlyBurn === "string" ? fin.monthlyBurn : "Not estimated",
-      breakEvenTimeline: typeof fin.breakEvenTimeline === "string" ? fin.breakEvenTimeline : "Not estimated",
-      yearOneRevenue: typeof fin.yearOneRevenue === "string" ? fin.yearOneRevenue : "Not estimated",
-      keyMetrics: Array.isArray(fin.keyMetrics) ? fin.keyMetrics : [],
+    legalCompliance: {
+      businessStructure: s(legal.businessStructure, "Consult a local attorney"),
+      registrations: a(legal.registrations),
+      taxObligations: s(legal.taxObligations, "Consult BIR for specific obligations"),
+      contracts: a(legal.contracts),
+      insuranceNeeds: a(legal.insuranceNeeds),
+      complianceChecklist: a(legal.complianceChecklist),
     },
-    risks: Array.isArray(m.risks) ? m.risks : [],
-    recommendedDocuments: Array.isArray(m.recommendedDocuments) ? m.recommendedDocuments : [],
+    competitiveAnalysis: {
+      swot: {
+        strengths: a(swotRaw.strengths),
+        weaknesses: a(swotRaw.weaknesses),
+        opportunities: a(swotRaw.opportunities),
+        threats: a(swotRaw.threats),
+      },
+      competitorLandscape: s(comp.competitorLandscape),
+      differentiators: a(comp.differentiators),
+      marketEntry: s(comp.marketEntry),
+    },
+    unitEconomics: {
+      customerAcquisitionCost: s(unit.customerAcquisitionCost, "Not estimated"),
+      lifetimeValue: s(unit.lifetimeValue, "Not estimated"),
+      ltvCacRatio: s(unit.ltvCacRatio, "Not estimated"),
+      averageRevenue: s(unit.averageRevenue, "Not estimated"),
+      grossMargin: s(unit.grossMargin, "Not estimated"),
+      contributionMargin: s(unit.contributionMargin, "Not estimated"),
+      paybackPeriod: s(unit.paybackPeriod, "Not estimated"),
+      breakEvenUnits: s(unit.breakEvenUnits, "Not estimated"),
+    },
+    roadmap: a(m.roadmap),
+    actionPlan: a(m.actionPlan),
+    financialOutlook: {
+      startupCosts: s(fin.startupCosts, "Not estimated"),
+      monthlyBurn: s(fin.monthlyBurn, "Not estimated"),
+      breakEvenTimeline: s(fin.breakEvenTimeline, "Not estimated"),
+      yearOneRevenue: s(fin.yearOneRevenue, "Not estimated"),
+      keyMetrics: a(fin.keyMetrics),
+      fundingStrategy: s(fin.fundingStrategy),
+      cashFlowProjection: s(fin.cashFlowProjection),
+    },
+    risks: a(m.risks),
+    recommendedDocuments: a(m.recommendedDocuments),
   };
 }
 
@@ -322,7 +425,7 @@ function useBusinessProgress(businessId: string | null) {
 }
 
 type ViewMode = "overview" | "intake" | "results";
-type ResultTab = "canvas" | "roadmap" | "actions" | "financials" | "risks";
+type ResultTab = "canvas" | "legal" | "swot" | "financials" | "roadmap" | "actions" | "risks";
 
 export default function BusinessBuilderCard() {
   const router = useRouter();
@@ -334,6 +437,7 @@ export default function BusinessBuilderCard() {
   const [intakeForm, setIntakeForm] = useState<IntakeForm>({
     businessIdea: "", targetMarket: "", valueProposition: "",
     revenueModel: "", goals: "", stage: "", challenges: "",
+    budget: "", timeline: "", teamSize: "", location: "", legalStructure: "",
   });
   const [formPreFilled, setFormPreFilled] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -390,6 +494,7 @@ export default function BusinessBuilderCard() {
 
         if (hasAnyData) {
           setIntakeForm((prev) => ({
+            ...prev,
             businessIdea: prev.businessIdea || ideaText,
             targetMarket: prev.targetMarket || "",
             valueProposition: prev.valueProposition || (biz.tagline || ""),
@@ -397,6 +502,7 @@ export default function BusinessBuilderCard() {
             goals: prev.goals || "",
             stage: prev.stage || (stageMap[biz.businessStage || ""] || ""),
             challenges: prev.challenges || "",
+            location: prev.location || (biz.city ? `${biz.city}${biz.country ? `, ${biz.country}` : ""}` : ""),
           }));
           setFormPreFilled(true);
         }
@@ -618,6 +724,46 @@ export default function BusinessBuilderCard() {
   );
 }
 
+function SelectionStep({ options, value, onChange, prompt }: {
+  options: { value: string; label: string; description: string }[];
+  value: string;
+  onChange: (v: string) => void;
+  prompt: string;
+}) {
+  return (
+    <motion.div key="selection" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-3">
+      <p className="text-xs text-[hsl(var(--kf-muted-foreground))]">{prompt}</p>
+      <div className="space-y-2">
+        {options.map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => onChange(opt.value)}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all min-h-[48px]"
+            style={{
+              background: value === opt.value ? "hsl(var(--kf-accent1) / 0.08)" : "transparent",
+              border: `1px solid ${value === opt.value ? "hsl(var(--kf-accent1) / 0.3)" : "hsl(var(--kf-border) / 0.15)"}`,
+            }}
+          >
+            <div className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0" style={{ border: `2px solid ${value === opt.value ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-muted-foreground) / 0.4)"}` }}>
+              {value === opt.value && <div className="w-2 h-2 rounded-full" style={{ background: "hsl(var(--kf-accent1))" }} />}
+            </div>
+            <div>
+              <span className="text-sm font-medium text-[hsl(var(--kf-foreground))]">{opt.label}</span>
+              <p className="text-[11px] text-[hsl(var(--kf-muted-foreground))]">{opt.description}</p>
+            </div>
+          </button>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
+const SELECTION_STEPS = [
+  { id: "stage", label: "Business Stage", field: "stage" as const, options: STAGE_OPTIONS, prompt: "Where are you in your business journey?" },
+  { id: "timeline", label: "Launch Timeline", field: "timeline" as const, options: TIMELINE_OPTIONS, prompt: "When do you plan to launch or reach your next milestone?" },
+  { id: "legalStructure", label: "Legal Structure", field: "legalStructure" as const, options: LEGAL_STRUCTURE_OPTIONS, prompt: "What legal structure are you considering for your business?" },
+];
+
 function IntakeWizard({ step, form, prefilled, generating, error, onFormChange, onStepChange, onGenerate, onBack }: {
   step: number;
   form: IntakeForm;
@@ -629,22 +775,26 @@ function IntakeWizard({ step, form, prefilled, generating, error, onFormChange, 
   onGenerate: () => void;
   onBack: () => void;
 }) {
-  const isStageStep = step === INTAKE_STEPS.length;
-  const isLastInputStep = step === INTAKE_STEPS.length - 1;
-  const totalSteps = INTAKE_STEPS.length + 1;
-  const currentStep = INTAKE_STEPS[step];
+  const totalSteps = INTAKE_STEPS.length + SELECTION_STEPS.length;
+  const isSelectionPhase = step >= INTAKE_STEPS.length;
+  const selectionIdx = step - INTAKE_STEPS.length;
+  const isLastStep = step === totalSteps - 1;
+  const currentTextStep = INTAKE_STEPS[step];
+  const currentSelectionStep = isSelectionPhase ? SELECTION_STEPS[selectionIdx] : null;
 
   const canProceed = step === 0
     ? form.businessIdea.trim().length > 10
     : true;
 
   const handleNext = () => {
-    if (isStageStep) {
+    if (isLastStep) {
       onGenerate();
     } else {
       onStepChange(step + 1);
     }
   };
+
+  const stepLabel = isSelectionPhase && currentSelectionStep ? currentSelectionStep.label : currentTextStep?.label || "";
 
   return (
     <div className="rounded-2xl overflow-hidden" style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border) / 0.3)" }}>
@@ -653,9 +803,7 @@ function IntakeWizard({ step, form, prefilled, generating, error, onFormChange, 
           <ArrowLeft className="w-4 h-4 text-[hsl(var(--kf-muted-foreground))]" />
         </button>
         <div className="flex-1">
-          <h3 className="text-sm font-semibold text-[hsl(var(--kf-foreground))]">
-            {isStageStep ? "Business Stage" : currentStep.label}
-          </h3>
+          <h3 className="text-sm font-semibold text-[hsl(var(--kf-foreground))]">{stepLabel}</h3>
           <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))]">Step {step + 1} of {totalSteps}</p>
         </div>
         <button onClick={onBack} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-[hsl(var(--kf-muted)/0.1)] transition-colors">
@@ -673,44 +821,27 @@ function IntakeWizard({ step, form, prefilled, generating, error, onFormChange, 
 
       <div className="p-5">
         <AnimatePresence mode="wait">
-          {isStageStep ? (
-            <motion.div key="stage" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-3">
-              <p className="text-xs text-[hsl(var(--kf-muted-foreground))]">Where are you in your business journey?</p>
-              <div className="space-y-2">
-                {STAGE_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => onFormChange({ ...form, stage: opt.value })}
-                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all min-h-[48px]"
-                    style={{
-                      background: form.stage === opt.value ? "hsl(var(--kf-accent1) / 0.08)" : "transparent",
-                      border: `1px solid ${form.stage === opt.value ? "hsl(var(--kf-accent1) / 0.3)" : "hsl(var(--kf-border) / 0.15)"}`,
-                    }}
-                  >
-                    <div className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0" style={{ border: `2px solid ${form.stage === opt.value ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-muted-foreground) / 0.4)"}` }}>
-                      {form.stage === opt.value && <div className="w-2 h-2 rounded-full" style={{ background: "hsl(var(--kf-accent1))" }} />}
-                    </div>
-                    <div>
-                      <span className="text-sm font-medium text-[hsl(var(--kf-foreground))]">{opt.label}</span>
-                      <p className="text-[11px] text-[hsl(var(--kf-muted-foreground))]">{opt.description}</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </motion.div>
-          ) : (
-            <motion.div key={currentStep.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-3">
-              <p className="text-xs text-[hsl(var(--kf-muted-foreground))]">{currentStep.hint}</p>
-              {form[currentStep.field].trim() && prefilled && (
+          {isSelectionPhase && currentSelectionStep ? (
+            <SelectionStep
+              key={currentSelectionStep.id}
+              options={currentSelectionStep.options}
+              value={form[currentSelectionStep.field]}
+              onChange={(v) => onFormChange({ ...form, [currentSelectionStep.field]: v })}
+              prompt={currentSelectionStep.prompt}
+            />
+          ) : currentTextStep ? (
+            <motion.div key={currentTextStep.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-3">
+              <p className="text-xs text-[hsl(var(--kf-muted-foreground))]">{currentTextStep.hint}</p>
+              {form[currentTextStep.field].trim() && prefilled && (
                 <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ background: "hsl(var(--kf-accent2) / 0.08)", border: "1px solid hsl(var(--kf-accent2) / 0.15)" }}>
                   <Sparkles className="w-3 h-3" style={{ color: "hsl(var(--kf-accent2))" }} />
                   <span className="text-[10px] font-medium" style={{ color: "hsl(var(--kf-accent2))" }}>Pre-filled from your business profile — edit as needed</span>
                 </div>
               )}
               <textarea
-                value={form[currentStep.field]}
-                onChange={(e) => onFormChange({ ...form, [currentStep.field]: e.target.value })}
-                placeholder={currentStep.placeholder}
+                value={form[currentTextStep.field]}
+                onChange={(e) => onFormChange({ ...form, [currentTextStep.field]: e.target.value })}
+                placeholder={currentTextStep.placeholder}
                 rows={5}
                 className="w-full resize-none rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 transition-all placeholder:text-[hsl(var(--kf-muted-foreground)/0.5)]"
                 style={{
@@ -719,11 +850,11 @@ function IntakeWizard({ step, form, prefilled, generating, error, onFormChange, 
                   color: "hsl(var(--kf-foreground))",
                 }}
               />
-              {step > 0 && !form[currentStep.field].trim() && (
+              {step > 0 && !form[currentTextStep.field].trim() && (
                 <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))] italic">This field is optional — skip it if you&apos;re unsure</p>
               )}
             </motion.div>
-          )}
+          ) : null}
         </AnimatePresence>
 
         {error && (
@@ -733,7 +864,7 @@ function IntakeWizard({ step, form, prefilled, generating, error, onFormChange, 
         )}
 
         <div className="mt-4 flex gap-2">
-          {step > 0 && !isStageStep && (
+          {step > 0 && !isSelectionPhase && (
             <button
               onClick={() => onStepChange(step + 1)}
               className="px-4 py-2.5 rounded-xl text-xs font-medium transition-colors min-h-[40px]"
@@ -751,12 +882,12 @@ function IntakeWizard({ step, form, prefilled, generating, error, onFormChange, 
             {generating ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Generating your business model...</span>
+                <span>Generating your business plan...</span>
               </>
-            ) : isStageStep ? (
+            ) : isLastStep ? (
               <>
                 <Sparkles className="w-4 h-4" />
-                <span>Generate Business Model</span>
+                <span>Generate Business Plan</span>
               </>
             ) : (
               <>
@@ -773,10 +904,12 @@ function IntakeWizard({ step, form, prefilled, generating, error, onFormChange, 
 
 const RESULT_TABS: { id: ResultTab; label: string; icon: React.ElementType }[] = [
   { id: "canvas", label: "Canvas", icon: BarChart3 },
+  { id: "legal", label: "Legal", icon: Shield },
+  { id: "swot", label: "SWOT", icon: Target },
+  { id: "financials", label: "Financials", icon: DollarSign },
   { id: "roadmap", label: "Roadmap", icon: Flag },
   { id: "actions", label: "Actions", icon: Zap },
-  { id: "financials", label: "Financials", icon: DollarSign },
-  { id: "risks", label: "Risks", icon: Shield },
+  { id: "risks", label: "Risks", icon: AlertTriangle },
 ];
 
 function modelToSections(model: GeneratedModel): Array<{ sectionName: string; content: string }> {
@@ -795,6 +928,50 @@ function modelToSections(model: GeneratedModel): Array<{ sectionName: string; co
     .map(([k, v]) => `${canvasLabels[k] || k}: ${v}`)
     .join("\n\n");
   sections.push({ sectionName: "Business Model Canvas", content: canvasContent });
+
+  if (model.legalCompliance) {
+    const lc = model.legalCompliance;
+    const legalLines = [
+      `Business Structure: ${lc.businessStructure}`,
+      `\nTax Obligations: ${lc.taxObligations}`,
+    ];
+    if (lc.registrations?.length) legalLines.push(`\nRequired Registrations:\n${lc.registrations.map((r) => `  • ${r}`).join("\n")}`);
+    if (lc.contracts?.length) legalLines.push(`\nEssential Contracts:\n${lc.contracts.map((c) => `  • ${c}`).join("\n")}`);
+    if (lc.insuranceNeeds?.length) legalLines.push(`\nInsurance Needs:\n${lc.insuranceNeeds.map((i) => `  • ${i}`).join("\n")}`);
+    if (lc.complianceChecklist?.length) legalLines.push(`\nCompliance Checklist:\n${lc.complianceChecklist.map((c, i) => `  ${i + 1}. ${c}`).join("\n")}`);
+    sections.push({ sectionName: "Legal & Compliance", content: legalLines.join("\n") });
+  }
+
+  if (model.competitiveAnalysis) {
+    const ca = model.competitiveAnalysis;
+    const compLines: string[] = [];
+    if (ca.swot) {
+      compLines.push("SWOT Analysis:");
+      if (ca.swot.strengths?.length) compLines.push(`  Strengths:\n${ca.swot.strengths.map((s) => `    • ${s}`).join("\n")}`);
+      if (ca.swot.weaknesses?.length) compLines.push(`  Weaknesses:\n${ca.swot.weaknesses.map((w) => `    • ${w}`).join("\n")}`);
+      if (ca.swot.opportunities?.length) compLines.push(`  Opportunities:\n${ca.swot.opportunities.map((o) => `    • ${o}`).join("\n")}`);
+      if (ca.swot.threats?.length) compLines.push(`  Threats:\n${ca.swot.threats.map((t) => `    • ${t}`).join("\n")}`);
+    }
+    if (ca.competitorLandscape) compLines.push(`\nCompetitor Landscape: ${ca.competitorLandscape}`);
+    if (ca.differentiators?.length) compLines.push(`\nDifferentiators:\n${ca.differentiators.map((d) => `  • ${d}`).join("\n")}`);
+    if (ca.marketEntry) compLines.push(`\nMarket Entry Strategy: ${ca.marketEntry}`);
+    sections.push({ sectionName: "Competitive Analysis", content: compLines.join("\n") });
+  }
+
+  if (model.unitEconomics) {
+    const ue = model.unitEconomics;
+    const ueLines = [
+      `Customer Acquisition Cost (CAC): ${ue.customerAcquisitionCost}`,
+      `Lifetime Value (LTV): ${ue.lifetimeValue}`,
+      `LTV:CAC Ratio: ${ue.ltvCacRatio}`,
+      `Average Revenue Per User: ${ue.averageRevenue}`,
+      `Gross Margin: ${ue.grossMargin}`,
+      `Contribution Margin: ${ue.contributionMargin}`,
+      `Payback Period: ${ue.paybackPeriod}`,
+      `Break-Even Units: ${ue.breakEvenUnits}`,
+    ];
+    sections.push({ sectionName: "Unit Economics", content: ueLines.join("\n") });
+  }
 
   if (model.roadmap?.length > 0) {
     const roadmapContent = model.roadmap.map((p, i) => {
@@ -822,14 +999,19 @@ function modelToSections(model: GeneratedModel): Array<{ sectionName: string; co
       `Break-Even Timeline: ${f.breakEvenTimeline}`,
       `Year One Revenue: ${f.yearOneRevenue}`,
     ];
+    if (f.fundingStrategy) finLines.push(`\nFunding Strategy: ${f.fundingStrategy}`);
+    if (f.cashFlowProjection) finLines.push(`\nCash Flow Projection: ${f.cashFlowProjection}`);
     if (f.keyMetrics?.length) finLines.push(`\nKey Metrics:\n${f.keyMetrics.map((m) => `  • ${m}`).join("\n")}`);
     sections.push({ sectionName: "Financial Outlook", content: finLines.join("\n") });
   }
 
   if (model.risks?.length > 0) {
-    const risksContent = model.risks.map((r, i) =>
-      `${i + 1}. ${r.risk} [Impact: ${r.impact}]\n   Mitigation: ${r.mitigation}`
-    ).join("\n\n");
+    const risksContent = model.risks.map((r, i) => {
+      const lines = [`${i + 1}. ${r.risk} [Impact: ${r.impact}${r.likelihood ? ` | Likelihood: ${r.likelihood}` : ""}${r.category ? ` | ${r.category}` : ""}]`];
+      lines.push(`   Mitigation: ${r.mitigation}`);
+      if (r.contingency) lines.push(`   Contingency: ${r.contingency}`);
+      return lines.join("\n");
+    }).join("\n\n");
     sections.push({ sectionName: "Risk Assessment", content: risksContent });
   }
 
@@ -1035,9 +1217,11 @@ function ResultsPanel({ model, tab, version, businessId, saveError, onTabChange,
       <div className="p-4">
         <AnimatePresence mode="wait">
           {tab === "canvas" && <CanvasView key="canvas" canvas={model.canvas} model={model} onSaveEdit={onSaveEdit} />}
+          {tab === "legal" && <LegalView key="legal" legal={model.legalCompliance} />}
+          {tab === "swot" && <SWOTView key="swot" analysis={model.competitiveAnalysis} economics={model.unitEconomics} />}
+          {tab === "financials" && <FinancialsView key="financials" outlook={model.financialOutlook} />}
           {tab === "roadmap" && <RoadmapView key="roadmap" roadmap={model.roadmap} />}
           {tab === "actions" && <ActionsView key="actions" actions={model.actionPlan} businessId={businessId} />}
-          {tab === "financials" && <FinancialsView key="financials" outlook={model.financialOutlook} />}
           {tab === "risks" && <RisksView key="risks" risks={model.risks} />}
         </AnimatePresence>
       </div>
@@ -1278,6 +1462,167 @@ function ActionsView({ actions, businessId }: { actions: ActionItem[]; businessI
   );
 }
 
+function LegalView({ legal }: { legal: LegalCompliance }) {
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
+      <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-accent1) / 0.04)", border: "1px solid hsl(var(--kf-accent1) / 0.12)" }}>
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <Briefcase className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
+          <span className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>Recommended Structure</span>
+        </div>
+        <p className="text-xs text-[hsl(var(--kf-foreground))] leading-relaxed">{legal.businessStructure}</p>
+      </div>
+
+      <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-warning) / 0.04)", border: "1px solid hsl(var(--kf-warning) / 0.12)" }}>
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <DollarSign className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-warning))" }} />
+          <span className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-warning))" }}>Tax Obligations</span>
+        </div>
+        <p className="text-xs text-[hsl(var(--kf-foreground))] leading-relaxed">{legal.taxObligations}</p>
+      </div>
+
+      {legal.registrations?.length > 0 && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-muted) / 0.05)", border: "1px solid hsl(var(--kf-border) / 0.12)" }}>
+          <span className="text-[10px] font-semibold text-[hsl(var(--kf-muted-foreground))] mb-2 block">Required Registrations</span>
+          <div className="space-y-1.5">
+            {legal.registrations.map((reg, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <CheckCircle2 className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-success))" }} />
+                <span className="text-[11px] text-[hsl(var(--kf-foreground))]">{reg}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {legal.contracts?.length > 0 && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-muted) / 0.05)", border: "1px solid hsl(var(--kf-border) / 0.12)" }}>
+          <span className="text-[10px] font-semibold text-[hsl(var(--kf-muted-foreground))] mb-2 block">Essential Contracts</span>
+          <div className="space-y-1.5">
+            {legal.contracts.map((c, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <FileText className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-accent2))" }} />
+                <span className="text-[11px] text-[hsl(var(--kf-foreground))]">{c}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {legal.insuranceNeeds?.length > 0 && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-muted) / 0.05)", border: "1px solid hsl(var(--kf-border) / 0.12)" }}>
+          <span className="text-[10px] font-semibold text-[hsl(var(--kf-muted-foreground))] mb-2 block">Insurance Coverage</span>
+          <div className="space-y-1.5">
+            {legal.insuranceNeeds.map((ins, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <Shield className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-info))" }} />
+                <span className="text-[11px] text-[hsl(var(--kf-foreground))]">{ins}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {legal.complianceChecklist?.length > 0 && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-success) / 0.04)", border: "1px solid hsl(var(--kf-success) / 0.12)" }}>
+          <span className="text-[10px] font-semibold mb-2 block" style={{ color: "hsl(var(--kf-success))" }}>Compliance Checklist</span>
+          <div className="space-y-1.5">
+            {legal.complianceChecklist.map((item, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <span className="text-[10px] font-bold flex-shrink-0 w-4 text-right" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{i + 1}.</span>
+                <span className="text-[11px] text-[hsl(var(--kf-foreground))]">{item}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+function SWOTView({ analysis, economics }: { analysis: CompetitiveAnalysis; economics: UnitEconomics }) {
+  const swotQuadrants = [
+    { label: "Strengths", items: analysis.swot.strengths, colorVar: "--kf-success", icon: TrendingUp },
+    { label: "Weaknesses", items: analysis.swot.weaknesses, colorVar: "--kf-error", icon: AlertTriangle },
+    { label: "Opportunities", items: analysis.swot.opportunities, colorVar: "--kf-accent2", icon: Sparkles },
+    { label: "Threats", items: analysis.swot.threats, colorVar: "--kf-warning", icon: Shield },
+  ];
+
+  const econMetrics = [
+    { label: "CAC", value: economics.customerAcquisitionCost, colorVar: "--kf-accent1" },
+    { label: "LTV", value: economics.lifetimeValue, colorVar: "--kf-accent2" },
+    { label: "LTV:CAC", value: economics.ltvCacRatio, colorVar: "--kf-success" },
+    { label: "ARPU", value: economics.averageRevenue, colorVar: "--kf-info" },
+    { label: "Gross Margin", value: economics.grossMargin, colorVar: "--kf-accent1" },
+    { label: "Contribution Margin", value: economics.contributionMargin, colorVar: "--kf-accent2" },
+    { label: "Payback Period", value: economics.paybackPeriod, colorVar: "--kf-warning" },
+    { label: "Break-Even Units", value: economics.breakEvenUnits, colorVar: "--kf-success" },
+  ];
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
+      <div className="grid grid-cols-2 gap-2">
+        {swotQuadrants.map(({ label, items, colorVar, icon: Icon }) => (
+          <div key={label} className="rounded-xl p-3" style={{ background: `hsl(var(${colorVar}) / 0.04)`, border: `1px solid hsl(var(${colorVar}) / 0.12)` }}>
+            <div className="flex items-center gap-1.5 mb-2">
+              <Icon className="w-3 h-3" style={{ color: `hsl(var(${colorVar}))` }} />
+              <span className="text-[10px] font-semibold" style={{ color: `hsl(var(${colorVar}))` }}>{label}</span>
+            </div>
+            <div className="space-y-1">
+              {items.map((item, i) => (
+                <div key={i} className="flex items-start gap-1.5">
+                  <div className="w-1 h-1 rounded-full mt-1.5 flex-shrink-0" style={{ background: `hsl(var(${colorVar}))` }} />
+                  <span className="text-[11px] text-[hsl(var(--kf-foreground))] leading-tight">{String(item)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {analysis.competitorLandscape && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-muted) / 0.05)", border: "1px solid hsl(var(--kf-border) / 0.12)" }}>
+          <span className="text-[10px] font-semibold text-[hsl(var(--kf-muted-foreground))] mb-1.5 block">Competitor Landscape</span>
+          <p className="text-[11px] text-[hsl(var(--kf-foreground))] leading-relaxed">{analysis.competitorLandscape}</p>
+        </div>
+      )}
+
+      {analysis.differentiators?.length > 0 && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-accent1) / 0.04)", border: "1px solid hsl(var(--kf-accent1) / 0.12)" }}>
+          <span className="text-[10px] font-semibold mb-2 block" style={{ color: "hsl(var(--kf-accent1))" }}>Competitive Differentiators</span>
+          <div className="space-y-1.5">
+            {analysis.differentiators.map((d, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <Zap className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-accent1))" }} />
+                <span className="text-[11px] text-[hsl(var(--kf-foreground))]">{String(d)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {analysis.marketEntry && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-accent2) / 0.04)", border: "1px solid hsl(var(--kf-accent2) / 0.12)" }}>
+          <span className="text-[10px] font-semibold mb-1.5 block" style={{ color: "hsl(var(--kf-accent2))" }}>Market Entry Strategy</span>
+          <p className="text-[11px] text-[hsl(var(--kf-foreground))] leading-relaxed">{analysis.marketEntry}</p>
+        </div>
+      )}
+
+      <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-muted) / 0.05)", border: "1px solid hsl(var(--kf-border) / 0.12)" }}>
+        <span className="text-[10px] font-semibold text-[hsl(var(--kf-muted-foreground))] mb-2 block">Unit Economics</span>
+        <div className="grid grid-cols-2 gap-2">
+          {econMetrics.map(({ label, value, colorVar }) => (
+            <div key={label} className="px-2.5 py-2 rounded-lg" style={{ background: `hsl(var(${colorVar}) / 0.04)` }}>
+              <span className="text-[9px] font-medium block mb-0.5" style={{ color: `hsl(var(${colorVar}))` }}>{label}</span>
+              <span className="text-[11px] font-semibold text-[hsl(var(--kf-foreground))]">{value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 function FinancialsView({ outlook }: { outlook: FinancialOutlook }) {
   const items = [
     { label: "Startup Costs", value: outlook.startupCosts, icon: DollarSign, colorVar: "--kf-accent1" },
@@ -1299,6 +1644,24 @@ function FinancialsView({ outlook }: { outlook: FinancialOutlook }) {
           </div>
         ))}
       </div>
+      {outlook.fundingStrategy && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-accent1) / 0.04)", border: "1px solid hsl(var(--kf-accent1) / 0.12)" }}>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <Briefcase className="w-3 h-3" style={{ color: "hsl(var(--kf-accent1))" }} />
+            <span className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>Funding Strategy</span>
+          </div>
+          <p className="text-[11px] text-[hsl(var(--kf-foreground))] leading-relaxed">{outlook.fundingStrategy}</p>
+        </div>
+      )}
+      {outlook.cashFlowProjection && (
+        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-accent2) / 0.04)", border: "1px solid hsl(var(--kf-accent2) / 0.12)" }}>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <BarChart3 className="w-3 h-3" style={{ color: "hsl(var(--kf-accent2))" }} />
+            <span className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-accent2))" }}>Cash Flow Projection</span>
+          </div>
+          <p className="text-[11px] text-[hsl(var(--kf-foreground))] leading-relaxed">{outlook.cashFlowProjection}</p>
+        </div>
+      )}
       {outlook.keyMetrics?.length > 0 && (
         <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-muted) / 0.05)", border: "1px solid hsl(var(--kf-border) / 0.12)" }}>
           <span className="text-[10px] font-semibold text-[hsl(var(--kf-muted-foreground))] mb-2 block">Key Metrics to Track</span>
@@ -1325,15 +1688,29 @@ function RisksView({ risks }: { risks: Risk[] }) {
           <div className="flex items-start gap-2 mb-1.5">
             <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" style={{ color: `hsl(var(${impactColor(risk.impact)}))` }} />
             <div className="flex-1">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs font-medium text-[hsl(var(--kf-foreground))]">{risk.risk}</span>
-                <span className="text-[8px] font-bold px-1.5 py-0.5 rounded" style={{ background: `hsl(var(${impactColor(risk.impact)}) / 0.12)`, color: `hsl(var(${impactColor(risk.impact)}))` }}>{risk.impact}</span>
+                <span className="text-[8px] font-bold px-1.5 py-0.5 rounded" style={{ background: `hsl(var(${impactColor(risk.impact)}) / 0.12)`, color: `hsl(var(${impactColor(risk.impact)}))` }}>Impact: {risk.impact}</span>
+                {risk.likelihood && (
+                  <span className="text-[8px] font-bold px-1.5 py-0.5 rounded" style={{ background: `hsl(var(${impactColor(risk.likelihood)}) / 0.12)`, color: `hsl(var(${impactColor(risk.likelihood)}))` }}>Likelihood: {risk.likelihood}</span>
+                )}
+                {risk.category && (
+                  <span className="text-[8px] px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--kf-muted) / 0.1)", color: "hsl(var(--kf-muted-foreground))" }}>{risk.category}</span>
+                )}
               </div>
             </div>
           </div>
-          <div className="ml-5 flex items-start gap-1.5">
-            <Shield className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-success))" }} />
-            <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))]">{risk.mitigation}</p>
+          <div className="ml-5 space-y-1.5">
+            <div className="flex items-start gap-1.5">
+              <Shield className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-success))" }} />
+              <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))]"><span className="font-medium text-[hsl(var(--kf-foreground))]">Mitigation:</span> {risk.mitigation}</p>
+            </div>
+            {risk.contingency && (
+              <div className="flex items-start gap-1.5">
+                <Zap className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-warning))" }} />
+                <p className="text-[10px] text-[hsl(var(--kf-muted-foreground))]"><span className="font-medium text-[hsl(var(--kf-foreground))]">Contingency:</span> {risk.contingency}</p>
+              </div>
+            )}
           </div>
         </div>
       ))}

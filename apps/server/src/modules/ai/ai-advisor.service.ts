@@ -521,6 +521,11 @@ Use the business's actual data to make projections realistic. Currency should ma
       goals?: string;
       stage?: string;
       challenges?: string;
+      budget?: string;
+      timeline?: string;
+      teamSize?: string;
+      location?: string;
+      legalStructure?: string;
     },
   ) {
     const context = await this.getBusinessContext(businessId);
@@ -547,9 +552,21 @@ Use the business's actual data to make projections realistic. Currency should ma
       intake.goals ? `Goals: ${sanitize(intake.goals)}` : null,
       intake.stage ? `Current Stage: ${sanitize(intake.stage)}` : null,
       intake.challenges ? `Key Challenges: ${sanitize(intake.challenges)}` : null,
+      intake.budget ? `Available Budget: ${sanitize(intake.budget)}` : null,
+      intake.timeline ? `Launch Timeline: ${sanitize(intake.timeline)}` : null,
+      intake.teamSize ? `Team Size: ${sanitize(intake.teamSize)}` : null,
+      intake.location ? `Location: ${sanitize(intake.location)}` : null,
+      intake.legalStructure ? `Preferred Legal Structure: ${sanitize(intake.legalStructure)}` : null,
     ].filter(Boolean).join('\n');
 
-    const systemPrompt = `You are a Senior Business Strategist and startup advisor specializing in Caribbean and international markets. You create comprehensive, actionable business plans.
+    const systemPrompt = `You are a world-class Business Strategist, Legal Advisor, Financial Analyst, and Operations Consultant combined. You have deep expertise in Caribbean and international markets, startup methodology, corporate law, tax strategy, financial modeling, and go-to-market execution. You produce institutional-quality business plans that would satisfy investors, bank loan officers, legal counsel, and regulatory bodies.
+
+YOUR EXPERTISE AREAS:
+- Legal: Company formation (sole trader, partnership, LLC, limited company), BIR registration, VAT compliance, industry permits/licenses, employment law, data protection (T&T Data Protection Act 2011), intellectual property, contract law
+- Financial: Unit economics (CAC, LTV, ARPU), cash flow modeling, break-even analysis, working capital requirements, funding strategy, tax obligations (Corporation Tax 30%, Green Fund Levy 0.3%, Business Levy 0.6%), financial projections
+- Strategic: Porter's Five Forces, SWOT analysis, competitive positioning, Blue Ocean strategy, market sizing (TAM/SAM/SOM), customer journey mapping
+- Operations: Supply chain, vendor management, technology stack, process automation, quality assurance, scalability planning
+- Marketing: Go-to-market strategy, channel economics, brand positioning, customer acquisition funnel, retention strategy, digital marketing
 
 Existing Business Data:
 ${existingContext || 'New business — no existing data.'}
@@ -557,76 +574,110 @@ ${existingContext || 'New business — no existing data.'}
 User Input:
 ${intakeContext}
 
-Generate a comprehensive business model and execution plan. Return ONLY valid JSON with this exact structure:
+Generate a comprehensive, professional-grade business plan. Return ONLY valid JSON with this EXACT structure:
+
 {
-  "summary": "2-3 sentence executive summary of the business concept",
+  "summary": "3-4 sentence executive summary covering the concept, market opportunity, revenue potential, and competitive edge",
   "canvas": {
-    "valueProposition": "What unique value you deliver to customers",
-    "customerSegments": "Who your target customers are and their characteristics",
-    "channels": "How you reach and deliver to customers",
-    "customerRelationships": "How you acquire, retain, and grow customer base",
-    "revenueStreams": "How the business makes money — pricing, models, projections",
-    "keyResources": "Critical assets needed — people, tech, capital, IP",
-    "keyActivities": "Most important things the business must do",
-    "keyPartnerships": "Strategic partners, suppliers, and alliances needed",
-    "costStructure": "Major costs, fixed vs variable, and burn rate considerations"
+    "valueProposition": "Detailed unique value — include specific benefits, pain points solved, and why customers would switch from alternatives. Reference specific market gaps.",
+    "customerSegments": "Detailed segmentation with demographics, psychographics, buying behavior, estimated market size (TAM/SAM/SOM where possible), and primary vs secondary segments",
+    "channels": "Multi-channel strategy: acquisition channels, distribution channels, communication channels. Include cost-per-channel estimates and expected conversion rates",
+    "customerRelationships": "Lifecycle strategy: acquisition tactics, onboarding process, retention mechanisms, upsell/cross-sell strategy, churn prevention, community building",
+    "revenueStreams": "Detailed pricing architecture: primary revenue model, secondary streams, pricing tiers with specific price points in TTD, payment terms, projected revenue mix",
+    "keyResources": "Categorized: Human (roles, headcount, salary ranges), Intellectual (IP, brand, proprietary tech), Physical (equipment, workspace, inventory), Financial (capital requirements, credit lines)",
+    "keyActivities": "Core operations workflow, quality assurance processes, technology development, partnership management, compliance activities. Prioritized by impact.",
+    "keyPartnerships": "Strategic alliances, key suppliers (with alternatives), distribution partners, technology vendors, professional advisors (lawyer, accountant, insurance). Include why each matters.",
+    "costStructure": "Detailed: fixed costs (rent, salaries, insurance, subscriptions), variable costs (COGS, commissions, shipping), one-time costs (setup, equipment, legal). Break down monthly totals in TTD."
+  },
+  "legalCompliance": {
+    "businessStructure": "Recommended legal structure (Sole Trader / Partnership / LLC / Limited Company) with reasoning, formation steps, estimated registration costs in TTD, and timeline",
+    "registrations": ["List each required registration: BIR (Board of Inland Revenue), NIB (National Insurance Board), VAT registration (if revenue > 500,000 TTD), TTSEC (if applicable), industry-specific licenses"],
+    "taxObligations": "Corporation Tax (30%), Business Levy (0.6%), Green Fund Levy (0.3%), PAYE obligations, VAT (12.5% if applicable), Health Surcharge. Include filing deadlines and estimated annual tax liability.",
+    "contracts": ["List essential contracts: Service Agreement, Terms of Service, Privacy Policy, Employment Contracts, NDA, Contractor Agreements, Supplier Agreements — explain why each is needed"],
+    "insuranceNeeds": ["Required and recommended insurance: Public Liability, Professional Indemnity, Workers Compensation, Property Insurance, Cyber Liability — with estimated annual premiums in TTD"],
+    "complianceChecklist": ["Ordered checklist of every legal/regulatory step from Day 1 to full compliance. Be specific to T&T and the industry."]
+  },
+  "competitiveAnalysis": {
+    "swot": {
+      "strengths": ["3-5 genuine strengths based on the business concept — be specific, not generic"],
+      "weaknesses": ["3-5 honest weaknesses and limitations — include resource gaps, experience gaps, market barriers"],
+      "opportunities": ["3-5 market opportunities — include timing advantages, underserved segments, regulatory changes, tech trends"],
+      "threats": ["3-5 real threats — competitive response, regulatory risk, economic conditions, supply chain risks"]
+    },
+    "competitorLandscape": "Analysis of the competitive environment: who the main competitors are (direct and indirect), their strengths/weaknesses, market share estimates, pricing comparison, and your positioning strategy",
+    "differentiators": ["3-5 specific competitive advantages that are defensible and sustainable"],
+    "marketEntry": "Go-to-market strategy: launch approach, initial target segment, beachhead market, expansion plan, estimated time to first revenue"
+  },
+  "unitEconomics": {
+    "customerAcquisitionCost": "Estimated CAC with breakdown by channel (social media, referrals, advertising, partnerships) in TTD",
+    "lifetimeValue": "Estimated LTV based on average order value, purchase frequency, and retention rate in TTD",
+    "ltvCacRatio": "Target LTV:CAC ratio with analysis — healthy is 3:1+",
+    "averageRevenue": "ARPU (Average Revenue Per User) monthly and annually in TTD",
+    "grossMargin": "Expected gross margin percentage with COGS breakdown",
+    "contributionMargin": "Revenue minus variable costs per unit/transaction in TTD",
+    "paybackPeriod": "Months to recover CAC from a single customer",
+    "breakEvenUnits": "Number of customers/transactions needed monthly to break even"
   },
   "roadmap": [
     {
-      "phase": "Phase name",
+      "phase": "Phase name (e.g. Foundation & Legal Setup)",
       "timeline": "e.g. Month 1-3",
-      "objectives": ["Objective 1", "Objective 2"],
-      "milestones": ["Milestone 1", "Milestone 2"],
-      "estimatedCost": "Budget range in TTD"
+      "objectives": ["Specific, measurable objectives"],
+      "milestones": ["Concrete deliverables with success criteria"],
+      "estimatedCost": "Budget range in TTD with breakdown"
     }
   ],
   "actionPlan": [
     {
       "priority": "HIGH|MEDIUM|LOW",
-      "action": "Specific action to take",
-      "category": "SETUP|MARKETING|FINANCE|OPERATIONS|LEGAL",
+      "action": "Specific, actionable task — not vague advice",
+      "category": "LEGAL|FINANCE|SETUP|MARKETING|OPERATIONS|TECHNOLOGY|HR",
       "timeframe": "This week|This month|This quarter",
-      "details": "Brief explanation of how to execute"
+      "details": "Step-by-step execution instructions including who, what, where, estimated cost, and expected outcome",
+      "module": "projects|bookings|commerce|marketing|expenses|contacts|store|documents|reports"
     }
   ],
   "financialOutlook": {
-    "startupCosts": "Estimated total startup investment in TTD",
-    "monthlyBurn": "Estimated monthly operating costs in TTD",
-    "breakEvenTimeline": "When the business should break even",
-    "yearOneRevenue": "Projected first-year revenue in TTD",
-    "keyMetrics": ["Metric 1 to track", "Metric 2 to track"]
+    "startupCosts": "Itemized startup investment in TTD (registration, equipment, inventory, marketing, working capital, legal fees, insurance)",
+    "monthlyBurn": "Detailed monthly operating costs in TTD (rent, salaries, utilities, marketing, subscriptions, supplies, insurance, loan payments)",
+    "breakEvenTimeline": "Month-by-month projection to breakeven with assumptions stated",
+    "yearOneRevenue": "Conservative, moderate, and optimistic revenue scenarios for Year 1 in TTD with underlying assumptions",
+    "keyMetrics": ["Specific KPIs with target values: Monthly Revenue, Customer Count, CAC, LTV, Churn Rate, Gross Margin %, Cash Runway"],
+    "fundingStrategy": "Recommended funding approach: bootstrapping, bank loan (with T&T bank options), grants (NEDCO, IDB, Youth Business TT), angel investment, or hybrid. Include estimated amounts needed.",
+    "cashFlowProjection": "Quarter-by-quarter cash flow summary for Year 1 showing inflows, outflows, and closing balance in TTD"
   },
   "risks": [
     {
-      "risk": "Description of the risk",
+      "risk": "Specific risk description",
       "impact": "HIGH|MEDIUM|LOW",
-      "mitigation": "How to mitigate this risk"
+      "likelihood": "HIGH|MEDIUM|LOW",
+      "category": "FINANCIAL|LEGAL|MARKET|OPERATIONAL|TECHNOLOGY|REGULATORY",
+      "mitigation": "Detailed mitigation strategy with specific actions, contingency plans, and early warning indicators",
+      "contingency": "What to do if this risk materializes despite mitigation"
     }
   ],
   "recommendedDocuments": ["document-slug-1", "document-slug-2"]
 }
 
-Guidelines:
-- Use TTD currency for all financial figures
-- Be specific and actionable — no generic advice
-- Tailor to Caribbean market realities (import costs, island logistics, local regulations)
-- Include 4-6 roadmap phases covering first 18 months
-- Include 8-12 action items across categories
-- Include 4-6 risks with mitigations
-- Recommend 5-8 business documents from these available slugs ONLY: company-description, registration-record, owner-register, license-register, invoice-template, tax-calendar, chart-of-accounts, financial-statement, budget-template, receipt-template, expense-report, proposal-template, service-agreement, payment-terms, pricing-sheet, client-onboarding, refund-policy, company-tagline, founder-bio, company-profile, elevator-pitch, mission-vision, tone-guide, sales-one-pager, faq-document, sop, approval-matrix, business-continuity, meeting-agenda, project-handoff, communication-plan, offer-letter, employee-handbook, nda-employee, job-description, contractor-agreement, contractor-sow, contractor-ip, privacy-policy, data-handling, cookie-policy, website-terms, ecommerce-terms
-- Each action item should have a "module" field indicating which KEYFLOWOS module can execute it: "projects", "bookings", "commerce", "marketing", "expenses", "contacts", "store", "documents", "reports"
+QUALITY STANDARDS — Your output must meet these criteria:
+1. LEGAL DEFENSIBILITY: Every legal recommendation must reference actual T&T legislation, regulatory bodies, or established legal principles. Cite the Companies Act, the VAT Act, the Income Tax Act, OSHA requirements, and industry-specific regulations where applicable.
+2. FINANCIAL RIGOR: All financial figures must be realistic for the T&T/Caribbean market. Use actual market rates for rent, salaries, utilities, and insurance. Show your work — explain assumptions behind projections.
+3. COMPETITIVE INTELLIGENCE: Analyze real competitive dynamics, not theoretical ones. Consider local market leaders, regional competitors, and international players entering the market.
+4. ACTIONABILITY: Every recommendation must be something the user can execute within the given timeframe. Include specific next steps, not generic advice like "do market research."
+5. INDUSTRY SPECIFICITY: Tailor every section to the specific industry. A restaurant plan should discuss food safety certificates and health inspections. A tech startup should discuss IP protection and data handling. A consulting firm should discuss professional liability and client contracts.
 
-Enhance the actionPlan items to include a "module" field:
-"actionPlan": [
-  {
-    "priority": "HIGH|MEDIUM|LOW",
-    "action": "Specific action to take",
-    "category": "SETUP|MARKETING|FINANCE|OPERATIONS|LEGAL",
-    "timeframe": "This week|This month|This quarter",
-    "details": "Brief explanation of how to execute",
-    "module": "projects|bookings|commerce|marketing|expenses|contacts|store|documents|reports"
-  }
-]`;
+VOLUME REQUIREMENTS:
+- 4-6 roadmap phases covering first 18 months
+- 10-15 action items across all categories (LEGAL, FINANCE, SETUP, MARKETING, OPERATIONS, TECHNOLOGY, HR)
+- 6-8 risks with mitigations across all categories
+- 3-5 items in each SWOT quadrant
+- 4-6 legal registrations
+- 3-5 essential contracts
+- 3-5 insurance recommendations
+- 3-5 competitive differentiators
+- Recommend 5-8 business documents from these available slugs ONLY: company-description, registration-record, owner-register, license-register, invoice-template, tax-calendar, chart-of-accounts, financial-statement, budget-template, receipt-template, expense-report, proposal-template, service-agreement, payment-terms, pricing-sheet, client-onboarding, refund-policy, company-tagline, founder-bio, company-profile, elevator-pitch, mission-vision, tone-guide, sales-one-pager, faq-document, sop, approval-matrix, business-continuity, meeting-agenda, project-handoff, communication-plan, offer-letter, employee-handbook, nda-employee, job-description, contractor-agreement, contractor-sow, contractor-ip, privacy-policy, data-handling, cookie-policy, website-terms, ecommerce-terms
+
+ALL financial figures in TTD. Be specific, be thorough, be actionable. This plan should be good enough to present to a bank or investor.`;
 
     try {
       const result = await this.aiUsage.callAi({
@@ -634,9 +685,9 @@ Enhance the actionPlan items to include a "module" field:
         feature: 'chat',
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Generate a complete business model and execution plan for: ${intake.businessIdea}` },
+          { role: 'user', content: `Generate a complete, professional-grade business plan for: ${intake.businessIdea}` },
         ],
-        maxTokens: 4000,
+        maxTokens: 8000,
         temperature: 0.7,
       });
 
@@ -657,28 +708,65 @@ Enhance the actionPlan items to include a "module" field:
         return { success: false, error: 'AI generated an incomplete business model. Please try again.' };
       }
 
+      const safeStr = (v: unknown, fallback = '') => typeof v === 'string' ? v : fallback;
+      const safeArr = (v: unknown) => Array.isArray(v) ? v : [];
+      const safeObj = (v: unknown) => v && typeof v === 'object' ? v as Record<string, unknown> : {};
+
+      const fin = safeObj(parsed.financialOutlook);
+      const legal = safeObj(parsed.legalCompliance);
+      const comp = safeObj(parsed.competitiveAnalysis);
+      const swotRaw = safeObj((comp as Record<string, unknown>).swot);
+      const unit = safeObj(parsed.unitEconomics);
+
       const validated = {
-        summary: typeof parsed.summary === 'string' ? parsed.summary : '',
+        summary: safeStr(parsed.summary),
         canvas: parsed.canvas && typeof parsed.canvas === 'object' ? parsed.canvas : {
           valueProposition: '', customerSegments: '', channels: '',
           customerRelationships: '', revenueStreams: '', keyResources: '',
           keyActivities: '', keyPartnerships: '', costStructure: '',
         },
-        roadmap: Array.isArray(parsed.roadmap) ? parsed.roadmap : [],
-        actionPlan: Array.isArray(parsed.actionPlan) ? parsed.actionPlan : [],
-        financialOutlook: parsed.financialOutlook && typeof parsed.financialOutlook === 'object' ? {
-          startupCosts: (parsed.financialOutlook as any).startupCosts ?? 'Not estimated',
-          monthlyBurn: (parsed.financialOutlook as any).monthlyBurn ?? 'Not estimated',
-          breakEvenTimeline: (parsed.financialOutlook as any).breakEvenTimeline ?? 'Not estimated',
-          yearOneRevenue: (parsed.financialOutlook as any).yearOneRevenue ?? 'Not estimated',
-          keyMetrics: Array.isArray((parsed.financialOutlook as any).keyMetrics) ? (parsed.financialOutlook as any).keyMetrics : [],
-        } : {
-          startupCosts: 'Not estimated', monthlyBurn: 'Not estimated',
-          breakEvenTimeline: 'Not estimated', yearOneRevenue: 'Not estimated',
-          keyMetrics: [],
+        legalCompliance: {
+          businessStructure: safeStr(legal.businessStructure, 'Consult a local attorney for structure recommendation'),
+          registrations: safeArr(legal.registrations),
+          taxObligations: safeStr(legal.taxObligations, 'Consult BIR for specific tax obligations'),
+          contracts: safeArr(legal.contracts),
+          insuranceNeeds: safeArr(legal.insuranceNeeds),
+          complianceChecklist: safeArr(legal.complianceChecklist),
         },
-        risks: Array.isArray(parsed.risks) ? parsed.risks : [],
-        recommendedDocuments: Array.isArray(parsed.recommendedDocuments) ? parsed.recommendedDocuments : [],
+        competitiveAnalysis: {
+          swot: {
+            strengths: safeArr(swotRaw.strengths),
+            weaknesses: safeArr(swotRaw.weaknesses),
+            opportunities: safeArr(swotRaw.opportunities),
+            threats: safeArr(swotRaw.threats),
+          },
+          competitorLandscape: safeStr(comp.competitorLandscape),
+          differentiators: safeArr(comp.differentiators),
+          marketEntry: safeStr(comp.marketEntry),
+        },
+        unitEconomics: {
+          customerAcquisitionCost: safeStr(unit.customerAcquisitionCost, 'Not estimated'),
+          lifetimeValue: safeStr(unit.lifetimeValue, 'Not estimated'),
+          ltvCacRatio: safeStr(unit.ltvCacRatio, 'Not estimated'),
+          averageRevenue: safeStr(unit.averageRevenue, 'Not estimated'),
+          grossMargin: safeStr(unit.grossMargin, 'Not estimated'),
+          contributionMargin: safeStr(unit.contributionMargin, 'Not estimated'),
+          paybackPeriod: safeStr(unit.paybackPeriod, 'Not estimated'),
+          breakEvenUnits: safeStr(unit.breakEvenUnits, 'Not estimated'),
+        },
+        roadmap: safeArr(parsed.roadmap),
+        actionPlan: safeArr(parsed.actionPlan),
+        financialOutlook: {
+          startupCosts: safeStr(fin.startupCosts, 'Not estimated'),
+          monthlyBurn: safeStr(fin.monthlyBurn, 'Not estimated'),
+          breakEvenTimeline: safeStr(fin.breakEvenTimeline, 'Not estimated'),
+          yearOneRevenue: safeStr(fin.yearOneRevenue, 'Not estimated'),
+          keyMetrics: safeArr(fin.keyMetrics),
+          fundingStrategy: safeStr(fin.fundingStrategy),
+          cashFlowProjection: safeStr(fin.cashFlowProjection),
+        },
+        risks: safeArr(parsed.risks),
+        recommendedDocuments: safeArr(parsed.recommendedDocuments),
       };
 
       return { success: true, model: validated, usage: result.usage };
