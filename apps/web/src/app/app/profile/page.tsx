@@ -14,7 +14,6 @@ import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 import GuidanceCard from "./components/guidance-card";
 import BusinessGuidanceWizard from "./components/guidance-wizard";
 import GuidanceDashboard from "./components/guidance-dashboard";
-import { getGuidanceStatus } from "./components/guidance-storage";
 import PersonalInfoSection from "./components/personal-info-section";
 import MyBusinessSection from "./components/my-business-section";
 import ProfessionalProfileSection from "./components/professional-profile-section";
@@ -336,24 +335,28 @@ export default function ProfileSettingsPage() {
   useEffect(() => {
     const bid = getStoredBusinessId();
     if (bid) setBusinessId(bid);
-    const localStatus = getGuidanceStatus();
-    setGuidanceStatusState(localStatus);
     if (bid) {
       apiGet<{ status: string; latestAssessment: unknown }>(`/business-guidance/${bid}/dashboard`)
         .then(({ data }) => {
           if (data?.latestAssessment) {
             setHasBackendAssessment(true);
             setGuidanceStatusState("complete");
-          } else if (data?.status === "IN_PROGRESS" || data?.status === "DRAFT") {
+          } else if (data?.status === "IN_PROGRESS" || data?.status === "DRAFT" || data?.status === "SUBMITTED") {
             setGuidanceStatusState("in_progress");
+          } else {
+            setGuidanceStatusState("not_started");
           }
         })
-        .catch(() => {});
+        .catch(() => {
+          setGuidanceStatusState("not_started");
+        });
       apiGet<unknown[]>(`/documents/businesses/${bid}/instances`)
         .then(({ data }) => {
           if (data) setDocCount(data.length);
         })
         .catch(() => {});
+    } else {
+      setGuidanceStatusState("not_started");
     }
   }, []);
 
@@ -386,13 +389,24 @@ export default function ProfileSettingsPage() {
       <BusinessGuidanceWizard
         onClose={() => {
           setShowGuidanceWizard(false);
-          const s = getGuidanceStatus();
-          setGuidanceStatusState(s);
-          if (s === "complete") handleTabChange("guidance");
+          if (businessId) {
+            apiGet<{ status: string; latestAssessment: unknown }>(`/business-guidance/${businessId}/dashboard`)
+              .then(({ data }) => {
+                if (data?.latestAssessment) {
+                  setHasBackendAssessment(true);
+                  setGuidanceStatusState("complete");
+                  handleTabChange("guidance");
+                } else if (data?.status === "IN_PROGRESS" || data?.status === "DRAFT" || data?.status === "SUBMITTED") {
+                  setGuidanceStatusState("in_progress");
+                }
+              })
+              .catch(() => {});
+          }
         }}
         onComplete={() => {
           setShowGuidanceWizard(false);
           setGuidanceStatusState("complete");
+          setHasBackendAssessment(true);
           handleTabChange("guidance");
           if (businessId) {
             apiGet<{ status: string; latestAssessment: unknown }>(`/business-guidance/${businessId}/dashboard`)
@@ -524,7 +538,7 @@ export default function ProfileSettingsPage() {
                 onGoToDocuments={() => handleTabChange("documents")}
               />
             ) : (
-              <GuidanceCard onLaunchWizard={() => setShowGuidanceWizard(true)} />
+              <GuidanceCard onLaunchWizard={() => setShowGuidanceWizard(true)} status={guidanceStatus} />
             )}
           </motion.div>
         )}

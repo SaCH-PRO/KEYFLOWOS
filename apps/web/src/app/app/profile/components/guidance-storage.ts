@@ -2,9 +2,6 @@ import { GuidanceProfile, DEFAULT_GUIDANCE_PROFILE } from "./guidance-types";
 
 const STORAGE_KEY = "kf_guidance_draft";
 const STEP_KEY = "kf_guidance_step";
-const STATUS_KEY = "kf_guidance_status";
-
-export type GuidanceStatus = "not_started" | "in_progress" | "complete";
 
 export function saveGuidanceDraft(profile: GuidanceProfile): void {
   if (typeof window === "undefined") return;
@@ -25,9 +22,6 @@ export function loadGuidanceDraft(): GuidanceProfile {
 export function saveGuidanceStep(step: number): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(STEP_KEY, String(step));
-  if (step > 0 && getGuidanceStatus() === "not_started") {
-    setGuidanceStatus("in_progress");
-  }
 }
 
 export function loadGuidanceStep(): number {
@@ -36,16 +30,6 @@ export function loadGuidanceStep(): number {
   const parsed = stored ? parseInt(stored, 10) : 0;
   if (isNaN(parsed) || parsed < 0 || parsed > 12) return 0;
   return parsed;
-}
-
-export function getGuidanceStatus(): GuidanceStatus {
-  if (typeof window === "undefined") return "not_started";
-  return (localStorage.getItem(STATUS_KEY) as GuidanceStatus) || "not_started";
-}
-
-export function setGuidanceStatus(status: GuidanceStatus): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(STATUS_KEY, status);
 }
 
 export function getGuidanceCompletionPercentage(profile: GuidanceProfile): number {
@@ -101,5 +85,4 @@ export function clearGuidanceDraft(): void {
   if (typeof window === "undefined") return;
   localStorage.removeItem(STORAGE_KEY);
   localStorage.removeItem(STEP_KEY);
-  localStorage.removeItem(STATUS_KEY);
 }

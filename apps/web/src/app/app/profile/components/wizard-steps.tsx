@@ -1103,11 +1103,13 @@ export function ReviewStep({
   onNavigateToStep,
   onSubmit,
   submitting,
+  submitError,
 }: {
   profile: GuidanceProfile;
   onNavigateToStep: (step: number) => void;
   onSubmit: () => void;
   submitting: boolean;
+  submitError?: string | null;
 }) {
   const completionMap = getStepCompletionMap(profile);
 
@@ -1229,7 +1231,12 @@ export function ReviewStep({
         })}
       </div>
 
-      <div className="pt-4 border-t border-border/30">
+      <div className="pt-4 border-t border-border/30 space-y-3">
+        {submitError && (
+          <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20">
+            <p className="text-xs text-red-400">{submitError}</p>
+          </div>
+        )}
         <Button
           onClick={onSubmit}
           disabled={submitting}
@@ -1239,7 +1246,7 @@ export function ReviewStep({
             {submitting ? (
               <>
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Generating Analysis...
+                Submitting to Analysis Engine...
               </>
             ) : (
               <>
