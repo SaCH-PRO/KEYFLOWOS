@@ -20,6 +20,8 @@ import ComplianceSection from "./components/compliance-section";
 import BrandIdentityTab from "./components/brand-identity-tab";
 import { JourneyIndicator, type CompletenessItem } from "./components/journey-indicator";
 import { BusinessContextCard } from "./components/business-context-card";
+import { ContextDepthCard } from "./components/context-depth-card";
+import { ProgressivePrompts } from "./components/progressive-prompts";
 import { SkeletonProfile } from "./components/skeleton-profile";
 import { ProfileSectionErrorBoundary } from "./components/profile-section-error-boundary";
 
@@ -369,6 +371,18 @@ export default function ProfileSettingsPage() {
 
             <motion.div variants={fadeUp}>
               <BusinessContextCard businessData={businessData} />
+            </motion.div>
+
+            <motion.div variants={fadeUp}>
+              <ProfileSectionErrorBoundary sectionName="Business Intelligence">
+                <ContextDepthCard />
+              </ProfileSectionErrorBoundary>
+            </motion.div>
+
+            <motion.div variants={fadeUp}>
+              <ProfileSectionErrorBoundary sectionName="Smart Suggestions">
+                <ProgressivePrompts />
+              </ProfileSectionErrorBoundary>
             </motion.div>
 
             <motion.div variants={fadeUp}>

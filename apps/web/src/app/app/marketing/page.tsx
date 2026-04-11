@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/page-header";
+import { ProgressivePrompts } from "../profile/components/progressive-prompts";
 import { TabNav } from "@/components/ui/tab-nav";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
@@ -307,6 +308,8 @@ export default function MarketingPage() {
           </motion.div>
         </AnimatePresence>
       </div>
+
+      <ProgressivePrompts moduleFilter={["marketingStrategy", "growth"]} />
 
       <ModuleWalkthrough moduleKey="marketing" steps={MARKETING_WALKTHROUGH} />
     </div>

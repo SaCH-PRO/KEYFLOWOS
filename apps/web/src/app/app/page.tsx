@@ -22,6 +22,7 @@ import { ProgressDrawer } from "./_command/progress-section";
 import { ShareLinkModal } from "@/components/ui/share-link-modal";
 import { NextBestActionWidget } from "@/components/ai/next-best-action-widget";
 import { CashFlowWidget } from "./_command/cash-flow-widget";
+import { ProgressivePrompts } from "./profile/components/progressive-prompts";
 import { getBusinessById, fetchServices } from "@/lib/client";
 
 export default function CommandPage() {
@@ -184,6 +185,7 @@ export default function CommandPage() {
       </div>
 
       <div className="order-3 space-y-4" data-walkthrough="today-actions">
+        <ProgressivePrompts />
         <NextBestActionWidget businessId={d.businessId} />
         <BriefingCard
           businessId={d.businessId}

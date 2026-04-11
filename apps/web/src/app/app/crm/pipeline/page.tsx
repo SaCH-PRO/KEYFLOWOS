@@ -13,6 +13,7 @@ import {
 import { KanbanSkeleton } from "@/components/ui/skeleton";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { ProgressivePrompts } from "../../profile/components/progressive-prompts";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { FeatureGuide } from "@/components/ui/feature-guide";
@@ -244,6 +245,8 @@ export default function ContactsPage() {
         onConfirm={handleConfirmAction}
         onCancel={handleCancelConfirm}
       />
+
+      <ProgressivePrompts moduleFilter={["customer", "sales", "partnerships"]} />
 
       <ModuleWalkthrough moduleKey="crm" steps={CRM_WALKTHROUGH} />
     </div>
