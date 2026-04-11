@@ -14,7 +14,7 @@ import {
   Eye, Layers, Award, ClipboardList, Activity,
   BookOpen, Scale, Crosshair, Gauge,
 } from "lucide-react";
-import { apiGet, apiPost, apiPostSimple, apiPut } from "@/lib/api";
+import { apiGet, apiPatch, apiPost, apiPostSimple, apiPut } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 
 type ProgressKey =
@@ -203,6 +203,12 @@ interface IntakeForm {
   assets: string;
   competitiveContext: string;
   interactionMode: string;
+  salesApproach: string;
+  marketingStrategy: string;
+  peopleStrategy: string;
+  technologyStack: string;
+  partnerships: string;
+  intellectualProperty: string;
 }
 
 interface ServerPlan {
@@ -287,6 +293,12 @@ const INTAKE_STEPS = [
   { id: "competitive", label: "Competitive Landscape", icon: Activity, field: "competitiveContext" as const, placeholder: "Who are your main competitors? How are they positioned? What do they do well or poorly?", hint: "Name specific competitors if possible. Include direct competitors (same service) and indirect competitors (alternative solutions)" },
   { id: "goals", label: "Goals & Vision", icon: Flag, field: "goals" as const, placeholder: "What are your 6-month and 12-month goals? Where do you see this business in 3 years?", hint: "Include revenue targets, customer milestones, hiring plans, or expansion goals" },
   { id: "challenges", label: "Challenges & Risks", icon: AlertTriangle, field: "challenges" as const, placeholder: "What obstacles or concerns do you foresee? What keeps you up at night about this venture?", hint: "Common Caribbean challenges: import costs, forex limitations, finding skilled staff, seasonal fluctuations, competition" },
+  { id: "salesApproach", label: "Sales Strategy", icon: Target, field: "salesApproach" as const, placeholder: "How will you sell? Describe your sales process, channels, and how you'll follow up with leads.", hint: "E.g. 'Direct outreach via Instagram DMs and WhatsApp, in-person consultations, referral-based growth. Average deal closes in 2 weeks.'" },
+  { id: "marketingStrategy", label: "Marketing & Content", icon: Megaphone, field: "marketingStrategy" as const, placeholder: "What's your brand voice? What content will you create? Which platforms will you focus on?", hint: "Think about: brand personality, content pillars (topics you'll cover), posting frequency, and your overall messaging framework." },
+  { id: "peopleStrategy", label: "People & Culture", icon: Users, field: "peopleStrategy" as const, placeholder: "What culture do you want to build? What key roles do you need to hire? How will you find and retain talent?", hint: "Consider: company values, hiring approach, compensation philosophy, remote/in-office policy, and training plans." },
+  { id: "technologyStack", label: "Technology & Digital", icon: Settings, field: "technologyStack" as const, placeholder: "What tools and technology do you use or plan to use? How digitally mature is your business?", hint: "E.g. 'Using Shopify for e-commerce, QuickBooks for accounting, Instagram for marketing. Planning to add email automation.'" },
+  { id: "partnerships", label: "Partnerships & Ecosystem", icon: Users, field: "partnerships" as const, placeholder: "Who are your key suppliers, partners, or collaborators? Any strategic alliances or industry associations?", hint: "Think about: supply chain, distribution partners, referral networks, industry groups, and community involvement." },
+  { id: "intellectualProperty", label: "Intellectual Property", icon: Shield, field: "intellectualProperty" as const, placeholder: "Do you have trademarks, patents, proprietary processes, or unique brand assets to protect?", hint: "Consider: business name/logo trademarks, unique recipes/formulas, proprietary software, domain names, and trade secrets." },
 ];
 
 const STAGE_OPTIONS = [
@@ -586,6 +598,8 @@ const INITIAL_INTAKE: IntakeForm = {
   budget: "", timeline: "", teamSize: "", location: "",
   legalStructure: "", industry: "", problemSolved: "",
   assets: "", competitiveContext: "", interactionMode: "founder",
+  salesApproach: "", marketingStrategy: "", peopleStrategy: "",
+  technologyStack: "", partnerships: "", intellectualProperty: "",
 };
 
 export default function BusinessBuilderCard() {
@@ -673,6 +687,40 @@ export default function BusinessBuilderCard() {
       });
   }, [businessId, formPreFilled, serverLoaded]);
 
+  const persistIntakeToGuidanceProfiles = useCallback(async (form: IntakeForm) => {
+    if (!businessId) return;
+    const profilePayloads: { name: string; data: Record<string, unknown> }[] = [];
+
+    if (form.salesApproach.trim()) {
+      profilePayloads.push({ name: 'sales', data: { salesProcess: form.salesApproach } });
+    }
+    if (form.marketingStrategy.trim()) {
+      profilePayloads.push({ name: 'marketingStrategy', data: { brandVoice: form.marketingStrategy } });
+    }
+    if (form.peopleStrategy.trim()) {
+      profilePayloads.push({ name: 'people', data: { companyCulture: form.peopleStrategy } });
+    }
+    if (form.technologyStack.trim()) {
+      profilePayloads.push({ name: 'technology', data: { digitalMaturity: form.technologyStack } });
+    }
+    if (form.partnerships.trim()) {
+      profilePayloads.push({ name: 'partnerships', data: { vendorRelationships: form.partnerships } });
+    }
+    if (form.intellectualProperty.trim()) {
+      profilePayloads.push({ name: 'intellectualProperty', data: { ipProtectionStrategy: form.intellectualProperty } });
+    }
+
+    const results = await Promise.allSettled(
+      profilePayloads.map(({ name, data }) =>
+        apiPatch(`/identity/businesses/${businessId}/guidance/${name}`, data)
+      )
+    );
+    const failures = results.filter(r => r.status === 'rejected');
+    if (failures.length > 0) {
+      console.warn(`Failed to persist ${failures.length} guidance profile(s)`);
+    }
+  }, [businessId]);
+
   const handleGenerate = async () => {
     if (!businessId || !intakeForm.businessIdea.trim()) return;
     setGenerating(true);
@@ -693,6 +741,9 @@ export default function BusinessBuilderCard() {
           .catch((err) => {
             console.error("Failed to fetch generated plan id:", err);
           });
+        persistIntakeToGuidanceProfiles(intakeForm).catch((err) => {
+          console.error("Failed to persist intake to guidance profiles:", err);
+        });
       } else {
         setError(res.data?.error || res.error || "Failed to generate. Please try again.");
       }

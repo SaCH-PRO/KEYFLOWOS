@@ -1,6 +1,6 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { computeProfileCompleteness } from './profile-completeness.constants';
+import { computeProfileCompleteness, computeTieredCompleteness, COMPLETENESS_TIERS, PROGRESSIVE_DEEPENING_PROMPTS } from './profile-completeness.constants';
 
 @Injectable()
 export class IdentityService {
@@ -442,6 +442,247 @@ export class IdentityService {
     });
 
     return { user, business };
+  }
+
+  async getTieredCompleteness(businessId: string) {
+    const [business, guidanceProfile] = await Promise.all([
+      this.prisma.client.business.findUnique({ where: { id: businessId } }),
+      this.prisma.client.businessGuidanceProfile.findUnique({
+        where: { businessId },
+        include: {
+          identity: true,
+          founder: true,
+          offer: true,
+          customer: true,
+          revenue: true,
+          finance: true,
+          operations: true,
+          compliance: true,
+          growth: true,
+          goals: true,
+          sales: true,
+          marketingStrategy: true,
+          people: true,
+          technology: true,
+          partnerships: true,
+          intellectualProperty: true,
+        },
+      }).catch(() => null),
+    ]);
+
+    if (!business) throw new NotFoundException('Business not found');
+
+    const subProfiles: Record<string, unknown> = {};
+    if (guidanceProfile) {
+      subProfiles.identity = guidanceProfile.identity;
+      subProfiles.founder = guidanceProfile.founder;
+      subProfiles.offer = guidanceProfile.offer;
+      subProfiles.customer = guidanceProfile.customer;
+      subProfiles.revenue = guidanceProfile.revenue;
+      subProfiles.finance = guidanceProfile.finance;
+      subProfiles.operations = guidanceProfile.operations;
+      subProfiles.compliance = guidanceProfile.compliance;
+      subProfiles.growth = guidanceProfile.growth;
+      subProfiles.goals = guidanceProfile.goals;
+      subProfiles.sales = guidanceProfile.sales;
+      subProfiles.marketingStrategy = guidanceProfile.marketingStrategy;
+      subProfiles.people = guidanceProfile.people;
+      subProfiles.technology = guidanceProfile.technology;
+      subProfiles.partnerships = guidanceProfile.partnerships;
+      subProfiles.intellectualProperty = guidanceProfile.intellectualProperty;
+    }
+
+    return computeTieredCompleteness(
+      {
+        name: business.name,
+        logoUrl: business.logoUrl,
+        headline: business.headline,
+        bio: business.bio,
+        industry: business.industry,
+        skills: business.skills as string[] | null,
+        businessStage: business.businessStage,
+        city: business.city,
+        country: business.country,
+        interests: business.interests as string[] | null,
+        tagline: business.tagline,
+        description: business.description,
+      },
+      subProfiles as Record<string, Record<string, unknown> | null | undefined>,
+    );
+  }
+
+  async getProgressivePrompts(businessId: string) {
+    const guidanceProfile = await this.prisma.client.businessGuidanceProfile.findUnique({
+      where: { businessId },
+      include: {
+        identity: true,
+        founder: true,
+        offer: true,
+        customer: true,
+        revenue: true,
+        finance: true,
+        operations: true,
+        compliance: true,
+        growth: true,
+        goals: true,
+        sales: true,
+        marketingStrategy: true,
+        people: true,
+        technology: true,
+        partnerships: true,
+        intellectualProperty: true,
+      },
+    }).catch(() => null);
+
+    const completedProfiles = new Set<string>();
+    if (guidanceProfile) {
+      const profileMap: Record<string, unknown> = {
+        identity: guidanceProfile.identity,
+        founder: guidanceProfile.founder,
+        offer: guidanceProfile.offer,
+        customer: guidanceProfile.customer,
+        revenue: guidanceProfile.revenue,
+        finance: guidanceProfile.finance,
+        operations: guidanceProfile.operations,
+        compliance: guidanceProfile.compliance,
+        growth: guidanceProfile.growth,
+        goals: guidanceProfile.goals,
+        sales: guidanceProfile.sales,
+        marketingStrategy: guidanceProfile.marketingStrategy,
+        people: guidanceProfile.people,
+        technology: guidanceProfile.technology,
+        partnerships: guidanceProfile.partnerships,
+        intellectualProperty: guidanceProfile.intellectualProperty,
+      };
+
+      for (const [key, value] of Object.entries(profileMap)) {
+        if (value && typeof value === 'object') {
+          const record = value as Record<string, unknown>;
+          const skip = new Set(['id', 'guidanceProfileId', 'createdAt', 'updatedAt', 'notes']);
+          const fields = Object.entries(record).filter(([k]) => !skip.has(k));
+          const filled = fields.filter(([, v]) => {
+            if (v == null || v === '' || v === false) return false;
+            if (Array.isArray(v) && v.length === 0) return false;
+            return true;
+          });
+          if (filled.length >= 2) completedProfiles.add(key);
+        }
+      }
+    }
+
+    const [invoiceCount, contactCount, bookingCount, docCount, expenseCount, memberCount, storeEnabled, campaignCount] = await Promise.all([
+      this.prisma.client.invoice.count({ where: { businessId, deletedAt: null }, take: 1 }).catch(() => 0),
+      this.prisma.client.contact.count({ where: { businessId, deletedAt: null }, take: 1 }).catch(() => 0),
+      this.prisma.client.booking.count({ where: { businessId, deletedAt: null }, take: 1 }).catch(() => 0),
+      this.prisma.client.documentInstance.count({ where: { businessId } }).catch(() => 0),
+      this.prisma.client.expense.count({ where: { businessId, deletedAt: null }, take: 1 }).catch(() => 0),
+      this.prisma.client.membership.count({ where: { businessId } }).catch(() => 0),
+      this.prisma.client.business.findUnique({ where: { id: businessId }, select: { storeEnabled: true } }).then(b => b?.storeEnabled || false).catch(() => false),
+      this.prisma.client.campaignBriefing.count({ where: { businessId } }).catch(() => 0),
+    ]);
+
+    const activeTriggers = new Set<string>();
+    if (invoiceCount > 0) activeTriggers.add('first_invoice');
+    if (contactCount > 0) activeTriggers.add('first_contact');
+    if (bookingCount > 0) activeTriggers.add('first_booking');
+    if (docCount > 0) activeTriggers.add('first_document');
+    if (expenseCount > 0) activeTriggers.add('first_expense');
+    if (memberCount > 1) activeTriggers.add('first_team_member');
+    if (storeEnabled) activeTriggers.add('store_enabled');
+    if (campaignCount > 0) activeTriggers.add('first_campaign');
+
+    return PROGRESSIVE_DEEPENING_PROMPTS.filter(p => {
+      if (!activeTriggers.has(p.trigger)) return false;
+      if (completedProfiles.has(p.subProfile)) return false;
+      return true;
+    });
+  }
+
+  async getGuidanceSubProfile(businessId: string, subProfileName: string) {
+    let guidanceProfile = await this.prisma.client.businessGuidanceProfile.findUnique({
+      where: { businessId },
+    });
+
+    if (!guidanceProfile) return null;
+
+    const validNames = [
+      'identity', 'founder', 'offer', 'customer', 'revenue', 'finance',
+      'operations', 'compliance', 'growth', 'goals', 'sales', 'marketingStrategy',
+      'people', 'technology', 'partnerships', 'intellectualProperty',
+    ];
+    if (!validNames.includes(subProfileName)) {
+      throw new BadRequestException(`Invalid sub-profile name: ${subProfileName}`);
+    }
+
+    const full = await this.prisma.client.businessGuidanceProfile.findUnique({
+      where: { businessId },
+      include: { [subProfileName]: true },
+    });
+
+    return (full as Record<string, unknown>)?.[subProfileName] || null;
+  }
+
+  async upsertGuidanceSubProfile(businessId: string, subProfileName: string, data: Record<string, unknown>) {
+    const validNames = [
+      'identity', 'founder', 'offer', 'customer', 'revenue', 'finance',
+      'operations', 'compliance', 'growth', 'goals', 'sales', 'marketingStrategy',
+      'people', 'technology', 'partnerships', 'intellectualProperty',
+    ];
+    if (!validNames.includes(subProfileName)) {
+      throw new BadRequestException(`Invalid sub-profile name: ${subProfileName}`);
+    }
+
+    let guidanceProfile = await this.prisma.client.businessGuidanceProfile.findUnique({
+      where: { businessId },
+    });
+
+    if (!guidanceProfile) {
+      guidanceProfile = await this.prisma.client.businessGuidanceProfile.create({
+        data: { businessId },
+      });
+    }
+
+    const { id, guidanceProfileId, createdAt, updatedAt, ...rawData } = data as Record<string, unknown>;
+    const cleanData: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(rawData)) {
+      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || Array.isArray(value) || value === null) {
+        cleanData[key] = value;
+      }
+    }
+
+    const gpId = guidanceProfile.id;
+    type PrismaDelegate = {
+      findUnique(args: { where: { guidanceProfileId: string } }): Promise<unknown>;
+      update(args: { where: { guidanceProfileId: string }; data: Record<string, unknown> }): Promise<unknown>;
+      create(args: { data: Record<string, unknown> }): Promise<unknown>;
+    };
+    const upsertFor = (delegate: PrismaDelegate) =>
+      delegate.findUnique({ where: { guidanceProfileId: gpId } }).then((existing: unknown) =>
+        existing
+          ? delegate.update({ where: { guidanceProfileId: gpId }, data: cleanData })
+          : delegate.create({ data: { ...cleanData, guidanceProfileId: gpId } }),
+      );
+
+    const db = this.prisma.client;
+    switch (subProfileName) {
+      case 'identity': return upsertFor(db.businessIdentityProfile);
+      case 'founder': return upsertFor(db.founderProfile);
+      case 'offer': return upsertFor(db.offerProfile);
+      case 'customer': return upsertFor(db.customerProfile);
+      case 'revenue': return upsertFor(db.revenueProfile);
+      case 'finance': return upsertFor(db.financeProfile);
+      case 'operations': return upsertFor(db.operationsProfile);
+      case 'compliance': return upsertFor(db.complianceGuidanceProfile);
+      case 'growth': return upsertFor(db.growthProfile);
+      case 'goals': return upsertFor(db.goalsProfile);
+      case 'sales': return upsertFor(db.salesProfile);
+      case 'marketingStrategy': return upsertFor(db.marketingStrategyProfile);
+      case 'people': return upsertFor(db.peopleProfile);
+      case 'technology': return upsertFor(db.technologyProfile);
+      case 'partnerships': return upsertFor(db.partnershipsProfile);
+      case 'intellectualProperty': return upsertFor(db.intellectualPropertyProfile);
+      default: throw new BadRequestException(`Model not found for sub-profile: ${subProfileName}`);
+    }
   }
 
   private async detectDocumentImpact(businessId: string, changedFields: string[], businessName: string) {

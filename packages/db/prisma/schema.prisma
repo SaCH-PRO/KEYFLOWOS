@@ -2026,6 +2026,12 @@ model BusinessGuidanceProfile {
   compliance ComplianceGuidanceProfile?
   growth     GrowthProfile?
   goals      GoalsProfile?
+  sales      SalesProfile?
+  marketingStrategy MarketingStrategyProfile?
+  people     PeopleProfile?
+  technology TechnologyProfile?
+  partnerships PartnershipsProfile?
+  intellectualProperty IntellectualPropertyProfile?
   assessmentResults AssessmentResult[]
   recommendations   GuidanceRecommendation[]
   roadmapItems      RoadmapItem[]
@@ -2264,6 +2270,153 @@ model GoalsProfile {
 
   @@index([guidanceProfileId])
   @@map("goals_profiles")
+}
+
+model SalesProfile {
+  id                  String   @id @default(cuid())
+  guidanceProfileId   String   @unique @map("guidance_profile_id")
+  salesProcess        String?  @map("sales_process")
+  salesCycle          String?  @map("sales_cycle")
+  pipelineStages      String[] @default([]) @map("pipeline_stages")
+  conversionRate      Float?   @map("conversion_rate")
+  averageDealSize     Float?   @map("average_deal_size")
+  salesChannels       String[] @default([]) @map("sales_channels")
+  crmApproach         String?  @map("crm_approach")
+  leadSources         String[] @default([]) @map("lead_sources")
+  followUpStrategy    String?  @map("follow_up_strategy")
+  salesTeamSize       Int?     @map("sales_team_size")
+  quotaTarget         Float?   @map("quota_target")
+  objectionHandling   String?  @map("objection_handling")
+  notes               String?
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  guidanceProfile BusinessGuidanceProfile @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([guidanceProfileId])
+  @@map("sales_profiles")
+}
+
+model MarketingStrategyProfile {
+  id                  String   @id @default(cuid())
+  guidanceProfileId   String   @unique @map("guidance_profile_id")
+  brandVoice          String?  @map("brand_voice")
+  messagingFramework  String?  @map("messaging_framework")
+  contentPillars      String[] @default([]) @map("content_pillars")
+  contentFrequency    String?  @map("content_frequency")
+  campaignHistory     String?  @map("campaign_history")
+  socialStrategy      String?  @map("social_strategy")
+  emailStrategy       String?  @map("email_strategy")
+  seoStrategy         String?  @map("seo_strategy")
+  paidAdvertising     String?  @map("paid_advertising")
+  advertisingBudget   Float?   @map("advertising_budget")
+  targetKeywords      String[] @default([]) @map("target_keywords")
+  brandGuidelines     String?  @map("brand_guidelines")
+  notes               String?
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  guidanceProfile BusinessGuidanceProfile @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([guidanceProfileId])
+  @@map("marketing_strategy_profiles")
+}
+
+model PeopleProfile {
+  id                    String   @id @default(cuid())
+  guidanceProfileId     String   @unique @map("guidance_profile_id")
+  companyCulture        String?  @map("company_culture")
+  hiringCriteria        String?  @map("hiring_criteria")
+  compensationPhilosophy String? @map("compensation_philosophy")
+  trainingApproach      String?  @map("training_approach")
+  orgStructure          String?  @map("org_structure")
+  employeeBenefits      String[] @default([]) @map("employee_benefits")
+  retentionStrategy     String?  @map("retention_strategy")
+  performanceReview     String?  @map("performance_review")
+  remotePolicy          String?  @map("remote_policy")
+  diversityPolicy       String?  @map("diversity_policy")
+  keyRoles              String[] @default([]) @map("key_roles")
+  hiringTimeline        String?  @map("hiring_timeline")
+  notes                 String?
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  guidanceProfile BusinessGuidanceProfile @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([guidanceProfileId])
+  @@map("people_profiles")
+}
+
+model TechnologyProfile {
+  id                  String   @id @default(cuid())
+  guidanceProfileId   String   @unique @map("guidance_profile_id")
+  techStack           String[] @default([]) @map("tech_stack")
+  digitalMaturity     String?  @map("digital_maturity")
+  cybersecurityPosture String? @map("cybersecurity_posture")
+  dataStrategy        String?  @map("data_strategy")
+  cloudServices       String[] @default([]) @map("cloud_services")
+  websitePlatform     String?  @map("website_platform")
+  ecommercePlatform   String?  @map("ecommerce_platform")
+  automationTools     String[] @default([]) @map("automation_tools")
+  analyticsTools      String[] @default([]) @map("analytics_tools")
+  itBudget            Float?   @map("it_budget")
+  dataBackupStrategy  String?  @map("data_backup_strategy")
+  techDebt            String?  @map("tech_debt")
+  notes               String?
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  guidanceProfile BusinessGuidanceProfile @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([guidanceProfileId])
+  @@map("technology_profiles")
+}
+
+model PartnershipsProfile {
+  id                  String   @id @default(cuid())
+  guidanceProfileId   String   @unique @map("guidance_profile_id")
+  keySuppliers        String[] @default([]) @map("key_suppliers")
+  vendorRelationships String?  @map("vendor_relationships")
+  strategicAlliances  String[] @default([]) @map("strategic_alliances")
+  distributionPartners String[] @default([]) @map("distribution_partners")
+  referralPartners    String[] @default([]) @map("referral_partners")
+  jointVentures       String?  @map("joint_ventures")
+  communityInvolvement String? @map("community_involvement")
+  industryAssociations String[] @default([]) @map("industry_associations")
+  partnershipGoals    String?  @map("partnership_goals")
+  supplierDiversification String? @map("supplier_diversification")
+  notes               String?
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  guidanceProfile BusinessGuidanceProfile @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([guidanceProfileId])
+  @@map("partnerships_profiles")
+}
+
+model IntellectualPropertyProfile {
+  id                  String   @id @default(cuid())
+  guidanceProfileId   String   @unique @map("guidance_profile_id")
+  trademarks          String[] @default([])
+  patents             String[] @default([])
+  copyrights          String[] @default([])
+  tradeSecrets        String[] @default([]) @map("trade_secrets")
+  proprietaryProcesses String[] @default([]) @map("proprietary_processes")
+  brandAssets         String[] @default([]) @map("brand_assets")
+  domainNames         String[] @default([]) @map("domain_names")
+  ipProtectionStrategy String? @map("ip_protection_strategy")
+  licensingStrategy   String?  @map("licensing_strategy")
+  ipRegistrationStatus String? @map("ip_registration_status")
+  competitiveIPRisks  String?  @map("competitive_ip_risks")
+  notes               String?
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  guidanceProfile BusinessGuidanceProfile @relation(fields: [guidanceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([guidanceProfileId])
+  @@map("intellectual_property_profiles")
 }
 
 model AssessmentResult {

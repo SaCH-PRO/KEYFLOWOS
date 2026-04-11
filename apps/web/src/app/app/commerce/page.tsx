@@ -28,6 +28,7 @@ import { useCommerceCopilot } from "./hooks/use-commerce-copilot";
 import { useCommerceComposer } from "./hooks/use-commerce-composer";
 import { useCommerceAiHub } from "./hooks/use-commerce-ai-hub";
 import { SearchableHelpDrawer } from "./components/contextual-onboarding";
+import { ProgressivePrompts } from "../profile/components/progressive-prompts";
 import { ModuleWalkthrough, WalkthroughTrigger } from "@/components/ui/module-walkthrough";
 import { MetricExplainer } from "@/components/ui/metric-explainer";
 import { RichTooltip } from "@/components/ui/rich-tooltip";
@@ -378,6 +379,8 @@ export default function CommercePage() {
         onClose={() => setHelpOpen(false)}
         onNavigate={(navTab: string) => handleTabChange(navTab)}
       />
+
+      <ProgressivePrompts moduleFilter={["sales", "revenue", "finance"]} />
 
       <ModuleWalkthrough moduleKey="commerce" steps={COMMERCE_WALKTHROUGH} />
     </div>

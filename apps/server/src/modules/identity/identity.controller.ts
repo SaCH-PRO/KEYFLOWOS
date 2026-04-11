@@ -25,7 +25,7 @@ import { AiUsageService } from '../ai/ai-usage.service';
 import { CurrentUser, AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { OptionalAuthGuard } from '../../core/auth/optional-auth.guard';
 import { generateDocumentRecommendations } from './document-guidance.util';
-import { PROFILE_COMPLETENESS_FIELDS } from './profile-completeness.constants';
+import { PROFILE_COMPLETENESS_FIELDS, COMPLETENESS_TIERS } from './profile-completeness.constants';
 
 @Controller('identity')
 export class IdentityController {
@@ -259,6 +259,44 @@ export class IdentityController {
   @Get('profile-completeness-fields')
   getProfileCompletenessFields() {
     return { fields: PROFILE_COMPLETENESS_FIELDS };
+  }
+
+  @Get('completeness-tiers')
+  getCompletenessTiers() {
+    return { tiers: COMPLETENESS_TIERS };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/tiered-completeness')
+  async getTieredCompleteness(@Param('businessId') businessId: string) {
+    return this.identity.getTieredCompleteness(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/progressive-prompts')
+  async getProgressivePrompts(@Param('businessId') businessId: string) {
+    return this.identity.getProgressivePrompts(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/guidance/:subProfile')
+  async getGuidanceSubProfile(
+    @Param('businessId') businessId: string,
+    @Param('subProfile') subProfile: string,
+  ) {
+    const data = await this.identity.getGuidanceSubProfile(businessId, subProfile);
+    return { subProfile: subProfile, data };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/guidance/:subProfile')
+  async upsertGuidanceSubProfile(
+    @Param('businessId') businessId: string,
+    @Param('subProfile') subProfile: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    const data = await this.identity.upsertGuidanceSubProfile(businessId, subProfile, body);
+    return { subProfile: subProfile, data };
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
