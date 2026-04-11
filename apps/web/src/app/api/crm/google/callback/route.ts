@@ -15,6 +15,18 @@ function detectFlowFromState(state: string): string | null {
   }
 }
 
+function getPublicOrigin(request: NextRequest): string {
+  const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
+  const proto = request.headers.get("x-forwarded-proto") || "https";
+  if (host) return `${proto}://${host}`;
+  if (process.env.REPLIT_DEV_DOMAIN) return `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  return request.nextUrl.origin;
+}
+
+function publicRedirect(path: string, request: NextRequest) {
+  return NextResponse.redirect(`${getPublicOrigin(request)}${path}`);
+}
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const state = searchParams.get("state");
@@ -26,32 +38,31 @@ export async function GET(request: NextRequest) {
 
   if (flow === "drive") {
     if (error) {
-      return NextResponse.redirect(new URL("/app/profile?tab=documents&drive=error&reason=" + error, request.url));
+      return publicRedirect("/app/profile?tab=documents&drive=error&reason=" + error, request);
     }
     if (!state || !code) {
-      return NextResponse.redirect(new URL("/app/profile?tab=documents&drive=error&reason=missing_params", request.url));
+      return publicRedirect("/app/profile?tab=documents&drive=error&reason=missing_params", request);
     }
     try {
       const backendUrl = `${API_BASE}/drive/callback?state=${encodeURIComponent(state)}&code=${encodeURIComponent(code)}${scope ? `&scope=${encodeURIComponent(scope)}` : ""}`;
       const res = await fetch(backendUrl, { redirect: "manual" });
       const location = res.headers.get("location");
-      if (location) {
-        const redirectUrl = location.startsWith("/") ? new URL(location, request.url) : new URL(location);
-        return NextResponse.redirect(redirectUrl);
+      if (location && location.startsWith("/")) {
+        return publicRedirect(location, request);
       }
-      return NextResponse.redirect(new URL("/app/profile?tab=documents&drive=success", request.url));
+      return publicRedirect("/app/profile?tab=documents&drive=success", request);
     } catch (err) {
       console.error("Drive callback proxy error:", err);
-      return NextResponse.redirect(new URL("/app/profile?tab=documents&drive=error&reason=proxy_error", request.url));
+      return publicRedirect("/app/profile?tab=documents&drive=error&reason=proxy_error", request);
     }
   }
 
   if (error) {
-    return NextResponse.redirect(new URL("/app/crm/pipeline?google_error=" + error, request.url));
+    return publicRedirect("/app/crm/pipeline?google_error=" + error, request);
   }
 
   if (!state || !code) {
-    return NextResponse.redirect(new URL("/app/crm/pipeline?google_error=missing_params", request.url));
+    return publicRedirect("/app/crm/pipeline?google_error=missing_params", request);
   }
 
   try {
@@ -59,14 +70,13 @@ export async function GET(request: NextRequest) {
     const res = await fetch(backendUrl, { redirect: "manual" });
 
     const location = res.headers.get("location");
-    if (location) {
-      const redirectUrl = location.startsWith("/") ? new URL(location, request.url) : new URL(location);
-      return NextResponse.redirect(redirectUrl);
+    if (location && location.startsWith("/")) {
+      return publicRedirect(location, request);
     }
 
-    return NextResponse.redirect(new URL("/app/crm/pipeline?google_success=true", request.url));
+    return publicRedirect("/app/crm/pipeline?google_success=true", request);
   } catch (err) {
     console.error("Google Contacts callback proxy error:", err);
-    return NextResponse.redirect(new URL("/app/crm/pipeline?google_error=proxy_error", request.url));
+    return publicRedirect("/app/crm/pipeline?google_error=proxy_error", request);
   }
 }
