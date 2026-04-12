@@ -47,11 +47,11 @@ const SORT_OPTIONS: { value: SortOption; label: string }[] = [
 ];
 
 const SMART_SEGMENTS: { key: SmartSegment; label: string; icon: typeof Flame; color: string; description: string }[] = [
-  { key: "high-value", label: "High Value", icon: TrendingUp, color: "hsl(142 76% 36%)", description: "Contacts with high revenue potential or significant transaction history." },
-  { key: "needs-followup", label: "Needs Follow-up", icon: AlertTriangle, color: "hsl(var(--kf-accent1))", description: "Contacts with pending tasks, unanswered messages, or overdue interactions." },
-  { key: "new-this-week", label: "New This Week", icon: CalendarPlus, color: "hsl(var(--kf-accent2))", description: "Contacts added in the last 7 days — follow up quickly to build rapport." },
+  { key: "high-value", label: "High Value", icon: TrendingUp, color: "hsl(142 76% 36%)", description: "Clients with high revenue potential or significant transaction history." },
+  { key: "needs-followup", label: "Needs Follow-up", icon: AlertTriangle, color: "hsl(var(--kf-accent1))", description: "Clients with pending tasks, unanswered messages, or overdue interactions." },
+  { key: "new-this-week", label: "New This Week", icon: CalendarPlus, color: "hsl(var(--kf-accent2))", description: "Clients added in the last 7 days — follow up quickly to build rapport." },
   { key: "at-risk", label: "At Risk", icon: Flame, color: "hsl(0 70% 55%)", description: "Clients showing signs of churn — declining engagement or missed bookings." },
-  { key: "stale", label: "No Activity 30d", icon: Clock, color: "hsl(var(--kf-muted-foreground))", description: "Contacts with no interaction in the last 30 days — consider a re-engagement campaign." },
+  { key: "stale", label: "No Activity 30d", icon: Clock, color: "hsl(var(--kf-muted-foreground))", description: "Clients with no interaction in the last 30 days — consider a re-engagement campaign." },
 ];
 
 export interface PipelineToolbarProps {
@@ -173,10 +173,10 @@ function PipelineToolbarInner({
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50" />
           <input
             type="text"
-            placeholder="Search contacts..."
+            placeholder="Search clients..."
             value={searchInput}
             onChange={(e) => onSearchChange(e.target.value)}
-            aria-label="Search contacts"
+            aria-label="Search clients"
             className="w-full pl-9 pr-8 py-2 text-sm bg-white/[0.03] border border-border/40 rounded-xl focus:outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]/40 focus:border-[hsl(var(--kf-accent1))]/40 placeholder:text-muted-foreground/40 transition-all"
           />
           {searchInput && (
@@ -192,8 +192,8 @@ function PipelineToolbarInner({
         <button
           onClick={onAddContact}
           className="p-2 rounded-xl bg-gradient-to-br from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all flex-shrink-0"
-          aria-label="Add contact"
-          title="Add contact"
+          aria-label="Add client"
+          title="Add client"
           data-walkthrough="crm-add"
         >
           <Plus className="w-4 h-4" />
@@ -214,7 +214,7 @@ function PipelineToolbarInner({
             <button
               onClick={handleToggleSort}
               className={`p-2 rounded-xl transition-all flex-shrink-0 ${showSort ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
-              aria-label="Sort contacts"
+              aria-label="Sort clients"
               aria-haspopup="listbox"
               aria-expanded={showSort}
               title="Sort"
@@ -246,8 +246,8 @@ function PipelineToolbarInner({
           <button
             onClick={onToggleSelectMode}
             className={`p-2 rounded-xl transition-all flex-shrink-0 ${selectMode ? "bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
-            aria-label={selectMode ? "Exit select mode" : "Select contacts"}
-            title={selectMode ? "Exit select mode" : "Select contacts"}
+            aria-label={selectMode ? "Exit select mode" : "Select clients"}
+            title={selectMode ? "Exit select mode" : "Select clients"}
           >
             <CheckSquare className="w-4 h-4" />
           </button>
@@ -255,8 +255,8 @@ function PipelineToolbarInner({
             <button
               onClick={onImport}
               className="p-2 rounded-xl text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground transition-all flex-shrink-0"
-              aria-label="Import contacts"
-              title="Import contacts"
+              aria-label="Import clients"
+              title="Import clients"
             >
               <Upload className="w-4 h-4" />
             </button>
@@ -354,7 +354,7 @@ function PipelineToolbarInner({
         )}
       </div>
 
-      <div role="tablist" aria-label="Contact list views" className="flex gap-1 border-t border-border/30 pt-2.5">
+      <div role="tablist" aria-label="Client list views" className="flex gap-1 border-t border-border/30 pt-2.5">
         {[
           { key: "all" as const, label: "All", count: allCount, icon: Users },
           { key: "pinned" as const, label: "Pinned", count: pinnedCount, icon: Star },

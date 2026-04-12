@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import React from "react";
 import { motion } from "framer-motion";
-import { Mail, Phone, Building2, Tag, Trash2, MessageCircle, MoreHorizontal, Receipt, Calendar, FileSignature, TrendingUp, Clock } from "lucide-react";
+import { Mail, Phone, Tag, Trash2, MessageCircle, MoreHorizontal, Receipt, Calendar, FileSignature, TrendingUp, Clock, AlertCircle, DollarSign } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 import { relativeTime, getScoreStyle, STATUS_COLORS } from "@/lib/crm-utils";
 
@@ -43,6 +43,14 @@ const STATUS_DOT_COLORS: Record<string, string> = {
   INACTIVE: "bg-muted-foreground/30",
 };
 
+const STAGE_BADGE_STYLES: Record<string, { bg: string; text: string; label: string }> = {
+  LEAD: { bg: "bg-blue-500/10", text: "text-blue-400", label: "Lead" },
+  PROSPECT: { bg: "bg-amber-500/10", text: "text-amber-400", label: "Prospect" },
+  CLIENT: { bg: "bg-emerald-500/10", text: "text-emerald-400", label: "Client" },
+  LOST: { bg: "bg-muted/30", text: "text-muted-foreground/60", label: "Lost" },
+  VIP: { bg: "bg-violet-500/10", text: "text-violet-400", label: "VIP" },
+};
+
 export type QuickActionType = "create-invoice" | "book-appointment" | "send-quote";
 
 interface ContactCardProps {
@@ -74,6 +82,14 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
   const scoreStyle = hasLeadScore ? getScoreStyle(leadScore!) : null;
 
   const lastInteraction = contact.meta?.lastInteractionAt;
+  const outstandingBalance = contact.meta?.outstandingBalance;
+  const hasOutstanding = outstandingBalance != null && outstandingBalance > 0;
+  const totalRevenue = contact.meta?.totalRevenue;
+  const isHighValue = (totalRevenue != null && totalRevenue > 500) || (contact.meta?.invoiceCount != null && contact.meta.invoiceCount > 3);
+  const hasBookings = contact.meta?.bookingCount != null && contact.meta.bookingCount > 0;
+  const stageBadge = STAGE_BADGE_STYLES[contact.status ?? ""] ?? STAGE_BADGE_STYLES.LEAD;
+  const nextDueTask = (contact as any).meta?.nextDueTaskAt;
+  const hasOverdueTask = nextDueTask ? new Date(nextDueTask) < new Date() : false;
 
   const waPhone = getContactPhone(contact);
 
@@ -131,17 +147,24 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 min-w-0">
             <h3 className="text-sm font-semibold truncate">{fullName}</h3>
-            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDot}`} title={contact.status ?? "LEAD"} />
+            <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-md ${stageBadge.bg} ${stageBadge.text} flex-shrink-0`}>
+              {stageBadge.label}
+            </span>
+            {isHighValue && (
+              <span className="flex items-center gap-0.5 text-[9px] font-medium px-1 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 flex-shrink-0" title="High Value">
+                <TrendingUp className="w-2.5 h-2.5" />
+              </span>
+            )}
             {hasLeadScore && scoreStyle && (
               <span
-                className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${scoreStyle.bg} ${scoreStyle.text} flex-shrink-0`}
+                className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${scoreStyle.bg} ${scoreStyle.text} flex-shrink-0`}
                 title={`Lead Score: ${leadScore}`}
               >
                 {leadScore}
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2 mt-0.5 min-w-0">
+          <div className="flex items-center gap-2 mt-0.5 min-w-0 flex-wrap">
             {(contact.companyName || contact.jobTitle) && (
               <span className="text-xs text-muted-foreground/70 truncate min-w-0">
                 {contact.companyName || contact.jobTitle}
@@ -149,8 +172,25 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
             )}
             {lastInteraction && (
               <span className="text-[10px] text-muted-foreground/50 flex items-center gap-0.5 flex-shrink-0">
-                <Clock className="w-3 h-3" />
+                <Clock className="w-2.5 h-2.5" />
                 {relativeTime(lastInteraction)}
+              </span>
+            )}
+            {hasOutstanding && (
+              <span className="text-[10px] text-red-400/80 flex items-center gap-0.5 flex-shrink-0" title={`Outstanding: $${outstandingBalance?.toFixed(0)}`}>
+                <DollarSign className="w-2.5 h-2.5" />
+                {outstandingBalance?.toFixed(0)}
+              </span>
+            )}
+            {hasBookings && (
+              <span className="text-[10px] text-blue-400/70 flex items-center gap-0.5 flex-shrink-0" title={`${contact.meta?.bookingCount} booking(s)`}>
+                <Calendar className="w-2.5 h-2.5" />
+                {contact.meta?.bookingCount}
+              </span>
+            )}
+            {hasOverdueTask && (
+              <span className="text-[10px] text-[hsl(var(--kf-accent1))]/80 flex items-center gap-0.5 flex-shrink-0" title="Overdue task">
+                <AlertCircle className="w-2.5 h-2.5" />
               </span>
             )}
           </div>

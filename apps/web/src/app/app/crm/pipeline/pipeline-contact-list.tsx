@@ -125,7 +125,7 @@ function QuickAddRow({ onSubmit, onCancel }: { onSubmit: (data: { firstName: str
     <div className="kf-card p-3 space-y-2" style={{ borderColor: "hsl(var(--kf-accent1) / 0.3)", background: "hsl(var(--kf-accent1) / 0.03)" }}>
       <div className="flex items-center justify-between">
         <span className="text-[11px] font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: "hsl(var(--kf-accent1))" }}>
-          <Plus className="w-3 h-3" /> Quick Add Contact
+          <Plus className="w-3 h-3" /> Quick Add Client
         </span>
         <button onClick={onCancel} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted/50">
           <X className="w-3.5 h-3.5 text-muted-foreground" />
@@ -291,7 +291,7 @@ function PipelineContactListInner({
         <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center mx-auto mb-3">
           <AlertTriangle className="w-5 h-5 text-red-400/70" />
         </div>
-        <p className="text-sm font-semibold tracking-tight mb-1">Could not load contacts</p>
+        <p className="text-sm font-semibold tracking-tight mb-1">Could not load clients</p>
         <p className="text-xs text-muted-foreground/60 mb-4">{loadError}</p>
         {onRetry && (
           <button
@@ -316,7 +316,7 @@ function PipelineContactListInner({
         style={{ color: "hsl(var(--kf-accent1))", borderStyle: "dashed" }}
       >
         <Plus className="w-3.5 h-3.5" />
-        Quick Add Contact
+        Quick Add Client
       </button>
     )
   );
@@ -327,17 +327,17 @@ function PipelineContactListInner({
         {quickAddRow}
         <EmptyState
           icon={Users}
-          title={activeListTab === "pinned" ? "No pinned contacts" : activeListTab === "recent" ? "No recent contacts" : "No contacts yet"}
+          title={activeListTab === "pinned" ? "No pinned clients" : activeListTab === "recent" ? "No recent clients" : "No clients yet"}
           description={
             activeListTab === "pinned"
-              ? "Pin your most important contacts for quick access"
+              ? "Pin your most important clients for quick access"
               : activeListTab === "recent"
-              ? "Your recently viewed contacts will appear here"
-              : "Add your first contact to get started"
+              ? "Your recently viewed clients will appear here"
+              : "Add your first client to get started"
           }
-          actionLabel={activeListTab === "all" ? "Add Contact" : undefined}
+          actionLabel={activeListTab === "all" ? "Add Client" : undefined}
           onAction={activeListTab === "all" ? onAddContact : undefined}
-          tip={activeListTab === "all" ? "Contacts are the heart of your CRM — add clients, leads, and partners to track relationships and activity." : undefined}
+          tip={activeListTab === "all" ? "Clients are the heart of your CRM — add clients, leads, and partners to track relationships and activity." : undefined}
         />
       </div>
     );
@@ -393,7 +393,7 @@ function PipelineContactListInner({
           onScroll={handleScroll}
           onKeyDown={handleKeyDown}
           role="listbox"
-          aria-label="Contacts list"
+          aria-label="Clients list"
           tabIndex={0}
           className="max-h-[calc(100vh-16rem)] overflow-y-auto outline-none"
           style={{ willChange: "transform" }}
@@ -417,7 +417,7 @@ function PipelineContactListInner({
       <div
         ref={listRef}
         role="listbox"
-        aria-label="Contacts list"
+        aria-label="Clients list"
         tabIndex={0}
         onKeyDown={handleKeyDown}
         className="space-y-3 outline-none"
