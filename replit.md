@@ -51,6 +51,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Automation Playbook Templates:** 18 pre-built automation recipes covering all modules (Commerce, Bookings, CRM, Marketing, Time-Based) with one-click activation.
 - **Error Boundaries:** Dedicated `error.tsx` boundaries for all core modules.
 - **Security: PublicRateLimitGuard:** Reusable rate-limiting guard applied to all unauthenticated endpoints with configurable per-route limits.
+- **KeyflowOS Store Quick-Access:** Global sidebar icon (all users) with slide-out drawer showing KeyflowOS service catalog and intake form. Submissions stored in `IntakeSubmission` model with notification trigger to business owner. Public endpoint at `/site/storefront/public/:slug/intake` (rate-limited, sanitized).
 
 ## External Dependencies
 - **Database:** PostgreSQL

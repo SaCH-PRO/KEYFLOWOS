@@ -161,6 +161,9 @@ model Business {
   // AI Output Templates
   outputTemplates      OutputTemplate[]
 
+  // Intake Submissions
+  intakeSubmissions    IntakeSubmission[]
+
   // Customer notification preferences (JSON: { booking_confirmed: true, ... })
   notificationPreferences Json? @default("{}") @map("notification_preferences")
 
@@ -2927,4 +2930,29 @@ model OutputTemplate {
   @@index([businessId, category])
   @@index([businessId, category, isDefault])
   @@map("output_templates")
+}
+
+// ---
+// INTAKE SUBMISSIONS (Platform store / client request forms)
+// ---
+model IntakeSubmission {
+  id           String   @id @default(cuid())
+  businessId   String   @map("business_id")
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name         String
+  email        String
+  phone        String?
+  category     String
+  description  String
+  budget       String?
+  urgency      String   @default("normal")
+  status       String   @default("new")
+  notes        String?
+  data         Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId, status, createdAt])
+  @@index([businessId, category])
+  @@map("intake_submissions")
 }
