@@ -113,7 +113,7 @@ export class AutopilotController {
     @Param('businessId') businessId: string,
     @Param('actionId') actionId: string,
     @Body() body: {
-      type: 'follow_up' | 'birthday' | 'payment_reminder' | 'check_in' | 'offer';
+      type: 'follow_up' | 'birthday' | 'payment_reminder' | 'check_in' | 'offer' | 'review_request' | 'referral_request' | 'thank_you' | 're_engage';
       contactId: string;
       contactName: string;
       description: string;

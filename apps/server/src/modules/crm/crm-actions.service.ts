@@ -30,7 +30,7 @@ type AutopilotAction = {
 };
 
 type AiNextAction = {
-  type: 'follow_up' | 'send_quote' | 'payment_reminder' | 'add_note';
+  type: 'follow_up' | 'send_quote' | 'payment_reminder' | 'add_note' | 'review_request' | 'referral_request' | 'thank_you' | 're_engage';
   contactId: string;
   contactName: string;
   reason: string;
@@ -957,16 +957,31 @@ export class CrmActionsService {
   async getAiNextActions(businessId: string): Promise<AiNextAction[]> {
     const now = new Date();
     const DAY = 24 * 60 * 60 * 1000;
-    const fourteenDaysAgo = new Date(now.getTime() - 14 * DAY);
+    const threeDaysAgo = new Date(now.getTime() - 3 * DAY);
     const sevenDaysAgo = new Date(now.getTime() - 7 * DAY);
-
-    const [staleContacts, highScoreNoQuote, overdueInvoiceContacts, newLeadsNoNotes] = await Promise.all([
+    const fourteenDaysAgo = new Date(now.getTime() - 14 * DAY);
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * DAY);
+    const [
+      staleContacts,
+      highScoreNoQuote,
+      overdueInvoiceContacts,
+      newLeadsNoNotes,
+      recentlyCompletedBookings,
+      highRevenueInactive,
+      recentlyPaidClients,
+      business,
+    ] = await Promise.all([
       this.db.contact.findMany({
         where: {
           ...contactWhereBase(businessId),
           lastInteractionAt: { lte: fourteenDaysAgo },
         },
-        select: { id: true, firstName: true, lastName: true, status: true, lastInteractionAt: true, leadScore: true },
+        select: {
+          id: true, firstName: true, lastName: true, status: true,
+          lastInteractionAt: true, leadScore: true, preferredChannel: true,
+          tags: true, companyName: true, source: true,
+          _count: { select: { bookings: true, invoices: true, events: true } },
+        },
         orderBy: { lastInteractionAt: 'asc' },
         take: 10,
       }),
@@ -977,7 +992,12 @@ export class CrmActionsService {
           invoices: { none: { deletedAt: null } },
           status: { in: ['LEAD', 'PROSPECT'] },
         },
-        select: { id: true, firstName: true, lastName: true, status: true, leadScore: true },
+        select: {
+          id: true, firstName: true, lastName: true, status: true,
+          leadScore: true, preferredChannel: true, companyName: true,
+          createdAt: true,
+          _count: { select: { events: true, bookings: true } },
+        },
         orderBy: { leadScore: 'desc' },
         take: 10,
       }),
@@ -986,7 +1006,15 @@ export class CrmActionsService {
           ...contactWhereBase(businessId),
           invoices: { some: { status: 'OVERDUE', deletedAt: null } },
         },
-        select: { id: true, firstName: true, lastName: true, status: true, invoices: { where: { status: 'OVERDUE', deletedAt: null }, select: { total: true, dueDate: true } } },
+        select: {
+          id: true, firstName: true, lastName: true, status: true,
+          preferredChannel: true, phone: true, email: true,
+          invoices: {
+            where: { status: 'OVERDUE', deletedAt: null },
+            select: { total: true, dueDate: true, invoiceNumber: true },
+            orderBy: { dueDate: 'asc' },
+          },
+        },
         take: 10,
       }),
       this.db.contact.findMany({
@@ -995,67 +1023,191 @@ export class CrmActionsService {
           createdAt: { gte: sevenDaysAgo },
           notes: { none: {} },
         },
-        select: { id: true, firstName: true, lastName: true, status: true, createdAt: true },
+        select: {
+          id: true, firstName: true, lastName: true, status: true,
+          createdAt: true, source: true, email: true, phone: true,
+          companyName: true,
+        },
         orderBy: { createdAt: 'desc' },
         take: 10,
       }),
+      this.db.booking.findMany({
+        where: {
+          contact: contactWhereBase(businessId),
+          status: 'COMPLETED',
+          endTime: { gte: threeDaysAgo, lte: now },
+        },
+        include: {
+          contact: { select: { id: true, firstName: true, lastName: true, preferredChannel: true } },
+          service: { select: { name: true, price: true } },
+        },
+        take: 5,
+        orderBy: { endTime: 'desc' },
+      }),
+      this.db.contact.findMany({
+        where: {
+          ...contactWhereBase(businessId),
+          status: 'CLIENT',
+          lastInteractionAt: { lte: thirtyDaysAgo },
+          invoices: { some: { status: 'PAID', deletedAt: null } },
+        },
+        select: {
+          id: true, firstName: true, lastName: true,
+          lastInteractionAt: true, preferredChannel: true,
+          invoices: {
+            where: { status: 'PAID', deletedAt: null },
+            select: { total: true },
+          },
+        },
+        orderBy: { lastInteractionAt: 'asc' },
+        take: 5,
+      }),
+      this.db.invoice.findMany({
+        where: {
+          businessId,
+          status: 'PAID',
+          paidAt: { gte: sevenDaysAgo },
+        },
+        include: {
+          contact: { select: { id: true, firstName: true, lastName: true, preferredChannel: true } },
+        },
+        take: 5,
+        orderBy: { paidAt: 'desc' },
+      }),
+      this.db.business.findUnique({
+        where: { id: businessId },
+        select: { name: true, industry: true, archetype: true },
+      }),
     ]);
 
-    const contactSummaries: string[] = [];
+    const contactProfiles: string[] = [];
 
     for (const c of staleContacts.slice(0, 5)) {
       const name = this.contactName(c);
       const daysSince = this.daysBetween(new Date(c.lastInteractionAt || now), now);
-      contactSummaries.push(`STALE: "${name}" (id:${c.id}) - No interaction in ${daysSince} days, status: ${c.status}`);
+      const engagement = c._count;
+      contactProfiles.push(
+        `STALE: "${name}" (id:${c.id}) | status:${c.status} | silent:${daysSince}d | score:${c.leadScore ?? 'N/A'} | ` +
+        `bookings:${engagement.bookings} invoices:${engagement.invoices} events:${engagement.events} | ` +
+        `channel:${c.preferredChannel || 'unknown'} | company:${c.companyName || 'N/A'} | tags:${c.tags?.join(',') || 'none'}`
+      );
     }
     for (const c of highScoreNoQuote.slice(0, 5)) {
       const name = this.contactName(c);
-      contactSummaries.push(`HIGH_SCORE_NO_QUOTE: "${name}" (id:${c.id}) - Lead score ${c.leadScore}, status: ${c.status}, no quote/invoice sent`);
+      const daysInPipeline = this.daysBetween(new Date(c.createdAt), now);
+      contactProfiles.push(
+        `HOT_LEAD: "${name}" (id:${c.id}) | status:${c.status} | score:${c.leadScore} | ` +
+        `pipeline:${daysInPipeline}d | events:${c._count.events} bookings:${c._count.bookings} | ` +
+        `company:${c.companyName || 'N/A'} | NO QUOTE/INVOICE SENT`
+      );
     }
     for (const c of overdueInvoiceContacts.slice(0, 5)) {
       const name = this.contactName(c);
       const totalOverdue = c.invoices.reduce((sum: number, inv: any) => sum + (Number(inv.total) || 0), 0);
-      contactSummaries.push(`OVERDUE_INVOICE: "${name}" (id:${c.id}) - ${c.invoices.length} overdue invoice(s) totaling ${totalOverdue}`);
+      const oldestDue = c.invoices[0]?.dueDate;
+      const daysPast = oldestDue ? this.daysBetween(new Date(oldestDue), now) : 0;
+      contactProfiles.push(
+        `OVERDUE: "${name}" (id:${c.id}) | ${c.invoices.length} invoice(s) | TTD ${totalOverdue.toLocaleString()} total | ` +
+        `oldest:${daysPast}d past due | refs:${c.invoices.map((i: any) => i.invoiceNumber).join(',')} | ` +
+        `channel:${c.preferredChannel || 'unknown'} | has_email:${!!c.email} has_phone:${!!c.phone}`
+      );
     }
     for (const c of newLeadsNoNotes.slice(0, 5)) {
       const name = this.contactName(c);
       const daysAgo = this.daysBetween(new Date(c.createdAt), now);
-      contactSummaries.push(`NEW_NO_NOTES: "${name}" (id:${c.id}) - New lead from ${daysAgo} day(s) ago, no notes added`);
+      contactProfiles.push(
+        `NEW_LEAD: "${name}" (id:${c.id}) | added:${daysAgo}d ago | source:${c.source || 'unknown'} | ` +
+        `company:${c.companyName || 'N/A'} | has_email:${!!c.email} has_phone:${!!c.phone} | NO NOTES YET`
+      );
+    }
+    for (const b of recentlyCompletedBookings.slice(0, 3)) {
+      if (!b.contact) continue;
+      const name = this.contactName(b.contact);
+      const hoursAgo = Math.round((now.getTime() - new Date(b.endTime).getTime()) / (60 * 60 * 1000));
+      contactProfiles.push(
+        `POST_SESSION: "${name}" (id:${b.contact.id}) | completed:${hoursAgo}h ago | ` +
+        `service:${b.service?.name || 'N/A'} | revenue:TTD ${b.service?.price || 0} | ` +
+        `channel:${b.contact.preferredChannel || 'unknown'} | NEEDS FOLLOW-UP & REVIEW REQUEST`
+      );
+    }
+    for (const c of highRevenueInactive.slice(0, 3)) {
+      const name = this.contactName(c);
+      const daysSince = this.daysBetween(new Date(c.lastInteractionAt || now), now);
+      const totalPaid = c.invoices.reduce((sum: number, inv: any) => sum + (Number(inv.total) || 0), 0);
+      contactProfiles.push(
+        `HIGH_VALUE_DORMANT: "${name}" (id:${c.id}) | lifetime:TTD ${totalPaid.toLocaleString()} | ` +
+        `inactive:${daysSince}d | channel:${c.preferredChannel || 'unknown'} | AT RISK OF CHURN`
+      );
+    }
+    for (const inv of recentlyPaidClients.slice(0, 3)) {
+      if (!inv.contact) continue;
+      const name = this.contactName(inv.contact);
+      contactProfiles.push(
+        `RECENT_PAYMENT: "${name}" (id:${inv.contact.id}) | paid:TTD ${this.toNum(inv.total).toLocaleString()} | ` +
+        `channel:${inv.contact.preferredChannel || 'unknown'} | OPPORTUNITY FOR THANK YOU / REVIEW / REFERRAL`
+      );
     }
 
-    if (contactSummaries.length === 0) {
+    if (contactProfiles.length === 0) {
       return [];
     }
+
+    const knownContactIds = new Set<string>();
+    for (const c of staleContacts) knownContactIds.add(c.id);
+    for (const c of highScoreNoQuote) knownContactIds.add(c.id);
+    for (const c of overdueInvoiceContacts) knownContactIds.add(c.id);
+    for (const c of newLeadsNoNotes) knownContactIds.add(c.id);
+    for (const b of recentlyCompletedBookings) if (b.contact?.id) knownContactIds.add(b.contact.id);
+    for (const c of highRevenueInactive) knownContactIds.add(c.id);
+    for (const inv of recentlyPaidClients) if (inv.contact?.id) knownContactIds.add(inv.contact.id);
+
+    const businessContext = business
+      ? `Business: "${business.name}" | Industry: ${business.industry || 'service'} | Type: ${business.archetype || 'general'}`
+      : 'Business: Caribbean service business';
 
     try {
       const result = await this.aiUsage.callAi({
         businessId,
         feature: 'crm_next_actions',
         model: 'gpt-4o-mini',
-        maxTokens: 800,
-        temperature: 0.4,
+        maxTokens: 1200,
+        temperature: 0.3,
         messages: [
           {
             role: 'system',
-            content: `You are a CRM advisor. Analyze the contact data and suggest prioritized next actions.
-Return ONLY a JSON array of actions. Each action must have:
-- "type": one of "follow_up", "send_quote", "payment_reminder", "add_note"
-- "contactId": the contact's id
-- "contactName": the contact's name
-- "reason": a brief actionable reason (max 80 chars)
-- "priority": "high", "medium", or "low"
+            content: `You are an elite CRM strategist for a Caribbean service business (Trinidad & Tobago, TTD currency). You think like a revenue-focused business advisor — every action you suggest should either protect existing revenue, unlock new revenue, or strengthen a relationship that leads to revenue.
 
-Rules:
-- STALE contacts → suggest "follow_up" to re-engage
-- HIGH_SCORE_NO_QUOTE → suggest "send_quote"
-- OVERDUE_INVOICE → suggest "payment_reminder"
-- NEW_NO_NOTES → suggest "add_note"
-- Return max 8 actions, sorted by priority (high first)
-- Be specific and actionable in reasons`,
+${businessContext}
+
+ANALYZE the contact profiles below and return a prioritized JSON array of next-best-actions. Each action MUST have:
+- "type": one of "follow_up" | "send_quote" | "payment_reminder" | "add_note" | "review_request" | "referral_request" | "thank_you" | "re_engage"
+- "contactId": the contact's ID (exact match from data)
+- "contactName": the contact's name
+- "reason": specific, actionable reason referencing actual data (max 100 chars). Never generic — cite numbers, days, amounts.
+- "priority": "high" | "medium" | "low"
+- "estimatedImpact": "revenue" | "retention" | "growth" — what business outcome does this action serve?
+- "confidence": 0.0-1.0 — how confident are you this is the right action?
+
+PRIORITIZATION RULES (in order):
+1. REVENUE AT RISK: Overdue invoices > TTD 500 are always high priority. Cite the amount.
+2. HOT LEADS GOING COLD: High-score leads without quotes — every day in pipeline without a proposal loses momentum.
+3. POST-SESSION GOLD: Within 48h of a completed booking is the best time for reviews, referrals, and upsells.
+4. HIGH-VALUE DORMANCY: Clients with strong revenue history going silent is a churn signal. Re-engage before they leave.
+5. RELATIONSHIP BUILDING: Thank-you messages after payments build loyalty. Review/referral requests from happy clients fuel growth.
+6. NEW LEAD CAPTURE: New leads without notes means no qualification — add notes to progress them.
+7. STALE RE-ENGAGEMENT: Contacts silent 14+ days need a touch, but prioritize by their revenue potential.
+
+TONE RULES:
+- Be specific: "Follow up on TTD 2,400 overdue invoice INV-042 — 12 days past due" NOT "Follow up on payment"
+- Be actionable: Start reasons with a verb — "Send", "Call", "Schedule", "Request", "Thank"
+- Be data-driven: Reference scores, amounts, days, counts from the profile data
+- Caribbean warmth: These are relationship-first businesses — suggestions should feel human, not transactional
+
+Return max 10 actions. Sort by priority (high first), then by estimated impact (revenue > retention > growth), then by confidence. Return ONLY the JSON array, no markdown.`,
           },
           {
             role: 'user',
-            content: `Here are the contacts needing attention:\n${contactSummaries.join('\n')}`,
+            content: `Contacts requiring attention:\n\n${contactProfiles.join('\n')}`,
           },
         ],
         outputCategory: 'general',
@@ -1064,7 +1216,7 @@ Rules:
       const parsed = JSON.parse(result.content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim());
       if (!Array.isArray(parsed)) return [];
 
-      const validTypes = ['follow_up', 'send_quote', 'payment_reminder', 'add_note'];
+      const validTypes = ['follow_up', 'send_quote', 'payment_reminder', 'add_note', 'review_request', 'referral_request', 'thank_you', 're_engage'];
       const validPriorities = ['high', 'medium', 'low'];
 
       return parsed
@@ -1072,21 +1224,25 @@ Rules:
           a && typeof a === 'object' &&
           validTypes.includes(a.type) &&
           typeof a.contactId === 'string' &&
+          knownContactIds.has(a.contactId) &&
           typeof a.contactName === 'string' &&
           typeof a.reason === 'string' &&
           validPriorities.includes(a.priority)
         )
-        .slice(0, 8)
+        .slice(0, 10)
         .map((a: any) => ({
-          type: a.type,
+          type: a.type as AiNextAction['type'],
           contactId: a.contactId,
           contactName: a.contactName,
-          reason: a.reason.slice(0, 120),
+          reason: a.reason.slice(0, 140),
           priority: a.priority,
         }));
     } catch (err) {
       this.logger.warn('AI next actions generation failed', (err as Error).message);
-      return this.getFallbackAiActions(staleContacts, highScoreNoQuote, overdueInvoiceContacts, newLeadsNoNotes);
+      return this.getFallbackAiActions(
+        staleContacts, highScoreNoQuote, overdueInvoiceContacts, newLeadsNoNotes,
+        recentlyCompletedBookings, highRevenueInactive, recentlyPaidClients,
+      );
     }
   }
 
@@ -1095,15 +1251,19 @@ Rules:
     highScore: any[],
     overdue: any[],
     newNoNotes: any[],
+    completedBookings?: any[],
+    highRevInactive?: any[],
+    recentPaid?: any[],
   ): AiNextAction[] {
     const actions: AiNextAction[] = [];
 
-    for (const c of stale.slice(0, 2)) {
+    for (const c of overdue.slice(0, 2)) {
+      const totalOverdue = c.invoices?.reduce((sum: number, inv: any) => sum + (Number(inv.total) || 0), 0) ?? 0;
       actions.push({
-        type: 'follow_up',
+        type: 'payment_reminder',
         contactId: c.id,
         contactName: this.contactName(c),
-        reason: `Re-engage ${this.contactName(c)} — no interaction in 14+ days`,
+        reason: `Collect TTD ${totalOverdue.toLocaleString()} overdue from ${this.contactName(c)}`,
         priority: 'high',
       });
     }
@@ -1112,29 +1272,64 @@ Rules:
         type: 'send_quote',
         contactId: c.id,
         contactName: this.contactName(c),
-        reason: `Send quote to ${this.contactName(c)} — high lead score (${c.leadScore}) but no quote`,
+        reason: `Send proposal to ${this.contactName(c)} — lead score ${c.leadScore}, no quote sent yet`,
         priority: 'high',
       });
     }
-    for (const c of overdue.slice(0, 2)) {
+    if (completedBookings) {
+      for (const b of completedBookings.slice(0, 2)) {
+        if (!b.contact) continue;
+        actions.push({
+          type: 'follow_up',
+          contactId: b.contact.id,
+          contactName: this.contactName(b.contact),
+          reason: `Send post-session follow-up to ${this.contactName(b.contact)} — ${b.service?.name || 'booking'} just completed`,
+          priority: 'high',
+        });
+      }
+    }
+    if (highRevInactive) {
+      for (const c of highRevInactive.slice(0, 2)) {
+        actions.push({
+          type: 'follow_up',
+          contactId: c.id,
+          contactName: this.contactName(c),
+          reason: `Re-engage high-value client ${this.contactName(c)} — going dormant`,
+          priority: 'high',
+        });
+      }
+    }
+    for (const c of stale.slice(0, 2)) {
       actions.push({
-        type: 'payment_reminder',
+        type: 'follow_up',
         contactId: c.id,
         contactName: this.contactName(c),
-        reason: `Follow up on payment with ${this.contactName(c)} — overdue invoices`,
+        reason: `Re-engage ${this.contactName(c)} — no interaction in 14+ days`,
         priority: 'medium',
       });
+    }
+    if (recentPaid) {
+      for (const inv of recentPaid.slice(0, 1)) {
+        if (!inv.contact) continue;
+        actions.push({
+          type: 'follow_up',
+          contactId: inv.contact.id,
+          contactName: this.contactName(inv.contact),
+          reason: `Thank ${this.contactName(inv.contact)} for recent payment — build loyalty`,
+          priority: 'medium',
+        });
+      }
     }
     for (const c of newNoNotes.slice(0, 2)) {
       actions.push({
         type: 'add_note',
         contactId: c.id,
         contactName: this.contactName(c),
-        reason: `Add notes for ${this.contactName(c)} — new lead with no notes`,
+        reason: `Qualify new lead ${this.contactName(c)} — no notes captured yet`,
         priority: 'low',
       });
     }
 
-    return actions.slice(0, 8);
+    return actions.slice(0, 10);
   }
 }
