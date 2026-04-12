@@ -27,7 +27,7 @@ import NextLink from "next/link";
 import { EmptyState } from "@/components/ui/empty-state";
 import type { Service, StaffMember, Booking } from "./bookings-types";
 import { formatAmount } from "../../commerce/utils/commerce-utils";
-import { fetchStaffAvailability, setStaffAvailability, updateService } from "@/lib/client";
+import { fetchStaffAvailability, setStaffAvailability, updateService, getBusinessById, updateBusiness } from "@/lib/client";
 import { toast } from "sonner";
 
 const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -48,6 +48,8 @@ interface CatalogCapacityTabProps {
   onDisconnectCalendar: () => void;
   loading: boolean;
   businessId?: string | null;
+  businessHoursSet?: boolean;
+  onBusinessHoursSaved?: () => void;
 }
 
 const stagger = {
@@ -59,32 +61,26 @@ const stagger = {
 };
 
 const HOUR_PRESETS = [
-  { label: "Mon–Fri 9–5", apply: (setHours: (fn: (prev: HoursMap) => HoursMap) => void) => {
-    setHours(() => {
-      const h: HoursMap = {};
-      for (let i = 0; i < 7; i++) h[i] = { open: "09:00", close: "17:00", enabled: i >= 1 && i <= 5 };
-      return h;
-    });
+  { label: "Mon–Fri 9–5", make: (): HoursMap => {
+    const h: HoursMap = {};
+    for (let i = 0; i < 7; i++) h[i] = { open: "09:00", close: "17:00", enabled: i >= 1 && i <= 5 };
+    return h;
   }},
-  { label: "Mon–Sat 8–6", apply: (setHours: (fn: (prev: HoursMap) => HoursMap) => void) => {
-    setHours(() => {
-      const h: HoursMap = {};
-      for (let i = 0; i < 7; i++) h[i] = { open: "08:00", close: "18:00", enabled: i >= 1 && i <= 6 };
-      return h;
-    });
+  { label: "Mon–Sat 8–6", make: (): HoursMap => {
+    const h: HoursMap = {};
+    for (let i = 0; i < 7; i++) h[i] = { open: "08:00", close: "18:00", enabled: i >= 1 && i <= 6 };
+    return h;
   }},
-  { label: "Every Day 9–5", apply: (setHours: (fn: (prev: HoursMap) => HoursMap) => void) => {
-    setHours(() => {
-      const h: HoursMap = {};
-      for (let i = 0; i < 7; i++) h[i] = { open: "09:00", close: "17:00", enabled: true };
-      return h;
-    });
+  { label: "Every Day 9–5", make: (): HoursMap => {
+    const h: HoursMap = {};
+    for (let i = 0; i < 7; i++) h[i] = { open: "09:00", close: "17:00", enabled: true };
+    return h;
   }},
 ];
 
 type HoursMap = Record<number, { open: string; close: string; enabled: boolean }>;
 
-function AvailabilityHours() {
+function AvailabilityHours({ businessId, onSaved }: { businessId?: string | null; onSaved?: () => void }) {
   const [hours, setHours] = useState<HoursMap>(() => {
     const defaults: HoursMap = {};
     for (let i = 0; i < 7; i++) {
@@ -92,6 +88,56 @@ function AvailabilityHours() {
     }
     return defaults;
   });
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [loadedForBiz, setLoadedForBiz] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!businessId || loadedForBiz === businessId) return;
+    getBusinessById(businessId).then((res) => {
+      const bh = res.data?.businessHours;
+      if (bh) {
+        const parsed: HoursMap = {};
+        for (let i = 0; i < 7; i++) {
+          const key = DAY_LABELS[i].toLowerCase();
+          const entry = bh[key];
+          if (entry) {
+            parsed[i] = { open: entry.open ?? "09:00", close: entry.close ?? "17:00", enabled: !entry.closed };
+          } else {
+            parsed[i] = { open: "09:00", close: "17:00", enabled: i >= 1 && i <= 5 };
+          }
+        }
+        setHours(parsed);
+      }
+      setLoadedForBiz(businessId);
+      setDirty(false);
+    }).catch(() => setLoadedForBiz(businessId));
+  }, [businessId, loadedForBiz]);
+
+  const updateHours = useCallback((fn: (prev: HoursMap) => HoursMap) => {
+    setHours(fn);
+    setDirty(true);
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    if (!businessId) return;
+    setSaving(true);
+    const payload: Record<string, { open: string; close: string; closed: boolean }> = {};
+    for (let i = 0; i < 7; i++) {
+      const key = DAY_LABELS[i].toLowerCase();
+      payload[key] = { open: hours[i].open, close: hours[i].close, closed: !hours[i].enabled };
+    }
+    try {
+      await updateBusiness({ businessId, businessHours: payload });
+      toast.success("Business hours saved");
+      setDirty(false);
+      onSaved?.();
+    } catch {
+      toast.error("Failed to save business hours");
+    } finally {
+      setSaving(false);
+    }
+  }, [businessId, hours, onSaved]);
 
   const activeDays = Object.values(hours).filter((h) => h.enabled).length;
   const totalHours = Object.values(hours)
@@ -112,13 +158,27 @@ function AvailabilityHours() {
             {activeDays} days · {Math.round(totalHours)}h/week
           </span>
         </div>
+        <button
+          onClick={handleSave}
+          disabled={saving || !dirty}
+          className="inline-flex items-center gap-1 px-2.5 min-h-[36px] text-[10px] font-medium rounded-lg transition-colors disabled:opacity-40"
+          style={{
+            background: dirty ? "hsl(var(--kf-accent1) / 0.1)" : "hsl(var(--muted) / 0.1)",
+            color: dirty ? "hsl(var(--kf-accent1))" : "hsl(var(--muted-foreground))",
+            borderWidth: 1,
+            borderColor: dirty ? "hsl(var(--kf-accent1) / 0.2)" : "hsl(var(--border) / 0.3)",
+          }}
+        >
+          <Save className="w-2.5 h-2.5" />
+          {saving ? "Saving..." : "Save Hours"}
+        </button>
       </div>
 
       <div className="flex items-center gap-1.5 flex-wrap">
         {HOUR_PRESETS.map((preset) => (
           <button
             key={preset.label}
-            onClick={() => preset.apply(setHours)}
+            onClick={() => updateHours(() => preset.make())}
             className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium transition-colors hover:bg-muted/20"
             style={{
               background: "hsl(var(--muted) / 0.1)",
@@ -140,7 +200,7 @@ function AvailabilityHours() {
             <div key={day} className="flex items-center gap-2 py-1">
               <button
                 onClick={() =>
-                  setHours((prev) => ({
+                  updateHours((prev) => ({
                     ...prev,
                     [idx]: { ...prev[idx], enabled: !prev[idx].enabled },
                   }))
@@ -162,7 +222,7 @@ function AvailabilityHours() {
                     type="time"
                     value={entry.open}
                     onChange={(e) =>
-                      setHours((prev) => ({
+                      updateHours((prev) => ({
                         ...prev,
                         [idx]: { ...prev[idx], open: e.target.value },
                       }))
@@ -174,7 +234,7 @@ function AvailabilityHours() {
                     type="time"
                     value={entry.close}
                     onChange={(e) =>
-                      setHours((prev) => ({
+                      updateHours((prev) => ({
                         ...prev,
                         [idx]: { ...prev[idx], close: e.target.value },
                       }))
@@ -524,6 +584,8 @@ export default function CatalogCapacityTab({
   onDisconnectCalendar,
   loading,
   businessId,
+  businessHoursSet,
+  onBusinessHoursSaved,
 }: CatalogCapacityTabProps) {
   const [setupTab, setSetupTab] = useState<"services" | "staff" | "availability" | "hours">("services");
 
@@ -553,11 +615,11 @@ export default function CatalogCapacityTab({
     const items: { label: string; ok: boolean; tabKey: "services" | "staff" | "availability" | "hours" }[] = [
       { label: `${services.length} service${services.length !== 1 ? "s" : ""} configured`, ok: services.length > 0, tabKey: "services" },
       { label: `${staff.length} staff assigned`, ok: staff.length > 0, tabKey: "staff" },
-      { label: "Business hours set", ok: true, tabKey: "hours" },
+      { label: "Business hours set", ok: !!businessHoursSet, tabKey: "hours" },
       { label: "Calendar connected", ok: calendarConnected, tabKey: "hours" },
     ];
     return items;
-  }, [services, staff, calendarConnected]);
+  }, [services, staff, calendarConnected, businessHoursSet]);
 
   const readyCount = readinessItems.filter((r) => r.ok).length;
 
@@ -944,7 +1006,7 @@ export default function CatalogCapacityTab({
 
       {setupTab === "hours" && (
         <motion.div variants={stagger.item} className="space-y-4">
-          <AvailabilityHours />
+          <AvailabilityHours businessId={businessId} onSaved={onBusinessHoursSaved} />
 
           <motion.div variants={stagger.item} className="space-y-2">
             <div className="flex items-center gap-2">
