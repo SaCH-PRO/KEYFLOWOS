@@ -15,6 +15,7 @@ import { AiPrepBriefPanel } from "./ai-prep-brief";
 import { AiTagSuggestionsPanel } from "./ai-tag-suggestions";
 import { CommunicationLogger } from "./communication-logger";
 import { NextBestActionCard } from "./next-best-action-card";
+import { RelationshipHealthStrip } from "./relationship-health-strip";
 
 export type ContactDetailData = {
   id: string;
@@ -219,7 +220,7 @@ export function ContactDetail({
         <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center mb-4">
           <MessageSquare className="w-8 h-8 text-muted-foreground" />
         </div>
-        <p className="text-muted-foreground">Select a contact to view details</p>
+        <p className="text-muted-foreground">Select a client to view details</p>
       </div>
     );
   }
@@ -276,6 +277,27 @@ export function ContactDetail({
           />
         </div>
 
+        <div className="shrink-0">
+          <RelationshipHealthStrip
+            healthMetrics={healthMetrics}
+            outstandingBalance={contact.meta?.outstandingBalance}
+            totalRevenue={contact.meta?.totalRevenue}
+            nextBooking={bookings?.[0]?.startTime}
+            bookingCount={contact.meta?.bookingCount ?? 0}
+            lastInteraction={contact.meta?.lastInteractionAt}
+          />
+        </div>
+
+        {(aiInsight || onGenerateAiInsight) && (
+          <div className="shrink-0">
+            <NextBestActionCard
+              aiInsight={aiInsight}
+              loading={aiInsightLoading}
+              onGenerate={onGenerateAiInsight}
+            />
+          </div>
+        )}
+
         {onLogCommunication && (
           <div className="shrink-0">
             <button
@@ -300,16 +322,6 @@ export function ContactDetail({
         <div className="shrink-0">
           <ContactDetailInfo contact={contact} relatedContacts={relatedContacts} onSelectRelatedContact={onSelectRelatedContact} />
         </div>
-
-        {(aiInsight || onGenerateAiInsight) && (
-          <div className="shrink-0">
-            <NextBestActionCard
-              aiInsight={aiInsight}
-              loading={aiInsightLoading}
-              onGenerate={onGenerateAiInsight}
-            />
-          </div>
-        )}
 
         <div className="flex-1 min-h-0 flex flex-col">
           <ContactDetailTabs

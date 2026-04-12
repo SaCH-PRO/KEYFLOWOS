@@ -16,7 +16,7 @@ interface ProgressivePrompt {
   ctaHref: string;
 }
 
-export function ProgressivePrompts({ businessId, moduleFilter }: { businessId: string | null; moduleFilter?: string[] }) {
+export function ProgressivePrompts({ businessId = null, moduleFilter }: { businessId?: string | null; moduleFilter?: string[] }) {
   const router = useRouter();
   const [prompts, setPrompts] = useState<ProgressivePrompt[]>([]);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());

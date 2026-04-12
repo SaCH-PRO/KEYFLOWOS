@@ -21,6 +21,7 @@ import { ModuleWalkthrough, WalkthroughTrigger } from "@/components/ui/module-wa
 import { InfoBadge } from "@/components/ui/info-badge";
 import { CRM_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { PipelineTabContent } from "./pipeline-tab-content";
+import { ClientsMetricsStrip } from "./clients-metrics-strip";
 import { useContactsPipeline } from "./use-contacts-pipeline";
 import { useCrmAiHub } from "./hooks/use-crm-ai-hub";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
@@ -77,10 +78,10 @@ export default function ContactsPage() {
     {
       groupName: "CRM Navigation",
       shortcuts: [
-        { key: "n", description: "New contact", action: () => state.setShowAddMenu(true) },
-        { key: "f", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('input[aria-label="Search contacts"]'); el?.focus(); } },
-        { key: "1", description: "Contacts tab", action: () => setCrmViewTab("contacts") },
-        { key: "r", description: "Refresh contacts", action: () => { void loadContacts(); void loadFlowData(); } },
+        { key: "n", description: "New client", action: () => state.setShowAddMenu(true) },
+        { key: "f", description: "Focus search", action: () => { const el = document.querySelector<HTMLInputElement>('input[aria-label="Search clients"]'); el?.focus(); } },
+        { key: "1", description: "Clients tab", action: () => setCrmViewTab("contacts") },
+        { key: "r", description: "Refresh clients", action: () => { void loadContacts(); void loadFlowData(); } },
         { key: "b", description: "Open broadcast", action: () => state.setShowBroadcast(true) },
       ],
     },
@@ -186,24 +187,24 @@ export default function ContactsPage() {
   }
 
   return (
-    <div className="space-y-6" aria-label="CRM Pipeline">
+    <div className="space-y-4" aria-label="Clients Workspace">
       <PageHeader
         icon={Users}
-        title="Contacts"
-        subtitle={<span className="inline-flex items-center gap-1.5">Your AI-powered contact management hub <InfoBadge title="CRM Overview" body="Your CRM centralizes all contact data, lead scoring, communication history, and AI insights. Use Smart Segments to quickly filter contacts by engagement level." side="bottom" iconSize={12} /></span>}
+        title="Clients"
+        subtitle={<span className="inline-flex items-center gap-1.5">Manage relationships, follow-ups, health, and client activity across your pipeline <InfoBadge title="Client Workspace" body="Your client workspace centralizes relationship intelligence, communication history, and AI-powered insights. Use Smart Segments to triage clients by engagement and health." side="bottom" iconSize={12} /></span>}
         titleExtra={
           <div className="flex items-center gap-2">
             <FeatureGuide
               featureKey="crm-pipeline"
-              title="Getting Started with CRM"
-              description="Manage your contacts, track relationships, and grow your business."
+              title="Getting Started with Clients"
+              description="Triage relationships, track health, and take action on what matters."
               steps={[
-                { title: "Add Contacts", description: "Create manually, scan business cards, import CSV/VCF, or sync from Google Contacts." },
+                { title: "Add Clients", description: "Create manually, scan business cards, import CSV/VCF, or sync from Google Contacts." },
                 { title: "Smart Segments", description: "Filter with one-tap segments like High Value, New This Week, and At Risk." },
-                { title: "Communicate", description: "Reach out via WhatsApp, email, or phone directly from any contact card." },
-                { title: "Bulk Actions", description: "Select multiple contacts for broadcast messages, tagging, or status updates." },
+                { title: "Communicate", description: "Reach out via WhatsApp, email, or phone directly from any client card." },
+                { title: "Bulk Actions", description: "Select multiple clients for broadcast messages, tagging, or status updates." },
                 { title: "Insights & AI", description: "Track pipeline health, revenue data, and use AI tools for summaries and scoring." },
-                { title: "Studio", description: "Use the database view for bulk operations, smart lists, and data cleanup." },
+                { title: "Action Queue", description: "See who needs attention and why — sorted by urgency and value." },
               ]}
             />
             <WalkthroughTrigger moduleKey="crm" />
@@ -216,6 +217,16 @@ export default function ContactsPage() {
         const cl = checkLimit("contacts");
         return <PlanLimitBanner resourceKey="contacts" label="contacts" currentUsage={cl.current} limit={cl.limit} isUnlimited={cl.isUnlimited} nearLimit={cl.nearLimit} atLimit={cl.atLimit} upgradeTo={cl.upgradeTo} />;
       })()}
+
+      <ClientsMetricsStrip
+        totalClients={contacts.length}
+        activeClients={state.flowIntelligence?.clients ?? contacts.filter((c) => c.status === "CLIENT").length}
+        followUpsDue={state.segmentCounts["needs-followup"] ?? 0}
+        atRisk={state.segmentCounts["at-risk"] ?? 0}
+        newThisWeek={state.segmentCounts["new-this-week"] ?? 0}
+        highValue={state.segmentCounts["high-value"] ?? 0}
+        onSegmentClick={state.setActiveSegment}
+      />
 
       <PipelineTabContent
         state={state}
