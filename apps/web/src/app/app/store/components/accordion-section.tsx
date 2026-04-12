@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, useId, type ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronRight } from "lucide-react";
 
@@ -25,6 +25,8 @@ export function AccordionSection({
 }: AccordionSectionProps) {
   const [open, setOpen] = useState(defaultOpen);
   const accent = accentColor || "hsl(var(--kf-accent1))";
+  const triggerId = useId();
+  const panelId = useId();
 
   return (
     <div
@@ -36,8 +38,10 @@ export function AccordionSection({
     >
       <button
         type="button"
+        id={triggerId}
         onClick={() => setOpen(!open)}
         aria-expanded={open}
+        aria-controls={panelId}
         className="w-full flex items-center gap-3 px-4 py-3.5 text-left min-h-[52px] transition-colors hover:bg-[hsl(var(--kf-muted)/0.15)]"
       >
         <div
@@ -82,6 +86,9 @@ export function AccordionSection({
             className="overflow-hidden"
           >
             <div
+              id={panelId}
+              role="region"
+              aria-labelledby={triggerId}
               className="px-4 pb-4 pt-1"
               style={{ borderTop: "1px solid hsl(var(--kf-border) / 0.3)" }}
             >
