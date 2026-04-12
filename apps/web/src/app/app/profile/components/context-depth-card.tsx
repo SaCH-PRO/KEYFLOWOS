@@ -8,7 +8,6 @@ import {
   Users, Shield, Lightbulb, Settings, Target,
 } from "lucide-react";
 import { apiGet } from "@/lib/api";
-import { getStoredBusinessId } from "@/lib/workspace";
 
 interface TierScore {
   tierId: string;
@@ -63,22 +62,24 @@ const SUB_PROFILE_LABELS: Record<string, string> = {
   intellectualProperty: "Intellectual Property",
 };
 
-export function ContextDepthCard() {
+export function ContextDepthCard({ businessId }: { businessId: string | null }) {
   const [data, setData] = useState<TieredCompletenessResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedTier, setExpandedTier] = useState<string | null>(null);
 
   useEffect(() => {
-    const businessId = getStoredBusinessId();
     if (!businessId) { setLoading(false); return; }
+    setLoading(true);
 
     apiGet<TieredCompletenessResult>(`/identity/businesses/${businessId}/tiered-completeness`)
       .then(({ data: result }) => {
         if (result) setData(result);
       })
-      .catch(() => {})
+      .catch((err) => {
+        console.error("Failed to load tiered completeness:", err);
+      })
       .finally(() => setLoading(false));
-  }, []);
+  }, [businessId]);
 
   const toggleTier = useCallback((tierId: string) => {
     setExpandedTier(prev => prev === tierId ? null : tierId);

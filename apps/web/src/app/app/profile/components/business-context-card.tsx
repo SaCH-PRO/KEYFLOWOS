@@ -1,18 +1,10 @@
 "use client";
 
 import { Building2, Briefcase, TrendingUp, User, Target, Sparkles } from "lucide-react";
-
-interface BusinessData {
-  name?: string;
-  industry?: string;
-  businessStage?: string;
-  teamSize?: string;
-  city?: string;
-  country?: string;
-}
+import type { ProfileBusinessData } from "./profile-types";
 
 interface BusinessContextCardProps {
-  businessData: BusinessData | null;
+  businessData: ProfileBusinessData | null;
 }
 
 export function BusinessContextCard({ businessData }: BusinessContextCardProps) {

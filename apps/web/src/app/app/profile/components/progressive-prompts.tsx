@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles, X, ArrowRight } from "lucide-react";
 import { apiGet } from "@/lib/api";
-import { getStoredBusinessId } from "@/lib/workspace";
 
 interface ProgressivePrompt {
   id: string;
@@ -17,31 +16,34 @@ interface ProgressivePrompt {
   ctaHref: string;
 }
 
-export function ProgressivePrompts({ moduleFilter }: { moduleFilter?: string[] } = {}) {
+export function ProgressivePrompts({ businessId, moduleFilter }: { businessId: string | null; moduleFilter?: string[] }) {
   const router = useRouter();
   const [prompts, setPrompts] = useState<ProgressivePrompt[]>([]);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const businessId = getStoredBusinessId();
     if (!businessId) { setLoading(false); return; }
+    setLoading(true);
 
     const stored = localStorage.getItem(`dismissed-prompts-${businessId}`);
-    if (stored) {
-      try { setDismissed(new Set(JSON.parse(stored))); } catch {}
+    try {
+      setDismissed(stored ? new Set(JSON.parse(stored)) : new Set());
+    } catch {
+      setDismissed(new Set());
     }
 
     apiGet<ProgressivePrompt[]>(`/identity/businesses/${businessId}/progressive-prompts`)
       .then(({ data }) => {
         if (data) setPrompts(data);
       })
-      .catch(() => {})
+      .catch((err) => {
+        console.error("Failed to load progressive prompts:", err);
+      })
       .finally(() => setLoading(false));
-  }, []);
+  }, [businessId]);
 
   const dismiss = useCallback((promptId: string) => {
-    const businessId = getStoredBusinessId();
     setDismissed(prev => {
       const next = new Set(prev);
       next.add(promptId);
@@ -50,7 +52,7 @@ export function ProgressivePrompts({ moduleFilter }: { moduleFilter?: string[] }
       }
       return next;
     });
-  }, []);
+  }, [businessId]);
 
   if (loading) return null;
 
