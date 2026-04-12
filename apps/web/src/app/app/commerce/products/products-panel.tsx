@@ -545,15 +545,15 @@ export const ProductsPanel = React.memo(function ProductsPanel({
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3">
-            {Array.from({ length: 9 }).map((_, i) => (
+          <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
+            {Array.from({ length: 12 }).map((_, i) => (
               <div
                 key={i}
                 className="relative rounded-xl border border-border/50 bg-card overflow-hidden"
                 style={{ animation: `pulse 1.5s ease-in-out ${i * 0.08}s infinite` }}
               >
-                <div className="aspect-square bg-muted/20 w-full" />
-                <div className="absolute bottom-0 left-0 right-0 p-2 space-y-1.5">
+                <div className="h-[72px] bg-muted/20 w-full" />
+                <div className="px-2 py-1.5 space-y-1">
                   <div className="h-3 bg-muted/30 rounded w-3/4" />
                   <div className="h-3 bg-muted/30 rounded w-1/2" />
                 </div>
@@ -626,7 +626,7 @@ export const ProductsPanel = React.memo(function ProductsPanel({
             </div>
           )}
           {viewMode === "grid" ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3">
+            <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
               <AnimatePresence mode="popLayout">
                 {filteredProducts.map((product) => (
                   <div key={product.id} className="relative">

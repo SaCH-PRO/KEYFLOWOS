@@ -106,7 +106,7 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index < 10 ? index * 0.02 : 0 }}
       onClick={onClick}
-      className={`rounded-xl border bg-card px-3 py-2.5 cursor-pointer transition-all hover:bg-white/[0.02] group ${
+      className={`rounded-xl border bg-card px-3 py-2 cursor-pointer transition-all hover:bg-white/[0.02] group ${
         isSelected ? "border-[hsl(var(--kf-accent1))]/50 bg-[hsl(var(--kf-accent1))]/[0.04]" : "border-border/40"
       } ${selected ? "border-[hsl(var(--kf-accent2))]/50 bg-[hsl(var(--kf-accent2))]/[0.04]" : ""}`}
     >

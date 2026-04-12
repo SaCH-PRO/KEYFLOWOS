@@ -14,6 +14,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 
 **UI/UX Decisions:**
 - Redesigned design system with a warm Caribbean color palette (orange `#F97316` primary, teal `#14B8A6` secondary), selective glassmorphism, clean elevation system, and PWA capabilities.
+- **Compact UI Rule**: All listing/grid views must be compact, minimizing vertical height and scrolling. Hover reveals additional info (tooltips/overlays), click opens full detail interface. Applied across ProductCard (72px image + inline info), BillingCard (single-row layout), BookingList (tight rows), ExpenseList (dense table rows), ContactCard, PostCard, CourseCard, and CommunityPostCard.
 - Compact UI elements, unified design language, enhanced data tables, and accessible design with ARIA compliance.
 - Product detail and form components emphasize inline editing, real-time previews, validation, and performance.
 - Standardized shared component library and consolidated shell design.
