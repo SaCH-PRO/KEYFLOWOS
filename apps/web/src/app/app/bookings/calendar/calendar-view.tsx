@@ -12,6 +12,7 @@ import {
   List,
 } from "lucide-react";
 import type { Booking } from "../components/bookings-types";
+import type { GoogleCalendarEvent } from "@/lib/client";
 import { contactName } from "../components/bookings-types";
 import MonthGrid from "./month-grid";
 import WeekTimeline from "./week-timeline";
@@ -21,6 +22,7 @@ type ViewMode = "month" | "week" | "day";
 
 interface CalendarViewProps {
   bookings: Booking[];
+  googleEvents?: GoogleCalendarEvent[];
   onSelectBooking: (booking: Booking) => void;
   onCreateBooking?: (prefill: { date: string; time?: string }) => void;
   onSmartAction?: (booking: Booking, action: string) => void;
@@ -42,6 +44,7 @@ const VIEW_ICONS: Record<ViewMode, typeof CalendarDays> = {
 
 export default function CalendarView({
   bookings,
+  googleEvents = [],
   onSelectBooking,
   onCreateBooking,
   onSmartAction,
@@ -74,6 +77,18 @@ export default function CalendarView({
       return name.includes(q) || serviceName.includes(q) || staffName.includes(q);
     });
   }, [bookings, search]);
+
+  const filteredGoogleEvents = useMemo(() => {
+    if (!search.trim()) return googleEvents;
+    const q = search.toLowerCase();
+    return googleEvents.filter((e) => {
+      return (
+        e.summary.toLowerCase().includes(q) ||
+        (e.description?.toLowerCase().includes(q) ?? false) ||
+        (e.location?.toLowerCase().includes(q) ?? false)
+      );
+    });
+  }, [googleEvents, search]);
 
   const navigatePrev = useCallback(() => {
     setCurrentDate((d) => {
@@ -165,6 +180,17 @@ export default function CalendarView({
             style={{ color: "hsl(var(--kf-accent1))" }}
           />
           <h3 className="text-sm font-semibold truncate">{headerLabel}</h3>
+          {googleEvents.length > 0 && (
+            <span
+              className="ml-1.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium"
+              style={{
+                background: "hsl(var(--kf-accent2) / 0.15)",
+                color: "hsl(var(--kf-accent2))",
+              }}
+            >
+              Google
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -248,6 +274,7 @@ export default function CalendarView({
           {viewMode === "month" && (
             <MonthGrid
               bookings={filteredBookings}
+              googleEvents={filteredGoogleEvents}
               currentDate={currentDate}
               onSelectDay={handleSelectDay}
               selectedDay={selectedDay}
@@ -256,6 +283,7 @@ export default function CalendarView({
           {viewMode === "week" && (
             <WeekTimeline
               bookings={filteredBookings}
+              googleEvents={filteredGoogleEvents}
               currentDate={currentDate}
               onSelectBooking={onSelectBooking}
               onSlotClick={handleSlotClick}
@@ -265,6 +293,7 @@ export default function CalendarView({
           {viewMode === "day" && (
             <DayTimeline
               bookings={filteredBookings}
+              googleEvents={filteredGoogleEvents}
               currentDate={currentDate}
               onSelectBooking={onSelectBooking}
               onSlotClick={handleSlotClick}

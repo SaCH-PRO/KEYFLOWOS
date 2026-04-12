@@ -57,3 +57,11 @@ export function getWeekDays(baseDate: Date): Date[] {
 export function isSameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
+
+export function toLocalDateKey(d: Date | string): string {
+  const date = typeof d === "string" ? new Date(d) : d;
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}

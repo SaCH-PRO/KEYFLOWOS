@@ -16,6 +16,7 @@ import {
   Contact,
   BookingStats,
   ScheduleHealth,
+  GoogleCalendarEvent,
   createBooking,
   rescheduleBooking,
   updateBookingNotes,
@@ -30,6 +31,7 @@ import {
   updateBookingStatus,
   fetchBookingStats,
   fetchScheduleHealth,
+  fetchGoogleCalendarEvents,
   getBusinessById,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
@@ -93,6 +95,7 @@ export default function BookingsPage() {
   const [calendarConnected, setCalendarConnected] = useState(false);
   const [calendarEmail, setCalendarEmail] = useState<string | null>(null);
   const [calendarLoading, setCalendarLoading] = useState(false);
+  const [googleEvents, setGoogleEvents] = useState<GoogleCalendarEvent[]>([]);
   const [banner, setBanner] = useState<{ text: string; type: "success" | "error" | "info" } | null>(null);
 
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
@@ -199,6 +202,24 @@ export default function BookingsPage() {
   }, [businessId]);
 
   useEffect(() => { void loadData(); }, [loadData]);
+
+  const loadGoogleEvents = useCallback(async () => {
+    if (!businessId || !calendarConnected) {
+      setGoogleEvents([]);
+      return;
+    }
+    try {
+      const now = new Date();
+      const timeMin = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
+      const timeMax = new Date(now.getFullYear(), now.getMonth() + 3, 1).toISOString();
+      const res = await fetchGoogleCalendarEvents(businessId, timeMin, timeMax);
+      setGoogleEvents(res.data ?? []);
+    } catch {
+      setGoogleEvents([]);
+    }
+  }, [businessId, calendarConnected]);
+
+  useEffect(() => { void loadGoogleEvents(); }, [loadGoogleEvents]);
 
   useEffect(() => {
     if (businessId) {
@@ -548,6 +569,7 @@ export default function BookingsPage() {
               />
               <CalendarView
                 bookings={filteredBookings}
+                googleEvents={googleEvents}
                 onSelectBooking={setSelectedBooking}
                 onCreateBooking={handleCalendarCreate}
                 onSmartAction={handleSmartAction}

@@ -380,6 +380,70 @@ export class CalendarService {
     return eventId;
   }
 
+  async listCalendarEvents(
+    businessId: string,
+    timeMin: string,
+    timeMax: string,
+  ): Promise<Array<{
+    id: string;
+    summary: string;
+    description?: string;
+    start: string;
+    end: string;
+    allDay: boolean;
+    htmlLink?: string;
+    location?: string;
+    organizer?: string;
+  }>> {
+    try {
+      const accessToken = await this.refreshAccessToken(businessId);
+
+      const params = new URLSearchParams({
+        timeMin,
+        timeMax,
+        singleEvents: 'true',
+        orderBy: 'startTime',
+        maxResults: '250',
+      });
+
+      const res = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params.toString()}`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        },
+      );
+
+      if (!res.ok) {
+        const err = await res.text();
+        this.logger.error('Failed to list calendar events', err);
+        return [];
+      }
+
+      const data = await res.json();
+      const items: any[] = data.items ?? [];
+
+      return items
+        .filter((item: any) => item.status !== 'cancelled')
+        .map((item: any) => {
+          const allDay = !!(item.start?.date && !item.start?.dateTime);
+          return {
+            id: item.id,
+            summary: item.summary ?? '(No title)',
+            description: item.description ?? undefined,
+            start: allDay ? item.start.date : item.start.dateTime,
+            end: allDay ? item.end.date : item.end.dateTime,
+            allDay,
+            htmlLink: item.htmlLink ?? undefined,
+            location: item.location ?? undefined,
+            organizer: item.organizer?.email ?? undefined,
+          };
+        });
+    } catch (error) {
+      this.logger.error('Error listing calendar events', error);
+      return [];
+    }
+  }
+
   async removeBookingFromCalendar(bookingId: string): Promise<boolean> {
     const booking = await this.prisma.client.booking.findUnique({
       where: { id: bookingId },

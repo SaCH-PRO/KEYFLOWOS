@@ -63,7 +63,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Database:** PostgreSQL
 - **Authentication:** Supabase Auth
 - **AI:** OpenAI
-- **Google Services:** Google Calendar, Google Sign-In, Gmail, Google Contacts, Google Drive
+- **Google Services:** Google Calendar (bi-directional: push bookings + pull events into unified timeline), Google Sign-In, Gmail, Google Contacts, Google Drive
 - **Payment Gateways:** WiPay, PayPal, Google Pay (env-configurable production mode via NEXT_PUBLIC_GOOGLE_PAY_ENV)
 - **Rich Text:** TipTap (React)
 - **Charts:** Recharts

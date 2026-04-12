@@ -2,7 +2,8 @@
 
 import { useMemo } from "react";
 import type { Booking } from "../components/bookings-types";
-import { contactName } from "../components/bookings-types";
+import type { GoogleCalendarEvent } from "@/lib/client";
+import { contactName, toLocalDateKey } from "../components/bookings-types";
 
 const STATUS_DOT: Record<string, string> = {
   PENDING: "bg-[hsl(var(--kf-warning))]",
@@ -13,6 +14,7 @@ const STATUS_DOT: Record<string, string> = {
 
 interface MonthGridProps {
   bookings: Booking[];
+  googleEvents?: GoogleCalendarEvent[];
   currentDate: Date;
   onSelectDay: (date: Date) => void;
   selectedDay: Date | null;
@@ -28,6 +30,7 @@ function isSameDay(a: Date, b: Date) {
 
 export default function MonthGrid({
   bookings,
+  googleEvents = [],
   currentDate,
   onSelectDay,
   selectedDay,
@@ -66,12 +69,34 @@ export default function MonthGrid({
   const bookingsByDay = useMemo(() => {
     const map = new Map<string, Booking[]>();
     for (const b of bookings) {
-      const key = new Date(b.startTime).toISOString().split("T")[0];
+      const key = toLocalDateKey(b.startTime);
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(b);
     }
     return map;
   }, [bookings]);
+
+  const googleEventsByDay = useMemo(() => {
+    const map = new Map<string, GoogleCalendarEvent[]>();
+    for (const e of googleEvents) {
+      if (e.allDay) {
+        const startDate = new Date(e.start + "T00:00:00");
+        const endDate = new Date(e.end + "T00:00:00");
+        const cursor = new Date(startDate);
+        while (cursor < endDate) {
+          const key = toLocalDateKey(cursor);
+          if (!map.has(key)) map.set(key, []);
+          map.get(key)!.push(e);
+          cursor.setDate(cursor.getDate() + 1);
+        }
+      } else {
+        const key = toLocalDateKey(e.start);
+        if (!map.has(key)) map.set(key, []);
+        map.get(key)!.push(e);
+      }
+    }
+    return map;
+  }, [googleEvents]);
 
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -91,8 +116,10 @@ export default function MonthGrid({
         <div key={wi} className="grid grid-cols-7 gap-1">
           {week.map((day, di) => {
             if (!day) return <div key={di} />;
-            const key = day.toISOString().split("T")[0];
+            const key = toLocalDateKey(day);
             const dayBookings = bookingsByDay.get(key) ?? [];
+            const dayGoogleEvents = googleEventsByDay.get(key) ?? [];
+            const totalItems = dayBookings.length + dayGoogleEvents.length;
             const isCurrentMonth =
               day.getMonth() === monthStart.getMonth();
             const isToday = isSameDay(day, today);
@@ -126,31 +153,47 @@ export default function MonthGrid({
                 >
                   {day.getDate()}
                 </span>
-                {dayBookings.length > 0 && (
+                {totalItems > 0 && (
                   <div className="mt-1 space-y-0.5">
-                    {dayBookings.length <= 3 ? (
-                      dayBookings.map((b) => (
-                        <div
-                          key={b.id}
-                          className="flex items-center gap-1 truncate"
-                        >
+                    {totalItems <= 3 ? (
+                      <>
+                        {dayBookings.map((b) => (
                           <div
-                            className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                              STATUS_DOT[b.status] ?? "bg-slate-400"
-                            }`}
-                          />
-                          <span className="text-[9px] truncate text-muted-foreground">
-                            {b.service?.name ?? contactName(b)}
-                          </span>
-                          {b.notes && (
-                            <span className="text-[8px] text-muted-foreground/50 flex-shrink-0" title={b.notes}>📝</span>
-                          )}
-                        </div>
-                      ))
+                            key={b.id}
+                            className="flex items-center gap-1 truncate"
+                          >
+                            <div
+                              className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                                STATUS_DOT[b.status] ?? "bg-slate-400"
+                              }`}
+                            />
+                            <span className="text-[9px] truncate text-muted-foreground">
+                              {b.service?.name ?? contactName(b)}
+                            </span>
+                            {b.notes && (
+                              <span className="text-[8px] text-muted-foreground/50 flex-shrink-0" title={b.notes}>📝</span>
+                            )}
+                          </div>
+                        ))}
+                        {dayGoogleEvents.map((e) => (
+                          <div
+                            key={e.id}
+                            className="flex items-center gap-1 truncate"
+                          >
+                            <div
+                              className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                              style={{ background: "hsl(var(--kf-accent2))" }}
+                            />
+                            <span className="text-[9px] truncate" style={{ color: "hsl(var(--kf-accent2))" }}>
+                              {e.summary}
+                            </span>
+                          </div>
+                        ))}
+                      </>
                     ) : (
                       <div className="flex items-center gap-1">
                         <div className="flex -space-x-0.5">
-                          {dayBookings.slice(0, 4).map((b) => (
+                          {dayBookings.slice(0, 3).map((b) => (
                             <div
                               key={b.id}
                               className={`w-1.5 h-1.5 rounded-full ${
@@ -158,9 +201,16 @@ export default function MonthGrid({
                               }`}
                             />
                           ))}
+                          {dayGoogleEvents.slice(0, Math.max(1, 4 - dayBookings.length)).map((e) => (
+                            <div
+                              key={e.id}
+                              className="w-1.5 h-1.5 rounded-full"
+                              style={{ background: "hsl(var(--kf-accent2))" }}
+                            />
+                          ))}
                         </div>
                         <span className="text-[9px] text-muted-foreground font-medium">
-                          {dayBookings.length}
+                          {totalItems}
                         </span>
                       </div>
                     )}

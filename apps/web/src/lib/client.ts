@@ -1957,6 +1957,41 @@ export async function syncBookingToCalendar(bookingId: string, businessId?: stri
   });
 }
 
+export interface GoogleCalendarEvent {
+  id: string;
+  summary: string;
+  description?: string;
+  start: string;
+  end: string;
+  allDay: boolean;
+  htmlLink?: string;
+  location?: string;
+  organizer?: string;
+}
+
+export async function fetchGoogleCalendarEvents(
+  businessId: string,
+  timeMin: string,
+  timeMax: string,
+) {
+  return apiGet(
+    `/bookings/businesses/${encodeURIComponent(businessId)}/calendar/events?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}`,
+    z.array(
+      z.object({
+        id: z.string(),
+        summary: z.string(),
+        description: z.string().optional(),
+        start: z.string(),
+        end: z.string(),
+        allDay: z.boolean(),
+        htmlLink: z.string().optional(),
+        location: z.string().optional(),
+        organizer: z.string().optional(),
+      }),
+    ),
+  );
+}
+
 export async function updateBookingStatus(bookingId: string, status: string, businessId?: string) {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost<Booking>({
