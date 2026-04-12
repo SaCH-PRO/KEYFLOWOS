@@ -109,19 +109,18 @@ export function AccordionSection({
 interface AccordionGroupProps {
   title: string;
   children: ReactNode;
+  brandColor?: string;
 }
 
-export function AccordionGroup({ title, children }: AccordionGroupProps) {
+export function AccordionGroup({ title, children, brandColor }: AccordionGroupProps) {
+  const lineColor = brandColor ? `${brandColor}35` : "hsl(var(--kf-accent1) / 0.2)";
   return (
     <div className="space-y-2">
       <h3
         className="text-[10px] font-bold uppercase tracking-widest px-1 flex items-center gap-2"
         style={{ color: "hsl(var(--kf-muted-foreground) / 0.6)" }}
       >
-        <span
-          className="w-5 h-px"
-          style={{ background: "hsl(var(--kf-accent1) / 0.2)" }}
-        />
+        <span className="w-5 h-px" style={{ background: lineColor }} />
         {title}
       </h3>
       <div className="space-y-1.5">{children}</div>

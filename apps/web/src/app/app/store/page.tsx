@@ -3,15 +3,14 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Store, Package, Clock, ShoppingBag, TrendingUp,
-  Zap, ExternalLink, ArrowUpRight,
+  Store, Package, ShoppingBag, TrendingUp,
+  ExternalLink, ArrowUpRight, Eye, BarChart3, Users,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { ModuleWalkthrough, WalkthroughTrigger } from "@/components/ui/module-walkthrough";
-import { InfoBadge } from "@/components/ui/info-badge";
 import { STORE_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { useStoreAiHub } from "./hooks/use-store-ai-hub";
 import { useStoreData } from "./hooks/use-store-data";
@@ -25,6 +24,7 @@ import { VIEW_TABS, type TabKey } from "./components/store-types";
 type HeroSection = { imageUrl?: string; coverImageUrl?: string };
 type SocialProofSection = { testimonials?: unknown[] };
 type BusinessHourEntry = { enabled?: boolean };
+type AppearanceSection = { primaryColor?: string; secondaryColor?: string; accentColor?: string };
 
 const TAB_KEYS = VIEW_TABS.map((t) => t.key);
 const SLIDE = {
@@ -32,12 +32,6 @@ const SLIDE = {
   center: { x: 0, opacity: 1 },
   exit: (d: number) => ({ x: d > 0 ? -60 : 60, opacity: 0 }),
 };
-
-const STAT_CARDS = [
-  { key: "products", label: "Products", icon: Package, color: "--kf-accent1" },
-  { key: "services", label: "Services", icon: ShoppingBag, color: "--kf-accent2" },
-  { key: "catalog", label: "In Store", icon: TrendingUp, color: "--kf-success" },
-];
 
 export default function StorePage() {
   const searchParams = useSearchParams();
@@ -93,60 +87,81 @@ export default function StorePage() {
   if (!s.businessId) return <WorkspaceError />;
 
   const cfg = s.storefrontConfig;
+  const appearance = cfg.appearance as AppearanceSection | undefined;
+  const pc = appearance?.primaryColor || s.businessData?.primaryColor || "#F97316";
+  const sc = appearance?.secondaryColor || s.businessData?.secondaryColor || "#14B8A6";
+  const ac = appearance?.accentColor || "#a78bfa";
+
   const statValues = {
     products: s.commerceProducts.length,
     services: s.services.length,
     catalog: s.storeItemCount ?? s.commerceProducts.length + s.services.length,
   };
 
+  const STAT_CARDS = [
+    { key: "products" as const, label: "Products", icon: Package, color: pc },
+    { key: "services" as const, label: "Services", icon: ShoppingBag, color: sc },
+    { key: "catalog" as const, label: "In Store", icon: TrendingUp, color: ac },
+  ];
+
+  const logoUrl = s.businessData?.logoUrl;
+
   return (
     <div className="space-y-0" aria-label="Store">
       <div
         className="relative rounded-2xl overflow-hidden mb-6"
         style={{
-          background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.18) 0%, hsl(var(--kf-accent1) / 0.06) 40%, hsl(var(--kf-card)) 100%)",
-          border: "1px solid hsl(var(--kf-accent1) / 0.2)",
+          background: `linear-gradient(135deg, ${pc}18 0%, ${sc}0a 50%, hsl(var(--kf-card)) 100%)`,
+          border: `1px solid ${pc}25`,
         }}
       >
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
           <div
-            className="absolute -top-20 -right-20 w-72 h-72 rounded-full"
-            style={{ background: "radial-gradient(circle, hsl(var(--kf-accent1) / 0.12), transparent 65%)" }}
+            className="absolute -top-20 -right-20 w-80 h-80 rounded-full"
+            style={{ background: `radial-gradient(circle, ${pc}18, transparent 60%)` }}
           />
           <div
-            className="absolute top-1/2 -right-8 w-40 h-40 rounded-2xl rotate-45"
-            style={{ border: "2px solid hsl(var(--kf-accent1) / 0.08)" }}
+            className="absolute top-1/2 -right-10 w-44 h-44 rounded-2xl rotate-45"
+            style={{ border: `2px solid ${pc}0c` }}
           />
           <div
-            className="absolute -bottom-12 -left-12 w-48 h-48 rounded-full"
-            style={{ background: "radial-gradient(circle, hsl(var(--kf-accent2) / 0.08), transparent 65%)" }}
+            className="absolute -bottom-16 -left-16 w-56 h-56 rounded-full"
+            style={{ background: `radial-gradient(circle, ${sc}10, transparent 60%)` }}
           />
           <div
-            className="absolute top-4 right-40 w-16 h-16 rounded-xl rotate-12"
-            style={{ border: "1.5px solid hsl(var(--kf-accent1) / 0.06)" }}
+            className="absolute top-6 right-36 w-20 h-20 rounded-xl rotate-12"
+            style={{ border: `1.5px solid ${pc}08` }}
           />
-          <div
-            className="absolute bottom-6 right-1/4 w-2 h-2 rounded-full"
-            style={{ background: "hsl(var(--kf-accent1) / 0.2)" }}
-          />
-          <div
-            className="absolute top-8 left-1/3 w-1.5 h-1.5 rounded-full"
-            style={{ background: "hsl(var(--kf-accent1) / 0.15)" }}
-          />
+          <div className="absolute bottom-8 right-1/4 w-2 h-2 rounded-full" style={{ background: `${pc}30` }} />
+          <div className="absolute top-10 left-1/3 w-1.5 h-1.5 rounded-full" style={{ background: `${sc}25` }} />
+          <div className="absolute bottom-3 left-1/4 w-1 h-1 rounded-full" style={{ background: `${ac}20` }} />
         </div>
 
         <div className="relative px-6 pt-6 pb-5">
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-center gap-4">
-              <div
-                className="h-14 w-14 rounded-2xl flex items-center justify-center flex-shrink-0"
-                style={{
-                  background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent1) / 0.7))",
-                  boxShadow: "0 8px 24px hsl(var(--kf-accent1) / 0.35), 0 2px 8px hsl(var(--kf-accent1) / 0.2)",
-                }}
-              >
-                <Store className="w-7 h-7" style={{ color: "white" }} />
-              </div>
+              {logoUrl ? (
+                <div
+                  className="h-14 w-14 rounded-2xl flex items-center justify-center flex-shrink-0 overflow-hidden"
+                  style={{
+                    border: `2px solid ${pc}30`,
+                    boxShadow: `0 8px 24px ${pc}20`,
+                    background: "hsl(var(--kf-card))",
+                  }}
+                >
+                  <img src={logoUrl} alt="Logo" className="w-full h-full object-cover" />
+                </div>
+              ) : (
+                <div
+                  className="h-14 w-14 rounded-2xl flex items-center justify-center flex-shrink-0"
+                  style={{
+                    background: `linear-gradient(135deg, ${pc}, ${sc})`,
+                    boxShadow: `0 8px 24px ${pc}40, 0 2px 8px ${pc}25`,
+                  }}
+                >
+                  <Store className="w-7 h-7" style={{ color: "white" }} />
+                </div>
+              )}
               <div>
                 <div className="flex items-center gap-3">
                   <h1 className="text-2xl font-bold tracking-tight" style={{ color: "hsl(var(--kf-foreground))" }}>
@@ -155,12 +170,8 @@ export default function StorePage() {
                   <div
                     className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold"
                     style={{
-                      background: s.storeEnabled
-                        ? "hsl(var(--kf-success) / 0.15)"
-                        : "hsl(var(--kf-warning) / 0.15)",
-                      color: s.storeEnabled
-                        ? "hsl(var(--kf-success))"
-                        : "hsl(var(--kf-warning))",
+                      background: s.storeEnabled ? "hsl(var(--kf-success) / 0.15)" : "hsl(var(--kf-warning) / 0.15)",
+                      color: s.storeEnabled ? "hsl(var(--kf-success))" : "hsl(var(--kf-warning))",
                       border: `1px solid ${s.storeEnabled ? "hsl(var(--kf-success) / 0.3)" : "hsl(var(--kf-warning) / 0.3)"}`,
                     }}
                   >
@@ -183,29 +194,49 @@ export default function StorePage() {
             <StoreHeaderActions storeEnabled={s.storeEnabled} publicUrl={s.getPublicBookingUrl()} onToggleEnabled={s.toggleStoreEnabled} />
           </div>
 
-          <div className="grid grid-cols-3 gap-3 mt-6">
+          <div className="flex items-center gap-2 mt-4">
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded" style={{ background: pc }} />
+              <span className="text-[10px] font-mono" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{pc}</span>
+            </div>
+            <div className="w-px h-3" style={{ background: "hsl(var(--kf-border) / 0.3)" }} />
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded" style={{ background: sc }} />
+              <span className="text-[10px] font-mono" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{sc}</span>
+            </div>
+            <div className="w-px h-3" style={{ background: "hsl(var(--kf-border) / 0.3)" }} />
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded" style={{ background: ac }} />
+              <span className="text-[10px] font-mono" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{ac}</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3 mt-4">
             {STAT_CARDS.map(({ key, label, icon: Icon, color }) => (
               <div
                 key={key}
                 className="group relative rounded-xl px-4 py-3.5 flex items-center gap-3 transition-all duration-200 hover:scale-[1.02] cursor-default overflow-hidden"
                 style={{
-                  background: `hsl(var(${color}) / 0.08)`,
-                  border: `1px solid hsl(var(${color}) / 0.15)`,
+                  background: `${color}0c`,
+                  border: `1px solid ${color}18`,
                 }}
               >
-                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200" style={{ background: `linear-gradient(135deg, hsl(var(${color}) / 0.04), transparent)` }} />
+                <div
+                  className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                  style={{ background: `linear-gradient(135deg, ${color}08, transparent)` }}
+                />
                 <div
                   className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 relative"
                   style={{
-                    background: `hsl(var(${color}) / 0.15)`,
-                    boxShadow: `0 2px 8px hsl(var(${color}) / 0.1)`,
+                    background: `${color}18`,
+                    boxShadow: `0 2px 8px ${color}15`,
                   }}
                 >
-                  <Icon className="w-[18px] h-[18px]" style={{ color: `hsl(var(${color}))` }} />
+                  <Icon className="w-[18px] h-[18px]" style={{ color }} />
                 </div>
                 <div className="relative">
                   <div className="text-xl font-bold tabular-nums" style={{ color: "hsl(var(--kf-foreground))" }}>
-                    {statValues[key as keyof typeof statValues]}
+                    {statValues[key]}
                   </div>
                   <div className="text-[11px] font-medium" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
                     {label}
@@ -222,9 +253,9 @@ export default function StorePage() {
               rel="noopener noreferrer"
               className="mt-5 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold transition-all hover:scale-[1.02] min-h-[44px]"
               style={{
-                background: "hsl(var(--kf-accent1) / 0.12)",
-                color: "hsl(var(--kf-accent1))",
-                border: "1px solid hsl(var(--kf-accent1) / 0.25)",
+                background: `${pc}15`,
+                color: pc,
+                border: `1px solid ${pc}30`,
               }}
             >
               <ExternalLink className="w-3.5 h-3.5" />
@@ -263,13 +294,13 @@ export default function StorePage() {
                     className="absolute inset-0 rounded-lg"
                     style={{
                       background: "hsl(var(--kf-card))",
-                      border: "1px solid hsl(var(--kf-accent1) / 0.2)",
-                      boxShadow: "0 2px 8px hsl(var(--kf-background) / 0.4), inset 0 1px 0 hsl(var(--kf-accent1) / 0.05)",
+                      border: `1px solid ${pc}20`,
+                      boxShadow: `0 2px 8px hsl(var(--kf-background) / 0.4), inset 0 1px 0 ${pc}08`,
                     }}
                     transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
                   />
                 )}
-                <Icon className="w-4 h-4 relative z-10" style={isActive ? { color: "hsl(var(--kf-accent1))" } : undefined} />
+                <Icon className="w-4 h-4 relative z-10" style={isActive ? { color: pc } : undefined} />
                 <span className="relative z-10">{label}</span>
               </button>
             );
