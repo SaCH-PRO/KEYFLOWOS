@@ -34,10 +34,12 @@ import {
   FolderKanban,
   FileText,
   User,
+  Sparkles,
 } from "lucide-react";
 import { AiCommandBar, AiCopilotTrigger } from "./_command/ai-command-bar";
 import { usePlanLimitHandler } from "@/hooks/use-plan";
 import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
+import { KeyflowOSStoreDrawer } from "@/components/keyflowos-store-drawer";
 
 function relativeTime(dateStr: string): string {
   const now = Date.now();
@@ -234,6 +236,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [onboardingChecked, setOnboardingChecked] = useState(false);
   const { planLimitHit, clearPlanLimit } = usePlanLimitHandler();
+  const [kfStoreOpen, setKfStoreOpen] = useState(false);
 
   useEffect(() => {
     setMobileDrawerOpen(false);
@@ -427,6 +430,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="mt-auto px-2 pb-3 space-y-px">
+            <button
+              onClick={() => setKfStoreOpen(true)}
+              className={cn(
+                "kf-nav-item w-full group",
+                sidebarCollapsed && "justify-center px-2"
+              )}
+              title={sidebarCollapsed ? "KeyflowOS Store" : undefined}
+            >
+              <div
+                className="w-[18px] h-[18px] rounded flex items-center justify-center flex-shrink-0"
+                style={{ background: "linear-gradient(135deg, #F97316, #14B8A6)" }}
+              >
+                <Sparkles className="w-3 h-3 text-white" />
+              </div>
+              {!sidebarCollapsed && <span className="text-[13px]">KF Store</span>}
+            </button>
             {bottomNavItems.map((item) => {
               const Icon = item.icon;
               const isActive = pathname.startsWith(item.href);
@@ -761,6 +780,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <div className="kf-divider my-2" />
 
               <div className="flex flex-col gap-px">
+                <button
+                  onClick={() => { setMobileDrawerOpen(false); setKfStoreOpen(true); }}
+                  className="kf-nav-item py-2.5 active:scale-[0.98] w-full"
+                >
+                  <div
+                    className="w-[18px] h-[18px] rounded flex items-center justify-center flex-shrink-0"
+                    style={{ background: "linear-gradient(135deg, #F97316, #14B8A6)" }}
+                  >
+                    <Sparkles className="w-3 h-3 text-white" />
+                  </div>
+                  <span>KF Store</span>
+                </button>
                 {bottomNavItems.map((item) => {
                   const Icon = item.icon;
                   const isActive = pathname.startsWith(item.href);
@@ -836,6 +867,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <PlanLimitDialog planLimit={planLimitHit} onClose={clearPlanLimit} />
+      <KeyflowOSStoreDrawer open={kfStoreOpen} onClose={() => setKfStoreOpen(false)} />
     </div>
   );
 }

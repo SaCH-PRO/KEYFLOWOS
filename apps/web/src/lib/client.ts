@@ -5704,4 +5704,27 @@ export async function generateWeeklyBriefing(businessId?: string): Promise<ApiRe
   return apiPost<WeeklyBriefingResponse>({ path: `/commerce/businesses/${encodeURIComponent(bid)}/weekly-briefing`, body: {} });
 }
 
+export async function submitPublicIntake(slug: string, input: {
+  name: string;
+  email: string;
+  phone?: string;
+  category: string;
+  description: string;
+  budget?: string;
+  urgency?: string;
+}): Promise<ApiResult<{ id: string; message: string }>> {
+  try {
+    const res = await fetch(`${API_BASE}/site/storefront/public/${encodeURIComponent(slug)}/intake`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) return { data: null, error: data?.message || 'Failed to submit' };
+    return { data, error: null };
+  } catch {
+    return { data: null, error: 'Network error' };
+  }
+}
+
 export { DEFAULT_BUSINESS_ID };

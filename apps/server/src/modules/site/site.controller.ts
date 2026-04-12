@@ -2,6 +2,7 @@ import { Controller, Get, Put, Post, Patch, Param, Body, Query, Inject, UseGuard
 import { SiteService } from './site.service';
 import { StoreOrderService } from './store-order.service';
 import { PromoCodeService } from './promo-code.service';
+import { IntakeService } from './intake.service';
 import { PaymentsService } from '../payments/payments.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -14,6 +15,7 @@ export class SiteController {
     @Inject(SiteService) private readonly siteService: SiteService,
     @Inject(StoreOrderService) private readonly storeOrderService: StoreOrderService,
     @Inject(PromoCodeService) private readonly promoCodeService: PromoCodeService,
+    @Inject(IntakeService) private readonly intakeService: IntakeService,
     @Inject(PaymentsService) private readonly paymentsService: PaymentsService,
   ) {}
 
@@ -345,5 +347,58 @@ export class SiteController {
     @Body() body: { status?: string; sellerResponse?: string },
   ) {
     return this.siteService.moderateReview(businessId, reviewId, body);
+  }
+
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(5, 60_000)
+  @Post('storefront/public/:slug/intake')
+  submitIntake(
+    @Param('slug') slug: string,
+    @Body() body: {
+      name: string;
+      email: string;
+      phone?: string;
+      category: string;
+      description: string;
+      budget?: string;
+      urgency?: string;
+    },
+  ) {
+    return this.intakeService.submitIntake(slug, {
+      name: sanitize(body.name ?? ''),
+      email: sanitize(body.email ?? ''),
+      phone: body.phone ? sanitize(body.phone) : undefined,
+      category: sanitize(body.category ?? ''),
+      description: sanitize(body.description ?? ''),
+      budget: body.budget ? sanitize(body.budget) : undefined,
+      urgency: body.urgency,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/intake')
+  listIntakeSubmissions(
+    @Param('businessId') businessId: string,
+    @Query('status') status?: string,
+    @Query('category') category?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.intakeService.listForBusiness(businessId, {
+      status,
+      category,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/intake/:id')
+  updateIntakeStatus(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: { status: string; notes?: string },
+  ) {
+    return this.intakeService.updateStatus(id, businessId, body.status, body.notes);
   }
 }
