@@ -373,6 +373,42 @@ export class AutomationExecutorService {
       total: inv.total,
       trigger: 'invoice.paid',
     });
+
+    try {
+      const lineItems = await this.prisma.client.invoiceItem.findMany({
+        where: { invoiceId: inv.id },
+        select: { productId: true },
+      });
+      const productIds = lineItems.map((li: any) => li.productId).filter(Boolean);
+      if (productIds.length > 0) {
+        const templates = await this.prisma.client.projectTemplate.findMany({
+          where: { businessId: payload.businessId, productId: { in: productIds } },
+        });
+        for (const tmpl of templates) {
+          const taskTitles = Array.isArray(tmpl.taskTitles) ? tmpl.taskTitles as string[] : [];
+          await this.prisma.client.project.create({
+            data: {
+              businessId: payload.businessId,
+              name: tmpl.name,
+              status: 'ACTIVE',
+              priority: 'NORMAL',
+              contactId: inv.contact?.id,
+              invoiceId: inv.id,
+              tasks: {
+                create: taskTitles.map((title: string, i: number) => ({
+                  businessId: payload.businessId,
+                  title,
+                  sortOrder: i + 1,
+                })),
+              },
+            },
+          });
+          this.logger.log(`Auto-created project "${tmpl.name}" from template for invoice ${inv.id}`);
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Auto-project creation from template failed: ${err}`);
+    }
   }
 
   @OnEvent('invoice.sent')

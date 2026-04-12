@@ -27,12 +27,12 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **AI Copilot System:** Global AI entry point with route-aware context detection, chat drawer, and suggestion nudges.
 - **Billing & Payment:** Multi-method payments, shareable PaymentLinks, and subscription billing.
 - **Core Workflows:** Quote-to-Invoice, multi-gateway payment, subscription & billing, and expense tracking.
-- **User & Security:** Multi-Tenant System with `businessId` isolation, personalized authentication (Google OAuth), notification system, input sanitization, DTO validation, rate limiting, and AI prompt injection guards.
+- **User & Security:** Multi-Tenant System with `businessId` isolation, personalized authentication (Google OAuth), notification system, global input sanitization (HTML stripping on all public DTOs), DTO validation with MaxLength constraints, rate limiting on ALL public endpoints (store, payments, bookings, reviews), and AI prompt injection guards.
 - **Cross-Module Intelligence Agents:** Client Momentum, Campaign Intelligence, Financial Copilot, and an event-driven workflow engine for cross-module actions.
 - **Public Storefront (`/book/[slug]`):** Premium, mobile-first, conversion-optimized storefront with section-based layout, product detail pages, category navigation, featured products, FAQ, policy pages, contact section, testimonials, structured data, dynamic Google Font pairing loading, persistent checkout order summary, configurable tax rate, and email capture.
 - **Store Setup Wizard:** 5-step guided setup process for storefront configuration.
 - **Financial Copilot Agent:** Monitors revenue, expenses, and cash flow with anomaly detection and weekly AI-powered briefings.
-- **Customer Notification System:** Transactional email system for branded customer-facing emails.
+- **Customer Notification System:** Transactional email system for branded customer-facing emails with delivery status dashboard (Sent/Queued/Failed/Expired stats) in Settings.
 - **Platform Features:** Gamification, online store, public booking page, module event bus, keyboard shortcuts, webhook dispatcher, and developer settings.
 - **Tiered Monetization:** Plan comparison grid with feature breakdowns.
 - **Observability:** Request correlation ID, logging interceptor, and health checks.
@@ -46,14 +46,17 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Universal Export System:** All AI-generated content is exportable via Download, Email, Save to Drive, and Print options.
 - **Business Documentation Engine:** AI-powered document generation, versioning, and health tracking across 18 categories and 96 document types. Features include AI drafting, section-level editing with risk-tiered modes, AI tweak bar, version history, audit logs, review tasks, and impact detection. Uses a Document Blueprint System for structured generation.
 - **Navigation & Command System:** Sidebar, breadcrumbs, Command Palette (⌘K), and persistent AI Copilot quick-action chips.
+- **Project Templates:** Create reusable project templates with pre-defined tasks; auto-project creation from invoice payment when templates are linked to products.
+- **Automation Playbook Templates:** 18 pre-built automation recipes covering all modules (Commerce, Bookings, CRM, Marketing, Time-Based) with one-click activation.
 - **Error Boundaries:** Dedicated `error.tsx` boundaries for all core modules.
+- **Security: PublicRateLimitGuard:** Reusable rate-limiting guard applied to all unauthenticated endpoints with configurable per-route limits.
 
 ## External Dependencies
 - **Database:** PostgreSQL
 - **Authentication:** Supabase Auth
 - **AI:** OpenAI
 - **Google Services:** Google Calendar, Google Sign-In, Gmail, Google Contacts, Google Drive
-- **Payment Gateways:** WiPay, PayPal, Google Pay
+- **Payment Gateways:** WiPay, PayPal, Google Pay (env-configurable production mode via NEXT_PUBLIC_GOOGLE_PAY_ENV)
 - **Rich Text:** TipTap (React)
 - **Charts:** Recharts
 - **Package Manager:** pnpm

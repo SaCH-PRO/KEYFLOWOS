@@ -8,6 +8,7 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CreateProductDto } from './dto/create-product.dto';
 import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
+import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
 import { BulkProductsDto } from './dto/bulk-products.dto';
 import { ReceiptService } from './receipt.service';
 import { GmailService } from './gmail.service';
@@ -677,11 +678,15 @@ export class CommerceController {
     return this.commerce.deactivatePaymentLink(id, businessId);
   }
 
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(20, 60_000)
   @Get('payment-links/:token')
   getPaymentLinkByToken(@Param('token') token: string) {
     return this.commerce.getPaymentLinkByToken(token);
   }
 
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(10, 60_000)
   @Post('invoices/:invoiceId/payment-intent')
   recordPublicPaymentIntent(
     @Param('invoiceId') invoiceId: string,

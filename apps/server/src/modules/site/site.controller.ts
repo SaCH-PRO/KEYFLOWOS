@@ -5,6 +5,8 @@ import { PromoCodeService } from './promo-code.service';
 import { PaymentsService } from '../payments/payments.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
+import { sanitize } from '../../core/utils/sanitize';
 
 @Controller('site')
 export class SiteController {
@@ -35,11 +37,15 @@ export class SiteController {
     return this.siteService.updateStorefrontConfig(businessId, config);
   }
 
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(30, 60_000)
   @Get('storefront/public/:slug')
   getPublicStorefront(@Param('slug') slug: string) {
     return this.siteService.getPublicStorefront(slug);
   }
 
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(60, 60_000)
   @Post('businesses/:businessId/analytics/event')
   trackEvent(
     @Param('businessId') businessId: string,
@@ -87,6 +93,8 @@ export class SiteController {
     return this.siteService.getAiConversionAdvice(businessId);
   }
 
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(10, 60_000)
   @Post('storefront/public/:slug/checkout')
   async publicCheckout(
     @Param('slug') slug: string,
@@ -103,14 +111,22 @@ export class SiteController {
     const storefront = await this.siteService.getPublicStorefront(slug);
     const businessId = storefront.business.id;
 
+    const cleanCustomer = {
+      ...body.customer,
+      name: sanitize(body.customer.name) ?? '',
+      email: sanitize(body.customer.email ?? null) ?? undefined,
+      phone: sanitize(body.customer.phone ?? null) ?? undefined,
+      country: sanitize(body.customer.country ?? null) ?? undefined,
+    };
+
     const order = await this.storeOrderService.createOrder({
       businessId,
       cartItems: body.items,
-      customerInfo: body.customer,
-      promoCode: body.promoCode,
+      customerInfo: cleanCustomer,
+      promoCode: body.promoCode ? sanitize(body.promoCode) ?? undefined : undefined,
       shippingInfo: body.shipping,
       paymentMethod: body.paymentMethod,
-      notes: body.notes,
+      notes: sanitize(body.notes ?? null) ?? undefined,
     });
 
     let payment: any = null;
@@ -131,6 +147,8 @@ export class SiteController {
     };
   }
 
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(15, 60_000)
   @Post('storefront/public/:slug/validate-promo')
   async validatePromoCode(
     @Param('slug') slug: string,
@@ -157,6 +175,8 @@ export class SiteController {
     };
   }
 
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(30, 60_000)
   @Get('storefront/public/order/:orderId')
   getPublicOrder(
     @Param('orderId') orderId: string,
@@ -263,6 +283,8 @@ export class SiteController {
     return this.promoCodeService.delete(businessId, promoId);
   }
 
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(5, 60_000)
   @Post('storefront/public/:slug/reviews')
   submitReview(
     @Param('slug') slug: string,
@@ -275,9 +297,18 @@ export class SiteController {
       orderReference?: string;
     },
   ) {
-    return this.siteService.submitReview(slug, body);
+    const cleanBody = {
+      ...body,
+      customerName: sanitize(body.customerName) ?? body.customerName,
+      customerEmail: sanitize(body.customerEmail ?? null) ?? undefined,
+      reviewText: sanitize(body.reviewText ?? null) ?? undefined,
+      orderReference: sanitize(body.orderReference ?? null) ?? undefined,
+    };
+    return this.siteService.submitReview(slug, cleanBody);
   }
 
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(30, 60_000)
   @Get('storefront/public/:slug/products/:productId/reviews')
   getProductReviews(
     @Param('slug') slug: string,
@@ -286,6 +317,8 @@ export class SiteController {
     return this.siteService.getProductReviews(slug, productId);
   }
 
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(30, 60_000)
   @Get('storefront/public/:slug/review-aggregates')
   getReviewAggregates(@Param('slug') slug: string) {
     return this.siteService.getReviewAggregates(slug);

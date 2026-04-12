@@ -172,4 +172,74 @@ export class ProjectsController {
       data: { deletedAt: new Date() },
     });
   }
+
+  @Get('businesses/:businessId/templates')
+  async listTemplates(@Param('businessId') businessId: string) {
+    return this.prisma.client.projectTemplate.findMany({
+      where: { businessId },
+      include: { product: { select: { id: true, name: true } } },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  @Post('businesses/:businessId/templates')
+  async createTemplate(
+    @Param('businessId') businessId: string,
+    @Body() body: { name: string; taskTitles: string[]; productId?: string },
+  ) {
+    return this.prisma.client.projectTemplate.create({
+      data: {
+        businessId,
+        name: body.name,
+        taskTitles: body.taskTitles,
+        productId: body.productId || undefined,
+      },
+    });
+  }
+
+  @Delete('businesses/:businessId/templates/:templateId')
+  async deleteTemplate(
+    @Param('businessId') businessId: string,
+    @Param('templateId') templateId: string,
+  ) {
+    return this.prisma.client.projectTemplate.delete({
+      where: { id: templateId, businessId },
+    });
+  }
+
+  @Post('businesses/:businessId/from-template/:templateId')
+  async createFromTemplate(
+    @Param('businessId') businessId: string,
+    @Param('templateId') templateId: string,
+    @Body() body: { name?: string; contactId?: string; invoiceId?: string; bookingId?: string },
+  ) {
+    const template = await this.prisma.client.projectTemplate.findFirst({
+      where: { id: templateId, businessId },
+    });
+    if (!template) throw new Error('Template not found');
+
+    const taskTitles = Array.isArray(template.taskTitles) ? template.taskTitles as string[] : [];
+
+    const project = await this.prisma.client.project.create({
+      data: {
+        businessId,
+        name: body.name || template.name,
+        status: 'ACTIVE',
+        priority: 'NORMAL',
+        contactId: body.contactId,
+        invoiceId: body.invoiceId,
+        bookingId: body.bookingId,
+        tasks: {
+          create: taskTitles.map((title, i) => ({
+            businessId,
+            title,
+            sortOrder: i + 1,
+          })),
+        },
+      },
+      include: { tasks: true },
+    });
+
+    return project;
+  }
 }
