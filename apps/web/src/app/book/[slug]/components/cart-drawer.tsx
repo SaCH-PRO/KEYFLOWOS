@@ -135,7 +135,7 @@ export function CartDrawer({
             className="relative w-14 h-14 rounded-full shadow-2xl flex items-center justify-center transition-all duration-300 group-hover:scale-110 group-active:scale-95"
             style={{ backgroundColor: primaryColor, boxShadow: `0 8px 32px ${primaryColor}50` }}
           >
-            <ShoppingCart className="w-6 h-6 text-white transition-transform duration-300 group-hover:rotate-[-8deg]" />
+            <ShoppingCart className="w-6 h-6 text-gray-900 transition-transform duration-300 group-hover:rotate-[-8deg]" />
           </span>
           <span
             className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-white text-xs font-bold flex items-center justify-center shadow-lg transition-transform duration-300"
@@ -164,8 +164,8 @@ export function CartDrawer({
           <div
             className="relative w-full sm:w-[420px] max-h-[90vh] sm:max-h-full flex flex-col rounded-t-3xl sm:rounded-t-none overflow-hidden"
             style={{
-              background: "linear-gradient(180deg, #16161e 0%, #0e0e14 100%)",
-              borderTop: "1px solid rgba(255,255,255,0.08)",
+              background: "linear-gradient(180deg, #ffffff 0%, #f9fafb 100%)",
+              borderTop: "1px solid rgba(0,0,0,0.05)",
               borderLeft: "none",
               animation: "slideUp 300ms cubic-bezier(0.16,1,0.3,1)",
             }}
@@ -177,7 +177,7 @@ export function CartDrawer({
               }}
             />
 
-            <div className="relative flex items-center justify-between p-5 border-b border-white/[0.06]">
+            <div className="relative flex items-center justify-between p-5 border-b border-gray-200">
               <div className="flex items-center gap-3">
                 <div
                   className="w-9 h-9 rounded-xl flex items-center justify-center"
@@ -186,17 +186,17 @@ export function CartDrawer({
                   <ShoppingCart className="w-4.5 h-4.5" style={{ color: primaryColor }} />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-base text-white">Your Cart</h3>
-                  <p className="text-[11px] text-white/40">
+                  <h3 className="font-semibold text-base text-gray-900">Your Cart</h3>
+                  <p className="text-[11px] text-gray-400">
                     {cartCount} {cartCount === 1 ? "item" : "items"}
                   </p>
                 </div>
               </div>
               <button
                 onClick={onClose}
-                className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center transition-all duration-200 hover:rotate-90"
+                className="w-8 h-8 rounded-xl bg-gray-100 hover:bg-gray-200/50 flex items-center justify-center transition-all duration-200 hover:rotate-90"
               >
-                <X className="w-4 h-4 text-white/60" />
+                <X className="w-4 h-4 text-gray-500" />
               </button>
             </div>
 
@@ -209,12 +209,12 @@ export function CartDrawer({
                   <ShoppingBag className="w-8 h-8" style={{ color: primaryColor, opacity: 0.5 }} />
                 </div>
                 <div>
-                  <h4 className="text-base font-medium text-white/70">Your cart is empty</h4>
-                  <p className="text-xs text-white/35 mt-1">Browse our products and services to get started</p>
+                  <h4 className="text-base font-medium text-gray-600">Your cart is empty</h4>
+                  <p className="text-xs text-gray-900/35 mt-1">Browse our products and services to get started</p>
                 </div>
                 <button
                   onClick={onClose}
-                  className="px-6 py-3 rounded-xl text-sm font-medium text-white transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] min-h-[44px]"
+                  className="px-6 py-3 rounded-xl text-sm font-medium text-gray-900 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] min-h-[44px]"
                   style={{ backgroundColor: primaryColor }}
                 >
                   Browse Products
@@ -224,14 +224,14 @@ export function CartDrawer({
               <>
                 <div className="relative flex-1 overflow-y-auto p-4 space-y-2.5" style={{ scrollbarWidth: "thin" }}>
                   {serviceItems.length > 0 && productItems.length > 0 && (
-                    <div className="text-[10px] uppercase tracking-widest text-white/25 font-medium px-1 pt-1">
+                    <div className="text-[10px] uppercase tracking-widest text-gray-900/25 font-medium px-1 pt-1">
                       Services
                     </div>
                   )}
                   {serviceItems.map((item, idx) => renderCartItem(item, idx))}
 
                   {serviceItems.length > 0 && productItems.length > 0 && (
-                    <div className="text-[10px] uppercase tracking-widest text-white/25 font-medium px-1 pt-2">
+                    <div className="text-[10px] uppercase tracking-widest text-gray-900/25 font-medium px-1 pt-2">
                       Products
                     </div>
                   )}
@@ -239,9 +239,9 @@ export function CartDrawer({
                 </div>
 
                 <div
-                  className="relative border-t border-white/[0.06] p-5 space-y-4"
+                  className="relative border-t border-gray-200 p-5 space-y-4"
                   style={{
-                    background: "linear-gradient(180deg, rgba(255,255,255,0.02) 0%, transparent 100%)",
+                    background: "linear-gradient(180deg, rgba(0,0,0,0.02) 0%, transparent 100%)",
                   }}
                 >
                   {hasBookingItems && (
@@ -263,7 +263,7 @@ export function CartDrawer({
                             <span className="text-xs font-medium" style={{ color: primaryColor }}>
                               {promoCode.code}
                             </span>
-                            <span className="text-[10px] text-white/40 ml-2">
+                            <span className="text-[10px] text-gray-400 ml-2">
                               {promoCode.discountType === "percentage"
                                 ? `${promoCode.discountValue}% off`
                                 : `${formatPrice(promoCode.discountValue, cartCurrency)} off`}
@@ -272,7 +272,7 @@ export function CartDrawer({
                         </div>
                         <button
                           onClick={onRemovePromo}
-                          className="text-[10px] text-white/40 hover:text-red-400 transition-colors px-2 py-1 rounded-lg hover:bg-white/[0.04]"
+                          className="text-[10px] text-gray-400 hover:text-red-400 transition-colors px-2 py-1 rounded-lg hover:bg-gray-50"
                         >
                           Remove
                         </button>
@@ -288,13 +288,13 @@ export function CartDrawer({
                           }}
                           onKeyDown={(e) => { if (e.key === "Enter") handleApplyPromo(); }}
                           placeholder="Promo code"
-                          className="flex-1 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5 text-xs text-white placeholder:text-white/20 focus:outline-none transition-all duration-200"
+                          className="flex-1 rounded-xl border border-gray-200 bg-white/[0.02] px-3 py-2.5 text-xs text-gray-900 placeholder:text-gray-300 focus:outline-none transition-all duration-200"
                           style={{ borderColor: promoError ? "rgba(239,68,68,0.4)" : undefined }}
                         />
                         <button
                           onClick={handleApplyPromo}
                           disabled={promoLoading || !promoInput.trim()}
-                          className="px-4 py-2.5 rounded-xl text-xs font-medium text-white transition-all duration-200 disabled:opacity-30 min-h-[44px]"
+                          className="px-4 py-2.5 rounded-xl text-xs font-medium text-gray-900 transition-all duration-200 disabled:opacity-30 min-h-[44px]"
                           style={{ backgroundColor: primaryColor }}
                         >
                           {promoLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Apply"}
@@ -308,8 +308,8 @@ export function CartDrawer({
 
                   <div className="space-y-1.5">
                     <div className="flex justify-between items-center text-sm">
-                      <span className="text-white/50">Subtotal ({cartCount} {cartCount === 1 ? "item" : "items"})</span>
-                      <span className="text-white/70">{formatPrice(cartTotal, cartCurrency)}</span>
+                      <span className="text-gray-500">Subtotal ({cartCount} {cartCount === 1 ? "item" : "items"})</span>
+                      <span className="text-gray-600">{formatPrice(cartTotal, cartCurrency)}</span>
                     </div>
                     {discount > 0 && (
                       <div className="flex justify-between items-center text-sm">
@@ -319,18 +319,18 @@ export function CartDrawer({
                     )}
                     {estimatedTax > 0 && (
                       <div className="flex justify-between items-center text-[11px]">
-                        <span className="text-white/30">Est. Tax ({effectiveTaxRate}%)</span>
-                        <span className="text-white/30">{formatPrice(estimatedTax, cartCurrency)}</span>
+                        <span className="text-gray-400">Est. Tax ({effectiveTaxRate}%)</span>
+                        <span className="text-gray-400">{formatPrice(estimatedTax, cartCurrency)}</span>
                       </div>
                     )}
                     {hasPhysicalItems && (
                       <div className="flex justify-between items-center text-[11px]">
-                        <span className="text-white/30">Shipping</span>
-                        <span className="text-white/30">Calculated at checkout</span>
+                        <span className="text-gray-400">Shipping</span>
+                        <span className="text-gray-400">Calculated at checkout</span>
                       </div>
                     )}
-                    <div className="flex justify-between items-center pt-1.5 border-t border-white/[0.04]">
-                      <span className="text-base font-semibold text-white/80">Total</span>
+                    <div className="flex justify-between items-center pt-1.5 border-t border-gray-200">
+                      <span className="text-base font-semibold text-gray-700">Total</span>
                       <span className="text-xl font-bold tabular-nums" style={{ color: primaryColor }}>
                         {formatPrice(orderTotal, cartCurrency)}
                       </span>
@@ -339,13 +339,13 @@ export function CartDrawer({
 
                   <button
                     onClick={onCheckout}
-                    className="relative w-full py-3.5 rounded-2xl text-white font-semibold text-sm transition-all duration-300 hover:scale-[1.015] active:scale-[0.98] overflow-hidden group min-h-[44px]"
+                    className="relative w-full py-3.5 rounded-2xl text-gray-900 font-semibold text-sm transition-all duration-300 hover:scale-[1.015] active:scale-[0.98] overflow-hidden group min-h-[44px]"
                     style={{ backgroundColor: primaryColor, boxShadow: `0 8px 32px ${primaryColor}35` }}
                   >
                     <span
                       className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
                       style={{
-                        background: `linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.1) 50%, transparent 100%)`,
+                        background: `linear-gradient(90deg, transparent 0%, rgba(0,0,0,0.06) 50%, transparent 100%)`,
                       }}
                     />
                     <span className="relative flex items-center justify-center gap-2">
@@ -356,17 +356,17 @@ export function CartDrawer({
 
                   <button
                     onClick={onClose}
-                    className="w-full py-2.5 rounded-xl text-xs font-medium text-white/40 hover:text-white/60 hover:bg-white/[0.03] transition-all duration-200 min-h-[44px]"
+                    className="w-full py-2.5 rounded-xl text-xs font-medium text-gray-400 hover:text-gray-500 hover:bg-gray-50 transition-all duration-200 min-h-[44px]"
                   >
                     Continue Shopping
                   </button>
 
-                  <div className="flex items-center justify-center gap-4 text-[10px] text-white/25">
+                  <div className="flex items-center justify-center gap-4 text-[10px] text-gray-900/25">
                     <span className="flex items-center gap-1">
                       <ShieldCheck className="w-3 h-3" />
                       Secure checkout
                     </span>
-                    <span className="w-px h-3 bg-white/10" />
+                    <span className="w-px h-3 bg-gray-200/50" />
                     <span className="flex items-center gap-1">
                       <Lock className="w-3 h-3" />
                       SSL Encrypted
@@ -405,9 +405,9 @@ export function CartDrawer({
     return (
       <div
         key={key}
-        className="group rounded-2xl border border-white/[0.06] p-3.5 transition-all duration-250"
+        className="group rounded-2xl border border-gray-200 p-3.5 transition-all duration-250"
         style={{
-          background: "linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)",
+          background: "linear-gradient(135deg, rgba(0,0,0,0.03) 0%, rgba(0,0,0,0.01) 100%)",
           opacity: isRemoving ? 0 : 1,
           transform: isRemoving ? "translateX(100px) scale(0.9)" : "translateX(0) scale(1)",
           animationDelay: `${idx * 50}ms`,
@@ -441,10 +441,10 @@ export function CartDrawer({
                 <AlertTriangle className="w-3 h-3 text-amber-400/80" />
               )}
             </div>
-            <h4 className="text-sm font-medium text-white/90 truncate leading-tight">
+            <h4 className="text-sm font-medium text-gray-800 truncate leading-tight">
               {item.name}
             </h4>
-            <p className="text-[11px] text-white/35 mt-0.5">
+            <p className="text-[11px] text-gray-900/35 mt-0.5">
               {formatPrice(item.price, item.currency)} each
               {item.duration ? ` · ${item.duration} min` : ""}
             </p>
@@ -452,31 +452,31 @@ export function CartDrawer({
 
           <button
             onClick={() => handleRemove(item.id, item.itemType)}
-            className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-500/10 transition-all duration-200 text-white/20 hover:text-red-400 min-h-[44px] min-w-[44px] flex items-center justify-center"
+            className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-500/10 transition-all duration-200 text-gray-300 hover:text-red-400 min-h-[44px] min-w-[44px] flex items-center justify-center"
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
         </div>
 
-        <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-white/[0.04]">
+        <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-gray-200">
           {item.itemType === "service" ? (
-            <span className="text-[10px] text-white/30 bg-white/[0.04] px-2 py-1 rounded-lg">Qty: 1</span>
+            <span className="text-[10px] text-gray-400 bg-gray-50 px-2 py-1 rounded-lg">Qty: 1</span>
           ) : (
             <div className="flex items-center gap-1">
               <button
                 onClick={() => onUpdateQuantity(item.id, item.itemType, -1)}
-                className="w-8 h-8 min-h-[44px] min-w-[44px] rounded-lg bg-white/[0.04] hover:bg-white/[0.08] flex items-center justify-center transition-all duration-200 active:scale-90"
+                className="w-8 h-8 min-h-[44px] min-w-[44px] rounded-lg bg-gray-50 hover:bg-gray-100 flex items-center justify-center transition-all duration-200 active:scale-90"
               >
-                <Minus className="w-3 h-3 text-white/50" />
+                <Minus className="w-3 h-3 text-gray-500" />
               </button>
-              <span className="text-sm font-semibold w-8 text-center text-white/90 tabular-nums">
+              <span className="text-sm font-semibold w-8 text-center text-gray-800 tabular-nums">
                 {item.quantity}
               </span>
               <button
                 onClick={() => onUpdateQuantity(item.id, item.itemType, 1)}
-                className="w-8 h-8 min-h-[44px] min-w-[44px] rounded-lg bg-white/[0.04] hover:bg-white/[0.08] flex items-center justify-center transition-all duration-200 active:scale-90"
+                className="w-8 h-8 min-h-[44px] min-w-[44px] rounded-lg bg-gray-50 hover:bg-gray-100 flex items-center justify-center transition-all duration-200 active:scale-90"
               >
-                <Plus className="w-3 h-3 text-white/50" />
+                <Plus className="w-3 h-3 text-gray-500" />
               </button>
             </div>
           )}

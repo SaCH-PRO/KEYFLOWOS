@@ -775,7 +775,7 @@ export default function PublicBookingPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen text-white flex items-center justify-center" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
+      <main className="min-h-screen text-gray-900 flex items-center justify-center" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
         <div className="flex flex-col items-center gap-4 animate-pulse">
           <div
             className="w-14 h-14 rounded-2xl flex items-center justify-center"
@@ -784,8 +784,8 @@ export default function PublicBookingPage() {
             <Loader2 className="w-7 h-7 animate-spin" style={{ color: primaryColor }} />
           </div>
           <div className="space-y-2 text-center">
-            <div className="h-3 w-32 bg-white/[0.06] rounded-full mx-auto" />
-            <div className="h-2 w-24 bg-white/[0.04] rounded-full mx-auto" />
+            <div className="h-3 w-32 bg-gray-100 rounded-full mx-auto" />
+            <div className="h-2 w-24 bg-gray-50 rounded-full mx-auto" />
           </div>
         </div>
       </main>
@@ -794,13 +794,13 @@ export default function PublicBookingPage() {
 
   if (error && !business) {
     return (
-      <main className="min-h-screen text-white flex items-center justify-center px-4" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
+      <main className="min-h-screen text-gray-900 flex items-center justify-center px-4" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
         <div className="max-w-md w-full rounded-3xl border border-red-500/30 bg-red-500/5 backdrop-blur-xl p-10 text-center space-y-4">
           <div className="w-16 h-16 rounded-2xl bg-red-500/10 flex items-center justify-center mx-auto">
             <Globe className="w-8 h-8 text-red-400" />
           </div>
           <h1 className="text-xl font-semibold text-red-400">Page Not Found</h1>
-          <p className="text-sm text-white/50">
+          <p className="text-sm text-gray-500">
             The booking page for &ldquo;{slug}&rdquo; could not be found.
           </p>
         </div>
@@ -837,7 +837,7 @@ export default function PublicBookingPage() {
     };
 
     return (
-      <main className="min-h-screen text-white flex items-center justify-center px-4 relative overflow-hidden" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
+      <main className="min-h-screen text-gray-900 flex items-center justify-center px-4 relative overflow-hidden" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
         {!paymentFailed && (
           <div className="absolute inset-0 pointer-events-none">
             {Array.from({ length: 40 }).map((_, i) => {
@@ -939,7 +939,7 @@ export default function PublicBookingPage() {
 
   if (checkoutMode) {
     return (
-      <main className="min-h-screen text-white" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
+      <main className="min-h-screen text-gray-900" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
         <CheckoutFlow
           business={business!}
           cart={cart}
@@ -991,19 +991,19 @@ export default function PublicBookingPage() {
                 onClick={() => setWishlistOpen(true)}
                 className="relative w-10 h-10 rounded-xl flex items-center justify-center transition-all hover:scale-105"
                 style={{
-                  backgroundColor: wishlist.count > 0 ? `${primaryColor}15` : "rgba(255,255,255,0.05)",
-                  border: wishlist.count > 0 ? `1px solid ${primaryColor}25` : "1px solid rgba(255,255,255,0.06)",
+                  backgroundColor: wishlist.count > 0 ? `${primaryColor}15` : "rgba(0,0,0,0.04)",
+                  border: wishlist.count > 0 ? `1px solid ${primaryColor}25` : "1px solid rgba(0,0,0,0.04)",
                 }}
                 title="Wishlist"
               >
                 <Heart
                   className="w-5 h-5"
-                  style={{ color: wishlist.count > 0 ? primaryColor : "rgba(255,255,255,0.4)" }}
+                  style={{ color: wishlist.count > 0 ? primaryColor : "rgba(0,0,0,0.2)" }}
                   fill={wishlist.count > 0 ? primaryColor : "none"}
                 />
                 {wishlist.count > 0 && (
                   <span
-                    className="absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
+                    className="absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-gray-900"
                     style={{ backgroundColor: primaryColor }}
                   >
                     {wishlist.count}
@@ -1117,7 +1117,7 @@ export default function PublicBookingPage() {
   };
 
   return (
-    <main className="min-h-screen text-white relative" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient, fontFamily: bodyFontStyle }}>
+    <main className="min-h-screen text-gray-900 relative" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient, fontFamily: bodyFontStyle }}>
       {business && (
         <>
           <OrganizationSchema business={business} url={pageUrl} />
@@ -1150,7 +1150,7 @@ export default function PublicBookingPage() {
             {storefrontConfig.promotions.bannerText}
             <button
               onClick={() => setBannerDismissed(true)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg hover:bg-white/[0.08] transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg hover:bg-gray-100 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
               aria-label="Dismiss banner"
             >
               <X className="w-3.5 h-3.5 opacity-50 hover:opacity-80" />
@@ -1165,7 +1165,7 @@ export default function PublicBookingPage() {
             <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: `${accentColor}15` }}>
               <Shield className="w-4 h-4" style={{ color: accentColor }} />
             </div>
-            <span className="text-white/55">{storefrontConfig.socialProof.guaranteeText}</span>
+            <span className="text-gray-900/55">{storefrontConfig.socialProof.guaranteeText}</span>
           </div>
         )}
 
@@ -1177,7 +1177,7 @@ export default function PublicBookingPage() {
 
       <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
         <div
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[11px] text-white/25 backdrop-blur-xl border border-white/[0.06] shadow-lg pointer-events-auto hover:text-white/40 transition-colors"
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[11px] text-gray-900/25 backdrop-blur-xl border border-gray-200 shadow-lg pointer-events-auto hover:text-gray-400 transition-colors"
           style={{ backgroundColor: `${ts.pageBg}cc` }}
         >
           <Sparkles className="w-3 h-3" style={{ color: `${primaryColor}60` }} />

@@ -72,8 +72,8 @@ export function ShareButtons({ url, title, description, primaryColor = "#F97316"
         onClick={handleCopyLink}
         className={buttonClass}
         style={{
-          backgroundColor: copied ? "#10b98120" : "rgba(255,255,255,0.06)",
-          color: copied ? "#10b981" : "rgba(255,255,255,0.5)",
+          backgroundColor: copied ? "#10b98120" : "rgba(0,0,0,0.04)",
+          color: copied ? "#10b981" : "rgba(0,0,0,0.4)",
         }}
         title="Copy link"
       >
@@ -111,7 +111,7 @@ export function ShareStoreButton({ url, storeName, primaryColor = "#F97316" }: {
         Share This Store
       </button>
       {showMenu && (
-        <div className="absolute top-full mt-2 right-0 z-50 p-3 rounded-xl border border-white/10 bg-gray-900/95 backdrop-blur-xl shadow-2xl">
+        <div className="absolute top-full mt-2 right-0 z-50 p-3 rounded-xl border border-gray-200 bg-white/95 backdrop-blur-xl shadow-2xl">
           <ShareButtons url={url} title={storeName} description={`Check out ${storeName}!`} primaryColor={primaryColor} compact />
         </div>
       )}

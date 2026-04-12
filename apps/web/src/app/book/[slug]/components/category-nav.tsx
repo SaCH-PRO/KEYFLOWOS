@@ -36,9 +36,9 @@ export function CategoryNav({ catalogItems, activeCategory, onCategoryChange, pr
           onClick={() => onCategoryChange(null)}
           className="flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-medium whitespace-nowrap transition-all min-h-[44px] flex-shrink-0"
           style={{
-            backgroundColor: !activeCategory ? `${primaryColor}20` : "rgba(255,255,255,0.04)",
-            color: !activeCategory ? primaryColor : "rgba(255,255,255,0.5)",
-            border: !activeCategory ? `1px solid ${primaryColor}30` : "1px solid rgba(255,255,255,0.06)",
+            backgroundColor: !activeCategory ? `${primaryColor}20` : "rgba(0,0,0,0.03)",
+            color: !activeCategory ? primaryColor : "rgba(0,0,0,0.4)",
+            border: !activeCategory ? `1px solid ${primaryColor}30` : "1px solid rgba(0,0,0,0.04)",
           }}
         >
           <Grid3X3 className="w-3.5 h-3.5" />
@@ -50,9 +50,9 @@ export function CategoryNav({ catalogItems, activeCategory, onCategoryChange, pr
             onClick={() => onCategoryChange(cat.key)}
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-medium whitespace-nowrap transition-all min-h-[44px] flex-shrink-0"
             style={{
-              backgroundColor: activeCategory === cat.key ? `${primaryColor}20` : "rgba(255,255,255,0.04)",
-              color: activeCategory === cat.key ? primaryColor : "rgba(255,255,255,0.5)",
-              border: activeCategory === cat.key ? `1px solid ${primaryColor}30` : "1px solid rgba(255,255,255,0.06)",
+              backgroundColor: activeCategory === cat.key ? `${primaryColor}20` : "rgba(0,0,0,0.03)",
+              color: activeCategory === cat.key ? primaryColor : "rgba(0,0,0,0.4)",
+              border: activeCategory === cat.key ? `1px solid ${primaryColor}30` : "1px solid rgba(0,0,0,0.04)",
             }}
           >
             {cat.label} ({cat.count})
@@ -87,20 +87,20 @@ export function Breadcrumbs({ slug, businessName, category, productName, primary
   if (crumbs.length <= 1) return null;
 
   return (
-    <nav className="flex items-center gap-1.5 text-xs text-white/40 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+    <nav className="flex items-center gap-1.5 text-xs text-gray-400 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
       <Home className="w-3 h-3 flex-shrink-0" style={{ color: primaryColor }} />
       {crumbs.map((crumb, idx) => (
         <span key={idx} className="flex items-center gap-1.5 flex-shrink-0">
-          {idx > 0 && <ChevronRight className="w-3 h-3 text-white/20" />}
+          {idx > 0 && <ChevronRight className="w-3 h-3 text-gray-300" />}
           {crumb.path && idx < crumbs.length - 1 ? (
             <button
               onClick={() => onNavigate?.(crumb.path!)}
-              className="hover:text-white/60 transition-colors min-h-[44px] flex items-center"
+              className="hover:text-gray-500 transition-colors min-h-[44px] flex items-center"
             >
               {crumb.label}
             </button>
           ) : (
-            <span className="text-white/60 font-medium">{crumb.label}</span>
+            <span className="text-gray-500 font-medium">{crumb.label}</span>
           )}
         </span>
       ))}

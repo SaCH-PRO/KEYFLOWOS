@@ -20,18 +20,18 @@ export function WishlistDrawer({ open, onClose, items, onRemove, onAddToCart, pr
   return (
     <>
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-gray-950/95 backdrop-blur-xl border-l border-white/10 z-50 flex flex-col animate-slideInRight">
-        <div className="flex items-center justify-between p-5 border-b border-white/10">
+      <div className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-white/95 backdrop-blur-xl border-l border-gray-200 z-50 flex flex-col animate-slideInRight">
+        <div className="flex items-center justify-between p-5 border-b border-gray-200">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${primaryColor}15` }}>
               <Heart className="w-4.5 h-4.5" style={{ color: primaryColor }} fill={primaryColor} />
             </div>
             <div>
-              <h3 className="text-base font-semibold text-white">Wishlist</h3>
-              <p className="text-xs text-white/40">{items.length} saved item{items.length !== 1 ? "s" : ""}</p>
+              <h3 className="text-base font-semibold text-gray-900">Wishlist</h3>
+              <p className="text-xs text-gray-400">{items.length} saved item{items.length !== 1 ? "s" : ""}</p>
             </div>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-colors">
+          <button onClick={onClose} className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 hover:text-gray-900 hover:bg-gray-200/50 transition-colors">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -39,19 +39,19 @@ export function WishlistDrawer({ open, onClose, items, onRemove, onAddToCart, pr
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {items.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center space-y-4 py-16">
-              <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center">
-                <Heart className="w-8 h-8 text-white/15" />
+              <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center">
+                <Heart className="w-8 h-8 text-gray-900/15" />
               </div>
               <div className="space-y-1">
-                <p className="text-sm font-medium text-white/50">Your wishlist is empty</p>
-                <p className="text-xs text-white/30">Tap the heart icon on any item to save it for later</p>
+                <p className="text-sm font-medium text-gray-500">Your wishlist is empty</p>
+                <p className="text-xs text-gray-400">Tap the heart icon on any item to save it for later</p>
               </div>
             </div>
           ) : (
             items.map((item) => (
               <div
                 key={item.id}
-                className="flex gap-3 p-3 rounded-xl border border-white/[0.06] bg-white/[0.02] group hover:bg-white/[0.04] transition-colors"
+                className="flex gap-3 p-3 rounded-xl border border-gray-200 bg-white/[0.02] group hover:bg-gray-50 transition-colors"
               >
                 {item.imageUrl ? (
                   <img src={item.imageUrl} alt={item.name} className="w-16 h-16 rounded-lg object-cover flex-shrink-0" />
@@ -64,7 +64,7 @@ export function WishlistDrawer({ open, onClose, items, onRemove, onAddToCart, pr
                   </div>
                 )}
                 <div className="flex-1 min-w-0">
-                  <h4 className="text-sm font-medium text-white truncate">{item.name}</h4>
+                  <h4 className="text-sm font-medium text-gray-900 truncate">{item.name}</h4>
                   <p className="text-sm font-semibold mt-1" style={{ color: primaryColor }}>
                     {formatPrice(item.price, item.currency)}
                   </p>

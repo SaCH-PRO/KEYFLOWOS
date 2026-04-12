@@ -16,9 +16,9 @@ function FaqItem({ entry, primaryColor, index }: { entry: FaqEntry; primaryColor
 
   return (
     <div
-      className="border border-white/[0.06] rounded-2xl overflow-hidden transition-all duration-300"
+      className="border border-gray-200 rounded-2xl overflow-hidden transition-all duration-300"
       style={{
-        background: open ? `${primaryColor}06` : "rgba(255,255,255,0.02)",
+        background: open ? `${primaryColor}06` : "rgba(0,0,0,0.02)",
         borderColor: open ? `${primaryColor}20` : undefined,
       }}
     >
@@ -27,11 +27,11 @@ function FaqItem({ entry, primaryColor, index }: { entry: FaqEntry; primaryColor
         className="w-full flex items-center justify-between gap-4 px-5 py-4 text-left min-h-[44px] group"
         aria-expanded={open}
       >
-        <span className="text-sm font-medium text-white/80 group-hover:text-white transition-colors leading-relaxed">
+        <span className="text-sm font-medium text-gray-700 group-hover:text-gray-900 transition-colors leading-relaxed">
           {entry.question}
         </span>
         <ChevronDown
-          className="w-4 h-4 flex-shrink-0 text-white/30 transition-transform duration-300"
+          className="w-4 h-4 flex-shrink-0 text-gray-400 transition-transform duration-300"
           style={{ transform: open ? "rotate(180deg)" : "rotate(0)" }}
         />
       </button>
@@ -42,7 +42,7 @@ function FaqItem({ entry, primaryColor, index }: { entry: FaqEntry; primaryColor
           opacity: open ? 1 : 0,
         }}
       >
-        <div className="px-5 pb-4 text-sm text-white/50 leading-relaxed whitespace-pre-line">
+        <div className="px-5 pb-4 text-sm text-gray-500 leading-relaxed whitespace-pre-line">
           {entry.answer}
         </div>
       </div>
@@ -62,7 +62,7 @@ export function FaqSection({ entries, heading, primaryColor, accentColor }: Prop
         >
           <HelpCircle className="w-4 h-4" style={{ color: accentColor }} />
         </div>
-        <h3 className="text-lg font-semibold text-white/80">
+        <h3 className="text-lg font-semibold text-gray-700">
           {heading || "Frequently Asked Questions"}
         </h3>
       </div>

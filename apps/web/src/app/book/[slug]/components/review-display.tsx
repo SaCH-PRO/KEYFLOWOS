@@ -48,7 +48,7 @@ function StarRating({ rating, size = 14, interactive = false, onChange }: {
         >
           <Star
             style={{ width: size, height: size }}
-            className={`${(hover || rating) >= star ? "text-amber-400 fill-amber-400" : "text-white/15"} transition-colors`}
+            className={`${(hover || rating) >= star ? "text-amber-400 fill-amber-400" : "text-gray-900/15"} transition-colors`}
           />
         </button>
       ))}
@@ -61,7 +61,7 @@ export function StarRatingDisplay({ rating, count, size = 12 }: { rating: number
   return (
     <div className="flex items-center gap-1.5">
       <StarRating rating={Math.round(rating)} size={size} />
-      <span className="text-[11px] text-white/40 tabular-nums">
+      <span className="text-[11px] text-gray-400 tabular-nums">
         {rating.toFixed(1)} ({count})
       </span>
     </div>
@@ -126,7 +126,7 @@ export function ReviewSection({ slug, productId, productName, primaryColor }: Pr
   if (loading) {
     return (
       <div className="py-6 flex justify-center">
-        <Loader2 className="w-5 h-5 animate-spin text-white/20" />
+        <Loader2 className="w-5 h-5 animate-spin text-gray-300" />
       </div>
     );
   }
@@ -135,11 +135,11 @@ export function ReviewSection({ slug, productId, productName, primaryColor }: Pr
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h3 className="text-sm font-semibold text-white">Reviews</h3>
+          <h3 className="text-sm font-semibold text-gray-900">Reviews</h3>
           {data && data.totalCount > 0 && (
             <div className="flex items-center gap-1.5">
               <StarRating rating={Math.round(data.averageRating)} size={14} />
-              <span className="text-xs text-white/50 tabular-nums">
+              <span className="text-xs text-gray-500 tabular-nums">
                 {data.averageRating.toFixed(1)} ({data.totalCount})
               </span>
             </div>
@@ -165,50 +165,50 @@ export function ReviewSection({ slug, productId, productName, primaryColor }: Pr
       )}
 
       {showForm && (
-        <form onSubmit={handleSubmit} className="space-y-3 p-4 rounded-xl border border-white/10 bg-white/[0.02]">
+        <form onSubmit={handleSubmit} className="space-y-3 p-4 rounded-xl border border-gray-200 bg-white/[0.02]">
           <div>
-            <label className="text-xs text-white/50 mb-1 block">Your Rating *</label>
+            <label className="text-xs text-gray-500 mb-1 block">Your Rating *</label>
             <StarRating rating={formData.rating} size={24} interactive onChange={(r) => setFormData((prev) => ({ ...prev, rating: r }))} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-white/50 mb-1 block">Name *</label>
+              <label className="text-xs text-gray-500 mb-1 block">Name *</label>
               <input
                 type="text"
                 value={formData.customerName}
                 onChange={(e) => setFormData((prev) => ({ ...prev, customerName: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg border border-white/10 bg-white/5 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-white/20"
+                className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-100 text-sm text-gray-900 placeholder:text-gray-900/25 focus:outline-none focus:border-gray-300"
                 placeholder="Your name"
                 required
               />
             </div>
             <div>
-              <label className="text-xs text-white/50 mb-1 block">Email</label>
+              <label className="text-xs text-gray-500 mb-1 block">Email</label>
               <input
                 type="email"
                 value={formData.customerEmail}
                 onChange={(e) => setFormData((prev) => ({ ...prev, customerEmail: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg border border-white/10 bg-white/5 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-white/20"
+                className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-100 text-sm text-gray-900 placeholder:text-gray-900/25 focus:outline-none focus:border-gray-300"
                 placeholder="email@example.com"
               />
             </div>
           </div>
           <div>
-            <label className="text-xs text-white/50 mb-1 block">Order Reference</label>
+            <label className="text-xs text-gray-500 mb-1 block">Order Reference</label>
             <input
               type="text"
               value={formData.orderReference}
               onChange={(e) => setFormData((prev) => ({ ...prev, orderReference: e.target.value }))}
-              className="w-full px-3 py-2 rounded-lg border border-white/10 bg-white/5 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-white/20"
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-100 text-sm text-gray-900 placeholder:text-gray-900/25 focus:outline-none focus:border-gray-300"
               placeholder="Your order or booking ID"
             />
           </div>
           <div>
-            <label className="text-xs text-white/50 mb-1 block">Review</label>
+            <label className="text-xs text-gray-500 mb-1 block">Review</label>
             <textarea
               value={formData.reviewText}
               onChange={(e) => setFormData((prev) => ({ ...prev, reviewText: e.target.value }))}
-              className="w-full px-3 py-2 rounded-lg border border-white/10 bg-white/5 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-white/20 resize-none"
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-100 text-sm text-gray-900 placeholder:text-gray-900/25 focus:outline-none focus:border-gray-300 resize-none"
               rows={3}
               placeholder={`Share your experience with ${productName}...`}
             />
@@ -216,7 +216,7 @@ export function ReviewSection({ slug, productId, productName, primaryColor }: Pr
           <button
             type="submit"
             disabled={submitting || formData.rating === 0 || !formData.customerName.trim()}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-all disabled:opacity-40"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-gray-900 transition-all disabled:opacity-40"
             style={{ backgroundColor: primaryColor }}
           >
             {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
@@ -227,32 +227,32 @@ export function ReviewSection({ slug, productId, productName, primaryColor }: Pr
 
       {(!data || data.totalCount === 0) && !showForm && !submitted && (
         <div className="text-center py-6 space-y-2">
-          <Star className="w-8 h-8 text-white/10 mx-auto" />
-          <p className="text-sm text-white/30">No reviews yet — be the first!</p>
+          <Star className="w-8 h-8 text-gray-900/10 mx-auto" />
+          <p className="text-sm text-gray-400">No reviews yet — be the first!</p>
         </div>
       )}
 
       {data && data.reviews.length > 0 && (
         <div className="space-y-3">
           {data.reviews.map((review) => (
-            <div key={review.id} className="p-3 rounded-xl border border-white/[0.06] bg-white/[0.02] space-y-2">
+            <div key={review.id} className="p-3 rounded-xl border border-gray-200 bg-white/[0.02] space-y-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-xs font-semibold text-white/60">
+                  <div className="w-7 h-7 rounded-full bg-gray-200/50 flex items-center justify-center text-xs font-semibold text-gray-500">
                     {review.customerName.charAt(0).toUpperCase()}
                   </div>
                   <div>
-                    <span className="text-xs font-medium text-white/70">{review.customerName}</span>
-                    <span className="text-[10px] text-white/30 ml-2">{formatDate(review.createdAt)}</span>
+                    <span className="text-xs font-medium text-gray-600">{review.customerName}</span>
+                    <span className="text-[10px] text-gray-400 ml-2">{formatDate(review.createdAt)}</span>
                   </div>
                 </div>
                 <StarRating rating={review.rating} size={12} />
               </div>
-              {review.reviewText && <p className="text-xs text-white/50 leading-relaxed">{review.reviewText}</p>}
+              {review.reviewText && <p className="text-xs text-gray-500 leading-relaxed">{review.reviewText}</p>}
               {review.sellerResponse && (
-                <div className="ml-4 p-2.5 rounded-lg bg-white/[0.03] border-l-2" style={{ borderColor: `${primaryColor}40` }}>
-                  <p className="text-[10px] font-medium text-white/40 mb-1">Seller Response</p>
-                  <p className="text-xs text-white/50">{review.sellerResponse}</p>
+                <div className="ml-4 p-2.5 rounded-lg bg-gray-50 border-l-2" style={{ borderColor: `${primaryColor}40` }}>
+                  <p className="text-[10px] font-medium text-gray-400 mb-1">Seller Response</p>
+                  <p className="text-xs text-gray-500">{review.sellerResponse}</p>
                 </div>
               )}
             </div>

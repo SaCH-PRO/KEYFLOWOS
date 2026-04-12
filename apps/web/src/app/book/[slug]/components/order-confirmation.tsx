@@ -144,16 +144,16 @@ export function OrderConfirmation({
 
         <div>
           <h1 className="text-2xl font-bold text-yellow-400 mb-2">Payment Processing</h1>
-          <p className="text-sm text-white/50 leading-relaxed">
+          <p className="text-sm text-gray-500 leading-relaxed">
             Your payment is still being processed. This may take a moment.
             Please check back shortly or contact the business if the issue persists.
           </p>
         </div>
 
         {orderNumber && (
-          <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-4">
-            <p className="text-xs text-white/40 mb-1">Order Reference</p>
-            <p className="text-sm font-mono font-semibold text-white/80">{orderNumber}</p>
+          <div className="rounded-xl bg-gray-50 border border-gray-200 p-4">
+            <p className="text-xs text-gray-400 mb-1">Order Reference</p>
+            <p className="text-sm font-mono font-semibold text-gray-700">{orderNumber}</p>
           </div>
         )}
 
@@ -161,7 +161,7 @@ export function OrderConfirmation({
           {onRetryPayment && (
             <button
               onClick={onRetryPayment}
-              className="w-full py-3.5 rounded-2xl font-semibold text-sm text-white transition-all duration-300 hover:scale-[1.015] active:scale-[0.98] inline-flex items-center justify-center gap-2"
+              className="w-full py-3.5 rounded-2xl font-semibold text-sm text-gray-900 transition-all duration-300 hover:scale-[1.015] active:scale-[0.98] inline-flex items-center justify-center gap-2"
               style={{ backgroundColor: primaryColor, boxShadow: `0 8px 32px ${primaryColor}30` }}
             >
               <RefreshCw className="w-4 h-4" />
@@ -170,7 +170,7 @@ export function OrderConfirmation({
           )}
           <button
             onClick={onContinueShopping}
-            className="w-full py-3 rounded-2xl border border-white/[0.06] text-sm font-medium text-white/50 hover:text-white/80 hover:bg-white/[0.03] transition-all duration-200 flex items-center justify-center gap-2"
+            className="w-full py-3 rounded-2xl border border-gray-200 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-50 transition-all duration-200 flex items-center justify-center gap-2"
           >
             <ShoppingBag className="w-3.5 h-3.5" />
             Back to Shop
@@ -195,7 +195,7 @@ export function OrderConfirmation({
 
         <div>
           <h1 className="text-2xl font-bold text-red-400 mb-2">Payment Failed</h1>
-          <p className="text-sm text-white/50 leading-relaxed">
+          <p className="text-sm text-gray-500 leading-relaxed">
             Something went wrong with your payment. Please try again or choose a different payment method.
           </p>
         </div>
@@ -204,7 +204,7 @@ export function OrderConfirmation({
           {onRetryPayment && (
             <button
               onClick={onRetryPayment}
-              className="w-full py-3.5 rounded-2xl font-semibold text-sm text-white transition-all duration-300 hover:scale-[1.015] active:scale-[0.98] inline-flex items-center justify-center gap-2"
+              className="w-full py-3.5 rounded-2xl font-semibold text-sm text-gray-900 transition-all duration-300 hover:scale-[1.015] active:scale-[0.98] inline-flex items-center justify-center gap-2"
               style={{ backgroundColor: primaryColor, boxShadow: `0 8px 32px ${primaryColor}30` }}
             >
               <RefreshCw className="w-4 h-4" />
@@ -213,7 +213,7 @@ export function OrderConfirmation({
           )}
           <button
             onClick={onContinueShopping}
-            className="w-full py-3 rounded-2xl border border-white/[0.06] text-sm font-medium text-white/50 hover:text-white/80 hover:bg-white/[0.03] transition-all duration-200 flex items-center justify-center gap-2"
+            className="w-full py-3 rounded-2xl border border-gray-200 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-50 transition-all duration-200 flex items-center justify-center gap-2"
           >
             <ShoppingBag className="w-3.5 h-3.5" />
             Back to Shop
@@ -248,16 +248,16 @@ export function OrderConfirmation({
         <h1 className="text-2xl font-bold text-emerald-400 mb-2">
           {isOrder ? "Order Placed!" : "Booking Confirmed!"}
         </h1>
-        <p className="text-sm text-white/50 leading-relaxed">
+        <p className="text-sm text-gray-500 leading-relaxed">
           Your {isOrder ? "order" : "appointment"} with{" "}
-          <span className="font-semibold text-white/80">{businessName}</span> has been confirmed.
+          <span className="font-semibold text-gray-700">{businessName}</span> has been confirmed.
         </p>
       </div>
 
       <div className="space-y-3" style={{ animation: "fadeUp 500ms ease-out 350ms both" }}>
         {orderNumber && (
-          <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-3 inline-flex items-center gap-2 mx-auto">
-            <span className="text-[11px] text-white/40">Order #</span>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 inline-flex items-center gap-2 mx-auto">
+            <span className="text-[11px] text-gray-400">Order #</span>
             <code className="font-mono text-sm font-bold tracking-wider" style={{ color: primaryColor }}>
               {orderNumber}
             </code>
@@ -266,9 +266,9 @@ export function OrderConfirmation({
         {bookingResults.filter((br) => !br.bookingId.startsWith("ORD-")).map((br, idx) => (
           <div
             key={idx}
-            className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-3 inline-flex items-center gap-2 mx-auto"
+            className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 inline-flex items-center gap-2 mx-auto"
           >
-            <span className="text-[11px] text-white/40">Booking Ref:</span>
+            <span className="text-[11px] text-gray-400">Booking Ref:</span>
             <code className="font-mono text-sm font-bold tracking-wider" style={{ color: primaryColor }}>
               {br.bookingId.slice(-8).toUpperCase()}
             </code>
@@ -278,14 +278,14 @@ export function OrderConfirmation({
 
       {orderItems && orderItems.length > 0 && (
         <div
-          className="rounded-2xl border border-white/[0.06] overflow-hidden text-left"
+          className="rounded-2xl border border-gray-200 overflow-hidden text-left"
           style={{
-            background: "linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)",
+            background: "linear-gradient(135deg, rgba(0,0,0,0.03) 0%, rgba(0,0,0,0.01) 100%)",
             animation: "fadeUp 500ms ease-out 380ms both",
           }}
         >
-          <div className="px-4 py-3 border-b border-white/[0.04]">
-            <p className="text-[10px] uppercase tracking-widest text-white/30 font-medium">Items Ordered</p>
+          <div className="px-4 py-3 border-b border-gray-200">
+            <p className="text-[10px] uppercase tracking-widest text-gray-400 font-medium">Items Ordered</p>
           </div>
           <div className="p-4 space-y-2">
             {orderItems.map((item) => (
@@ -294,21 +294,21 @@ export function OrderConfirmation({
                   {item.imageUrl ? (
                     <img src={item.imageUrl} alt={item.name} className="w-8 h-8 rounded-lg object-cover" />
                   ) : (
-                    <div className="w-8 h-8 rounded-lg bg-white/[0.04] flex items-center justify-center">
-                      <Package className="w-4 h-4 text-white/20" />
+                    <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center">
+                      <Package className="w-4 h-4 text-gray-300" />
                     </div>
                   )}
-                  <span className="text-white/60">{item.name}</span>
-                  <span className="text-[10px] text-white/30 bg-white/[0.04] px-1.5 py-0.5 rounded">x{item.quantity}</span>
+                  <span className="text-gray-500">{item.name}</span>
+                  <span className="text-[10px] text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded">x{item.quantity}</span>
                 </div>
-                <span className="text-white/70 font-medium tabular-nums">
+                <span className="text-gray-600 font-medium tabular-nums">
                   {formatPrice(item.price * item.quantity, item.currency)}
                 </span>
               </div>
             ))}
             {orderTotal !== undefined && orderCurrency && (
-              <div className="border-t border-white/[0.04] pt-2 flex justify-between items-center">
-                <span className="text-sm font-medium text-white/50">Total</span>
+              <div className="border-t border-gray-200 pt-2 flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-500">Total</span>
                 <span className="text-base font-bold tabular-nums" style={{ color: primaryColor }}>
                   {formatPrice(orderTotal, orderCurrency)}
                 </span>
@@ -323,10 +323,10 @@ export function OrderConfirmation({
           {confirmedDetails.serviceNames.map((name, idx) => (
             <div
               key={idx}
-              className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-3 text-left space-y-1.5"
+              className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-left space-y-1.5"
             >
-              <p className="text-sm font-medium text-white/80">{name}</p>
-              <div className="flex items-center gap-4 text-[12px] text-white/45">
+              <p className="text-sm font-medium text-gray-700">{name}</p>
+              <div className="flex items-center gap-4 text-[12px] text-gray-900/45">
                 {confirmedDetails.dates[idx] && (
                   <span className="flex items-center gap-1">
                     <CalendarPlus className="w-3 h-3" />
@@ -347,23 +347,23 @@ export function OrderConfirmation({
 
       {(paymentMethod || estimatedDelivery) && (
         <div
-          className="rounded-2xl border border-white/[0.06] overflow-hidden text-left"
+          className="rounded-2xl border border-gray-200 overflow-hidden text-left"
           style={{
-            background: "linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)",
+            background: "linear-gradient(135deg, rgba(0,0,0,0.03) 0%, rgba(0,0,0,0.01) 100%)",
             animation: "fadeUp 500ms ease-out 420ms both",
           }}
         >
           <div className="p-4 space-y-2">
             {paymentMethod && (
               <div className="flex justify-between text-sm">
-                <span className="text-white/40">Payment</span>
-                <span className="text-white/60">{paymentMethodLabels[paymentMethod] || paymentMethod}</span>
+                <span className="text-gray-400">Payment</span>
+                <span className="text-gray-500">{paymentMethodLabels[paymentMethod] || paymentMethod}</span>
               </div>
             )}
             {estimatedDelivery && (
               <div className="flex justify-between text-sm">
-                <span className="text-white/40">Est. Delivery</span>
-                <span className="text-white/60">{estimatedDelivery}</span>
+                <span className="text-gray-400">Est. Delivery</span>
+                <span className="text-gray-500">{estimatedDelivery}</span>
               </div>
             )}
           </div>
@@ -371,14 +371,14 @@ export function OrderConfirmation({
       )}
 
       <div
-        className="rounded-2xl border border-white/[0.06] overflow-hidden text-left"
+        className="rounded-2xl border border-gray-200 overflow-hidden text-left"
         style={{
-          background: "linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)",
+          background: "linear-gradient(135deg, rgba(0,0,0,0.03) 0%, rgba(0,0,0,0.01) 100%)",
           animation: "fadeUp 500ms ease-out 480ms both",
         }}
       >
-        <div className="px-4 py-3 border-b border-white/[0.04]">
-          <p className="text-[10px] uppercase tracking-widest text-white/30 font-medium">
+        <div className="px-4 py-3 border-b border-gray-200">
+          <p className="text-[10px] uppercase tracking-widest text-gray-400 font-medium">
             What Happens Next
           </p>
         </div>
@@ -407,8 +407,8 @@ export function OrderConfirmation({
                   )}
                 </div>
                 <div className={`pb-4 ${isLast ? "pb-0" : ""}`}>
-                  <p className="text-xs font-medium text-white/70">{step.title}</p>
-                  <p className="text-[11px] text-white/35 mt-0.5">{step.desc}</p>
+                  <p className="text-xs font-medium text-gray-600">{step.title}</p>
+                  <p className="text-[11px] text-gray-900/35 mt-0.5">{step.desc}</p>
                 </div>
               </div>
             );
@@ -422,7 +422,7 @@ export function OrderConfirmation({
             href={calendarUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="w-full py-3.5 rounded-2xl font-semibold text-sm text-white transition-all duration-300 hover:scale-[1.015] active:scale-[0.98] inline-flex items-center justify-center gap-2 min-h-[44px]"
+            className="w-full py-3.5 rounded-2xl font-semibold text-sm text-gray-900 transition-all duration-300 hover:scale-[1.015] active:scale-[0.98] inline-flex items-center justify-center gap-2 min-h-[44px]"
             style={{ backgroundColor: primaryColor, boxShadow: `0 8px 32px ${primaryColor}30` }}
           >
             <CalendarPlus className="w-4 h-4" />
@@ -445,7 +445,7 @@ export function OrderConfirmation({
             style={{
               backgroundColor: calendarUrl ? "transparent" : primaryColor,
               color: "white",
-              border: calendarUrl ? "1px solid rgba(255,255,255,0.1)" : "none",
+              border: calendarUrl ? "1px solid rgba(0,0,0,0.06)" : "none",
               boxShadow: calendarUrl ? "none" : `0 8px 32px ${primaryColor}30`,
             }}
           >
@@ -457,7 +457,7 @@ export function OrderConfirmation({
         )}
 
         <div className="space-y-2">
-          <p className="text-xs text-white/40">Share with friends</p>
+          <p className="text-xs text-gray-400">Share with friends</p>
           <div className="flex justify-center">
             <ShareButtons
               url={typeof window !== "undefined" ? window.location.href : ""}
@@ -470,7 +470,7 @@ export function OrderConfirmation({
 
         <button
           onClick={onContinueShopping}
-          className="w-full py-3 rounded-2xl border border-white/[0.06] text-sm font-medium text-white/50 hover:text-white/80 hover:bg-white/[0.03] transition-all duration-200 flex items-center justify-center gap-2 min-h-[44px]"
+          className="w-full py-3 rounded-2xl border border-gray-200 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-50 transition-all duration-200 flex items-center justify-center gap-2 min-h-[44px]"
         >
           <ShoppingBag className="w-3.5 h-3.5" />
           Continue Shopping
@@ -478,7 +478,7 @@ export function OrderConfirmation({
       </div>
 
       {businessAddress && (
-        <div className="flex items-center justify-center gap-1.5 text-[11px] text-white/25" style={{ animation: "fadeUp 500ms ease-out 700ms both" }}>
+        <div className="flex items-center justify-center gap-1.5 text-[11px] text-gray-900/25" style={{ animation: "fadeUp 500ms ease-out 700ms both" }}>
           <MapPin className="w-3 h-3" />
           <span>{businessAddress}</span>
         </div>
@@ -486,9 +486,9 @@ export function OrderConfirmation({
 
       {isOrder && !customerEmail && (
         <div
-          className="rounded-2xl border border-white/[0.06] overflow-hidden text-left"
+          className="rounded-2xl border border-gray-200 overflow-hidden text-left"
           style={{
-            background: "linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)",
+            background: "linear-gradient(135deg, rgba(0,0,0,0.03) 0%, rgba(0,0,0,0.01) 100%)",
             animation: "fadeUp 500ms ease-out 750ms both",
           }}
         >
@@ -501,8 +501,8 @@ export function OrderConfirmation({
                 <Bell className="w-4 h-4" style={{ color: secondaryColor }} />
               </div>
               <div>
-                <p className="text-xs font-medium text-white/70">Get Order Updates</p>
-                <p className="text-[10px] text-white/35">Receive status notifications via email</p>
+                <p className="text-xs font-medium text-gray-600">Get Order Updates</p>
+                <p className="text-[10px] text-gray-900/35">Receive status notifications via email</p>
               </div>
             </div>
             <form
@@ -538,14 +538,14 @@ export function OrderConfirmation({
                 placeholder="your@email.com"
                 className="flex-1 rounded-xl px-3 py-2.5 text-sm min-h-[44px]"
                 style={{
-                  background: "rgba(255,255,255,0.04)",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  color: "rgba(255,255,255,0.8)",
+                  background: "rgba(0,0,0,0.03)",
+                  border: "1px solid rgba(0,0,0,0.05)",
+                  color: "rgba(0,0,0,0.7)",
                 }}
               />
               <button
                 type="submit"
-                className="px-4 py-2.5 rounded-xl text-sm font-medium text-white transition-all hover:scale-[1.02] active:scale-[0.98] min-h-[44px]"
+                className="px-4 py-2.5 rounded-xl text-sm font-medium text-gray-900 transition-all hover:scale-[1.02] active:scale-[0.98] min-h-[44px]"
                 style={{ backgroundColor: secondaryColor }}
               >
                 Notify Me
@@ -555,7 +555,7 @@ export function OrderConfirmation({
         </div>
       )}
 
-      <div className="flex items-center justify-center gap-1.5 text-[10px] text-white/20">
+      <div className="flex items-center justify-center gap-1.5 text-[10px] text-gray-300">
         <Star className="w-3 h-3" />
         <span>Thank you for your business</span>
       </div>

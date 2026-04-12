@@ -77,12 +77,12 @@ export function ItemDetailModal({
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
       <div
-        className="relative w-full sm:max-w-2xl max-h-[95vh] sm:max-h-[90vh] bg-[#12121a] sm:rounded-2xl overflow-y-auto border border-white/10 shadow-2xl"
+        className="relative w-full sm:max-w-2xl max-h-[95vh] sm:max-h-[90vh] bg-white sm:rounded-2xl overflow-y-auto border border-gray-200 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <button
           onClick={onClose}
-          className="absolute top-3 right-3 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-black/50 backdrop-blur text-white/70 hover:text-white transition-colors"
+          className="absolute top-3 right-3 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-gray-200/80 backdrop-blur text-gray-600 hover:text-gray-900 transition-colors"
         >
           <X className="w-5 h-5" />
         </button>
@@ -102,34 +102,34 @@ export function ItemDetailModal({
             </span>
           )}
 
-          <h2 className="text-2xl font-bold text-white leading-tight">{item.name}</h2>
+          <h2 className="text-2xl font-bold text-gray-900 leading-tight">{item.name}</h2>
 
           <div className="flex items-center gap-4">
             <span className="text-2xl font-bold" style={{ color: primaryColor }}>
               {formatPrice(item.price, item.currency)}
             </span>
             {item.duration && (
-              <span className="flex items-center gap-1.5 text-sm text-white/50">
+              <span className="flex items-center gap-1.5 text-sm text-gray-500">
                 <Clock className="w-4 h-4" /> {item.duration} min
               </span>
             )}
           </div>
 
           {item.description && (
-            <p className="text-sm text-white/60 leading-relaxed whitespace-pre-line">{item.description}</p>
+            <p className="text-sm text-gray-500 leading-relaxed whitespace-pre-line">{item.description}</p>
           )}
 
           <div className="flex items-center justify-between py-2">
             <div className="flex flex-wrap gap-3">
-              <div className="flex items-center gap-1.5 text-xs text-white/40">
+              <div className="flex items-center gap-1.5 text-xs text-gray-400">
                 <Star className="w-3.5 h-3.5" style={{ color: primaryColor }} />
                 Quality Guaranteed
               </div>
-              <div className="flex items-center gap-1.5 text-xs text-white/40">
+              <div className="flex items-center gap-1.5 text-xs text-gray-400">
                 <Shield className="w-3.5 h-3.5" style={{ color: primaryColor }} />
                 Secure Booking
               </div>
-              <div className="flex items-center gap-1.5 text-xs text-white/40">
+              <div className="flex items-center gap-1.5 text-xs text-gray-400">
                 <Zap className="w-3.5 h-3.5" style={{ color: primaryColor }} />
                 Instant Confirmation
               </div>
@@ -139,13 +139,13 @@ export function ItemDetailModal({
                 onClick={onToggleWishlist}
                 className="w-10 h-10 rounded-xl flex items-center justify-center transition-all hover:scale-110"
                 style={{
-                  backgroundColor: isWishlisted ? `${primaryColor}15` : "rgba(255,255,255,0.05)",
+                  backgroundColor: isWishlisted ? `${primaryColor}15` : "rgba(0,0,0,0.04)",
                 }}
                 title={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
               >
                 <Heart
                   className="w-5 h-5 transition-colors"
-                  style={{ color: isWishlisted ? primaryColor : "rgba(255,255,255,0.3)" }}
+                  style={{ color: isWishlisted ? primaryColor : "rgba(0,0,0,0.15)" }}
                   fill={isWishlisted ? primaryColor : "none"}
                 />
               </button>
@@ -153,7 +153,7 @@ export function ItemDetailModal({
           </div>
 
           <div className="flex items-center justify-between">
-            <div className="text-xs text-white/40">Share this item</div>
+            <div className="text-xs text-gray-400">Share this item</div>
             <ShareButtons
               url={typeof window !== "undefined" ? window.location.href : ""}
               title={`${item.name} — ${formatPrice(item.price, item.currency)}`}
@@ -200,20 +200,20 @@ export function ItemDetailModal({
             <div className="space-y-4">
               <a
                 href={`/book/${slug}/product/${item.id}`}
-                className="flex items-center justify-center gap-2 text-xs text-white/40 hover:text-white/60 transition-colors min-h-[44px]"
+                className="flex items-center justify-center gap-2 text-xs text-gray-400 hover:text-gray-500 transition-colors min-h-[44px]"
               >
                 <ExternalLink className="w-3 h-3" />
                 View Full Details
               </a>
-              <div className="pt-4 border-t border-white/10">
+              <div className="pt-4 border-t border-gray-200">
                 <ReviewSection slug={slug} productId={item.id} productName={item.name} primaryColor={primaryColor} />
               </div>
             </div>
           )}
 
           {relatedItems.length > 0 && (
-            <div className="pt-4 border-t border-white/10 space-y-3">
-              <h3 className="text-sm font-semibold text-white/60">You might also like</h3>
+            <div className="pt-4 border-t border-gray-200 space-y-3">
+              <h3 className="text-sm font-semibold text-gray-500">You might also like</h3>
               <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
                 {relatedItems.slice(0, 4).map((ri) => {
                   const riAccent = ri.itemType === "service" ? primaryColor : ri.itemType === "product" ? secondaryColor : brandAccent;
@@ -221,7 +221,7 @@ export function ItemDetailModal({
                     <button
                       key={`${ri.id}_${ri.itemType}`}
                       onClick={() => onSelectItem(ri)}
-                      className="flex-shrink-0 w-36 rounded-xl border border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.06] transition-all overflow-hidden text-left"
+                      className="flex-shrink-0 w-36 rounded-xl border border-gray-200 bg-gray-50 hover:border-gray-300 hover:bg-gray-100 transition-all overflow-hidden text-left"
                     >
                       {ri.imageUrl ? (
                         <div className="w-full h-20 overflow-hidden">
@@ -239,7 +239,7 @@ export function ItemDetailModal({
                         </div>
                       )}
                       <div className="p-2 space-y-1">
-                        <p className="text-xs font-medium text-white truncate">{ri.name}</p>
+                        <p className="text-xs font-medium text-gray-900 truncate">{ri.name}</p>
                         <p className="text-xs font-semibold" style={{ color: primaryColor }}>
                           {formatPrice(ri.price, ri.currency)}
                         </p>
