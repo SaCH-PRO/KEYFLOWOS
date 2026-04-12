@@ -173,7 +173,7 @@ export function CatalogManager({
               style={{ color: "hsl(var(--kf-accent2))" }}
             >
               <ExternalLink className="w-3 h-3" />
-              Use products in Commerce
+              Manage in Commerce
             </Link>
           </div>
         </div>

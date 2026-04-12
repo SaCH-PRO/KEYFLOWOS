@@ -7,13 +7,12 @@ import {
   DollarSign,
   RefreshCw,
   Plus,
-  Search,
-  Zap,
   BookOpen,
   Clock,
   AlertTriangle,
   Settings,
   ArrowRight,
+  Package,
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -45,6 +44,8 @@ import InvoicesPanel from "./invoices/invoices-panel";
 import QuotesPanel from "./quotes/quotes-panel";
 import RecurringPanel from "./recurring/recurring-panel";
 import PaymentsTab from "./payments/payments-tab";
+import { ProductsPanel } from "./products/products-panel";
+import { useProducts } from "./hooks/use-products";
 
 const TABS = [
   { key: "invoices", label: "Invoices", icon: FileText, tooltip: "Create and manage invoices. Track sent, paid, overdue, and draft invoices." },
@@ -73,6 +74,8 @@ export default function CommercePage() {
     handleTabChange: overview.handleTabChange,
     prefillForContact: billing.prefillForContact,
   });
+
+  const productActions = useProducts(shell.businessId, shell.setProducts, shell.cachedImages, shell.setCachedImages);
 
   const emitEvent = useModuleEmit();
   const router = useRouter();
@@ -167,10 +170,11 @@ export default function CommercePage() {
       groupName: "Commerce Navigation",
       shortcuts: [
         { key: "n", description: "New item", action: () => composer.handleNewItem() },
-        { key: "1", description: "Invoices tab", action: () => handleTabChange("invoices") },
-        { key: "2", description: "Quotes tab", action: () => handleTabChange("quotes") },
-        { key: "3", description: "Payments tab", action: () => handleTabChange("payments") },
-        { key: "4", description: "Recurring tab", action: () => handleTabChange("recurring") },
+        { key: "1", description: "Products tab", action: () => handleTabChange("products") },
+        { key: "2", description: "Invoices tab", action: () => handleTabChange("invoices") },
+        { key: "3", description: "Quotes tab", action: () => handleTabChange("quotes") },
+        { key: "4", description: "Payments tab", action: () => handleTabChange("payments") },
+        { key: "5", description: "Recurring tab", action: () => handleTabChange("recurring") },
         { key: "r", description: "Refresh data", action: () => { shell.refreshProducts(); } },
         { key: "?", description: "Help", action: () => setHelpOpen(true) },
       ],
@@ -284,6 +288,32 @@ export default function CommercePage() {
         openKeys={accordionOpen}
         onOpenChange={setAccordionOpen}
         sections={[
+          {
+            key: "products", label: "Products & Services", icon: Package,
+            badge: shell.products.length || undefined,
+            content: (
+              <ProductsPanel
+                products={shell.products}
+                loading={shell.loading}
+                productSearch={productActions.productSearch}
+                setProductSearch={productActions.setProductSearch}
+                onEdit={productActions.openEditProduct}
+                onDelete={productActions.handleDeleteProduct}
+                onDuplicate={productActions.handleDuplicateProduct}
+                onToggleActive={productActions.handleToggleProductActive}
+                onInlineSave={productActions.handleInlineSave}
+                onAdd={productActions.openAddProduct}
+                setProducts={shell.setProducts}
+                deleteConfirm={productActions.deleteConfirm}
+                setDeleteConfirm={productActions.setDeleteConfirm}
+                cachedImages={shell.cachedImages}
+                businessId={businessId}
+                currency={businessCurrency}
+                invoices={shell.invoices}
+                quotes={shell.quotes}
+              />
+            ),
+          },
           {
             key: "invoices", label: "Invoices", icon: FileText,
             badge: shell.invoices.length || undefined,
