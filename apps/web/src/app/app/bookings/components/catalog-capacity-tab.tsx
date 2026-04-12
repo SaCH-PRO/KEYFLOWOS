@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useCallback, useEffect, useRef } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Briefcase,
@@ -21,7 +21,6 @@ import {
 } from "lucide-react";
 import NextLink from "next/link";
 import { EmptyState } from "@/components/ui/empty-state";
-import { SetupModeBanner } from "@/components/ui/setup-mode-banner";
 import type { Service, StaffMember, Booking } from "./bookings-types";
 import { formatAmount } from "../../commerce/utils/commerce-utils";
 import { fetchStaffAvailability, setStaffAvailability, updateService } from "@/lib/client";
@@ -439,6 +438,8 @@ export default function CatalogCapacityTab({
   loading,
   businessId,
 }: CatalogCapacityTabProps) {
+  const [setupTab, setSetupTab] = useState<"services" | "staff" | "availability" | "hours">("services");
+
   const serviceStats = useMemo(() => {
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -461,208 +462,315 @@ export default function CatalogCapacityTab({
     return map;
   }, [bookings]);
 
+  const readinessItems = useMemo(() => {
+    const items: { label: string; ok: boolean }[] = [
+      { label: `${services.length} service${services.length !== 1 ? "s" : ""} configured`, ok: services.length > 0 },
+      { label: `${staff.length} staff assigned`, ok: staff.length > 0 },
+      { label: "Business hours set", ok: true },
+      { label: "Calendar connected", ok: calendarConnected },
+    ];
+    return items;
+  }, [services, staff, calendarConnected]);
+
+  const readyCount = readinessItems.filter((r) => r.ok).length;
+
+  const SETUP_TABS = [
+    { key: "services" as const, label: "Services", icon: Briefcase, count: services.length },
+    { key: "staff" as const, label: "Staff", icon: Users, count: staff.length },
+    { key: "availability" as const, label: "Availability", icon: Clock },
+    { key: "hours" as const, label: "Business Hours", icon: CalendarDays },
+  ];
+
   return (
     <motion.div
       variants={stagger.container}
       initial="hidden"
       animate="visible"
-      className="space-y-6"
+      className="space-y-5"
     >
-      <SetupModeBanner label="Catalog & Capacity — manage services, staff, and availability" settingsHref="/app/settings/business" />
-      <motion.div variants={stagger.item} className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Briefcase className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-            <h3 className="text-sm font-semibold">Services</h3>
-            <span className="text-xs text-muted-foreground">({services.length})</span>
+      <motion.div variants={stagger.item} className="kf-card rounded-xl p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h3 className="text-sm font-semibold">Setup Readiness</h3>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {readyCount}/{readinessItems.length} configured \u2014 {readyCount === readinessItems.length ? "All set! Your booking system is ready." : "Complete the items below to accept bookings."}
+            </p>
           </div>
-          <NextLink
-            href="/app/store?tab=products"
-            className="inline-flex items-center gap-1 text-[11px] hover:underline min-w-[44px] min-h-[44px] justify-center"
-            style={{ color: "hsl(var(--kf-accent2))" }}
+          <div
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold"
+            style={{
+              background: readyCount === readinessItems.length ? "hsl(var(--kf-success) / 0.1)" : "hsl(var(--kf-warning) / 0.1)",
+              color: readyCount === readinessItems.length ? "hsl(var(--kf-success))" : "hsl(var(--kf-warning))",
+            }}
           >
-            <ExternalLink className="w-3 h-3" />
-            Manage in Store
-          </NextLink>
-        </div>
-
-        {services.length === 0 ? (
-          <EmptyState
-            icon={Briefcase}
-            title="No services yet"
-            description={loading ? "Loading services..." : "Add services from your Store to start accepting bookings."}
-            actionLabel={loading ? undefined : "Go to Store"}
-            actionIcon={Briefcase}
-            onAction={loading ? undefined : () => { window.location.href = "/app/store?tab=products"; }}
-            tip={loading ? undefined : "Services define what your clients can book — set pricing, duration, and availability."}
-          />
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {services.map((service) => {
-              const monthCount = serviceStats.get(service.id) ?? 0;
-              const assignedStaff = staff.length;
-              const svc = service as Service & { bufferMins?: number | null; leadTimeMins?: number | null };
-              return (
-                <motion.div
-                  key={service.id}
-                  variants={stagger.item}
-                  className="kf-card p-4 space-y-3 hover:ring-1 hover:ring-[hsl(var(--kf-accent1)/0.2)] transition-all"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <h4 className="text-sm font-semibold truncate">{service.name}</h4>
-                        <div
-                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium shrink-0"
-                          style={{
-                            background: monthCount > 0 ? "hsl(var(--kf-success) / 0.1)" : "hsl(var(--muted) / 0.3)",
-                            color: monthCount > 0 ? "hsl(var(--kf-success))" : "hsl(var(--muted-foreground))",
-                          }}
-                        >
-                          <div
-                            className="w-1.5 h-1.5 rounded-full"
-                            style={{ background: monthCount > 0 ? "hsl(var(--kf-success))" : "hsl(var(--muted-foreground) / 0.4)" }}
-                          />
-                          {monthCount > 0 ? "Active" : "Inactive"}
-                        </div>
-                      </div>
-                      {service.description && (
-                        <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">
-                          {service.description}
-                        </p>
-                      )}
-                    </div>
-                    <div
-                      className="text-sm font-bold shrink-0"
-                      style={{ color: "hsl(var(--kf-accent1))" }}
-                    >
-                      {formatAmount(service.price)}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 text-[11px] text-muted-foreground flex-wrap">
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      {service.durationMins ?? service.duration ?? 60}m
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Users className="w-3 h-3" />
-                      {assignedStaff} staff
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <CalendarDays className="w-3 h-3" />
-                      {monthCount} this month
-                    </span>
-                    {svc.bufferMins ? (
-                      <span className="flex items-center gap-1" style={{ color: "hsl(var(--kf-accent2))" }}>
-                        <Timer className="w-3 h-3" />
-                        {svc.bufferMins}m buffer
-                      </span>
-                    ) : null}
-                    {svc.leadTimeMins ? (
-                      <span className="flex items-center gap-1" style={{ color: "hsl(var(--kf-warning))" }}>
-                        <Timer className="w-3 h-3" />
-                        {svc.leadTimeMins}m lead
-                      </span>
-                    ) : null}
-                  </div>
-                  <ServiceTimingEditor
-                    serviceId={service.id}
-                    businessId={businessId ?? undefined}
-                    initialBuffer={svc.bufferMins ?? null}
-                    initialLead={svc.leadTimeMins ?? null}
-                  />
-                </motion.div>
-              );
-            })}
+            {readyCount}/{readinessItems.length}
           </div>
-        )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {readinessItems.map((item) => (
+            <span
+              key={item.label}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium"
+              style={{
+                background: item.ok ? "hsl(var(--kf-success) / 0.06)" : "hsl(var(--kf-error) / 0.06)",
+                color: item.ok ? "hsl(var(--kf-success))" : "hsl(var(--kf-error))",
+                borderWidth: 1,
+                borderColor: item.ok ? "hsl(var(--kf-success) / 0.15)" : "hsl(var(--kf-error) / 0.15)",
+              }}
+            >
+              <div
+                className="w-1.5 h-1.5 rounded-full"
+                style={{ background: item.ok ? "hsl(var(--kf-success))" : "hsl(var(--kf-error))" }}
+              />
+              {item.label}
+            </span>
+          ))}
+        </div>
       </motion.div>
 
-      <motion.div variants={stagger.item} className="space-y-3">
-        <div className="flex items-center gap-2">
-          <Users className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
-          <h3 className="text-sm font-semibold">Staff</h3>
-          <span className="text-xs text-muted-foreground">({staff.length})</span>
-        </div>
-
-        <div className="kf-card p-4 space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2 items-end">
-            <div>
-              <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider mb-1 block">
-                Name
-              </label>
-              <input
-                placeholder="Jane Doe"
-                value={staffForm.name}
-                onChange={(e) => setStaffForm((f) => ({ ...f, name: e.target.value }))}
-                className="kf-input w-full text-xs"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider mb-1 block">
-                Email
-              </label>
-              <input
-                placeholder="jane@example.com"
-                value={staffForm.email}
-                onChange={(e) => setStaffForm((f) => ({ ...f, email: e.target.value }))}
-                className="kf-input w-full text-xs"
-              />
-            </div>
+      <motion.div variants={stagger.item}>
+        <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background: "hsl(var(--muted) / 0.15)" }}>
+          {SETUP_TABS.map((t) => (
             <button
-              onClick={onCreateStaff}
-              className="kf-btn-primary inline-flex items-center gap-1.5 text-xs min-h-[44px]"
+              key={t.key}
+              onClick={() => setSetupTab(t.key)}
+              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all min-h-[40px]"
+              style={{
+                background: setupTab === t.key ? "hsl(var(--kf-accent1) / 0.1)" : "transparent",
+                color: setupTab === t.key ? "hsl(var(--kf-accent1))" : "hsl(var(--muted-foreground))",
+                borderWidth: setupTab === t.key ? 1 : 0,
+                borderColor: setupTab === t.key ? "hsl(var(--kf-accent1) / 0.2)" : "transparent",
+              }}
             >
-              <Plus className="w-3.5 h-3.5" /> Add
+              <t.icon className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{t.label}</span>
+              {t.count !== undefined && (
+                <span
+                  className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold"
+                  style={{
+                    background: setupTab === t.key ? "hsl(var(--kf-accent1) / 0.15)" : "hsl(var(--muted) / 0.3)",
+                    color: setupTab === t.key ? "hsl(var(--kf-accent1))" : "hsl(var(--muted-foreground))",
+                  }}
+                >
+                  {t.count}
+                </span>
+              )}
             </button>
-          </div>
+          ))}
         </div>
+      </motion.div>
 
-        {staff.length === 0 && !loading && (
-          <EmptyState
-            icon={Users}
-            title="No staff members"
-            description="Add your first team member using the form above to manage bookings and schedules."
-            actionLabel="Scroll to Add Staff"
-            onAction={() => {
-              const el = document.querySelector<HTMLInputElement>('input[placeholder="Jane Doe"]');
-              if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.focus(); }
-            }}
-            tip="Staff members can be assigned to services for appointment scheduling."
-          />
-        )}
+      {setupTab === "services" && (
+        <motion.div variants={stagger.item} className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Briefcase className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+              <h3 className="text-sm font-semibold">Services</h3>
+              <span className="text-xs text-muted-foreground">({services.length})</span>
+            </div>
+            <NextLink
+              href="/app/store?tab=products"
+              className="inline-flex items-center gap-1 text-[11px] hover:underline min-w-[44px] min-h-[44px] justify-center"
+              style={{ color: "hsl(var(--kf-accent2))" }}
+            >
+              <ExternalLink className="w-3 h-3" />
+              Manage in Store
+            </NextLink>
+          </div>
 
-        {staff.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-            {staff.map((s) => (
-              <div
-                key={s.id}
-                className="kf-card p-3 group hover:ring-1 hover:ring-[hsl(var(--kf-accent2)/0.2)] transition-all"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div
-                      className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-                      style={{
-                        background: "hsl(var(--kf-accent2) / 0.1)",
-                        color: "hsl(var(--kf-accent2))",
-                        borderWidth: 1,
-                        borderColor: "hsl(var(--kf-accent2) / 0.2)",
-                      }}
-                    >
-                      {s.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold truncate">{s.name}</p>
-                      <div className="flex items-center gap-2">
-                        {s.email && (
-                          <p className="text-[10px] text-muted-foreground flex items-center gap-1 truncate">
-                            <Mail className="w-2.5 h-2.5" /> {s.email}
+          {services.length === 0 ? (
+            <EmptyState
+              icon={Briefcase}
+              title="No services yet"
+              description={loading ? "Loading services..." : "Add services from your Store to start accepting bookings."}
+              actionLabel={loading ? undefined : "Go to Store"}
+              actionIcon={Briefcase}
+              onAction={loading ? undefined : () => { window.location.href = "/app/store?tab=products"; }}
+              tip={loading ? undefined : "Services define what your clients can book \u2014 set pricing, duration, and availability."}
+            />
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {services.map((service) => {
+                const monthCount = serviceStats.get(service.id) ?? 0;
+                const assignedStaff = staff.length;
+                const svc = service as Service & { bufferMins?: number | null; leadTimeMins?: number | null };
+                return (
+                  <motion.div
+                    key={service.id}
+                    variants={stagger.item}
+                    className="kf-card p-4 space-y-3 hover:ring-1 hover:ring-[hsl(var(--kf-accent1)/0.2)] transition-all"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-sm font-semibold truncate">{service.name}</h4>
+                          <div
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium shrink-0"
+                            style={{
+                              background: monthCount > 0 ? "hsl(var(--kf-success) / 0.1)" : "hsl(var(--muted) / 0.3)",
+                              color: monthCount > 0 ? "hsl(var(--kf-success))" : "hsl(var(--muted-foreground))",
+                            }}
+                          >
+                            <div
+                              className="w-1.5 h-1.5 rounded-full"
+                              style={{ background: monthCount > 0 ? "hsl(var(--kf-success))" : "hsl(var(--muted-foreground) / 0.4)" }}
+                            />
+                            {monthCount > 0 ? "Active" : "Inactive"}
+                          </div>
+                        </div>
+                        {service.description && (
+                          <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">
+                            {service.description}
                           </p>
                         )}
-                        <span className="text-[10px] text-muted-foreground">
-                          {staffBookingCounts.get(s.id) ?? 0} bookings
+                      </div>
+                      <div
+                        className="text-sm font-bold shrink-0"
+                        style={{ color: "hsl(var(--kf-accent1))" }}
+                      >
+                        {formatAmount(service.price)}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 text-[11px] text-muted-foreground flex-wrap">
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {service.durationMins ?? service.duration ?? 60}m
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Users className="w-3 h-3" />
+                        {assignedStaff} staff
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <CalendarDays className="w-3 h-3" />
+                        {monthCount} this month
+                      </span>
+                      {svc.bufferMins ? (
+                        <span className="flex items-center gap-1" style={{ color: "hsl(var(--kf-accent2))" }}>
+                          <Timer className="w-3 h-3" />
+                          {svc.bufferMins}m buffer
                         </span>
+                      ) : null}
+                      {svc.leadTimeMins ? (
+                        <span className="flex items-center gap-1" style={{ color: "hsl(var(--kf-warning))" }}>
+                          <Timer className="w-3 h-3" />
+                          {svc.leadTimeMins}m lead
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="flex items-center gap-2 pt-1 border-t border-border/20">
+                      {staff.length === 0 ? (
+                        <span className="text-[10px] flex items-center gap-1" style={{ color: "hsl(var(--kf-error))" }}>
+                          <Users className="w-2.5 h-2.5" /> No staff assigned
+                        </span>
+                      ) : (
+                        <span className="text-[10px] flex items-center gap-1" style={{ color: "hsl(var(--kf-success))" }}>
+                          <Users className="w-2.5 h-2.5" /> Staff ready
+                        </span>
+                      )}
+                    </div>
+                    <ServiceTimingEditor
+                      serviceId={service.id}
+                      businessId={businessId ?? undefined}
+                      initialBuffer={svc.bufferMins ?? null}
+                      initialLead={svc.leadTimeMins ?? null}
+                    />
+                  </motion.div>
+                );
+              })}
+            </div>
+          )}
+        </motion.div>
+      )}
+
+      {setupTab === "staff" && (
+        <motion.div variants={stagger.item} className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Users className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
+            <h3 className="text-sm font-semibold">Staff</h3>
+            <span className="text-xs text-muted-foreground">({staff.length})</span>
+          </div>
+
+          <div className="kf-card p-4 space-y-3">
+            <p className="text-[11px] text-muted-foreground">
+              Add staff members to assign services, define working hours, and route bookings correctly.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2 items-end">
+              <div>
+                <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider mb-1 block">
+                  Name
+                </label>
+                <input
+                  placeholder="Jane Doe"
+                  value={staffForm.name}
+                  onChange={(e) => setStaffForm((f) => ({ ...f, name: e.target.value }))}
+                  className="kf-input w-full text-xs"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider mb-1 block">
+                  Email
+                </label>
+                <input
+                  placeholder="jane@example.com"
+                  value={staffForm.email}
+                  onChange={(e) => setStaffForm((f) => ({ ...f, email: e.target.value }))}
+                  className="kf-input w-full text-xs"
+                />
+              </div>
+              <button
+                onClick={onCreateStaff}
+                className="kf-btn-primary inline-flex items-center gap-1.5 text-xs min-h-[44px]"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add
+              </button>
+            </div>
+          </div>
+
+          {staff.length === 0 && !loading && (
+            <EmptyState
+              icon={Users}
+              title="No staff members"
+              description="Add your first team member using the form above to manage bookings and schedules."
+              actionLabel="Scroll to Add Staff"
+              onAction={() => {
+                const el = document.querySelector<HTMLInputElement>('input[placeholder="Jane Doe"]');
+                if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.focus(); }
+              }}
+              tip="Staff members can be assigned to services for appointment scheduling."
+            />
+          )}
+
+          {staff.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+              {staff.map((s) => (
+                <div
+                  key={s.id}
+                  className="kf-card p-3 group hover:ring-1 hover:ring-[hsl(var(--kf-accent2)/0.2)] transition-all"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div
+                        className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+                        style={{
+                          background: "hsl(var(--kf-accent2) / 0.1)",
+                          color: "hsl(var(--kf-accent2))",
+                          borderWidth: 1,
+                          borderColor: "hsl(var(--kf-accent2) / 0.2)",
+                        }}
+                      >
+                        {s.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold truncate">{s.name}</p>
+                        <div className="flex items-center gap-2">
+                          {s.email && (
+                            <p className="text-[10px] text-muted-foreground flex items-center gap-1 truncate">
+                              <Mail className="w-2.5 h-2.5" /> {s.email}
+                            </p>
+                          )}
+                          <span className="text-[10px] text-muted-foreground">
+                            {staffBookingCounts.get(s.id) ?? 0} bookings
+                          </span>
                       </div>
                     </div>
                   </div>
@@ -682,54 +790,104 @@ export default function CatalogCapacityTab({
           </div>
         )}
       </motion.div>
+      )}
 
-      <AvailabilityHours />
-
-      <ReminderConfig businessId={businessId} />
-
-      <motion.div variants={stagger.item} className="space-y-3">
-        <div className="flex items-center gap-2">
-          <Link2 className="w-4 h-4 text-muted-foreground" />
-          <h3 className="text-sm font-semibold">Integrations</h3>
-        </div>
-
-        <a href="/app/settings/connections" className="kf-card p-4 flex items-center justify-between group hover:border-[hsl(var(--kf-accent1))]/40 transition-colors block">
-          <div className="flex items-center gap-3">
-            <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-              style={{ background: "hsl(var(--kf-accent2) / 0.1)" }}
-            >
-              <CalendarDays className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
-            </div>
-            <div>
-              <p className="text-sm font-medium">Google Calendar</p>
-              <p className="text-[11px] text-muted-foreground">
-                {calendarConnected
-                  ? `Connected as ${calendarEmail ?? "your account"}`
-                  : "Sync bookings to your Google Calendar"}
-              </p>
-            </div>
-          </div>
+      {setupTab === "availability" && (
+        <motion.div variants={stagger.item} className="space-y-4">
           <div className="flex items-center gap-2">
-            {calendarConnected && (
-              <div
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg"
-                style={{
-                  background: "hsl(var(--kf-success) / 0.1)",
-                  borderWidth: 1,
-                  borderColor: "hsl(var(--kf-success) / 0.3)",
-                }}
-              >
-                <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-success))" }} />
-                <span className="text-[11px] font-medium" style={{ color: "hsl(var(--kf-success))" }}>Connected</span>
-              </div>
-            )}
-            <span className="text-xs text-muted-foreground group-hover:text-[hsl(var(--kf-accent1))] transition-colors">
-              Manage in Settings →
-            </span>
+            <Clock className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
+            <h3 className="text-sm font-semibold">Staff Availability</h3>
           </div>
-        </a>
-      </motion.div>
+          <p className="text-[11px] text-muted-foreground">
+            Define when each staff member is available for bookings. This controls which time slots clients can book.
+          </p>
+
+          {staff.length === 0 ? (
+            <EmptyState
+              icon={Users}
+              title="No staff yet"
+              description="Add staff members first to configure their availability."
+              actionLabel="Go to Staff"
+              onAction={() => setSetupTab("staff")}
+              tip="Each staff member can have their own availability schedule."
+            />
+          ) : (
+            <div className="space-y-3">
+              {staff.map((s) => (
+                <div key={s.id} className="kf-card p-4">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div
+                      className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0"
+                      style={{
+                        background: "hsl(var(--kf-accent2) / 0.1)",
+                        color: "hsl(var(--kf-accent2))",
+                      }}
+                    >
+                      {s.name.charAt(0).toUpperCase()}
+                    </div>
+                    <span className="text-xs font-semibold">{s.name}</span>
+                  </div>
+                  {businessId && (
+                    <StaffAvailabilityEditor staffId={s.id} staffName={s.name} businessId={businessId} />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <ReminderConfig businessId={businessId} />
+        </motion.div>
+      )}
+
+      {setupTab === "hours" && (
+        <motion.div variants={stagger.item} className="space-y-4">
+          <AvailabilityHours />
+
+          <motion.div variants={stagger.item} className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Link2 className="w-4 h-4 text-muted-foreground" />
+              <h3 className="text-sm font-semibold">Integrations</h3>
+            </div>
+
+            <a href="/app/settings/connections" className="kf-card p-4 flex items-center justify-between group hover:border-[hsl(var(--kf-accent1))]/40 transition-colors block">
+              <div className="flex items-center gap-3">
+                <div
+                  className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+                  style={{ background: "hsl(var(--kf-accent2) / 0.1)" }}
+                >
+                  <CalendarDays className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
+                </div>
+                <div>
+                  <p className="text-sm font-medium">Google Calendar</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {calendarConnected
+                      ? `Connected as ${calendarEmail ?? "your account"}`
+                      : "Sync bookings to your Google Calendar"}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {calendarConnected && (
+                  <div
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg"
+                    style={{
+                      background: "hsl(var(--kf-success) / 0.1)",
+                      borderWidth: 1,
+                      borderColor: "hsl(var(--kf-success) / 0.3)",
+                    }}
+                  >
+                    <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-success))" }} />
+                    <span className="text-[11px] font-medium" style={{ color: "hsl(var(--kf-success))" }}>Connected</span>
+                  </div>
+                )}
+                <span className="text-xs text-muted-foreground group-hover:text-[hsl(var(--kf-accent1))] transition-colors">
+                  Manage in Settings \u2192
+                </span>
+              </div>
+            </a>
+          </motion.div>
+        </motion.div>
+      )}
     </motion.div>
   );
 }
