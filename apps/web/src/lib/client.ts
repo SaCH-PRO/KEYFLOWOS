@@ -423,7 +423,7 @@ const nextActionSchema = z.object({
 });
 
 const aiNextActionSchema = z.object({
-  type: z.enum(["follow_up", "send_quote", "payment_reminder", "add_note"]),
+  type: z.enum(["follow_up", "send_quote", "payment_reminder", "add_note", "review_request", "referral_request", "thank_you", "re_engage"]),
   contactId: z.string(),
   contactName: z.string(),
   reason: z.string(),
@@ -2778,7 +2778,7 @@ export type CrmNextAction = z.infer<typeof crmNextActionSchema>;
 
 const autopilotActionSchema = z.object({
   id: z.string(),
-  type: z.enum(["follow_up", "birthday", "payment_reminder", "check_in", "offer"]),
+  type: z.enum(["follow_up", "birthday", "payment_reminder", "check_in", "offer", "review_request", "referral_request", "thank_you", "re_engage"]),
   status: z.enum(["completed", "pending", "needs_approval"]),
   contactName: z.string(),
   contactId: z.string(),

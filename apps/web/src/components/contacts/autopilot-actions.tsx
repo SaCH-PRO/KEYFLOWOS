@@ -6,14 +6,14 @@ import {
   Bot, CheckCircle2, Clock, Eye, Pause, Play,
   Settings, MessageSquare, Gift, DollarSign, Bell,
   Sparkles, X, Copy, Send, Mail, Phone,
-  Loader2, ChevronDown, ChevronUp,
+  Loader2, ChevronDown, ChevronUp, Star, Users, Heart, RotateCcw,
 } from "lucide-react";
 import { generateAutopilotDraft, executeAutopilotAction } from "@/lib/client";
 import type { AutopilotDraft } from "@/lib/client";
 
 export interface AutopilotAction {
   id: string;
-  type: "follow_up" | "birthday" | "payment_reminder" | "check_in" | "offer";
+  type: "follow_up" | "birthday" | "payment_reminder" | "check_in" | "offer" | "review_request" | "referral_request" | "thank_you" | "re_engage";
   status: "completed" | "pending" | "needs_approval";
   contactName: string;
   contactId: string;
@@ -41,6 +41,10 @@ const ACTION_ICONS: Record<AutopilotAction["type"], typeof MessageSquare> = {
   payment_reminder: DollarSign,
   check_in: Bell,
   offer: Gift,
+  review_request: Star,
+  referral_request: Users,
+  thank_you: Heart,
+  re_engage: RotateCcw,
 };
 
 const ACTION_LABELS: Record<AutopilotAction["type"], string> = {
@@ -49,6 +53,10 @@ const ACTION_LABELS: Record<AutopilotAction["type"], string> = {
   payment_reminder: "Payment",
   check_in: "Check In",
   offer: "Offer",
+  review_request: "Review",
+  referral_request: "Referral",
+  thank_you: "Thank You",
+  re_engage: "Re-engage",
 };
 
 const TONE_COLORS: Record<string, string> = {
