@@ -1,0 +1,682 @@
+# KEYFLOWOS MASTER COMPLETION + UPGRADE EXECUTION PROMPT
+
+You are a senior staff-level full-stack engineer, systems architect, AI product engineer, technical product manager, and UX systems designer working inside the existing KEYFLOWOS monorepo.
+
+Your job is to review, reconcile, complete, harden, and upgrade the existing application so that it fully supports the KEYFLOWOS vision as an AI-powered business operating system for service businesses.
+
+You are not building a new app from scratch.
+You are working from the current repo and must preserve working architecture, patterns, conventions, design language, and modular boundaries unless there is a compelling architectural reason to refactor.
+
+You must treat this as a completion, stabilization, integration, and scale-readiness program.
+
+---
+
+# 1. SOURCE OF TRUTH AND CONTEXT
+
+You are working on KEYFLOWOS, a monorepo-based AI-powered operating system for service businesses.
+
+The strategic and architectural intent already established is:
+
+- KEYFLOWOS is an all-in-one business operating system for service businesses with a Caribbean-first identity.
+- It is meant to reduce the “tool maze” by unifying CRM, bookings, commerce, payments, automations, AI, reporting, projects, growth, and business intelligence.
+- The app is built around a unified Business Graph, an AI Brain, and an event-driven architecture.
+- The system should separate “Studio” (configuration/building) from “Cockpit” (operating/running).
+- AI is not a bolt-on assistant; it is meant to become the operational brain that observes, plans, creates, acts, and learns.
+- Cross-module communication must happen through the event bus, not direct tight coupling.
+- The app should become a premium “business at your fingertips” platform.
+
+Important strategic references from the repo:
+- Strategy doc describes historical gaps and roadmap priorities such as payment collection, notifications, reporting, mobile-first UX, AI copilot, recurring invoices, WhatsApp, and onboarding acceleration.
+- Blueprint doc defines the architectural philosophy: Business Graph, AI Brain, internal event bus, Studio/Cockpit split, playbooks, modular-isolationist build strategy.
+- Newer repo summary indicates the app has already advanced beyond some earlier gaps and now includes much more functionality.
+
+You must reconcile these realities carefully.
+
+---
+
+# 2. WHAT YOU MUST DO FIRST
+
+Before making changes, perform a repo-wide audit and build a current-state matrix.
+
+Do not assume the old strategy doc is fully current.
+Do not assume the repo summary is fully complete either.
+You must verify implementation status from the code.
+
+Create a structured audit covering:
+
+## 2.1 Feature verification
+For every major domain, mark:
+- fully implemented
+- partially implemented
+- stubbed
+- exists in UI but not wired
+- exists in backend but not surfaced
+- exists in schema but not used
+- exists in summary/docs but not actually implemented
+
+Domains to audit:
+- auth and identity
+- onboarding
+- cockpit
+- command center / AI Copilot
+- CRM
+- commerce
+- quotes
+- invoices
+- payments
+- subscription billing
+- bookings
+- store/public booking flow
+- public invoice/payment flow
+- social/marketing
+- automations/playbooks
+- projects
+- reports/analytics
+- notifications
+- WhatsApp
+- Google integrations
+- Drive/documents
+- business builder
+- documentation engine
+- expenses
+- community
+- diagnostics/admin
+- offline/PWA
+- feature gating/plans
+- observability
+- security hardening
+- rate limiting
+- input sanitization
+- multi-tenant enforcement
+- error boundaries
+- background jobs
+- AI memory/context
+- event bus workflows
+
+## 2.2 Architecture verification
+Audit whether the actual code follows these principles:
+- module isolation
+- event-driven integration
+- shared types/contracts
+- soft deletes / data integrity
+- multi-tenant scoping
+- reusable UI kit patterns
+- API validation
+- background-job capability
+- clear separation of frontend/backend concerns
+
+## 2.3 UX verification
+Audit:
+- mobile usability
+- empty states
+- loading states
+- keyboard avoidance
+- bottom nav quality
+- touch targets
+- form save resilience
+- deep-linking
+- onboarding time-to-first-value
+- consistency across modules
+
+## 2.4 Reliability verification
+Audit:
+- payment flow truth
+- webhook handling
+- idempotency
+- notification delivery
+- job retries
+- diagnostics usefulness
+- analytics correctness
+- error handling
+- transaction boundaries
+
+Output an internal audit matrix before major refactors.
+
+---
+
+# 3. PRIMARY GOAL
+
+Your primary goal is to make KEYFLOWOS truly capable of helping a user:
+
+- launch a business
+- run core business functions
+- automate repeatable workflows
+- maintain operations
+- monitor business health
+- receive AI-guided recommendations
+- generate business documents and plans
+- operate with high mobile usability
+- collect money
+- communicate professionally with customers
+- grow through integrated workflows and intelligence
+
+The finished product should feel like:
+- CRM
+- booking engine
+- invoicing/payment engine
+- communication hub
+- workflow automation layer
+- project/delivery manager
+- reporting system
+- AI command interface
+- business intelligence cockpit
+- business documentation engine
+
+all working as one operating system.
+
+---
+
+# 4. NON-NEGOTIABLE DESIGN PRINCIPLES
+
+## 4.1 Preserve the KEYFLOWOS identity
+Retain and strengthen:
+- Caribbean-first positioning
+- mobile-first operation
+- refined dark premium UI
+- selective glassmorphism
+- opinionated simplicity
+- “business at your fingertips” feel
+
+## 4.2 Do not create fragmented tool sprawl
+Every new feature must connect into the whole:
+- through the business graph
+- through the event system
+- through the cockpit
+- through the AI layer
+- through unified navigation and design language
+
+## 4.3 Prefer completion and integration over feature inflation
+Do not add random features unless they clearly strengthen:
+- revenue capture
+- operational flow
+- business automation
+- AI leverage
+- user retention
+- business intelligence
+- product defensibility
+
+## 4.4 Prefer production-safe changes
+For every system:
+- validate inputs
+- protect public endpoints
+- ensure business scoping
+- add error handling
+- add idempotency where needed
+- avoid brittle coupling
+
+---
+
+# 5. REQUIRED END STATE
+
+By the end of this execution program, KEYFLOWOS must have the following end-state characteristics.
+
+## 5.1 Revenue-complete core loop
+A new user must be able to:
+1. sign up
+2. complete a fast onboarding flow
+3. create service(s) or product(s)
+4. share a booking/store/payment link
+5. receive a booking or order
+6. send or auto-generate an invoice/quote if needed
+7. collect payment through a real payment flow
+8. send confirmations and reminders
+9. track revenue in reports
+10. receive AI next-step guidance
+
+## 5.2 Business function coverage
+The app must credibly support:
+- customer management
+- offer/service setup
+- scheduling
+- quoting
+- invoicing
+- payment collection
+- customer communication
+- operational tasking/projects
+- marketing/social content workflows
+- automation/playbooks
+- reporting
+- AI assistance
+- business documentation/planning
+- billing/plan monetization
+- diagnostics/admin observability
+
+## 5.3 Maintenance and intelligence loop
+The app must not stop at data entry.
+It must help maintain the business through:
+- dashboards
+- alerts
+- follow-up recommendations
+- overdue detection
+- pipeline warnings
+- revenue insights
+- booking performance insights
+- recurring operational prompts
+- AI-generated briefings
+
+---
+
+# 6. EXECUTION PHASES
+
+Implement work in phases. Do not tackle everything in a disorganized way.
+
+## PHASE A — TRUTH AUDIT AND RECONCILIATION
+Objectives:
+- audit actual repo state
+- reconcile old docs vs current code
+- identify what is real, partial, stale, duplicated, or conflicting
+- produce an actionable gap matrix
+
+Deliverables:
+- feature status matrix
+- architecture risk matrix
+- UX risk matrix
+- security/reliability matrix
+- prioritized backlog with dependencies
+
+## PHASE B — CORE LOOP COMPLETION
+Highest priority because it determines whether the app is a real business tool.
+
+Complete and harden:
+- real payment collection
+- public payment flow
+- invoice state transitions
+- payment records
+- receipts/confirmation
+- overdue handling
+- notification delivery
+- end-to-end test of create -> send -> pay -> confirm
+
+Also ensure:
+- public booking -> customer notification
+- public payment pages are branded, clean, mobile-fast, and reliable
+
+## PHASE C — COMMUNICATION LAYER
+Make customer communication dependable.
+
+Implement or finish:
+- branded transactional email system
+- booking confirmation emails
+- booking reminder emails
+- invoice sent emails
+- overdue invoice emails
+- payment receipt emails
+- quote follow-up emails where appropriate
+- owner/internal notifications
+- WhatsApp integration architecture
+- WhatsApp v1 workflows if credentials/config already supported
+- notification logs and delivery status visibility
+
+## PHASE D — REPORTING + MAINTENANCE
+Turn the system into an operational dashboard.
+
+Implement or finish:
+- real reporting dashboard
+- revenue metrics
+- bookings metrics
+- conversion metrics
+- outstanding invoices
+- top services/products
+- client retention or repeat-client proxies
+- trend views by date range
+- AI-generated weekly business briefing
+- anomaly or warning surfaces where feasible
+
+## PHASE E — PROJECTS + DELIVERY EXECUTION
+Finish the project and task layer so sold work can be delivered systematically.
+
+Implement or finish:
+- projects page
+- project templates
+- task creation
+- service/product-to-project linking
+- task assignment
+- due dates
+- status workflows
+- delivery checklists
+- post-delivery review prompts
+- optional auto-project generation after sale/booking
+
+## PHASE F — AI COMMAND + BUSINESS COPILOT
+Move AI from passive suggestion to useful operational copilot.
+
+Implement or finish:
+- global AI command hub
+- safe function calling across modules
+- context-aware responses
+- route-aware suggestions
+- actionable commands such as:
+  - create invoice
+  - summarize revenue
+  - create booking
+  - draft reminder
+  - identify overdue invoices
+  - suggest next best actions
+- AI should explain actions before or after execution where appropriate
+- support draft-first behavior for higher-risk actions
+
+## PHASE G — AUTOMATION / PLAYBOOK MATURITY
+Strengthen automation as a true orchestration layer.
+
+Implement or finish:
+- robust trigger/action engine
+- event subscriptions
+- condition handling
+- delay/wait behavior if architecture supports jobs
+- action logs
+- retry handling
+- playbook templates
+- practical playbooks such as:
+  - booking confirmation flow
+  - payment reminder flow
+  - quote follow-up flow
+  - review request flow
+  - missed-follow-up alert flow
+
+## PHASE H — ONBOARDING, UX, AND MOBILE EXCELLENCE
+Optimize for adoption and daily use.
+
+Implement or finish:
+- 2-minute onboarding path to first value
+- empty states
+- skeleton loading states
+- one-handed mobile navigation
+- touch target audit
+- FAB / quick-create actions
+- keyboard avoidance
+- bottom sheet patterns where useful
+- stronger share flows for booking/store/payment links
+- resilient long-form saving where relevant
+
+## PHASE I — HARDENING, SECURITY, AND OBSERVABILITY
+Make the app safer and more production-ready.
+
+Implement or finish:
+- rate limiting on public endpoints
+- input sanitization on public forms
+- DTO validation coverage
+- business scoping verification everywhere
+- webhook idempotency
+- database connection handling
+- health checks
+- request tracing/correlation
+- structured logging
+- better admin/diagnostics truthfulness
+- meaningful error states and fallback UI
+
+## PHASE J — PLAN GATING, MONETIZATION, AND POLISH
+Finish productization.
+
+Implement or finish:
+- subscription plan enforcement
+- usage limits
+- feature flags
+- upgrade prompts
+- billing/settings clarity
+- paid feature surfacing
+- polished premium onboarding to paid tiers
+
+---
+
+# 7. DETAILED FUNCTIONAL REQUIREMENTS
+
+## 7.1 Identity and business context
+Ensure:
+- business-scoped access everywhere
+- team roles enforced
+- owner/admin/staff permissions reviewed
+- business switching works if multi-business is supported
+- onboarding writes correct initial business state
+
+## 7.2 CRM
+Ensure:
+- contacts are central entities used consistently by bookings, invoices, quotes, tasks, and AI
+- timeline/history is meaningful
+- AI insights are grounded in actual business context
+- duplicate handling is reasonable
+- Google Contacts import remains stable
+
+## 7.3 Commerce and payments
+Ensure:
+- products/services are usable in quotes, invoices, store, and AI
+- quote-to-invoice workflow is stable
+- payment links work
+- invoice statuses update correctly
+- partial payment and payment status handling are coherent if supported
+- subscription billing and recurring invoices do not conflict conceptually
+
+## 7.4 Bookings
+Ensure:
+- service + staff + availability + booking relationships are coherent
+- Google Calendar sync is reliable
+- public booking page is fast and mobile-first
+- confirmations/reminders fire appropriately
+- no-show, cancel, complete status logic is usable in reports and automations
+
+## 7.5 Notifications
+Ensure:
+- notifications are event-driven
+- user can see delivery/log history if possible
+- templates are branded
+- failures are visible
+- duplicate sends are guarded against
+
+## 7.6 Reports
+Ensure:
+- metrics come from real data
+- numbers reconcile with source entities
+- filters and time ranges work
+- no fake placeholders remain
+- reports are useful to a small business operator, not just technically correct
+
+## 7.7 Projects
+Ensure:
+- not just a placeholder board
+- connected to business value
+- can represent delivery work after a booking, quote acceptance, invoice payment, or product sale
+- supports manual and automated creation paths
+
+## 7.8 AI Copilot
+Ensure:
+- AI has access to meaningful business context
+- output is not generic
+- commands are safe
+- AI suggestions are embedded in cockpit and module context
+- AI can draft, summarize, recommend, and in some cases execute
+
+## 7.9 Business Builder + Documentation Engine
+This is a strategic moat. Preserve and refine it rather than sidelining it.
+
+Ensure:
+- generated outputs remain high quality
+- export paths work
+- versioning works
+- task creation from plans/documents works where intended
+- profile/business context changes trigger document impact logic properly
+- generated business artifacts feel connected to the operational app, not isolated
+
+## 7.10 Diagnostics/admin
+Ensure:
+- diagnostics reflect truth, not mock data
+- admin surfaces real health and failure states
+- integration status is reliable
+- cross-module flow checks remain useful
+
+---
+
+# 8. TECHNICAL REQUIREMENTS
+
+## 8.1 Code quality
+- break up oversized files
+- reduce monolithic components/pages
+- improve separation of concerns
+- reuse shared components and hooks
+- remove dead code and stale placeholders
+- document tricky flows inline where appropriate
+
+## 8.2 Backend quality
+- services should own business logic
+- controllers should stay thin
+- event listeners should orchestrate cross-module flows
+- background jobs should be used where latency or retries matter
+- external integrations should be wrapped in dedicated services
+
+## 8.3 Frontend quality
+- modular components
+- shared UI patterns
+- predictable loading/error/empty states
+- optimistic UX only where safe
+- avoid UI/data mismatch
+- preserve premium polish
+
+## 8.4 Database quality
+- verify schema consistency with implemented features
+- add missing migrations if required
+- avoid breaking existing data
+- preserve data integrity
+- prefer additive migrations and backfills
+- verify indexes for common report and lookup paths
+
+---
+
+# 9. BUSINESS-CRITICAL PLAYBOOKS TO SUPPORT
+
+At minimum, ensure architecture and UX can support these playbooks:
+
+1. New booking -> confirmation -> reminder -> completion follow-up
+2. Quote sent -> follow-up reminder -> acceptance -> invoice generation
+3. Invoice sent -> reminder -> payment received -> receipt
+4. Completed service -> review request -> testimonial capture
+5. New lead/contact -> follow-up task -> stale lead warning
+6. New business onboarding -> first service -> booking link share -> first booking celebration
+7. Overdue invoices -> owner alert -> customer reminder
+8. Weekly business review -> AI briefing -> next best actions
+
+---
+
+# 10. ACCEPTANCE STANDARDS
+
+The app is not “done” until these are true:
+
+## 10.1 Core loop acceptance
+A fresh user on mobile can:
+- create a business
+- create a service
+- publish/share a booking link
+- receive a booking
+- notify the customer
+- send/collect payment
+- see the result in reporting
+- receive AI guidance on what to do next
+
+## 10.2 Product completeness acceptance
+There are no major nav routes that are obvious stubs unless intentionally hidden from production users.
+
+## 10.3 Operational integrity acceptance
+Cross-module flows behave consistently:
+- contacts connect to bookings/invoices/projects
+- payments affect invoice/reporting state
+- bookings can trigger communication and automation
+- AI sees consistent business context
+
+## 10.4 Mobile acceptance
+All core flows work well on a small phone viewport.
+No critical action should require desktop-only precision.
+
+## 10.5 Production readiness acceptance
+- public endpoints protected
+- errors handled gracefully
+- logging and diagnostics meaningful
+- no obviously fake dashboards in production areas
+- payment/webhook flows safely implemented
+
+---
+
+# 11. OUTPUT FORMAT FOR YOUR WORK
+
+As you execute, work in this order:
+
+## Step 1
+Produce a concise current-state audit with:
+- implemented
+- partial
+- missing
+- risky
+- duplicated/conflicting
+
+## Step 2
+Produce a prioritized backlog grouped by:
+- P0 revenue blockers
+- P1 reliability/communication blockers
+- P1 reporting/maintenance
+- P2 AI/automation maturity
+- P2 UX/mobile polish
+- P3 strategic expansion
+
+## Step 3
+Implement the highest-priority changes first.
+
+## Step 4
+After each major area, summarize:
+- what changed
+- what remains
+- what migrations/env vars/manual steps are required
+- what tests were added or updated
+
+## Step 5
+At the end, provide:
+- final gap closure summary
+- architecture notes
+- deployment checklist
+- smoke test checklist
+- known limitations
+
+---
+
+# 12. IMPORTANT RECONCILIATION RULE
+
+Because repo documentation is inconsistent across time:
+
+- prefer actual code over older docs
+- use docs to understand intended direction
+- do not delete advanced systems merely because older docs called them stubs
+- preserve and integrate newer capabilities like diagnostics, notifications, billing, document generation, AI context, and business builder if they exist
+- unify the product so it feels like one coherent operating system
+
+---
+
+# 13. STRATEGIC PRIORITY ORDER
+
+When forced to choose, prioritize in this order:
+
+1. payment collection and revenue truth
+2. customer notifications and communication reliability
+3. mobile-first usability
+4. reporting and maintenance visibility
+5. projects and execution systems
+6. AI copilot operational usefulness
+7. automation/playbook reliability
+8. monetization/gating polish
+9. deeper strategic expansion features
+
+---
+
+# 14. FINAL DIRECTIVE
+
+You are completing KEYFLOWOS into a premium, integrated, AI-powered business operating system.
+
+Do not drift into generic SaaS work.
+Do not overbuild low-value abstractions.
+Do not leave fake or stubbed surfaces visible.
+Do not fragment the product.
+
+Build toward a system where:
+- the business graph is unified
+- workflows are event-driven
+- AI is operationally useful
+- users can collect money
+- users can communicate with customers
+- users can monitor business health
+- users can execute and maintain their business from one platform
+
+Start by auditing the repo and reconciling implemented reality against strategic intent, then execute the highest-value backlog to completion.
