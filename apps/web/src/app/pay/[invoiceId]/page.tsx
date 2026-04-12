@@ -258,7 +258,7 @@ export default function PublicPaymentPage() {
     const methods = [{
       supportedMethods: "https://google.com/pay",
       data: {
-        environment: "TEST",
+        environment: process.env.NEXT_PUBLIC_GOOGLE_PAY_ENV === "PRODUCTION" ? "PRODUCTION" : "TEST",
         apiVersion: 2,
         apiVersionMinor: 0,
         allowedPaymentMethods: [{
@@ -269,7 +269,10 @@ export default function PublicPaymentPage() {
           },
           tokenizationSpecification: {
             type: "PAYMENT_GATEWAY",
-            parameters: { gateway: "example", gatewayMerchantId: "exampleMerchantId" },
+            parameters: {
+              gateway: process.env.NEXT_PUBLIC_GOOGLE_PAY_GATEWAY || "example",
+              gatewayMerchantId: process.env.NEXT_PUBLIC_GOOGLE_PAY_MERCHANT_ID || "exampleMerchantId",
+            },
           },
         }],
       },
@@ -293,7 +296,7 @@ export default function PublicPaymentPage() {
       const methods = [{
         supportedMethods: "https://google.com/pay",
         data: {
-          environment: "TEST",
+          environment: process.env.NEXT_PUBLIC_GOOGLE_PAY_ENV === "PRODUCTION" ? "PRODUCTION" : "TEST",
           apiVersion: 2,
           apiVersionMinor: 0,
           merchantInfo: { merchantName: invoice.business?.name || "KeyFlowOS" },
@@ -305,7 +308,10 @@ export default function PublicPaymentPage() {
             },
             tokenizationSpecification: {
               type: "PAYMENT_GATEWAY",
-              parameters: { gateway: "example", gatewayMerchantId: "exampleMerchantId" },
+              parameters: {
+                gateway: process.env.NEXT_PUBLIC_GOOGLE_PAY_GATEWAY || "example",
+                gatewayMerchantId: process.env.NEXT_PUBLIC_GOOGLE_PAY_MERCHANT_ID || "exampleMerchantId",
+              },
             },
           }],
           transactionInfo: {

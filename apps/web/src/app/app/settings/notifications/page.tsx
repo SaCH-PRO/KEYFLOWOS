@@ -293,6 +293,26 @@ export default function NotificationsSettingsPage() {
           animate={{ opacity: 1, y: 0 }}
           className="space-y-3"
         >
+          {log.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+              {[
+                { label: "Total", count: log.length, color: "var(--kf-accent2)" },
+                { label: "Sent", count: log.filter((e) => e.status === "SENT" || e.status === "DRAINED").length, color: "var(--kf-success)" },
+                { label: "Queued", count: log.filter((e) => e.status === "QUEUED").length, color: "var(--kf-warning)" },
+                { label: "Failed", count: log.filter((e) => e.status === "FAILED").length, color: "var(--kf-error)" },
+                { label: "Expired", count: log.filter((e) => e.status === "EXPIRED").length, color: "var(--kf-neutral)" },
+              ].map((s) => (
+                <div
+                  key={s.label}
+                  className="rounded-lg border border-border/30 p-3 text-center"
+                  style={{ background: `hsl(${s.color} / 0.04)` }}
+                >
+                  <p className="text-lg font-bold" style={{ color: `hsl(${s.color})` }}>{s.count}</p>
+                  <p className="kf-text-micro text-muted-foreground">{s.label}</p>
+                </div>
+              ))}
+            </div>
+          )}
           {log.length === 0 ? (
             <div className="text-center py-12">
               <Mail className="w-8 h-8 mx-auto mb-3" style={{ color: "hsl(var(--muted-foreground) / 0.4)" }} />

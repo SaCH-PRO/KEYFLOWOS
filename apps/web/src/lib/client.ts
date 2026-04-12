@@ -3120,6 +3120,45 @@ export async function deleteProjectTask(businessId: string, taskId: string): Pro
   );
 }
 
+export interface ProjectTemplate {
+  id: string;
+  name: string;
+  taskTitles: string[];
+  productId?: string | null;
+  product?: { id: string; name: string } | null;
+}
+
+export async function fetchProjectTemplates(businessId: string): Promise<ApiResult<ProjectTemplate[]>> {
+  return apiGetSimple<ProjectTemplate[]>(`/projects/businesses/${encodeURIComponent(businessId)}/templates`);
+}
+
+export async function createProjectTemplate(
+  businessId: string,
+  data: { name: string; taskTitles: string[]; productId?: string },
+): Promise<ApiResult<ProjectTemplate>> {
+  return apiPost<ProjectTemplate>({
+    path: `/projects/businesses/${encodeURIComponent(businessId)}/templates`,
+    body: data,
+  });
+}
+
+export async function deleteProjectTemplate(businessId: string, templateId: string): Promise<ApiResult<unknown>> {
+  return apiDelete<unknown>(
+    `/projects/businesses/${encodeURIComponent(businessId)}/templates/${encodeURIComponent(templateId)}`,
+  );
+}
+
+export async function createProjectFromTemplate(
+  businessId: string,
+  templateId: string,
+  data?: { name?: string; contactId?: string; invoiceId?: string; bookingId?: string },
+): Promise<ApiResult<Project>> {
+  return apiPost<Project>({
+    path: `/projects/businesses/${encodeURIComponent(businessId)}/from-template/${encodeURIComponent(templateId)}`,
+    body: data ?? {},
+  });
+}
+
 export type StorefrontSectionType = 'hero' | 'trust' | 'featured' | 'categories' | 'catalog' | 'testimonials' | 'faq' | 'policies' | 'contact';
 
 export type StorefrontSectionKey = StorefrontSectionType;

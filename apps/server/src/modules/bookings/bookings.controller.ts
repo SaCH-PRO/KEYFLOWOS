@@ -10,6 +10,7 @@ import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.gu
 import { PublicCreateBookingDto } from './dto/public-create-booking.dto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
 
 @Controller('bookings')
 export class BookingsController {
@@ -84,6 +85,8 @@ export class BookingsController {
     });
   }
 
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(30, 60_000)
   @Get('public/businesses/:businessId/services')
   publicListServices(@Param('businessId') businessId: string) {
     return this.prisma.client.service.findMany({
@@ -92,6 +95,8 @@ export class BookingsController {
     });
   }
 
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(30, 60_000)
   @Get('public/businesses/:businessId/staff')
   publicListStaff(@Param('businessId') businessId: string) {
     return this.prisma.client.staffMember.findMany({
@@ -100,6 +105,8 @@ export class BookingsController {
     });
   }
 
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(10, 60_000)
   @Post('public/businesses/:businessId')
   async publicCreateBooking(
     @Param('businessId') businessId: string,

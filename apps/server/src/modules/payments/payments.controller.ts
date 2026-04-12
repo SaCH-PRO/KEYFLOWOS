@@ -1,8 +1,10 @@
-import { Body, Controller, Get, Inject, Logger, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Logger, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
 
 @Controller('payments')
+@UseGuards(PublicRateLimitGuard)
 export class PaymentsController {
   private readonly logger = new Logger(PaymentsController.name);
 
@@ -11,6 +13,7 @@ export class PaymentsController {
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
+  @PublicRateLimit(20, 60_000)
   @Get('invoice/:invoiceId/gateways')
   async getGateways(@Param('invoiceId') invoiceId: string) {
     const invoice = await this.prisma.client.invoice.findUnique({
@@ -21,6 +24,7 @@ export class PaymentsController {
     return this.payments.getAvailableGateways(invoice.businessId);
   }
 
+  @PublicRateLimit(5, 60_000)
   @Post('invoice/:invoiceId/wipay')
   async createWipayCheckout(
     @Param('invoiceId') invoiceId: string,
@@ -29,16 +33,19 @@ export class PaymentsController {
     return this.payments.createWipayCheckout(invoiceId, body.returnUrl);
   }
 
+  @PublicRateLimit(20, 60_000)
   @Get('wipay/callback')
   async handleWipayCallback(@Query() queryParams: Record<string, string>) {
     return this.payments.handleWipayCallback(queryParams);
   }
 
+  @PublicRateLimit(5, 60_000)
   @Post('invoice/:invoiceId/paypal/create-order')
   async createPaypalOrder(@Param('invoiceId') invoiceId: string) {
     return this.payments.createPaypalOrder(invoiceId);
   }
 
+  @PublicRateLimit(5, 60_000)
   @Post('paypal/capture/:orderId')
   async capturePaypalOrder(
     @Param('orderId') orderId: string,

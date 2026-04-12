@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { FolderKanban, Send } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
@@ -10,14 +10,20 @@ import { RichTooltip } from "@/components/ui/rich-tooltip";
 import { PROJECTS_WALKTHROUGH } from "@/lib/walkthrough-definitions";
 import { ContactPickerDrawer } from "@/components/contacts";
 import { ProjectBoard } from "./components/project-board";
+import { TemplateManager } from "./components/template-manager";
 import { useProjectsAiHub } from "./hooks/use-projects-ai-hub";
 
 export default function ProjectsPage() {
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [showContactPicker, setShowContactPicker] = useState(false);
+  const [boardKey, setBoardKey] = useState(0);
   useProjectsAiHub(businessId);
 
   useEffect(() => { const bid = getStoredBusinessId(); if (bid) setBusinessId(bid); }, []);
+
+  const handleTemplateProjectCreated = useCallback(() => {
+    setBoardKey((k) => k + 1);
+  }, []);
 
   return (
     <div className="space-y-4">
@@ -53,8 +59,10 @@ export default function ProjectsPage() {
         <WalkthroughTrigger moduleKey="projects" />
       </div>
 
+      <TemplateManager businessId={businessId} onProjectCreated={handleTemplateProjectCreated} />
+
       <div data-walkthrough="projects-board">
-        <ProjectBoard businessId={businessId} />
+        <ProjectBoard key={boardKey} businessId={businessId} />
       </div>
 
       <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />
