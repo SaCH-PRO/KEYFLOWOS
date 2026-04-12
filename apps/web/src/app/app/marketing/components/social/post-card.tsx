@@ -83,9 +83,9 @@ export function PostCard({ post, onPublish, onEdit, onDelete, listView }: Props)
 
   return (
     <motion.div
-      whileHover={{ scale: 1.015, y: -2 }}
+      whileHover={{ scale: 1.01, y: -1 }}
       transition={{ type: "spring", stiffness: 400, damping: 25 }}
-      className={`group relative rounded-2xl border backdrop-blur-xl p-4 space-y-3 transition-all cursor-default ${listView ? "flex gap-4 items-start space-y-0" : ""}`}
+      className={`group relative rounded-xl border backdrop-blur-xl px-3 py-2.5 space-y-2 transition-all cursor-default ${listView ? "flex gap-3 items-start space-y-0" : ""}`}
       style={{
         background: "hsl(var(--kf-card) / 0.7)",
         borderColor: "hsl(var(--kf-border))",
@@ -93,9 +93,9 @@ export function PostCard({ post, onPublish, onEdit, onDelete, listView }: Props)
       }}
       whileTap={{ scale: 0.995 }}
     >
-      <div className={`${listView ? "flex-1 min-w-0 space-y-3" : ""}`}>
-        <div className="flex items-start justify-between gap-3">
-          <p className={`text-sm flex-1 leading-relaxed whitespace-pre-wrap ${listView ? "" : "line-clamp-4"}`}>{post.content}</p>
+      <div className={`${listView ? "flex-1 min-w-0 space-y-2" : ""}`}>
+        <div className="flex items-start justify-between gap-2">
+          <p className={`text-[13px] flex-1 leading-snug whitespace-pre-wrap ${listView ? "" : "line-clamp-3"}`}>{post.content}</p>
           <div className="relative flex-shrink-0">
             <button
               onClick={() => setMenuOpen(!menuOpen)}
@@ -238,10 +238,10 @@ export function PostCard({ post, onPublish, onEdit, onDelete, listView }: Props)
 
         {(post.status === "DRAFT" || post.status === "SCHEDULED") && (
           <button
-            className="kf-btn-secondary w-full text-xs sm:text-xs inline-flex items-center justify-center gap-1.5 py-2.5 sm:py-2 active:scale-[0.98] transition-transform"
+            className="kf-btn-secondary w-full text-xs inline-flex items-center justify-center gap-1.5 py-1.5 active:scale-[0.98] transition-transform opacity-0 group-hover:opacity-100"
             onClick={() => onPublish(post.id)}
           >
-            <Send className="w-4 h-4 sm:w-3 sm:h-3" /> Publish Now
+            <Send className="w-3 h-3" /> Publish Now
           </button>
         )}
       </div>

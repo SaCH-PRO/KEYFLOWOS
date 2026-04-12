@@ -94,7 +94,7 @@ export function ExpenseList({
               const cat = categories.find(c => c.id === exp.categoryId) || exp.category;
               const pmLabel = PAYMENT_METHODS.find(m => m.value === exp.paymentMethod)?.label;
               return (
-                <motion.div key={exp.id} role="row" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} className="grid grid-cols-1 md:grid-cols-[0.8fr_2fr_1fr_0.8fr_0.8fr_1fr_auto] gap-1 md:gap-3 px-4 py-3 hover:bg-white/[0.02] transition-colors group items-center cursor-pointer" onClick={() => onViewDetail(exp)}>
+                <motion.div key={exp.id} role="row" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} className="grid grid-cols-1 md:grid-cols-[0.8fr_2fr_1fr_0.8fr_0.8fr_1fr_auto] gap-1 md:gap-3 px-4 py-2 hover:bg-white/[0.02] transition-colors group items-center cursor-pointer" onClick={() => onViewDetail(exp)}>
                   <span className="text-xs text-muted-foreground">{formatDate(exp.date)}</span>
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium truncate">{exp.description}</span>

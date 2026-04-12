@@ -57,9 +57,9 @@ export function PostCard({ post, index, onExpand, onLike, onAuthorClick }: PostC
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.03 }}
       onClick={() => onExpand(post.id)}
-      className="bg-white/5 backdrop-blur border border-white/10 rounded-xl p-4 space-y-3 cursor-pointer hover:bg-white/[0.07] transition-colors"
+      className="bg-white/5 backdrop-blur border border-white/10 rounded-xl px-3 py-2.5 space-y-1.5 cursor-pointer hover:bg-white/[0.07] transition-colors group"
     >
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2.5">
         <div
           onClick={(e) => {
             if (onAuthorClick && post.business?.id) {
@@ -67,7 +67,7 @@ export function PostCard({ post, index, onExpand, onLike, onAuthorClick }: PostC
               onAuthorClick(post.business.id);
             }
           }}
-          className={`w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-xs overflow-hidden flex-shrink-0 ${onAuthorClick ? "cursor-pointer hover:ring-2 hover:ring-[hsl(var(--kf-accent1))]/50 transition-all" : ""}`}
+          className={`w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-[10px] overflow-hidden flex-shrink-0 ${onAuthorClick ? "cursor-pointer hover:ring-2 hover:ring-[hsl(var(--kf-accent1))]/50 transition-all" : ""}`}
         >
           {logoUrl ? (
             <img src={logoUrl} alt={post.business?.name || ""} className="w-full h-full object-cover" />
@@ -76,30 +76,29 @@ export function PostCard({ post, index, onExpand, onLike, onAuthorClick }: PostC
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <p
-            onClick={(e) => {
-              if (onAuthorClick && post.business?.id) {
-                e.stopPropagation();
-                onAuthorClick(post.business.id);
-              }
-            }}
-            className={`text-sm font-medium truncate ${onAuthorClick ? "hover:text-[hsl(var(--kf-accent1))] cursor-pointer transition-colors" : ""}`}
-          >
-            {post.business?.name || "Anonymous"}
-          </p>
-          {post.business?.headline && (
-            <p className="text-[10px] text-muted-foreground truncate">{post.business.headline}</p>
-          )}
+          <div className="flex items-center gap-1.5">
+            <p
+              onClick={(e) => {
+                if (onAuthorClick && post.business?.id) {
+                  e.stopPropagation();
+                  onAuthorClick(post.business.id);
+                }
+              }}
+              className={`text-[13px] font-medium truncate ${onAuthorClick ? "hover:text-[hsl(var(--kf-accent1))] cursor-pointer transition-colors" : ""}`}
+            >
+              {post.business?.name || "Anonymous"}
+            </p>
+            <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-semibold ${typeConfig.bg} ${typeConfig.color} flex items-center gap-0.5 flex-shrink-0`}>
+              <TypeIcon className="w-2.5 h-2.5" />
+              {typeConfig.label}
+            </span>
+            <span className="text-[10px] text-muted-foreground/50 flex-shrink-0">{timeAgo(post.createdAt)}</span>
+          </div>
         </div>
-        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${typeConfig.bg} ${typeConfig.color} flex items-center gap-1 flex-shrink-0`}>
-          <TypeIcon className="w-3 h-3" />
-          {typeConfig.label}
-        </span>
-        <span className="text-[10px] text-muted-foreground flex-shrink-0">{timeAgo(post.createdAt)}</span>
       </div>
 
-      {post.title && <h3 className="text-sm font-semibold">{post.title}</h3>}
-      <p className="text-sm text-muted-foreground line-clamp-2">{post.content}</p>
+      {post.title && <h3 className="text-[13px] font-semibold">{post.title}</h3>}
+      <p className="text-[12px] text-muted-foreground line-clamp-2">{post.content}</p>
 
       {post.tags?.length > 0 && (
         <div className="flex flex-wrap gap-1">

@@ -52,43 +52,42 @@ export function BillingCard({
       className="group relative rounded-xl border border-border/30 hover:border-border/50 bg-white/[0.015] hover:bg-white/[0.04] cursor-pointer transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring overflow-hidden"
     >
       <div
-        className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-xl"
+        className="absolute left-0 top-0 bottom-0 w-[2px] rounded-l-xl"
         style={{ backgroundColor: getStatusAccentColor(status) }}
       />
 
-      <div className="pl-4 pr-3 py-3 sm:py-3.5">
-        <div className="flex items-start gap-3">
+      <div className="pl-3.5 pr-2.5 py-2">
+        <div className="flex items-center gap-2.5">
           <div
-            className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center text-xs font-bold shrink-0 mt-0.5"
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-bold shrink-0"
             style={{ backgroundColor: theme.avatarBg }}
           >
             <span className={theme.avatarText}>{getContactInitials(contact)}</span>
           </div>
 
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-mono text-[13px] font-semibold text-foreground leading-tight">
+            <div className="flex items-center gap-1.5">
+              <span className="font-mono text-[12px] font-semibold text-foreground leading-tight">
                 {number}
               </span>
               <span
-                className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium border leading-none ${getStatusBadge(status)}`}
+                className={`px-1.5 py-0.5 rounded-full text-[9px] font-medium border leading-none ${getStatusBadge(status)}`}
               >
                 {status}
               </span>
               {badges}
             </div>
-            <div className="text-[13px] text-foreground/80 mt-0.5 truncate font-medium">
-              {contactName}
-            </div>
-            <div className="flex items-center gap-1.5 mt-1 text-[11px] text-muted-foreground/50">
+            <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-muted-foreground/60 min-w-0">
+              <span className="truncate font-medium text-foreground/70">{contactName}</span>
+              <span className="text-muted-foreground/25">·</span>
               <span className="truncate">{getItemsSummary(items)}</span>
               <span className="text-muted-foreground/25">·</span>
               <span className="shrink-0">{date ? formatRelativeDate(date) : ""}</span>
             </div>
           </div>
 
-          <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
-            <span className="text-[15px] font-bold text-foreground whitespace-nowrap tracking-tight">
+          <div className="text-right shrink-0 flex items-center gap-2">
+            <span className="text-sm font-bold text-foreground whitespace-nowrap tracking-tight">
               {formatAmount(total, currency)}
             </span>
 
@@ -102,7 +101,7 @@ export function BillingCard({
         </div>
 
         <div
-          className="flex md:hidden items-center gap-1 mt-2 pt-2 border-t border-border/15 overflow-x-auto scrollbar-none"
+          className="flex md:hidden items-center gap-1 mt-1.5 pt-1.5 border-t border-border/15 overflow-x-auto scrollbar-none"
           onClick={(e) => e.stopPropagation()}
         >
           {mobileActions}

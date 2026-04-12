@@ -89,7 +89,7 @@ export function PostsFeed({ posts, loading, onPublish, onEdit, onDelete, onNewPo
         variants={container}
         initial="hidden"
         animate="show"
-        className={viewMode === "grid" ? "grid gap-3 md:grid-cols-2 lg:grid-cols-3" : "flex flex-col gap-3"}
+        className={viewMode === "grid" ? "grid gap-2 md:grid-cols-2 lg:grid-cols-3" : "flex flex-col gap-1.5"}
       >
         {posts.map((post) => (
           <motion.div key={post.id} variants={item}>
