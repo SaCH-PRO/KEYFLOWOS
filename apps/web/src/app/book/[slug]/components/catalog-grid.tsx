@@ -142,19 +142,19 @@ export function CatalogGrid({
 
   if (catalogItems.length === 0) {
     return (
-      <div className={`${ts.cardRadius} border border-white/[0.06] bg-gradient-to-br from-white/[0.03] to-white/[0.01] backdrop-blur-xl p-16 text-center space-y-5 ${ts.fontClass}`}>
+      <div className={`${ts.cardRadius} border border-gray-200 bg-gradient-to-br from-white/[0.03] to-white/[0.01] backdrop-blur-xl p-16 text-center space-y-5 ${ts.fontClass}`}>
         <div className="w-20 h-20 mx-auto rounded-2xl bg-gradient-to-br from-white/[0.06] to-white/[0.02] flex items-center justify-center">
-          <Sparkles className="w-10 h-10 text-white/20" />
+          <Sparkles className="w-10 h-10 text-gray-300" />
         </div>
         <div className="space-y-2">
-          <h2 className={`text-xl ${ts.headerWeight} text-white/70 ${ts.textStyle}`}>Coming Soon</h2>
-          <p className={`text-sm text-white/35 max-w-sm mx-auto leading-relaxed ${ts.bodyWeight}`}>
+          <h2 className={`text-xl ${ts.headerWeight} text-gray-600 ${ts.textStyle}`}>Coming Soon</h2>
+          <p className={`text-sm text-gray-900/35 max-w-sm mx-auto leading-relaxed ${ts.bodyWeight}`}>
             This business is setting up their online store. Check back soon for services, products, and packages!
           </p>
         </div>
         <div className="flex items-center justify-center gap-6 pt-2">
           {["Services", "Products", "Packages"].map((label) => (
-            <div key={label} className="flex items-center gap-1.5 text-xs text-white/20">
+            <div key={label} className="flex items-center gap-1.5 text-xs text-gray-300">
               <div className="w-1.5 h-1.5 rounded-full bg-white/15" />
               {label}
             </div>
@@ -254,7 +254,7 @@ export function CatalogGrid({
 
           {itemBadge && (
             <span
-              className={`absolute top-2.5 right-2.5 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold backdrop-blur-md bg-gradient-to-r ${itemBadge.gradient} border border-white/10 shadow-lg`}
+              className={`absolute top-2.5 right-2.5 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold backdrop-blur-md bg-gradient-to-r ${itemBadge.gradient} border border-gray-200 shadow-lg`}
               style={{ color: "white" }}
             >
               <itemBadge.icon className="w-3 h-3" />
@@ -263,7 +263,7 @@ export function CatalogGrid({
           )}
 
           {isFeatured && !itemBadge && (
-            <span className="absolute top-2.5 right-2.5 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold backdrop-blur-md bg-gradient-to-r from-amber-500/30 to-orange-500/30 border border-white/10 text-white shadow-lg">
+            <span className="absolute top-2.5 right-2.5 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold backdrop-blur-md bg-gradient-to-r from-amber-500/30 to-orange-500/30 border border-gray-200 text-gray-900 shadow-lg">
               <Star className="w-3 h-3" />
               Featured
             </span>
@@ -275,13 +275,13 @@ export function CatalogGrid({
               className="absolute top-2.5 left-2.5 w-8 h-8 rounded-full backdrop-blur-md flex items-center justify-center transition-all hover:scale-110 z-10"
               style={{
                 backgroundColor: wishlisted ? `${primaryColor}30` : "rgba(0,0,0,0.4)",
-                border: wishlisted ? `1px solid ${primaryColor}40` : "1px solid rgba(255,255,255,0.1)",
+                border: wishlisted ? `1px solid ${primaryColor}40` : "1px solid rgba(0,0,0,0.06)",
               }}
               title={wishlisted ? "Remove from wishlist" : "Save for later"}
             >
               <Heart
                 className="w-3.5 h-3.5 transition-colors"
-                style={{ color: wishlisted ? primaryColor : "rgba(255,255,255,0.6)" }}
+                style={{ color: wishlisted ? primaryColor : "rgba(0,0,0,0.5)" }}
                 fill={wishlisted ? primaryColor : "none"}
               />
             </button>
@@ -299,7 +299,7 @@ export function CatalogGrid({
           </div>
 
           <div className="flex items-start justify-between gap-2">
-            <h4 className={`${ts.nameSize} ${ts.headerWeight} text-white leading-tight ${ts.textStyle} group-hover:text-white transition-colors`}>
+            <h4 className={`${ts.nameSize} ${ts.headerWeight} text-gray-900 leading-tight ${ts.textStyle} group-hover:text-gray-900 transition-colors`}>
               {item.name}
             </h4>
             {showPrices && (
@@ -313,7 +313,7 @@ export function CatalogGrid({
           </div>
 
           {item.description && (
-            <p className={`${ts.descSize} text-white/45 line-clamp-2 leading-relaxed ${ts.bodyWeight}`}>
+            <p className={`${ts.descSize} text-gray-900/45 line-clamp-2 leading-relaxed ${ts.bodyWeight}`}>
               {item.description}
             </p>
           )}
@@ -324,7 +324,7 @@ export function CatalogGrid({
 
           <div className="flex items-center justify-between pt-1">
             {showDuration && item.duration ? (
-              <span className={`flex items-center gap-1.5 ${ts.descSize} text-white/35 bg-white/[0.04] px-2 py-1 rounded-lg`}>
+              <span className={`flex items-center gap-1.5 ${ts.descSize} text-gray-900/35 bg-gray-50 px-2 py-1 rounded-lg`}>
                 <Clock className="w-3 h-3" /> {item.duration} min
               </span>
             ) : (
@@ -447,13 +447,13 @@ export function CatalogGrid({
                   {badge.label}
                 </span>
                 {itemBadge && (
-                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gradient-to-r ${itemBadge.gradient} border border-white/10 text-white`}>
+                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gradient-to-r ${itemBadge.gradient} border border-gray-200 text-gray-900`}>
                     <itemBadge.icon className="w-2.5 h-2.5" />
                     {itemBadge.label}
                   </span>
                 )}
               </div>
-              <h4 className={`${ts.nameSize} ${ts.headerWeight} text-white leading-tight ${ts.textStyle}`}>{item.name}</h4>
+              <h4 className={`${ts.nameSize} ${ts.headerWeight} text-gray-900 leading-tight ${ts.textStyle}`}>{item.name}</h4>
             </div>
             <div className="flex flex-col items-end gap-2 flex-shrink-0">
               {showPrices && (
@@ -464,14 +464,14 @@ export function CatalogGrid({
             </div>
           </div>
           {item.description && (
-            <p className={`${ts.descSize} text-white/45 line-clamp-2 leading-relaxed ${ts.bodyWeight}`}>{item.description}</p>
+            <p className={`${ts.descSize} text-gray-900/45 line-clamp-2 leading-relaxed ${ts.bodyWeight}`}>{item.description}</p>
           )}
           {reviewAgg && reviewAgg.reviewCount > 0 && (
             <StarRatingDisplay rating={reviewAgg.averageRating} count={reviewAgg.reviewCount} />
           )}
           <div className="flex items-center justify-between pt-0.5">
             {showDuration && item.duration ? (
-              <span className={`flex items-center gap-1.5 ${ts.descSize} text-white/35 bg-white/[0.04] px-2 py-1 rounded-lg`}>
+              <span className={`flex items-center gap-1.5 ${ts.descSize} text-gray-900/35 bg-gray-50 px-2 py-1 rounded-lg`}>
                 <Clock className="w-3 h-3" /> {item.duration} min
               </span>
             ) : (
@@ -532,7 +532,7 @@ export function CatalogGrid({
         <div className="relative flex-1 group/search">
           <Search
             className={`absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors duration-200 ${
-              searchFocused ? "text-white/50" : "text-white/25"
+              searchFocused ? "text-gray-500" : "text-gray-900/25"
             }`}
           />
           <input
@@ -542,7 +542,7 @@ export function CatalogGrid({
             onFocus={() => setSearchFocused(true)}
             onBlur={() => setSearchFocused(false)}
             placeholder="Search services, products..."
-            className={`w-full pl-10 pr-10 py-2.5 ${ts.searchRadius} border text-sm text-white placeholder:text-white/25 focus:outline-none transition-all duration-200`}
+            className={`w-full pl-10 pr-10 py-2.5 ${ts.searchRadius} border text-sm text-gray-900 placeholder:text-gray-900/25 focus:outline-none transition-all duration-200`}
             style={{
               background: ts.searchBg,
               borderColor: searchFocused ? `${primaryColor}50` : ts.searchBorder,
@@ -552,9 +552,9 @@ export function CatalogGrid({
           {searchQuery && (
             <button
               onClick={() => setSearchQuery("")}
-              className="absolute right-3.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors"
+              className="absolute right-3.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-gray-200/50 flex items-center justify-center hover:bg-gray-200 transition-colors"
             >
-              <X className="w-3 h-3 text-white/50" />
+              <X className="w-3 h-3 text-gray-500" />
             </button>
           )}
         </div>
@@ -562,11 +562,11 @@ export function CatalogGrid({
         <div className="relative" ref={sortRef}>
           <button
             onClick={() => setSortOpen(!sortOpen)}
-            className={`flex items-center gap-2 px-4 py-2.5 ${ts.searchRadius} border text-sm transition-all duration-200 hover:bg-white/[0.04]`}
+            className={`flex items-center gap-2 px-4 py-2.5 ${ts.searchRadius} border text-sm transition-all duration-200 hover:bg-gray-50`}
             style={{
-              borderColor: sortOpen ? `${primaryColor}40` : "rgba(255,255,255,0.08)",
-              backgroundColor: sortOpen ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.02)",
-              color: sortOption !== "default" ? primaryColor : "rgba(255,255,255,0.5)",
+              borderColor: sortOpen ? `${primaryColor}40` : "rgba(0,0,0,0.05)",
+              backgroundColor: sortOpen ? "rgba(0,0,0,0.03)" : "rgba(0,0,0,0.02)",
+              color: sortOption !== "default" ? primaryColor : "rgba(0,0,0,0.4)",
             }}
           >
             <SlidersHorizontal className="w-3.5 h-3.5" />
@@ -576,7 +576,7 @@ export function CatalogGrid({
           </button>
           {sortOpen && (
             <div
-              className={`absolute right-0 top-full mt-2 w-52 ${ts.cardRadius} border border-white/10 bg-[#16161f]/95 backdrop-blur-2xl shadow-2xl z-30 overflow-hidden`}
+              className={`absolute right-0 top-full mt-2 w-52 ${ts.cardRadius} border border-gray-200 bg-white/95 backdrop-blur-2xl shadow-2xl z-30 overflow-hidden`}
               style={{ animation: "fadeSlideDown 0.15s ease-out" }}
             >
               {(Object.entries(sortLabels) as [SortOption, string][]).map(([val, label]) => (
@@ -585,8 +585,8 @@ export function CatalogGrid({
                   onClick={() => { setSortOption(val); setSortOpen(false); }}
                   className={`w-full text-left px-4 py-2.5 text-sm transition-all duration-150 flex items-center justify-between ${
                     sortOption === val
-                      ? "text-white bg-white/[0.06]"
-                      : "text-white/45 hover:text-white/70 hover:bg-white/[0.04]"
+                      ? "text-gray-900 bg-gray-100"
+                      : "text-gray-900/45 hover:text-gray-600 hover:bg-gray-50"
                   }`}
                 >
                   {label}
@@ -616,7 +616,7 @@ export function CatalogGrid({
               {label}
               <span
                 className={`text-[10px] px-1.5 py-0.5 rounded-full transition-all duration-200 ${
-                  activeTab === tab ? "bg-white/15 text-white/90" : "bg-white/[0.06] text-white/30"
+                  activeTab === tab ? "bg-white/15 text-gray-800" : "bg-gray-100 text-gray-400"
                 }`}
               >
                 {count}
@@ -627,13 +627,13 @@ export function CatalogGrid({
       </div>
 
       {searchQuery && (
-        <div className="flex items-center gap-2 text-xs text-white/35">
+        <div className="flex items-center gap-2 text-xs text-gray-900/35">
           <Search className="w-3 h-3" />
           <span>
             {filteredItems.length} result{filteredItems.length !== 1 ? "s" : ""} for &ldquo;{searchQuery}&rdquo;
           </span>
           {activeTab !== "all" && (
-            <span className="text-white/20">
+            <span className="text-gray-300">
               in {tabs.find(([t]) => t === activeTab)?.[1]}
             </span>
           )}
@@ -663,13 +663,13 @@ export function CatalogGrid({
           </div>
         )
       ) : (
-        <div className={`${ts.cardRadius} border border-white/[0.06] bg-gradient-to-br from-white/[0.03] to-white/[0.01] backdrop-blur-xl p-12 text-center space-y-4`}>
-          <div className="w-14 h-14 mx-auto rounded-xl bg-white/[0.05] flex items-center justify-center">
-            <Search className="w-7 h-7 text-white/20" />
+        <div className={`${ts.cardRadius} border border-gray-200 bg-gradient-to-br from-white/[0.03] to-white/[0.01] backdrop-blur-xl p-12 text-center space-y-4`}>
+          <div className="w-14 h-14 mx-auto rounded-xl bg-gray-100 flex items-center justify-center">
+            <Search className="w-7 h-7 text-gray-300" />
           </div>
           <div className="space-y-1.5">
-            <p className={`text-sm ${ts.headerWeight} text-white/50`}>No items found</p>
-            <p className={`text-xs text-white/30 ${ts.bodyWeight}`}>
+            <p className={`text-sm ${ts.headerWeight} text-gray-500`}>No items found</p>
+            <p className={`text-xs text-gray-400 ${ts.bodyWeight}`}>
               {searchQuery
                 ? `Try a different search term or browse all categories`
                 : `No items available in this category`}
@@ -678,7 +678,7 @@ export function CatalogGrid({
           {(searchQuery || activeTab !== "all") && (
             <button
               onClick={() => { setSearchQuery(""); setActiveTab("all"); }}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-medium text-white/50 bg-white/[0.05] hover:bg-white/[0.08] transition-all duration-200"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-medium text-gray-500 bg-gray-100 hover:bg-gray-100 transition-all duration-200"
             >
               <X className="w-3 h-3" /> Clear filters
             </button>

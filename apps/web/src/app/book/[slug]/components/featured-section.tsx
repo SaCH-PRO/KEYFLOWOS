@@ -36,7 +36,7 @@ export function FeaturedSection({
         >
           <Star className="w-4 h-4" style={{ color: primaryColor }} />
         </div>
-        <h3 className="text-lg font-semibold text-white/80">Featured</h3>
+        <h3 className="text-lg font-semibold text-gray-700">Featured</h3>
       </div>
       <div className="flex gap-4 overflow-x-auto pb-2 snap-x snap-mandatory" style={{ scrollbarWidth: "none" }}>
         {items.map((item) => {
@@ -45,7 +45,7 @@ export function FeaturedSection({
           return (
             <div
               key={`featured_${item.id}`}
-              className="flex-shrink-0 w-56 snap-start rounded-2xl border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] hover:border-white/[0.15] transition-all duration-300 overflow-hidden cursor-pointer group relative"
+              className="flex-shrink-0 w-56 snap-start rounded-2xl border border-gray-200 bg-gray-50 hover:bg-gray-100 hover:border-gray-300 transition-all duration-300 overflow-hidden cursor-pointer group relative"
               onClick={() => onItemClick(item)}
             >
               <div
@@ -72,9 +72,9 @@ export function FeaturedSection({
               <div className="p-3.5 space-y-2">
                 <div className="flex items-center gap-1.5">
                   <Star className="w-3 h-3" style={{ color: primaryColor }} fill={primaryColor} />
-                  <span className="text-[10px] font-semibold text-white/40">Featured</span>
+                  <span className="text-[10px] font-semibold text-gray-400">Featured</span>
                 </div>
-                <h4 className="text-sm font-semibold text-white truncate">{item.name}</h4>
+                <h4 className="text-sm font-semibold text-gray-900 truncate">{item.name}</h4>
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-bold" style={{ color: itemColor }}>
                     {formatPrice(item.price, item.currency)}

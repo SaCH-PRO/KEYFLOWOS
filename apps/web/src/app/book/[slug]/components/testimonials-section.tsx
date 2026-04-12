@@ -28,7 +28,7 @@ export function TestimonialsSection({ testimonials, primaryColor, secondaryColor
         >
           <MessageCircle className="w-4 h-4" style={{ color: primaryColor }} />
         </div>
-        <h3 className="text-lg font-semibold text-white/80">What Our Clients Say</h3>
+        <h3 className="text-lg font-semibold text-gray-700">What Our Clients Say</h3>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {testimonials.map((t, idx) => (
@@ -50,10 +50,10 @@ export function TestimonialsSection({ testimonials, primaryColor, secondaryColor
                 />
               ))}
             </div>
-            <p className="text-sm text-white/55 italic leading-relaxed">
+            <p className="text-sm text-gray-900/55 italic leading-relaxed">
               &ldquo;{t.text}&rdquo;
             </p>
-            <p className="text-xs text-white/35 font-medium">&mdash; {t.name}</p>
+            <p className="text-xs text-gray-900/35 font-medium">&mdash; {t.name}</p>
           </div>
         ))}
       </div>

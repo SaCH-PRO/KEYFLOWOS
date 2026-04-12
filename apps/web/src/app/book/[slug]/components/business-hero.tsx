@@ -141,7 +141,7 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
                   className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full border-2 flex items-center justify-center"
                   style={{ borderColor: ts.pageBg, backgroundColor: openStatus.isOpen ? "#22c55e" : "#ef4444" }}
                 >
-                  <CheckCircle className="w-3.5 h-3.5 text-white" />
+                  <CheckCircle className="w-3.5 h-3.5 text-gray-900" />
                 </div>
               </div>
             ) : (
@@ -174,7 +174,7 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
             <h1 className={`text-3xl md:text-5xl tracking-tight ${ts.headerWeight} ${ts.textStyle}`}>
               {headline}
             </h1>
-            <p className={`text-base md:text-lg text-white/50 mt-3 max-w-lg mx-auto leading-relaxed ${ts.bodyWeight} ${ts.fontClass}`}>
+            <p className={`text-base md:text-lg text-gray-500 mt-3 max-w-lg mx-auto leading-relaxed ${ts.bodyWeight} ${ts.fontClass}`}>
               {subheadline}
             </p>
           </div>
@@ -206,7 +206,7 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
 
           {(business.address || business.phone || business.email) && (
             <div
-              className="flex items-center justify-center gap-4 md:gap-6 text-xs text-white/40 flex-wrap"
+              className="flex items-center justify-center gap-4 md:gap-6 text-xs text-gray-400 flex-wrap"
               style={{
                 opacity: entered ? 1 : 0,
                 transform: entered ? "translateY(0)" : "translateY(10px)",
@@ -214,22 +214,22 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
               }}
             >
               {business.address && (
-                <span className="flex items-center gap-1.5 hover:text-white/60 transition-colors">
+                <span className="flex items-center gap-1.5 hover:text-gray-500 transition-colors">
                   <MapPin className="w-3.5 h-3.5" style={{ color: primaryColor }} /> {business.address}
                 </span>
               )}
               {business.phone && (
-                <a href={`tel:${business.phone}`} className="flex items-center gap-1.5 hover:text-white/60 transition-colors">
+                <a href={`tel:${business.phone}`} className="flex items-center gap-1.5 hover:text-gray-500 transition-colors">
                   <Phone className="w-3.5 h-3.5" style={{ color: primaryColor }} /> {business.phone}
                 </a>
               )}
               {business.email && (
-                <a href={`mailto:${business.email}`} className="flex items-center gap-1.5 hover:text-white/60 transition-colors">
+                <a href={`mailto:${business.email}`} className="flex items-center gap-1.5 hover:text-gray-500 transition-colors">
                   <Mail className="w-3.5 h-3.5" style={{ color: primaryColor }} /> {business.email}
                 </a>
               )}
               {business.website && /^https?:\/\//i.test(business.website) && (
-                <a href={business.website} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 hover:text-white/60 transition-colors">
+                <a href={business.website} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 hover:text-gray-500 transition-colors">
                   <ExternalLink className="w-3.5 h-3.5" style={{ color: primaryColor }} /> Website
                 </a>
               )}
@@ -250,10 +250,10 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
                   href={business.facebook.startsWith("http") ? business.facebook : `https://facebook.com/${business.facebook}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-9 h-9 rounded-full flex items-center justify-center bg-white/[0.06] border border-white/[0.08] hover:bg-white/[0.12] transition-colors"
+                  className="w-9 h-9 rounded-full flex items-center justify-center bg-gray-100 border border-gray-200 hover:bg-gray-200/60 transition-colors"
                   aria-label="Facebook"
                 >
-                  <Facebook className="w-4 h-4 text-white/50 hover:text-white/70" />
+                  <Facebook className="w-4 h-4 text-gray-500 hover:text-gray-600" />
                 </a>
               )}
               {business.instagram && (
@@ -261,10 +261,10 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
                   href={business.instagram.startsWith("http") ? business.instagram : `https://instagram.com/${business.instagram}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-9 h-9 rounded-full flex items-center justify-center bg-white/[0.06] border border-white/[0.08] hover:bg-white/[0.12] transition-colors"
+                  className="w-9 h-9 rounded-full flex items-center justify-center bg-gray-100 border border-gray-200 hover:bg-gray-200/60 transition-colors"
                   aria-label="Instagram"
                 >
-                  <Instagram className="w-4 h-4 text-white/50 hover:text-white/70" />
+                  <Instagram className="w-4 h-4 text-gray-500 hover:text-gray-600" />
                 </a>
               )}
               {business.twitter && (
@@ -272,10 +272,10 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
                   href={business.twitter.startsWith("http") ? business.twitter : `https://twitter.com/${business.twitter}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-9 h-9 rounded-full flex items-center justify-center bg-white/[0.06] border border-white/[0.08] hover:bg-white/[0.12] transition-colors"
+                  className="w-9 h-9 rounded-full flex items-center justify-center bg-gray-100 border border-gray-200 hover:bg-gray-200/60 transition-colors"
                   aria-label="Twitter"
                 >
-                  <Twitter className="w-4 h-4 text-white/50 hover:text-white/70" />
+                  <Twitter className="w-4 h-4 text-gray-500 hover:text-gray-600" />
                 </a>
               )}
               {business.whatsapp && (
@@ -283,10 +283,10 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
                   href={`https://wa.me/${business.whatsapp.replace(/\D/g, "")}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-9 h-9 rounded-full flex items-center justify-center bg-white/[0.06] border border-white/[0.08] hover:bg-white/[0.12] transition-colors"
+                  className="w-9 h-9 rounded-full flex items-center justify-center bg-gray-100 border border-gray-200 hover:bg-gray-200/60 transition-colors"
                   aria-label="WhatsApp"
                 >
-                  <MessageCircle className="w-4 h-4 text-white/50 hover:text-white/70" />
+                  <MessageCircle className="w-4 h-4 text-gray-500 hover:text-gray-600" />
                 </a>
               )}
             </div>
@@ -303,7 +303,7 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
             {trustBadges.map((badge, i) => (
               <div
                 key={i}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] text-white/45 bg-white/[0.04] border border-white/[0.06]"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] text-gray-900/45 bg-gray-50 border border-gray-200"
               >
                 <badge.icon className="w-3 h-3" style={{ color: `${primaryColor}90` }} />
                 {badge.label}

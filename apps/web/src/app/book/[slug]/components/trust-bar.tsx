@@ -33,9 +33,9 @@ export function TrustBar({ primaryColor, secondaryColor, showPaymentBadge = true
 
   return (
     <div
-      className="rounded-2xl border border-white/[0.06] backdrop-blur-sm overflow-hidden"
+      className="rounded-2xl border border-gray-200 backdrop-blur-sm overflow-hidden"
       style={{
-        background: "linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)",
+        background: "linear-gradient(135deg, rgba(0,0,0,0.03) 0%, rgba(0,0,0,0.01) 100%)",
       }}
     >
       <div className="flex items-center justify-around py-3.5 px-4 gap-2 flex-wrap sm:flex-nowrap">
@@ -55,7 +55,7 @@ export function TrustBar({ primaryColor, secondaryColor, showPaymentBadge = true
                   style={{ color: idx % 2 === 0 ? primaryColor : secondaryColor }}
                 />
               </div>
-              <span className="text-[11px] font-medium text-white/50 whitespace-nowrap">
+              <span className="text-[11px] font-medium text-gray-500 whitespace-nowrap">
                 {item.label}
               </span>
             </div>
@@ -73,25 +73,25 @@ type FooterBadgeProps = {
 
 export function SecurityFooter({ primaryColor, businessName }: FooterBadgeProps) {
   return (
-    <div className="border-t border-white/[0.04] pt-8 pb-6 space-y-4">
+    <div className="border-t border-gray-200 pt-8 pb-6 space-y-4">
       <div className="flex items-center justify-center gap-6 flex-wrap">
-        <div className="flex items-center gap-1.5 text-[10px] text-white/20">
+        <div className="flex items-center gap-1.5 text-[10px] text-gray-300">
           <ShieldCheck className="w-3 h-3" />
           <span>SSL Encrypted</span>
         </div>
-        <div className="flex items-center gap-1.5 text-[10px] text-white/20">
+        <div className="flex items-center gap-1.5 text-[10px] text-gray-300">
           <Zap className="w-3 h-3" />
           <span>Instant Booking</span>
         </div>
-        <div className="flex items-center gap-1.5 text-[10px] text-white/20">
+        <div className="flex items-center gap-1.5 text-[10px] text-gray-300">
           <Star className="w-3 h-3" />
           <span>Trusted Platform</span>
         </div>
       </div>
-      <p className="text-center text-[10px] text-white/15">
+      <p className="text-center text-[10px] text-gray-900/15">
         &copy; {new Date().getFullYear()} {businessName}. All rights reserved.
       </p>
-      <p className="text-center text-[10px] text-white/10">
+      <p className="text-center text-[10px] text-gray-900/10">
         Powered by KeyFlowOS
       </p>
     </div>

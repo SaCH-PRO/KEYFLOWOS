@@ -216,14 +216,14 @@ export default function ProductDetailPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen text-white flex items-center justify-center" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
+      <main className="min-h-screen text-gray-900 flex items-center justify-center" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
         <div className="flex flex-col items-center gap-4 animate-pulse">
           <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background: `linear-gradient(135deg, ${primaryColor}20, ${primaryColor}08)` }}>
             <Loader2 className="w-7 h-7 animate-spin" style={{ color: primaryColor }} />
           </div>
           <div className="space-y-2 text-center">
-            <div className="h-3 w-32 bg-white/[0.06] rounded-full mx-auto" />
-            <div className="h-2 w-24 bg-white/[0.04] rounded-full mx-auto" />
+            <div className="h-3 w-32 bg-gray-100 rounded-full mx-auto" />
+            <div className="h-2 w-24 bg-gray-50 rounded-full mx-auto" />
           </div>
         </div>
       </main>
@@ -232,13 +232,13 @@ export default function ProductDetailPage() {
 
   if (error || !item || !business) {
     return (
-      <main className="min-h-screen text-white flex items-center justify-center px-4" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
+      <main className="min-h-screen text-gray-900 flex items-center justify-center px-4" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
         <div className="max-w-md w-full rounded-3xl border border-red-500/30 bg-red-500/5 backdrop-blur-xl p-10 text-center space-y-4">
           <div className="w-16 h-16 rounded-2xl bg-red-500/10 flex items-center justify-center mx-auto">
             <Globe className="w-8 h-8 text-red-400" />
           </div>
           <h1 className="text-xl font-semibold text-red-400">Not Found</h1>
-          <p className="text-sm text-white/50">{error || "Product could not be found."}</p>
+          <p className="text-sm text-gray-500">{error || "Product could not be found."}</p>
           <button
             onClick={() => router.push(`/book/${slug}`)}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium transition-all min-h-[44px]"
@@ -266,7 +266,7 @@ export default function ProductDetailPage() {
     : "Physical product — delivery details will be confirmed at checkout.";
 
   return (
-    <main className="min-h-screen text-white relative" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
+    <main className="min-h-screen text-gray-900 relative" style={{ backgroundColor: ts.pageBg, backgroundImage: ts.pageGradient }}>
       {item && business && (
         <>
           <ProductSchema item={item} businessName={business.name} url={pageUrl} />
@@ -283,7 +283,7 @@ export default function ProductDetailPage() {
         <div className="flex items-center justify-between">
           <button
             onClick={() => router.push(`/book/${slug}`)}
-            className="flex items-center gap-2 text-sm text-white/50 hover:text-white/80 transition-colors min-h-[44px] px-2 -ml-2"
+            className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 transition-colors min-h-[44px] px-2 -ml-2"
           >
             <ArrowLeft className="w-4 h-4" /> Back to Catalog
           </button>
@@ -330,7 +330,7 @@ export default function ProductDetailPage() {
               >
                 {badge.label}
               </span>
-              <h1 className="text-2xl md:text-3xl font-bold text-white leading-tight mt-2">{item.name}</h1>
+              <h1 className="text-2xl md:text-3xl font-bold text-gray-900 leading-tight mt-2">{item.name}</h1>
             </div>
 
             <div className="flex items-center gap-4">
@@ -338,31 +338,31 @@ export default function ProductDetailPage() {
                 {formatPrice(item.price, item.currency)}
               </span>
               {item.duration && (
-                <span className="flex items-center gap-1.5 text-sm text-white/50 bg-white/[0.04] px-3 py-1.5 rounded-lg">
+                <span className="flex items-center gap-1.5 text-sm text-gray-500 bg-gray-50 px-3 py-1.5 rounded-lg">
                   <Clock className="w-4 h-4" /> {item.duration} min
                 </span>
               )}
             </div>
 
             {item.description && (
-              <p className="text-sm text-white/60 leading-relaxed whitespace-pre-line">{item.description}</p>
+              <p className="text-sm text-gray-500 leading-relaxed whitespace-pre-line">{item.description}</p>
             )}
 
-            <div className="flex items-center gap-2 text-xs text-white/30">
+            <div className="flex items-center gap-2 text-xs text-gray-400">
               <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
               In Stock
             </div>
 
             <div className="flex flex-wrap gap-3 py-1">
-              <div className="flex items-center gap-1.5 text-xs text-white/40">
+              <div className="flex items-center gap-1.5 text-xs text-gray-400">
                 <Star className="w-3.5 h-3.5" style={{ color: primaryColor }} />
                 Quality Guaranteed
               </div>
-              <div className="flex items-center gap-1.5 text-xs text-white/40">
+              <div className="flex items-center gap-1.5 text-xs text-gray-400">
                 <Shield className="w-3.5 h-3.5" style={{ color: primaryColor }} />
                 Secure Checkout
               </div>
-              <div className="flex items-center gap-1.5 text-xs text-white/40">
+              <div className="flex items-center gap-1.5 text-xs text-gray-400">
                 <Zap className="w-3.5 h-3.5" style={{ color: primaryColor }} />
                 Instant Confirmation
               </div>
@@ -370,20 +370,20 @@ export default function ProductDetailPage() {
 
             {item.itemType !== "service" && (
               <div className="flex items-center gap-3">
-                <span className="text-xs text-white/40">Qty:</span>
-                <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/[0.03]">
+                <span className="text-xs text-gray-400">Qty:</span>
+                <div className="flex items-center gap-1 rounded-xl border border-gray-200 bg-gray-50">
                   <button
                     onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                    className="w-10 h-10 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-l-xl hover:bg-white/[0.06] transition-colors active:scale-90"
+                    className="w-10 h-10 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-l-xl hover:bg-gray-100 transition-colors active:scale-90"
                   >
-                    <Minus className="w-4 h-4 text-white/50" />
+                    <Minus className="w-4 h-4 text-gray-500" />
                   </button>
-                  <span className="w-10 text-center text-sm font-semibold tabular-nums text-white">{quantity}</span>
+                  <span className="w-10 text-center text-sm font-semibold tabular-nums text-gray-900">{quantity}</span>
                   <button
                     onClick={() => setQuantity((q) => q + 1)}
-                    className="w-10 h-10 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-r-xl hover:bg-white/[0.06] transition-colors active:scale-90"
+                    className="w-10 h-10 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-r-xl hover:bg-gray-100 transition-colors active:scale-90"
                   >
-                    <Plus className="w-4 h-4 text-white/50" />
+                    <Plus className="w-4 h-4 text-gray-500" />
                   </button>
                 </div>
               </div>
@@ -424,17 +424,17 @@ export default function ProductDetailPage() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-5 space-y-3">
+        <div className="rounded-2xl border border-gray-200 bg-white/[0.02] p-5 space-y-3">
           <div className="flex items-center gap-2">
             <Truck className="w-4 h-4" style={{ color: primaryColor }} />
-            <h3 className="text-sm font-semibold text-white/70">Fulfillment Info</h3>
+            <h3 className="text-sm font-semibold text-gray-600">Fulfillment Info</h3>
           </div>
-          <p className="text-sm text-white/45 leading-relaxed">{deliveryInfo}</p>
+          <p className="text-sm text-gray-900/45 leading-relaxed">{deliveryInfo}</p>
         </div>
 
         {relatedItems.length > 0 && (
           <div className="space-y-5 pt-4">
-            <h3 className="text-lg font-semibold text-white/70">Related Items</h3>
+            <h3 className="text-lg font-semibold text-gray-600">Related Items</h3>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               {relatedItems.map((ri) => {
                 const riColor = ri.itemType === "service" ? primaryColor : ri.itemType === "product" ? secondaryColor : accentColor;
@@ -442,7 +442,7 @@ export default function ProductDetailPage() {
                   <button
                     key={ri.id}
                     onClick={() => router.push(`/book/${slug}/product/${ri.id}`)}
-                    className="rounded-2xl border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] hover:border-white/[0.15] transition-all overflow-hidden text-left group"
+                    className="rounded-2xl border border-gray-200 bg-gray-50 hover:bg-gray-100 hover:border-gray-300 transition-all overflow-hidden text-left group"
                   >
                     {ri.imageUrl ? (
                       <div className="w-full h-28 overflow-hidden">
@@ -457,7 +457,7 @@ export default function ProductDetailPage() {
                       </div>
                     )}
                     <div className="p-3 space-y-1">
-                      <p className="text-xs font-medium text-white truncate">{ri.name}</p>
+                      <p className="text-xs font-medium text-gray-900 truncate">{ri.name}</p>
                       <p className="text-xs font-bold" style={{ color: riColor }}>
                         {formatPrice(ri.price, ri.currency)}
                       </p>
@@ -469,25 +469,25 @@ export default function ProductDetailPage() {
           </div>
         )}
 
-        <div className="border-t border-white/[0.04] pt-8 pb-6 space-y-3">
+        <div className="border-t border-gray-200 pt-8 pb-6 space-y-3">
           <div className="flex items-center justify-center gap-6 flex-wrap">
-            <div className="flex items-center gap-1.5 text-[10px] text-white/20">
+            <div className="flex items-center gap-1.5 text-[10px] text-gray-300">
               <Shield className="w-3 h-3" /> SSL Encrypted
             </div>
-            <div className="flex items-center gap-1.5 text-[10px] text-white/20">
+            <div className="flex items-center gap-1.5 text-[10px] text-gray-300">
               <Zap className="w-3 h-3" /> Instant Booking
             </div>
-            <div className="flex items-center gap-1.5 text-[10px] text-white/20">
+            <div className="flex items-center gap-1.5 text-[10px] text-gray-300">
               <Star className="w-3 h-3" /> Trusted Platform
             </div>
           </div>
-          <p className="text-center text-[10px] text-white/15">
+          <p className="text-center text-[10px] text-gray-900/15">
             &copy; {new Date().getFullYear()} {business.name}. All rights reserved.
           </p>
         </div>
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 md:hidden z-30 p-4 backdrop-blur-xl border-t border-white/[0.08]" style={{ backgroundColor: `${ts.pageBg}ee` }}>
+      <div className="fixed bottom-0 left-0 right-0 md:hidden z-30 p-4 backdrop-blur-xl border-t border-gray-200" style={{ backgroundColor: `${ts.pageBg}ee` }}>
         {isInCart ? (
           <button
             onClick={() => removeFromCart(item.id, item.itemType)}
