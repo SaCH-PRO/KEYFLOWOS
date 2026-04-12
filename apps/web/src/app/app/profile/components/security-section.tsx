@@ -11,7 +11,7 @@ const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 function PasswordStrength({ password }: { password: string }) {
   const checks = [
-    { label: "6+ characters", pass: password.length >= 6 },
+    { label: "8+ characters", pass: password.length >= 8 },
     { label: "Uppercase letter", pass: /[A-Z]/.test(password) },
     { label: "Number", pass: /\d/.test(password) },
     { label: "Special character", pass: /[^A-Za-z0-9]/.test(password) },
@@ -81,7 +81,7 @@ export default function SecuritySection({ onStatus }: SecuritySectionProps) {
     if (!token || !SUPABASE_URL || !SUPABASE_ANON_KEY) return;
     if (!passwordForm.newPassword) { onStatus({ type: "error", message: "Please enter a new password" }); return; }
     if (passwordForm.newPassword !== passwordForm.confirmPassword) { onStatus({ type: "error", message: "Passwords do not match" }); return; }
-    if (passwordForm.newPassword.length < 6) { onStatus({ type: "error", message: "Password must be at least 6 characters" }); return; }
+    if (passwordForm.newPassword.length < 8) { onStatus({ type: "error", message: "Password must be at least 8 characters" }); return; }
 
     setSavingPassword(true);
     onStatus(null);

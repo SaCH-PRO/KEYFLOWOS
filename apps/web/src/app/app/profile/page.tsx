@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   User, CheckCircle2, AlertCircle, FileText,
-  ChevronRight, Shield, Building2, Briefcase, Palette, Globe,
+  Building2, Briefcase, Palette, Globe,
 } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -23,43 +23,9 @@ import { ContextDepthCard } from "./components/context-depth-card";
 import { ProgressivePrompts } from "./components/progressive-prompts";
 import { SkeletonProfile } from "./components/skeleton-profile";
 import { ProfileSectionErrorBoundary } from "./components/profile-section-error-boundary";
+import type { ProfileBusinessData, ProfileCompletenessField, StatusMessage, TabId } from "./components/profile-types";
 
-interface IdentityMe {
-  id: string;
-  email: string;
-  name?: string | null;
-  firstName?: string | null;
-  lastName?: string | null;
-  phone?: string | null;
-  avatarUrl?: string | null;
-}
-
-interface BusinessData {
-  id?: string;
-  name?: string;
-  logoUrl?: string | null;
-  industry?: string;
-  businessStage?: string;
-  teamSize?: string;
-  city?: string;
-  country?: string;
-  tagline?: string | null;
-  description?: string | null;
-  businessHours?: Record<string, { open: string; close: string; closed: boolean }> | null;
-  headline?: string | null;
-  bio?: string | null;
-  skills?: string[];
-  interests?: string[];
-  profileCompleteness?: number;
-}
-
-interface ProfileCompletenessField {
-  key: string;
-  label: string;
-  description: string;
-}
-
-function checkFieldCompletion(key: string, bd: BusinessData | null): boolean {
+function checkFieldCompletion(key: string, bd: ProfileBusinessData | null): boolean {
   if (!bd) return false;
   switch (key) {
     case "name": return !!bd.name;
@@ -85,7 +51,6 @@ const fadeUp = {
   show: { opacity: 1, y: 0, transition: { duration: 0.3 } },
 };
 
-type TabId = "profile" | "brand" | "documents";
 
 const TAB_CONFIG: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: "profile", label: "Profile", icon: User },
@@ -99,12 +64,12 @@ export default function ProfileSettingsPage() {
   const initialTab = (searchParams.get("tab") as TabId) || "profile";
 
   const [loading, setLoading] = useState(true);
-  const [status, setStatusRaw] = useState<{ type: "success" | "error"; message: string } | null>(null);
-  const [dismissTimer, setDismissTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const [status, setStatusRaw] = useState<StatusMessage | null>(null);
+  const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [savedForm, setSavedForm] = useState({ email: "", name: "", firstName: "", lastName: "", phone: "" });
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [businessId, setBusinessId] = useState<string | null>(null);
-  const [businessData, setBusinessData] = useState<BusinessData | null>(null);
+  const [businessData, setBusinessData] = useState<ProfileBusinessData | null>(null);
   const [businessLoading, setBusinessLoading] = useState(false);
   const [profileCompleteness, setProfileCompleteness] = useState(0);
   const [docCount, setDocCount] = useState(0);
@@ -119,20 +84,21 @@ export default function ProfileSettingsPage() {
 
   const [activeTab, setActiveTab] = useState<TabId>(TAB_CONFIG.some(t => t.id === initialTab) ? initialTab : "profile");
 
-  const setStatus = useCallback((s: { type: "success" | "error"; message: string } | null) => {
+  const setStatus = useCallback((s: StatusMessage | null) => {
     setStatusRaw(s);
-    if (dismissTimer) clearTimeout(dismissTimer);
+    if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current);
     if (s) {
-      const timer = setTimeout(() => setStatusRaw(null), 4000);
-      setDismissTimer(timer);
+      dismissTimerRef.current = setTimeout(() => setStatusRaw(null), 4000);
+    } else {
+      dismissTimerRef.current = null;
     }
-  }, [dismissTimer]);
+  }, []);
 
   useEffect(() => {
     return () => {
-      if (dismissTimer) clearTimeout(dismissTimer);
+      if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current);
     };
-  }, [dismissTimer]);
+  }, []);
 
   const handleTabChange = useCallback((tab: TabId) => {
     setActiveTab(tab);
@@ -200,7 +166,7 @@ export default function ProfileSettingsPage() {
         .catch((err) => {
           console.error("Failed to load document count:", err);
         });
-      apiGet<BusinessData & { primaryColor?: string | null; facebook?: string | null; instagram?: string | null; twitter?: string | null; linkedin?: string | null }>(`/identity/businesses/${bid}`)
+      apiGet<ProfileBusinessData>(`/identity/businesses/${bid}`)
         .then(({ data, error }) => {
           if (error) {
             setStatus({ type: "error", message: `Failed to load business data: ${error}` });
@@ -230,7 +196,7 @@ export default function ProfileSettingsPage() {
   useEffect(() => {
     const load = async () => {
       try {
-        const { data, error } = await apiGet<IdentityMe>("/identity/me");
+        const { data, error } = await apiGet<{ id: string; email: string; name?: string | null; firstName?: string | null; lastName?: string | null; phone?: string | null; avatarUrl?: string | null }>("/identity/me");
         if (error) {
           setStatus({ type: "error", message: `Failed to load profile: ${error}` });
         } else if (data) {
@@ -372,13 +338,13 @@ export default function ProfileSettingsPage() {
 
             <motion.div variants={fadeUp}>
               <ProfileSectionErrorBoundary sectionName="Business Intelligence">
-                <ContextDepthCard />
+                <ContextDepthCard businessId={businessId} />
               </ProfileSectionErrorBoundary>
             </motion.div>
 
             <motion.div variants={fadeUp}>
               <ProfileSectionErrorBoundary sectionName="Smart Suggestions">
-                <ProgressivePrompts />
+                <ProgressivePrompts businessId={businessId} />
               </ProfileSectionErrorBoundary>
             </motion.div>
 
@@ -442,24 +408,6 @@ export default function ProfileSettingsPage() {
               </ProfileSectionErrorBoundary>
             </motion.div>
 
-            <motion.div variants={fadeUp}>
-              <div
-                className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer hover:bg-[hsl(var(--muted))] transition-colors min-h-[44px]"
-                style={{ border: "1px solid hsl(var(--kf-border) / 0.2)" }}
-                onClick={() => router.push("/app/settings/security")}
-                role="button"
-                tabIndex={0}
-                aria-label="Go to Security & Preferences"
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") router.push("/app/settings/security"); }}
-              >
-                <Shield className="w-4 h-4 text-[hsl(var(--muted-foreground))]" aria-hidden="true" />
-                <div className="flex-1">
-                  <div className="text-sm font-medium text-[hsl(var(--foreground))]">Security & Preferences</div>
-                  <div className="text-xs text-[hsl(var(--muted-foreground))]">Password, theme, and account security</div>
-                </div>
-                <ChevronRight className="w-4 h-4 text-[hsl(var(--muted-foreground))]" aria-hidden="true" />
-              </div>
-            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>

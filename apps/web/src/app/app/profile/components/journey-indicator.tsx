@@ -13,7 +13,6 @@ export interface CompletenessItem {
 
 interface JourneyIndicatorProps {
   items: CompletenessItem[];
-  profileCompleteness?: number;
   onGoTo: (tab: "profile" | "brand" | "documents") => void;
 }
 

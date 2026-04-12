@@ -48,14 +48,6 @@ interface BizInfo {
   businessHours: BusinessHours;
 }
 
-interface BusinessData {
-  id: string;
-  name: string;
-  tagline?: string | null;
-  description?: string | null;
-  teamSize?: string | null;
-  businessHours?: BusinessHours | null;
-}
 
 const EMPTY_BIZ_INFO: BizInfo = {
   name: "",
@@ -128,7 +120,7 @@ export default function MyBusinessSection({
     setSaving(true);
     onStatus(null);
     try {
-      const { error } = await apiPatch<BusinessData>(`/identity/businesses/${businessId}`, {
+      const { error } = await apiPatch<BizInfo>(`/identity/businesses/${businessId}`, {
         name: form.name,
         tagline: form.tagline,
         description: form.description,
