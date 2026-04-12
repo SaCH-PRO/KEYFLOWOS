@@ -549,7 +549,7 @@ export default function BookingsPage() {
           transition={{ type: "spring", bounce: 0.15, duration: 0.35 }}
         >
           {tab === "schedule" && (
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <TodayStrip
                 bookings={bookings}
                 stats={stats}
