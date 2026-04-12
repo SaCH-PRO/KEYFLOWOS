@@ -31,6 +31,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Cross-Module Intelligence Agents:** Client Momentum, Campaign Intelligence, Financial Copilot, and an event-driven workflow engine for cross-module actions.
 - **Public Storefront (`/book/[slug]`):** Premium, mobile-first, conversion-optimized storefront with section-based layout, product detail pages, category navigation, featured products, FAQ, policy pages, contact section, testimonials, structured data, dynamic Google Font pairing loading, persistent checkout order summary, configurable tax rate, and email capture.
 - **Store Setup Wizard:** 5-step guided setup process for storefront configuration.
+- **Store Dashboard:** Flagship brand-aware e-commerce dashboard with cover image hero, live stat cards, catalog preview strip, and real QR code generation (`qrcode` library) for link + QR sharing. Accordion-based storefront configuration organized into Launch, Design, Content, and Settings groups.
 - **Financial Copilot Agent:** Monitors revenue, expenses, and cash flow with anomaly detection and weekly AI-powered briefings.
 - **Customer Notification System:** Transactional email system for branded customer-facing emails with delivery status dashboard (Sent/Queued/Failed/Expired stats) in Settings.
 - **Platform Features:** Gamification, online store, public booking page, module event bus, keyboard shortcuts, webhook dispatcher, and developer settings.
