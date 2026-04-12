@@ -30,10 +30,11 @@ export function AccordionSection({
 
   return (
     <div
-      className="rounded-xl overflow-hidden transition-colors"
+      className="rounded-xl overflow-hidden transition-all duration-200"
       style={{
         background: "hsl(var(--kf-card))",
         border: open ? `1px solid color-mix(in srgb, ${accent} 30%, transparent)` : "1px solid hsl(var(--kf-border) / 0.4)",
+        boxShadow: open ? `0 4px 16px hsl(var(--kf-background) / 0.3), inset 3px 0 0 ${accent}` : "none",
       }}
     >
       <button
@@ -42,12 +43,13 @@ export function AccordionSection({
         onClick={() => setOpen(!open)}
         aria-expanded={open}
         aria-controls={panelId}
-        className="w-full flex items-center gap-3 px-4 py-3.5 text-left min-h-[52px] transition-colors hover:bg-[hsl(var(--kf-muted)/0.15)]"
+        className="w-full flex items-center gap-3 px-4 py-3.5 text-left min-h-[52px] transition-colors hover:bg-[hsl(var(--kf-muted)/0.12)]"
       >
         <div
-          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors"
+          className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-200"
           style={{
-            background: open ? `color-mix(in srgb, ${accent} 20%, transparent)` : "hsl(var(--kf-muted) / 0.2)",
+            background: open ? `color-mix(in srgb, ${accent} 20%, transparent)` : "hsl(var(--kf-muted) / 0.15)",
+            boxShadow: open ? `0 2px 8px color-mix(in srgb, ${accent} 15%, transparent)` : "none",
           }}
         >
           <Icon
@@ -57,7 +59,10 @@ export function AccordionSection({
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold" style={{ color: "hsl(var(--kf-foreground))" }}>
+            <span
+              className="text-sm font-semibold transition-colors"
+              style={{ color: open ? "hsl(var(--kf-foreground))" : "hsl(var(--kf-foreground) / 0.85)" }}
+            >
               {title}
             </span>
             {badge}
@@ -71,7 +76,7 @@ export function AccordionSection({
         <ChevronRight
           className="w-4 h-4 flex-shrink-0 transition-transform duration-200"
           style={{
-            color: "hsl(var(--kf-muted-foreground))",
+            color: open ? accent : "hsl(var(--kf-muted-foreground))",
             transform: open ? "rotate(90deg)" : "rotate(0deg)",
           }}
         />
@@ -90,7 +95,7 @@ export function AccordionSection({
               role="region"
               aria-labelledby={triggerId}
               className="px-4 pb-4 pt-1"
-              style={{ borderTop: "1px solid hsl(var(--kf-border) / 0.3)" }}
+              style={{ borderTop: "1px solid hsl(var(--kf-border) / 0.2)" }}
             >
               {children}
             </div>
@@ -110,9 +115,13 @@ export function AccordionGroup({ title, children }: AccordionGroupProps) {
   return (
     <div className="space-y-2">
       <h3
-        className="text-[10px] font-bold uppercase tracking-widest px-1"
+        className="text-[10px] font-bold uppercase tracking-widest px-1 flex items-center gap-2"
         style={{ color: "hsl(var(--kf-muted-foreground) / 0.6)" }}
       >
+        <span
+          className="w-5 h-px"
+          style={{ background: "hsl(var(--kf-accent1) / 0.2)" }}
+        />
         {title}
       </h3>
       <div className="space-y-1.5">{children}</div>
