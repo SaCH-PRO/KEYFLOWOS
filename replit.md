@@ -1,7 +1,7 @@
 # KEYFLOWOS Monorepo
 
 ## Overview
-KEYFLOWOS is an AI-powered operating system designed to automate operations for service businesses, aiming for 80-90% automation. It provides pre-built Playbooks, a unified "Command" center with an AI-powered command bar, voice input, and integrated business intelligence. The system integrates six core engines: LaunchFlow, OperateAI, GrowthStack, ProfitLens, ScaleHub, and MasterClass Mode, offering a comprehensive solution for business automation, growth, and management.
+KEYFLOWOS is an AI-powered operating system designed to automate operations for service businesses, aiming for 80-90% automation. It provides pre-built Playbooks, a unified "Command" center with an AI-powered command bar, voice input, and integrated business intelligence. The system integrates six core engines: LaunchFlow, OperateAI, GrowthStack, ProfitLens, ScaleHub, and MasterClass Mode, offering a comprehensive solution for business automation, growth, and management. Its business vision is to provide a comprehensive, AI-driven platform for business automation, growth, and management, with a high degree of automation and pre-opinionated workflows.
 
 ## User Preferences
 - Caribbean localization (TTD currency, Trinidad timezone)
@@ -14,64 +14,48 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 
 **UI/UX Decisions:**
 - Redesigned design system with a warm Caribbean color palette (orange `#F97316` primary, teal `#14B8A6` secondary), selective glassmorphism, clean elevation system, and PWA capabilities.
-- **Compact UI Rule**: All listing/grid views must be compact, minimizing vertical height and scrolling. Hover reveals additional info (tooltips/overlays), click opens full detail interface. Applied across ProductCard (72px image + inline info), BillingCard (single-row layout), BookingList (tight rows), ExpenseList (dense table rows), ContactCard, PostCard, CourseCard, and CommunityPostCard.
+- **Compact UI Rule**: All listing/grid views must be compact, minimizing vertical height and scrolling. Hover reveals additional info (tooltips/overlays), click opens full detail interface.
 - Compact UI elements, unified design language, enhanced data tables, and accessible design with ARIA compliance.
 - Product detail and form components emphasize inline editing, real-time previews, validation, and performance.
 - Standardized shared component library and consolidated shell design.
 
 **Technical Implementations & Features:**
-- **AI-Powered Automation:** Business Autopilot System for archetype inference, revenue model detection, task orchestration, and legal/compliance.
+- **AI-Powered Automation:** Business Autopilot System for archetype inference, revenue model detection, task orchestration, and legal/compliance. Includes a global AI entry point with route-aware context detection, chat drawer, and suggestion nudges.
 - **Command Center:** Simplified "Today" surface with greeting header, cash flow forecast, priority queue, and collapsible AI briefing card.
-- **Modules:** Commerce (Revenue), CRM (Clients), Bookings (Calendar), Marketing (Content), Store (Presence), Expenses, Projects, and Reports. Automations (Flows)/Learn/Community accessible via URL.
-- **4-Surface Navigation Architecture (Phase 1 Complete):** Tiered navigation with Primary Rail (52px icon-only strip) + Secondary Panel (192px contextual sub-nav). Four master surfaces:
-  - **Cockpit** (`/app`): Live operations dashboard (formerly "Today/Command")
-  - **Workspaces**: Clients, Calendar, Revenue, Content, Flows, Projects, Expenses, Reports
-  - **Studio**: Business, Services, Team, Branding, Integrations, Templates, Emails, Presence (formerly "Settings")
-  - **Public**: Storefront, Community, Learn
-  - Active primary section auto-detected from route. Mobile drawer groups items by surface with section headers.
+- **4-Surface Navigation Architecture:** Tiered navigation with Primary Rail + Secondary Panel. Four master surfaces: Cockpit, Workspaces, Studio, and Public.
 - **Business Intelligence Context System:** Gathers comprehensive business context from 16 guidance sub-profiles, organized into labeled domain sections. Features a 5-tier weighted completeness system, progressive deepening prompts, and capability unlock mapping. Includes a Business Builder intake wizard.
-- **AI Copilot System:** Global AI entry point with route-aware context detection, chat drawer, and suggestion nudges.
-- **Billing & Payment:** Multi-method payments, shareable PaymentLinks, and subscription billing.
-- **Core Workflows:** Quote-to-Invoice, multi-gateway payment, subscription & billing, and expense tracking.
-- **User & Security:** Multi-Tenant System with `businessId` isolation, personalized authentication (Google OAuth), notification system, global input sanitization (HTML stripping on all public DTOs), DTO validation with MaxLength constraints, rate limiting on ALL public endpoints (store, payments, bookings, reviews), and AI prompt injection guards.
-- **Clients Workspace Overhaul (Phase 2 Complete):** Phase 1: Renamed "Contacts" to "Clients" throughout, added ClientsMetricsStrip (Active/Follow-ups/At Risk/New/High Value with segment click-through), upgraded Actions to "Priority Queue" (expanded by default), enriched client list rows with stage badges/high-value markers/outstanding balance/booking count/overdue task indicators, added RelationshipHealthStrip and upgraded NextBestActionCard. Phase 2: Context-aware communication action bar (primary channel highlighted based on preferredChannel, disabled Call state, contextual hints for outstanding balance/overdue tasks/upcoming bookings), stage-change workflow consequence panel (animated transition with suggestion/hint/create-task CTA, auto-dismiss 8s), activity timeline date-group separators (Today/Yesterday/This Week/Month with item counts), enhanced tab styling with stronger active states and colored count pills. Phase 3 (density/refinement) remains.
-- **Clients Workspace Overhaul (Phase 3 Complete):** Improved quick-add flow with expandable "More fields" toggle (stage selector with Lead/Prospect/Client buttons, source dropdown), collapsed accordion preview text on both CollapsibleCard (stats) and CollapsibleSection (info) showing compact summaries when closed (e.g., "Score 75 · TTD 450 due", "Engineer at Acme Corp", "WhatsApp preferred"), center context strip above contact list when client selected (showing upcoming booking, pending invoice, open tasks, latest note, preferred channel), stronger selected row state with accent glow shadow, improved segment count pills with pill-shaped badges and active background tint, and tab count pills with subtle background.
-- **AI Priority Queue Brain (Upgraded):** Elite CRM strategist AI with 7 data categories (stale contacts, hot leads, overdue invoices, new leads, post-session bookings, high-value dormant clients, recent payments), revenue-weighted prioritization, Caribbean cultural awareness, business context injection, contactId hallucination guard, and 8 action types (follow_up, send_quote, payment_reminder, add_note, review_request, referral_request, thank_you, re_engage). Autopilot draft generation enriched with booking history, revenue metrics, preferred channel, lead scores, tags, and lifecycle stage.
-- **Calendar Workspace Overhaul (Phase 1 Complete):** Restructured from 2 tabs (Schedule/Setup) to 3 tabs (Schedule/Performance/Setup). Performance tab is a first-class analytics surface with KPI strip (weekly bookings, completion rate, revenue, utilization), weekly utilization bar chart, cancellation/status summary, service demand rankings, staff load cards, and AI insights with actionable CTAs. Setup tab now has internal sub-navigation (Services/Staff/Availability/Business Hours) with a readiness banner showing completion status (services configured, staff assigned, business hours set, calendar connected). Service cards include readiness indicators (staff ready/no staff assigned). Header subtitle updated to "Schedule, booking health, and capacity". Keyboard shortcuts updated for 3 tabs.
-- **Calendar Workspace Overhaul (Phase 2 Complete):** Schedule tab operational improvements. ScheduleHints upgraded to collapsible "Action Queue" with urgency-ranked items (fill empty slots, rebook clients, AI insights), dismiss-per-item, CTA buttons (Send Offer, Rebook), schedule health confidence score badge, and AI badge. TodayStrip made compact: single-row scrollable KPI strip with utilization metric, tighter priority queue with condensed items. BookingDetailDrawer upgraded to business OS inspector: "Open Client" cross-link to /app/clients, "Create Invoice" CTA, WhatsApp/Email quick-contact actions, payment state indicator, compact card sections, and unified "Quick Actions" panel. Orphaned performance-tab.tsx removed.
-- **Calendar Workspace Overhaul (Phase 3 Complete):** Setup builder improvements. Service cards redesigned: compact layout with active dot indicator, booking count, buffer/lead badges, staff readiness + calendar connection state per-card. Staff section: inline availability accordion with day count, booking count pill badge per staff member, streamlined add form. Business Hours: quick-apply presets (Mon–Fri 9–5, Mon–Sat 8–6, Every Day 9–5), active days + total weekly hours summary. Dependency warnings: cross-tab warnings when services exist but no staff, or staff needed but none added, with "Go to [tab]" CTA buttons. Readiness chips are now clickable to navigate to relevant sub-tab. All elements made more compact with tighter padding and smaller touch targets for density.
-- **Cross-Module Intelligence Agents:** Client Momentum, Campaign Intelligence, Financial Copilot, and an event-driven workflow engine for cross-module actions.
-- **Public Storefront (`/book/[slug]`):** Premium, mobile-first, conversion-optimized storefront with section-based layout, product detail pages, category navigation, featured products, FAQ, policy pages, contact section, testimonials, structured data, dynamic Google Font pairing loading, persistent checkout order summary, configurable tax rate, and email capture.
-- **Store Setup Wizard:** 5-step guided setup process for storefront configuration.
-- **Store Dashboard:** Flagship brand-aware e-commerce dashboard with cover image hero, live stat cards, catalog preview strip, and real QR code generation (`qrcode` library) for link + QR sharing. Accordion-based storefront configuration organized into Launch, Design, Content, and Settings groups.
+- **Billing & Payment:** Multi-method payments, shareable PaymentLinks, subscription billing, quote-to-invoice workflows, and expense tracking.
+- **User & Security:** Multi-Tenant System with `businessId` isolation, personalized authentication, notification system, global input sanitization, DTO validation, rate limiting on all public endpoints, and AI prompt injection guards.
+- **Clients Workspace:** Comprehensive client management with metrics, priority queue, enhanced list views, context-aware communication, stage-change workflow panels, and activity timelines. Includes an upgraded AI Priority Queue Brain for intelligent client prioritization and action generation.
+- **Calendar Workspace:** Restructured into Schedule, Performance, and Setup tabs. Features include KPI strips, utilization charts, service demand rankings, staff load cards, AI insights, and a setup builder with readiness indicators and dependency warnings.
+- **Cross-Module Intelligence Agents:** Client Momentum, Campaign Intelligence, Financial Copilot, and an event-driven workflow engine.
+- **Public Storefront (`/book/[slug]`):** Premium, mobile-first, conversion-optimized storefront with section-based layout, product detail pages, category navigation, and a Store Setup Wizard.
+- **Store Dashboard:** Flagship brand-aware e-commerce dashboard with live stat cards, catalog preview, QR code generation, and accordion-based storefront configuration.
 - **Financial Copilot Agent:** Monitors revenue, expenses, and cash flow with anomaly detection and weekly AI-powered briefings.
-- **Customer Notification System:** Transactional email system for branded customer-facing emails with delivery status dashboard (Sent/Queued/Failed/Expired stats) in Settings.
+- **Customer Notification System:** Transactional email system for branded customer-facing emails with delivery status dashboard.
 - **Platform Features:** Gamification, online store, public booking page, module event bus, keyboard shortcuts, webhook dispatcher, and developer settings.
-- **Tiered Monetization:** Plan comparison grid with feature breakdowns.
 - **Observability:** Request correlation ID, logging interceptor, and health checks.
-- **System Diagnostics & Health Center:** Real-time on-demand diagnostics dashboard at `/admin/system` with checks across Infrastructure, Modules, Integrations, Cross-Module Flows, and Environment Variables.
+- **System Diagnostics & Health Center:** Real-time on-demand diagnostics dashboard at `/admin/system`.
 - **Learn Module:** MasterClass functionality with My Learning, Catalog, and Certificates.
 - **Profile Module (Consolidated Hub):** Three-tab layout (Profile / Brand & Identity / Documents).
-    - **Profile tab**: Personal and business information, security, compliance, and an integrated Business Intelligence Engine for autonomous business intelligence and execution. This engine includes a multi-agent reasoning system, a 17-step intake wizard, 12000-token AI responses, and 9 result tabs (Overview, Canvas, Legal, SWOT, Financials, Roadmap, Actions, Risks, Governance). It supports a Premium Build Mode, truth/evidence/assumption labeling, and versioning.
-    - **Brand & Identity tab**: Logo uploader, business information, social media links, and branding/color customization.
-    - **Documents tab**: Full document catalog, my documents list, health dashboard, AI generator modal, and Google Drive browser integration.
-- **Google Drive Integration:** OAuth2 connection for browsing, searching, filtering, inline preview, saving generated documents, and exporting HTML.
-- **Universal Export System:** All AI-generated content is exportable via Download, Email, Save to Drive, and Print options.
-- **Business Documentation Engine:** AI-powered document generation, versioning, and health tracking across 18 categories and 96 document types. Features include AI drafting, section-level editing with risk-tiered modes, AI tweak bar, version history, audit logs, review tasks, and impact detection. Uses a Document Blueprint System for structured generation.
+    - **Profile tab**: Personal/business info, security, compliance, integrated Business Intelligence Engine with multi-agent reasoning, intake wizard, and result tabs.
+    - **Brand & Identity tab**: Logo uploader, business info, social media, branding/color customization.
+    - **Documents tab**: Full document catalog, my documents, health dashboard, AI generator modal, and Google Drive browser integration.
+- **Universal Export System:** All AI-generated content is exportable.
+- **Business Documentation Engine:** AI-powered document generation, versioning, and health tracking across 18 categories and 96 document types, with risk-tiered editing and a Document Blueprint System.
 - **Navigation & Command System:** Sidebar, breadcrumbs, Command Palette (⌘K), and persistent AI Copilot quick-action chips.
-- **Project Templates:** Create reusable project templates with pre-defined tasks; auto-project creation from invoice payment when templates are linked to products.
-- **Automation Playbook Templates:** 18 pre-built automation recipes covering all modules (Commerce, Bookings, CRM, Marketing, Time-Based) with one-click activation.
+- **Project Templates:** Create reusable templates with pre-defined tasks; auto-project creation from invoice payment.
+- **Automation Playbook Templates:** 18 pre-built automation recipes across all modules with one-click activation.
 - **Error Boundaries:** Dedicated `error.tsx` boundaries for all core modules.
-- **Security: PublicRateLimitGuard:** Reusable rate-limiting guard applied to all unauthenticated endpoints with configurable per-route limits.
-- **KeyflowOS Store Quick-Access:** Global sidebar icon (all users) with slide-out drawer showing 3-tier Business Progression System (Build 0→1, Grow 1→10, Scale 10→100+). 23 intake categories across tiers plus 5 cross-service products. "in-app" badges mark capabilities available in KeyflowOS itself. Submissions stored in `IntakeSubmission` model with notification trigger. 93 products (31 packages, 53 services, 9 digital), 17 bookable services, $79–$14,999. Premium bundles: BUILD ($4,999), GROW ($5,999), SCALE ($7,999), FULL JOURNEY ($14,999). Public endpoint at `/site/storefront/public/:slug/intake` (rate-limited, sanitized).
+- **Security: PublicRateLimitGuard:** Reusable rate-limiting guard applied to all unauthenticated endpoints.
+- **KeyflowOS Store Quick-Access:** Global sidebar icon with slide-out drawer showing 3-tier Business Progression System (Build, Grow, Scale).
 
 ## External Dependencies
 - **Database:** PostgreSQL
 - **Authentication:** Supabase Auth
 - **AI:** OpenAI
-- **Google Services:** Google Calendar (bi-directional: push bookings + pull events into unified timeline), Google Sign-In, Gmail, Google Contacts, Google Drive
-- **Payment Gateways:** WiPay, PayPal, Google Pay (env-configurable production mode via NEXT_PUBLIC_GOOGLE_PAY_ENV)
+- **Google Services:** Google Calendar, Google Sign-In, Gmail, Google Contacts, Google Drive
+- **Payment Gateways:** WiPay, PayPal, Google Pay
 - **Rich Text:** TipTap (React)
 - **Charts:** Recharts
 - **Package Manager:** pnpm
-- **Storage:** App Storage

@@ -506,11 +506,20 @@ export default function BookingDetailDrawer({
 
         {selectedBooking.service && (
           <div className="pt-2 border-t border-border/30">
-            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/50">
-              <CreditCard className="w-3 h-3" />
-              <span>
-                {selectedBooking.status === "COMPLETED" ? "Payment expected" : "Estimated"}: {formatAmount(selectedBooking.service.price)}
-              </span>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/50">
+                <CreditCard className="w-3 h-3" />
+                <span>
+                  {selectedBooking.status === "COMPLETED" ? "Payment expected" : "Estimated"}: {formatAmount(selectedBooking.service.price)}
+                </span>
+              </div>
+              <Link
+                href="/app/commerce"
+                className="text-[9px] flex items-center gap-0.5 transition-colors hover:underline"
+                style={{ color: "hsl(var(--kf-accent2) / 0.6)" }}
+              >
+                Revenue <ExternalLink className="w-2.5 h-2.5" />
+              </Link>
             </div>
           </div>
         )}
