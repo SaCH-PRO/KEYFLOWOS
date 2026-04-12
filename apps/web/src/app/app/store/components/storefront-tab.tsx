@@ -260,6 +260,11 @@ export function StorefrontTab({
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  const appearance = storefrontConfig.appearance as { primaryColor?: string; secondaryColor?: string; accentColor?: string } | undefined;
+  const pc = appearance?.primaryColor || businessData?.primaryColor || "#F97316";
+  const sc = appearance?.secondaryColor || businessData?.secondaryColor || "#14B8A6";
+  const ac = appearance?.accentColor || "#a78bfa";
+
   const handleCopyUrl = useCallback(() => {
     navigator.clipboard.writeText(publicUrl);
     setCopied(true);
@@ -309,7 +314,7 @@ export function StorefrontTab({
         </motion.div>
       )}
 
-      <AccordionGroup title="Setup">
+      <AccordionGroup title="Setup" brandColor={pc}>
         <AccordionSection
           title="Launch Checklist"
           subtitle="Track what's needed to go live"
@@ -334,7 +339,7 @@ export function StorefrontTab({
           title="Store URL"
           subtitle="Set your public storefront link"
           icon={Link2}
-          accentColor="hsl(var(--kf-accent1))"
+          accentColor={pc}
           badge={urlBadge}
         >
           <StoreSettings
@@ -349,12 +354,12 @@ export function StorefrontTab({
         </AccordionSection>
       </AccordionGroup>
 
-      <AccordionGroup title="Design">
+      <AccordionGroup title="Design" brandColor={sc}>
         <AccordionSection
           title="Appearance"
           subtitle="Colors, hero image & branding"
           icon={Palette}
-          accentColor="hsl(var(--kf-accent2))"
+          accentColor={sc}
         >
           <div className="space-y-4">
             <AppearanceCustomizer
@@ -377,7 +382,7 @@ export function StorefrontTab({
           title="Typography"
           subtitle="Fonts & brand assets"
           icon={Type}
-          accentColor="hsl(var(--kf-accent2))"
+          accentColor={sc}
         >
           <FontBrandingPanel
             config={storefrontConfig}
@@ -391,7 +396,7 @@ export function StorefrontTab({
           title="Section Layout"
           subtitle="Reorder & toggle sections"
           icon={LayoutGrid}
-          accentColor="hsl(var(--kf-accent2))"
+          accentColor={sc}
         >
           <SectionLayoutManager
             config={storefrontConfig}
@@ -402,12 +407,12 @@ export function StorefrontTab({
         </AccordionSection>
       </AccordionGroup>
 
-      <AccordionGroup title="Content">
+      <AccordionGroup title="Content" brandColor={pc}>
         <AccordionSection
           title="Merchandising"
           subtitle="Featured products & display"
           icon={ShoppingBag}
-          accentColor="hsl(var(--kf-accent1))"
+          accentColor={pc}
           badge={merchandisingBadge}
         >
           <MerchandisingPanel
@@ -423,7 +428,7 @@ export function StorefrontTab({
           title="Social Proof"
           subtitle="Testimonials & reviews"
           icon={Star}
-          accentColor="hsl(var(--kf-accent1))"
+          accentColor={pc}
           badge={socialBadge}
         >
           <SocialProofPanel
@@ -437,7 +442,7 @@ export function StorefrontTab({
           title="FAQ"
           subtitle="Frequently asked questions"
           icon={HelpCircle}
-          accentColor="hsl(var(--kf-accent1))"
+          accentColor={pc}
         >
           <FaqManager
             config={storefrontConfig}
@@ -450,7 +455,7 @@ export function StorefrontTab({
           title="Policies"
           subtitle="Refund, privacy & terms"
           icon={FileText}
-          accentColor="hsl(var(--kf-accent1))"
+          accentColor={pc}
         >
           <PolicyEditor
             config={storefrontConfig}
@@ -461,12 +466,12 @@ export function StorefrontTab({
         </AccordionSection>
       </AccordionGroup>
 
-      <AccordionGroup title="Settings">
+      <AccordionGroup title="Settings" brandColor={ac}>
         <AccordionSection
           title="SEO"
           subtitle="Search engine & social previews"
           icon={Search}
-          accentColor="hsl(var(--kf-info))"
+          accentColor={ac}
         >
           <SeoSettingsInline
             storefrontConfig={storefrontConfig}
@@ -481,6 +486,7 @@ export function StorefrontTab({
           title="Store Settings"
           subtitle="Currency, contact & preferences"
           icon={Settings}
+          accentColor={ac}
         >
           <StoreSettingsPanel
             config={storefrontConfig}
