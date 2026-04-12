@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   AlertCircle, X, Search, Globe, Copy, ExternalLink, Check,
   Rocket, Link2, Palette, Type, LayoutGrid, ShoppingBag, Star,
-  HelpCircle, FileText, Settings, Share2,
+  HelpCircle, FileText, Settings, Share2, ChevronRight,
+  Sparkles, Eye, Zap,
 } from "lucide-react";
-import { AccordionSection, AccordionGroup } from "./accordion-section";
 import { StoreSettings } from "./store-settings";
 import { AppearanceCustomizer } from "./appearance-customizer";
 import { StorefrontPreview } from "./storefront-preview";
@@ -59,6 +59,29 @@ type SeoProps = {
   businessName?: string;
 };
 
+type SectionId = "checklist" | "url" | "appearance" | "fonts" | "layout" | "merchandising" | "social" | "faq" | "policies" | "seo" | "settings" | "share";
+
+const SECTION_CARDS: {
+  id: SectionId;
+  icon: React.ElementType;
+  title: string;
+  description: string;
+  color: string;
+  group: string;
+}[] = [
+  { id: "checklist", icon: Rocket, title: "Launch Checklist", description: "Track what's needed to go live", color: "--kf-success", group: "setup" },
+  { id: "url", icon: Link2, title: "Store URL", description: "Set your public storefront link", color: "--kf-accent1", group: "setup" },
+  { id: "appearance", icon: Palette, title: "Appearance", description: "Colors, hero image & branding", color: "--kf-accent2", group: "design" },
+  { id: "fonts", icon: Type, title: "Typography", description: "Fonts & brand assets", color: "--kf-accent2", group: "design" },
+  { id: "layout", icon: LayoutGrid, title: "Section Layout", description: "Reorder & toggle sections", color: "--kf-accent2", group: "design" },
+  { id: "merchandising", icon: ShoppingBag, title: "Merchandising", description: "Featured products & display", color: "--kf-accent1", group: "content" },
+  { id: "social", icon: Star, title: "Social Proof", description: "Testimonials & reviews", color: "--kf-accent1", group: "content" },
+  { id: "faq", icon: HelpCircle, title: "FAQ", description: "Frequently asked questions", color: "--kf-accent1", group: "content" },
+  { id: "policies", icon: FileText, title: "Policies", description: "Refund, privacy & terms", color: "--kf-accent1", group: "content" },
+  { id: "seo", icon: Search, title: "SEO", description: "Search engine & social previews", color: "--kf-info", group: "settings" },
+  { id: "settings", icon: Settings, title: "Store Settings", description: "Currency, contact & preferences", color: "--kf-muted-foreground", group: "settings" },
+];
+
 function SeoSettingsInline({ storefrontConfig, onConfigChange, onSaveConfig, configSaving, publicUrl, businessName }: SeoProps) {
   const seo = (storefrontConfig.seo ?? {}) as { metaTitle?: string; metaDescription?: string; ogImage?: string };
   const metaTitle = seo.metaTitle ?? "";
@@ -83,10 +106,10 @@ function SeoSettingsInline({ storefrontConfig, onConfigChange, onSaveConfig, con
             onChange={(e) => onConfigChange("seo", { metaTitle: e.target.value })}
             placeholder={businessName || "Your Store Name"}
             maxLength={60}
-            className="w-full rounded-lg px-3 py-2.5 text-sm min-h-[44px]"
+            className="w-full rounded-xl px-3.5 py-2.5 text-sm min-h-[44px]"
             style={{
-              background: "hsl(var(--kf-muted) / 0.3)",
-              border: "1px solid hsl(var(--kf-border))",
+              background: "hsl(var(--kf-muted) / 0.15)",
+              border: "1px solid hsl(var(--kf-border) / 0.3)",
               color: "hsl(var(--kf-foreground))",
             }}
           />
@@ -105,10 +128,10 @@ function SeoSettingsInline({ storefrontConfig, onConfigChange, onSaveConfig, con
             placeholder="Browse our products and services. Book online today."
             maxLength={160}
             rows={3}
-            className="w-full rounded-lg px-3 py-2.5 text-sm resize-none"
+            className="w-full rounded-xl px-3.5 py-2.5 text-sm resize-none"
             style={{
-              background: "hsl(var(--kf-muted) / 0.3)",
-              border: "1px solid hsl(var(--kf-border))",
+              background: "hsl(var(--kf-muted) / 0.15)",
+              border: "1px solid hsl(var(--kf-border) / 0.3)",
               color: "hsl(var(--kf-foreground))",
             }}
           />
@@ -126,10 +149,10 @@ function SeoSettingsInline({ storefrontConfig, onConfigChange, onSaveConfig, con
             value={ogImage}
             onChange={(e) => onConfigChange("seo", { ogImage: e.target.value })}
             placeholder="https://example.com/og-image.jpg"
-            className="w-full rounded-lg px-3 py-2.5 text-sm min-h-[44px]"
+            className="w-full rounded-xl px-3.5 py-2.5 text-sm min-h-[44px]"
             style={{
-              background: "hsl(var(--kf-muted) / 0.3)",
-              border: "1px solid hsl(var(--kf-border))",
+              background: "hsl(var(--kf-muted) / 0.15)",
+              border: "1px solid hsl(var(--kf-border) / 0.3)",
               color: "hsl(var(--kf-foreground))",
             }}
           />
@@ -140,23 +163,25 @@ function SeoSettingsInline({ storefrontConfig, onConfigChange, onSaveConfig, con
       </div>
 
       <div>
-        <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center gap-1 mb-3 p-1 rounded-lg w-fit" style={{ background: "hsl(var(--kf-muted) / 0.1)" }}>
           <button
             onClick={() => setPreviewMode("google")}
-            className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors min-h-[44px]"
+            className="text-xs font-medium px-3 py-1.5 rounded-md transition-all"
             style={{
-              background: previewMode === "google" ? "hsl(var(--kf-accent1) / 0.15)" : "transparent",
+              background: previewMode === "google" ? "hsl(var(--kf-card))" : "transparent",
               color: previewMode === "google" ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-muted-foreground))",
+              boxShadow: previewMode === "google" ? "0 1px 4px hsl(var(--kf-background) / 0.3)" : "none",
             }}
           >
             Google Preview
           </button>
           <button
             onClick={() => setPreviewMode("social")}
-            className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors min-h-[44px]"
+            className="text-xs font-medium px-3 py-1.5 rounded-md transition-all"
             style={{
-              background: previewMode === "social" ? "hsl(var(--kf-accent2) / 0.15)" : "transparent",
+              background: previewMode === "social" ? "hsl(var(--kf-card))" : "transparent",
               color: previewMode === "social" ? "hsl(var(--kf-accent2))" : "hsl(var(--kf-muted-foreground))",
+              boxShadow: previewMode === "social" ? "0 1px 4px hsl(var(--kf-background) / 0.3)" : "none",
             }}
           >
             Social Preview
@@ -167,8 +192,8 @@ function SeoSettingsInline({ storefrontConfig, onConfigChange, onSaveConfig, con
           <div
             className="rounded-xl p-4 space-y-1"
             style={{
-              background: "hsl(var(--kf-muted) / 0.15)",
-              border: "1px solid hsl(var(--kf-border) / 0.5)",
+              background: "hsl(var(--kf-muted) / 0.08)",
+              border: "1px solid hsl(var(--kf-border) / 0.3)",
             }}
           >
             <div className="flex items-center gap-1.5">
@@ -177,7 +202,7 @@ function SeoSettingsInline({ storefrontConfig, onConfigChange, onSaveConfig, con
                 {previewUrl}
               </span>
             </div>
-            <p className="text-sm font-medium truncate" style={{ color: "hsl(210 100% 56%)" }}>
+            <p className="text-sm font-medium truncate" style={{ color: "hsl(var(--kf-accent2))" }}>
               {previewTitle}
             </p>
             <p className="text-xs line-clamp-2" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
@@ -187,11 +212,11 @@ function SeoSettingsInline({ storefrontConfig, onConfigChange, onSaveConfig, con
         ) : (
           <div
             className="rounded-xl overflow-hidden"
-            style={{ border: "1px solid hsl(var(--kf-border) / 0.5)" }}
+            style={{ border: "1px solid hsl(var(--kf-border) / 0.3)" }}
           >
             <div
               className="w-full h-[120px] flex items-center justify-center"
-              style={{ background: "hsl(var(--kf-muted) / 0.2)" }}
+              style={{ background: "hsl(var(--kf-muted) / 0.1)" }}
             >
               {ogImage ? (
                 <img
@@ -206,11 +231,11 @@ function SeoSettingsInline({ storefrontConfig, onConfigChange, onSaveConfig, con
                 <span className="text-xs" style={{ color: "hsl(var(--kf-muted-foreground))" }}>No OG image set</span>
               )}
             </div>
-            <div className="p-3 space-y-1" style={{ background: "hsl(var(--kf-muted) / 0.15)" }}>
+            <div className="p-3 space-y-1" style={{ background: "hsl(var(--kf-muted) / 0.08)" }}>
               <p className="text-[10px] uppercase tracking-wide" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
                 {previewUrl.replace(/^https?:\/\//, "").split("/")[0]}
               </p>
-              <p className="text-sm font-semibold line-clamp-1">{previewTitle}</p>
+              <p className="text-sm font-semibold line-clamp-1" style={{ color: "hsl(var(--kf-foreground))" }}>{previewTitle}</p>
               <p className="text-xs line-clamp-2" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
                 {previewDesc}
               </p>
@@ -228,6 +253,87 @@ function SeoSettingsInline({ storefrontConfig, onConfigChange, onSaveConfig, con
           {configSaving ? "Saving..." : "Save SEO"}
         </button>
       </div>
+    </div>
+  );
+}
+
+function SectionCard({ card, isOpen, badge, onToggle }: {
+  card: typeof SECTION_CARDS[0];
+  isOpen: boolean;
+  badge?: React.ReactNode;
+  onToggle: () => void;
+}) {
+  const Icon = card.icon;
+  return (
+    <button
+      onClick={onToggle}
+      className="w-full text-left rounded-xl p-4 transition-all group min-h-[44px]"
+      style={{
+        background: isOpen
+          ? `hsl(var(${card.color}) / 0.08)`
+          : "hsl(var(--kf-card) / 0.6)",
+        border: isOpen
+          ? `1px solid hsl(var(${card.color}) / 0.2)`
+          : "1px solid hsl(var(--kf-border) / 0.12)",
+      }}
+      aria-expanded={isOpen}
+    >
+      <div className="flex items-center gap-3">
+        <div
+          className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 transition-all"
+          style={{
+            background: `hsl(var(${card.color}) / ${isOpen ? "0.2" : "0.1"})`,
+          }}
+        >
+          <Icon className="w-4 h-4" style={{ color: `hsl(var(${card.color}))` }} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium" style={{ color: "hsl(var(--kf-foreground))" }}>
+              {card.title}
+            </span>
+            {badge}
+          </div>
+          <span className="text-[11px]" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+            {card.description}
+          </span>
+        </div>
+        <ChevronRight
+          className="w-4 h-4 transition-transform flex-shrink-0"
+          style={{
+            color: "hsl(var(--kf-muted-foreground))",
+            transform: isOpen ? "rotate(90deg)" : "rotate(0deg)",
+          }}
+        />
+      </div>
+    </button>
+  );
+}
+
+function SectionGroup({ title, icon: Icon, children, color }: {
+  title: string;
+  icon: React.ElementType;
+  children: React.ReactNode;
+  color: string;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2.5 px-1">
+        <div
+          className="w-6 h-6 rounded-lg flex items-center justify-center"
+          style={{ background: `hsl(var(${color}) / 0.1)` }}
+        >
+          <Icon className="w-3 h-3" style={{ color: `hsl(var(${color}))` }} />
+        </div>
+        <span
+          className="text-xs font-semibold uppercase tracking-wider"
+          style={{ color: `hsl(var(${color}) / 0.7)` }}
+        >
+          {title}
+        </span>
+        <div className="flex-1 h-px" style={{ background: `hsl(var(${color}) / 0.1)` }} />
+      </div>
+      {children}
     </div>
   );
 }
@@ -253,6 +359,7 @@ export function StorefrontTab({
   hasTestimonials,
   onTabChange,
 }: Props) {
+  const [openSection, setOpenSection] = useState<SectionId | null>("checklist");
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -262,40 +369,14 @@ export function StorefrontTab({
     setTimeout(() => setCopied(false), 2000);
   }, [publicUrl]);
 
-  return (
-    <div className="space-y-5">
-      {!storeEnabled && !bannerDismissed && (
-        <motion.div
-          initial={{ opacity: 0, y: -4 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -4 }}
-          className="flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-xs"
-          style={{
-            background: "hsl(var(--kf-warning) / 0.08)",
-            border: "1px solid hsl(var(--kf-warning) / 0.25)",
-            color: "hsl(var(--kf-warning))",
-          }}
-        >
-          <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "hsl(var(--kf-warning))" }} />
-          <span className="flex-1">Your store is unpublished. Toggle it live from the header to make it visible.</span>
-          <button
-            onClick={() => setBannerDismissed(true)}
-            aria-label="Dismiss unpublished warning"
-            className="p-0.5 rounded-md hover:bg-[hsl(40_90%_50%/0.15)] transition-colors flex-shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center"
-          >
-            <X className="w-3 h-3" />
-          </button>
-        </motion.div>
-      )}
+  const toggleSection = useCallback((id: SectionId) => {
+    setOpenSection(prev => prev === id ? null : id);
+  }, []);
 
-      <AccordionGroup title="Setup">
-        <AccordionSection
-          icon={Rocket}
-          title="Launch Checklist"
-          subtitle="Track what's needed to go live"
-          defaultOpen={true}
-          accentColor="hsl(var(--kf-success))"
-        >
+  const renderContent = (id: SectionId) => {
+    switch (id) {
+      case "checklist":
+        return (
           <ReadinessChecklist
             hasLogo={!!businessData?.logoUrl}
             hasHeroImage={hasHeroImage}
@@ -308,16 +389,9 @@ export function StorefrontTab({
             onTabChange={onTabChange}
             slug={businessData?.slug ?? currentSlug ?? undefined}
           />
-        </AccordionSection>
-
-        <AccordionSection
-          icon={Link2}
-          title="Store URL"
-          subtitle={currentSlug ? `/${currentSlug}` : "Set your public URL"}
-          badge={currentSlug ? (
-            <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold" style={{ background: "hsl(var(--kf-success) / 0.15)", color: "hsl(var(--kf-success))" }}>Active</span>
-          ) : undefined}
-        >
+        );
+      case "url":
+        return (
           <StoreSettings
             businessId={businessId}
             slug={slug}
@@ -327,16 +401,9 @@ export function StorefrontTab({
             onSaveSlug={onSaveSlug}
             slugSaving={slugSaving}
           />
-        </AccordionSection>
-      </AccordionGroup>
-
-      <AccordionGroup title="Design">
-        <AccordionSection
-          icon={Palette}
-          title="Appearance"
-          subtitle="Colors, hero image, and branding"
-          accentColor="hsl(var(--kf-accent2))"
-        >
+        );
+      case "appearance":
+        return (
           <div className="space-y-4">
             <AppearanceCustomizer
               config={storefrontConfig}
@@ -353,14 +420,9 @@ export function StorefrontTab({
               slug={slug}
             />
           </div>
-        </AccordionSection>
-
-        <AccordionSection
-          icon={Type}
-          title="Fonts & Branding"
-          subtitle="Typography and brand assets"
-          accentColor="hsl(var(--kf-accent2))"
-        >
+        );
+      case "fonts":
+        return (
           <FontBrandingPanel
             config={storefrontConfig}
             onConfigChange={onConfigChange}
@@ -368,35 +430,18 @@ export function StorefrontTab({
             saving={configSaving}
             businessData={businessData}
           />
-        </AccordionSection>
-
-        <AccordionSection
-          icon={LayoutGrid}
-          title="Section Layout"
-          subtitle="Reorder and toggle storefront sections"
-          accentColor="hsl(var(--kf-accent2))"
-        >
+        );
+      case "layout":
+        return (
           <SectionLayoutManager
             config={storefrontConfig}
             onConfigChange={onConfigChange}
             onSave={onSaveConfig}
             saving={configSaving}
           />
-        </AccordionSection>
-      </AccordionGroup>
-
-      <AccordionGroup title="Content">
-        <AccordionSection
-          icon={ShoppingBag}
-          title="Merchandising"
-          subtitle="Featured products and display settings"
-          accentColor="hsl(var(--kf-accent1))"
-          badge={
-            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--kf-muted) / 0.3)", color: "hsl(var(--kf-muted-foreground))" }}>
-              {commerceProducts.length} items
-            </span>
-          }
-        >
+        );
+      case "merchandising":
+        return (
           <MerchandisingPanel
             config={storefrontConfig}
             products={commerceProducts}
@@ -405,60 +450,36 @@ export function StorefrontTab({
             onSave={onSaveConfig}
             saving={configSaving}
           />
-        </AccordionSection>
-
-        <AccordionSection
-          icon={Star}
-          title="Social Proof"
-          subtitle="Testimonials and customer reviews"
-          accentColor="hsl(var(--kf-accent1))"
-          badge={hasTestimonials ? (
-            <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold" style={{ background: "hsl(var(--kf-success) / 0.15)", color: "hsl(var(--kf-success))" }}>Added</span>
-          ) : undefined}
-        >
+        );
+      case "social":
+        return (
           <SocialProofPanel
             storefrontConfig={storefrontConfig}
             configSaving={configSaving}
             onConfigChange={onConfigChange}
             onSaveConfig={onSaveConfig}
           />
-        </AccordionSection>
-
-        <AccordionSection
-          icon={HelpCircle}
-          title="FAQ"
-          subtitle="Frequently asked questions"
-          accentColor="hsl(var(--kf-accent1))"
-        >
+        );
+      case "faq":
+        return (
           <FaqManager
             config={storefrontConfig}
             onConfigChange={onConfigChange}
             onSave={onSaveConfig}
             saving={configSaving}
           />
-        </AccordionSection>
-
-        <AccordionSection
-          icon={FileText}
-          title="Policies"
-          subtitle="Refund, privacy, delivery, and terms"
-          accentColor="hsl(var(--kf-accent1))"
-        >
+        );
+      case "policies":
+        return (
           <PolicyEditor
             config={storefrontConfig}
             onConfigChange={onConfigChange}
             onSave={onSaveConfig}
             saving={configSaving}
           />
-        </AccordionSection>
-      </AccordionGroup>
-
-      <AccordionGroup title="Settings">
-        <AccordionSection
-          icon={Search}
-          title="SEO"
-          subtitle="Search engine optimization and social previews"
-        >
+        );
+      case "seo":
+        return (
           <SeoSettingsInline
             storefrontConfig={storefrontConfig}
             onConfigChange={onConfigChange}
@@ -467,53 +488,230 @@ export function StorefrontTab({
             publicUrl={publicUrl}
             businessName={businessData?.name}
           />
-        </AccordionSection>
-
-        <AccordionSection
-          icon={Settings}
-          title="Store Settings"
-          subtitle="Currency, contact info, and preferences"
-        >
+        );
+      case "settings":
+        return (
           <StoreSettingsPanel
             config={storefrontConfig}
             onConfigChange={onConfigChange}
             onSave={onSaveConfig}
             saving={configSaving}
           />
-        </AccordionSection>
-
-        {storeEnabled && currentSlug && (
-          <AccordionSection
-            icon={Share2}
-            title="Share Your Store"
-            subtitle={publicUrl}
-            accentColor="hsl(var(--kf-success))"
-          >
-            <div className="flex items-center gap-2 pt-1">
-              <div
-                className="flex-1 rounded-lg px-3 py-2.5 text-xs truncate"
-                style={{
-                  background: "hsl(var(--kf-muted) / 0.3)",
-                  border: "1px solid hsl(var(--kf-border))",
-                  color: "hsl(var(--kf-muted-foreground))",
-                }}
-              >
-                {publicUrl}
-              </div>
-              <button
-                onClick={handleCopyUrl}
-                className="kf-btn-secondary min-h-[44px] px-4 text-sm flex items-center gap-1.5"
-              >
-                {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                {copied ? "Copied" : "Copy"}
-              </button>
+        );
+      case "share":
+        return (
+          <div className="flex items-center gap-2 pt-1">
+            <div
+              className="flex-1 rounded-xl px-3.5 py-2.5 text-xs truncate font-mono"
+              style={{
+                background: "hsl(var(--kf-muted) / 0.15)",
+                border: "1px solid hsl(var(--kf-border) / 0.3)",
+                color: "hsl(var(--kf-muted-foreground))",
+              }}
+            >
+              {publicUrl}
             </div>
-            <p className="text-[10px] mt-2" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-              Share this link with customers. View full sharing options including QR code in the header.
-            </p>
-          </AccordionSection>
-        )}
-      </AccordionGroup>
+            <button
+              onClick={handleCopyUrl}
+              className="kf-btn-secondary min-h-[44px] px-4 text-sm flex items-center gap-1.5"
+            >
+              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+
+  const getBadge = (id: SectionId) => {
+    switch (id) {
+      case "url":
+        return currentSlug ? (
+          <span className="px-1.5 py-0.5 rounded-md text-[9px] font-semibold" style={{ background: "hsl(var(--kf-success) / 0.15)", color: "hsl(var(--kf-success))" }}>Active</span>
+        ) : null;
+      case "merchandising":
+        return (
+          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md" style={{ background: "hsl(var(--kf-muted) / 0.2)", color: "hsl(var(--kf-muted-foreground))" }}>
+            {commerceProducts.length} items
+          </span>
+        );
+      case "social":
+        return hasTestimonials ? (
+          <span className="px-1.5 py-0.5 rounded-md text-[9px] font-semibold" style={{ background: "hsl(var(--kf-success) / 0.15)", color: "hsl(var(--kf-success))" }}>Added</span>
+        ) : null;
+      default:
+        return null;
+    }
+  };
+
+  const setupCards = SECTION_CARDS.filter(c => c.group === "setup");
+  const designCards = SECTION_CARDS.filter(c => c.group === "design");
+  const contentCards = SECTION_CARDS.filter(c => c.group === "content");
+  const settingsCards = SECTION_CARDS.filter(c => c.group === "settings");
+
+  const shareCard = storeEnabled && currentSlug ? {
+    id: "share" as SectionId,
+    icon: Share2,
+    title: "Share Your Store",
+    description: publicUrl,
+    color: "--kf-success",
+    group: "settings",
+  } : null;
+
+  return (
+    <div className="space-y-6">
+      {!storeEnabled && !bannerDismissed && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          className="flex items-center gap-3 rounded-xl px-4 py-3 text-xs"
+          style={{
+            background: "linear-gradient(135deg, hsl(var(--kf-warning) / 0.08), hsl(var(--kf-warning) / 0.04))",
+            border: "1px solid hsl(var(--kf-warning) / 0.2)",
+            color: "hsl(var(--kf-warning))",
+          }}
+        >
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "hsl(var(--kf-warning) / 0.15)" }}>
+            <AlertCircle className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-warning))" }} />
+          </div>
+          <span className="flex-1 font-medium">Your store is unpublished. Toggle it live from the header to make it visible to customers.</span>
+          <button
+            onClick={() => setBannerDismissed(true)}
+            aria-label="Dismiss unpublished warning"
+            className="p-1 rounded-lg transition-colors flex-shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center"
+            style={{ color: "hsl(var(--kf-warning))" }}
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </motion.div>
+      )}
+
+      <SectionGroup title="Setup" icon={Zap} color="--kf-success">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {setupCards.map(card => (
+            <div key={card.id}>
+              <SectionCard card={card} isOpen={openSection === card.id} badge={getBadge(card.id)} onToggle={() => toggleSection(card.id)} />
+              <AnimatePresence>
+                {openSection === card.id && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    className="overflow-hidden"
+                  >
+                    <div
+                      className="p-4 mt-1 rounded-xl"
+                      style={{
+                        background: "hsl(var(--kf-card) / 0.8)",
+                        border: "1px solid hsl(var(--kf-border) / 0.15)",
+                      }}
+                    >
+                      {renderContent(card.id)}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          ))}
+        </div>
+      </SectionGroup>
+
+      <SectionGroup title="Design" icon={Palette} color="--kf-accent2">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {designCards.map(card => (
+            <div key={card.id}>
+              <SectionCard card={card} isOpen={openSection === card.id} badge={getBadge(card.id)} onToggle={() => toggleSection(card.id)} />
+              <AnimatePresence>
+                {openSection === card.id && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    className="overflow-hidden"
+                  >
+                    <div
+                      className="p-4 mt-1 rounded-xl"
+                      style={{
+                        background: "hsl(var(--kf-card) / 0.8)",
+                        border: "1px solid hsl(var(--kf-border) / 0.15)",
+                      }}
+                    >
+                      {renderContent(card.id)}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          ))}
+        </div>
+      </SectionGroup>
+
+      <SectionGroup title="Content" icon={Sparkles} color="--kf-accent1">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {contentCards.map(card => (
+            <div key={card.id}>
+              <SectionCard card={card} isOpen={openSection === card.id} badge={getBadge(card.id)} onToggle={() => toggleSection(card.id)} />
+              <AnimatePresence>
+                {openSection === card.id && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    className="overflow-hidden"
+                  >
+                    <div
+                      className="p-4 mt-1 rounded-xl"
+                      style={{
+                        background: "hsl(var(--kf-card) / 0.8)",
+                        border: "1px solid hsl(var(--kf-border) / 0.15)",
+                      }}
+                    >
+                      {renderContent(card.id)}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          ))}
+        </div>
+      </SectionGroup>
+
+      <SectionGroup title="Settings" icon={Settings} color="--kf-muted-foreground">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {[...settingsCards, ...(shareCard ? [shareCard] : [])].map(card => (
+            <div key={card.id}>
+              <SectionCard card={card} isOpen={openSection === card.id} badge={getBadge(card.id)} onToggle={() => toggleSection(card.id)} />
+              <AnimatePresence>
+                {openSection === card.id && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    className="overflow-hidden"
+                  >
+                    <div
+                      className="p-4 mt-1 rounded-xl"
+                      style={{
+                        background: "hsl(var(--kf-card) / 0.8)",
+                        border: "1px solid hsl(var(--kf-border) / 0.15)",
+                      }}
+                    >
+                      {renderContent(card.id)}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          ))}
+        </div>
+      </SectionGroup>
     </div>
   );
 }
