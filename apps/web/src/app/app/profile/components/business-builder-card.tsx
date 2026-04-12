@@ -389,7 +389,17 @@ function safeArray(val: unknown): unknown[] {
 
 function validateModel(raw: unknown): GeneratedModel {
   const m = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-  const canvas = (m.canvas && typeof m.canvas === "object" ? m.canvas : {}) as Record<string, string>;
+  const canvasRaw = (m.canvas && typeof m.canvas === "object" ? m.canvas : {}) as Record<string, unknown>;
+  const toStr = (v: unknown): string => {
+    if (typeof v === "string") return v;
+    if (Array.isArray(v)) return v.map((item) => (typeof item === "string" ? item : JSON.stringify(item))).join("\n• ");
+    if (v && typeof v === "object") return Object.entries(v).map(([k, val]) => `${k}: ${typeof val === "string" ? val : JSON.stringify(val)}`).join("\n");
+    return "";
+  };
+  const canvas: Record<string, string> = {};
+  for (const k of ["valueProposition", "customerSegments", "channels", "customerRelationships", "revenueStreams", "keyResources", "keyActivities", "keyPartnerships", "costStructure"]) {
+    canvas[k] = toStr(canvasRaw[k]);
+  }
   const fin = (m.financialOutlook && typeof m.financialOutlook === "object" ? m.financialOutlook : {}) as Record<string, unknown>;
   const legal = (m.legalCompliance && typeof m.legalCompliance === "object" ? m.legalCompliance : {}) as Record<string, unknown>;
   const comp = (m.competitiveAnalysis && typeof m.competitiveAnalysis === "object" ? m.competitiveAnalysis : {}) as Record<string, unknown>;
@@ -462,15 +472,15 @@ function validateModel(raw: unknown): GeneratedModel {
       confidenceRationale: s(brief.confidenceRationale),
     },
     canvas: {
-      valueProposition: canvas.valueProposition || "",
-      customerSegments: canvas.customerSegments || "",
-      channels: canvas.channels || "",
-      customerRelationships: canvas.customerRelationships || "",
-      revenueStreams: canvas.revenueStreams || "",
-      keyResources: canvas.keyResources || "",
-      keyActivities: canvas.keyActivities || "",
-      keyPartnerships: canvas.keyPartnerships || "",
-      costStructure: canvas.costStructure || "",
+      valueProposition: canvas.valueProposition ?? "",
+      customerSegments: canvas.customerSegments ?? "",
+      channels: canvas.channels ?? "",
+      customerRelationships: canvas.customerRelationships ?? "",
+      revenueStreams: canvas.revenueStreams ?? "",
+      keyResources: canvas.keyResources ?? "",
+      keyActivities: canvas.keyActivities ?? "",
+      keyPartnerships: canvas.keyPartnerships ?? "",
+      costStructure: canvas.costStructure ?? "",
     },
     legalCompliance: {
       businessStructure: s(legal.businessStructure, "Consult a local attorney"),

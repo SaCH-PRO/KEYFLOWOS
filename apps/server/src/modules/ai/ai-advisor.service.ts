@@ -895,11 +895,28 @@ ALL financial figures in TTD. This plan must be of a quality suitable for presen
           confidenceLevel: safeStr(brief.confidenceLevel, 'MEDIUM'),
           confidenceRationale: safeStr(brief.confidenceRationale),
         },
-        canvas: parsed.canvas && typeof parsed.canvas === 'object' ? parsed.canvas : {
-          valueProposition: '', customerSegments: '', channels: '',
-          customerRelationships: '', revenueStreams: '', keyResources: '',
-          keyActivities: '', keyPartnerships: '', costStructure: '',
-        },
+        canvas: (() => {
+          const c = safeObj(parsed.canvas);
+          const canvasStr = (v: unknown): string => {
+            if (typeof v === 'string') return v;
+            if (Array.isArray(v)) return v.map(item => typeof item === 'string' ? item : JSON.stringify(item)).join('\n• ');
+            if (v && typeof v === 'object') {
+              return Object.entries(v).map(([k, val]) => `${k}: ${typeof val === 'string' ? val : JSON.stringify(val)}`).join('\n');
+            }
+            return '';
+          };
+          return {
+            valueProposition: canvasStr(c.valueProposition),
+            customerSegments: canvasStr(c.customerSegments),
+            channels: canvasStr(c.channels),
+            customerRelationships: canvasStr(c.customerRelationships),
+            revenueStreams: canvasStr(c.revenueStreams),
+            keyResources: canvasStr(c.keyResources),
+            keyActivities: canvasStr(c.keyActivities),
+            keyPartnerships: canvasStr(c.keyPartnerships),
+            costStructure: canvasStr(c.costStructure),
+          };
+        })(),
         legalCompliance: {
           businessStructure: safeStr(legal.businessStructure, 'Consult a local attorney for structure recommendation'),
           registrations: safeArr(legal.registrations),
