@@ -18,9 +18,16 @@ import {
   ChevronRight,
   Pencil,
   Save,
+  ExternalLink,
+  FileText,
+  MessageCircle,
+  CreditCard,
+  User,
 } from "lucide-react";
 import type { Booking } from "./bookings-types";
 import { STATUS_STYLE, formatTime, formatFullDate, contactName } from "./bookings-types";
+import { formatAmount } from "../../commerce/utils/commerce-utils";
+import Link from "next/link";
 
 interface BookingDetailDrawerProps {
   selectedBooking: Booking;
@@ -29,6 +36,7 @@ interface BookingDetailDrawerProps {
   onSyncCalendar: (bookingId: string) => void;
   onReschedule?: (bookingId: string, newStartTime: string) => void;
   onUpdateNotes?: (bookingId: string, notes: string) => void;
+  onCreateInvoice?: (booking: Booking) => void;
   calendarConnected: boolean;
 }
 
@@ -164,6 +172,7 @@ export default function BookingDetailDrawer({
   onSyncCalendar,
   onReschedule,
   onUpdateNotes,
+  onCreateInvoice,
   calendarConnected,
 }: BookingDetailDrawerProps) {
   const [showReschedule, setShowReschedule] = useState(false);
@@ -171,6 +180,12 @@ export default function BookingDetailDrawer({
   const [notesText, setNotesText] = useState(selectedBooking.notes ?? "");
 
   const canReschedule = selectedBooking.status === "PENDING" || selectedBooking.status === "CONFIRMED";
+  const canInvoice = selectedBooking.status === "COMPLETED" || selectedBooking.status === "CONFIRMED";
+
+  const contactPhone = selectedBooking.contact?.phone;
+  const contactEmail = selectedBooking.contact?.email;
+  const whatsappLink = contactPhone ? `https://wa.me/${contactPhone.replace(/[^0-9]/g, "")}` : null;
+  const mailtoLink = contactEmail ? `mailto:${contactEmail}` : null;
 
   return (
     <motion.div
@@ -185,154 +200,218 @@ export default function BookingDetailDrawer({
         animate={{ x: 0 }}
         exit={{ x: "100%" }}
         transition={{ type: "spring", damping: 25 }}
-        className="relative w-full max-w-md h-full bg-background border-l border-border/60 overflow-y-auto p-6 space-y-5"
+        className="relative w-full max-w-md h-full bg-background border-l border-border/60 overflow-y-auto p-5 space-y-4"
       >
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-bold">Booking Details</h3>
+          <h3 className="text-base font-bold">Booking Details</h3>
           <button onClick={onClose} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted/50">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium border" style={STATUS_STYLE[selectedBooking.status] ?? { background: "hsl(var(--muted) / 0.2)", color: "hsl(var(--muted-foreground))" }}>
-          {selectedBooking.status}
+        <div className="flex items-center gap-2">
+          <span
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border"
+            style={STATUS_STYLE[selectedBooking.status] ?? { background: "hsl(var(--muted) / 0.2)", color: "hsl(var(--muted-foreground))" }}
+          >
+            {selectedBooking.status}
+          </span>
+          {selectedBooking.service && (
+            <span className="text-xs font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>
+              {formatAmount(selectedBooking.service.price)}
+            </span>
+          )}
         </div>
 
-        <div className="space-y-4">
-          <div className="kf-card p-4 space-y-3">
-            <div className="flex items-center gap-2 text-sm">
-              <CalendarDays className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-              <span className="font-medium">{formatFullDate(selectedBooking.startTime)}</span>
-            </div>
-            <div className="flex items-center gap-2 text-sm">
-              <Clock className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
-              <span>{formatTime(selectedBooking.startTime)} – {formatTime(selectedBooking.endTime)}</span>
-            </div>
+        <div className="kf-card rounded-xl p-3 space-y-2">
+          <div className="flex items-center gap-2 text-sm">
+            <CalendarDays className="w-4 h-4 shrink-0" style={{ color: "hsl(var(--kf-accent1))" }} />
+            <span className="font-medium">{formatFullDate(selectedBooking.startTime)}</span>
           </div>
-
-          <div className="kf-card p-4 space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide flex items-center gap-1.5">
-                <StickyNote className="w-3.5 h-3.5" />
-                Notes
-              </div>
-              {!editingNotes && onUpdateNotes && (
-                <button
-                  onClick={() => { setNotesText(selectedBooking.notes ?? ""); setEditingNotes(true); }}
-                  className="flex items-center gap-1 text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors min-h-[44px]"
-                >
-                  <Pencil className="w-2.5 h-2.5" />
-                  {selectedBooking.notes ? "Edit" : "Add notes"}
-                </button>
-              )}
-            </div>
-            {editingNotes ? (
-              <div className="space-y-2">
-                <textarea
-                  value={notesText}
-                  onChange={(e) => setNotesText(e.target.value)}
-                  rows={3}
-                  className="kf-input w-full text-sm resize-none"
-                  placeholder="Add notes about this booking..."
-                  aria-label="Booking notes"
-                />
-                <div className="flex gap-1.5 justify-end">
-                  <button
-                    onClick={() => setEditingNotes(false)}
-                    className="px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors min-h-[44px]"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => {
-                      onUpdateNotes?.(selectedBooking.id, notesText);
-                      setEditingNotes(false);
-                    }}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded-md transition-colors min-h-[44px]"
-                    style={{
-                      background: "hsl(var(--kf-accent1) / 0.1)",
-                      color: "hsl(var(--kf-accent1))",
-                    }}
-                  >
-                    <Save className="w-2.5 h-2.5" />
-                    Save
-                  </button>
-                </div>
-              </div>
-            ) : selectedBooking.notes ? (
-              <p className="text-sm text-foreground/90 whitespace-pre-wrap">{selectedBooking.notes}</p>
-            ) : (
-              <p className="text-[11px] text-muted-foreground/50 italic">No notes yet</p>
+          <div className="flex items-center gap-2 text-sm">
+            <Clock className="w-4 h-4 shrink-0" style={{ color: "hsl(var(--kf-accent1))" }} />
+            <span>{formatTime(selectedBooking.startTime)} – {formatTime(selectedBooking.endTime)}</span>
+            {selectedBooking.service && (
+              <span className="text-[10px] text-muted-foreground ml-auto">
+                {selectedBooking.service.duration} min
+              </span>
             )}
           </div>
+        </div>
 
-          {selectedBooking.contact && (
-            <div className="kf-card p-4 space-y-2">
-              <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Client</div>
-              <div className="flex items-center gap-3">
-                <div className="h-9 w-9 rounded-full flex items-center justify-center text-sm font-bold" style={{ background: "hsl(var(--kf-accent1) / 0.1)", borderColor: "hsl(var(--kf-accent1) / 0.2)", borderWidth: 1, color: "hsl(var(--kf-accent1))" }}>
-                  {(selectedBooking.contact.firstName?.charAt(0) ?? "?").toUpperCase()}
-                </div>
-                <div>
-                  <div className="text-sm font-medium">{contactName(selectedBooking)}</div>
-                  {selectedBooking.contact.email && (
-                    <div className="text-xs text-muted-foreground flex items-center gap-1">
-                      <Mail className="w-3 h-3" /> {selectedBooking.contact.email}
-                    </div>
-                  )}
-                  {selectedBooking.contact.phone && (
-                    <div className="text-xs text-muted-foreground flex items-center gap-1">
-                      <Phone className="w-3 h-3" /> {selectedBooking.contact.phone}
-                    </div>
-                  )}
-                </div>
+        {selectedBooking.contact && (
+          <div className="kf-card rounded-xl p-3 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider flex items-center gap-1.5">
+                <User className="w-3 h-3" />
+                Client
+              </div>
+              <Link
+                href={`/app/clients?contact=${selectedBooking.contact.id}`}
+                className="flex items-center gap-1 text-[10px] font-medium transition-colors hover:underline"
+                style={{ color: "hsl(var(--kf-accent2))" }}
+              >
+                Open Client <ExternalLink className="w-2.5 h-2.5" />
+              </Link>
+            </div>
+            <div className="flex items-center gap-3">
+              <div
+                className="h-9 w-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0"
+                style={{
+                  background: "hsl(var(--kf-accent1) / 0.1)",
+                  borderColor: "hsl(var(--kf-accent1) / 0.2)",
+                  borderWidth: 1,
+                  color: "hsl(var(--kf-accent1))",
+                }}
+              >
+                {(selectedBooking.contact.firstName?.charAt(0) ?? "?").toUpperCase()}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium truncate">{contactName(selectedBooking)}</div>
+                {contactEmail && (
+                  <div className="text-[11px] text-muted-foreground flex items-center gap-1 truncate">
+                    <Mail className="w-3 h-3 shrink-0" /> {contactEmail}
+                  </div>
+                )}
+                {contactPhone && (
+                  <div className="text-[11px] text-muted-foreground flex items-center gap-1">
+                    <Phone className="w-3 h-3 shrink-0" /> {contactPhone}
+                  </div>
+                )}
               </div>
             </div>
-          )}
-
-          {selectedBooking.service && (
-            <div className="kf-card p-4 space-y-2">
-              <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Service</div>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Briefcase className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
-                  <span className="text-sm font-medium">{selectedBooking.service.name}</span>
-                </div>
-                <span className="text-sm text-muted-foreground">{selectedBooking.service.duration} min</span>
-              </div>
-              <div className="text-sm font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>
-                TTD {selectedBooking.service.price.toLocaleString()}
-              </div>
-              {(selectedBooking.service.bufferMins || selectedBooking.service.leadTimeMins) && (
-                <div className="flex items-center gap-3 text-[11px] text-muted-foreground pt-1 border-t border-border/30">
-                  {selectedBooking.service.bufferMins ? (
-                    <span>{selectedBooking.service.bufferMins}m buffer</span>
-                  ) : null}
-                  {selectedBooking.service.leadTimeMins ? (
-                    <span>{selectedBooking.service.leadTimeMins}m lead time</span>
-                  ) : null}
-                </div>
+            <div className="flex items-center gap-1.5 pt-1 border-t border-border/30">
+              {whatsappLink && (
+                <a
+                  href={whatsappLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-medium transition-colors hover:bg-muted/20"
+                  style={{ color: "hsl(var(--kf-success))" }}
+                >
+                  <MessageCircle className="w-3 h-3" /> WhatsApp
+                </a>
+              )}
+              {mailtoLink && (
+                <a
+                  href={mailtoLink}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-medium transition-colors hover:bg-muted/20"
+                  style={{ color: "hsl(var(--kf-info))" }}
+                >
+                  <Mail className="w-3 h-3" /> Email
+                </a>
               )}
             </div>
-          )}
+          </div>
+        )}
 
-          {selectedBooking.staff && (
-            <div className="kf-card p-4 space-y-2">
-              <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Staff</div>
-              <div className="flex items-center gap-2">
-                <div className="h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold" style={{ background: "hsl(var(--kf-accent2) / 0.1)", borderColor: "hsl(var(--kf-accent2) / 0.2)", borderWidth: 1, color: "hsl(var(--kf-accent2))" }}>
-                  {selectedBooking.staff.name.charAt(0).toUpperCase()}
-                </div>
-                <span className="text-sm font-medium">{selectedBooking.staff.name}</span>
+        {selectedBooking.service && (
+          <div className="kf-card rounded-xl p-3 space-y-2">
+            <div className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider flex items-center gap-1.5">
+              <Briefcase className="w-3 h-3" />
+              Service
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">{selectedBooking.service.name}</span>
+              <span className="text-sm font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>
+                {formatAmount(selectedBooking.service.price)}
+              </span>
+            </div>
+            {(selectedBooking.service.bufferMins || selectedBooking.service.leadTimeMins) && (
+              <div className="flex items-center gap-3 text-[10px] text-muted-foreground pt-1 border-t border-border/30">
+                {selectedBooking.service.bufferMins ? (
+                  <span>{selectedBooking.service.bufferMins}m buffer</span>
+                ) : null}
+                {selectedBooking.service.leadTimeMins ? (
+                  <span>{selectedBooking.service.leadTimeMins}m lead</span>
+                ) : null}
+              </div>
+            )}
+          </div>
+        )}
+
+        {selectedBooking.staff && (
+          <div className="kf-card rounded-xl p-3">
+            <div className="flex items-center gap-2.5">
+              <div
+                className="h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+                style={{
+                  background: "hsl(var(--kf-accent2) / 0.1)",
+                  borderColor: "hsl(var(--kf-accent2) / 0.2)",
+                  borderWidth: 1,
+                  color: "hsl(var(--kf-accent2))",
+                }}
+              >
+                {selectedBooking.staff.name.charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <div className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Staff</div>
+                <div className="text-sm font-medium">{selectedBooking.staff.name}</div>
               </div>
             </div>
+          </div>
+        )}
+
+        <div className="kf-card rounded-xl p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider flex items-center gap-1.5">
+              <StickyNote className="w-3 h-3" />
+              Notes
+            </div>
+            {!editingNotes && onUpdateNotes && (
+              <button
+                onClick={() => { setNotesText(selectedBooking.notes ?? ""); setEditingNotes(true); }}
+                className="flex items-center gap-1 text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors min-h-[36px]"
+              >
+                <Pencil className="w-2.5 h-2.5" />
+                {selectedBooking.notes ? "Edit" : "Add"}
+              </button>
+            )}
+          </div>
+          {editingNotes ? (
+            <div className="space-y-2">
+              <textarea
+                value={notesText}
+                onChange={(e) => setNotesText(e.target.value)}
+                rows={3}
+                className="kf-input w-full text-sm resize-none"
+                placeholder="Add notes about this booking..."
+                aria-label="Booking notes"
+              />
+              <div className="flex gap-1.5 justify-end">
+                <button
+                  onClick={() => setEditingNotes(false)}
+                  className="px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors min-h-[36px]"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    onUpdateNotes?.(selectedBooking.id, notesText);
+                    setEditingNotes(false);
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded-md transition-colors min-h-[36px]"
+                  style={{
+                    background: "hsl(var(--kf-accent1) / 0.1)",
+                    color: "hsl(var(--kf-accent1))",
+                  }}
+                >
+                  <Save className="w-2.5 h-2.5" />
+                  Save
+                </button>
+              </div>
+            </div>
+          ) : selectedBooking.notes ? (
+            <p className="text-sm text-foreground/90 whitespace-pre-wrap">{selectedBooking.notes}</p>
+          ) : (
+            <p className="text-[11px] text-muted-foreground/50 italic">No notes yet</p>
           )}
         </div>
 
         {showReschedule && canReschedule && onReschedule ? (
-          <div className="kf-card p-4 space-y-3">
-            <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide flex items-center gap-1.5">
-              <RefreshCw className="w-3.5 h-3.5" />
+          <div className="kf-card rounded-xl p-3 space-y-3">
+            <div className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider flex items-center gap-1.5">
+              <RefreshCw className="w-3 h-3" />
               Reschedule Booking
             </div>
             <RescheduleForm
@@ -346,23 +425,38 @@ export default function BookingDetailDrawer({
           </div>
         ) : (
           <div className="space-y-2 pt-2 border-t border-border/40">
-            <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-2">Actions</div>
+            <div className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider mb-2">Quick Actions</div>
+
+            {canInvoice && onCreateInvoice && (
+              <button
+                onClick={() => onCreateInvoice(selectedBooking)}
+                className="w-full flex items-center justify-center gap-1.5 px-3 min-h-[40px] rounded-xl text-xs font-medium border transition-colors"
+                style={{
+                  background: "hsl(var(--kf-accent1) / 0.08)",
+                  borderColor: "hsl(var(--kf-accent1) / 0.2)",
+                  color: "hsl(var(--kf-accent1))",
+                }}
+              >
+                <FileText className="w-3.5 h-3.5" /> Create Invoice
+              </button>
+            )}
+
             <div className="grid grid-cols-2 gap-2">
               {selectedBooking.status === "PENDING" && (
                 <>
                   <button
                     onClick={() => onStatusChange(selectedBooking.id, "CONFIRMED")}
-                    className="flex items-center justify-center gap-1.5 px-3 min-h-[44px] rounded-xl text-sm font-medium transition-colors"
+                    className="flex items-center justify-center gap-1.5 px-3 min-h-[40px] rounded-xl text-xs font-medium transition-colors"
                     style={{ background: "hsl(var(--kf-success) / 0.1)", borderWidth: 1, borderColor: "hsl(var(--kf-success) / 0.3)", color: "hsl(var(--kf-success))" }}
                   >
-                    <CheckCircle2 className="w-4 h-4" /> Confirm
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Confirm
                   </button>
                   <button
                     onClick={() => onStatusChange(selectedBooking.id, "CANCELLED")}
-                    className="flex items-center justify-center gap-1.5 px-3 min-h-[44px] rounded-xl text-sm font-medium transition-colors"
+                    className="flex items-center justify-center gap-1.5 px-3 min-h-[40px] rounded-xl text-xs font-medium transition-colors"
                     style={{ background: "hsl(var(--kf-error) / 0.1)", borderWidth: 1, borderColor: "hsl(var(--kf-error) / 0.3)", color: "hsl(var(--kf-error))" }}
                   >
-                    <XCircle className="w-4 h-4" /> Cancel
+                    <XCircle className="w-3.5 h-3.5" /> Cancel
                   </button>
                 </>
               )}
@@ -370,17 +464,17 @@ export default function BookingDetailDrawer({
                 <>
                   <button
                     onClick={() => onStatusChange(selectedBooking.id, "COMPLETED")}
-                    className="flex items-center justify-center gap-1.5 px-3 min-h-[44px] rounded-xl text-sm font-medium border transition-colors"
+                    className="flex items-center justify-center gap-1.5 px-3 min-h-[40px] rounded-xl text-xs font-medium border transition-colors"
                     style={{ background: "hsl(var(--kf-accent2) / 0.1)", borderColor: "hsl(var(--kf-accent2) / 0.3)", color: "hsl(var(--kf-accent2))" }}
                   >
-                    <CheckCircle2 className="w-4 h-4" /> Complete
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Complete
                   </button>
                   <button
                     onClick={() => onStatusChange(selectedBooking.id, "CANCELLED")}
-                    className="flex items-center justify-center gap-1.5 px-3 min-h-[44px] rounded-xl text-sm font-medium transition-colors"
+                    className="flex items-center justify-center gap-1.5 px-3 min-h-[40px] rounded-xl text-xs font-medium transition-colors"
                     style={{ background: "hsl(var(--kf-error) / 0.1)", borderWidth: 1, borderColor: "hsl(var(--kf-error) / 0.3)", color: "hsl(var(--kf-error))" }}
                   >
-                    <XCircle className="w-4 h-4" /> Cancel
+                    <XCircle className="w-3.5 h-3.5" /> Cancel
                   </button>
                 </>
               )}
@@ -393,20 +487,31 @@ export default function BookingDetailDrawer({
             {canReschedule && onReschedule && (
               <button
                 onClick={() => setShowReschedule(true)}
-                className="w-full flex items-center justify-center gap-1.5 px-3 min-h-[44px] rounded-xl text-sm font-medium border transition-colors"
+                className="w-full flex items-center justify-center gap-1.5 px-3 min-h-[40px] rounded-xl text-xs font-medium border transition-colors"
                 style={{ background: "hsl(var(--kf-accent1) / 0.08)", borderColor: "hsl(var(--kf-accent1) / 0.2)", color: "hsl(var(--kf-accent1))" }}
               >
-                <RefreshCw className="w-4 h-4" /> Reschedule
+                <RefreshCw className="w-3.5 h-3.5" /> Reschedule
               </button>
             )}
             {calendarConnected && selectedBooking.status !== "CANCELLED" && (
               <button
                 onClick={() => onSyncCalendar(selectedBooking.id)}
-                className="w-full kf-btn-secondary flex items-center justify-center gap-1.5 px-3 min-h-[44px] text-sm"
+                className="w-full kf-btn-secondary flex items-center justify-center gap-1.5 px-3 min-h-[40px] text-xs"
               >
-                <Link2 className="w-4 h-4" /> Sync to Google Calendar
+                <Link2 className="w-3.5 h-3.5" /> Sync to Google Calendar
               </button>
             )}
+          </div>
+        )}
+
+        {selectedBooking.service && (
+          <div className="pt-2 border-t border-border/30">
+            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/50">
+              <CreditCard className="w-3 h-3" />
+              <span>
+                {selectedBooking.status === "COMPLETED" ? "Payment expected" : "Estimated"}: {formatAmount(selectedBooking.service.price)}
+              </span>
+            </div>
           </div>
         )}
       </motion.div>
