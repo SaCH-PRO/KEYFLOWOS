@@ -1537,6 +1537,7 @@ export async function getBusinessById(businessId: string) {
     complianceStatus: z.string().nullable().optional(),
     complianceData: z.record(z.boolean()).nullable().optional(),
     lastHealthCheck: z.string().nullable().optional(),
+    businessHours: z.record(z.object({ open: z.string(), close: z.string(), closed: z.boolean().optional() })).nullable().optional(),
   });
   return apiGet(
     `/identity/businesses/${encodeURIComponent(businessId)}`,

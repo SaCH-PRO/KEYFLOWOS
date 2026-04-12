@@ -111,6 +111,7 @@ export default function BookingsPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
 
   const [staffForm, setStaffForm] = useState({ name: "", email: "" });
+  const [businessHoursSet, setBusinessHoursSet] = useState(false);
 
   const directionRef = useRef<number>(0);
   const tabKeys = useMemo(() => TABS.map((t) => t.key), []);
@@ -231,6 +232,13 @@ export default function BookingsPage() {
       ai.updateContext({ businessId, activeView: tab });
       getBusinessById(businessId).then((res) => {
         if (res.data?.slug) setBusinessSlug(res.data.slug);
+        if (res.data?.businessHours) {
+          const bh = res.data.businessHours;
+          const hasAnyEnabled = Object.values(bh).some((entry) => !entry.closed);
+          setBusinessHoursSet(hasAnyEnabled);
+        } else {
+          setBusinessHoursSet(false);
+        }
       }).catch(() => {});
     }
   }, [businessId, tab, ai]);
@@ -617,6 +625,8 @@ export default function BookingsPage() {
               onDisconnectCalendar={handleDisconnectCalendar}
               loading={loading}
               businessId={businessId}
+              businessHoursSet={businessHoursSet}
+              onBusinessHoursSaved={() => setBusinessHoursSet(true)}
             />
             </div>
           )}
