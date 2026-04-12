@@ -1,7 +1,8 @@
 "use client";
 
+import { useEffect } from "react";
 import { motion } from "framer-motion";
-import { CheckCircle2, AlertCircle } from "lucide-react";
+import { CheckCircle2, AlertCircle, Building2, Globe, Palette } from "lucide-react";
 import { Button } from "@keyflow/ui";
 import { useBusinessSettings } from "../../settings/business/use-business-settings";
 import { LogoUploader } from "../../settings/business/logo-uploader";
@@ -9,9 +10,6 @@ import { BasicInfoTab } from "../../settings/business/basic-info-tab";
 import { SocialTab } from "../../settings/business/social-tab";
 import { BrandingTab } from "../../settings/business/branding-tab";
 import { AccordionSection, AccordionGroup } from "../../store/components/accordion-section";
-import {
-  Building2, Globe, Palette,
-} from "lucide-react";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 12 },
@@ -28,6 +26,10 @@ export default function BrandIdentityTab({ onDirtyChange }: BrandIdentityTabProp
     business, handleSave, handleLogoUpload, fileInputRef, logoUrl,
     isDirty, validationErrors,
   } = useBusinessSettings();
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   if (loading) {
     return (

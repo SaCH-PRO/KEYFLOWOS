@@ -200,7 +200,7 @@ export default function ProfileSettingsPage() {
         .catch((err) => {
           console.error("Failed to load document count:", err);
         });
-      apiGet<BusinessData>(`/identity/businesses/${bid}`)
+      apiGet<BusinessData & { primaryColor?: string | null; facebook?: string | null; instagram?: string | null; twitter?: string | null; linkedin?: string | null }>(`/identity/businesses/${bid}`)
         .then(({ data, error }) => {
           if (error) {
             setStatus({ type: "error", message: `Failed to load business data: ${error}` });
@@ -209,6 +209,13 @@ export default function ProfileSettingsPage() {
           if (data) {
             setBusinessData(data);
             setProfileCompleteness(data.profileCompleteness || 0);
+            setBizBrandData({
+              primaryColor: data.primaryColor ?? null,
+              facebook: data.facebook ?? null,
+              instagram: data.instagram ?? null,
+              twitter: data.twitter ?? null,
+              linkedin: data.linkedin ?? null,
+            });
           }
         })
         .catch(() => {
@@ -216,13 +223,6 @@ export default function ProfileSettingsPage() {
         })
         .finally(() => {
           setBusinessLoading(false);
-        });
-      apiGet<Record<string, unknown>>(`/identity/businesses/${bid}`)
-        .then(({ data }) => {
-          if (data) setBizBrandData(data as typeof bizBrandData);
-        })
-        .catch((err) => {
-          console.error("Failed to load brand data:", err);
         });
     }
   }, []);
@@ -336,8 +336,10 @@ export default function ProfileSettingsPage() {
         )}
 
         {activeTab === "brand" && (
-          <motion.div key="brand" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-            <BrandIdentityTab />
+          <motion.div key="brand" id="tabpanel-brand" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+            <ProfileSectionErrorBoundary sectionName="Brand & Identity">
+              <BrandIdentityTab onDirtyChange={handleBizInfoDirtyChange} />
+            </ProfileSectionErrorBoundary>
           </motion.div>
         )}
 
