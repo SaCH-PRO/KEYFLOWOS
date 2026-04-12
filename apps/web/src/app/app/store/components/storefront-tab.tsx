@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import {
   AlertCircle, X, Search, Globe, Copy, ExternalLink, Check,
   Rocket, Link2, Palette, Type, LayoutGrid, ShoppingBag, Star,
-  HelpCircle, FileText, Settings, Share2,
+  HelpCircle, FileText, Settings,
 } from "lucide-react";
 import { AccordionGroup, AccordionSection } from "./accordion-section";
 import { StoreSettings } from "./store-settings";
@@ -72,7 +72,7 @@ function SeoSettingsInline({ storefrontConfig, onConfigChange, onSaveConfig, con
 
   return (
     <div className="space-y-4 pt-2">
-      <div className="space-y-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label className="block text-xs font-medium mb-1.5" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
             Meta Title
@@ -91,35 +91,12 @@ function SeoSettingsInline({ storefrontConfig, onConfigChange, onSaveConfig, con
             }}
           />
           <p className="text-[10px] mt-1" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-            {metaTitle.length}/60 characters
+            {metaTitle.length}/60
           </p>
         </div>
-
         <div>
           <label className="block text-xs font-medium mb-1.5" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-            Meta Description
-          </label>
-          <textarea
-            value={metaDescription}
-            onChange={(e) => onConfigChange("seo", { metaDescription: e.target.value })}
-            placeholder="Browse our products and services. Book online today."
-            maxLength={160}
-            rows={3}
-            className="w-full rounded-xl px-3.5 py-2.5 text-sm resize-none"
-            style={{
-              background: "hsl(var(--kf-muted) / 0.15)",
-              border: "1px solid hsl(var(--kf-border) / 0.3)",
-              color: "hsl(var(--kf-foreground))",
-            }}
-          />
-          <p className="text-[10px] mt-1" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-            {metaDescription.length}/160 characters
-          </p>
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium mb-1.5" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-            Social Sharing Image (OG Image URL)
+            OG Image URL
           </label>
           <input
             type="url"
@@ -134,101 +111,80 @@ function SeoSettingsInline({ storefrontConfig, onConfigChange, onSaveConfig, con
             }}
           />
           <p className="text-[10px] mt-1" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-            Recommended: 1200×630px. Shown when your store is shared on social media.
+            1200×630px recommended
           </p>
         </div>
       </div>
+      <div>
+        <label className="block text-xs font-medium mb-1.5" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+          Meta Description
+        </label>
+        <textarea
+          value={metaDescription}
+          onChange={(e) => onConfigChange("seo", { metaDescription: e.target.value })}
+          placeholder="Browse our products and services. Book online today."
+          maxLength={160}
+          rows={2}
+          className="w-full rounded-xl px-3.5 py-2.5 text-sm resize-none"
+          style={{
+            background: "hsl(var(--kf-muted) / 0.15)",
+            border: "1px solid hsl(var(--kf-border) / 0.3)",
+            color: "hsl(var(--kf-foreground))",
+          }}
+        />
+        <p className="text-[10px] mt-1" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+          {metaDescription.length}/160
+        </p>
+      </div>
 
       <div>
-        <div className="flex items-center gap-1 mb-3 p-1 rounded-lg w-fit" style={{ background: "hsl(var(--kf-muted) / 0.1)" }}>
-          <button
-            onClick={() => setPreviewMode("google")}
-            aria-pressed={previewMode === "google"}
-            className="text-xs font-medium px-4 py-2 rounded-md transition-all min-h-[44px]"
-            style={{
-              background: previewMode === "google" ? "hsl(var(--kf-card))" : "transparent",
-              color: previewMode === "google" ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-muted-foreground))",
-              boxShadow: previewMode === "google" ? "0 1px 4px hsl(var(--kf-background) / 0.3)" : "none",
-            }}
-          >
-            Google Preview
-          </button>
-          <button
-            onClick={() => setPreviewMode("social")}
-            aria-pressed={previewMode === "social"}
-            className="text-xs font-medium px-4 py-2 rounded-md transition-all min-h-[44px]"
-            style={{
-              background: previewMode === "social" ? "hsl(var(--kf-card))" : "transparent",
-              color: previewMode === "social" ? "hsl(var(--kf-accent2))" : "hsl(var(--kf-muted-foreground))",
-              boxShadow: previewMode === "social" ? "0 1px 4px hsl(var(--kf-background) / 0.3)" : "none",
-            }}
-          >
-            Social Preview
-          </button>
+        <div className="flex items-center gap-1 mb-2 p-0.5 rounded-lg w-fit" style={{ background: "hsl(var(--kf-muted) / 0.1)" }}>
+          {(["google", "social"] as const).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setPreviewMode(mode)}
+              aria-pressed={previewMode === mode}
+              className="text-[10px] font-medium px-3 py-1.5 rounded-md transition-all min-h-[32px]"
+              style={{
+                background: previewMode === mode ? "hsl(var(--kf-card))" : "transparent",
+                color: previewMode === mode ? "hsl(var(--kf-accent1))" : "hsl(var(--kf-muted-foreground))",
+                boxShadow: previewMode === mode ? "0 1px 4px hsl(var(--kf-background) / 0.3)" : "none",
+              }}
+            >
+              {mode === "google" ? "Google" : "Social"}
+            </button>
+          ))}
         </div>
 
         {previewMode === "google" ? (
-          <div
-            className="rounded-xl p-4 space-y-1"
-            style={{
-              background: "hsl(var(--kf-muted) / 0.08)",
-              border: "1px solid hsl(var(--kf-border) / 0.3)",
-            }}
-          >
+          <div className="rounded-xl p-3 space-y-0.5" style={{ background: "hsl(var(--kf-muted) / 0.08)", border: "1px solid hsl(var(--kf-border) / 0.3)" }}>
             <div className="flex items-center gap-1.5">
-              <Globe className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-muted-foreground))" }} />
-              <span className="text-xs truncate" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-                {previewUrl}
-              </span>
+              <Globe className="w-3 h-3" style={{ color: "hsl(var(--kf-muted-foreground))" }} />
+              <span className="text-[10px] truncate" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{previewUrl}</span>
             </div>
-            <p className="text-sm font-medium truncate" style={{ color: "hsl(var(--kf-accent2))" }}>
-              {previewTitle}
-            </p>
-            <p className="text-xs line-clamp-2" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-              {previewDesc}
-            </p>
+            <p className="text-sm font-medium truncate" style={{ color: "hsl(var(--kf-accent2))" }}>{previewTitle}</p>
+            <p className="text-xs line-clamp-2" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{previewDesc}</p>
           </div>
         ) : (
-          <div
-            className="rounded-xl overflow-hidden"
-            style={{ border: "1px solid hsl(var(--kf-border) / 0.3)" }}
-          >
-            <div
-              className="w-full h-[120px] flex items-center justify-center"
-              style={{ background: "hsl(var(--kf-muted) / 0.1)" }}
-            >
+          <div className="rounded-xl overflow-hidden" style={{ border: "1px solid hsl(var(--kf-border) / 0.3)" }}>
+            <div className="w-full h-[80px] flex items-center justify-center" style={{ background: "hsl(var(--kf-muted) / 0.1)" }}>
               {ogImage ? (
-                <img
-                  src={ogImage}
-                  alt="Social preview"
-                  className="w-full h-full object-cover"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).style.display = "none";
-                  }}
-                />
+                <img src={ogImage} alt="Social preview" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
               ) : (
-                <span className="text-xs" style={{ color: "hsl(var(--kf-muted-foreground))" }}>No OG image set</span>
+                <span className="text-[10px]" style={{ color: "hsl(var(--kf-muted-foreground))" }}>No OG image</span>
               )}
             </div>
-            <div className="p-3 space-y-1" style={{ background: "hsl(var(--kf-muted) / 0.08)" }}>
-              <p className="text-[10px] uppercase tracking-wide" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-                {previewUrl.replace(/^https?:\/\//, "").split("/")[0]}
-              </p>
-              <p className="text-sm font-semibold line-clamp-1" style={{ color: "hsl(var(--kf-foreground))" }}>{previewTitle}</p>
-              <p className="text-xs line-clamp-2" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-                {previewDesc}
-              </p>
+            <div className="p-2.5 space-y-0.5" style={{ background: "hsl(var(--kf-muted) / 0.08)" }}>
+              <p className="text-[9px] uppercase tracking-wide" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{previewUrl.replace(/^https?:\/\//, "").split("/")[0]}</p>
+              <p className="text-xs font-semibold line-clamp-1" style={{ color: "hsl(var(--kf-foreground))" }}>{previewTitle}</p>
+              <p className="text-[10px] line-clamp-1" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{previewDesc}</p>
             </div>
           </div>
         )}
       </div>
 
       <div className="flex justify-end">
-        <button
-          onClick={onSaveConfig}
-          disabled={configSaving}
-          className="kf-btn-primary min-h-[44px] px-4 text-sm"
-        >
+        <button onClick={onSaveConfig} disabled={configSaving} className="kf-btn-primary min-h-[44px] px-4 text-sm">
           {configSaving ? "Saving..." : "Save SEO"}
         </button>
       </div>
@@ -258,18 +214,11 @@ export function StorefrontTab({
   onTabChange,
 }: Props) {
   const [bannerDismissed, setBannerDismissed] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   const appearance = storefrontConfig.appearance as { primaryColor?: string; secondaryColor?: string; accentColor?: string } | undefined;
   const pc = appearance?.primaryColor || businessData?.primaryColor || "#F97316";
   const sc = appearance?.secondaryColor || businessData?.secondaryColor || "#14B8A6";
   const ac = appearance?.accentColor || "#a78bfa";
-
-  const handleCopyUrl = useCallback(() => {
-    navigator.clipboard.writeText(publicUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [publicUrl]);
 
   const urlBadge = currentSlug ? (
     <span className="px-1.5 py-0.5 rounded-md text-[9px] font-semibold" style={{ background: "hsl(var(--kf-success) / 0.15)", color: "hsl(var(--kf-success))" }}>Active</span>
@@ -286,7 +235,7 @@ export function StorefrontTab({
   ) : undefined;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {!storeEnabled && !bannerDismissed && (
         <motion.div
           initial={{ opacity: 0, y: -8 }}
@@ -300,21 +249,20 @@ export function StorefrontTab({
           }}
         >
           <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "hsl(var(--kf-warning) / 0.15)" }}>
-            <AlertCircle className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-warning))" }} />
+            <AlertCircle className="w-3.5 h-3.5" />
           </div>
           <span className="flex-1 font-medium">Your store is unpublished. Toggle it live from the header to make it visible to customers.</span>
           <button
             onClick={() => setBannerDismissed(true)}
-            aria-label="Dismiss unpublished warning"
+            aria-label="Dismiss"
             className="p-1 rounded-lg transition-colors flex-shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center"
-            style={{ color: "hsl(var(--kf-warning))" }}
           >
             <X className="w-3.5 h-3.5" />
           </button>
         </motion.div>
       )}
 
-      <AccordionGroup title="Setup" brandColor={pc}>
+      <AccordionGroup title="Launch" brandColor={pc}>
         <AccordionSection
           title="Launch Checklist"
           subtitle="Track what's needed to go live"
@@ -336,8 +284,8 @@ export function StorefrontTab({
           />
         </AccordionSection>
         <AccordionSection
-          title="Store URL"
-          subtitle="Set your public storefront link"
+          title="Store URL & QR Code"
+          subtitle="Set your link and generate a scannable QR"
           icon={Link2}
           accentColor={pc}
           badge={urlBadge}
@@ -357,7 +305,7 @@ export function StorefrontTab({
       <AccordionGroup title="Design" brandColor={sc}>
         <AccordionSection
           title="Appearance"
-          subtitle="Colors, hero image & branding"
+          subtitle="Theme, colors, hero image & branding"
           icon={Palette}
           accentColor={sc}
         >
@@ -380,7 +328,7 @@ export function StorefrontTab({
         </AccordionSection>
         <AccordionSection
           title="Typography"
-          subtitle="Fonts & brand assets"
+          subtitle="Fonts & type pairing"
           icon={Type}
           accentColor={sc}
         >
@@ -439,30 +387,27 @@ export function StorefrontTab({
           />
         </AccordionSection>
         <AccordionSection
-          title="FAQ"
-          subtitle="Frequently asked questions"
+          title="FAQ & Policies"
+          subtitle="Questions, refund policy & terms"
           icon={HelpCircle}
           accentColor={pc}
         >
-          <FaqManager
-            config={storefrontConfig}
-            onConfigChange={onConfigChange}
-            onSave={onSaveConfig}
-            saving={configSaving}
-          />
-        </AccordionSection>
-        <AccordionSection
-          title="Policies"
-          subtitle="Refund, privacy & terms"
-          icon={FileText}
-          accentColor={pc}
-        >
-          <PolicyEditor
-            config={storefrontConfig}
-            onConfigChange={onConfigChange}
-            onSave={onSaveConfig}
-            saving={configSaving}
-          />
+          <div className="space-y-4">
+            <FaqManager
+              config={storefrontConfig}
+              onConfigChange={onConfigChange}
+              onSave={onSaveConfig}
+              saving={configSaving}
+            />
+            <div className="pt-2" style={{ borderTop: "1px solid hsl(var(--kf-border) / 0.2)" }}>
+              <PolicyEditor
+                config={storefrontConfig}
+                onConfigChange={onConfigChange}
+                onSave={onSaveConfig}
+                saving={configSaving}
+              />
+            </div>
+          </div>
         </AccordionSection>
       </AccordionGroup>
 
@@ -484,7 +429,7 @@ export function StorefrontTab({
         </AccordionSection>
         <AccordionSection
           title="Store Settings"
-          subtitle="Currency, contact & preferences"
+          subtitle="Currency, delivery & contact"
           icon={Settings}
           accentColor={ac}
         >
@@ -495,34 +440,6 @@ export function StorefrontTab({
             saving={configSaving}
           />
         </AccordionSection>
-        {storeEnabled && currentSlug && (
-          <AccordionSection
-            title="Share Your Store"
-            subtitle={publicUrl}
-            icon={Share2}
-            accentColor="hsl(var(--kf-success))"
-          >
-            <div className="flex items-center gap-2 pt-1">
-              <div
-                className="flex-1 rounded-xl px-3.5 py-2.5 text-xs truncate font-mono"
-                style={{
-                  background: "hsl(var(--kf-muted) / 0.15)",
-                  border: "1px solid hsl(var(--kf-border) / 0.3)",
-                  color: "hsl(var(--kf-muted-foreground))",
-                }}
-              >
-                {publicUrl}
-              </div>
-              <button
-                onClick={handleCopyUrl}
-                className="kf-btn-secondary min-h-[44px] px-4 text-sm flex items-center gap-1.5"
-              >
-                {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                {copied ? "Copied" : "Copy"}
-              </button>
-            </div>
-          </AccordionSection>
-        )}
       </AccordionGroup>
     </div>
   );
