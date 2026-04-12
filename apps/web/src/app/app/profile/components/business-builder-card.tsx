@@ -273,10 +273,63 @@ const MODULE_ROUTES: Record<string, string> = {
   commerce: "/app/commerce",
   marketing: "/app/marketing",
   expenses: "/app/expenses",
-  contacts: "/app/contacts",
+  contacts: "/app/crm/pipeline",
   store: "/app/store",
   documents: "/app/profile?tab=documents",
   reports: "/app/reports",
+  settings: "/app/settings",
+  today: "/app",
+  profile: "/app/profile",
+};
+
+type QuickLink = { label: string; path: string; icon: React.ElementType; colorVar: string };
+
+const TAB_QUICK_LINKS: Record<string, QuickLink[]> = {
+  overview: [
+    { label: "Today Dashboard", path: "/app", icon: Zap, colorVar: "--kf-accent1" },
+    { label: "Reports", path: "/app/reports", icon: BarChart3, colorVar: "--kf-accent2" },
+    { label: "Documents", path: "/app/profile?tab=documents", icon: FileText, colorVar: "--kf-info" },
+  ],
+  canvas: [
+    { label: "Commerce", path: "/app/commerce", icon: DollarSign, colorVar: "--kf-accent1" },
+    { label: "Contacts", path: "/app/crm/pipeline", icon: Users, colorVar: "--kf-accent2" },
+    { label: "Store", path: "/app/store", icon: ShoppingBag, colorVar: "--kf-info" },
+    { label: "Marketing", path: "/app/marketing", icon: Megaphone, colorVar: "--kf-success" },
+  ],
+  legal: [
+    { label: "Documents", path: "/app/profile?tab=documents", icon: FileText, colorVar: "--kf-accent2" },
+    { label: "Settings", path: "/app/settings", icon: Settings, colorVar: "--kf-info" },
+    { label: "Commerce", path: "/app/commerce", icon: DollarSign, colorVar: "--kf-accent1" },
+  ],
+  swot: [
+    { label: "Marketing", path: "/app/marketing", icon: Megaphone, colorVar: "--kf-accent1" },
+    { label: "Contacts", path: "/app/crm/pipeline", icon: Users, colorVar: "--kf-accent2" },
+    { label: "Reports", path: "/app/reports", icon: BarChart3, colorVar: "--kf-info" },
+  ],
+  financials: [
+    { label: "Expenses", path: "/app/expenses", icon: DollarSign, colorVar: "--kf-warning" },
+    { label: "Commerce", path: "/app/commerce", icon: ShoppingBag, colorVar: "--kf-accent1" },
+    { label: "Reports", path: "/app/reports", icon: BarChart3, colorVar: "--kf-accent2" },
+  ],
+  roadmap: [
+    { label: "Projects", path: "/app/projects", icon: Target, colorVar: "--kf-accent1" },
+    { label: "Bookings", path: "/app/bookings", icon: Calendar, colorVar: "--kf-accent2" },
+    { label: "Store", path: "/app/store", icon: ShoppingBag, colorVar: "--kf-info" },
+  ],
+  actions: [
+    { label: "Projects", path: "/app/projects", icon: Target, colorVar: "--kf-accent1" },
+    { label: "Today", path: "/app", icon: Zap, colorVar: "--kf-accent2" },
+  ],
+  risks: [
+    { label: "Projects", path: "/app/projects", icon: Target, colorVar: "--kf-accent1" },
+    { label: "Reports", path: "/app/reports", icon: BarChart3, colorVar: "--kf-accent2" },
+    { label: "Documents", path: "/app/profile?tab=documents", icon: FileText, colorVar: "--kf-info" },
+  ],
+  governance: [
+    { label: "Reports", path: "/app/reports", icon: BarChart3, colorVar: "--kf-success" },
+    { label: "Settings", path: "/app/settings", icon: Settings, colorVar: "--kf-accent1" },
+    { label: "Projects", path: "/app/projects", icon: Target, colorVar: "--kf-accent2" },
+  ],
 };
 
 const INTAKE_STEPS = [
@@ -360,7 +413,7 @@ const PROGRESS_PHASES: Phase[] = [
     id: "execute", label: "Execute", tagline: "Launch and start serving customers", icon: Rocket, colorVar: "--kf-accent1",
     actions: [
       { label: "Go Live", description: "Publish your storefront to the world", icon: Zap, route: "/app/store", doneKey: "storeEnabled" },
-      { label: "First Contact", description: "Add or import your first customers", icon: Users, route: "/app/contacts", doneKey: "hasContacts" },
+      { label: "First Contact", description: "Add or import your first customers", icon: Users, route: "/app/crm/pipeline", doneKey: "hasContacts" },
       { label: "First Booking", description: "Accept your first appointment or order", icon: Calendar, route: "/app/bookings", doneKey: "hasBookings" },
       { label: "Payment Setup", description: "Configure how you get paid", icon: DollarSign, route: "/app/commerce", doneKey: "hasInvoices" },
     ],
@@ -1662,6 +1715,41 @@ function ResultsPanel({ model, tab, version, businessId, saveError, onTabChange,
   );
 }
 
+function QuickLinks({ tabId }: { tabId: string }) {
+  const router = useRouter();
+  const links = TAB_QUICK_LINKS[tabId];
+  if (!links?.length) return null;
+  return (
+    <div className="mt-4 pt-3" style={{ borderTop: "1px solid hsl(var(--kf-border) / 0.1)" }}>
+      <div className="flex items-center gap-1.5 mb-2">
+        <ExternalLink className="w-3 h-3 text-[hsl(var(--kf-muted-foreground))]" />
+        <span className="text-[9px] font-semibold uppercase tracking-wider text-[hsl(var(--kf-muted-foreground))]">Take Action</span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {links.map((link) => {
+          const LIcon = link.icon;
+          return (
+            <button
+              key={link.path}
+              onClick={() => router.push(link.path)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-medium transition-all hover:scale-[1.02] active:scale-[0.98]"
+              style={{
+                background: `hsl(var(${link.colorVar}) / 0.06)`,
+                border: `1px solid hsl(var(${link.colorVar}) / 0.15)`,
+                color: `hsl(var(${link.colorVar}))`,
+              }}
+            >
+              <LIcon className="w-3 h-3" />
+              {link.label}
+              <ArrowRight className="w-2.5 h-2.5 opacity-50" />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function OverviewView({ brief, score }: { brief: ExecutiveBrief; score: QualityScore }) {
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
@@ -1802,6 +1890,7 @@ function OverviewView({ brief, score }: { brief: ExecutiveBrief; score: QualityS
           )}
         </div>
       )}
+      <QuickLinks tabId="overview" />
     </motion.div>
   );
 }
@@ -1863,6 +1952,9 @@ function CanvasView({ canvas, model, onSaveEdit }: { canvas: BusinessModelCanvas
           )}
         </div>
       ))}
+      <div className="col-span-2">
+        <QuickLinks tabId="canvas" />
+      </div>
     </motion.div>
   );
 }
@@ -1917,6 +2009,7 @@ function RoadmapView({ roadmap }: { roadmap: RoadmapPhase[] }) {
           </div>
         </div>
       ))}
+      <QuickLinks tabId="roadmap" />
     </motion.div>
   );
 }
@@ -2026,6 +2119,7 @@ function ActionsView({ actions, businessId }: { actions: ActionItem[]; businessI
           </div>
         </div>
       ))}
+      <QuickLinks tabId="actions" />
     </motion.div>
   );
 }
@@ -2104,6 +2198,7 @@ function LegalView({ legal }: { legal: LegalCompliance }) {
           </div>
         </div>
       )}
+      <QuickLinks tabId="legal" />
     </motion.div>
   );
 }
@@ -2187,6 +2282,7 @@ function SWOTView({ analysis, economics }: { analysis: CompetitiveAnalysis; econ
           ))}
         </div>
       </div>
+      <QuickLinks tabId="swot" />
     </motion.div>
   );
 }
@@ -2251,6 +2347,7 @@ function FinancialsView({ outlook }: { outlook: FinancialOutlook }) {
           </div>
         </div>
       )}
+      <QuickLinks tabId="financials" />
     </motion.div>
   );
 }
@@ -2339,6 +2436,7 @@ function RisksView({ risks, assumptions }: { risks: Risk[]; assumptions: Assumpt
           </div>
         </div>
       )}
+      <QuickLinks tabId="risks" />
     </motion.div>
   );
 }
@@ -2403,6 +2501,7 @@ function GovernanceView({ governance }: { governance: GovernanceFramework }) {
           </div>
         </div>
       )}
+      <QuickLinks tabId="governance" />
     </motion.div>
   );
 }
