@@ -4,29 +4,86 @@ import { useState, useRef, useEffect } from "react";
 import {
   X, Send, ExternalLink, Sparkles, CheckCircle, Loader2,
   Rocket, Globe, Palette, Bot, TrendingUp, Users, Calculator,
-  Scale, Shield, BookOpen, Wrench, Package, LayoutGrid, Headphones,
-  FileText, BarChart3
+  Scale, Shield, BookOpen, Wrench, Package, FileText, BarChart3,
+  Lightbulb, Target, Megaphone, Settings, Building2, ChevronRight,
+  Zap, GraduationCap, FolderOpen
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { submitPublicIntake } from "@/lib/client";
 
 const KEYFLOWOS_SLUG = "keyflowos" as const;
 
-const SERVICE_CATEGORIES = [
-  { value: "launch-setup", label: "Business Launch & Setup", icon: Rocket, desc: "Registration, structure, compliance, and getting started" },
-  { value: "website-store", label: "Website & Online Store", icon: Globe, desc: "E-commerce, booking pages, landing pages, and domains" },
-  { value: "branding-design", label: "Branding & Design", icon: Palette, desc: "Logo, visual identity, packaging, and brand strategy" },
-  { value: "ai-automation", label: "AI & Automation", icon: Bot, desc: "Workflows, AI copilots, chatbots, and process automation" },
-  { value: "marketing-growth", label: "Marketing & Growth", icon: TrendingUp, desc: "Social media, SEO, email campaigns, and paid ads" },
-  { value: "crm-sales", label: "CRM & Sales Systems", icon: Users, desc: "Pipelines, lead management, follow-ups, and outreach" },
-  { value: "finance-accounting", label: "Finance & Accounting", icon: Calculator, desc: "Bookkeeping, invoicing, expense tracking, and tax prep" },
-  { value: "legal-compliance", label: "Legal & Compliance", icon: Scale, desc: "Contracts, terms of service, privacy policies, and IP" },
-  { value: "hr-operations", label: "HR & Operations", icon: Shield, desc: "Hiring, payroll, SOPs, team management, and training" },
-  { value: "coaching-consulting", label: "Business Coaching", icon: BookOpen, desc: "1-on-1 strategy, mentoring, revenue planning, and pivots" },
-  { value: "tech-support", label: "Tech & IT Support", icon: Wrench, desc: "Integrations, troubleshooting, hosting, and maintenance" },
-  { value: "content-media", label: "Content & Media", icon: FileText, desc: "Copywriting, video, photography, and content strategy" },
-  { value: "analytics-reporting", label: "Analytics & Reporting", icon: BarChart3, desc: "Dashboards, KPIs, performance insights, and data" },
-  { value: "custom-package", label: "Custom Package", icon: Package, desc: "Something else? Tell us what you need" },
+interface ServiceCategory {
+  value: string;
+  label: string;
+  icon: typeof Rocket;
+  desc: string;
+  appBuiltIn?: boolean;
+}
+
+interface ServiceTier {
+  id: string;
+  label: string;
+  tagline: string;
+  color: string;
+  icon: typeof Rocket;
+  categories: ServiceCategory[];
+}
+
+const SERVICE_TIERS: ServiceTier[] = [
+  {
+    id: "build",
+    label: "BUILD",
+    tagline: "Idea to First Revenue (0 → 1)",
+    color: "#14B8A6",
+    icon: Rocket,
+    categories: [
+      { value: "idea-validation", label: "Idea Validation & Research", icon: Lightbulb, desc: "Problem-solution fit, market research, competitor mapping, and go/no-go framework" },
+      { value: "mvp-development", label: "MVP & Proof of Concept", icon: Target, desc: "MVP design, offer structuring, pricing strategy, landing page, and early users" },
+      { value: "launch-system", label: "Launch & First Revenue", icon: Rocket, desc: "Go-to-market strategy, brand identity, sales scripts, and launch campaign" },
+      { value: "business-registration", label: "Business Registration & Setup", icon: FileText, desc: "Entity formation, tax ID, compliance, and bank account guidance", appBuiltIn: true },
+      { value: "website-store", label: "Website & Online Store", icon: Globe, desc: "E-commerce store, booking page, landing pages, and domain setup", appBuiltIn: true },
+      { value: "branding-identity", label: "Branding & Identity", icon: Palette, desc: "Logo, color palette, typography, brand guidelines, and social profiles", appBuiltIn: true },
+    ],
+  },
+  {
+    id: "grow",
+    label: "GROW",
+    tagline: "Revenue to Consistency (1 → 10)",
+    color: "#F97316",
+    icon: TrendingUp,
+    categories: [
+      { value: "marketing-engine", label: "Marketing Engine", icon: Megaphone, desc: "Funnel design, paid + organic strategy, content system, and lead automation", appBuiltIn: true },
+      { value: "sales-system", label: "Sales & CRM System", icon: Users, desc: "Pipeline design, CRM setup, conversion optimization, and predictable revenue", appBuiltIn: true },
+      { value: "operations-stability", label: "Operations & SOPs", icon: Settings, desc: "Workflow mapping, SOP creation, team structure, and delivery optimization", appBuiltIn: true },
+      { value: "finance-accounting", label: "Finance & Accounting", icon: Calculator, desc: "Bookkeeping, invoicing, expense tracking, tax prep, and cash flow", appBuiltIn: true },
+      { value: "legal-compliance", label: "Legal & Compliance", icon: Scale, desc: "Contracts, terms of service, privacy policies, and regulatory compliance" },
+      { value: "content-media", label: "Content & Media Production", icon: FileText, desc: "Copywriting, video, photography, and content strategy" },
+    ],
+  },
+  {
+    id: "scale",
+    label: "SCALE",
+    tagline: "Systemization to Enterprise (10 → 100+)",
+    color: "#8B5CF6",
+    icon: Building2,
+    categories: [
+      { value: "automation-ai", label: "Business Automation & AI", icon: Bot, desc: "SOP digitization, AI copilots, workflow automation, and KPI dashboards", appBuiltIn: true },
+      { value: "expansion-channels", label: "Multi-Channel Expansion", icon: Globe, desc: "New market entry, product expansion, partnerships, and distribution" },
+      { value: "executive-structure", label: "Enterprise Architecture", icon: Building2, desc: "Org structure, leadership hiring, governance, and financial structuring" },
+      { value: "analytics-reporting", label: "Analytics & Intelligence", icon: BarChart3, desc: "Custom dashboards, performance tracking, data insights, and reporting", appBuiltIn: true },
+      { value: "tech-integration", label: "Tech & Integration", icon: Wrench, desc: "API connections, tool integrations, hosting, security, and maintenance" },
+      { value: "hr-team", label: "HR & Team Building", icon: Shield, desc: "Hiring systems, onboarding, payroll, performance reviews, and training" },
+    ],
+  },
+];
+
+const CROSS_PRODUCTS = [
+  { value: "digital-templates", label: "Digital Products & Templates", icon: FolderOpen, desc: "SOPs, pitch decks, financial models, funnels, and business kits" },
+  { value: "education-training", label: "Education & Training", icon: GraduationCap, desc: "Masterclass courses, certifications, and founder training programs", appBuiltIn: true },
+  { value: "coaching-advisory", label: "Coaching & Advisory", icon: BookOpen, desc: "1-on-1 strategy calls, growth accelerators, and pivot advisory" },
+  { value: "subscription-bos", label: "Business Operating System", icon: Zap, desc: "Monthly access to tools, templates, strategy calls, and data insights", appBuiltIn: true },
+  { value: "custom-project", label: "Custom Project", icon: Package, desc: "Something specific? Tell us exactly what you need" },
 ];
 
 const BUDGET_OPTIONS = [
@@ -40,7 +97,7 @@ const BUDGET_OPTIONS = [
 
 const URGENCY_OPTIONS = [
   { value: "low", label: "No rush" },
-  { value: "normal", label: "Within a week" },
+  { value: "normal", label: "This week" },
   { value: "high", label: "ASAP" },
 ];
 
@@ -62,6 +119,7 @@ export function KeyflowOSStoreDrawer({ open, onClose }: KeyflowOSStoreDrawerProp
   const [description, setDescription] = useState("");
   const [budget, setBudget] = useState("");
   const [urgency, setUrgency] = useState("normal");
+  const [businessStage, setBusinessStage] = useState("");
 
   useEffect(() => {
     if (!open) {
@@ -118,11 +176,19 @@ export function KeyflowOSStoreDrawer({ open, onClose }: KeyflowOSStoreDrawerProp
     setDescription("");
     setBudget("");
     setUrgency("normal");
+    setBusinessStage("");
     setError(null);
     setStep("browse");
   };
 
-  const selectedCat = SERVICE_CATEGORIES.find((c) => c.value === category);
+  const allCategories = [...SERVICE_TIERS.flatMap(t => t.categories), ...CROSS_PRODUCTS];
+  const selectedCat = allCategories.find((c) => c.value === category);
+
+  const selectCategory = (val: string, tier?: string) => {
+    setCategory(val);
+    setBusinessStage(tier || "");
+    setStep("form");
+  };
 
   return (
     <>
@@ -136,7 +202,7 @@ export function KeyflowOSStoreDrawer({ open, onClose }: KeyflowOSStoreDrawerProp
       <div
         ref={drawerRef}
         className={cn(
-          "fixed top-0 right-0 z-[61] h-full w-full sm:w-[440px] bg-card border-l border-border shadow-2xl transition-transform duration-300 ease-out flex flex-col",
+          "fixed top-0 right-0 z-[61] h-full w-full sm:w-[460px] bg-card border-l border-border shadow-2xl transition-transform duration-300 ease-out flex flex-col",
           open ? "translate-x-0" : "translate-x-full"
         )}
       >
@@ -150,7 +216,7 @@ export function KeyflowOSStoreDrawer({ open, onClose }: KeyflowOSStoreDrawerProp
             </div>
             <div>
               <h2 className="text-sm font-semibold">KeyflowOS Store</h2>
-              <p className="text-[11px] text-muted-foreground">Everything your business needs</p>
+              <p className="text-[11px] text-muted-foreground">Business Progression Systems</p>
             </div>
           </div>
           <button
@@ -168,34 +234,87 @@ export function KeyflowOSStoreDrawer({ open, onClose }: KeyflowOSStoreDrawerProp
                 className="rounded-xl p-5 relative overflow-hidden"
                 style={{ background: "linear-gradient(135deg, rgba(249, 115, 22, 0.12), rgba(20, 184, 166, 0.08))" }}
               >
-                <h3 className="text-base font-semibold mb-1.5">Your business, fully handled</h3>
-                <p className="text-sm text-muted-foreground leading-relaxed">
-                  From idea to profit — launch, operate, grow, and protect your business. Pick what you need and our team takes it from there.
+                <h3 className="text-base font-semibold mb-1">Idea to Enterprise. Fully handled.</h3>
+                <p className="text-[13px] text-muted-foreground leading-relaxed">
+                  We design, build, and scale businesses through fully integrated systems. Pick your stage, tell us what you need.
                 </p>
               </div>
 
+              {SERVICE_TIERS.map((tier) => {
+                const TierIcon = tier.icon;
+                return (
+                  <div key={tier.id}>
+                    <div className="flex items-center gap-2.5 mb-2.5">
+                      <div
+                        className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0"
+                        style={{ background: `${tier.color}20` }}
+                      >
+                        <TierIcon className="w-3.5 h-3.5" style={{ color: tier.color }} />
+                      </div>
+                      <div>
+                        <span className="text-[11px] font-bold tracking-wider" style={{ color: tier.color }}>{tier.label}</span>
+                        <span className="text-[11px] text-muted-foreground ml-1.5">{tier.tagline}</span>
+                      </div>
+                    </div>
+                    <div className="grid gap-1 ml-0.5">
+                      {tier.categories.map((svc) => {
+                        const SvcIcon = svc.icon;
+                        return (
+                          <button
+                            key={svc.value}
+                            onClick={() => selectCategory(svc.value, tier.id)}
+                            className="flex items-center gap-2.5 p-2.5 rounded-lg border border-border hover:border-muted-foreground/30 hover:bg-muted/50 transition-all text-left group"
+                          >
+                            <SvcIcon className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[13px] font-medium truncate">{svc.label}</span>
+                                {svc.appBuiltIn && (
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0" style={{ background: `${tier.color}15`, color: tier.color }}>
+                                    in-app
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[11px] text-muted-foreground leading-tight block mt-0.5 line-clamp-1">{svc.desc}</span>
+                            </div>
+                            <ChevronRight className="w-3 h-3 text-muted-foreground/30 group-hover:text-foreground flex-shrink-0 transition-colors" />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+
               <div>
-                <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">How can we help?</h4>
-                <div className="grid gap-1.5">
-                  {SERVICE_CATEGORIES.map((svc) => {
+                <div className="flex items-center gap-2.5 mb-2.5">
+                  <div className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 bg-muted">
+                    <Package className="w-3.5 h-3.5 text-muted-foreground" />
+                  </div>
+                  <span className="text-[11px] font-bold tracking-wider text-muted-foreground">PRODUCTS & PROGRAMS</span>
+                </div>
+                <div className="grid gap-1 ml-0.5">
+                  {CROSS_PRODUCTS.map((svc) => {
                     const SvcIcon = svc.icon;
                     return (
                       <button
                         key={svc.value}
-                        onClick={() => {
-                          setCategory(svc.value);
-                          setStep("form");
-                        }}
-                        className="flex items-start gap-3 p-3 rounded-lg border border-border hover:border-muted-foreground/30 hover:bg-muted/50 transition-all text-left group"
+                        onClick={() => selectCategory(svc.value, "")}
+                        className="flex items-center gap-2.5 p-2.5 rounded-lg border border-border hover:border-muted-foreground/30 hover:bg-muted/50 transition-all text-left group"
                       >
-                        <div className="mt-0.5 w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 bg-muted group-hover:bg-background transition-colors">
-                          <SvcIcon className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground transition-colors" />
-                        </div>
+                        <SvcIcon className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors flex-shrink-0" />
                         <div className="flex-1 min-w-0">
-                          <span className="text-sm font-medium block">{svc.label}</span>
-                          <span className="text-[11px] text-muted-foreground leading-tight block mt-0.5">{svc.desc}</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[13px] font-medium truncate">{svc.label}</span>
+                            {svc.appBuiltIn && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded-full font-medium bg-muted text-muted-foreground flex-shrink-0">
+                                in-app
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[11px] text-muted-foreground leading-tight block mt-0.5 line-clamp-1">{svc.desc}</span>
                         </div>
-                        <Send className="w-3 h-3 text-muted-foreground/40 group-hover:text-foreground mt-1.5 flex-shrink-0 transition-colors" />
+                        <ChevronRight className="w-3 h-3 text-muted-foreground/30 group-hover:text-foreground flex-shrink-0 transition-colors" />
                       </button>
                     );
                   })}
@@ -211,7 +330,7 @@ export function KeyflowOSStoreDrawer({ open, onClose }: KeyflowOSStoreDrawerProp
                   style={{ color: "hsl(var(--kf-accent1))" }}
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
-                  Browse full catalog on our storefront
+                  Browse full catalog with pricing
                 </a>
               </div>
             </div>
@@ -227,6 +346,14 @@ export function KeyflowOSStoreDrawer({ open, onClose }: KeyflowOSStoreDrawerProp
                   ← Back
                 </button>
                 <span className="text-xs text-muted-foreground">·</span>
+                {businessStage && (
+                  <>
+                    <span className="text-[10px] font-bold tracking-wider" style={{ color: SERVICE_TIERS.find(t => t.id === businessStage)?.color }}>
+                      {businessStage.toUpperCase()}
+                    </span>
+                    <span className="text-xs text-muted-foreground">·</span>
+                  </>
+                )}
                 <span className="text-xs font-medium" style={{ color: "hsl(var(--kf-accent1))" }}>
                   {selectedCat?.label}
                 </span>
@@ -236,10 +363,15 @@ export function KeyflowOSStoreDrawer({ open, onClose }: KeyflowOSStoreDrawerProp
                 <div className="flex items-center gap-2.5 p-3 rounded-lg bg-muted/50 border border-border">
                   <selectedCat.icon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                   <p className="text-xs text-muted-foreground leading-relaxed">{selectedCat.desc}</p>
+                  {selectedCat.appBuiltIn && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full font-medium bg-[hsl(var(--kf-accent1))]/10 flex-shrink-0" style={{ color: "hsl(var(--kf-accent1))" }}>
+                      also in-app
+                    </span>
+                  )}
                 </div>
               )}
 
-              <h3 className="text-base font-semibold">Tell us what you need</h3>
+              <h3 className="text-base font-semibold">Tell us about your business</h3>
 
               {error && (
                 <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
@@ -248,18 +380,33 @@ export function KeyflowOSStoreDrawer({ open, onClose }: KeyflowOSStoreDrawerProp
               )}
 
               <div className="space-y-3.5">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">
-                    Your name <span className="text-red-400">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Jane Smith"
-                    maxLength={200}
-                    className="kf-input w-full"
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1 block">
+                      Your name <span className="text-red-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Jane Smith"
+                      maxLength={200}
+                      className="kf-input w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1 block">
+                      Phone <span className="text-muted-foreground text-[10px]">(optional)</span>
+                    </label>
+                    <input
+                      type="tel"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="+1 868 555 0000"
+                      maxLength={50}
+                      className="kf-input w-full"
+                    />
+                  </div>
                 </div>
 
                 <div>
@@ -278,26 +425,12 @@ export function KeyflowOSStoreDrawer({ open, onClose }: KeyflowOSStoreDrawerProp
 
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">
-                    Phone <span className="text-muted-foreground">(optional)</span>
-                  </label>
-                  <input
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="+1 868 555 0000"
-                    maxLength={50}
-                    className="kf-input w-full"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">
-                    Describe what you need <span className="text-red-400">*</span>
+                    What do you need? <span className="text-red-400">*</span>
                   </label>
                   <textarea
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Tell us about your business, the challenge you're facing, or the outcome you want. No detail is too small."
+                    placeholder="Tell us about your business, where you are now, what you're trying to achieve, and any specific challenges..."
                     rows={4}
                     maxLength={5000}
                     className="kf-input w-full resize-none"
@@ -360,7 +493,7 @@ export function KeyflowOSStoreDrawer({ open, onClose }: KeyflowOSStoreDrawerProp
               </div>
               <h3 className="text-lg font-semibold mb-2">Request submitted!</h3>
               <p className="text-sm text-muted-foreground leading-relaxed max-w-[300px] mb-6">
-                Our team will review your request and reach out within 24 hours. Check your email for updates and next steps.
+                Our team will review your request and reach out within 24 hours with a tailored plan for your business.
               </p>
               <div className="flex gap-2.5">
                 <button
