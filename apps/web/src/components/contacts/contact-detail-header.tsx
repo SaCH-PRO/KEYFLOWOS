@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   Mail,
   Phone,
@@ -21,6 +22,10 @@ import {
   Copy,
   Bell,
   ChevronUp,
+  CheckCircle2,
+  ArrowRight,
+  ListTodo,
+  Zap,
 } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 import type { ContactDetailData, DetailQuickAction } from "./contact-detail";
@@ -53,6 +58,72 @@ const QUICK_TEMPLATES = [
 
 const WHATSAPP_CHAR_LIMIT = 4096;
 
+const STAGE_CONSEQUENCES: Record<string, { suggestion: string; taskLabel: string; hint: string }> = {
+  LEAD: {
+    suggestion: "Send an introductory message to warm up this lead",
+    taskLabel: "Send intro to {name}",
+    hint: "New leads convert best when contacted within 24 hours",
+  },
+  PROSPECT: {
+    suggestion: "Schedule a discovery call or send a proposal",
+    taskLabel: "Follow up with prospect {name}",
+    hint: "Prospects benefit from a personalized offer within 2 days",
+  },
+  CLIENT: {
+    suggestion: "Send a welcome message and onboard this client",
+    taskLabel: "Onboard client {name}",
+    hint: "Great! Set up their first booking or invoice to get started",
+  },
+  LOST: {
+    suggestion: "Log the reason for loss and schedule a re-engagement check",
+    taskLabel: "Re-engage {name} in 30 days",
+    hint: "Consider a win-back campaign after 30 days",
+  },
+};
+
+type CommChannel = "email" | "call" | "whatsapp" | "compose";
+
+function getPrimaryChannel(contact: ContactDetailData): CommChannel {
+  const pref = contact.preferredChannel?.toLowerCase();
+  if (pref === "whatsapp" && getContactPhone(contact)) return "whatsapp";
+  if (pref === "email" && contact.email) return "email";
+  if (pref === "phone" && contact.phone) return "call";
+
+  const hasOverdueInvoice = (contact.meta?.outstandingBalance ?? 0) > 0;
+  if (hasOverdueInvoice && contact.email) return "email";
+
+  if (getContactPhone(contact)) return "whatsapp";
+  if (contact.email) return "email";
+  if (contact.phone) return "call";
+  return "compose";
+}
+
+function getContextHint(contact: ContactDetailData, nextBookingDate?: string | null): string | null {
+  const balance = contact.meta?.outstandingBalance ?? 0;
+  if (balance > 0) return `Outstanding balance — send a payment reminder`;
+
+  const nextTask = contact.meta?.nextDueTaskAt;
+  if (nextTask) {
+    const due = new Date(nextTask);
+    const now = new Date();
+    const diffDays = Math.ceil((due.getTime() - now.getTime()) / 86400000);
+    if (diffDays <= 0) return "Overdue task — follow up now";
+    if (diffDays <= 1) return "Task due today — reach out";
+  }
+
+  if (nextBookingDate) {
+    const bookingDate = new Date(nextBookingDate);
+    const now = new Date();
+    if (bookingDate.getTime() > now.getTime()) {
+      const diffDays = Math.ceil((bookingDate.getTime() - now.getTime()) / 86400000);
+      if (diffDays <= 1) return "Booking tomorrow — confirm details";
+      if (diffDays <= 3) return `Booking in ${diffDays} days — confirm details`;
+    }
+  }
+
+  return null;
+}
+
 interface ContactDetailHeaderProps {
   contact: ContactDetailData;
   isPinned?: boolean;
@@ -64,6 +135,7 @@ interface ContactDetailHeaderProps {
   onQuickAction?: (contactId: string, action: DetailQuickAction) => void;
   onLogEvent?: (type: string, description?: string) => Promise<void>;
   onAddTask?: (title: string, options?: { dueDate?: string; priority?: string; remindAt?: string }) => Promise<void>;
+  nextBookingDate?: string | null;
 }
 
 export function ContactDetailHeader({
@@ -77,6 +149,7 @@ export function ContactDetailHeader({
   onQuickAction,
   onLogEvent,
   onAddTask,
+  nextBookingDate,
 }: ContactDetailHeaderProps) {
   const fullName = `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "Unnamed";
   const initials = `${contact.firstName?.[0] ?? ""}${contact.lastName?.[0] ?? ""}`.toUpperCase() || "?";
@@ -91,9 +164,21 @@ export function ContactDetailHeader({
   const [copied, setCopied] = useState(false);
   const [showFollowUp, setShowFollowUp] = useState(false);
   const [followUpLoading, setFollowUpLoading] = useState(false);
+  const [stageChange, setStageChange] = useState<{ from: string; to: string } | null>(null);
+  const [stageTaskCreated, setStageTaskCreated] = useState(false);
+
+  const primaryChannel = getPrimaryChannel(contact);
+  const contextHint = getContextHint(contact, nextBookingDate);
 
   const charCount = composeMessage.length;
   const charColor = charCount > WHATSAPP_CHAR_LIMIT ? "text-red-400" : charCount > WHATSAPP_CHAR_LIMIT * 0.8 ? "text-yellow-400" : "text-muted-foreground";
+
+  useEffect(() => {
+    if (stageChange) {
+      const timer = setTimeout(() => setStageChange(null), 8000);
+      return () => clearTimeout(timer);
+    }
+  }, [stageChange]);
 
   const applyTemplate = (template: string) => {
     setComposeMessage(template.replace("{name}", contact.firstName || "there"));
@@ -129,10 +214,46 @@ export function ContactDetailHeader({
     const due = new Date();
     due.setDate(due.getDate() + days);
     const label = days === 1 ? "tomorrow" : days === 3 ? "in 3 days" : "in 1 week";
-    await onAddTask(`Follow up with ${contact.firstName || "contact"} ${label}`, { dueDate: due.toISOString(), priority: "HIGH" });
+    await onAddTask(`Follow up with ${contact.firstName || "client"} ${label}`, { dueDate: due.toISOString(), priority: "HIGH" });
     onLogEvent?.("followup.scheduled", `Follow-up in ${days} day(s)`);
     setFollowUpLoading(false);
     setShowFollowUp(false);
+  };
+
+  const handleStatusChange = useCallback(async (newStatus: string) => {
+    if (!onUpdateStatus || newStatus === contact.status) return;
+    const previousStatus = contact.status || "LEAD";
+    await onUpdateStatus(newStatus);
+    setStageChange({ from: previousStatus, to: newStatus });
+    setStageTaskCreated(false);
+  }, [onUpdateStatus, contact.status]);
+
+  const handleStageTask = useCallback(async () => {
+    if (!onAddTask || !stageChange) return;
+    const consequence = STAGE_CONSEQUENCES[stageChange.to];
+    if (!consequence) return;
+    const due = new Date();
+    due.setDate(due.getDate() + 2);
+    await onAddTask(
+      consequence.taskLabel.replace("{name}", contact.firstName || "client"),
+      { dueDate: due.toISOString(), priority: "HIGH" }
+    );
+    setStageTaskCreated(true);
+  }, [onAddTask, stageChange, contact.firstName]);
+
+  const channelStyles = (channel: CommChannel, isPrimary: boolean) => {
+    const base = "flex-1 flex items-center justify-center gap-2 py-2 rounded-lg transition-all text-sm";
+    if (!isPrimary) return base;
+    return `${base} ring-1 ring-inset`;
+  };
+
+  const channelRingColor = (channel: CommChannel): string => {
+    switch (channel) {
+      case "email": return "ring-blue-400/40";
+      case "call": return "ring-violet-400/40";
+      case "whatsapp": return "ring-emerald-500/40";
+      default: return "ring-[hsl(var(--kf-accent1))]/40";
+    }
   };
 
   return (
@@ -152,7 +273,7 @@ export function ContactDetailHeader({
                 <button
                   onClick={() => onTogglePin(contact.id)}
                   className={`p-0.5 rounded transition-colors ${isPinned ? "text-yellow-400" : "text-muted-foreground hover:text-yellow-400"}`}
-                  title={isPinned ? "Unpin" : "Pin contact"}
+                  title={isPinned ? "Unpin" : "Pin client"}
                 >
                   <Star className={`w-4 h-4 ${isPinned ? "fill-current" : ""}`} />
                 </button>
@@ -224,7 +345,7 @@ export function ContactDetailHeader({
                 <button
                   onClick={onEdit}
                   className="flex items-center gap-1.5 px-2.5 py-1.5 hover:bg-[hsl(var(--kf-accent2))]/20 rounded-md transition-colors text-sm"
-                  title="Edit contact"
+                  title="Edit client"
                 >
                   <Pencil className="w-4 h-4 text-[hsl(var(--kf-accent2))]" />
                   <span className="hidden sm:inline text-xs text-muted-foreground">Edit</span>
@@ -234,7 +355,7 @@ export function ContactDetailHeader({
                 <button
                   onClick={onDelete}
                   className="flex items-center gap-1.5 px-2.5 py-1.5 hover:bg-red-500/20 rounded-md transition-colors text-sm"
-                  title="Delete contact"
+                  title="Delete client"
                 >
                   <Trash2 className="w-4 h-4 text-red-400" />
                   <span className="hidden sm:inline text-xs text-red-400">Delete</span>
@@ -257,7 +378,7 @@ export function ContactDetailHeader({
           return (
             <button
               key={s}
-              onClick={() => onUpdateStatus?.(s)}
+              onClick={() => handleStatusChange(s)}
               className={`relative flex items-center justify-center py-2 text-xs font-semibold rounded-xl transition-all ${
                 isActive
                   ? "text-white shadow-sm"
@@ -274,44 +395,128 @@ export function ContactDetailHeader({
         })}
       </div>
 
+      <AnimatePresence>
+        {stageChange && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            className="overflow-hidden"
+          >
+            <div
+              className="rounded-xl p-3 space-y-2 border"
+              style={{
+                backgroundColor: `${STATUS_COLORS[stageChange.to] ?? "hsl(var(--kf-accent1))"}10`,
+                borderColor: `${STATUS_COLORS[stageChange.to] ?? "hsl(var(--kf-accent1))"}30`,
+              }}
+            >
+              <div className="flex items-center gap-2 text-xs font-medium">
+                <CheckCircle2 className="w-3.5 h-3.5" style={{ color: STATUS_COLORS[stageChange.to] }} />
+                <span>
+                  Stage changed: {stageChange.from.charAt(0) + stageChange.from.slice(1).toLowerCase()}
+                  {" "}<ArrowRight className="w-3 h-3 inline" />{" "}
+                  <span className="font-semibold" style={{ color: STATUS_COLORS[stageChange.to] }}>
+                    {stageChange.to.charAt(0) + stageChange.to.slice(1).toLowerCase()}
+                  </span>
+                </span>
+              </div>
+              {STAGE_CONSEQUENCES[stageChange.to] && (
+                <>
+                  <div className="flex items-start gap-2 text-[11px] text-muted-foreground">
+                    <Zap className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: STATUS_COLORS[stageChange.to] }} />
+                    <span>{STAGE_CONSEQUENCES[stageChange.to].suggestion}</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/70 italic pl-5">
+                    {STAGE_CONSEQUENCES[stageChange.to].hint}
+                  </p>
+                  {onAddTask && !stageTaskCreated && (
+                    <button
+                      onClick={handleStageTask}
+                      className="flex items-center gap-1.5 text-[10px] font-medium px-2.5 py-1.5 rounded-lg transition-colors ml-5"
+                      style={{
+                        backgroundColor: `${STATUS_COLORS[stageChange.to]}15`,
+                        color: STATUS_COLORS[stageChange.to],
+                      }}
+                    >
+                      <ListTodo className="w-3 h-3" />
+                      Create follow-up task
+                    </button>
+                  )}
+                  {stageTaskCreated && (
+                    <div className="flex items-center gap-1.5 text-[10px] text-emerald-400 ml-5">
+                      <CheckCircle2 className="w-3 h-3" />
+                      Task created
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {contextHint && (
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[hsl(var(--kf-accent1))]/5 border border-[hsl(var(--kf-accent1))]/15 text-[10px] text-[hsl(var(--kf-accent1))]">
+          <Zap className="w-3 h-3 flex-shrink-0" />
+          <span>{contextHint}</span>
+        </div>
+      )}
+
       <div className="rounded-xl bg-muted/30 border border-border/50 overflow-hidden">
         <div className="flex items-center gap-2 p-3">
           {contact.email && (
             <a
               href={`mailto:${contact.email}`}
-              className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg hover:bg-blue-500/10 transition-colors text-sm"
+              className={`${channelStyles("email", primaryChannel === "email")} hover:bg-blue-500/10 ${primaryChannel === "email" ? `bg-blue-500/5 ${channelRingColor("email")}` : ""}`}
               title={`Email ${contact.email}`}
             >
               <Mail className="w-4 h-4 text-blue-400" />
               <span className="hidden sm:inline text-blue-400 text-xs">Email</span>
             </a>
           )}
-          {contact.phone && (
+          {contact.phone ? (
             <a
               href={`tel:${contact.phone}`}
-              className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg hover:bg-violet-500/10 transition-colors text-sm"
+              className={`${channelStyles("call", primaryChannel === "call")} hover:bg-violet-500/10 ${primaryChannel === "call" ? `bg-violet-500/5 ${channelRingColor("call")}` : ""}`}
               title={`Call ${contact.phone}`}
             >
               <Phone className="w-4 h-4 text-violet-400" />
               <span className="hidden sm:inline text-violet-400 text-xs">Call</span>
             </a>
+          ) : (
+            <span
+              className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm opacity-30 cursor-not-allowed"
+              title="No phone number"
+            >
+              <Phone className="w-4 h-4 text-muted-foreground" />
+              <span className="hidden sm:inline text-muted-foreground text-xs">Call</span>
+            </span>
           )}
-          {waPhone && (
+          {waPhone ? (
             <a
               href={buildWhatsAppLink(waPhone, `Hi ${contact.firstName || ""},`)}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg hover:bg-emerald-500/10 transition-colors text-sm"
+              className={`${channelStyles("whatsapp", primaryChannel === "whatsapp")} hover:bg-emerald-500/10 ${primaryChannel === "whatsapp" ? `bg-emerald-500/5 ${channelRingColor("whatsapp")}` : ""}`}
               title="WhatsApp"
             >
               <MessageCircle className="w-4 h-4 text-emerald-500" />
               <span className="hidden sm:inline text-emerald-500 text-xs">WhatsApp</span>
             </a>
+          ) : !contact.phone ? null : (
+            <span
+              className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm opacity-30 cursor-not-allowed"
+              title="No WhatsApp number"
+            >
+              <MessageCircle className="w-4 h-4 text-muted-foreground" />
+              <span className="hidden sm:inline text-muted-foreground text-xs">WhatsApp</span>
+            </span>
           )}
           <button
             onClick={() => setComposeOpen(!composeOpen)}
-            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg transition-colors text-sm ${
-              composeOpen ? "bg-[hsl(var(--kf-accent1))]/15" : "hover:bg-[hsl(var(--kf-accent1))]/10"
+            className={`${channelStyles("compose", primaryChannel === "compose")} ${
+              composeOpen ? "bg-[hsl(var(--kf-accent1))]/15" : primaryChannel === "compose" ? `bg-[hsl(var(--kf-accent1))]/5 ${channelRingColor("compose")}` : "hover:bg-[hsl(var(--kf-accent1))]/10"
             }`}
             title="Quick compose"
           >
@@ -341,7 +546,7 @@ export function ContactDetailHeader({
             </div>
             <div className="relative">
               <textarea
-                placeholder={`Write a message to ${contact.firstName || "this contact"}...`}
+                placeholder={`Write a message to ${contact.firstName || "this client"}...`}
                 value={composeMessage}
                 onChange={(e) => setComposeMessage(e.target.value)}
                 className="kf-input w-full min-h-[80px] resize-none text-sm"

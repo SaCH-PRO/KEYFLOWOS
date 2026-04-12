@@ -274,6 +274,7 @@ export function ContactDetail({
             onQuickAction={onQuickAction}
             onLogEvent={onLogEvent}
             onAddTask={onAddTask}
+            nextBookingDate={bookings?.find(b => new Date(b.startTime).getTime() > Date.now())?.startTime}
           />
         </div>
 
