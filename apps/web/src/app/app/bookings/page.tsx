@@ -8,6 +8,7 @@ import {
   X,
   Share2,
   Link2,
+  BarChart3,
 } from "lucide-react";
 import {
   Booking,
@@ -51,6 +52,7 @@ import BookingSideSheet from "./components/booking-side-sheet";
 import TodayStrip from "./components/today-strip";
 import ScheduleFilters from "./components/schedule-filters";
 import CatalogCapacityTab from "./components/catalog-capacity-tab";
+import PerformanceView from "./components/performance-view";
 import { FeatureGuide } from "@/components/ui/feature-guide";
 import { ShareLinkModal } from "@/components/ui/share-link-modal";
 import { SetupModeBanner } from "@/components/ui/setup-mode-banner";
@@ -62,6 +64,7 @@ import { PlanLimitBanner } from "@/components/ui/upgrade-prompt";
 
 const TABS: { key: Tab; label: string; icon: React.ElementType; tooltip?: string }[] = [
   { key: "schedule", label: "Schedule", icon: Calendar, tooltip: "View and manage upcoming bookings. Filter by status, date, or service." },
+  { key: "performance", label: "Performance", icon: BarChart3, tooltip: "Booking analytics, utilization trends, service demand, and AI insights." },
   { key: "catalog", label: "Setup", icon: Briefcase, tooltip: "Configure bookable services, staff availability, and capacity limits." },
 ];
 
@@ -132,7 +135,8 @@ export default function BookingsPage() {
       groupName: "Bookings",
       shortcuts: [
         { key: "1", action: () => handleTabChange("schedule"), description: "Schedule tab" },
-        { key: "2", action: () => handleTabChange("catalog"), description: "Setup tab" },
+        { key: "2", action: () => handleTabChange("performance"), description: "Performance tab" },
+        { key: "3", action: () => handleTabChange("catalog"), description: "Setup tab" },
         { key: "n", action: () => setShowCreateBooking(true), description: "New booking" },
         { key: "r", action: () => void loadData(), description: "Refresh data" },
         { key: "Escape", action: () => {
@@ -420,7 +424,7 @@ export default function BookingsPage() {
         <PageHeader
           icon={Calendar}
           title="Bookings"
-          subtitle="Schedule, catalog & performance"
+          subtitle="Schedule, booking health, and capacity"
         />
         <BookingsSkeleton />
       </div>
@@ -432,7 +436,7 @@ export default function BookingsPage() {
       <PageHeader
         icon={Calendar}
         title="Bookings"
-        subtitle="Schedule, catalog & performance"
+        subtitle="Schedule, booking health, and capacity"
         titleExtra={
           <div className="flex items-center gap-2">
             <FeatureGuide
@@ -575,6 +579,15 @@ export default function BookingsPage() {
                 onSmartAction={handleSmartAction}
               />
             </div>
+          )}
+          {tab === "performance" && (
+            <PerformanceView
+              bookings={bookings}
+              services={services}
+              staff={staff}
+              stats={stats}
+              scheduleHealth={scheduleHealth}
+            />
           )}
           {tab === "catalog" && (
             <div data-walkthrough="bookings-catalog">

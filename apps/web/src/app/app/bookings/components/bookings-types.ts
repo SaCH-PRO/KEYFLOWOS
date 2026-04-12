@@ -2,7 +2,8 @@ import type React from "react";
 export type { Booking, Service, StaffMember, Contact, BookingStats } from "@/lib/client";
 import type { Booking } from "@/lib/client";
 
-export type Tab = "schedule" | "catalog";
+export type Tab = "schedule" | "performance" | "catalog";
+export type SetupSubTab = "services" | "staff" | "availability" | "hours";
 export type StatusFilter = "ALL" | "PENDING" | "CONFIRMED" | "CANCELLED" | "COMPLETED";
 
 export const STATUS_STYLE: Record<string, React.CSSProperties> = {
