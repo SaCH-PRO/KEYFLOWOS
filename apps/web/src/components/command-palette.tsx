@@ -191,21 +191,20 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   ], [router]);
 
   const NAV_ACTIONS: Action[] = useMemo(() => [
-    { id: "nav-command", label: "Command", hint: "Command Center / Today view", shortcut: "⌘1", icon: Zap, onSelect: () => router.push("/app") },
-    { id: "nav-contacts", label: "Contacts", hint: "CRM & pipeline", shortcut: "⌘2", icon: Users, onSelect: () => router.push("/app/crm/pipeline") },
-    { id: "nav-commerce", label: "Commerce", hint: "Invoices, quotes & products", shortcut: "⌘3", icon: Receipt, onSelect: () => router.push("/app/commerce") },
-    { id: "nav-bookings", label: "Bookings", hint: "Schedule & calendar", shortcut: "⌘4", icon: Calendar, onSelect: () => router.push("/app/bookings") },
-    { id: "nav-marketing", label: "Marketing", hint: "Campaigns, social & lead forms", icon: Megaphone, onSelect: () => router.push("/app/marketing") },
-    { id: "nav-marketplace", label: "Marketplace", hint: "Discover & connect", icon: Globe, onSelect: () => router.push("/app/marketplace") },
+    { id: "nav-cockpit", label: "Cockpit", hint: "Live operations dashboard", shortcut: "⌘1", icon: Zap, onSelect: () => router.push("/app") },
+    { id: "nav-clients", label: "Clients", hint: "CRM & pipeline", shortcut: "⌘2", icon: Users, onSelect: () => router.push("/app/crm/pipeline") },
+    { id: "nav-revenue", label: "Revenue", hint: "Invoices, quotes & payments", shortcut: "⌘3", icon: Receipt, onSelect: () => router.push("/app/commerce") },
+    { id: "nav-calendar", label: "Calendar", hint: "Bookings & schedule", shortcut: "⌘4", icon: Calendar, onSelect: () => router.push("/app/bookings") },
+    { id: "nav-content", label: "Content", hint: "Campaigns, social & lead forms", icon: Megaphone, onSelect: () => router.push("/app/marketing") },
+    { id: "nav-flows", label: "Flows", hint: "Automations & playbooks", icon: Zap, onSelect: () => router.push("/app/automations") },
     { id: "nav-expenses", label: "Expenses", hint: "Track spending & budgets", icon: Receipt, onSelect: () => router.push("/app/expenses") },
     { id: "nav-projects", label: "Projects", hint: "Kanban board & tasks", icon: FolderKanban, onSelect: () => router.push("/app/projects") },
-    { id: "nav-automations", label: "Automations", hint: "Playbooks & workflow triggers", icon: Zap, onSelect: () => router.push("/app/automations") },
     { id: "nav-reports", label: "Reports", hint: "Analytics & KPIs", icon: BarChart3, onSelect: () => router.push("/app/reports") },
-    { id: "nav-store", label: "Store Setup", hint: "Online storefront", icon: Store, onSelect: () => router.push("/app/store") },
+    { id: "nav-studio", label: "Studio", hint: "Business configuration", icon: Settings, onSelect: () => router.push("/app/settings") },
+    { id: "nav-presence", label: "Presence", hint: "Online storefront & booking page", icon: Store, onSelect: () => router.push("/app/store") },
     { id: "nav-learn", label: "Learn", hint: "MasterClass courses", icon: GraduationCap, onSelect: () => router.push("/app/learn") },
     { id: "nav-community", label: "Community", hint: "Forum & founder circles", icon: Users, onSelect: () => router.push("/app/community") },
-    { id: "nav-settings", label: "Settings", hint: "Business settings", icon: Settings, onSelect: () => router.push("/app/settings") },
-    { id: "nav-profile", label: "My Profile", hint: "Personal info & identity", icon: User, onSelect: () => router.push("/app/profile") },
+    { id: "nav-branding", label: "Branding", hint: "Profile, brand & identity", icon: User, onSelect: () => router.push("/app/profile") },
   ], [router]);
 
   const filteredQuick = useMemo(() => {
