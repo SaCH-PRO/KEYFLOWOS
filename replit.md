@@ -21,7 +21,7 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 **Technical Implementations & Features:**
 - **AI-Powered Automation:** Business Autopilot System for archetype inference, revenue model detection, task orchestration, and legal/compliance.
 - **Command Center:** Simplified "Today" surface with greeting header, cash flow forecast, priority queue, and collapsible AI briefing card.
-- **Modules:** Commerce, CRM, Bookings, Marketing, Store, Expenses, Projects, and Reports. Automations/Learn/Community accessible via URL.
+- **Modules:** Commerce, CRM, Bookings, Marketing, Store (redesigned with gradient hero header, stat cards, card-grid storefront config), Expenses, Projects, and Reports. Automations/Learn/Community accessible via URL.
 - **Sidebar Navigation:** Consolidated navigation with CORE (Today, Contacts, Commerce, Bookings), GROW (Marketing, Store), and MANAGE (Expenses, Projects, Reports) groups. Settings are in the bottom section.
 - **Business Intelligence Context System:** Gathers comprehensive business context from 16 guidance sub-profiles, organized into labeled domain sections. Features a 5-tier weighted completeness system, progressive deepening prompts, and capability unlock mapping. Includes a Business Builder intake wizard.
 - **AI Copilot System:** Global AI entry point with route-aware context detection, chat drawer, and suggestion nudges.
