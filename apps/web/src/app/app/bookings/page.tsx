@@ -50,6 +50,7 @@ import CalendarView from "./calendar/calendar-view";
 import BookingDetailDrawer from "./components/booking-detail-drawer";
 import BookingSideSheet from "./components/booking-side-sheet";
 import TodayStrip from "./components/today-strip";
+import { ScheduleHints } from "./components/schedule-hints";
 import ScheduleFilters from "./components/schedule-filters";
 import CatalogCapacityTab from "./components/catalog-capacity-tab";
 import PerformanceView from "./components/performance-view";
@@ -548,7 +549,7 @@ export default function BookingsPage() {
           transition={{ type: "spring", bounce: 0.15, duration: 0.35 }}
         >
           {tab === "schedule" && (
-            <div className="space-y-3">
+            <div className="space-y-2">
               <TodayStrip
                 bookings={bookings}
                 stats={stats}
@@ -559,6 +560,16 @@ export default function BookingsPage() {
                 onViewStaffLoad={(staffId) => {
                   setStaffFilter(staffId);
                   setBanner({ text: `Showing bookings for ${staff.find((s) => s.id === staffId)?.name ?? "staff"}`, type: "info" });
+                }}
+              />
+              <ScheduleHints
+                scheduleHealth={scheduleHealth}
+                onSendOffer={(day, count) => {
+                  setBanner({ text: `Preparing offer for ${day} (${count} clients)...`, type: "info" });
+                }}
+                onRebook={(name) => {
+                  setBanner({ text: `Opening rebooking for ${name}...`, type: "info" });
+                  setShowCreateBooking(true);
                 }}
               />
               <ScheduleFilters
@@ -638,6 +649,7 @@ export default function BookingsPage() {
             onSyncCalendar={handleSyncBooking}
             onReschedule={handleReschedule}
             onUpdateNotes={handleUpdateNotes}
+            onCreateInvoice={handleCreateInvoice}
             calendarConnected={calendarConnected}
           />
         )}
