@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { CommandPalette } from "@/components/command-palette";
@@ -35,6 +35,18 @@ import {
   FileText,
   User,
   Sparkles,
+  Gauge,
+  LayoutGrid,
+  Wrench,
+  Globe,
+  Building2,
+  Package,
+  Palette,
+  Plug,
+  Mail,
+  BookOpen,
+  ChevronRight,
+  Users2,
 } from "lucide-react";
 import { AiCommandBar, AiCopilotTrigger } from "./_command/ai-command-bar";
 import { usePlanLimitHandler } from "@/hooks/use-plan";
@@ -166,42 +178,86 @@ interface NavItem {
   exactMatch?: boolean;
 }
 
-const navGroups: { label: string; items: NavItem[] }[] = [
-  {
-    label: "CORE",
-    items: [
-      { label: "Today", href: "/app", icon: Zap, exactMatch: true },
-      { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
-      { label: "Commerce", href: "/app/commerce", icon: CreditCard },
-      { label: "Bookings", href: "/app/bookings", icon: Calendar },
-    ],
-  },
-  {
-    label: "GROW",
-    items: [
-      { label: "Marketing", href: "/app/marketing", icon: Megaphone },
-      { label: "Store", href: "/app/store", icon: Store },
-    ],
-  },
-  {
-    label: "MANAGE",
-    items: [
-      { label: "Expenses", href: "/app/expenses", icon: Receipt },
-      { label: "Projects", href: "/app/projects", icon: FolderKanban },
-      { label: "Reports", href: "/app/reports", icon: BarChart3 },
-    ],
-  },
+type PrimarySectionId = "cockpit" | "workspaces" | "studio" | "public";
+
+interface PrimaryNavItem {
+  id: PrimarySectionId;
+  label: string;
+  icon: typeof Gauge;
+  href?: string;
+}
+
+const primaryNav: PrimaryNavItem[] = [
+  { id: "cockpit", label: "Cockpit", icon: Gauge, href: "/app" },
+  { id: "workspaces", label: "Workspaces", icon: LayoutGrid },
+  { id: "studio", label: "Studio", icon: Wrench },
+  { id: "public", label: "Public", icon: Globe },
 ];
 
-const bottomNavItems = [
-  { label: "Settings", href: "/app/settings", icon: Settings },
+const secondaryNav: Record<string, NavItem[]> = {
+  workspaces: [
+    { label: "Clients", href: "/app/crm/pipeline", icon: Users },
+    { label: "Calendar", href: "/app/bookings", icon: Calendar },
+    { label: "Revenue", href: "/app/commerce", icon: CreditCard },
+    { label: "Content", href: "/app/marketing", icon: Megaphone },
+    { label: "Flows", href: "/app/automations", icon: Zap },
+    { label: "Projects", href: "/app/projects", icon: FolderKanban },
+    { label: "Expenses", href: "/app/expenses", icon: Receipt },
+    { label: "Reports", href: "/app/reports", icon: BarChart3 },
+    { label: "Documents", href: "/app/documents", icon: FileText },
+  ],
+  studio: [
+    { label: "Business", href: "/app/settings/business", icon: Building2 },
+    { label: "Services", href: "/app/commerce?tab=products", icon: Package, matchTab: "products" },
+    { label: "Team", href: "/app/settings/team", icon: Users2 },
+    { label: "Branding", href: "/app/profile", icon: Palette },
+    { label: "Integrations", href: "/app/settings/connections", icon: Plug },
+    { label: "Templates", href: "/app/settings/templates", icon: FileText },
+    { label: "Emails", href: "/app/settings/notifications", icon: Mail },
+    { label: "Presence", href: "/app/store", icon: Store },
+  ],
+  public: [
+    { label: "Community", href: "/app/community", icon: MessageCircle },
+    { label: "Learn", href: "/app/learn", icon: BookOpen },
+    { label: "Marketplace", href: "/app/marketplace", icon: Globe },
+  ],
+};
+
+const routeToSurface: [string, PrimarySectionId][] = [
+  ["/app/settings", "studio"],
+  ["/app/profile", "studio"],
+  ["/app/store", "studio"],
+  ["/app/community", "public"],
+  ["/app/learn", "public"],
+  ["/app/marketplace", "public"],
+  ["/app/social", "workspaces"],
+  ["/app/crm", "workspaces"],
+  ["/app/commerce", "workspaces"],
+  ["/app/bookings", "workspaces"],
+  ["/app/marketing", "workspaces"],
+  ["/app/automations", "workspaces"],
+  ["/app/projects", "workspaces"],
+  ["/app/expenses", "workspaces"],
+  ["/app/reports", "workspaces"],
+  ["/app/documents", "workspaces"],
+  ["/app/onboarding", "cockpit"],
 ];
+
+function detectPrimarySection(pathname: string): PrimarySectionId {
+  if (pathname === "/app") return "cockpit";
+  for (const [prefix, section] of routeToSurface) {
+    if (pathname === prefix || pathname.startsWith(prefix + "/")) {
+      return section;
+    }
+  }
+  return "workspaces";
+}
 
 const mobileBottomNav = [
-  { label: "Today", href: "/app", icon: Zap },
-  { label: "Commerce", href: "/app/commerce", icon: CreditCard },
-  { label: "Bookings", href: "/app/bookings", icon: Calendar },
-  { label: "Contacts", href: "/app/crm/pipeline", icon: Users },
+  { label: "Cockpit", href: "/app", icon: Gauge },
+  { label: "Revenue", href: "/app/commerce", icon: CreditCard },
+  { label: "Calendar", href: "/app/bookings", icon: Calendar },
+  { label: "Clients", href: "/app/crm/pipeline", icon: Users },
   { label: "More", href: "#more", icon: MoreHorizontal },
 ];
 
@@ -210,7 +266,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const isNavActive = useCallback((item: NavItem) => {
+  const activePrimary = useMemo(() => detectPrimarySection(pathname), [pathname]);
+  const [expandedSection, setExpandedSection] = useState<PrimarySectionId | null>(null);
+  const secondaryVisible = expandedSection ?? (activePrimary !== "cockpit" ? activePrimary : null);
+
+  useEffect(() => {
+    setExpandedSection(null);
+  }, [pathname]);
+
+  const isSecondaryActive = useCallback((item: NavItem) => {
     const basePath = item.href.split("?")[0];
     if (item.matchTab) {
       return pathname === basePath && searchParams.get("tab") === item.matchTab;
@@ -218,11 +282,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     if (item.exactMatch) {
       return pathname === basePath && !searchParams.get("tab");
     }
-    return pathname === item.href || (item.href !== "/app" && pathname.startsWith(item.href));
+    return pathname === basePath || pathname.startsWith(basePath + "/");
   }, [pathname, searchParams]);
+
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -247,10 +311,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         const isUuid = /^[0-9a-f-]{20,}$/i.test(last || "");
         const labelSegment = isUuid && segments.length > 1 ? segments[segments.length - 2] : last;
         const labelMap: Record<string, string> = {
-          app: "Command", crm: "CRM", pipeline: "Contacts", commerce: "Commerce",
-          bookings: "Bookings", marketing: "Marketing", expenses: "Expenses",
-          projects: "Projects", documents: "Documents", automations: "Automations", reports: "Reports",
-          store: "Store Setup", settings: "Settings", learn: "Learn",
+          app: "Cockpit", crm: "CRM", pipeline: "Clients", commerce: "Revenue",
+          bookings: "Calendar", marketing: "Content", expenses: "Expenses",
+          projects: "Projects", documents: "Documents", automations: "Flows", reports: "Reports",
+          store: "Presence", settings: "Studio", learn: "Learn",
           community: "Community", marketplace: "Marketplace",
         };
         const label = labelMap[labelSegment || ""] || (labelSegment ? labelSegment.charAt(0).toUpperCase() + labelSegment.slice(1) : "");
@@ -371,111 +435,123 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  const handlePrimaryClick = (item: PrimaryNavItem) => {
+    if (item.href) {
+      router.push(item.href);
+      setExpandedSection(null);
+    } else {
+      setExpandedSection((prev) => (prev === item.id ? null : item.id));
+    }
+  };
+
+  const currentSecondary = secondaryVisible ? secondaryNav[secondaryVisible] : null;
+  const currentSectionLabel = primaryNav.find((p) => p.id === secondaryVisible)?.label;
+
   return (
     <div className="h-dvh bg-background text-foreground overflow-hidden">
       <div className="flex h-full">
-        <aside 
+        <aside
           role="navigation"
           aria-label="Main navigation"
-          className={cn(
-            "hidden md:flex md:flex-col border-r border-border h-full transition-all duration-200",
-            sidebarCollapsed ? "w-[60px]" : "w-56"
-          )}
-          style={{ background: "hsl(var(--kf-sidebar-bg))" }}
+          className="hidden md:flex h-full"
         >
-          <div className="flex items-center gap-2.5 px-3 py-4">
-            <div 
-              className="h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0"
+          <div
+            className="w-[52px] flex flex-col items-center border-r border-border h-full py-3 gap-1 flex-shrink-0"
+            style={{ background: "hsl(var(--kf-sidebar-bg))" }}
+          >
+            <Link
+              href="/app"
+              className="h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0 mb-3"
               style={{ background: "hsl(var(--kf-accent1))" }}
+              title="KEYFLOWOS"
             >
               <Zap className="w-4 h-4 text-white" />
+            </Link>
+
+            {primaryNav.map((item) => {
+              const Icon = item.icon;
+              const isActive = activePrimary === item.id;
+              const isExpanded = expandedSection === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => handlePrimaryClick(item)}
+                  className={cn(
+                    "w-9 h-9 rounded-lg flex items-center justify-center transition-all relative group",
+                    isActive
+                      ? "text-foreground"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
+                    isExpanded && "bg-muted/50"
+                  )}
+                  title={item.label}
+                  aria-label={item.label}
+                >
+                  {isActive && (
+                    <div
+                      className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-[14px] w-[3px] h-5 rounded-r-full"
+                      style={{ background: "hsl(var(--kf-accent1))" }}
+                    />
+                  )}
+                  <Icon className="w-[18px] h-[18px]" />
+                </button>
+              );
+            })}
+
+            <div className="mt-auto flex flex-col items-center gap-1">
+              <button
+                onClick={() => setKfStoreOpen(true)}
+                className="w-9 h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+                title="KF Store"
+              >
+                <div
+                  className="w-[18px] h-[18px] rounded flex items-center justify-center"
+                  style={{ background: "linear-gradient(135deg, #F97316, #14B8A6)" }}
+                >
+                  <Sparkles className="w-2.5 h-2.5 text-white" />
+                </div>
+              </button>
+              <ThemeToggle />
             </div>
-            {!sidebarCollapsed && (
-              <h1 className="text-sm font-bold tracking-tight">KEYFLOWOS</h1>
-            )}
           </div>
 
-          <div className="flex-1 flex flex-col py-1 px-2 overflow-y-auto min-h-0">
-            {navGroups.map((group, groupIdx) => (
-              <div key={group.label} className={cn(groupIdx > 0 && "mt-4")}>
-                {!sidebarCollapsed && (
-                  <div className="kf-section-label">{group.label}</div>
-                )}
-                {sidebarCollapsed && groupIdx > 0 && (
-                  <div className="kf-divider mx-1 mb-1" />
-                )}
+          {currentSecondary && (
+            <div
+              className="w-[192px] border-r border-border h-full flex flex-col overflow-hidden"
+              style={{ background: "hsl(var(--kf-sidebar-bg) / 0.7)" }}
+            >
+              <div className="px-3 py-3 border-b border-border/50">
+                <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {currentSectionLabel}
+                </h2>
+              </div>
+              <div className="flex-1 overflow-y-auto py-1.5 px-1.5">
                 <div className="flex flex-col gap-px">
-                  {group.items.map((item) => {
+                  {currentSecondary.map((item) => {
                     const Icon = item.icon;
-                    const active = isNavActive(item);
+                    const active = isSecondaryActive(item);
                     return (
                       <Link
-                        key={item.href}
+                        key={item.href + item.label}
                         href={item.href}
                         className={cn(
-                          "kf-nav-item",
-                          active && "active",
-                          sidebarCollapsed && "justify-center px-2"
+                          "flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all",
+                          active
+                            ? "bg-[hsl(var(--kf-accent1))]/10 text-foreground font-medium"
+                            : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                         )}
-                        title={sidebarCollapsed ? item.label : undefined}
                       >
-                        <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
-                        {!sidebarCollapsed && <span>{item.label}</span>}
+                        <Icon className="w-4 h-4 flex-shrink-0" />
+                        <span>{item.label}</span>
+                        {active && (
+                          <ChevronRight className="w-3 h-3 ml-auto text-muted-foreground/50" />
+                        )}
                       </Link>
                     );
                   })}
                 </div>
               </div>
-            ))}
-          </div>
-
-          <div className="mt-auto px-2 pb-3 space-y-px">
-            <button
-              onClick={() => setKfStoreOpen(true)}
-              className={cn(
-                "kf-nav-item w-full group",
-                sidebarCollapsed && "justify-center px-2"
-              )}
-              title={sidebarCollapsed ? "KeyflowOS Store" : undefined}
-            >
-              <div
-                className="w-[18px] h-[18px] rounded flex items-center justify-center flex-shrink-0"
-                style={{ background: "linear-gradient(135deg, #F97316, #14B8A6)" }}
-              >
-                <Sparkles className="w-3 h-3 text-white" />
-              </div>
-              {!sidebarCollapsed && <span className="text-[13px]">KF Store</span>}
-            </button>
-            {bottomNavItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = pathname.startsWith(item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    "kf-nav-item",
-                    isActive && "active",
-                    sidebarCollapsed && "justify-center px-2"
-                  )}
-                  title={sidebarCollapsed ? item.label : undefined}
-                >
-                  <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
-                  {!sidebarCollapsed && <span>{item.label}</span>}
-                </Link>
-              );
-            })}
-            
-            <div className="pt-2 mt-1 border-t border-border flex items-center justify-between">
-              {!sidebarCollapsed && <ThemeToggle />}
-              <button
-                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              >
-                {sidebarCollapsed ? <PanelLeft className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
-              </button>
             </div>
-          </div>
+          )}
         </aside>
 
         <main role="main" className="flex-1 flex flex-col h-full min-w-0">
@@ -673,7 +749,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                       role="menuitem"
                     >
                       <Settings className="w-3.5 h-3.5 text-muted-foreground" />
-                      Settings
+                      Studio
                     </Link>
                     <div className="border-t border-border mt-1 pt-1">
                       <button
@@ -703,7 +779,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="md:hidden fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="Navigation menu">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setMobileDrawerOpen(false)} />
           <div
-            className="absolute left-0 top-0 bottom-0 w-64 border-r border-border flex flex-col overflow-y-auto"
+            className="absolute left-0 top-0 bottom-0 w-72 border-r border-border flex flex-col overflow-y-auto"
             role="navigation"
             aria-label="Main navigation"
             style={{ background: "hsl(var(--kf-sidebar-bg))" }}
@@ -751,66 +827,66 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             )}
 
             <div className="flex-1 py-2 px-2">
-              {navGroups.map((group, groupIdx) => (
-                <div key={group.label} className={cn(groupIdx > 0 && "mt-3")}>
-                  <div className="kf-section-label">{group.label}</div>
-                  <div className="flex flex-col gap-px">
-                    {group.items.map((item) => {
-                      const Icon = item.icon;
-                      const active = isNavActive(item);
-                      return (
-                        <Link
-                          key={item.href}
-                          href={item.href}
-                          onClick={() => setMobileDrawerOpen(false)}
-                          className={cn(
-                            "kf-nav-item py-2.5 active:scale-[0.98]",
-                            active && "active"
-                          )}
-                        >
-                          <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
-                          <span>{item.label}</span>
-                        </Link>
-                      );
-                    })}
+              <Link
+                href="/app"
+                onClick={() => setMobileDrawerOpen(false)}
+                className={cn(
+                  "kf-nav-item py-2.5 active:scale-[0.98] mb-2",
+                  pathname === "/app" && "active"
+                )}
+              >
+                <Gauge className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
+                <span>Cockpit</span>
+              </Link>
+
+              {(["workspaces", "studio", "public"] as const).map((sectionId) => {
+                const section = primaryNav.find((p) => p.id === sectionId)!;
+                const items = secondaryNav[sectionId] || [];
+                const SectionIcon = section.icon;
+                return (
+                  <div key={sectionId} className="mt-2">
+                    <div className="kf-section-label flex items-center gap-1.5">
+                      <SectionIcon className="w-3 h-3" />
+                      {section.label}
+                    </div>
+                    <div className="flex flex-col gap-px">
+                      {items.map((item) => {
+                        const Icon = item.icon;
+                        const active = isSecondaryActive(item);
+                        return (
+                          <Link
+                            key={item.href + item.label}
+                            href={item.href}
+                            onClick={() => setMobileDrawerOpen(false)}
+                            className={cn(
+                              "kf-nav-item py-2.5 active:scale-[0.98]",
+                              active && "active"
+                            )}
+                          >
+                            <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
+                            <span>{item.label}</span>
+                          </Link>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
 
               <div className="kf-divider my-2" />
 
-              <div className="flex flex-col gap-px">
-                <button
-                  onClick={() => { setMobileDrawerOpen(false); setKfStoreOpen(true); }}
-                  className="kf-nav-item py-2.5 active:scale-[0.98] w-full"
+              <button
+                onClick={() => { setMobileDrawerOpen(false); setKfStoreOpen(true); }}
+                className="kf-nav-item py-2.5 active:scale-[0.98] w-full"
+              >
+                <div
+                  className="w-[18px] h-[18px] rounded flex items-center justify-center flex-shrink-0"
+                  style={{ background: "linear-gradient(135deg, #F97316, #14B8A6)" }}
                 >
-                  <div
-                    className="w-[18px] h-[18px] rounded flex items-center justify-center flex-shrink-0"
-                    style={{ background: "linear-gradient(135deg, #F97316, #14B8A6)" }}
-                  >
-                    <Sparkles className="w-3 h-3 text-white" />
-                  </div>
-                  <span>KF Store</span>
-                </button>
-                {bottomNavItems.map((item) => {
-                  const Icon = item.icon;
-                  const isActive = pathname.startsWith(item.href);
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      onClick={() => setMobileDrawerOpen(false)}
-                      className={cn(
-                        "kf-nav-item py-2.5 active:scale-[0.98]",
-                        isActive && "active"
-                      )}
-                    >
-                      <Icon className="w-[18px] h-[18px] flex-shrink-0 kf-nav-icon" />
-                      <span>{item.label}</span>
-                    </Link>
-                  );
-                })}
-              </div>
+                  <Sparkles className="w-3 h-3 text-white" />
+                </div>
+                <span>KF Store</span>
+              </button>
             </div>
 
             <div className="mt-auto px-2 pb-4 space-y-1 border-t border-border pt-2">
