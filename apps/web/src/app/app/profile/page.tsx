@@ -16,7 +16,6 @@ import ProfessionalProfileSection from "./components/professional-profile-sectio
 import DocumentsTab from "./components/documents-tab";
 import BusinessBuilderCard from "./components/business-builder-card";
 import SecuritySection from "./components/security-section";
-import ComplianceSection from "./components/compliance-section";
 import BrandIdentityTab from "./components/brand-identity-tab";
 import { JourneyIndicator, type CompletenessItem } from "./components/journey-indicator";
 import { BusinessContextCard } from "./components/business-context-card";
@@ -109,7 +108,6 @@ export default function ProfileSettingsPage() {
   const [businessLoading, setBusinessLoading] = useState(false);
   const [profileCompleteness, setProfileCompleteness] = useState(0);
   const [docCount, setDocCount] = useState(0);
-  const [complianceProgress, setComplianceProgress] = useState({ completed: 0, total: 5 });
   const [bizBrandData, setBizBrandData] = useState<{
     primaryColor?: string | null;
     facebook?: string | null;
@@ -152,14 +150,12 @@ export default function ProfileSettingsPage() {
   const handlePersonalDirtyChange = useCallback((dirty: boolean) => setIsPersonalDirty(dirty), []);
   const handleBizDirtyChange = useCallback((dirty: boolean) => setIsBizDirty(dirty), []);
   const handleBizInfoDirtyChange = useCallback((dirty: boolean) => setIsBizInfoDirty(dirty), []);
-  const handleComplianceChange = useCallback((completed: number, total: number) => setComplianceProgress({ completed, total }), []);
 
   const completenessItems: CompletenessItem[] = useMemo(() => {
     const hasPersonalName = !!(savedForm.firstName || savedForm.name);
     const hasPhone = !!savedForm.phone;
     const hasBranding = !!bizBrandData?.primaryColor;
     const hasSocial = !!(bizBrandData?.facebook || bizBrandData?.instagram || bizBrandData?.twitter || bizBrandData?.linkedin);
-    const complianceDone = complianceProgress.completed >= complianceProgress.total;
     const bizItems: CompletenessItem[] = completenessFields.length > 0
       ? completenessFields.map((field) => ({
           label: field.label,
@@ -177,10 +173,9 @@ export default function ProfileSettingsPage() {
       ...bizItems,
       { label: "Set up branding", done: hasBranding, tab: "brand" as TabId, icon: Palette },
       { label: "Connect social accounts", done: hasSocial, tab: "brand" as TabId, icon: Globe },
-      { label: "Complete compliance checklist", done: complianceDone, tab: "profile" as TabId, icon: Shield },
       { label: "Generate your first document", done: docCount > 0, tab: "documents" as TabId, icon: FileText },
     ];
-  }, [savedForm, businessData, profileCompleteness, docCount, bizBrandData, complianceProgress, completenessFields]);
+  }, [savedForm, businessData, profileCompleteness, docCount, bizBrandData, completenessFields]);
 
   useEffect(() => {
     apiGet<{ fields: ProfileCompletenessField[] }>("/identity/profile-completeness-fields")
@@ -442,16 +437,6 @@ export default function ProfileSettingsPage() {
             <motion.div variants={fadeUp} className="kf-card p-6">
               <ProfileSectionErrorBoundary sectionName="Security">
                 <SecuritySection onStatus={setStatus} />
-              </ProfileSectionErrorBoundary>
-            </motion.div>
-
-            <motion.div variants={fadeUp} className="kf-card p-6">
-              <ProfileSectionErrorBoundary sectionName="Compliance">
-                <ComplianceSection
-                  businessId={businessId}
-                  onStatus={setStatus}
-                  onComplianceChange={handleComplianceChange}
-                />
               </ProfileSectionErrorBoundary>
             </motion.div>
 

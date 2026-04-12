@@ -94,15 +94,6 @@ interface FinancialOutlook {
   sensitivityAnalysis?: string;
 }
 
-interface LegalCompliance {
-  businessStructure: string;
-  registrations: string[];
-  taxObligations: string;
-  contracts: string[];
-  insuranceNeeds: string[];
-  complianceChecklist: string[];
-}
-
 interface SwotAnalysis {
   strengths: string[];
   weaknesses: string[];
@@ -172,7 +163,6 @@ interface GeneratedModel {
   summary: string;
   executiveBrief: ExecutiveBrief;
   canvas: BusinessModelCanvas;
-  legalCompliance: LegalCompliance;
   competitiveAnalysis: CompetitiveAnalysis;
   unitEconomics: UnitEconomics;
   roadmap: RoadmapPhase[];
@@ -295,11 +285,6 @@ const TAB_QUICK_LINKS: Record<string, QuickLink[]> = {
     { label: "Contacts", path: "/app/crm/pipeline", icon: Users, colorVar: "--kf-accent2" },
     { label: "Store", path: "/app/store", icon: ShoppingBag, colorVar: "--kf-info" },
     { label: "Marketing", path: "/app/marketing", icon: Megaphone, colorVar: "--kf-success" },
-  ],
-  legal: [
-    { label: "Documents", path: "/app/profile?tab=documents", icon: FileText, colorVar: "--kf-accent2" },
-    { label: "Settings", path: "/app/settings", icon: Settings, colorVar: "--kf-info" },
-    { label: "Commerce", path: "/app/commerce", icon: DollarSign, colorVar: "--kf-accent1" },
   ],
   swot: [
     { label: "Marketing", path: "/app/marketing", icon: Megaphone, colorVar: "--kf-accent1" },
@@ -454,7 +439,6 @@ function validateModel(raw: unknown): GeneratedModel {
     canvas[k] = toStr(canvasRaw[k]);
   }
   const fin = (m.financialOutlook && typeof m.financialOutlook === "object" ? m.financialOutlook : {}) as Record<string, unknown>;
-  const legal = (m.legalCompliance && typeof m.legalCompliance === "object" ? m.legalCompliance : {}) as Record<string, unknown>;
   const comp = (m.competitiveAnalysis && typeof m.competitiveAnalysis === "object" ? m.competitiveAnalysis : {}) as Record<string, unknown>;
   const swotRaw = (comp.swot && typeof comp.swot === "object" ? comp.swot : {}) as Record<string, unknown>;
   const unit = (m.unitEconomics && typeof m.unitEconomics === "object" ? m.unitEconomics : {}) as Record<string, unknown>;
@@ -534,14 +518,6 @@ function validateModel(raw: unknown): GeneratedModel {
       keyActivities: canvas.keyActivities ?? "",
       keyPartnerships: canvas.keyPartnerships ?? "",
       costStructure: canvas.costStructure ?? "",
-    },
-    legalCompliance: {
-      businessStructure: s(legal.businessStructure, "Consult a local attorney"),
-      registrations: a(legal.registrations).map(String),
-      taxObligations: s(legal.taxObligations, "Consult BIR for specific obligations"),
-      contracts: a(legal.contracts).map(String),
-      insuranceNeeds: a(legal.insuranceNeeds).map(String),
-      complianceChecklist: a(legal.complianceChecklist).map(String),
     },
     competitiveAnalysis: {
       swot: {
@@ -653,7 +629,7 @@ function useBusinessProgress(businessId: string | null) {
 }
 
 type ViewMode = "overview" | "intake" | "results";
-type ResultTab = "overview" | "canvas" | "legal" | "swot" | "financials" | "roadmap" | "actions" | "risks" | "governance";
+type ResultTab = "overview" | "canvas" | "swot" | "financials" | "roadmap" | "actions" | "risks" | "governance";
 
 const INITIAL_INTAKE: IntakeForm = {
   businessIdea: "", targetMarket: "", valueProposition: "",
@@ -1268,7 +1244,6 @@ function IntakeWizard({ step, form, prefilled, generating, error, onFormChange, 
 const RESULT_TABS: { id: ResultTab; label: string; icon: React.ElementType }[] = [
   { id: "overview", label: "Brief", icon: Eye },
   { id: "canvas", label: "Canvas", icon: BarChart3 },
-  { id: "legal", label: "Legal", icon: Shield },
   { id: "swot", label: "SWOT", icon: Target },
   { id: "financials", label: "Finance", icon: DollarSign },
   { id: "roadmap", label: "Roadmap", icon: Flag },
@@ -1308,19 +1283,6 @@ function modelToSections(model: GeneratedModel): Array<{ sectionName: string; co
     .map(([k, v]) => `${canvasLabels[k] || k}: ${v}`)
     .join("\n\n");
   sections.push({ sectionName: "Business Model Canvas", content: canvasContent });
-
-  if (model.legalCompliance) {
-    const lc = model.legalCompliance;
-    const legalLines = [
-      `Business Structure: ${lc.businessStructure}`,
-      `\nTax Obligations: ${lc.taxObligations}`,
-    ];
-    if (lc.registrations?.length) legalLines.push(`\nRequired Registrations:\n${lc.registrations.map((r) => `  • ${r}`).join("\n")}`);
-    if (lc.contracts?.length) legalLines.push(`\nEssential Contracts:\n${lc.contracts.map((c) => `  • ${c}`).join("\n")}`);
-    if (lc.insuranceNeeds?.length) legalLines.push(`\nInsurance Needs:\n${lc.insuranceNeeds.map((i) => `  • ${i}`).join("\n")}`);
-    if (lc.complianceChecklist?.length) legalLines.push(`\nCompliance Checklist:\n${lc.complianceChecklist.map((c, i) => `  ${i + 1}. ${c}`).join("\n")}`);
-    sections.push({ sectionName: "Legal & Compliance", content: legalLines.join("\n") });
-  }
 
   if (model.competitiveAnalysis) {
     const ca = model.competitiveAnalysis;
@@ -1667,7 +1629,6 @@ function ResultsPanel({ model, tab, version, businessId, saveError, onTabChange,
         <AnimatePresence mode="wait">
           {tab === "overview" && <OverviewView key="overview" brief={model.executiveBrief} score={model.qualityScore} />}
           {tab === "canvas" && <CanvasView key="canvas" canvas={model.canvas} model={model} onSaveEdit={onSaveEdit} />}
-          {tab === "legal" && <LegalView key="legal" legal={model.legalCompliance} />}
           {tab === "swot" && <SWOTView key="swot" analysis={model.competitiveAnalysis} economics={model.unitEconomics} />}
           {tab === "financials" && <FinancialsView key="financials" outlook={model.financialOutlook} />}
           {tab === "roadmap" && <RoadmapView key="roadmap" roadmap={model.roadmap} />}
@@ -2120,85 +2081,6 @@ function ActionsView({ actions, businessId }: { actions: ActionItem[]; businessI
         </div>
       ))}
       <QuickLinks tabId="actions" />
-    </motion.div>
-  );
-}
-
-function LegalView({ legal }: { legal: LegalCompliance }) {
-  return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
-      <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-accent1) / 0.04)", border: "1px solid hsl(var(--kf-accent1) / 0.12)" }}>
-        <div className="flex items-center gap-1.5 mb-1.5">
-          <Briefcase className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-accent1))" }} />
-          <span className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-accent1))" }}>Recommended Structure</span>
-        </div>
-        <p className="text-xs text-[hsl(var(--kf-foreground))] leading-relaxed">{legal.businessStructure}</p>
-      </div>
-
-      <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-warning) / 0.04)", border: "1px solid hsl(var(--kf-warning) / 0.12)" }}>
-        <div className="flex items-center gap-1.5 mb-1.5">
-          <DollarSign className="w-3.5 h-3.5" style={{ color: "hsl(var(--kf-warning))" }} />
-          <span className="text-[10px] font-semibold" style={{ color: "hsl(var(--kf-warning))" }}>Tax Obligations</span>
-        </div>
-        <p className="text-xs text-[hsl(var(--kf-foreground))] leading-relaxed">{legal.taxObligations}</p>
-      </div>
-
-      {legal.registrations?.length > 0 && (
-        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-muted) / 0.05)", border: "1px solid hsl(var(--kf-border) / 0.12)" }}>
-          <span className="text-[10px] font-semibold text-[hsl(var(--kf-muted-foreground))] mb-2 block">Required Registrations</span>
-          <div className="space-y-1.5">
-            {legal.registrations.map((reg, i) => (
-              <div key={i} className="flex items-start gap-2">
-                <CheckCircle2 className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-success))" }} />
-                <span className="text-[11px] text-[hsl(var(--kf-foreground))]">{reg}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {legal.contracts?.length > 0 && (
-        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-muted) / 0.05)", border: "1px solid hsl(var(--kf-border) / 0.12)" }}>
-          <span className="text-[10px] font-semibold text-[hsl(var(--kf-muted-foreground))] mb-2 block">Essential Contracts</span>
-          <div className="space-y-1.5">
-            {legal.contracts.map((c, i) => (
-              <div key={i} className="flex items-start gap-2">
-                <FileText className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-accent2))" }} />
-                <span className="text-[11px] text-[hsl(var(--kf-foreground))]">{c}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {legal.insuranceNeeds?.length > 0 && (
-        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-muted) / 0.05)", border: "1px solid hsl(var(--kf-border) / 0.12)" }}>
-          <span className="text-[10px] font-semibold text-[hsl(var(--kf-muted-foreground))] mb-2 block">Insurance Coverage</span>
-          <div className="space-y-1.5">
-            {legal.insuranceNeeds.map((ins, i) => (
-              <div key={i} className="flex items-start gap-2">
-                <Shield className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-info))" }} />
-                <span className="text-[11px] text-[hsl(var(--kf-foreground))]">{ins}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {legal.complianceChecklist?.length > 0 && (
-        <div className="rounded-xl p-3" style={{ background: "hsl(var(--kf-success) / 0.04)", border: "1px solid hsl(var(--kf-success) / 0.12)" }}>
-          <span className="text-[10px] font-semibold mb-2 block" style={{ color: "hsl(var(--kf-success))" }}>Compliance Checklist</span>
-          <div className="space-y-1.5">
-            {legal.complianceChecklist.map((item, i) => (
-              <div key={i} className="flex items-start gap-2">
-                <span className="text-[10px] font-bold flex-shrink-0 w-4 text-right" style={{ color: "hsl(var(--kf-muted-foreground))" }}>{i + 1}.</span>
-                <span className="text-[11px] text-[hsl(var(--kf-foreground))]">{item}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      <QuickLinks tabId="legal" />
     </motion.div>
   );
 }
