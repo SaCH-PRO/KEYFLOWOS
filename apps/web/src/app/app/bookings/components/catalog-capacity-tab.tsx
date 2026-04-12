@@ -52,13 +52,6 @@ interface CatalogCapacityTabProps {
   onBusinessHoursSaved?: () => void;
 }
 
-const stagger = {
-  container: { hidden: {}, visible: { transition: { staggerChildren: 0.05 } } },
-  item: {
-    hidden: { opacity: 0, y: 8 },
-    visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
-  },
-};
 
 const HOUR_PRESETS = [
   { label: "Mon–Fri 9–5", make: (): HoursMap => {
@@ -149,7 +142,7 @@ function AvailabilityHours({ businessId, onSaved }: { businessId?: string | null
     }, 0);
 
   return (
-    <motion.div variants={stagger.item} className="space-y-3">
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Clock className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
@@ -249,7 +242,7 @@ function AvailabilityHours({ businessId, onSaved }: { businessId?: string | null
           );
         })}
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -498,7 +491,7 @@ function ReminderConfig({ businessId }: { businessId?: string | null }) {
   };
 
   return (
-    <motion.div variants={stagger.item} className="space-y-2">
+    <div className="space-y-2">
       <div className="flex items-center gap-2">
         <Bell className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
         <h3 className="text-sm font-semibold">Booking Reminders</h3>
@@ -537,7 +530,7 @@ function ReminderConfig({ businessId }: { businessId?: string | null }) {
           </button>
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -631,13 +624,8 @@ export default function CatalogCapacityTab({
   ];
 
   return (
-    <motion.div
-      variants={stagger.container}
-      initial="hidden"
-      animate="visible"
-      className="space-y-4"
-    >
-      <motion.div variants={stagger.item} className="kf-card rounded-xl p-3">
+    <div className="space-y-4">
+      <div className="kf-card rounded-xl p-3">
         <div className="flex items-center justify-between mb-2.5">
           <div>
             <h3 className="text-sm font-semibold">Setup Readiness</h3>
@@ -679,9 +667,9 @@ export default function CatalogCapacityTab({
             </button>
           ))}
         </div>
-      </motion.div>
+      </div>
 
-      <motion.div variants={stagger.item}>
+      <div>
         <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background: "hsl(var(--muted) / 0.15)" }}>
           {SETUP_TABS.map((t) => (
             <button
@@ -711,10 +699,10 @@ export default function CatalogCapacityTab({
             </button>
           ))}
         </div>
-      </motion.div>
+      </div>
 
       {setupTab === "services" && (
-        <motion.div variants={stagger.item} className="space-y-3">
+        <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Briefcase className="w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
@@ -756,9 +744,8 @@ export default function CatalogCapacityTab({
                 const svc = service as Service & { bufferMins?: number | null; leadTimeMins?: number | null };
                 const isActive = monthCount > 0;
                 return (
-                  <motion.div
+                  <div
                     key={service.id}
-                    variants={stagger.item}
                     className="kf-card p-3 space-y-2 hover:ring-1 hover:ring-[hsl(var(--kf-accent1)/0.2)] transition-all"
                   >
                     <div className="flex items-start justify-between gap-2">
@@ -823,16 +810,16 @@ export default function CatalogCapacityTab({
                       initialBuffer={svc.bufferMins ?? null}
                       initialLead={svc.leadTimeMins ?? null}
                     />
-                  </motion.div>
+                  </div>
                 );
               })}
             </div>
           )}
-        </motion.div>
+        </div>
       )}
 
       {setupTab === "staff" && (
-        <motion.div variants={stagger.item} className="space-y-3">
+        <div className="space-y-3">
           <div className="flex items-center gap-2">
             <Users className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
             <h3 className="text-sm font-semibold">Staff</h3>
@@ -951,11 +938,11 @@ export default function CatalogCapacityTab({
               })}
             </div>
           )}
-        </motion.div>
+        </div>
       )}
 
       {setupTab === "availability" && (
-        <motion.div variants={stagger.item} className="space-y-3">
+        <div className="space-y-3">
           <div className="flex items-center gap-2">
             <Clock className="w-4 h-4" style={{ color: "hsl(var(--kf-accent2))" }} />
             <h3 className="text-sm font-semibold">Staff Availability</h3>
@@ -1001,14 +988,14 @@ export default function CatalogCapacityTab({
           )}
 
           <ReminderConfig businessId={businessId} />
-        </motion.div>
+        </div>
       )}
 
       {setupTab === "hours" && (
-        <motion.div variants={stagger.item} className="space-y-4">
+        <div className="space-y-4">
           <AvailabilityHours businessId={businessId} onSaved={onBusinessHoursSaved} />
 
-          <motion.div variants={stagger.item} className="space-y-2">
+          <div className="space-y-2">
             <div className="flex items-center gap-2">
               <Link2 className="w-4 h-4 text-muted-foreground" />
               <h3 className="text-sm font-semibold">Calendar Integration</h3>
@@ -1050,9 +1037,9 @@ export default function CatalogCapacityTab({
                 </span>
               </div>
             </a>
-          </motion.div>
-        </motion.div>
+          </div>
+        </div>
       )}
-    </motion.div>
+    </div>
   );
 }
