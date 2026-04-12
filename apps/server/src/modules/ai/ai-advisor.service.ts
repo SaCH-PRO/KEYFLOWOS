@@ -766,15 +766,15 @@ REQUIRED OUTPUT — Return ONLY valid JSON with this EXACT structure:
     "decisionRights": "Who can make what decisions — spending limits, hiring authority, strategic pivots, customer exceptions"
   },
   "qualityScore": {
-    "logicalCoherence": 1-10,
-    "comprehensiveness": 1-10,
-    "contextSpecificity": 1-10,
-    "commercialRelevance": 1-10,
-    "actionability": 1-10,
-    "financialSensibility": 1-10,
-    "operationalFeasibility": 1-10,
-    "riskIdentification": 1-10,
-    "overallGrade": "A|B|C|D",
+    "logicalCoherence": 8,
+    "comprehensiveness": 7,
+    "contextSpecificity": 6,
+    "commercialRelevance": 8,
+    "actionability": 7,
+    "financialSensibility": 7,
+    "operationalFeasibility": 8,
+    "riskIdentification": 7,
+    "overallGrade": "A or B or C or D",
     "improvementAreas": ["1-3 areas where the plan could be strengthened with more information from the user"]
   },
   "recommendedDocuments": ["document-slug-1", "document-slug-2"]
@@ -816,16 +816,53 @@ ALL financial figures in TTD. This plan must be of a quality suitable for presen
       });
 
       const raw = result.content || '';
-      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+
+      let jsonStr = raw;
+      const fenceMatch = raw.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+      if (fenceMatch) {
+        jsonStr = fenceMatch[1].trim();
+      }
+
+      const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
+        this.logger.error(`Business model: No JSON object found in AI response (length=${raw.length})`);
         return { success: false, error: 'Failed to generate business model. Please try again.' };
       }
 
+      let jsonCandidate = jsonMatch[0];
+
       let parsed: Record<string, unknown>;
       try {
-        parsed = JSON.parse(jsonMatch[0]);
-      } catch {
-        return { success: false, error: 'AI returned an invalid response. Please try again.' };
+        parsed = JSON.parse(jsonCandidate);
+      } catch (parseErr) {
+        this.logger.warn(`Business model: First JSON.parse failed: ${(parseErr as Error).message}, attempting repair...`);
+
+        try {
+          jsonCandidate = jsonCandidate
+            .replace(/,\s*([}\]])/g, '$1')
+            .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":')
+            .replace(/:\s*'([^']*)'/g, ': "$1"');
+
+          parsed = JSON.parse(jsonCandidate);
+        } catch {
+          const braces = (jsonCandidate.match(/\{/g) || []).length;
+          const closeBraces = (jsonCandidate.match(/\}/g) || []).length;
+          if (braces > closeBraces) {
+            const missing = braces - closeBraces;
+            jsonCandidate += '}'.repeat(missing);
+            try {
+              parsed = JSON.parse(jsonCandidate);
+            } catch (finalErr) {
+              this.logger.error(`Business model: JSON repair failed after adding ${missing} closing braces: ${(finalErr as Error).message}`);
+              this.logger.error(`Business model: Raw response first 500 chars: ${raw.substring(0, 500)}`);
+              return { success: false, error: 'AI returned an invalid response. Please try again.' };
+            }
+          } else {
+            this.logger.error(`Business model: JSON parse failed, braces balanced (${braces}/${closeBraces})`);
+            this.logger.error(`Business model: Raw response first 500 chars: ${raw.substring(0, 500)}`);
+            return { success: false, error: 'AI returned an invalid response. Please try again.' };
+          }
+        }
       }
 
       if (!parsed.summary || !parsed.canvas || !parsed.roadmap) {
