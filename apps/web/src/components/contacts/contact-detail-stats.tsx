@@ -62,6 +62,7 @@ function CollapsibleCard({
   defaultOpen = false,
   hasData = false,
   badge,
+  preview,
 }: {
   icon: typeof TrendingUp;
   title: string;
@@ -69,6 +70,7 @@ function CollapsibleCard({
   defaultOpen?: boolean;
   hasData?: boolean;
   badge?: React.ReactNode;
+  preview?: string;
 }) {
   const [open, setOpen] = useState(defaultOpen);
 
@@ -78,13 +80,18 @@ function CollapsibleCard({
         onClick={() => setOpen(!open)}
         className="w-full flex items-center justify-between p-3 hover:bg-muted/20 transition-colors"
       >
-        <div className="flex items-center gap-2">
-          <Icon className="w-3.5 h-3.5 text-muted-foreground" />
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{title}</span>
-          {hasData && <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--kf-accent2))]" />}
+        <div className="flex items-center gap-2 min-w-0">
+          <Icon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex-shrink-0">{title}</span>
+          {hasData && <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--kf-accent2))] flex-shrink-0" />}
           {badge}
+          {!open && preview && (
+            <span className="text-[10px] text-muted-foreground/60 truncate ml-1">
+              {preview}
+            </span>
+          )}
         </div>
-        <ChevronRight className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
+        <ChevronRight className={`w-4 h-4 text-muted-foreground transition-transform duration-200 flex-shrink-0 ${open ? "rotate-90" : ""}`} />
       </button>
       {open && <div className="px-3 pb-3">{children}</div>}
     </div>
@@ -319,7 +326,13 @@ export function ContactDetailStats({ contact, events, onSetActiveTab, onQuickAct
 
   return (
     <>
-      <CollapsibleCard icon={TrendingUp} title="Metrics" hasData={!!hasAnyMetric} badge={scoreBadge}>
+      <CollapsibleCard icon={TrendingUp} title="Metrics" hasData={!!hasAnyMetric} badge={scoreBadge}
+        preview={hasAnyMetric ? [
+          contact.meta?.leadScore != null ? `Score ${contact.meta.leadScore}` : null,
+          (contact.meta?.outstandingBalance ?? 0) > 0 ? `TTD ${contact.meta?.outstandingBalance?.toLocaleString()} due` : null,
+          contact.meta?.lastInteractionAt ? relativeTime(contact.meta.lastInteractionAt) : null,
+        ].filter(Boolean).join(" · ") : undefined}
+      >
         {hasAnyMetric ? (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
             <div className="kf-stat-card p-3">
@@ -378,7 +391,13 @@ export function ContactDetailStats({ contact, events, onSetActiveTab, onQuickAct
 
       <MomentumBadge contactId={contact.id} />
 
-      <CollapsibleCard icon={BarChart3} title="Financial Summary" hasData={hasFinancial}>
+      <CollapsibleCard icon={BarChart3} title="Financial Summary" hasData={hasFinancial}
+        preview={hasFinancial ? [
+          (contact.meta?.totalRevenue ?? 0) > 0 ? `TTD ${(contact.meta?.totalRevenue ?? 0).toLocaleString()}` : null,
+          `${contact.meta?.invoiceCount ?? 0} invoices`,
+          `${contact.meta?.bookingCount ?? 0} bookings`,
+        ].filter(Boolean).join(" · ") : undefined}
+      >
         <div className="grid grid-cols-3 gap-3 text-center">
           <div>
             <p className="text-lg font-semibold" style={{ color: "hsl(var(--kf-accent2))" }}>
@@ -418,7 +437,9 @@ export function ContactDetailStats({ contact, events, onSetActiveTab, onQuickAct
       </CollapsibleCard>
 
       {recentEvents.length > 0 && (
-        <CollapsibleCard icon={History} title="Recent Activity" hasData={recentEvents.length > 0}>
+        <CollapsibleCard icon={History} title="Recent Activity" hasData={recentEvents.length > 0}
+          preview={recentEvents.length > 0 ? `${recentEvents.length} recent · ${EVENT_LABELS[recentEvents[0].type] || recentEvents[0].type}` : undefined}
+        >
           <div className="space-y-1.5">
             {recentEvents.map((event) => (
               <div key={event.id} className="flex items-center justify-between text-xs">

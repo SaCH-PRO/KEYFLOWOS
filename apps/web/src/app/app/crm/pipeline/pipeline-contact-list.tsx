@@ -86,14 +86,20 @@ export interface PipelineContactListProps {
   onLoadMore: () => void;
   onRetry?: () => void;
   onAddContact: () => void;
-  onQuickCreate?: (data: { firstName: string; lastName?: string; email?: string; phone?: string }) => Promise<void>;
+  onQuickCreate?: (data: { firstName: string; lastName?: string; email?: string; phone?: string; status?: string; source?: string }) => Promise<void>;
 }
 
-function QuickAddRow({ onSubmit, onCancel }: { onSubmit: (data: { firstName: string; lastName?: string; email?: string; phone?: string }) => Promise<void>; onCancel: () => void }) {
+const QUICK_STAGES = ["LEAD", "PROSPECT", "CLIENT"] as const;
+const QUICK_SOURCES = ["manual", "booking", "store", "lead-form", "import"] as const;
+
+function QuickAddRow({ onSubmit, onCancel }: { onSubmit: (data: { firstName: string; lastName?: string; email?: string; phone?: string; status?: string; source?: string }) => Promise<void>; onCancel: () => void }) {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [stage, setStage] = useState("LEAD");
+  const [source, setSource] = useState("manual");
+  const [expanded, setExpanded] = useState(false);
   const [saving, setSaving] = useState(false);
   const firstRef = useRef<HTMLInputElement>(null);
 
@@ -108,18 +114,23 @@ function QuickAddRow({ onSubmit, onCancel }: { onSubmit: (data: { firstName: str
         lastName: lastName.trim() || undefined,
         email: email.trim() || undefined,
         phone: phone.trim() || undefined,
+        status: stage,
+        source,
       });
       setFirstName("");
       setLastName("");
       setEmail("");
       setPhone("");
+      setStage("LEAD");
+      setSource("manual");
       firstRef.current?.focus();
     } catch {
-      // error handled by parent
     } finally {
       setSaving(false);
     }
   };
+
+  const kd = (e: React.KeyboardEvent) => { if (e.key === "Enter") handleSubmit(); if (e.key === "Escape") onCancel(); };
 
   return (
     <div className="kf-card p-3 space-y-2" style={{ borderColor: "hsl(var(--kf-accent1) / 0.3)", background: "hsl(var(--kf-accent1) / 0.03)" }}>
@@ -140,7 +151,7 @@ function QuickAddRow({ onSubmit, onCancel }: { onSubmit: (data: { firstName: str
             onChange={(e) => setFirstName(e.target.value)}
             placeholder="First name *"
             className="kf-input w-full text-xs pl-7"
-            onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); if (e.key === "Escape") onCancel(); }}
+            onKeyDown={kd}
           />
         </div>
         <input
@@ -148,34 +159,62 @@ function QuickAddRow({ onSubmit, onCancel }: { onSubmit: (data: { firstName: str
           onChange={(e) => setLastName(e.target.value)}
           placeholder="Last name"
           className="kf-input w-full text-xs"
-          onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); if (e.key === "Escape") onCancel(); }}
+          onKeyDown={kd}
         />
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        <div className="relative">
-          <Mail className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
-          <input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="Email"
-            type="email"
-            className="kf-input w-full text-xs pl-7"
-            onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); if (e.key === "Escape") onCancel(); }}
-          />
-        </div>
-        <div className="relative">
-          <Phone className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
-          <input
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="Phone"
-            className="kf-input w-full text-xs pl-7"
-            onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); if (e.key === "Escape") onCancel(); }}
-          />
-        </div>
-      </div>
+      {expanded && (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="relative">
+              <Mail className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+              <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" type="email" className="kf-input w-full text-xs pl-7" onKeyDown={kd} />
+            </div>
+            <div className="relative">
+              <Phone className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone" className="kf-input w-full text-xs pl-7" onKeyDown={kd} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <span className="text-[10px] text-muted-foreground mb-0.5 block">Stage</span>
+              <div className="flex gap-1">
+                {QUICK_STAGES.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setStage(s)}
+                    className={`flex-1 text-[10px] font-medium py-1.5 rounded-lg transition-all ${stage === s ? "text-white" : "bg-white/[0.04] text-muted-foreground hover:bg-white/[0.08]"}`}
+                    style={stage === s ? { backgroundColor: s === "LEAD" ? "hsl(var(--kf-accent1))" : s === "PROSPECT" ? "hsl(var(--kf-accent2))" : "hsl(142 76% 36%)" } : undefined}
+                  >
+                    {s.charAt(0) + s.slice(1).toLowerCase()}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <span className="text-[10px] text-muted-foreground mb-0.5 block">Source</span>
+              <select
+                value={source}
+                onChange={(e) => setSource(e.target.value)}
+                className="kf-input w-full text-xs"
+              >
+                {QUICK_SOURCES.map((s) => (
+                  <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1).replace("-", " ")}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </>
+      )}
       <div className="flex items-center justify-between">
-        <span className="text-[10px] text-muted-foreground/50">Press Enter to save, Esc to cancel</span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="text-[10px] text-[hsl(var(--kf-accent2))] hover:underline"
+          >
+            {expanded ? "Less fields" : "More fields"}
+          </button>
+          <span className="text-[10px] text-muted-foreground/40">Enter to save · Esc to cancel</span>
+        </div>
         <button
           onClick={handleSubmit}
           disabled={!firstName.trim() || saving}
