@@ -109,23 +109,27 @@ export function ContactDetailTabs({
           { key: "journey", label: "Journey", icon: Route },
           { key: "notes", label: "Notes", icon: MessageSquare, count: notes.length },
           { key: "tasks", label: "Tasks", icon: ListTodo, count: tasks.filter((t) => t.status !== "DONE").length },
-          { key: "timeline", label: "Timeline", icon: History },
+          { key: "timeline", label: "Timeline", icon: History, count: events.length },
         ].map(({ key, label, icon: Icon, count }) => (
           <button
             key={key}
             role="tab"
             aria-selected={activeTab === key}
             onClick={() => onSetActiveTab(key)}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap ${
+            className={`flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-medium transition-all border-b-2 -mb-px whitespace-nowrap ${
               activeTab === key
-                ? "border-[hsl(var(--kf-accent1))] text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+                ? "border-[hsl(var(--kf-accent1))] text-foreground bg-[hsl(var(--kf-accent1))]/5"
+                : "border-transparent text-muted-foreground hover:text-foreground hover:bg-white/[0.03]"
             }`}
           >
-            <Icon className="w-4 h-4" />
+            <Icon className={`w-3.5 h-3.5 ${activeTab === key ? "text-[hsl(var(--kf-accent1))]" : ""}`} />
             {label}
             {count != null && count > 0 && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted">{count}</span>
+              <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${
+                activeTab === key
+                  ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]"
+                  : "bg-muted text-muted-foreground"
+              }`}>{count}</span>
             )}
           </button>
         ))}

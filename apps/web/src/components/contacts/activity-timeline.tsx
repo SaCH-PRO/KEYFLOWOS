@@ -198,6 +198,36 @@ export function ActivityTimeline({ contact, events, notes, tasks }: ActivityTime
     return counts;
   }, [items]);
 
+  const groupedByDate = useMemo(() => {
+    const groups: { label: string; items: TimelineItem[] }[] = [];
+    let currentLabel = "";
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const todayStr = today.toDateString();
+    const yesterdayStr = yesterday.toDateString();
+
+    for (const item of visible) {
+      const d = new Date(item.timestamp);
+      const dStr = d.toDateString();
+      let label: string;
+      if (dStr === todayStr) label = "Today";
+      else if (dStr === yesterdayStr) label = "Yesterday";
+      else {
+        const diffDays = Math.floor((today.getTime() - d.getTime()) / 86400000);
+        if (diffDays < 7) label = "This Week";
+        else if (diffDays < 30) label = "This Month";
+        else label = d.toLocaleDateString("en-TT", { month: "long", year: "numeric" });
+      }
+      if (label !== currentLabel) {
+        groups.push({ label, items: [] });
+        currentLabel = label;
+      }
+      groups[groups.length - 1].items.push(item);
+    }
+    return groups;
+  }, [visible]);
+
   if (items.length === 0) {
     return (
       <div className="text-center py-8 space-y-2">
@@ -240,53 +270,64 @@ export function ActivityTimeline({ contact, events, notes, tasks }: ActivityTime
         })}
       </div>
 
-      <div className="relative pl-5 space-y-1">
-        <div className="absolute left-[9px] top-2 bottom-2 w-[2px] rounded-full bg-gradient-to-b from-[hsl(var(--kf-accent1))]/40 via-border/30 to-transparent" />
-
-        {visible.map((item, idx) => {
-          const Icon = item.icon;
-          const isFirst = idx === 0;
-
-          return (
-            <div key={item.id} className="group relative flex gap-3">
-              <div
-                className={`absolute left-[-12px] p-[5px] rounded-full bg-background border-2 z-10 transition-transform group-hover:scale-110 ${
-                  isFirst ? "ring-2 ring-offset-1 ring-offset-background" : ""
-                }`}
-                style={{
-                  borderColor: item.iconColor,
-                  ...(isFirst ? { ringColor: item.iconColor } : {}),
-                }}
-              >
-                <Icon className="w-2.5 h-2.5" style={{ color: item.iconColor }} />
-              </div>
-
-              <div className="flex-1 ml-1 p-3 rounded-xl bg-white/[0.03] backdrop-blur-sm border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.1] transition-all">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-sm font-medium truncate">{item.title}</span>
-                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${
-                      item.kind === "note" ? "bg-violet-500/10 text-violet-400"
-                        : item.kind === "task" ? "bg-blue-500/10 text-blue-400"
-                        : "bg-white/[0.06] text-muted-foreground"
-                    }`}>
-                      {item.kind === "note" ? "Note" : item.kind === "task" ? "Task" : "Event"}
-                    </span>
-                  </div>
-                  <span className="text-[10px] text-muted-foreground whitespace-nowrap shrink-0">
-                    {getRelativeTime(item.timestamp)}
-                  </span>
-                </div>
-                {item.description && (
-                  <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{item.description}</p>
-                )}
-                <div className="text-[10px] text-muted-foreground/50 mt-1">
-                  {new Date(item.timestamp).toLocaleString("en-TT", { dateStyle: "medium", timeStyle: "short" })}
-                </div>
-              </div>
+      <div className="space-y-4">
+        {groupedByDate.map((group) => (
+          <div key={group.label} className="space-y-1">
+            <div className="flex items-center gap-2 px-1 pb-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">{group.label}</span>
+              <div className="flex-1 h-px bg-border/30" />
+              <span className="text-[10px] text-muted-foreground/40">{group.items.length}</span>
             </div>
-          );
-        })}
+            <div className="relative pl-5 space-y-1">
+              <div className="absolute left-[9px] top-2 bottom-2 w-[2px] rounded-full bg-gradient-to-b from-[hsl(var(--kf-accent1))]/40 via-border/30 to-transparent" />
+
+              {group.items.map((item, idx) => {
+                const Icon = item.icon;
+                const isFirst = idx === 0 && group === groupedByDate[0];
+
+                return (
+                  <div key={item.id} className="group relative flex gap-3">
+                    <div
+                      className={`absolute left-[-12px] p-[5px] rounded-full bg-background border-2 z-10 transition-transform group-hover:scale-110 ${
+                        isFirst ? "ring-2 ring-offset-1 ring-offset-background" : ""
+                      }`}
+                      style={{
+                        borderColor: item.iconColor,
+                        ...(isFirst ? { ringColor: item.iconColor } : {}),
+                      }}
+                    >
+                      <Icon className="w-2.5 h-2.5" style={{ color: item.iconColor }} />
+                    </div>
+
+                    <div className="flex-1 ml-1 p-3 rounded-xl bg-white/[0.03] backdrop-blur-sm border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.1] transition-all">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-sm font-medium truncate">{item.title}</span>
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${
+                            item.kind === "note" ? "bg-violet-500/10 text-violet-400"
+                              : item.kind === "task" ? "bg-blue-500/10 text-blue-400"
+                              : "bg-white/[0.06] text-muted-foreground"
+                          }`}>
+                            {item.kind === "note" ? "Note" : item.kind === "task" ? "Task" : "Event"}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-muted-foreground whitespace-nowrap shrink-0">
+                          {getRelativeTime(item.timestamp)}
+                        </span>
+                      </div>
+                      {item.description && (
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{item.description}</p>
+                      )}
+                      <div className="text-[10px] text-muted-foreground/50 mt-1">
+                        {new Date(item.timestamp).toLocaleString("en-TT", { dateStyle: "medium", timeStyle: "short" })}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
 
       {remaining > 0 && (
