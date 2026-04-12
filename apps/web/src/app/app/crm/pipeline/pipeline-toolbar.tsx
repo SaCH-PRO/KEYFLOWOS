@@ -337,7 +337,13 @@ function PipelineToolbarInner({
                 <SIcon className="w-3.5 h-3.5" style={{ color }} />
                 {label}
                 {count > 0 && (
-                  <span className="text-[10px] font-bold ml-0.5 opacity-80" style={{ color }}>{count}</span>
+                  <span
+                    className={`text-[10px] font-bold ml-0.5 px-1.5 py-0.5 rounded-md ${isActive ? "bg-white/[0.08]" : ""}`}
+                    style={isActive
+                      ? { color }
+                      : { color, opacity: 0.7 }
+                    }
+                  >{count}</span>
                 )}
               </button>
             </RichTooltip>
@@ -373,7 +379,7 @@ function PipelineToolbarInner({
           >
             <Icon className="w-3.5 h-3.5" />
             <span>{label}</span>
-            <span className={`text-[10px] font-mono ${activeListTab === key ? "text-muted-foreground" : "text-muted-foreground/50"}`}>{count}</span>
+            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md ${activeListTab === key ? "text-muted-foreground bg-white/[0.06]" : "text-muted-foreground/50"}`}>{count}</span>
           </button>
         ))}
       </div>

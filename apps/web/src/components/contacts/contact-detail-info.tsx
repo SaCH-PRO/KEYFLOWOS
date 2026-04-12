@@ -27,12 +27,14 @@ function CollapsibleSection({
   children,
   defaultOpen = false,
   hasData = false,
+  preview,
 }: {
   icon: typeof Building2;
   title: string;
   children: React.ReactNode;
   defaultOpen?: boolean;
   hasData?: boolean;
+  preview?: string;
 }) {
   const [open, setOpen] = useState(defaultOpen);
 
@@ -42,12 +44,17 @@ function CollapsibleSection({
         onClick={() => setOpen(!open)}
         className="w-full flex items-center justify-between p-3 hover:bg-muted/20 transition-colors"
       >
-        <div className="flex items-center gap-2">
-          <Icon className="w-3.5 h-3.5 text-muted-foreground" />
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{title}</span>
-          {hasData && <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--kf-accent2))]" />}
+        <div className="flex items-center gap-2 min-w-0">
+          <Icon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex-shrink-0">{title}</span>
+          {hasData && <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--kf-accent2))] flex-shrink-0" />}
+          {!open && preview && (
+            <span className="text-[10px] text-muted-foreground/60 truncate ml-1">
+              {preview}
+            </span>
+          )}
         </div>
-        <ChevronRight className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
+        <ChevronRight className={`w-4 h-4 text-muted-foreground transition-transform duration-200 flex-shrink-0 ${open ? "rotate-90" : ""}`} />
       </button>
       {open && <div className="px-3 pb-3">{children}</div>}
     </div>
@@ -108,7 +115,9 @@ export function ContactDetailInfo({ contact, relatedContacts, onSelectRelatedCon
         </div>
       )}
 
-      <CollapsibleSection icon={Building2} title="Professional" hasData={hasProfessional}>
+      <CollapsibleSection icon={Building2} title="Professional" hasData={hasProfessional}
+        preview={hasProfessional ? [contact.jobTitle, contact.companyName].filter(Boolean).join(" at ") || undefined : undefined}
+      >
         <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
           <InfoField label="Company" value={contact.companyName} />
           <InfoField label="Job Title" value={contact.jobTitle} />
@@ -117,7 +126,9 @@ export function ContactDetailInfo({ contact, relatedContacts, onSelectRelatedCon
         </div>
       </CollapsibleSection>
 
-      <CollapsibleSection icon={Link2} title="Social & Referral" hasData={hasSocial}>
+      <CollapsibleSection icon={Link2} title="Social & Referral" hasData={hasSocial}
+        preview={hasSocial ? [linkedinUrl ? "LinkedIn" : null, instagramUrl ? "Instagram" : null, twitterUrl ? "Twitter" : null, referredBy ? `Ref: ${referredBy}` : null].filter(Boolean).join(" · ") || undefined : undefined}
+      >
         <div className="space-y-2 text-sm">
           {linkedinUrl && (
             <a href={linkedinUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-blue-400 hover:underline">
@@ -148,7 +159,13 @@ export function ContactDetailInfo({ contact, relatedContacts, onSelectRelatedCon
         </div>
       </CollapsibleSection>
 
-      <CollapsibleSection icon={PhoneCall} title="Contact Methods" hasData={hasContactMethods}>
+      <CollapsibleSection icon={PhoneCall} title="Contact Methods" hasData={hasContactMethods}
+        preview={hasContactMethods ? [
+          contact.preferredChannel ? `${contact.preferredChannel} preferred` : null,
+          contact.whatsappNumber ? "WhatsApp" : null,
+          contact.language,
+        ].filter(Boolean).join(" · ") || undefined : undefined}
+      >
         <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
           <InfoField label="Secondary Email" value={contact.secondaryEmail} />
           <InfoField label="Secondary Phone" value={contact.secondaryPhone} />
@@ -158,7 +175,9 @@ export function ContactDetailInfo({ contact, relatedContacts, onSelectRelatedCon
         </div>
       </CollapsibleSection>
 
-      <CollapsibleSection icon={MapPin} title="Address" hasData={hasAddress}>
+      <CollapsibleSection icon={MapPin} title="Address" hasData={hasAddress}
+        preview={hasAddress ? [contact.city, contact.country].filter(Boolean).join(", ") || undefined : undefined}
+      >
         <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
           <div className="col-span-2">
             <InfoField label="Address Line 1" value={contact.addressLine1} />
@@ -174,7 +193,13 @@ export function ContactDetailInfo({ contact, relatedContacts, onSelectRelatedCon
         </div>
       </CollapsibleSection>
 
-      <CollapsibleSection icon={Tag} title="Preferences" hasData={!!hasPreferences}>
+      <CollapsibleSection icon={Tag} title="Preferences" hasData={!!hasPreferences}
+        preview={hasPreferences ? [
+          contact.doNotContact ? "Do Not Contact" : null,
+          contact.marketingOptIn === true ? "Mktg Opt-In" : contact.marketingOptIn === false ? "Mktg Opt-Out" : null,
+          contact.segment,
+        ].filter(Boolean).join(" · ") || undefined : undefined}
+      >
         <div className="flex flex-wrap gap-2 mb-2">
           {contact.marketingOptIn === true && (
             <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-500 border border-emerald-500/30">

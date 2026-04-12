@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, type PanInfo } from "framer-motion";
-import { X, List, Heart, ChevronDown, Zap, Bot } from "lucide-react";
+import { X, List, Heart, ChevronDown, Zap, Bot, Receipt, Calendar, StickyNote, CheckCircle2, MessageCircle } from "lucide-react";
 import { toast } from "sonner";
 import { createContact, fetchContactLists } from "@/lib/client";
 import { STATUS_COLORS } from "@/lib/crm-utils";
@@ -38,6 +38,55 @@ interface PipelineTabContentProps {
   onToggleAutopilotPause?: () => void;
   onApproveAutopilot?: (id: string) => Promise<void>;
   onDenyAutopilot?: (id: string) => Promise<void>;
+}
+
+function SelectedContextStrip({ contact, invoices, bookings, notes, tasks }: {
+  contact: { firstName?: string | null; lastName?: string | null; preferredChannel?: string | null; meta?: { outstandingBalance?: number | null } | null };
+  invoices?: Array<{ id: string; status: string; total?: number | null; currency?: string | null }>;
+  bookings?: Array<{ id: string; startTime: string; status: string; service?: { name: string } | null }>;
+  notes?: Array<{ id: string; body: string }>;
+  tasks?: Array<{ id: string; status?: string | null }>;
+}) {
+  const latestBooking = bookings?.find(b => new Date(b.startTime).getTime() > Date.now());
+  const pendingInvoice = invoices?.find(i => i.status === "SENT" || i.status === "OVERDUE");
+  const latestNote = notes?.[0];
+  const pendingTasks = tasks?.filter(t => t.status !== "COMPLETED" && t.status !== "CANCELLED") ?? [];
+  const name = `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "Client";
+
+  const items: Array<{ icon: typeof Receipt; text: string; color: string }> = [];
+
+  if (latestBooking) {
+    const date = new Date(latestBooking.startTime);
+    items.push({ icon: Calendar, text: `${latestBooking.service?.name ?? "Booking"} ${date.toLocaleDateString("en-TT", { month: "short", day: "numeric" })}`, color: "text-blue-400" });
+  }
+  if (pendingInvoice) {
+    items.push({ icon: Receipt, text: `${pendingInvoice.status === "OVERDUE" ? "Overdue" : "Pending"} invoice${pendingInvoice.total ? ` · TTD ${pendingInvoice.total.toLocaleString()}` : ""}`, color: pendingInvoice.status === "OVERDUE" ? "text-red-400" : "text-amber-400" });
+  }
+  if (pendingTasks.length > 0) {
+    items.push({ icon: CheckCircle2, text: `${pendingTasks.length} open task${pendingTasks.length > 1 ? "s" : ""}`, color: "text-[hsl(var(--kf-accent1))]" });
+  }
+  if (latestNote) {
+    items.push({ icon: StickyNote, text: latestNote.body.slice(0, 40) + (latestNote.body.length > 40 ? "…" : ""), color: "text-yellow-400" });
+  }
+  if (contact.preferredChannel) {
+    items.push({ icon: MessageCircle, text: `Prefers ${contact.preferredChannel}`, color: "text-emerald-400" });
+  }
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className="mb-3 flex items-center gap-3 px-3 py-2 rounded-xl border border-border/30 bg-white/[0.02] overflow-x-auto scrollbar-hide">
+      <span className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider flex-shrink-0">{name}</span>
+      <div className="w-px h-4 bg-border/30 flex-shrink-0" />
+      {items.map((item, i) => (
+        <div key={i} className="flex items-center gap-1.5 flex-shrink-0">
+          <item.icon className={`w-3 h-3 ${item.color}`} />
+          <span className="text-[11px] text-muted-foreground">{item.text}</span>
+          {i < items.length - 1 && <span className="text-muted-foreground/20 ml-1">·</span>}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 const PIPELINE_VIEW_KEY = "kf_pipeline_view";
@@ -105,7 +154,7 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
   const listRef = useRef<HTMLDivElement>(null);
   const prevSelectedRef = useRef<string | null>(null);
 
-  const handleQuickCreate = useCallback(async (data: { firstName: string; lastName?: string; email?: string; phone?: string }) => {
+  const handleQuickCreate = useCallback(async (data: { firstName: string; lastName?: string; email?: string; phone?: string; status?: string; source?: string }) => {
     if (!businessId) return;
     try {
       const { data: result } = await createContact({
@@ -114,8 +163,8 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
         lastName: data.lastName,
         email: data.email,
         phone: data.phone,
-        source: "manual",
-        status: "LEAD",
+        source: data.source ?? "manual",
+        status: data.status ?? "LEAD",
       });
       if (result) {
         toast.success(`${data.firstName} added`);
@@ -367,6 +416,9 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
       ) : (
         <div className="grid gap-6 lg:grid-cols-[1fr,450px]">
           <div ref={listRef}>
+            {selectedContactId && detailPanelProps.contact && (
+              <SelectedContextStrip contact={detailPanelProps.contact} invoices={detailPanelProps.invoices} bookings={detailPanelProps.bookings} notes={detailPanelProps.notes} tasks={detailPanelProps.tasks} />
+            )}
             <PipelineContactList
               contacts={displayContacts as ContactCardData[]}
               loading={loading}
