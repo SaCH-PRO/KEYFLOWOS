@@ -352,6 +352,19 @@ export class BookingsController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/calendar/events')
+  async listCalendarEvents(
+    @Param('businessId') businessId: string,
+    @Query('timeMin') timeMin: string,
+    @Query('timeMax') timeMax: string,
+  ) {
+    if (!timeMin || !timeMax) {
+      throw new BadRequestException('timeMin and timeMax query parameters are required');
+    }
+    return this.calendar.listCalendarEvents(businessId, timeMin, timeMax);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/bookings/:bookingId/sync-calendar')
   async syncBookingToCalendar(
     @Param('businessId') businessId: string,
