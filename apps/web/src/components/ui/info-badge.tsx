@@ -51,9 +51,12 @@ export function InfoBadge({
 
   return (
     <span ref={containerRef} className="relative inline-flex items-center">
-      <button
-        onClick={() => setOpen(!open)}
-        className="inline-flex items-center justify-center rounded-full transition-colors hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none"
+      <span
+        role="button"
+        tabIndex={0}
+        onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); setOpen(!open); } }}
+        className="inline-flex items-center justify-center rounded-full transition-colors hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none cursor-pointer"
         style={{
           width: iconSize + 8,
           height: iconSize + 8,
@@ -68,7 +71,7 @@ export function InfoBadge({
             style={{ width: iconSize, height: iconSize, color: "hsl(var(--kf-accent2))" }}
           />
         )}
-      </button>
+      </span>
       <AnimatePresence>
         {open && (
           <motion.span

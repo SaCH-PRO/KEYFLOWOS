@@ -1,0 +1,62 @@
+## Error Type
+Console Error
+
+## Error Message
+In HTML, <button> cannot be a descendant of <button>.
+This will cause a hydration error.
+
+  ...
+    <div className="space-y-1.5">
+      <div className="rounded-xl...">
+        <button>
+        <AnimatePresence initial={false}>
+          <PresenceChild isPresent={true} initial={false} custom={undefined} presenceAffectsLayout={true} mode="sync" ...>
+            <motion.div initial={{height:0,opacity:0}} animate={{height:"auto", ...}} exit={{height:0,opacity:0}} ...>
+              <div className="overflow-h..." style={{height:"auto", ...}} ref={function useMotionRef.useCallback}>
+                <div className="px-4 pb-4 ...">
+                  <InvoicesPanel invoices={[...]} contacts={[...]} products={[...]} businessId="cml78w33i0..." ...>
+                    <motion.div initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-10}} ...>
+                      <div className="space-y-4" style={{opacity:1, ...}} ref={function useMotionRef.useCallback}>
+                        <BillingFormModal>
+                        <TaxSummaryPanel>
+                        <DunningRulesPanel businessId="cml78w33i0...">
+                          <div className="rounded-xl...">
+>                           <button
+>                             onClick={function onClick}
+>                             className="w-full flex items-center gap-2 px-4 py-3 hover:bg-white/[0.02] transition-colors"
+>                           >
+                              <Bell>
+                              <span>
+                              <InfoBadge title="Dunning Rules" body="Automatica..." side="right" iconSize={10}>
+                                <span ref={{current:null}} className="relative i...">
+>                                 <button
+>                                   onClick={function onClick}
+>                                   className="inline-flex items-center justify-center rounded-full transition-colors ..."
+>                                   style={{width:18,height:18,minWidth:28,minHeight:28}}
+>                                   aria-label="Info: Dunning Rules"
+>                                   aria-expanded={false}
+>                                 >
+                                  ...
+                              ...
+                            ...
+                        ...
+      ...
+
+
+
+    at button (<anonymous>:null:null)
+    at InfoBadge (src/components/ui/info-badge.tsx:54:7)
+    at DunningRulesPanel (src/app/app/commerce/components/dunning-rules.tsx:83:9)
+    at InvoicesPanel (src/app/app/commerce/invoices/invoices-panel.tsx:721:7)
+    at CommercePage (src/app/app/commerce/page.tsx:291:15)
+
+## Code Frame
+  52 |   return (
+  53 |     <span ref={containerRef} className="relative inline-flex items-center">
+> 54 |       <button
+     |       ^
+  55 |         onClick={() => setOpen(!open)}
+  56 |         className="inline-flex items-center justify-center rounded-full transition-colors hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none"
+  57 |         style={{
+
+Next.js version: 16.1.6 (Turbopack)
