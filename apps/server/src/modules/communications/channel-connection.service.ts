@@ -83,6 +83,16 @@ export class ChannelConnectionService {
       where: { id },
       data,
     });
+
+    if (existing.provider?.toUpperCase() === 'EMAIL' && data.accountEmail) {
+      await this.upsertDestination(id, businessId, {
+        platform: 'EMAIL',
+        platformId: data.accountEmail,
+        displayName: data.label || data.accountEmail,
+        capabilities: ['text', 'html', 'attachments'],
+      });
+    }
+
     return stripSecrets(updated);
   }
 
@@ -209,9 +219,14 @@ export class ChannelConnectionService {
       }
     }
 
-    if (!conn.token && healthState === 'Connected') {
+    const isEmail = conn.provider?.toUpperCase() === 'EMAIL';
+    if (!isEmail && !conn.token && healthState === 'Connected') {
       healthState = 'Error';
       healthMessage = 'No authentication token found. Please reconnect.';
+    }
+    if (isEmail && !conn.accountEmail && healthState === 'Connected') {
+      healthState = 'Error';
+      healthMessage = 'No sender email configured. Update your email sender settings.';
     }
 
     if (conn.destinations.length === 0 && healthState === 'Connected') {

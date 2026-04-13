@@ -252,7 +252,8 @@ function ConnectionCard({
   const meta = getProviderMeta(provider);
   const Icon = meta.icon;
   const dests = connection.enrichedDestinations ?? connection.destinations ?? [];
-  const needsReconnect = connection.healthState === "Expired" || connection.healthState === "NeedsRefresh" || connection.healthState === "MissingPermission" || connection.healthState === "Error";
+  const isEmail = provider.toUpperCase() === "EMAIL";
+  const needsReconnect = !isEmail && (connection.healthState === "Expired" || connection.healthState === "NeedsRefresh" || connection.healthState === "MissingPermission" || connection.healthState === "Error");
 
   const handleHealthCheck = async () => {
     setChecking(true);
