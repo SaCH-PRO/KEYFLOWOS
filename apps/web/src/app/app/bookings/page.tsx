@@ -9,6 +9,7 @@ import {
   Share2,
   Link2,
   BarChart3,
+  Megaphone,
 } from "lucide-react";
 import {
   Booking,
@@ -36,6 +37,7 @@ import {
   getBusinessById,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
+import { useOpenComposer } from "@/hooks/use-open-composer";
 import { useSearchParams, useRouter } from "next/navigation";
 import type { Tab, StatusFilter } from "./components/bookings-types";
 import { PageHeader } from "@/components/ui/page-header";
@@ -104,6 +106,7 @@ export default function BookingsPage() {
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [businessSlug, setBusinessSlug] = useState<string | null>(null);
+  const openComposer = useOpenComposer();
 
   const [staffFilter, setStaffFilter] = useState("");
   const [serviceFilter, setServiceFilter] = useState("");
@@ -453,20 +456,44 @@ export default function BookingsPage() {
         rightSlot={
           <div className="flex items-center gap-1">
             {businessSlug && services.length > 0 && (
-              <button
-                onClick={() => setShareModalOpen(true)}
-                className="inline-flex items-center gap-1.5 px-2.5 min-h-[44px] kf-radius-sm kf-text-micro font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
-                style={{
-                  background: "hsl(var(--kf-accent2) / 0.1)",
-                  border: "1px solid hsl(var(--kf-accent2) / 0.2)",
-                  color: "hsl(var(--kf-accent2))",
-                }}
-                title="Share booking link"
-                data-walkthrough="bookings-share"
-              >
-                <Share2 className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Share</span>
-              </button>
+              <>
+                <button
+                  onClick={() => {
+                    const topService = services[0];
+                    const bookingUrl = `${window.location.origin}/book/${businessSlug}`;
+                    openComposer({
+                      contentType: "social",
+                      body: `Book your next appointment with us! 🗓️\n\n${topService ? `Featured: ${topService.name}` : "Browse our services"}\n\n${bookingUrl}`,
+                      subject: `Book with us — ${topService?.name ?? "Services available"}`,
+                    });
+                  }}
+                  className="inline-flex items-center gap-1.5 px-2.5 min-h-[44px] kf-radius-sm kf-text-micro font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+                  style={{
+                    background: "hsl(var(--kf-accent) / 0.1)",
+                    border: "1px solid hsl(var(--kf-accent) / 0.2)",
+                    color: "hsl(var(--kf-accent))",
+                  }}
+                  title="Promote your booking services"
+                  data-walkthrough="bookings-promote"
+                >
+                  <Megaphone className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Promote</span>
+                </button>
+                <button
+                  onClick={() => setShareModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-2.5 min-h-[44px] kf-radius-sm kf-text-micro font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+                  style={{
+                    background: "hsl(var(--kf-accent2) / 0.1)",
+                    border: "1px solid hsl(var(--kf-accent2) / 0.2)",
+                    color: "hsl(var(--kf-accent2))",
+                  }}
+                  title="Share booking link"
+                  data-walkthrough="bookings-share"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Share</span>
+                </button>
+              </>
             )}
             <RichTooltip title="Calendar Sync" description={calendarConnected ? `Connected to ${calendarEmail ?? "Google Calendar"}. Bookings sync automatically.` : "Click to connect Google Calendar and sync your bookings."} side="bottom">
             <button

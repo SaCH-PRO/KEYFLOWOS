@@ -31,20 +31,6 @@ function stripHtml(html: string) {
   return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
 }
 
-const ALLOWED_TAGS = new Set(["p", "br", "b", "i", "u", "strong", "em", "a", "ul", "ol", "li", "h1", "h2", "h3", "span", "div", "blockquote"]);
-const ALLOWED_ATTRS = new Set(["href", "style", "class"]);
-
-function sanitizeHtml(html: string): string {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/on\w+\s*=\s*["'][^"']*["']/gi, "")
-    .replace(/on\w+\s*=\s*[^\s>]*/gi, "")
-    .replace(/javascript\s*:/gi, "")
-    .replace(/<iframe[\s\S]*?(<\/iframe>|\/?>)/gi, "")
-    .replace(/<object[\s\S]*?(<\/object>|\/?>)/gi, "")
-    .replace(/<embed[\s\S]*?\/?\s*>/gi, "")
-    .replace(/<form[\s\S]*?(<\/form>|\/?>)/gi, "");
-}
 
 function FacebookPreview({ body, mediaUrls, businessName }: { body: string; mediaUrls?: string[]; businessName?: string }) {
   const plain = stripHtml(body);
@@ -103,6 +89,7 @@ function InstagramPreview({ body, mediaUrls, businessName }: { body: string; med
 }
 
 function EmailPreview({ body, subject, businessName }: { body: string; subject?: string; businessName?: string }) {
+  const plain = stripHtml(body);
   return (
     <div className="rounded-xl border border-border/30 bg-[#1a1a1e] overflow-hidden">
       <div className="p-3 border-b border-border/20 space-y-1">
@@ -115,7 +102,9 @@ function EmailPreview({ body, subject, businessName }: { body: string; subject?:
           <span>{subject || "(No subject)"}</span>
         </div>
       </div>
-      <div className="p-3 text-xs text-foreground/80 max-h-48 overflow-y-auto prose-sm" dangerouslySetInnerHTML={{ __html: sanitizeHtml(body || "<p>Start writing your email...</p>") }} />
+      <div className="p-3 text-xs text-foreground/80 max-h-48 overflow-y-auto whitespace-pre-wrap leading-relaxed">
+        {plain || "Start writing your email..."}
+      </div>
     </div>
   );
 }
