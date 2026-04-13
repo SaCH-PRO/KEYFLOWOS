@@ -68,6 +68,7 @@ export class ChannelConnectionService {
 
   async update(businessId: string, id: string, data: {
     label?: string;
+    accountEmail?: string;
     token?: string;
     refreshToken?: string;
     expiresAt?: Date;
@@ -269,11 +270,10 @@ export class ChannelConnectionService {
         conn = await this.prisma.client.channelConnection.update({
           where: { id: existing.id },
           data: {
-            token: sc.accessToken,
+            token: sc.token,
             refreshToken: sc.refreshToken || undefined,
             expiresAt: sc.expiresAt || undefined,
             label: sc.accountName || existing.label,
-            accountEmail: sc.email || existing.accountEmail,
             healthState: 'Connected',
             healthMessage: null,
             lastCheckedAt: new Date(),
@@ -284,11 +284,10 @@ export class ChannelConnectionService {
           data: {
             businessId,
             provider,
-            token: sc.accessToken,
+            token: sc.token,
             refreshToken: sc.refreshToken || undefined,
             expiresAt: sc.expiresAt || undefined,
             label: sc.accountName || provider,
-            accountEmail: sc.email || undefined,
             healthState: 'Connected',
             healthMessage: null,
             lastCheckedAt: new Date(),
@@ -298,42 +297,35 @@ export class ChannelConnectionService {
 
       let destCount = 0;
 
-      if (sc.pages && Array.isArray(sc.pages)) {
-        const pages = sc.pages as Array<Record<string, unknown>>;
-        for (const page of pages) {
-          const pictureData = page.picture as Record<string, unknown> | undefined;
-          const pictureInner = pictureData?.data as Record<string, unknown> | undefined;
-          await this.upsertDestination(conn.id, businessId, {
-            platform: 'FACEBOOK',
-            platformId: (page.id || page.pageId) as string | undefined,
-            displayName: (page.name || page.pageName || 'Facebook Page') as string,
-            avatarUrl: (pictureInner?.url || page.avatarUrl) as string | undefined,
-            capabilities: ['text', 'image', 'video', 'link'],
-          });
-          destCount++;
-        }
-      }
-
-      if (sc.instagramAccounts && Array.isArray(sc.instagramAccounts)) {
-        const igAccounts = sc.instagramAccounts as Array<Record<string, unknown>>;
-        for (const ig of igAccounts) {
-          await this.upsertDestination(conn.id, businessId, {
-            platform: 'INSTAGRAM',
-            platformId: (ig.id || ig.igId) as string | undefined,
-            displayName: (ig.username || ig.name || 'Instagram') as string,
-            avatarUrl: (ig.profilePictureUrl || ig.avatarUrl) as string | undefined,
-            capabilities: ['image', 'video', 'carousel'],
-          });
-          destCount++;
-        }
-      }
-
-      if (provider === 'GOOGLE' && sc.email) {
+      if (provider === 'FACEBOOK' && sc.platformId) {
         await this.upsertDestination(conn.id, businessId, {
-          platform: 'EMAIL',
-          platformId: sc.email,
-          displayName: sc.accountName || sc.email,
-          capabilities: ['text', 'html', 'attachments'],
+          platform: 'FACEBOOK',
+          platformId: sc.platformId,
+          displayName: sc.accountName || 'Facebook Page',
+          avatarUrl: sc.profilePicture || undefined,
+          capabilities: ['text', 'image', 'video', 'link'],
+        });
+        destCount++;
+      }
+
+      if (provider === 'INSTAGRAM' && sc.platformId) {
+        await this.upsertDestination(conn.id, businessId, {
+          platform: 'INSTAGRAM',
+          platformId: sc.platformId,
+          displayName: sc.accountName || 'Instagram',
+          avatarUrl: sc.profilePicture || undefined,
+          capabilities: ['image', 'video', 'carousel'],
+        });
+        destCount++;
+      }
+
+      if (['LINKEDIN', 'TWITTER', 'TIKTOK'].includes(provider) && sc.platformId) {
+        await this.upsertDestination(conn.id, businessId, {
+          platform: provider,
+          platformId: sc.platformId,
+          displayName: sc.accountName || provider,
+          avatarUrl: sc.profilePicture || undefined,
+          capabilities: ['text', 'image', 'video'],
         });
         destCount++;
       }
