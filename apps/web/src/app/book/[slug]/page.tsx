@@ -914,7 +914,7 @@ export default function PublicBookingPage() {
           formatTime={formatTime}
         />
 
-        <style jsx>{`
+        <style>{`
           @keyframes confettiFall {
             0% { transform: translateY(0) rotate(0deg) scale(1); opacity: 0.9; }
             100% { transform: translateY(100vh) rotate(720deg) scale(0.3); opacity: 0; }

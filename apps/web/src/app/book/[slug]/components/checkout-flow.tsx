@@ -1082,7 +1082,7 @@ export function CheckoutFlow({
         </div>
       </div>
 
-      <style jsx>{`
+      <style>{`
         @keyframes stepForward {
           from { opacity: 0; transform: translateX(24px); }
           to { opacity: 1; transform: translateX(0); }

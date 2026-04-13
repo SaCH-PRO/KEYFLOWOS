@@ -103,7 +103,7 @@ export function WishlistDrawer({ open, onClose, items, onRemove, onAddToCart, pr
           )}
         </div>
 
-        <style jsx>{`
+        <style>{`
           @keyframes slideInRight {
             from { transform: translateX(100%); }
             to { transform: translateX(0); }
