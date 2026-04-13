@@ -238,6 +238,7 @@ export function UnifiedComposer({
           if (c.variants && c.variants.length > 0) {
             const meta = (v: typeof c.variants[0]) => (v.metadata || {}) as Record<string, string>;
             setVariants(c.variants.map(v => ({
+              destinationId: v.destinationId,
               platform: v.platform,
               textBody: v.body || c.body || "",
               subject: v.subject || meta(v).subject,
