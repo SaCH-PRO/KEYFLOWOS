@@ -108,6 +108,7 @@ export class GoogleDriveService {
 
     const scopes = [
       'https://www.googleapis.com/auth/drive.file',
+      'https://www.googleapis.com/auth/spreadsheets',
       'https://www.googleapis.com/auth/userinfo.email',
     ];
 
@@ -434,5 +435,368 @@ export class GoogleDriveService {
     } else {
       return `https://drive.google.com/file/d/${fileId}/preview`;
     }
+  }
+
+  async getInventorySheetSyncStatus(businessId: string) {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { inventoryLinkedSheetId: true, inventoryLinkedSheetName: true, inventoryLastSyncAt: true, driveAccessToken: true },
+    });
+
+    return {
+      connected: !!business?.driveAccessToken,
+      linkedSheetId: business?.inventoryLinkedSheetId || null,
+      linkedSheetName: business?.inventoryLinkedSheetName || null,
+      lastSyncAt: business?.inventoryLastSyncAt || null,
+    };
+  }
+
+  async linkInventorySheet(businessId: string, sheetId: string, sheetName: string) {
+    await this.prisma.client.business.update({
+      where: { id: businessId },
+      data: { inventoryLinkedSheetId: sheetId, inventoryLinkedSheetName: sheetName },
+    });
+    return { success: true, sheetId, sheetName };
+  }
+
+  async unlinkInventorySheet(businessId: string) {
+    await this.prisma.client.business.update({
+      where: { id: businessId },
+      data: { inventoryLinkedSheetId: null, inventoryLinkedSheetName: null, inventoryLastSyncAt: null },
+    });
+    return { success: true };
+  }
+
+  async createInventorySheet(businessId: string, title: string): Promise<{ fileId: string; webViewLink: string; name: string }> {
+    const accessToken = await this.getValidAccessToken(businessId);
+
+    const metadata = {
+      name: title || 'Inventory Sync',
+      mimeType: 'application/vnd.google-apps.spreadsheet',
+      description: 'Inventory sync sheet managed by KeyflowOS',
+    };
+
+    const res = await fetch('https://www.googleapis.com/drive/v3/files?fields=id,webViewLink,name', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(metadata),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      this.logger.error('Failed to create inventory sheet', err);
+      throw new BadRequestException('Failed to create Google Sheet — check Drive permissions');
+    }
+
+    const file = await res.json();
+
+    const headers = [['SKU', 'Product Name', 'Warehouse', 'Quantity On Hand', 'Reserved', 'Available', 'Reorder Level', 'Cost Per Unit', 'Currency', 'Status', 'Last Updated']];
+    await this.writeSheetValues(accessToken, file.id, 'Sheet1', 'A1', headers);
+
+    await this.prisma.client.business.update({
+      where: { id: businessId },
+      data: { inventoryLinkedSheetId: file.id, inventoryLinkedSheetName: file.name },
+    });
+
+    this.logger.log(`Created inventory sheet ${file.id} for business ${businessId}`);
+    return { fileId: file.id, webViewLink: file.webViewLink, name: file.name };
+  }
+
+  private async writeSheetValues(accessToken: string, spreadsheetId: string, sheetName: string, range: string, values: any[][]) {
+    const fullRange = `${sheetName}!${range}`;
+    const res = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(fullRange)}?valueInputOption=USER_ENTERED`,
+      {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values }),
+      },
+    );
+    if (!res.ok) {
+      const err = await res.text();
+      this.logger.error('Failed to write sheet values', err);
+      throw new BadRequestException('Failed to write to Google Sheet — check permissions and sheet access');
+    }
+    return res.json();
+  }
+
+  private async clearSheetValues(accessToken: string, spreadsheetId: string, sheetName: string) {
+    const res = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}:clear`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: '{}',
+      },
+    );
+    if (!res.ok) {
+      const err = await res.text();
+      this.logger.warn('Failed to clear sheet values before push', err);
+    }
+  }
+
+  private async readSheetValues(accessToken: string, spreadsheetId: string, range: string): Promise<any[][]> {
+    const res = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!res.ok) {
+      const err = await res.text();
+      this.logger.error('Failed to read sheet values', err);
+      throw new BadRequestException('Failed to read from Google Sheet — check sheet ID and permissions');
+    }
+    const data = await res.json();
+    return data.values || [];
+  }
+
+  async pushInventoryToSheet(businessId: string) {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { inventoryLinkedSheetId: true },
+    });
+    if (!business?.inventoryLinkedSheetId) throw new BadRequestException('No linked inventory sheet. Please link a Google Sheet first.');
+
+    const [inventory, products, warehouses] = await Promise.all([
+      this.prisma.client.inventoryStock.findMany({
+        where: { businessId },
+        include: { product: true, warehouse: true },
+      }),
+      this.prisma.client.product.findMany({ where: { businessId, deletedAt: null } }),
+      this.prisma.client.warehouse.findMany({ where: { businessId, isActive: true } }),
+    ]);
+
+    const accessToken = await this.getValidAccessToken(businessId);
+    const sheetId = business.inventoryLinkedSheetId;
+
+    const now = new Date().toISOString();
+    const rows: any[][] = [
+      ['SKU', 'Product Name', 'Warehouse', 'Quantity On Hand', 'Reserved', 'Available', 'Reorder Level', 'Cost Per Unit', 'Currency', 'Status', 'Last Updated'],
+    ];
+
+    type InvWithRelations = typeof inventory[0] & { product: { sku?: string | null; name: string } | null; warehouse: { name: string } | null };
+    for (const inv of inventory as InvWithRelations[]) {
+      const product = inv.product;
+      const warehouse = inv.warehouse;
+      const available = inv.quantity - inv.reserved;
+      const status = inv.quantity <= 0 ? 'Out of Stock' : (inv.reorderAt && inv.quantity <= inv.reorderAt ? 'Low Stock' : 'In Stock');
+      const invRow = inv as typeof inv & { costPerUnit?: number | null; currency?: string | null };
+      rows.push([
+        product?.sku || '',
+        product?.name || '',
+        warehouse?.name || '',
+        inv.quantity,
+        inv.reserved,
+        available,
+        inv.reorderAt ?? '',
+        invRow.costPerUnit ?? '',
+        invRow.currency || 'TTD',
+        status,
+        now,
+      ]);
+    }
+
+    await this.clearSheetValues(accessToken, sheetId, 'Sheet1');
+    await this.writeSheetValues(accessToken, sheetId, 'Sheet1', 'A1', rows);
+    await this.prisma.client.business.update({
+      where: { id: businessId },
+      data: { inventoryLastSyncAt: new Date() },
+    });
+
+    this.logger.log(`Pushed ${inventory.length} inventory records to sheet ${sheetId}`);
+    return { success: true, rowsPushed: inventory.length, syncedAt: now };
+  }
+
+  async pullInventoryFromSheet(businessId: string): Promise<{ rows: Record<string, string>[]; headers: string[] }> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { inventoryLinkedSheetId: true },
+    });
+    if (!business?.inventoryLinkedSheetId) throw new BadRequestException('No linked inventory sheet. Please link a Google Sheet first.');
+
+    const accessToken = await this.getValidAccessToken(businessId);
+    const values = await this.readSheetValues(accessToken, business.inventoryLinkedSheetId, 'Sheet1');
+
+    if (values.length < 2) return { rows: [], headers: [] };
+
+    const headers = values[0].map((h: string) => String(h).trim());
+    const rows = values.slice(1).map((row: any[]) => {
+      const obj: Record<string, string> = {};
+      headers.forEach((h, i) => { obj[h] = row[i] !== undefined ? String(row[i]) : ''; });
+      return obj;
+    });
+
+    await this.prisma.client.business.update({
+      where: { id: businessId },
+      data: { inventoryLastSyncAt: new Date() },
+    });
+
+    return { rows, headers };
+  }
+
+  async generateInventorySheetDiff(businessId: string): Promise<{
+    conflicts: Array<{
+      sku: string; productName: string; warehouseName: string;
+      systemQty: number | null; sheetQty: number;
+      systemReorderAt: number | null; sheetReorderAt: number | null;
+      hasConflict: boolean; isNew: boolean;
+    }>;
+    unchanged: number;
+  }> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { inventoryLinkedSheetId: true },
+    });
+    if (!business?.inventoryLinkedSheetId) throw new BadRequestException('No linked inventory sheet. Please link a Google Sheet first.');
+
+    const accessToken = await this.getValidAccessToken(businessId);
+    const values = await this.readSheetValues(accessToken, business.inventoryLinkedSheetId, 'Sheet1');
+    if (values.length < 2) return { conflicts: [], unchanged: 0 };
+
+    const headers = values[0].map((h: string) => String(h).trim());
+    const sheetRows = values.slice(1).map((row: any[]) => {
+      const obj: Record<string, string> = {};
+      headers.forEach((h, i) => { obj[h] = row[i] !== undefined ? String(row[i]) : ''; });
+      return obj;
+    });
+
+    const [systemInventory, products, warehouses] = await Promise.all([
+      this.prisma.client.inventoryStock.findMany({ where: { businessId }, include: { product: true, warehouse: true } }),
+      this.prisma.client.product.findMany({ where: { businessId, deletedAt: null }, select: { id: true, name: true, sku: true } }),
+      this.prisma.client.warehouse.findMany({ where: { businessId, isActive: true } }),
+    ]);
+
+    const systemMap: Record<string, any> = {};
+    for (const inv of systemInventory) {
+      const key = `${inv.product?.sku || inv.product?.name}|${inv.warehouse?.name}`.toLowerCase();
+      systemMap[key] = inv;
+    }
+
+    const conflicts: Array<any> = [];
+    let unchanged = 0;
+
+    for (const row of sheetRows) {
+      const sku = String(row['SKU'] || '').trim();
+      const productName = String(row['Product Name'] || '').trim();
+      const warehouseName = String(row['Warehouse'] || '').trim();
+      const sheetQty = parseInt(row['Quantity On Hand'] ?? '', 10);
+      const sheetReorderAt = row['Reorder Level'] ? parseInt(row['Reorder Level'], 10) : null;
+
+      if (isNaN(sheetQty)) continue;
+
+      const lookupKey = `${sku || productName}|${warehouseName}`.toLowerCase();
+      const systemRecord = systemMap[lookupKey];
+
+      if (!systemRecord) {
+        conflicts.push({ sku, productName, warehouseName, systemQty: null, sheetQty, systemReorderAt: null, sheetReorderAt, hasConflict: true, isNew: true });
+      } else if (systemRecord.quantity !== sheetQty || systemRecord.reorderAt !== sheetReorderAt) {
+        conflicts.push({
+          sku: sku || systemRecord.product?.sku || '',
+          productName: productName || systemRecord.product?.name || '',
+          warehouseName: warehouseName || systemRecord.warehouse?.name || '',
+          systemQty: systemRecord.quantity,
+          sheetQty,
+          systemReorderAt: systemRecord.reorderAt,
+          sheetReorderAt,
+          hasConflict: true,
+          isNew: false,
+        });
+      } else {
+        unchanged++;
+      }
+    }
+
+    return { conflicts, unchanged };
+  }
+
+  async applyPulledInventory(businessId: string, rows: Record<string, string>[], userId?: string): Promise<{ applied: number; skipped: number; errors: string[] }> {
+    const warehouses = await this.prisma.client.warehouse.findMany({ where: { businessId, isActive: true } });
+    const products = await this.prisma.client.product.findMany({ where: { businessId, deletedAt: null }, select: { id: true, name: true, sku: true } });
+
+    const whByName = Object.fromEntries(warehouses.map((w: any) => [w.name.toLowerCase(), w]));
+    const prodBySku = Object.fromEntries(products.filter((p: any) => p.sku).map((p: any) => [p.sku!.toLowerCase(), p]));
+    const prodByName = Object.fromEntries(products.map((p: any) => [p.name.toLowerCase(), p]));
+
+    const results = { applied: 0, skipped: 0, errors: [] as string[] };
+
+    for (const row of rows) {
+      try {
+        const sku = String(row['SKU'] || '').trim();
+        const productName = String(row['Product Name'] || '').trim();
+        const warehouseName = String(row['Warehouse'] || '').trim();
+        const qty = parseInt(row['Quantity On Hand'] ?? '', 10);
+        const reorderLevel = row['Reorder Level'] ? parseInt(row['Reorder Level'], 10) : undefined;
+        const costPerUnit = row['Cost Per Unit'] ? parseFloat(row['Cost Per Unit']) : undefined;
+
+        if (isNaN(qty) || qty < 0) { results.errors.push(`Row skipped: invalid quantity for ${sku || productName}`); results.skipped++; continue; }
+
+        const product = (sku && prodBySku[sku.toLowerCase()]) || (productName && prodByName[productName.toLowerCase()]);
+        if (!product) { results.errors.push(`Product not found: ${sku || productName}`); results.skipped++; continue; }
+
+        const warehouse = warehouseName ? whByName[warehouseName.toLowerCase()] : warehouses[0];
+        if (!warehouse) { results.errors.push(`Warehouse not found: ${warehouseName}`); results.skipped++; continue; }
+
+        const productId = product.id;
+        const existing = await this.prisma.client.inventoryStock.findUnique({
+          where: { productId_warehouseId: { productId, warehouseId: warehouse.id } },
+        });
+
+        const previousQty = existing?.quantity ?? null;
+
+        if (existing) {
+          await this.prisma.client.inventoryStock.update({
+            where: { id: existing.id },
+            data: {
+              quantity: qty,
+              ...(reorderLevel !== undefined && !isNaN(reorderLevel) ? { reorderAt: reorderLevel } : {}),
+              ...(costPerUnit !== undefined && !isNaN(costPerUnit) ? { costPerUnit } : {}),
+            },
+          });
+        } else {
+          await this.prisma.client.inventoryStock.create({
+            data: {
+              businessId,
+              productId,
+              warehouseId: warehouse.id,
+              quantity: qty,
+              reserved: 0,
+              currency: 'TTD',
+              ...(reorderLevel !== undefined && !isNaN(reorderLevel) ? { reorderAt: reorderLevel } : {}),
+              ...(costPerUnit !== undefined && !isNaN(costPerUnit) ? { costPerUnit } : {}),
+            },
+          });
+        }
+
+        const qtyChange = previousQty !== null ? qty - previousQty : qty;
+        if (qtyChange !== 0) {
+          await this.prisma.client.stockMovement.create({
+            data: {
+              businessId,
+              warehouseId: warehouse.id,
+              productId,
+              type: 'ADJUSTMENT',
+              quantityChange: qtyChange,
+              reasonCode: 'SHEET_SYNC',
+              note: `Google Sheets sync: ${sku || productName}${previousQty !== null ? ` (was ${previousQty})` : ' (new)'}`,
+              createdBy: userId,
+            },
+          });
+        }
+
+        results.applied++;
+      } catch (err: any) {
+        results.errors.push(err.message);
+        results.skipped++;
+      }
+    }
+
+    await this.prisma.client.business.update({
+      where: { id: businessId },
+      data: { inventoryLastSyncAt: new Date() },
+    });
+
+    return results;
   }
 }

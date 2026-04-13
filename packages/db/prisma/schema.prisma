@@ -134,6 +134,7 @@ model Business {
   shippingZones    ShippingZone[]
   warehouses       Warehouse[]
   inventoryStocks  InventoryStock[]
+  stockMovements   StockMovement[]
   shipments        Shipment[]
   customsDeclarations CustomsDeclaration[]
   preOrders        PreOrder[]
@@ -196,6 +197,11 @@ model Business {
   driveAccessToken  String?   @map("drive_access_token")
   driveRefreshToken String?   @map("drive_refresh_token")
   driveTokenExpiry  DateTime? @map("drive_token_expiry")
+
+  // Inventory Spreadsheet Sync
+  inventoryLinkedSheetId   String?   @map("inventory_linked_sheet_id")
+  inventoryLinkedSheetName String?   @map("inventory_linked_sheet_name")
+  inventoryLastSyncAt      DateTime? @map("inventory_last_sync_at")
 
   // Store Settings
   storeEnabled      Boolean @default(true) @map("store_enabled")
@@ -1888,6 +1894,28 @@ model InventoryStock {
   @@unique([productId, warehouseId])
   @@index([businessId])
   @@map("inventory_stocks")
+}
+
+model StockMovement {
+  id           String   @id @default(cuid())
+  businessId   String   @map("business_id")
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  warehouseId  String?  @map("warehouse_id")
+  productId    String?  @map("product_id")
+
+  type         String   @default("ADJUSTMENT")
+  quantityChange Int    @map("quantity_change")
+  reasonCode   String?  @map("reason_code")
+  note         String?
+  referenceId  String?  @map("reference_id")
+  createdBy    String?  @map("created_by")
+
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([businessId])
+  @@index([warehouseId])
+  @@index([productId])
+  @@map("stock_movements")
 }
 
 model MarketplaceOrder {

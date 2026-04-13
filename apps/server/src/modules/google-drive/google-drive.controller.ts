@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Param, Query, Body, Req, Res, UseGuards, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Patch, Param, Query, Body, Req, Res, UseGuards, Inject } from '@nestjs/common';
 import { Response } from 'express';
 import { GoogleDriveService } from './google-drive.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
@@ -129,6 +129,64 @@ export class GoogleDriveController {
   ) {
     const html = this.driveService.buildDocumentHtml(body);
     return { html };
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/inventory-sheet/status')
+  getInventorySheetStatus(@Param('businessId') businessId: string) {
+    return this.driveService.getInventorySheetSyncStatus(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/inventory-sheet/create')
+  createInventorySheet(
+    @Param('businessId') businessId: string,
+    @Body() body: { title?: string },
+  ) {
+    return this.driveService.createInventorySheet(businessId, body.title || 'Inventory Sync');
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/inventory-sheet/link')
+  linkInventorySheet(
+    @Param('businessId') businessId: string,
+    @Body() body: { sheetId: string; sheetName: string },
+  ) {
+    return this.driveService.linkInventorySheet(businessId, body.sheetId, body.sheetName);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Delete('businesses/:businessId/inventory-sheet/unlink')
+  unlinkInventorySheet(@Param('businessId') businessId: string) {
+    return this.driveService.unlinkInventorySheet(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/inventory-sheet/push')
+  pushInventoryToSheet(@Param('businessId') businessId: string) {
+    return this.driveService.pushInventoryToSheet(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/inventory-sheet/pull')
+  pullInventoryFromSheet(@Param('businessId') businessId: string) {
+    return this.driveService.pullInventoryFromSheet(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/inventory-sheet/apply')
+  applyPulledInventory(
+    @Param('businessId') businessId: string,
+    @Body() body: { rows: Record<string, string>[] },
+    @Req() req: { user?: { id?: string } },
+  ) {
+    return this.driveService.applyPulledInventory(businessId, body.rows || [], req.user?.id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/inventory-sheet/diff')
+  generateInventorySheetDiff(@Param('businessId') businessId: string) {
+    return this.driveService.generateInventorySheetDiff(businessId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

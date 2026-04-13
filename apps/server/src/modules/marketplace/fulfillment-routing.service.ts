@@ -104,6 +104,10 @@ export interface InventoryAlert {
   reserved: number;
   available: number;
   reorderAt: number;
+  salesVelocity30d?: number;
+  avgDailySales?: number;
+  daysOfStockLeft?: number;
+  suggestedReorderQty?: number;
 }
 
 export type FulfillmentStrategy =
@@ -959,23 +963,88 @@ export class FulfillmentRoutingService {
       updateData.receivedAt = new Date();
     }
 
-    const updatedPO = await this.prisma.client.purchaseOrder.update({
-      where: { id: poId },
-      data: updateData,
-    });
+    let updatedPO: any;
 
     if (targetStatus === 'RECEIVED') {
-      await this.prisma.client.fulfillmentRoute.updateMany({
-        where: { businessId, purchaseOrderId: poId },
-        data: { status: 'PICKING_PACKING' },
+      const warehouses = await this.prisma.client.warehouse.findMany({
+        where: { businessId, isActive: true },
+        orderBy: { createdAt: 'asc' },
       });
+      const defaultWarehouseId = warehouses[0]?.id;
 
+      updatedPO = await this.prisma.client.$transaction(async (tx) => {
+        const updated = await tx.purchaseOrder.update({
+          where: { id: poId },
+          data: updateData,
+        });
+
+        await tx.fulfillmentRoute.updateMany({
+          where: { businessId, purchaseOrderId: poId },
+          data: { status: 'PICKING_PACKING' },
+        });
+
+        const poItems = (updated.items as any[]) ?? [];
+        for (const item of poItems) {
+          const productId = item.productId;
+          const qty = item.receivedQuantity ?? item.quantity ?? 0;
+          const warehouseId = item.warehouseId || defaultWarehouseId;
+
+          if (!productId || !warehouseId || qty <= 0) continue;
+
+          const existing = await tx.inventoryStock.findUnique({
+            where: { productId_warehouseId: { productId, warehouseId } },
+          });
+
+          if (existing) {
+            await tx.inventoryStock.update({
+              where: { id: existing.id },
+              data: { quantity: existing.quantity + qty },
+            });
+          } else {
+            await tx.inventoryStock.create({
+              data: {
+                businessId,
+                productId,
+                warehouseId,
+                quantity: qty,
+                reserved: 0,
+                currency: updated.currency ?? 'TTD',
+                ...(item.unitCost ? { costPerUnit: item.unitCost } : {}),
+              },
+            });
+          }
+
+          await tx.stockMovement.create({
+            data: {
+              businessId,
+              warehouseId,
+              productId,
+              type: 'RECEIPT',
+              quantityChange: qty,
+              reasonCode: 'PO_RECEIPT',
+              note: `Received via PO ${updated.poNumber}`,
+              referenceId: poId,
+            },
+          });
+        }
+
+        return updated;
+      });
+    } else {
+      updatedPO = await this.prisma.client.purchaseOrder.update({
+        where: { id: poId },
+        data: updateData,
+      });
+    }
+
+    if (targetStatus === 'RECEIVED') {
+      const poItems = (updatedPO.items as any[]) ?? [];
       this.events.emit('purchaseOrder.received', {
         businessId,
         purchaseOrderId: poId,
         poNumber: updatedPO.poNumber,
         supplierName: updatedPO.supplierName,
-        items: (updatedPO.items as any[]) ?? [],
+        items: poItems,
         total: updatedPO.total,
         currency: updatedPO.currency,
       } as PurchaseOrderReceivedPayload);
@@ -1104,16 +1173,48 @@ export class FulfillmentRoutingService {
   }
 
   async getInventoryAlerts(businessId: string): Promise<InventoryAlert[]> {
-    const stocks = await this.prisma.client.inventoryStock.findMany({
-      where: { businessId },
-      include: { product: true, warehouse: true },
-    });
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const [stocks, recentOrderItems] = await Promise.all([
+      this.prisma.client.inventoryStock.findMany({
+        where: { businessId },
+        include: { product: true, warehouse: true },
+      }),
+      this.prisma.client.marketplaceOrderItem.findMany({
+        where: {
+          order: { businessId, createdAt: { gte: thirtyDaysAgo } },
+        },
+        select: { productId: true, quantity: true },
+      }),
+    ]);
+
+    const salesByProduct: Record<string, number> = {};
+    for (const item of recentOrderItems) {
+      if (!item.productId) continue;
+      salesByProduct[item.productId] = (salesByProduct[item.productId] || 0) + (item.quantity || 0);
+    }
 
     const alerts: InventoryAlert[] = [];
 
     for (const stock of stocks) {
       if (!stock.reorderAt) continue;
       const available = stock.quantity - stock.reserved;
+
+      const salesVelocity30d = salesByProduct[stock.productId] || 0;
+      const avgDailySales = salesVelocity30d / 30;
+      const daysOfStockLeft = avgDailySales > 0 ? Math.round(available / avgDailySales) : null;
+      const leadTimeDays = 14;
+      const safetyStockDays = 7;
+      const suggestedReorderQty = avgDailySales > 0
+        ? Math.ceil(avgDailySales * (leadTimeDays + safetyStockDays))
+        : Math.max(stock.reorderAt * 3, 10);
+
+      const velocityFields = {
+        salesVelocity30d,
+        avgDailySales: Math.round(avgDailySales * 10) / 10,
+        daysOfStockLeft: daysOfStockLeft ?? undefined,
+        suggestedReorderQty,
+      };
 
       if (available <= 0) {
         alerts.push({
@@ -1128,6 +1229,7 @@ export class FulfillmentRoutingService {
           reserved: stock.reserved,
           available: 0,
           reorderAt: stock.reorderAt,
+          ...velocityFields,
         });
       } else if (available <= stock.reorderAt) {
         alerts.push({
@@ -1142,10 +1244,15 @@ export class FulfillmentRoutingService {
           reserved: stock.reserved,
           available,
           reorderAt: stock.reorderAt,
+          ...velocityFields,
         });
       }
     }
 
-    return alerts;
+    return alerts.sort((a, b) => {
+      if (a.severity === 'critical' && b.severity !== 'critical') return -1;
+      if (b.severity === 'critical' && a.severity !== 'critical') return 1;
+      return (b.avgDailySales || 0) - (a.avgDailySales || 0);
+    });
   }
 }
