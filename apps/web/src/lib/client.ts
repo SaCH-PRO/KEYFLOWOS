@@ -3667,6 +3667,87 @@ export async function fetchCashFlowForecast(businessId: string, days = 30): Prom
 }
 
 // ---
+// FLOW AI BOT
+// ---
+export interface FlowToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, any>;
+  riskLevel: 'low' | 'medium' | 'high';
+}
+
+export interface FlowToolResult {
+  toolCallId: string;
+  name: string;
+  result: any;
+  success: boolean;
+  error?: string;
+}
+
+export interface FlowPendingConfirmation {
+  toolCallId: string;
+  name: string;
+  arguments: Record<string, any>;
+  description: string;
+  riskLevel: 'low' | 'medium' | 'high';
+}
+
+export interface FlowChatResponse {
+  reply: string;
+  toolCalls?: FlowToolCall[];
+  toolResults?: FlowToolResult[];
+  pendingConfirmations?: FlowPendingConfirmation[];
+  requiresConfirmation?: boolean;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    creditsUsed: number;
+  };
+}
+
+export async function sendFlowChat(
+  businessId: string,
+  message: string,
+  history?: any[],
+  pendingConfirmation?: {
+    toolCallId: string;
+    confirmed: boolean;
+    toolName?: string;
+    toolArgs?: Record<string, any>;
+  },
+): Promise<ApiResult<FlowChatResponse>> {
+  return apiPost<FlowChatResponse>({
+    path: `/ai/businesses/${encodeURIComponent(businessId)}/flow/chat`,
+    body: { message, history, pendingConfirmation },
+  });
+}
+
+export async function confirmFlowAction(
+  businessId: string,
+  toolCallId: string,
+  toolName: string,
+  toolArgs: Record<string, any>,
+  confirmed: boolean,
+): Promise<ApiResult<FlowChatResponse>> {
+  return apiPost<FlowChatResponse>({
+    path: `/ai/businesses/${encodeURIComponent(businessId)}/flow/confirm`,
+    body: { toolCallId, toolName, toolArgs, confirmed },
+  });
+}
+
+export async function fetchFlowSessions(businessId: string): Promise<ApiResult<any[]>> {
+  return apiGetSimple<any[]>(`/ai/businesses/${encodeURIComponent(businessId)}/flow/sessions`);
+}
+
+export async function clearFlowSession(businessId: string, sessionId: string): Promise<ApiResult<{ success: boolean }>> {
+  return apiPost<{ success: boolean }>({
+    path: `/ai/businesses/${encodeURIComponent(businessId)}/flow/sessions/${encodeURIComponent(sessionId)}/clear`,
+    body: {},
+  });
+}
+
+// ---
 // AI USAGE & BILLING
 // ---
 export interface AiUsageSummary {
