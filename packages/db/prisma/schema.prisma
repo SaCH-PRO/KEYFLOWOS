@@ -1489,6 +1489,8 @@ model EmailCampaignContact {
   status     String   @default("PENDING") // PENDING, SENT, OPENED, CLICKED, BOUNCED
   sentAt     DateTime? @map("sent_at")
   openedAt   DateTime? @map("opened_at")
+  clickedAt  DateTime? @map("clicked_at")
+  bouncedAt  DateTime? @map("bounced_at")
 
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
