@@ -47,6 +47,7 @@ import { SocialTabContent } from "./components/social-tab-content";
 import { MarketingCalendarTab } from "./components/marketing-calendar-tab";
 import { AudienceHealthSection } from "./components/campaign-intelligence-cards";
 import { AudienceSegmentsPanel } from "./components/audience-segments-panel";
+import { UnifiedComposer } from "./components/unified/unified-composer";
 import type { EmailCampaign, LeadForm } from "@/lib/client";
 import type { BusinessPulse } from "./hooks/use-marketing";
 
@@ -417,6 +418,17 @@ export default function ContentPage() {
     document.querySelector<HTMLButtonElement>("[data-marketing-new-campaign]")?.click();
   }, [handleTabChange]));
 
+  useEffect(() => {
+    const composeParam = searchParams.get("compose");
+    const contentTypeParam = searchParams.get("contentType");
+    if (composeParam === "true") {
+      setActiveTab("create");
+      setCreateSubmode("compose");
+      if (contentTypeParam === "email") setComposeType("email");
+      else setComposeType("social");
+    }
+  }, [searchParams]);
+
   const handleNewItem = useCallback(() => {
     if (activeTab === "create") {
       if (createSubmode === "compose") {
@@ -622,41 +634,14 @@ export default function ContentPage() {
                   <AiBadge label="AI Content" explanation="AI can generate email subject lines, body copy, and social posts based on your business context and audience." />
                 </div>
 
-                {createSubmode === "compose" && (
+                {createSubmode === "compose" && mk.businessId && (
                   <div className="space-y-4">
-                    <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/20 border border-border/30 w-fit">
-                      <button
-                        onClick={() => setComposeType("email")}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                          composeType === "email"
-                            ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))] shadow-sm"
-                            : "text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        <Mail className="w-3.5 h-3.5" /> Email Campaign
-                      </button>
-                      <button
-                        onClick={() => setComposeType("social")}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                          composeType === "social"
-                            ? "bg-[hsl(var(--kf-accent2))]/15 text-[hsl(var(--kf-accent2))] shadow-sm"
-                            : "text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        <PenSquare className="w-3.5 h-3.5" /> Social Post
-                      </button>
-                    </div>
-                    <AnimatePresence mode="wait">
-                      {composeType === "email" ? (
-                        <motion.div key="email" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-                          <CampaignsPanel businessId={mk.businessId} campaigns={mk.campaigns} setCampaigns={mk.setCampaigns} availableTags={mk.availableTags} onCampaignCreated={mk.handleCampaignCreated} onCampaignSent={mk.handleCampaignSent} onViewContact={mk.handleViewContact} onAiWrite={() => handleAiAction("campaign-content-generator")} />
-                        </motion.div>
-                      ) : (
-                        <motion.div key="social" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-                          <SocialTabContent businessId={mk.businessId} onPostsLoaded={mk.handleSocialPostsLoaded} />
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                    <UnifiedComposer
+                      businessId={mk.businessId}
+                      initialContentType={composeType === "email" ? "email" : "social"}
+                      onContentCreated={() => { void mk.loadData(); }}
+                      onClose={() => { setCreateSubmode("posts"); void mk.loadData(); }}
+                    />
                   </div>
                 )}
 
