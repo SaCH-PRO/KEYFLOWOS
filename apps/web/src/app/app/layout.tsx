@@ -110,7 +110,7 @@ function NewEntityMenu({ onClose }: { onClose: () => void }) {
     { label: "Project", icon: FolderKanban, href: "/app/projects" },
     { label: "Campaign", icon: Megaphone, href: "/app/marketing" },
     { label: "Post", icon: MessageCircle, href: "/app/marketing?tab=social" },
-    { label: "Automation", icon: Zap, href: "/app/automations" },
+    { label: "Flow", icon: Zap, href: "/app/automations" },
   ];
 
   useEffect(() => {

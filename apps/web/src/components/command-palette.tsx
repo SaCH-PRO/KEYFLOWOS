@@ -187,7 +187,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     { id: "new-project", label: "New Project", hint: "Start a project", icon: FolderKanban, onSelect: () => router.push("/app/projects") },
     { id: "new-quote", label: "New Quote", hint: "Draft a quote", icon: FileText, onSelect: () => router.push("/app/commerce?tab=quotes") },
     { id: "new-campaign", label: "New Campaign", hint: "Create a campaign", icon: Megaphone, onSelect: () => router.push("/app/marketing") },
-    { id: "new-automation", label: "New Automation", hint: "Build a playbook", icon: Zap, onSelect: () => router.push("/app/automations") },
+    { id: "new-flow", label: "New Flow", hint: "Build an automation flow", icon: Zap, onSelect: () => router.push("/app/automations") },
   ], [router]);
 
   const NAV_ACTIONS: Action[] = useMemo(() => [
@@ -196,7 +196,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     { id: "nav-revenue", label: "Revenue", hint: "Invoices, quotes & payments", shortcut: "⌘3", icon: Receipt, onSelect: () => router.push("/app/commerce") },
     { id: "nav-calendar", label: "Calendar", hint: "Bookings & schedule", shortcut: "⌘4", icon: Calendar, onSelect: () => router.push("/app/bookings") },
     { id: "nav-content", label: "Content", hint: "Campaigns, social & lead forms", icon: Megaphone, onSelect: () => router.push("/app/marketing") },
-    { id: "nav-flows", label: "Flows", hint: "Automations & playbooks", icon: Zap, onSelect: () => router.push("/app/automations") },
+    { id: "nav-flows", label: "Flows", hint: "Business automation & orchestration", icon: Zap, onSelect: () => router.push("/app/automations") },
     { id: "nav-expenses", label: "Expenses", hint: "Track spending & budgets", icon: Receipt, onSelect: () => router.push("/app/expenses") },
     { id: "nav-projects", label: "Projects", hint: "Kanban board & tasks", icon: FolderKanban, onSelect: () => router.push("/app/projects") },
     { id: "nav-reports", label: "Reports", hint: "Analytics & KPIs", icon: BarChart3, onSelect: () => router.push("/app/reports") },

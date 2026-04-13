@@ -47,7 +47,8 @@ The project is a monorepo utilizing a Next.js 16 frontend (`apps/web`) and a Nes
 - **Business Documentation Engine:** AI-powered document generation, versioning, and health tracking across 18 categories and 96 document types, with risk-tiered editing and a Document Blueprint System.
 - **Navigation & Command System:** Sidebar, breadcrumbs, Command Palette (⌘K), and persistent AI Copilot quick-action chips.
 - **Project Templates:** Create reusable templates with pre-defined tasks; auto-project creation from invoice payment.
-- **Automation Playbook Templates:** 18 pre-built automation recipes across all modules with one-click activation.
+- **Flows Workspace (formerly Automations, route: `/app/automations`):** Intelligent orchestration surface with 3-tab layout (My Flows, Templates, Activity Log). Features Flow Health Strip (active/paused/triggered/needs-attention metrics), Flow Coverage Map (per-module automation %), Recommended Flows (gap-based suggestions), upgraded flow cards with module-touched chips and health indicators, redesigned Playbook Builder with step-block visual chain and natural-language summaries, enriched Template Gallery with businessProblem/expectedOutcome/prerequisites/complexity filters, and Execution Diagnostics with stats strip, time-range filters, rerun/inspect actions. 19+ strategic automation templates across all modules.
+- **Automation Playbook Templates:** 19+ pre-built automation recipes across all modules with one-click activation, enriched with business context, complexity ratings, and module coverage metadata.
 - **Error Boundaries:** Dedicated `error.tsx` boundaries for all core modules.
 - **Security: PublicRateLimitGuard:** Reusable rate-limiting guard applied to all unauthenticated endpoints.
 - **KeyflowOS Store Quick-Access:** Global sidebar icon with slide-out drawer showing 3-tier Business Progression System (Build, Grow, Scale).
