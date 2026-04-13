@@ -369,12 +369,22 @@ export class AutomationExecutorService {
             },
           });
 
+          const emailVariant = await this.prisma.client.outboundVariant.create({
+            data: {
+              contentId: campaignContent.id,
+              platform: 'EMAIL',
+              textBody: campaignBody,
+              htmlBody: campaignBody,
+              variantMeta: { subject: campaignSubject },
+            },
+          });
+
           const destination = emailConnection.destinations[0];
           const deliveryData = recipients
             .filter((r): r is typeof r & { email: string } => !!r.email)
             .map(r => ({
               contentId: campaignContent.id,
-              variantId: null as string | null,
+              variantId: emailVariant.id,
               destinationId: destination.id,
               businessId,
               status: 'Queued',

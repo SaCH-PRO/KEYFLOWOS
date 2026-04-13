@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 type ConnectionRecord = Awaited<ReturnType<PrismaService['client']['channelConnection']['findFirst']>>;
@@ -442,6 +442,8 @@ export class ChannelConnectionService {
 
     if (input.channel === 'whatsapp') {
       contactWhere.phone = { not: null };
+    } else if (input.channel === 'email') {
+      contactWhere.email = { not: null };
     } else {
       contactWhere.OR = [{ email: { not: null } }, { phone: { not: null } }];
     }
