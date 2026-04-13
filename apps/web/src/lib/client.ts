@@ -6228,7 +6228,7 @@ export interface AiAudienceSegmentsResult {
 }
 
 export interface AiContentIdeasResult {
-  ideas: { title: string; brief: string; contentType: string; category: string; effort: string }[];
+  ideas: { title: string; brief: string; contentType: string; category: string; effort: string; dataSource?: string }[];
 }
 
 export async function aiGenerateDraft(data: { contentType: string; objective?: string; tone?: string; audience?: string; topic?: string; existingBody?: string }, businessId?: string): Promise<ApiResult<AiDraftResult>> {

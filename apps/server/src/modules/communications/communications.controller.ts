@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Inject, Optional, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { createHmac } from 'crypto';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -25,7 +25,7 @@ export class CommunicationsController {
     @Inject(ChannelConnectionService) private readonly connections: ChannelConnectionService,
     @Inject(OutboundContentService) private readonly content: OutboundContentService,
     @Inject(DeliveryQueueService) private readonly delivery: DeliveryQueueService,
-    @Optional() @Inject(ContentAiService) private readonly contentAi: ContentAiService | null,
+    @Inject(ContentAiService) private readonly contentAi: ContentAiService,
   ) {}
 
   @Get('health')
@@ -320,77 +320,66 @@ export class CommunicationsController {
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/content-ai/generate-draft')
   async aiGenerateDraft(@Param('businessId') businessId: string, @Body() body: { contentType: string; objective?: string; tone?: string; audience?: string; topic?: string; existingBody?: string }) {
-    if (!this.contentAi) throw new BadRequestException('AI service unavailable');
     return this.contentAi.generateDraft(businessId, body);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/content-ai/rewrite')
   async aiRewrite(@Param('businessId') businessId: string, @Body() body: { body: string; targetChannel: string; tone?: string; objective?: string }) {
-    if (!this.contentAi) throw new BadRequestException('AI service unavailable');
     return this.contentAi.rewriteForChannel(businessId, body);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/content-ai/suggest-subjects')
   async aiSuggestSubjects(@Param('businessId') businessId: string, @Body() body: { body: string; objective?: string; tone?: string; audience?: string }) {
-    if (!this.contentAi) throw new BadRequestException('AI service unavailable');
     return this.contentAi.suggestSubjects(businessId, body);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/content-ai/suggest-cta')
   async aiSuggestCta(@Param('businessId') businessId: string, @Body() body: { body: string; objective?: string; contentType?: string }) {
-    if (!this.contentAi) throw new BadRequestException('AI service unavailable');
     return this.contentAi.suggestCta(businessId, body);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/content-ai/suggest-hashtags')
   async aiSuggestHashtags(@Param('businessId') businessId: string, @Body() body: { body: string; industry?: string }) {
-    if (!this.contentAi) throw new BadRequestException('AI service unavailable');
     return this.contentAi.suggestHashtags(businessId, body);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/content-ai/shorten-expand')
   async aiShortenExpand(@Param('businessId') businessId: string, @Body() body: { body: string; action: 'shorten' | 'expand'; targetChannel?: string }) {
-    if (!this.contentAi) throw new BadRequestException('AI service unavailable');
     return this.contentAi.shortenOrExpand(businessId, body);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/content-ai/suggest-channels')
   async aiSuggestChannels(@Param('businessId') businessId: string, @Body() body: { body: string; objective?: string; audience?: string; availableChannels: string[] }) {
-    if (!this.contentAi) throw new BadRequestException('AI service unavailable');
     return this.contentAi.suggestChannels(businessId, body);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/content-ai/suggest-time')
   async aiSuggestTime(@Param('businessId') businessId: string, @Body() body: { contentType: string; audience?: string; timezone?: string }) {
-    if (!this.contentAi) throw new BadRequestException('AI service unavailable');
     return this.contentAi.suggestSendTime(businessId, body);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/content-ai/suggest-preview-text')
   async aiSuggestPreviewText(@Param('businessId') businessId: string, @Body() body: { subject: string; body: string; objective?: string }) {
-    if (!this.contentAi) throw new BadRequestException('AI service unavailable');
     return this.contentAi.suggestPreviewText(businessId, body);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/content-ai/suggest-audience-segments')
   async aiSuggestAudienceSegments(@Param('businessId') businessId: string, @Body() body: { body: string; contentType?: string; objective?: string; existingSegments?: string[] }) {
-    if (!this.contentAi) throw new BadRequestException('AI service unavailable');
     return this.contentAi.suggestAudienceSegments(businessId, body);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/content-ai/suggest-content-ideas')
   async aiSuggestContentIdeas(@Param('businessId') businessId: string, @Body() body: { objective?: string; audience?: string; recentTopics?: string[]; contentType?: string }) {
-    if (!this.contentAi) throw new BadRequestException('AI service unavailable');
     return this.contentAi.suggestContentIdeas(businessId, body);
   }
 }

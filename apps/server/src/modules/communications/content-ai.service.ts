@@ -152,17 +152,20 @@ Respond in valid JSON:
     if (!this.aiUsage) throw new Error('AI service unavailable');
 
     const channelContext = this.getChannelContext(input.targetChannel);
+    const isEmail = ['email', 'campaign_email'].includes(input.targetChannel.toLowerCase());
 
-    const prompt = `Rewrite the following content optimized for ${channelContext.label}.
+    const prompt = `Rewrite the following content specifically optimized for ${channelContext.label}.
 ${input.tone ? `Maintain a ${sanitize(input.tone, 50)} tone.` : ''}
 ${input.objective ? `Objective: ${sanitize(input.objective, 100)}` : ''}
 
+Channel-specific optimization rules:
 ${channelContext.guidelines}
 
 Respond in valid JSON:
 {
-  "body": "The rewritten content",
-  "subject": "Subject line (for email only, null otherwise)",
+  "body": "The rewritten content optimized for ${channelContext.label}",
+  "subject": ${isEmail ? '"Compelling subject line under 60 chars"' : 'null'},
+  "previewText": ${isEmail ? '"Preview/preheader text (40-90 chars)"' : 'null'},
   "hashtags": ["relevant", "hashtags"]
 }`;
 
@@ -178,7 +181,7 @@ Respond in valid JSON:
       responseMode: 'structured_json',
     });
 
-    return this.parseJsonResponse(result.content, { body: '', subject: null, hashtags: [] });
+    return this.parseJsonResponse(result.content, { body: '', subject: null, previewText: null, hashtags: [] });
   }
 
   async suggestSubjects(businessId: string, input: SuggestSubjectsInput) {
@@ -445,31 +448,88 @@ Respond in valid JSON:
     return this.parseJsonResponse(result.content, { segments: [], primarySegment: '' });
   }
 
+  private async getCrossModuleSignals(businessId: string) {
+    const [contactStats, recentInvoices, upcomingBookings, recentContent] = await Promise.all([
+      this.prisma.client.contact.groupBy({
+        by: ['status'],
+        where: { businessId, deletedAt: null },
+        _count: true,
+      }).catch(() => []),
+      this.prisma.client.invoice.findMany({
+        where: { businessId, deletedAt: null },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        select: { status: true, total: true, createdAt: true },
+      }).catch(() => []),
+      this.prisma.client.booking.findMany({
+        where: {
+          businessId,
+          deletedAt: null,
+          startTime: { gte: new Date() },
+        },
+        orderBy: { startTime: 'asc' },
+        take: 5,
+        select: { serviceName: true, startTime: true, status: true },
+      }).catch(() => []),
+      this.prisma.client.outboundContent.findMany({
+        where: { businessId, deletedAt: null },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        select: { subject: true, contentType: true, status: true, createdAt: true },
+      }).catch(() => []),
+    ]);
+
+    const statusCounts = (contactStats as Array<{ status: string; _count: number }>)
+      .map(s => `${s.status}: ${s._count}`).join(', ');
+    const invoiceSummary = (recentInvoices as Array<{ status: string; total: number }>)
+      .map(i => `${i.status} ($${i.total})`).join(', ');
+    const bookingSummary = (upcomingBookings as Array<{ serviceName: string | null; startTime: Date }>)
+      .map(b => b.serviceName || 'Booking').join(', ');
+    const recentTopics = (recentContent as Array<{ subject: string | null; contentType: string }>)
+      .map(c => c.subject || c.contentType).join('; ');
+
+    return {
+      clientPipeline: statusCounts || 'No contacts yet',
+      recentRevenue: invoiceSummary || 'No invoices yet',
+      upcomingServices: bookingSummary || 'No bookings scheduled',
+      recentContent: recentTopics || 'No recent content',
+    };
+  }
+
   async suggestContentIdeas(businessId: string, input: SuggestContentIdeasInput) {
     if (!this.aiUsage) throw new Error('AI service unavailable');
 
-    const biz = await this.getBusinessContext(businessId);
+    const [biz, signals] = await Promise.all([
+      this.getBusinessContext(businessId),
+      this.getCrossModuleSignals(businessId),
+    ]);
 
-    const prompt = `Generate content ideas for a Caribbean service business.
+    const prompt = `Generate content ideas for a Caribbean service business using real business intelligence signals.
 Business: ${biz?.name || 'Business'} (${biz?.industry || 'Service'})
 ${biz?.tagline ? `Tagline: ${biz.tagline}` : ''}
 Currency: ${biz?.currency || 'TTD'}
 ${input.objective ? `Objective: ${sanitize(input.objective, 100)}` : ''}
 ${input.audience ? `Target Audience: ${sanitize(input.audience, 100)}` : ''}
 ${input.contentType ? `Content Type: ${sanitize(input.contentType, 50)}` : ''}
-${input.recentTopics?.length ? `Recent topics (avoid repeating): ${input.recentTopics.map(t => sanitize(t, 80)).join('; ')}` : ''}
 
-Generate 5 fresh content ideas drawing from:
-- Client engagement patterns and retention
-- Revenue opportunities and promotions
-- Seasonal/calendar events relevant to Caribbean businesses
-- Industry trends
-- Customer success stories / social proof angles
+CROSS-MODULE BUSINESS INTELLIGENCE:
+- Client Pipeline: ${signals.clientPipeline}
+- Recent Revenue Activity: ${signals.recentRevenue}
+- Upcoming Services/Bookings: ${signals.upcomingServices}
+- Recent Content Published: ${signals.recentContent}
+${input.recentTopics?.length ? `Topics to avoid repeating: ${input.recentTopics.map(t => sanitize(t, 80)).join('; ')}` : ''}
+
+Generate 5 content ideas that leverage these real business signals. Ideas should:
+- Reference actual pipeline stages to re-engage leads or nurture prospects
+- Create urgency around upcoming bookings or services
+- Capitalize on revenue patterns for upsell/cross-sell content
+- Avoid repeating recent content topics
+- Be relevant to Caribbean business context and culture
 
 Respond in valid JSON:
 {
   "ideas": [
-    { "title": "Idea title", "brief": "2-3 sentence description", "contentType": "social_post|campaign_email|whatsapp_message", "category": "engagement|promotion|education|social-proof|seasonal", "effort": "low|medium|high" }
+    { "title": "Idea title", "brief": "2-3 sentence description referencing specific business signals", "contentType": "social_post|campaign_email|whatsapp_message", "category": "engagement|promotion|education|social-proof|seasonal", "effort": "low|medium|high", "dataSource": "crm|revenue|calendar|content" }
   ]
 }`;
 
@@ -478,7 +538,7 @@ Respond in valid JSON:
       feature: 'content_idea_suggestions',
       messages: [
         { role: 'system', content: prompt },
-        { role: 'user', content: `Suggest content ideas for my ${biz?.industry || 'service'} business` },
+        { role: 'user', content: `Suggest content ideas based on my business intelligence` },
       ],
       maxTokens: 1000,
       temperature: 0.8,
@@ -492,11 +552,19 @@ Respond in valid JSON:
     const map: Record<string, { label: string; guidelines: string }> = {
       campaign_email: {
         label: 'Email Campaign',
-        guidelines: 'Write professional email body content. Include a clear subject line suggestion. Use paragraphs, not just bullet points. Include a compelling opening, value proposition, and clear CTA.',
+        guidelines: 'Write professional email body content. Include a clear subject line and preview text suggestion. Use paragraphs with a compelling opening, value proposition, and clear CTA. Personalize the greeting. Keep subject under 60 characters. Preview text should complement subject (40-90 chars).',
       },
       email: {
         label: 'Email Campaign',
-        guidelines: 'Write professional email body content. Include a clear subject line suggestion. Use paragraphs, not just bullet points. Include a compelling opening, value proposition, and clear CTA.',
+        guidelines: 'Write professional email body content. Include a clear subject line and preview text suggestion. Use paragraphs with a compelling opening, value proposition, and clear CTA. Personalize the greeting. Keep subject under 60 characters. Preview text should complement subject (40-90 chars).',
+      },
+      instagram: {
+        label: 'Instagram Post',
+        guidelines: 'Keep caption under 2200 characters. Start with a strong visual hook in the first line (crucial for feed). Use line breaks for readability. Include 5-15 relevant hashtags at the end. Use emojis strategically. End with a question or CTA to drive engagement. Consider carousel format tips if explaining a process.',
+      },
+      facebook: {
+        label: 'Facebook Post',
+        guidelines: 'Optimal length is 40-80 characters for highest engagement, but can go up to 500. Start with a question or bold statement. Use line breaks. Include a CTA. Hashtags optional (1-2 max). Encourage shares and comments. Consider linking to a landing page.',
       },
       social_post: {
         label: 'Social Media Post',
@@ -506,24 +574,28 @@ Respond in valid JSON:
         label: 'Social Media Post',
         guidelines: 'Keep under 2200 characters. Start with a hook. Use line breaks for readability. End with a CTA. Include suggested hashtags.',
       },
+      whatsapp: {
+        label: 'WhatsApp Message',
+        guidelines: 'Keep under 1000 characters for best readability. Be conversational, warm, and direct — like texting a client. Use emojis sparingly (1-3 max). No hashtags. Include a clear CTA. Use bold (*text*) for emphasis. Short paragraphs, one idea per message. Consider template message format for first contact.',
+      },
       whatsapp_message: {
         label: 'WhatsApp Message',
-        guidelines: 'Keep under 4096 characters. Be conversational and direct. Use emojis sparingly. Include a clear CTA. No hashtags needed.',
+        guidelines: 'Keep under 1000 characters for best readability. Be conversational, warm, and direct — like texting a client. Use emojis sparingly (1-3 max). No hashtags. Include a clear CTA. Use bold (*text*) for emphasis. Short paragraphs, one idea per message.',
       },
       messaging: {
         label: 'WhatsApp Message',
-        guidelines: 'Keep under 4096 characters. Be conversational and direct. Use emojis sparingly. Include a clear CTA. No hashtags needed.',
+        guidelines: 'Keep under 1000 characters for best readability. Be conversational, warm, and direct — like texting a client. Use emojis sparingly (1-3 max). No hashtags. Include a clear CTA. Short paragraphs, one idea per message.',
       },
       multi_channel_broadcast: {
         label: 'Multi-Channel Broadcast',
-        guidelines: 'Write versatile content that works across email, social media, and messaging. Keep the core message adaptable.',
+        guidelines: 'Write versatile content that works across email, social media, and messaging. Keep the core message adaptable. Provide a subject line for email, hashtags for social, and a shorter conversational version for WhatsApp.',
       },
       multi: {
         label: 'Multi-Channel Broadcast',
-        guidelines: 'Write versatile content that works across email, social media, and messaging. Keep the core message adaptable.',
+        guidelines: 'Write versatile content that works across email, social media, and messaging. Keep the core message adaptable. Provide a subject line for email, hashtags for social, and a shorter conversational version for WhatsApp.',
       },
     };
-    return map[contentType] || map.social_post;
+    return map[contentType.toLowerCase()] || map.social_post;
   }
 
   private parseJsonResponse<T>(content: string, fallback: T): T {
