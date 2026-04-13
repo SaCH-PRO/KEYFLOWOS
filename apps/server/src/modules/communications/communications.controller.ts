@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { createHmac } from 'crypto';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -150,24 +150,28 @@ export class CommunicationsController {
     return this.connections.getAudienceHealth(businessId);
   }
 
-  @Post('deliveries/:deliveryId/track-open')
+  @Get('deliveries/:deliveryId/track-open')
   async trackOpen(@Param('deliveryId') deliveryId: string, @Query('t') token?: string) {
-    if (!TRACKING_SECRET) throw new BadRequestException('Tracking not configured');
-    if (!token || !verifyTrackingToken(deliveryId, token)) {
-      throw new BadRequestException('Invalid tracking token');
+    if (TRACKING_SECRET && token && verifyTrackingToken(deliveryId, token)) {
+      await this.delivery.trackOpen(deliveryId);
     }
-    await this.delivery.trackOpen(deliveryId);
     return { ok: true };
   }
 
-  @Post('deliveries/:deliveryId/track-click')
-  async trackClick(@Param('deliveryId') deliveryId: string, @Query('t') token?: string) {
-    if (!TRACKING_SECRET) throw new BadRequestException('Tracking not configured');
-    if (!token || !verifyTrackingToken(deliveryId, token)) {
-      throw new BadRequestException('Invalid tracking token');
+  @Get('deliveries/:deliveryId/track-click')
+  async trackClick(
+    @Param('deliveryId') deliveryId: string,
+    @Query('t') token: string | undefined,
+    @Query('r') redirectUrl: string | undefined,
+    @Res() res: import('express').Response,
+  ) {
+    if (!TRACKING_SECRET || !token || !verifyTrackingToken(deliveryId, token)) {
+      if (redirectUrl) return res.redirect(302, redirectUrl);
+      return res.status(400).json({ error: 'Invalid tracking' });
     }
     await this.delivery.trackClick(deliveryId);
-    return { ok: true };
+    if (redirectUrl) return res.redirect(302, redirectUrl);
+    return res.json({ ok: true });
   }
 
   // --- Outbound Content ---
