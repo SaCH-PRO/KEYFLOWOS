@@ -244,6 +244,10 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
 
           await this.recordEvent(delivery.id, 'failure', 'Sending', 'Failed', attemptNumber, result.errorCode, result.errorMessage, errorSnapshot);
 
+          if (delivery.contactId) {
+            await this.updateCampaignContactStatus(delivery.contentId, delivery.contactId, 'BOUNCED');
+          }
+
           this.events.emit('content.failed', { deliveryId: delivery.id, contentId: delivery.contentId, businessId: delivery.businessId, errorCode: result.errorCode });
           this.events.emit('delivery.failed', { deliveryId: delivery.id, contentId: delivery.contentId, businessId: delivery.businessId });
 
@@ -535,6 +539,8 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
       const updateData: Record<string, unknown> = { status };
       if (status === 'SENT') updateData.sentAt = new Date();
       if (status === 'OPENED') updateData.openedAt = new Date();
+      if (status === 'CLICKED') updateData.clickedAt = new Date();
+      if (status === 'BOUNCED') updateData.bouncedAt = new Date();
 
       await this.prisma.client.emailCampaignContact.updateMany({
         where: { campaignId, contactId },

@@ -106,9 +106,10 @@ function inferContentType(destinations: ChannelDestination[]): ContentTypeOption
   if (destinations.length === 0) return "social";
   const platforms = new Set(destinations.map((d) => d.platform.toUpperCase()));
   const hasEmail = platforms.has("GOOGLE") || platforms.has("EMAIL");
-  const hasSocial = platforms.has("FACEBOOK") || platforms.has("INSTAGRAM") || platforms.has("WHATSAPP") || platforms.has("META");
-  if (hasEmail && hasSocial) return "multi";
-  if (hasEmail) return "email";
+  const hasWhatsApp = platforms.has("WHATSAPP");
+  const hasSocial = platforms.has("FACEBOOK") || platforms.has("INSTAGRAM") || platforms.has("META");
+  if ((hasEmail || hasWhatsApp) && hasSocial) return "multi";
+  if (hasEmail || hasWhatsApp) return "email";
   return "social";
 }
 
