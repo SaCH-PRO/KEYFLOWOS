@@ -15,6 +15,32 @@ export class SeedService implements OnApplicationBootstrap {
     await this.seedCourses();
     await this.seedCohorts();
     await this.seedDocumentTaxonomy();
+    await this.seedSuperAdmin();
+  }
+
+  private async seedSuperAdmin() {
+    const SUPER_ADMIN_EMAIL = 'keyflowos.tt@gmail.com';
+    try {
+      const user = await this.prisma.client.user.findUnique({
+        where: { email: SUPER_ADMIN_EMAIL },
+        select: { id: true, role: true },
+      });
+      if (!user) {
+        this.logger.log(`Super admin user (${SUPER_ADMIN_EMAIL}) not found yet — skipping promotion`);
+        return;
+      }
+      if (user.role === 'SUPER_ADMIN') {
+        this.logger.log(`Super admin (${SUPER_ADMIN_EMAIL}) already promoted`);
+        return;
+      }
+      await this.prisma.client.user.update({
+        where: { email: SUPER_ADMIN_EMAIL },
+        data: { role: 'SUPER_ADMIN' },
+      });
+      this.logger.log(`Promoted ${SUPER_ADMIN_EMAIL} to SUPER_ADMIN`);
+    } catch (e) {
+      this.logger.warn('Super admin seed failed: ' + (e as Error).message);
+    }
   }
 
   private async seedDocumentTaxonomy() {

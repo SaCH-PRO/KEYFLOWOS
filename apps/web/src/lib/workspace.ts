@@ -29,6 +29,7 @@ export interface CachedUser {
   firstName?: string | null;
   lastName?: string | null;
   avatarUrl?: string | null;
+  role?: string | null;
 }
 
 let businessCache: CachedBusiness | null = null;
@@ -132,6 +133,11 @@ export async function refreshWorkspace(): Promise<string | null> {
     return result.data.business.id;
   }
   return null;
+}
+
+export function isSuperAdmin(): boolean {
+  const user = getCachedUser();
+  return user?.role === "SUPER_ADMIN";
 }
 
 export function getUserDisplayName(): string {
