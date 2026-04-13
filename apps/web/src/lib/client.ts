@@ -6081,4 +6081,51 @@ export async function syncChannelConnectionsFromSocial(businessId?: string): Pro
   });
 }
 
+export interface EmailValidationResult {
+  valid: boolean;
+  warnings: { field: string; message: string; severity: 'error' | 'warning' }[];
+  audienceSummary: { totalMatching: number; suppressed: number; eligible: number };
+  senderConfigured: boolean;
+}
+
+export interface AudienceExpandResult {
+  contacts: { id: string; email: string; firstName: string | null; lastName: string | null; tags: string[] }[];
+  total: number;
+  suppressed: number;
+  availableTags: string[];
+}
+
+export interface AudienceHealthResult {
+  totalContacts: number;
+  withEmail: number;
+  suppressed: number;
+  optedIn: number;
+  emailCoverage: number;
+  deliverabilityRate: number;
+  segments: { tag: string; count: number }[];
+}
+
+export async function validateEmailSend(data: { subject?: string; destinationIds?: string[]; segmentTags?: string[] }, businessId?: string): Promise<ApiResult<EmailValidationResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<EmailValidationResult>({
+    path: `/communications/businesses/${encodeURIComponent(bid)}/email/validate-send`,
+    body: data,
+  });
+}
+
+export async function expandAudience(data: { segmentTags?: string[]; limit?: number }, businessId?: string): Promise<ApiResult<AudienceExpandResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<AudienceExpandResult>({
+    path: `/communications/businesses/${encodeURIComponent(bid)}/audience/expand`,
+    body: data,
+  });
+}
+
+export async function getAudienceHealth(businessId?: string): Promise<ApiResult<AudienceHealthResult>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiGet<AudienceHealthResult>({
+    path: `/communications/businesses/${encodeURIComponent(bid)}/audience/health`,
+  });
+}
+
 export { DEFAULT_BUSINESS_ID };

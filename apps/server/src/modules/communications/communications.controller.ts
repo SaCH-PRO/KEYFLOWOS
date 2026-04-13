@@ -96,6 +96,26 @@ export class CommunicationsController {
     return this.connections.upsertDestination(connectionId, businessId, body);
   }
 
+  // --- Email Validation & Audience ---
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/email/validate-send')
+  validateEmailSend(@Param('businessId') businessId: string, @Body() body: { subject?: string; destinationIds?: string[]; segmentTags?: string[] }) {
+    return this.connections.validateEmailSend(businessId, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/audience/expand')
+  expandAudience(@Param('businessId') businessId: string, @Body() body: { segmentTags?: string[]; limit?: number }) {
+    return this.connections.expandAudience(businessId, body);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/audience/health')
+  audienceHealth(@Param('businessId') businessId: string) {
+    return this.connections.getAudienceHealth(businessId);
+  }
+
   // --- Outbound Content ---
 
   @UseGuards(AuthGuard, BusinessGuard)

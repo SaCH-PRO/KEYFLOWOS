@@ -18,6 +18,7 @@ import type { ChannelDestination, OutboundContent } from "@/lib/client";
 import { ChannelSelector } from "./channel-selector";
 import { ChannelVariantsPanel, type VariantData } from "./channel-variants-panel";
 import { ChannelPreviewPanel } from "./channel-preview-panel";
+import { AudienceSelector } from "./audience-selector";
 
 type ContentTypeOption = "social" | "email" | "multi";
 type ComposerStep = "compose" | "distribute" | "review";
@@ -247,6 +248,8 @@ export function UnifiedComposer({
   const [savedContentId, setSavedContentId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [draftRestored, setDraftRestored] = useState(false);
+  const [segmentTags, setSegmentTags] = useState<string[]>([]);
+  const [emailValidation, setEmailValidation] = useState<import("@/lib/client").EmailValidationResult | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -378,7 +381,8 @@ export function UnifiedComposer({
 
   const canAdvanceToDistribute = body.trim().length > 0;
   const canAdvanceToReview = selectedDestinations.length > 0;
-  const canPublish = canAdvanceToReview && !hasBlockingWarnings;
+  const hasEmailValidationErrors = (contentType === "email" || contentType === "multi") && emailValidation && !emailValidation.valid;
+  const canPublish = canAdvanceToReview && !hasBlockingWarnings && !hasEmailValidationErrors;
   const readinessScore = useMemo(() => {
     let score = 0;
     if (body.trim()) score += 25;
@@ -795,6 +799,17 @@ export function UnifiedComposer({
                   />
                 )}
 
+                {(contentType === "email" || contentType === "multi") && selectedDestinations.length > 0 && (
+                  <AudienceSelector
+                    businessId={businessId}
+                    subject={subject}
+                    destinationIds={selectedDestinations.map(d => d.id)}
+                    selectedTags={segmentTags}
+                    onTagsChange={setSegmentTags}
+                    onValidationChange={setEmailValidation}
+                  />
+                )}
+
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setStep("compose")}
@@ -816,7 +831,7 @@ export function UnifiedComposer({
 
             {step === "review" && (
               <motion.div key="review" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="space-y-4">
-                {hasBlockingWarnings && (
+                {(hasBlockingWarnings || hasEmailValidationErrors) && (
                   <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 space-y-1.5">
                     <div className="flex items-center gap-1.5">
                       <AlertCircle className="w-3.5 h-3.5 text-red-400" />
@@ -824,6 +839,9 @@ export function UnifiedComposer({
                     </div>
                     {channelWarnings.filter((w) => w.severity === "error").map((w, i) => (
                       <p key={i} className="text-[11px] text-red-400/80 ml-5">{w.platform}: {w.message}</p>
+                    ))}
+                    {emailValidation?.warnings.filter((w) => w.severity === "error").map((w, i) => (
+                      <p key={`ev-${i}`} className="text-[11px] text-red-400/80 ml-5">Email: {w.message}</p>
                     ))}
                   </div>
                 )}
@@ -841,6 +859,12 @@ export function UnifiedComposer({
                       <span className="text-muted-foreground block text-[10px] mb-0.5">Channels</span>
                       <span className="font-medium">{selectedDestinations.length} destination{selectedDestinations.length !== 1 ? "s" : ""}</span>
                     </div>
+                    {(contentType === "email" || contentType === "multi") && emailValidation && (
+                      <div>
+                        <span className="text-muted-foreground block text-[10px] mb-0.5">Email Recipients</span>
+                        <span className="font-medium">{emailValidation.audienceSummary.eligible} eligible{segmentTags.length > 0 ? ` (${segmentTags.join(", ")})` : ""}</span>
+                      </div>
+                    )}
                     {objective && (
                       <div>
                         <span className="text-muted-foreground block text-[10px] mb-0.5">Objective</span>

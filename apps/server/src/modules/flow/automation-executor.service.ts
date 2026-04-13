@@ -1,9 +1,10 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ActivityService } from './activity.service';
 import { CrmService } from '../crm/crm.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
+import { AdapterRegistryService } from '../communications/adapters/adapter-registry.service';
 import {
   BookingCreatedPayload,
   BookingConfirmedPayload,
@@ -23,6 +24,7 @@ export class AutomationExecutorService {
     @Inject(ActivityService) private readonly activity: ActivityService,
     @Inject(CrmService) private readonly crm: CrmService,
     @Inject(TransactionalEmailService) private readonly transactionalEmail: TransactionalEmailService,
+    @Optional() @Inject(AdapterRegistryService) private readonly adapterRegistry: AdapterRegistryService | null,
   ) {}
 
   private async loadContactData(businessId: string, contactId: string): Promise<Record<string, any> | null> {
@@ -245,7 +247,74 @@ export class AutomationExecutorService {
       }
       case 'send_whatsapp':
       case 'SEND_WHATSAPP': {
-        this.logger.log(`[ACTION] WhatsApp action queued for contact ${context.contactId}`);
+        if (context.contactId && this.adapterRegistry) {
+          try {
+            const contact = await this.crm.contactDetail({ businessId, contactId: context.contactId });
+            const c = contact.contact;
+            const phone = c?.phone;
+            if (!phone) {
+              this.logger.warn(`No phone number for contact ${context.contactId}, skipping WhatsApp`);
+              break;
+            }
+
+            const waConnection = await this.prisma.client.channelConnection.findFirst({
+              where: { businessId, provider: 'WHATSAPP' },
+              include: { destinations: { where: { isActive: true }, take: 1 } },
+            });
+
+            if (!waConnection || waConnection.destinations.length === 0) {
+              this.logger.warn(`No WhatsApp connection/destination for business ${businessId}`);
+              break;
+            }
+
+            const adapter = this.adapterRegistry.resolve('WHATSAPP');
+            if (!adapter) {
+              this.logger.warn('WhatsApp adapter not found in registry');
+              break;
+            }
+
+            const destination = waConnection.destinations[0];
+            const messageBody = action.message || action.templateData?.message || `Hello from ${playbookName}`;
+            const templateName = action.templateName as string | undefined;
+
+            const result = await adapter.publish(waConnection, destination, {
+              textBody: messageBody,
+              meta: {
+                recipientPhone: phone,
+                ...(templateName ? { templateName, templateLanguage: action.templateLanguage || 'en', templateParameters: action.templateParameters } : {}),
+              },
+            });
+
+            if (result.success) {
+              const flowContent = await this.prisma.client.outboundContent.create({
+                data: {
+                  businessId,
+                  contentType: 'whatsapp_message',
+                  body: messageBody,
+                  status: 'Published',
+                  publishedAt: new Date(),
+                  tags: ['flow-action'],
+                },
+              });
+              await this.prisma.client.outboundDelivery.create({
+                data: {
+                  contentId: flowContent.id,
+                  destinationId: destination.id,
+                  businessId,
+                  status: 'Sent',
+                  sentAt: new Date(),
+                  externalPostId: result.externalPostId,
+                  resultSnapshot: { source: 'flow', playbookName, contactId: context.contactId },
+                },
+              }).catch(() => {});
+              this.logger.log(`WhatsApp sent to ${phone} for playbook "${playbookName}"`);
+            } else {
+              this.logger.warn(`WhatsApp send failed for playbook "${playbookName}": ${result.errorMessage}`);
+            }
+          } catch (e) {
+            this.logger.warn(`Failed to send WhatsApp for playbook "${playbookName}": ${(e as Error).message}`);
+          }
+        }
         break;
       }
       case 'LOG_EVENT': {
