@@ -3261,17 +3261,27 @@ export interface FontPairing {
   body: string;
 }
 
+export interface StorefrontHeroProofChip {
+  label: string;
+  icon?: string;
+}
+
 export interface StorefrontConfig {
   hero: {
     headline?: string;
     subheadline?: string;
     ctaLabel?: string;
     coverImageUrl?: string;
+    coverVideoUrl?: string;
     showHours?: boolean;
     showWhatsApp?: boolean;
+    secondaryCtaLabel?: string;
+    promotionalRibbon?: string;
+    promotionalRibbonColor?: string;
+    proofChips?: StorefrontHeroProofChip[];
   };
   appearance: {
-    theme?: 'default' | 'minimal' | 'bold' | 'elegant';
+    theme?: 'default' | 'minimal' | 'bold' | 'elegant' | 'luxe' | 'fresh' | 'conversion_first' | 'premium_services' | 'luxury_editorial' | 'booking_optimized' | 'catalog_heavy' | 'authority_brand' | 'creator_expert' | 'hybrid_storefront';
     cardStyle?: 'grid' | 'list';
     showPrices?: boolean;
     showDuration?: boolean;
@@ -3321,6 +3331,12 @@ export interface StorefrontConfig {
     sections?: { id: string; name: string; itemIds: string[]; railType?: 'featured' | 'seasonal' | 'landing' }[];
   };
   sections?: StorefrontSection[];
+  sectionStyles?: {
+    trust?: { style?: 'badges' | 'strip' | 'minimal'; showPaymentBadge?: boolean };
+    catalog?: { showSectionHeader?: boolean; sectionHeaderLabel?: string; sectionHeaderEmphasis?: boolean };
+    faq?: { style?: 'accordion' | 'grid'; showIcon?: boolean };
+    hero?: { showScrollCta?: boolean };
+  };
   faqEntries?: FaqEntry[];
   faq?: {
     heading?: string;

@@ -40,6 +40,7 @@ type Props = {
   commerceProducts: Product[];
   config?: StorefrontConfig;
   slug?: string;
+  previewMode?: "desktop" | "mobile" | "both";
 };
 
 type PreviewItem = {
@@ -70,7 +71,7 @@ function TypeBadge({ type, primaryColor, secondaryColor, accentColor, radius }: 
   );
 }
 
-export function StorefrontPreview({ businessData, services, commerceProducts, config, slug }: Props) {
+export function StorefrontPreview({ businessData, services, commerceProducts, config, slug, previewMode = "desktop" }: Props) {
   const pc = config?.appearance?.primaryColor || businessData?.primaryColor || "#F97316";
   const sc = config?.appearance?.secondaryColor || businessData?.secondaryColor || "#14B8A6";
   const ac = config?.appearance?.accentColor || "#a78bfa";
@@ -579,6 +580,45 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
     contact: renderContactSection,
   };
 
+  const isMobile = previewMode === "mobile" || previewMode === "both";
+  const isBoth = previewMode === "both";
+
+  if (isBoth) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+        className="w-full"
+      >
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <p className="text-[10px] text-center text-muted-foreground font-medium">Mobile</p>
+            <StorefrontPreview
+              businessData={businessData}
+              services={services}
+              commerceProducts={commerceProducts}
+              config={config}
+              slug={slug}
+              previewMode="mobile"
+            />
+          </div>
+          <div className="space-y-1">
+            <p className="text-[10px] text-center text-muted-foreground font-medium">Desktop</p>
+            <StorefrontPreview
+              businessData={businessData}
+              services={services}
+              commerceProducts={commerceProducts}
+              config={config}
+              slug={slug}
+              previewMode="desktop"
+            />
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -588,26 +628,42 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
     >
       <div className="relative">
         <div
-          className="relative rounded-[2.5rem] p-3 shadow-2xl"
+          className={`relative shadow-2xl ${isMobile ? "rounded-[2.5rem] p-3" : "rounded-xl p-2"}`}
           style={{
-            background: "linear-gradient(180deg, hsl(var(--kf-muted) / 0.6), hsl(var(--kf-muted) / 0.3))",
-            border: "3px solid hsl(var(--kf-border) / 0.6)",
-            width: "380px",
+            background: isMobile
+              ? "linear-gradient(180deg, hsl(var(--kf-muted) / 0.6), hsl(var(--kf-muted) / 0.3))"
+              : "hsl(var(--kf-muted) / 0.4)",
+            border: isMobile ? "3px solid hsl(var(--kf-border) / 0.6)" : "2px solid hsl(var(--kf-border) / 0.5)",
+            width: isMobile ? "380px" : "520px",
           }}
         >
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-28 h-6 rounded-b-2xl"
-            style={{ background: "hsl(var(--kf-muted) / 0.8)" }}
-          />
-
-          <div className="flex items-center justify-between px-6 pt-2 pb-1">
-            <span className="text-[10px] text-muted-foreground/50">9:41</span>
-            <div className="flex items-center gap-1">
-              <Smartphone className="w-2.5 h-2.5 text-muted-foreground/40" />
-              <div className="w-5 h-2 rounded-sm border border-muted-foreground/30">
-                <div className="w-3.5 h-full rounded-sm bg-emerald-400/60" />
+          {isMobile && (
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-28 h-6 rounded-b-2xl"
+              style={{ background: "hsl(var(--kf-muted) / 0.8)" }}
+            />
+          )}
+          {!isMobile && (
+            <div className="flex items-center gap-1.5 px-2 pb-1.5">
+              {["bg-red-400/60", "bg-amber-400/60", "bg-green-400/60"].map((c) => (
+                <div key={c} className={`w-2 h-2 rounded-full ${c}`} />
+              ))}
+              <div className="flex-1 mx-2 h-3 rounded-full bg-muted-foreground/10 flex items-center px-2">
+                <span className="text-[7px] text-muted-foreground/30 truncate">/book/{slug || "your-store"}</span>
               </div>
             </div>
-          </div>
+          )}
+
+          {isMobile && (
+            <div className="flex items-center justify-between px-6 pt-2 pb-1">
+              <span className="text-[10px] text-muted-foreground/50">9:41</span>
+              <div className="flex items-center gap-1">
+                <Smartphone className="w-2.5 h-2.5 text-muted-foreground/40" />
+                <div className="w-5 h-2 rounded-sm border border-muted-foreground/30">
+                  <div className="w-3.5 h-full rounded-sm bg-emerald-400/60" />
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="flex items-center justify-between px-4 py-1">
             <span
@@ -734,9 +790,11 @@ export function StorefrontPreview({ businessData, services, commerceProducts, co
             </div>
           </div>
 
-          <div className="flex justify-center py-2">
-            <div className="w-28 h-1 rounded-full bg-muted-foreground/20" />
-          </div>
+          {isMobile && (
+            <div className="flex justify-center py-2">
+              <div className="w-28 h-1 rounded-full bg-muted-foreground/20" />
+            </div>
+          )}
         </div>
 
         {slug && (

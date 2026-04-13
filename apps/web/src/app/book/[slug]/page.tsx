@@ -109,7 +109,7 @@ export default function PublicBookingPage() {
   const primaryColor = appearance?.primaryColor || business?.primaryColor || "#F97316";
   const secondaryColor = appearance?.secondaryColor || business?.secondaryColor || "#14B8A6";
   const accentColor = appearance?.accentColor || "#a78bfa";
-  const themeKey = (appearance?.theme ?? "default") as ThemeKey;
+  const themeKey = (appearance?.theme ?? "conversion_first") as ThemeKey;
   const ts = getThemeStyles(themeKey, primaryColor, secondaryColor, accentColor);
   const densityPadding = appearance?.density === "compact" ? "px-4 py-4" : "px-4 sm:px-8 py-8";
   const fontPairingId = appearance?.fontPairing ?? "inter-inter";
@@ -533,6 +533,13 @@ export default function PublicBookingPage() {
     const configured = storefrontConfig?.sections;
     if (configured && configured.length > 0) {
       return configured.filter((s) => s.visible).map((s) => s.key);
+    }
+    const themeKey = (storefrontConfig?.appearance?.theme ?? "conversion_first") as ThemeKey;
+    const modelStyles = getThemeStyles(themeKey, "#000", "#000", "#000");
+    if (modelStyles.sectionSequence?.length) {
+      return modelStyles.sectionSequence.filter((k): k is StorefrontSectionKey =>
+        ["hero", "trust", "featured", "categories", "catalog", "testimonials", "faq", "contact", "policies"].includes(k)
+      );
     }
     return DEFAULT_SECTIONS;
   }, [storefrontConfig]);
@@ -980,7 +987,9 @@ export default function PublicBookingPage() {
     switch (key) {
       case "hero":
         return null;
-      case "trust":
+      case "trust": {
+        const trustSectionStyle = storefrontConfig?.sectionStyles?.trust;
+        const showPaymentBadge = trustSectionStyle?.showPaymentBadge !== false;
         return (
           <div key="trust" className="flex items-center justify-between">
             <TrustBar
@@ -989,6 +998,7 @@ export default function PublicBookingPage() {
               businessName={business?.name}
               completedOrdersCount={completedOrdersCount}
               configuredRails={storefrontConfig?.merchandising?.trustRails}
+              showPaymentBadge={showPaymentBadge}
               businessHoursToday={(() => {
                 if (!business?.businessHours) return null;
                 const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
@@ -1030,6 +1040,7 @@ export default function PublicBookingPage() {
             </div>
           </div>
         );
+      }
       case "featured":
         return featuredItems.length > 0 ? (
           <FeaturedSection
@@ -1055,37 +1066,52 @@ export default function PublicBookingPage() {
             slug={slug}
           />
         );
-      case "catalog":
+      case "catalog": {
+        const catalogSectionStyle = storefrontConfig?.sectionStyles?.catalog;
+        const showSectionHeader = catalogSectionStyle?.showSectionHeader ?? (ts.trustStyle !== "minimal");
+        const sectionHeaderLabel = catalogSectionStyle?.sectionHeaderLabel ?? (themeKey === "catalog_heavy" ? "All Products & Services" : themeKey === "booking_optimized" ? "Book an Appointment" : "Browse & Book");
         return (
-          <CatalogGrid
-            key="catalog"
-            catalogItems={filteredCatalogItems}
-            primaryColor={primaryColor}
-            secondaryColor={secondaryColor}
-            accentColor={accentColor}
-            isInCart={isInCart}
-            addToCart={addToCart}
-            removeFromCart={removeFromCart}
-            onUpdateQuantity={updateQuantity}
-            cartItems={cart}
-            badges={storefrontConfig?.merchandising?.badges}
-            featuredItemIds={storefrontConfig?.merchandising?.featuredItemIds}
-            onItemClick={handleItemClick}
-            config={storefrontConfig}
-            reviewAggregates={reviewAggregates}
-            isWishlisted={wishlist.isWishlisted}
-            onToggleWishlist={(item) =>
-              wishlist.toggle({
-                id: item.id,
-                name: item.name,
-                price: item.price,
-                currency: item.currency,
-                imageUrl: item.imageUrl,
-                itemType: item.itemType,
-              })
-            }
-          />
+          <div key="catalog" id="catalog-section">
+            {showSectionHeader && (
+              <div className="mb-4">
+                <h2
+                  className="text-lg font-bold tracking-tight"
+                  style={{ color: catalogSectionStyle?.sectionHeaderEmphasis ? primaryColor : "inherit" }}
+                >
+                  {sectionHeaderLabel}
+                </h2>
+              </div>
+            )}
+            <CatalogGrid
+              catalogItems={filteredCatalogItems}
+              primaryColor={primaryColor}
+              secondaryColor={secondaryColor}
+              accentColor={accentColor}
+              isInCart={isInCart}
+              addToCart={addToCart}
+              removeFromCart={removeFromCart}
+              onUpdateQuantity={updateQuantity}
+              cartItems={cart}
+              badges={storefrontConfig?.merchandising?.badges}
+              featuredItemIds={storefrontConfig?.merchandising?.featuredItemIds}
+              onItemClick={handleItemClick}
+              config={storefrontConfig}
+              reviewAggregates={reviewAggregates}
+              isWishlisted={wishlist.isWishlisted}
+              onToggleWishlist={(item) =>
+                wishlist.toggle({
+                  id: item.id,
+                  name: item.name,
+                  price: item.price,
+                  currency: item.currency,
+                  imageUrl: item.imageUrl,
+                  itemType: item.itemType,
+                })
+              }
+            />
+          </div>
         );
+      }
       case "testimonials":
         return storefrontConfig?.socialProof?.testimonials?.length ? (
           <TestimonialsSection
@@ -1095,7 +1121,8 @@ export default function PublicBookingPage() {
             secondaryColor={secondaryColor}
           />
         ) : null;
-      case "faq":
+      case "faq": {
+        const faqSectionStyle = storefrontConfig?.sectionStyles?.faq;
         return storefrontConfig?.faq?.entries?.length ? (
           <FaqSection
             key="faq"
@@ -1103,8 +1130,11 @@ export default function PublicBookingPage() {
             heading={storefrontConfig.faq.heading}
             primaryColor={primaryColor}
             accentColor={accentColor}
+            showIcon={faqSectionStyle?.showIcon !== false}
+            compact={faqSectionStyle?.style === "grid"}
           />
         ) : null;
+      }
       case "contact":
         return business ? (
           <ContactSection
@@ -1150,6 +1180,11 @@ export default function PublicBookingPage() {
           accentColor={accentColor}
           config={storefrontConfig}
           catalogCount={catalogItems.length}
+          completedOrdersCount={completedOrdersCount}
+          onScrollToCatalog={() => {
+            const el = document.getElementById("catalog-section");
+            if (el) el.scrollIntoView({ behavior: "smooth" });
+          }}
         />
       )}
 
