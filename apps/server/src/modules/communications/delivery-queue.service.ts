@@ -171,11 +171,20 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     if (recipientPhone) mergedMeta.recipientPhone = recipientPhone;
     if (delivery.contactId) mergedMeta.contactId = delivery.contactId;
 
+    const variantSubject = variantMeta?.subject as string | undefined;
+    const previewText = variantMeta?.previewText as string | undefined;
+    const senderName = variantMeta?.senderName as string | undefined;
+
+    const effectiveSubject = variantSubject || content?.subject;
+
+    if (previewText) mergedMeta.previewText = previewText;
+    if (senderName) mergedMeta.senderName = senderName;
+
     const payload = {
       textBody: effectiveVariant?.textBody ?? content?.body ?? '',
       htmlBody: effectiveVariant?.htmlBody,
       mediaUrls: effectiveVariant?.mediaUrls ?? [],
-      subject: content?.subject,
+      subject: effectiveSubject,
       recipientEmail,
       meta: Object.keys(mergedMeta).length > 0 ? mergedMeta : undefined,
     };
