@@ -39,6 +39,12 @@ export class CommunicationsController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/connections/sync-from-social')
+  async syncFromSocial(@Param('businessId') businessId: string) {
+    return this.connections.syncFromSocial(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/connections')
   createConnection(@Param('businessId') businessId: string, @Body() body: any) {
     return this.connections.create(businessId, body);

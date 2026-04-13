@@ -5850,8 +5850,6 @@ export type ChannelConnection = {
   provider: string;
   label: string | null;
   accountEmail: string | null;
-  token: string | null;
-  refreshToken: string | null;
   expiresAt: string | null;
   scopes: string | null;
   providerMeta: Record<string, unknown> | null;
@@ -6073,6 +6071,14 @@ export async function updateChannelConnection(connectionId: string, data: Record
 export async function deleteChannelConnection(connectionId: string, businessId?: string): Promise<ApiResult<{ deleted: boolean }>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiDelete<{ deleted: boolean }>(`/communications/businesses/${encodeURIComponent(bid)}/connections/${encodeURIComponent(connectionId)}`);
+}
+
+export async function syncChannelConnectionsFromSocial(businessId?: string): Promise<ApiResult<{ synced: number; results: { provider: string; connectionId: string; destinations: number }[] }>> {
+  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{ synced: number; results: { provider: string; connectionId: string; destinations: number }[] }>({
+    path: `/communications/businesses/${encodeURIComponent(bid)}/connections/sync-from-social`,
+    body: {},
+  });
 }
 
 export { DEFAULT_BUSINESS_ID };
