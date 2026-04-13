@@ -449,7 +449,10 @@ export function UnifiedComposer({
       const variantMeta: Record<string, unknown> = {};
       if (v.subject) variantMeta.subject = v.subject;
       if (v.previewText) variantMeta.previewText = v.previewText;
+      if (v.senderName) variantMeta.senderName = v.senderName;
       if (v.hashtags) variantMeta.hashtags = v.hashtags;
+      if (v.templateName) variantMeta.templateName = v.templateName;
+      if (v.templateLanguage) variantMeta.templateLanguage = v.templateLanguage;
 
       const res = await upsertOutboundVariant(contentId, {
         platform: v.platform,

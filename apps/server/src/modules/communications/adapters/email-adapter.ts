@@ -22,9 +22,16 @@ export class EmailAdapter implements ChannelAdapter {
     }
 
     try {
-      const from = destination.displayName ? `${destination.displayName} <${senderEmail}>` : senderEmail;
+      const senderName = (payload.meta?.senderName as string) || destination.displayName;
+      const from = senderName ? `${senderName} <${senderEmail}>` : senderEmail;
       const boundary = 'boundary_' + Date.now();
-      const htmlBody = payload.htmlBody || payload.textBody || '';
+      const previewText = payload.meta?.previewText as string | undefined;
+      let htmlBody = payload.htmlBody || payload.textBody || '';
+
+      if (previewText) {
+        const previewHtml = `<div style="display:none;max-height:0;overflow:hidden;mso-hide:all">${previewText}</div>`;
+        htmlBody = previewHtml + htmlBody;
+      }
 
       const message = [
         `From: ${from}`,

@@ -15,7 +15,10 @@ interface VariantData {
   textBody: string;
   subject?: string;
   previewText?: string;
+  senderName?: string;
   hashtags?: string;
+  templateName?: string;
+  templateLanguage?: string;
   customized: boolean;
 }
 
@@ -169,6 +172,17 @@ export function ChannelVariantsPanel({
                       {isEmailPlatform(variant.platform) && (
                         <>
                           <div>
+                            <label className="text-[10px] text-muted-foreground mb-1 block">Sender Name</label>
+                            <input
+                              type="text"
+                              value={variant.senderName || ""}
+                              onChange={(e) => updateVariant(variant.destinationId, "senderName", e.target.value)}
+                              maxLength={100}
+                              className="w-full px-2.5 py-1.5 rounded-lg bg-muted/10 border border-border/30 text-xs focus:outline-none focus:border-[hsl(var(--kf-accent1))]/50"
+                              placeholder="From name (e.g. Your Business Name)"
+                            />
+                          </div>
+                          <div>
                             <label className="text-[10px] text-muted-foreground mb-1 block">Subject Line</label>
                             <input
                               type="text"
@@ -191,6 +205,35 @@ export function ChannelVariantsPanel({
                               placeholder="Preview text shown in inbox (max 150 chars)..."
                             />
                             <span className="text-[9px] text-muted-foreground/50 mt-0.5 block">{(variant.previewText || "").length}/150</span>
+                          </div>
+                        </>
+                      )}
+
+                      {isWhatsApp(variant.platform) && (
+                        <>
+                          <div>
+                            <label className="text-[10px] text-muted-foreground mb-1 block">Template Name (optional)</label>
+                            <input
+                              type="text"
+                              value={variant.templateName || ""}
+                              onChange={(e) => updateVariant(variant.destinationId, "templateName", e.target.value)}
+                              className="w-full px-2.5 py-1.5 rounded-lg bg-muted/10 border border-border/30 text-xs focus:outline-none focus:border-[hsl(var(--kf-accent1))]/50"
+                              placeholder="e.g. order_confirmation, welcome_msg..."
+                            />
+                            <span className="text-[9px] text-muted-foreground/50 mt-0.5 block">Required for first-contact messages per WhatsApp policy</span>
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-muted-foreground mb-1 block">Template Language</label>
+                            <select
+                              value={variant.templateLanguage || "en"}
+                              onChange={(e) => updateVariant(variant.destinationId, "templateLanguage", e.target.value)}
+                              className="w-full px-2.5 py-1.5 rounded-lg bg-muted/10 border border-border/30 text-xs focus:outline-none focus:border-[hsl(var(--kf-accent1))]/50"
+                            >
+                              <option value="en">English</option>
+                              <option value="es">Spanish</option>
+                              <option value="fr">French</option>
+                              <option value="pt">Portuguese</option>
+                            </select>
                           </div>
                         </>
                       )}
