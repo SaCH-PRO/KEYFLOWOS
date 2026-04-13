@@ -49,6 +49,7 @@ import {
   Users2,
 } from "lucide-react";
 import { AiCommandBar, AiCopilotTrigger } from "./_command/ai-command-bar";
+import { FlowChatPanel, FlowTriggerButton } from "./_command/flow-chat-panel";
 import { usePlanLimitHandler } from "@/hooks/use-plan";
 import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
 import { KeyflowOSStoreDrawer } from "@/components/keyflowos-store-drawer";
@@ -301,6 +302,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [onboardingChecked, setOnboardingChecked] = useState(false);
   const { planLimitHit, clearPlanLimit } = usePlanLimitHandler();
   const [kfStoreOpen, setKfStoreOpen] = useState(false);
+  const [flowOpen, setFlowOpen] = useState(false);
 
   useEffect(() => {
     setMobileDrawerOpen(false);
@@ -944,6 +946,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <PlanLimitDialog planLimit={planLimitHit} onClose={clearPlanLimit} />
       <KeyflowOSStoreDrawer open={kfStoreOpen} onClose={() => setKfStoreOpen(false)} />
+      <FlowChatPanel open={flowOpen} onClose={() => setFlowOpen(false)} />
+      {!flowOpen && <FlowTriggerButton onClick={() => setFlowOpen(true)} />}
     </div>
   );
 }
