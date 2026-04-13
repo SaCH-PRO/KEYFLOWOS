@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 
@@ -95,7 +95,7 @@ export class ContentAiService {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Optional() @Inject(AiUsageService) private readonly aiUsage: AiUsageService | null,
+    @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {}
 
   private async getBusinessContext(businessId: string) {
@@ -107,7 +107,6 @@ export class ContentAiService {
   }
 
   async generateDraft(businessId: string, input: GenerateDraftInput) {
-    if (!this.aiUsage) throw new Error('AI service unavailable');
 
     const biz = await this.getBusinessContext(businessId);
     const channelContext = this.getChannelContext(input.contentType);
@@ -149,7 +148,6 @@ Respond in valid JSON:
   }
 
   async rewriteForChannel(businessId: string, input: RewriteInput) {
-    if (!this.aiUsage) throw new Error('AI service unavailable');
 
     const channelContext = this.getChannelContext(input.targetChannel);
     const isEmail = ['email', 'campaign_email'].includes(input.targetChannel.toLowerCase());
@@ -185,7 +183,6 @@ Respond in valid JSON:
   }
 
   async suggestSubjects(businessId: string, input: SuggestSubjectsInput) {
-    if (!this.aiUsage) throw new Error('AI service unavailable');
 
     const prompt = `Generate 5 compelling email subject lines for the following content.
 ${input.objective ? `Objective: ${sanitize(input.objective, 100)}` : ''}
@@ -217,7 +214,6 @@ Respond in valid JSON:
   }
 
   async suggestCta(businessId: string, input: SuggestCtaInput) {
-    if (!this.aiUsage) throw new Error('AI service unavailable');
 
     const prompt = `Generate 4 compelling calls-to-action for the following content.
 ${input.objective ? `Objective: ${sanitize(input.objective, 100)}` : ''}
@@ -248,7 +244,6 @@ Respond in valid JSON:
   }
 
   async suggestHashtags(businessId: string, input: SuggestHashtagsInput) {
-    if (!this.aiUsage) throw new Error('AI service unavailable');
 
     const biz = await this.getBusinessContext(businessId);
 
@@ -281,7 +276,6 @@ Respond in valid JSON:
   }
 
   async shortenOrExpand(businessId: string, input: ShortenExpandInput) {
-    if (!this.aiUsage) throw new Error('AI service unavailable');
 
     const action = input.action === 'shorten' ? 'shorter and more concise' : 'longer with more detail and depth';
     const channelContext = input.targetChannel ? this.getChannelContext(input.targetChannel) : null;
@@ -310,7 +304,6 @@ Respond in valid JSON:
   }
 
   async suggestChannels(businessId: string, input: SuggestChannelsInput) {
-    if (!this.aiUsage) throw new Error('AI service unavailable');
 
     const prompt = `Recommend the best distribution channels for this content.
 Available channels: ${input.availableChannels.join(', ')}
@@ -336,7 +329,6 @@ Respond in valid JSON:
   }
 
   async suggestSendTime(businessId: string, input: SuggestTimeInput) {
-    if (!this.aiUsage) throw new Error('AI service unavailable');
 
     const tz = input.timezone || 'America/Port_of_Spain';
 
@@ -376,7 +368,6 @@ Respond in valid JSON:
   }
 
   async suggestPreviewText(businessId: string, input: SuggestPreviewTextInput) {
-    if (!this.aiUsage) throw new Error('AI service unavailable');
 
     const prompt = `Generate email preview text (preheader) options for an email.
 Subject line: ${sanitize(input.subject, 200)}
@@ -412,7 +403,6 @@ Respond in valid JSON:
   }
 
   async suggestAudienceSegments(businessId: string, input: SuggestAudienceSegmentsInput) {
-    if (!this.aiUsage) throw new Error('AI service unavailable');
 
     const biz = await this.getBusinessContext(businessId);
 
@@ -497,7 +487,6 @@ Respond in valid JSON:
   }
 
   async suggestContentIdeas(businessId: string, input: SuggestContentIdeasInput) {
-    if (!this.aiUsage) throw new Error('AI service unavailable');
 
     const [biz, signals] = await Promise.all([
       this.getBusinessContext(businessId),
