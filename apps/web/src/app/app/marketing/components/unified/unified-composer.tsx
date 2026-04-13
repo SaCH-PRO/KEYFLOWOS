@@ -33,6 +33,7 @@ interface UnifiedComposerProps {
   initialSubject?: string;
   onContentCreated?: (content: OutboundContent) => void;
   onClose?: () => void;
+  healthData?: import("@/hooks/use-channel-health").ChannelHealthData;
 }
 
 const OBJECTIVES = [
@@ -224,6 +225,7 @@ export function UnifiedComposer({
   initialSubject = "",
   onContentCreated,
   onClose,
+  healthData,
 }: UnifiedComposerProps) {
   const [step, setStep] = useState<ComposerStep>("compose");
   const [contentType, setContentType] = useState<ContentTypeOption>(initialContentType);
@@ -759,6 +761,7 @@ export function UnifiedComposer({
                   selectedDestinations={selectedDestinations}
                   onSelectionChange={handleDestinationChange}
                   contentType={contentTypeForApi}
+                  healthData={healthData}
                 />
 
                 {channelWarnings.length > 0 && (

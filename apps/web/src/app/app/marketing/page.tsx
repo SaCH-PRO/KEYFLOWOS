@@ -51,6 +51,7 @@ import { AudienceHealthSection } from "./components/campaign-intelligence-cards"
 import { AudienceSegmentsPanel } from "./components/audience-segments-panel";
 import { UnifiedComposer } from "./components/unified/unified-composer";
 import { ContentStudioTab } from "./components/content-studio-tab";
+import { useChannelHealth } from "@/hooks/use-channel-health";
 import { listOutboundContent } from "@/lib/client";
 import type { EmailCampaign, LeadForm, OutboundContent } from "@/lib/client";
 import type { BusinessPulse } from "./hooks/use-marketing";
@@ -349,6 +350,7 @@ export default function ContentPage() {
   const searchParams = useSearchParams();
   const mk = useMarketing();
   const marketingAi = useMarketingAiHub();
+  const channelHealth = useChannelHealth(mk.businessId || "");
 
   const [activeTab, setActiveTab] = useState<ContentTab>("create");
   const [createSubmode, setCreateSubmode] = useState<CreateSubmode>("compose");
@@ -664,6 +666,7 @@ export default function ContentPage() {
                       initialContentType={composeType === "email" ? "email" : composeType === "multi" ? "multi" : "social"}
                       onContentCreated={() => { setEditingContentId(undefined); void mk.loadData(); }}
                       onClose={() => { setEditingContentId(undefined); setCreateSubmode("posts"); void mk.loadData(); }}
+                      healthData={channelHealth}
                     />
                   </div>
                 )}
@@ -862,7 +865,7 @@ export default function ContentPage() {
               </div>
             )}
             {activeTab === "studio" && (
-              <ContentStudioTab businessId={mk.businessId || ""} />
+              <ContentStudioTab businessId={mk.businessId || ""} sharedHealth={channelHealth} />
             )}
           </motion.div>
         </AnimatePresence>
