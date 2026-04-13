@@ -132,9 +132,9 @@ export class CommunicationsController {
   schedule(
     @Param('businessId') businessId: string,
     @Param('id') contentId: string,
-    @Body() body: { destinationIds: string[]; scheduledAt: string },
+    @Body() body: { destinationIds: string[]; scheduledAt: string; timezone?: string },
   ) {
-    return this.delivery.schedule(businessId, contentId, body.destinationIds, body.scheduledAt);
+    return this.delivery.schedule(businessId, contentId, body.destinationIds, body.scheduledAt, body.timezone);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -142,9 +142,9 @@ export class CommunicationsController {
   reschedule(
     @Param('businessId') businessId: string,
     @Param('deliveryId') deliveryId: string,
-    @Body() body: { scheduledAt: string },
+    @Body() body: { scheduledAt: string; timezone?: string },
   ) {
-    return this.delivery.reschedule(businessId, deliveryId, body.scheduledAt);
+    return this.delivery.reschedule(businessId, deliveryId, body.scheduledAt, body.timezone);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
