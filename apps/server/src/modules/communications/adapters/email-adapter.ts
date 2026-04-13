@@ -105,6 +105,6 @@ export class EmailAdapter implements ChannelAdapter {
   }
 
   getCapabilities(_platform: string): AdapterCapabilities {
-    return { supports_text_post: false, supports_image_post: false, supports_video_post: false, supports_scheduled_post: false, supports_campaign_email: true, supports_template_message: true };
+    return { supports_text_post: false, supports_image_post: false, supports_video_post: false, supports_scheduled_post: false, supports_campaign_email: true, supports_template_message: false };
   }
 }
