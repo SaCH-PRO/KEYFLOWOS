@@ -337,6 +337,177 @@ export class ChannelConnectionService {
     return { synced: results.length, results };
   }
 
+  async validateEmailSend(businessId: string, input: {
+    subject?: string;
+    destinationIds?: string[];
+    segmentTags?: string[];
+  }) {
+    const warnings: { field: string; message: string; severity: 'error' | 'warning' }[] = [];
+
+    if (!input.subject?.trim()) {
+      warnings.push({ field: 'subject', message: 'Subject line is required for email campaigns', severity: 'error' });
+    } else if (input.subject.length > 150) {
+      warnings.push({ field: 'subject', message: 'Subject line is too long (max 150 chars)', severity: 'warning' });
+    }
+
+    const emailConnections = await this.prisma.client.channelConnection.findMany({
+      where: { businessId, provider: { in: ['EMAIL', 'GOOGLE'] } },
+      select: { id: true, accountEmail: true, label: true, healthState: true },
+    });
+
+    if (input.destinationIds && input.destinationIds.length > 0) {
+      const selectedDestinations = await this.prisma.client.channelDestination.findMany({
+        where: { id: { in: input.destinationIds }, connection: { businessId } },
+        include: { connection: { select: { provider: true, accountEmail: true, healthState: true } } },
+      });
+
+      const emailDestinations = selectedDestinations.filter(
+        d => d.connection.provider === 'EMAIL' || d.connection.provider === 'GOOGLE',
+      );
+
+      if (emailDestinations.length === 0) {
+        warnings.push({ field: 'destination', message: 'No email-capable destinations selected', severity: 'warning' });
+      }
+
+      const unhealthyDest = emailDestinations.find(d => d.connection.healthState !== 'Connected');
+      if (unhealthyDest) {
+        warnings.push({ field: 'destination', message: `Selected sender health: ${unhealthyDest.connection.healthState}. Reconnect in Studio.`, severity: 'warning' });
+      }
+    }
+
+    const hasSender = emailConnections.some(c => c.accountEmail);
+    if (!hasSender) {
+      warnings.push({ field: 'sender', message: 'No email sender configured. Set up your sender identity in Content Studio.', severity: 'error' });
+    }
+
+    const unhealthySender = emailConnections.find(c => c.accountEmail && c.healthState !== 'Connected');
+    if (unhealthySender) {
+      warnings.push({ field: 'sender', message: `Sender "${unhealthySender.label || unhealthySender.accountEmail}" health: ${unhealthySender.healthState}`, severity: 'warning' });
+    }
+
+    const contactWhere: Record<string, unknown> = { businessId, deletedAt: null, email: { not: null } };
+    if (input.segmentTags && input.segmentTags.length > 0) {
+      contactWhere.tags = { hasSome: input.segmentTags };
+    }
+
+    const [totalAudience, suppressedCount] = await Promise.all([
+      this.prisma.client.contact.count({ where: contactWhere }),
+      this.prisma.client.contact.count({
+        where: {
+          ...contactWhere,
+          OR: [{ doNotContact: true }, { marketingOptIn: false }],
+        },
+      }),
+    ]);
+
+    const eligibleCount = totalAudience - suppressedCount;
+
+    if (totalAudience === 0) {
+      warnings.push({ field: 'audience', message: 'No contacts match this audience segment', severity: 'error' });
+    } else if (eligibleCount === 0) {
+      warnings.push({ field: 'audience', message: 'All matching contacts are suppressed or opted out', severity: 'error' });
+    }
+
+    if (suppressedCount > 0 && eligibleCount > 0) {
+      warnings.push({ field: 'audience', message: `${suppressedCount} contact(s) will be excluded (unsubscribed/opted out)`, severity: 'warning' });
+    }
+
+    return {
+      valid: warnings.every(w => w.severity !== 'error'),
+      warnings,
+      audienceSummary: {
+        totalMatching: totalAudience,
+        suppressed: suppressedCount,
+        eligible: eligibleCount,
+      },
+      senderConfigured: hasSender,
+    };
+  }
+
+  async expandAudience(businessId: string, input: {
+    segmentTags?: string[];
+    limit?: number;
+  }) {
+    const contactWhere: Record<string, unknown> = {
+      businessId,
+      deletedAt: null,
+      email: { not: null },
+      doNotContact: { not: true },
+      marketingOptIn: { not: false },
+    };
+    if (input.segmentTags && input.segmentTags.length > 0) {
+      contactWhere.tags = { hasSome: input.segmentTags };
+    }
+
+    const contacts = await this.prisma.client.contact.findMany({
+      where: contactWhere,
+      select: { id: true, email: true, firstName: true, lastName: true, tags: true },
+      take: input.limit ?? 500,
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const suppressedCount = await this.prisma.client.contact.count({
+      where: {
+        businessId,
+        deletedAt: null,
+        email: { not: null },
+        OR: [{ doNotContact: true }, { marketingOptIn: false }],
+        ...(input.segmentTags && input.segmentTags.length > 0 ? { tags: { hasSome: input.segmentTags } } : {}),
+      },
+    });
+
+    const allTags = new Set<string>();
+    contacts.forEach(c => c.tags?.forEach((t: string) => allTags.add(t)));
+
+    return {
+      contacts,
+      total: contacts.length,
+      suppressed: suppressedCount,
+      availableTags: Array.from(allTags).sort(),
+    };
+  }
+
+  async getAudienceHealth(businessId: string) {
+    const [totalContacts, withEmail, suppressed, optedIn, tagCounts] = await Promise.all([
+      this.prisma.client.contact.count({ where: { businessId, deletedAt: null } }),
+      this.prisma.client.contact.count({ where: { businessId, deletedAt: null, email: { not: null } } }),
+      this.prisma.client.contact.count({
+        where: { businessId, deletedAt: null, OR: [{ doNotContact: true }, { marketingOptIn: false }] },
+      }),
+      this.prisma.client.contact.count({
+        where: { businessId, deletedAt: null, email: { not: null }, doNotContact: { not: true }, marketingOptIn: { not: false } },
+      }),
+      this.prisma.client.contact.findMany({
+        where: { businessId, deletedAt: null },
+        select: { tags: true },
+      }),
+    ]);
+
+    const segments: Record<string, number> = {};
+    tagCounts.forEach(c => {
+      if (c.tags && Array.isArray(c.tags)) {
+        (c.tags as string[]).forEach(t => { segments[t] = (segments[t] || 0) + 1; });
+      }
+    });
+
+    const sortedSegments = Object.entries(segments)
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count);
+
+    const emailCoverage = totalContacts > 0 ? Math.round((withEmail / totalContacts) * 100) : 0;
+    const deliverabilityRate = withEmail > 0 ? Math.round((optedIn / withEmail) * 100) : 0;
+
+    return {
+      totalContacts,
+      withEmail,
+      suppressed,
+      optedIn,
+      emailCoverage,
+      deliverabilityRate,
+      segments: sortedSegments,
+    };
+  }
+
   async toggleDestination(businessId: string, destId: string, isActive: boolean) {
     const dest = await this.prisma.client.channelDestination.findFirst({
       where: { id: destId, businessId },

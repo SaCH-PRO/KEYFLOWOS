@@ -51,6 +51,7 @@ import { SocialTabContent } from "./components/social-tab-content";
 import { MarketingCalendarTab } from "./components/marketing-calendar-tab";
 import { AudienceHealthSection } from "./components/campaign-intelligence-cards";
 import { AudienceSegmentsPanel } from "./components/audience-segments-panel";
+import { AudienceHealthDashboard } from "./components/audience-health-dashboard";
 import { UnifiedComposer } from "./components/unified/unified-composer";
 import { ContentStudioTab } from "./components/content-studio-tab";
 import { useChannelHealth } from "@/hooks/use-channel-health";
@@ -913,6 +914,10 @@ export default function ContentPage() {
             )}
             {activeTab === "audience" && (
               <div className="space-y-6">
+                <AudienceHealthDashboard
+                  businessId={mk.businessId}
+                  onCreateCampaign={() => { handleTabChange("create"); setCreateSubmode("compose"); setComposeType("email"); }}
+                />
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <AudienceHealthSection businessId={mk.businessId} />
                   <AudienceSegmentsPanel

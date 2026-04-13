@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ChannelAdapter } from './channel-adapter.interface';
 import { MetaAdapter } from './meta-adapter';
 import { EmailAdapter } from './email-adapter';
+import { WhatsAppAdapter } from './whatsapp-adapter';
 
 @Injectable()
 export class AdapterRegistryService {
@@ -11,6 +12,7 @@ export class AdapterRegistryService {
   constructor() {
     this.register(new MetaAdapter());
     this.register(new EmailAdapter());
+    this.register(new WhatsAppAdapter());
   }
 
   private register(adapter: ChannelAdapter) {

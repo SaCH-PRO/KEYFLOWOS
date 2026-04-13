@@ -9,9 +9,10 @@ import { BookingsModule } from '../bookings/bookings.module';
 import { CrmModule } from '../crm/crm.module';
 import { CommerceModule } from '../commerce/commerce.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { CommunicationsModule } from '../communications/communications.module';
 
 @Module({
-  imports: [BookingsModule, forwardRef(() => CrmModule), forwardRef(() => CommerceModule), NotificationsModule],
+  imports: [BookingsModule, forwardRef(() => CrmModule), forwardRef(() => CommerceModule), NotificationsModule, CommunicationsModule],
   controllers: [FlowController],
   providers: [FlowListener, FlowService, ActivityService, AutomationExecutorService, CrossModuleAgentService],
   exports: [FlowService, ActivityService, CrossModuleAgentService],
