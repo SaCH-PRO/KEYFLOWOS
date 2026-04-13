@@ -722,16 +722,17 @@ export function BillingPanel({
 
         <button
           onClick={() => {
+            if (gmailStatus?.connected) return;
             if (current) setTaskOrigin(current);
             pushContext({ taskIntent: "connect-email", workspace: "Revenue" });
             router.push("/app/settings/connections");
           }}
           className={`ml-auto inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-sm transition-all duration-200 shrink-0 ${
             gmailStatus?.connected
-              ? "border-green-500/30 bg-green-500/[0.06] hover:bg-green-500/10"
-              : "border-amber-500/30 bg-amber-500/[0.06] hover:bg-amber-500/10"
+              ? "border-green-500/30 bg-green-500/[0.06]"
+              : "border-amber-500/30 bg-amber-500/[0.06] hover:bg-amber-500/10 cursor-pointer"
           }`}
-          title={gmailStatus?.connected ? `Email connected: ${gmailStatus.email}` : "Email not connected"}
+          title={gmailStatus?.connected ? `Email connected: ${gmailStatus.email}` : "Click to connect Gmail in Settings"}
         >
           <span className="relative flex h-2 w-2">
             {gmailStatus?.connected && (

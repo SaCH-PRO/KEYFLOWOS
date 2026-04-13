@@ -468,9 +468,9 @@ export default function BookingsPage() {
                 <span className="hidden sm:inline">Share</span>
               </button>
             )}
-            <RichTooltip title="Calendar Sync" description={calendarConnected ? `Connected to ${calendarEmail ?? "Google Calendar"}. Bookings sync automatically.` : "Connect Google Calendar in Settings to sync your bookings."} side="bottom">
-            <a
-              href="/app/settings/connections"
+            <RichTooltip title="Calendar Sync" description={calendarConnected ? `Connected to ${calendarEmail ?? "Google Calendar"}. Bookings sync automatically.` : "Click to connect Google Calendar and sync your bookings."} side="bottom">
+            <button
+              onClick={handleConnectCalendar}
               className="inline-flex items-center justify-center gap-1.5 min-w-[44px] min-h-[44px] rounded-lg text-[11px] transition-colors"
               style={{
                 background: calendarConnected ? "hsl(var(--kf-success) / 0.08)" : "hsl(var(--muted) / 0.3)",
@@ -478,11 +478,12 @@ export default function BookingsPage() {
                 borderWidth: 1,
                 borderColor: calendarConnected ? "hsl(var(--kf-success) / 0.2)" : "hsl(var(--border))",
               }}
-              title={calendarConnected ? `Calendar connected: ${calendarEmail ?? ""}` : "Connect calendar in Settings"}
+              title={calendarConnected ? `Calendar connected: ${calendarEmail ?? ""}` : "Connect Google Calendar"}
+              disabled={calendarLoading || calendarConnected}
             >
               <Link2 className="w-4 h-4" />
               {calendarConnected && <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "hsl(var(--kf-success))" }} />}
-            </a>
+            </button>
             </RichTooltip>
           </div>
         }

@@ -14,7 +14,6 @@ import {
   Share2,
   Wifi,
 } from "lucide-react";
-import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import type { SocialConnection } from "@/lib/client";
 
@@ -173,14 +172,13 @@ export function ConnectionsDropdown({
             </div>
 
             <div className="border-t border-border px-4 py-3">
-              <Link
-                href="/app/settings/connections"
-                onClick={() => setOpen(false)}
+              <button
+                onClick={() => { setOpen(false); window.location.href = "/app/settings/connections"; }}
                 className="flex items-center justify-center gap-2 w-full text-sm font-medium text-[hsl(var(--kf-accent1))] hover:underline transition-colors"
               >
                 <Settings className="w-3.5 h-3.5" />
                 Manage Connections
-              </Link>
+              </button>
             </div>
           </motion.div>
         )}

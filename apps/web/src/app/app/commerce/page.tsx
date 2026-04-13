@@ -54,6 +54,7 @@ import RecurringPanel from "./recurring/recurring-panel";
 import PaymentsTab from "./payments/payments-tab";
 import { ProductsPanel } from "./products/products-panel";
 import { useProducts } from "./hooks/use-products";
+import { RevenueSetupDrawer } from "./components/revenue-setup-drawer";
 
 type RevenueMode = "operations" | "catalog" | "setup";
 
@@ -101,6 +102,7 @@ export default function CommercePage() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [mode, setMode] = useState<RevenueMode>("operations");
   const [opsSection, setOpsSection] = useState<string>("invoices");
+  const [setupDrawer, setSetupDrawer] = useState<"billing" | "payments" | "branding" | null>(null);
   
 
   const { tab } = overview;
@@ -740,14 +742,14 @@ export default function CommercePage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {[
-              { label: "Billing & Tax", desc: "Tax rates, default terms, and invoice preferences", href: "/app/settings/business?tab=billing", icon: Receipt, colorVar: "--kf-accent1" },
-              { label: "Payment Gateways", desc: "WiPay, PayPal, and payment methods", href: "/app/settings/business?tab=payments", icon: Shield, colorVar: "--kf-accent2" },
-              { label: "Branding & Templates", desc: "Customize invoice branding and layout", href: "/app/settings/business?tab=branding", icon: Palette, colorVar: "--kf-accent1" },
+              { label: "Billing & Tax", desc: "Tax rates, default terms, and invoice preferences", section: "billing" as const, icon: Receipt, colorVar: "--kf-accent1" },
+              { label: "Payment Gateways", desc: "WiPay, PayPal, and payment methods", section: "payments" as const, icon: Shield, colorVar: "--kf-accent2" },
+              { label: "Branding & Templates", desc: "Customize invoice branding and layout", section: "branding" as const, icon: Palette, colorVar: "--kf-accent1" },
             ].map((link) => (
-              <Link
+              <button
                 key={link.label}
-                href={link.href}
-                className="flex items-center gap-3 p-4 rounded-xl border border-border/40 bg-card transition-all group"
+                onClick={() => setSetupDrawer(link.section)}
+                className="flex items-center gap-3 p-4 rounded-xl border border-border/40 bg-card transition-all group text-left"
                 style={{ ["--link-color" as string]: `hsl(var(${link.colorVar}))` }}
               >
                 <div className="p-2 rounded-xl shrink-0" style={{ background: `hsl(var(${link.colorVar}) / 0.1)` }}>
@@ -758,7 +760,7 @@ export default function CommercePage() {
                   <p className="text-[10px] text-muted-foreground/60 mt-0.5">{link.desc}</p>
                 </div>
                 <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/30 transition-colors shrink-0" />
-              </Link>
+              </button>
             ))}
           </div>
 
@@ -792,6 +794,12 @@ export default function CommercePage() {
         isOpen={helpOpen}
         onClose={() => setHelpOpen(false)}
         onNavigate={(navTab: string) => handleTabChange(navTab)}
+      />
+
+      <RevenueSetupDrawer
+        open={setupDrawer !== null}
+        onClose={() => setSetupDrawer(null)}
+        section={setupDrawer ?? "billing"}
       />
 
       <ProgressivePrompts moduleFilter={["sales", "revenue", "finance"]} />
