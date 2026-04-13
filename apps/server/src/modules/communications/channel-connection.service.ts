@@ -122,4 +122,95 @@ export class ChannelConnectionService {
       data: { healthState, healthMessage, lastCheckedAt: new Date() },
     });
   }
+
+  async getHealthSummary(businessId: string) {
+    const connections = await this.prisma.client.channelConnection.findMany({
+      where: { businessId },
+      include: { destinations: true },
+    });
+
+    const total = connections.length;
+    const healthy = connections.filter(c => c.healthState === 'Connected').length;
+    const needsAttention = connections.filter(c => c.healthState === 'NeedsRefresh').length;
+    const expired = connections.filter(c => ['Expired', 'MissingPermission', 'Error'].includes(c.healthState)).length;
+    const totalDestinations = connections.reduce((sum, c) => sum + c.destinations.length, 0);
+    const activeDestinations = connections.reduce((sum, c) => sum + c.destinations.filter(d => d.isActive).length, 0);
+
+    return {
+      total,
+      healthy,
+      needsAttention,
+      expired,
+      totalDestinations,
+      activeDestinations,
+      connections: connections.map(c => ({
+        id: c.id,
+        provider: c.provider,
+        label: c.label,
+        healthState: c.healthState,
+        healthMessage: c.healthMessage,
+        lastCheckedAt: c.lastCheckedAt,
+        destinationCount: c.destinations.length,
+        activeDestinationCount: c.destinations.filter(d => d.isActive).length,
+      })),
+    };
+  }
+
+  async runHealthCheck(businessId: string, id: string) {
+    const conn = await this.prisma.client.channelConnection.findFirst({
+      where: { id, businessId },
+      include: { destinations: true },
+    });
+    if (!conn) throw new NotFoundException('Connection not found');
+
+    let healthState = 'Connected';
+    let healthMessage: string | null = null;
+
+    if (conn.expiresAt && new Date(conn.expiresAt) < new Date()) {
+      healthState = 'Expired';
+      healthMessage = 'Token has expired. Please reconnect to refresh your credentials.';
+    } else if (conn.expiresAt) {
+      const hoursUntilExpiry = (new Date(conn.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60);
+      if (hoursUntilExpiry < 24) {
+        healthState = 'NeedsRefresh';
+        healthMessage = `Token expires in ${Math.round(hoursUntilExpiry)} hours. Consider reconnecting soon.`;
+      }
+    }
+
+    if (!conn.token && healthState === 'Connected') {
+      healthState = 'Error';
+      healthMessage = 'No authentication token found. Please reconnect.';
+    }
+
+    if (conn.destinations.length === 0 && healthState === 'Connected') {
+      healthState = 'DestinationMissing';
+      healthMessage = 'No destinations configured. Add a page, account, or email address.';
+    }
+
+    const updated = await this.prisma.client.channelConnection.update({
+      where: { id },
+      data: { healthState, healthMessage, lastCheckedAt: new Date() },
+      include: { destinations: true },
+    });
+
+    return {
+      id: updated.id,
+      healthState: updated.healthState,
+      healthMessage: updated.healthMessage,
+      lastCheckedAt: updated.lastCheckedAt,
+      destinations: updated.destinations,
+    };
+  }
+
+  async toggleDestination(businessId: string, destId: string, isActive: boolean) {
+    const dest = await this.prisma.client.channelDestination.findFirst({
+      where: { id: destId, businessId },
+    });
+    if (!dest) throw new NotFoundException('Destination not found');
+
+    return this.prisma.client.channelDestination.update({
+      where: { id: destId },
+      data: { isActive },
+    });
+  }
 }

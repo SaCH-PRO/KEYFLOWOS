@@ -42,9 +42,12 @@ function getPlatformMeta(platform: string) {
 }
 
 function getDisabledReason(connection: ChannelConnection): string | null {
-  if (connection.healthStatus === "error") return "Connection error — reconnect required";
-  if (connection.healthStatus === "degraded") return "Connection degraded — may have limited functionality";
-  if (!connection.isActive) return "Connection inactive — reactivate in Settings";
+  const health = connection.healthState || connection.healthStatus || "Connected";
+  if (health === "Error" || health === "error") return "Connection error — reconnect required";
+  if (health === "Expired") return "Token expired — reconnect required";
+  if (health === "NeedsRefresh" || health === "degraded") return "Connection degraded — may have limited functionality";
+  if (health === "MissingPermission") return "Missing permissions — reconnect to fix";
+  if (connection.isActive === false) return "Connection inactive — reactivate in Studio";
   return null;
 }
 
@@ -100,7 +103,7 @@ export function ChannelSelector({ businessId, selectedDestinations, onSelectionC
   }, [allDestinations, connections]);
 
   const notConnectedPlatforms = useMemo(() => {
-    const connectedPlatforms = new Set(connections.map((c) => (c.platform || c.providerType).toUpperCase()));
+    const connectedPlatforms = new Set(connections.map((c) => (c.provider || c.platform || c.providerType || "").toUpperCase()));
     return Object.entries(PLATFORM_ICONS)
       .filter(([key]) => !connectedPlatforms.has(key) && key !== "META" && key !== "EMAIL")
       .map(([key, meta]) => ({ key, ...meta }));
@@ -173,14 +176,18 @@ export function ChannelSelector({ businessId, selectedDestinations, onSelectionC
                   </div>
 
                   {groupedByConnection.map(({ connection, destinations: dests, disabledReason }) => {
-                    const connMeta = getPlatformMeta(connection.platform || connection.providerType);
+                    const connMeta = getPlatformMeta(connection.provider || connection.platform || connection.providerType || "");
                     const isConnectionDisabled = !!disabledReason;
                     return (
                       <div key={connection.id} className="space-y-1.5">
                         <div className="flex items-center gap-2 px-1">
                           <connMeta.icon className="w-3 h-3" style={{ color: isConnectionDisabled ? "#94a3b8" : connMeta.color }} />
-                          <span className={`text-[10px] font-medium ${isConnectionDisabled ? "text-muted-foreground/50" : ""}`}>{connection.displayName}</span>
-                          <div className={`w-1.5 h-1.5 rounded-full ${connection.healthStatus === "healthy" ? "bg-emerald-400" : connection.healthStatus === "degraded" ? "bg-amber-400" : "bg-red-400"}`} />
+                          <span className={`text-[10px] font-medium ${isConnectionDisabled ? "text-muted-foreground/50" : ""}`}>{connection.label || connection.displayName}</span>
+                          <div className={`w-1.5 h-1.5 rounded-full ${
+                            (connection.healthState || connection.healthStatus || "Connected") === "Connected" ? "bg-emerald-400" :
+                            ["NeedsRefresh", "DestinationMissing", "degraded"].includes(connection.healthState || connection.healthStatus || "") ? "bg-amber-400" :
+                            "bg-red-400"
+                          }`} />
                           <div className="flex items-center gap-0.5 ml-auto">
                             {connMeta.capabilities.slice(0, 3).map((cap) => {
                               const CapIcon = CAPABILITY_ICONS[cap] || Globe;
@@ -215,7 +222,7 @@ export function ChannelSelector({ businessId, selectedDestinations, onSelectionC
                               </div>
                               <div className="flex-1 min-w-0">
                                 <p className="text-xs font-medium truncate">{dest.displayName}</p>
-                                <p className="text-[10px] text-muted-foreground capitalize">{dest.destinationType.replace(/_/g, " ")}</p>
+                                <p className="text-[10px] text-muted-foreground capitalize">{(dest.destinationType || dest.platform || "").replace(/_/g, " ")}</p>
                               </div>
                               {isActive ? (
                                 <Wifi className="w-3 h-3 text-emerald-400/60" />
