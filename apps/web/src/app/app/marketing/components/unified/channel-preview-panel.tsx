@@ -6,12 +6,21 @@ import { Eye, Mail, Facebook, Instagram, MessageCircle, Globe, Smartphone } from
 
 type PreviewPlatform = "FACEBOOK" | "INSTAGRAM" | "EMAIL" | "WHATSAPP" | "GENERIC";
 
+interface VariantOverride {
+  destinationId: string;
+  platform: string;
+  textBody: string;
+  subject?: string;
+  customized: boolean;
+}
+
 interface ChannelPreviewPanelProps {
   body: string;
   subject?: string;
   mediaUrls?: string[];
   selectedPlatforms: PreviewPlatform[];
   businessName?: string;
+  variants?: VariantOverride[];
 }
 
 const PLATFORM_META: Record<PreviewPlatform, { label: string; icon: React.ElementType; color: string; bg: string }> = {
@@ -124,7 +133,30 @@ function WhatsAppPreview({ body, mediaUrls }: { body: string; mediaUrls?: string
   );
 }
 
-export function ChannelPreviewPanel({ body, subject, mediaUrls, selectedPlatforms, businessName }: ChannelPreviewPanelProps) {
+const PLATFORM_MAP_PREVIEW: Record<string, string> = {
+  GOOGLE: "EMAIL",
+  META: "FACEBOOK",
+};
+
+function resolveVariantForPlatform(
+  platform: PreviewPlatform,
+  masterBody: string,
+  masterSubject: string | undefined,
+  variants?: VariantOverride[],
+): { body: string; subject: string } {
+  if (!variants || variants.length === 0) return { body: masterBody, subject: masterSubject || "" };
+  const mapped = PLATFORM_MAP_PREVIEW[platform] || platform;
+  const match = variants.find(v => {
+    const vPlat = PLATFORM_MAP_PREVIEW[v.platform.toUpperCase()] || v.platform.toUpperCase();
+    return vPlat === mapped && v.customized;
+  });
+  return {
+    body: match?.textBody || masterBody,
+    subject: match?.subject || masterSubject || "",
+  };
+}
+
+export function ChannelPreviewPanel({ body, subject, mediaUrls, selectedPlatforms, businessName, variants }: ChannelPreviewPanelProps) {
   const platforms = useMemo(() => {
     if (selectedPlatforms.length === 0) return ["GENERIC" as PreviewPlatform];
     return selectedPlatforms;
@@ -140,18 +172,22 @@ export function ChannelPreviewPanel({ body, subject, mediaUrls, selectedPlatform
         {platforms.map((platform) => {
           const meta = PLATFORM_META[platform] || PLATFORM_META.GENERIC;
           const Icon = meta.icon;
+          const resolved = resolveVariantForPlatform(platform, body, subject, variants);
           return (
             <motion.div key={platform} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
               <div className="space-y-1.5">
                 <div className="flex items-center gap-1.5 px-1">
                   <Icon className="w-3 h-3" style={{ color: meta.color }} />
                   <span className="text-[10px] font-medium" style={{ color: meta.color }}>{meta.label}</span>
+                  {variants?.some(v => (PLATFORM_MAP_PREVIEW[v.platform.toUpperCase()] || v.platform.toUpperCase()) === (PLATFORM_MAP_PREVIEW[platform] || platform) && v.customized) && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[#F97316]/10 text-[#F97316] font-medium">Customized</span>
+                  )}
                 </div>
-                {platform === "FACEBOOK" && <FacebookPreview body={body} mediaUrls={mediaUrls} businessName={businessName} />}
-                {platform === "INSTAGRAM" && <InstagramPreview body={body} mediaUrls={mediaUrls} businessName={businessName} />}
-                {platform === "EMAIL" && <EmailPreview body={body} subject={subject} businessName={businessName} />}
-                {platform === "WHATSAPP" && <WhatsAppPreview body={body} mediaUrls={mediaUrls} />}
-                {platform === "GENERIC" && <FacebookPreview body={body} mediaUrls={mediaUrls} businessName={businessName} />}
+                {platform === "FACEBOOK" && <FacebookPreview body={resolved.body} mediaUrls={mediaUrls} businessName={businessName} />}
+                {platform === "INSTAGRAM" && <InstagramPreview body={resolved.body} mediaUrls={mediaUrls} businessName={businessName} />}
+                {platform === "EMAIL" && <EmailPreview body={resolved.body} subject={resolved.subject} businessName={businessName} />}
+                {platform === "WHATSAPP" && <WhatsAppPreview body={resolved.body} mediaUrls={mediaUrls} />}
+                {platform === "GENERIC" && <FacebookPreview body={resolved.body} mediaUrls={mediaUrls} businessName={businessName} />}
               </div>
             </motion.div>
           );

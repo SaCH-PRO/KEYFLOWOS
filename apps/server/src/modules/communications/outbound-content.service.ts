@@ -108,15 +108,25 @@ export class OutboundContentService {
     htmlBody?: string;
     mediaUrls?: string[];
     variantMeta?: Record<string, unknown>;
+    destinationId?: string;
   }) {
     const content = await this.prisma.client.outboundContent.findFirst({
       where: { id: contentId, businessId, deletedAt: null },
     });
     if (!content) throw new NotFoundException('Content not found for this business');
 
-    const existing = await this.prisma.client.outboundVariant.findFirst({
+    const meta = { ...(data.variantMeta ?? {}), ...(data.destinationId ? { destinationId: data.destinationId } : {}) };
+
+    const allVariants = await this.prisma.client.outboundVariant.findMany({
       where: { contentId, platform: data.platform },
     });
+    const existing = data.destinationId
+      ? allVariants.find((v) => {
+          const vm = v.variantMeta as Record<string, unknown> | null;
+          return vm?.destinationId === data.destinationId;
+        })
+      : allVariants[0] ?? null;
+
     if (existing) {
       return this.prisma.client.outboundVariant.update({
         where: { id: existing.id },
@@ -124,12 +134,12 @@ export class OutboundContentService {
           textBody: data.textBody ?? existing.textBody,
           htmlBody: data.htmlBody ?? existing.htmlBody,
           mediaUrls: data.mediaUrls ?? existing.mediaUrls,
-          variantMeta: data.variantMeta ?? existing.variantMeta,
+          variantMeta: Object.keys(meta).length > 0 ? meta : existing.variantMeta,
         },
       });
     }
     return this.prisma.client.outboundVariant.create({
-      data: { contentId, ...data, mediaUrls: data.mediaUrls ?? [] },
+      data: { contentId, platform: data.platform, textBody: data.textBody, htmlBody: data.htmlBody, mediaUrls: data.mediaUrls ?? [], variantMeta: Object.keys(meta).length > 0 ? meta : undefined },
     });
   }
 }
