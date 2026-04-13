@@ -10,7 +10,6 @@ import {
   CalendarDays,
   Search,
   X,
-  ListTodo,
   Send,
   FileText,
   Clock,
@@ -19,6 +18,10 @@ import {
   TrendingUp,
   Zap,
   LayoutList,
+  DollarSign,
+  Activity,
+  Target,
+  UserPlus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/page-header";
@@ -43,6 +46,7 @@ import { MarketingCalendarTab } from "./components/marketing-calendar-tab";
 import { AudienceHealthSection } from "./components/campaign-intelligence-cards";
 import { AudienceSegmentsPanel } from "./components/audience-segments-panel";
 import type { EmailCampaign, LeadForm } from "@/lib/client";
+import type { BusinessPulse } from "./hooks/use-marketing";
 
 type ContentTab = "create" | "calendar" | "audience";
 type CreateSubmode = "compose" | "campaigns" | "posts" | "scheduled";
@@ -192,6 +196,144 @@ function ContentIntelligenceStrip({
   );
 }
 
+function BusinessPulseStrip({
+  pulse,
+  crossModuleSignals,
+  onCreateCampaign,
+  onCreatePost,
+}: {
+  pulse: BusinessPulse;
+  crossModuleSignals: { type: string; message: string; timestamp: number }[];
+  onCreateCampaign: () => void;
+  onCreatePost: () => void;
+}) {
+  const insights = useMemo(() => {
+    const items: { icon: React.ElementType; text: string; color: string; action?: () => void; actionLabel?: string }[] = [];
+
+    if (pulse.pipeline) {
+      const { contactsGoingCold, newThisWeek, totalContacts, leads } = pulse.pipeline;
+
+      if (contactsGoingCold > 0) {
+        items.push({
+          icon: AlertTriangle,
+          text: `${contactsGoingCold} contact${contactsGoingCold > 1 ? "s" : ""} going cold — send a re-engagement campaign`,
+          color: "text-red-400",
+          action: onCreateCampaign,
+          actionLabel: "Win back",
+        });
+      }
+
+      if (newThisWeek > 0) {
+        items.push({
+          icon: UserPlus,
+          text: `${newThisWeek} new contact${newThisWeek > 1 ? "s" : ""} this week — welcome them with targeted content`,
+          color: "text-emerald-400",
+          action: onCreateCampaign,
+          actionLabel: "Welcome",
+        });
+      }
+
+      if (leads > 0 && totalContacts > 0) {
+        const leadPct = Math.round((leads / totalContacts) * 100);
+        if (leadPct > 40) {
+          items.push({
+            icon: Target,
+            text: `${leadPct}% of contacts are still leads — nurture them toward conversion`,
+            color: "text-amber-400",
+            action: onCreateCampaign,
+            actionLabel: "Nurture",
+          });
+        }
+      }
+    }
+
+    if (pulse.financial) {
+      const { revenueGrowthPct, topServices, revenueAtRisk } = pulse.financial;
+
+      if (revenueGrowthPct > 10) {
+        items.push({
+          icon: TrendingUp,
+          text: `Revenue up ${Math.round(revenueGrowthPct)}% — promote your momentum with a success story`,
+          color: "text-emerald-400",
+          action: onCreatePost,
+          actionLabel: "Share win",
+        });
+      } else if (revenueGrowthPct < -5) {
+        items.push({
+          icon: DollarSign,
+          text: `Revenue down ${Math.abs(Math.round(revenueGrowthPct))}% — consider a promotional campaign`,
+          color: "text-red-400",
+          action: onCreateCampaign,
+          actionLabel: "Promote",
+        });
+      }
+
+      if (revenueAtRisk > 0) {
+        items.push({
+          icon: AlertTriangle,
+          text: `TTD ${revenueAtRisk.toLocaleString()} revenue at risk from overdue invoices`,
+          color: "text-amber-400",
+          action: onCreateCampaign,
+          actionLabel: "Follow up",
+        });
+      }
+
+      if (topServices.length > 0) {
+        const topService = topServices[0];
+        items.push({
+          icon: Activity,
+          text: `"${topService.name}" is your top earner — create content around it`,
+          color: "text-blue-400",
+          action: onCreatePost,
+          actionLabel: "Promote",
+        });
+      }
+    }
+
+    const recentSignals = crossModuleSignals.filter((s) => Date.now() - s.timestamp < 600_000);
+    for (const signal of recentSignals.slice(0, 2)) {
+      items.push({
+        icon: Zap,
+        text: signal.message,
+        color: "text-purple-400",
+        action: signal.type === "invoice_paid" || signal.type === "contacts_imported" ? onCreateCampaign : onCreatePost,
+        actionLabel: "Act now",
+      });
+    }
+
+    return items.slice(0, 4);
+  }, [pulse, crossModuleSignals, onCreateCampaign, onCreatePost]);
+
+  if (insights.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border border-border/30 bg-card p-2.5 space-y-1.5">
+      <div className="flex items-center gap-2">
+        <Activity className="w-3.5 h-3.5 text-purple-400" />
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">Business Pulse</span>
+      </div>
+      <div className="space-y-1">
+        {insights.map((insight, i) => (
+          <div key={i} className="flex items-center justify-between gap-2 group">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <insight.icon className={`w-3 h-3 shrink-0 ${insight.color}`} />
+              <span className="text-[11px] text-muted-foreground truncate">{insight.text}</span>
+            </div>
+            {insight.action && insight.actionLabel && (
+              <button
+                onClick={insight.action}
+                className="text-[10px] font-medium text-purple-400 hover:underline shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                {insight.actionLabel}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function ContentPage() {
   const searchParams = useSearchParams();
   const mk = useMarketing();
@@ -246,9 +388,10 @@ export default function ContentPage() {
         forms: mk.forms,
         socialPosts: mk.socialPosts,
         crossModuleSignals: mk.crossModuleSignals,
+        businessPulse: mk.businessPulse,
       });
     }
-  }, [mk.businessId, activeTab, mk.dataVersion, mk.campaigns, mk.forms, mk.socialPosts, mk.crossModuleSignals, marketingAi.updateMarketingContext]);
+  }, [mk.businessId, activeTab, mk.dataVersion, mk.campaigns, mk.forms, mk.socialPosts, mk.crossModuleSignals, mk.businessPulse, marketingAi.updateMarketingContext]);
 
   const handleTabChange = useCallback((key: string) => {
     const resolved = LEGACY_TAB_MAP[key] || key;
@@ -448,6 +591,12 @@ export default function ContentPage() {
                   onCreateCampaign={() => { setCreateSubmode("compose"); setComposeType("email"); setTimeout(() => document.querySelector<HTMLButtonElement>("[data-marketing-new-campaign]")?.click(), 100); }}
                   onCreatePost={() => { setCreateSubmode("compose"); setComposeType("social"); setTimeout(() => document.querySelector<HTMLButtonElement>("[data-social-new-post]")?.click(), 100); }}
                   onScheduleDraft={() => setCreateSubmode("scheduled")}
+                />
+                <BusinessPulseStrip
+                  pulse={mk.businessPulse}
+                  crossModuleSignals={mk.crossModuleSignals}
+                  onCreateCampaign={() => { setCreateSubmode("compose"); setComposeType("email"); setTimeout(() => document.querySelector<HTMLButtonElement>("[data-marketing-new-campaign]")?.click(), 100); }}
+                  onCreatePost={() => { setCreateSubmode("compose"); setComposeType("social"); setTimeout(() => document.querySelector<HTMLButtonElement>("[data-social-new-post]")?.click(), 100); }}
                 />
 
                 <div className="flex items-center gap-2 flex-wrap">

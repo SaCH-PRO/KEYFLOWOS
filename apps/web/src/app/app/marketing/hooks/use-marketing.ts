@@ -8,12 +8,16 @@ import {
   fetchLeadFormSubmissions,
   fetchPosts,
   fetchMarketingStats as fetchMarketingStatsApi,
+  fetchFlowIntelligence,
+  fetchFinancialGrowth,
   getGmailAuthUrl,
   type EmailCampaign,
   type LeadForm,
   type LeadFormSubmission,
   type SocialPost,
   type MarketingStats as ServerMarketingStats,
+  type FlowIntelligenceData,
+  type FinancialGrowthData,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { toast } from "sonner";
@@ -40,6 +44,13 @@ export interface CrossModuleSignal {
   data?: Record<string, unknown>;
 }
 
+export interface BusinessPulse {
+  pipeline: FlowIntelligenceData | null;
+  financial: FinancialGrowthData | null;
+  contactCount: number;
+  recentContactTags: string[];
+}
+
 export interface UseMarketingReturn {
   businessId: string | null;
   loading: boolean;
@@ -53,6 +64,7 @@ export interface UseMarketingReturn {
   availableTags: string[];
   stats: MarketingStats;
   crossModuleSignals: CrossModuleSignal[];
+  businessPulse: BusinessPulse;
   dataVersion: number;
   loadData: () => Promise<void>;
   loadCampaigns: () => Promise<void>;
@@ -109,6 +121,12 @@ export function useMarketing(): UseMarketingReturn {
   const [crossModuleSignals, setCrossModuleSignals] = useState<CrossModuleSignal[]>([]);
   const [serverStats, setServerStats] = useState<ServerMarketingStats | null>(null);
   const [dataVersion, setDataVersion] = useState(0);
+  const [businessPulse, setBusinessPulse] = useState<BusinessPulse>({
+    pipeline: null,
+    financial: null,
+    contactCount: 0,
+    recentContactTags: [],
+  });
 
   const signalTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const bumpVersion = useCallback(() => setDataVersion((v) => v + 1), []);
@@ -158,12 +176,14 @@ export function useMarketing(): UseMarketingReturn {
     }
     setLoading(true);
     try {
-      const [campaignsRes, formsRes, contactsRes, postsRes, statsRes] = await Promise.all([
+      const [campaignsRes, formsRes, contactsRes, postsRes, statsRes, pipelineRes, financialRes] = await Promise.all([
         fetchCampaigns(businessId),
         fetchLeadForms(businessId),
         fetchContacts(businessId, { take: 200 }),
         fetchPosts(businessId),
         fetchMarketingStatsApi(businessId).catch(() => ({ data: null, error: "Failed" })),
+        fetchFlowIntelligence(businessId).catch(() => ({ data: null, error: "Failed" })),
+        fetchFinancialGrowth(businessId).catch(() => ({ data: null, error: "Failed" })),
       ]);
       if (statsRes.data) setServerStats(statsRes.data);
       if (campaignsRes.data) setCampaigns(campaignsRes.data);
@@ -181,11 +201,21 @@ export function useMarketing(): UseMarketingReturn {
         );
         setSubmissions(subsMap);
       }
+      const contactTags: string[] = [];
+      let contactCount = 0;
       if (contactsRes.data?.contacts) {
         const tags = new Set<string>();
-        contactsRes.data.contacts.forEach((c) => c.tags?.forEach((t) => tags.add(t)));
+        contactsRes.data.contacts.forEach((c: { tags?: string[] }) => c.tags?.forEach((t) => tags.add(t)));
         setAvailableTags(Array.from(tags));
+        contactTags.push(...Array.from(tags));
+        contactCount = contactsRes.data.contacts.length;
       }
+      setBusinessPulse({
+        pipeline: pipelineRes.data ?? null,
+        financial: financialRes.data ?? null,
+        contactCount,
+        recentContactTags: contactTags,
+      });
     } catch {
       toast.error("Failed to load marketing data");
     }
@@ -396,6 +426,7 @@ export function useMarketing(): UseMarketingReturn {
     availableTags,
     stats,
     crossModuleSignals,
+    businessPulse,
     dataVersion,
     loadData,
     loadCampaigns,
