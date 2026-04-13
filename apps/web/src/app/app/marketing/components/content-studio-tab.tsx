@@ -788,10 +788,31 @@ export function ContentStudioTab({ businessId }: ContentStudioTabProps) {
     }
   }, [health]);
 
-  const handleReconnect = useCallback((provider: string) => {
+  const handleReconnect = useCallback(async (provider: string) => {
     if (!businessId) return;
-    startSocialOAuth(provider, businessId);
-  }, [businessId]);
+    try {
+      const res = await startSocialOAuth(provider, businessId);
+      if (res.data?.authUrl) {
+        const popup = window.open(res.data.authUrl, `oauth_reconnect_${provider}`, "width=600,height=700,scrollbars=yes");
+        if (!popup) {
+          toast.error("Pop-up blocked. Please allow pop-ups and try again.");
+          return;
+        }
+        toast.info("Complete re-authentication in the popup window...");
+        const checkInterval = setInterval(() => {
+          if (popup.closed) {
+            clearInterval(checkInterval);
+            health.refresh();
+            toast.success("Reconnection flow completed");
+          }
+        }, 1000);
+      } else {
+        toast.error(res.error || "Failed to start reconnection");
+      }
+    } catch {
+      toast.error("Failed to start reconnection flow");
+    }
+  }, [businessId, health]);
 
   if (health.loading) {
     return (

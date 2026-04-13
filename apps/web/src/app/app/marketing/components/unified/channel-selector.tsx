@@ -9,12 +9,14 @@ import {
 } from "lucide-react";
 import { listChannelConnections, listChannelDestinations } from "@/lib/client";
 import type { ChannelConnection, ChannelDestination } from "@/lib/client";
+import type { ChannelHealthData } from "@/hooks/use-channel-health";
 
 interface ChannelSelectorProps {
   businessId: string;
   selectedDestinations: ChannelDestination[];
   onSelectionChange: (destinations: ChannelDestination[]) => void;
   contentType?: string;
+  healthData?: ChannelHealthData;
 }
 
 const PLATFORM_ICONS: Record<string, { icon: React.ElementType; color: string; label: string; capabilities: string[] }> = {
@@ -51,27 +53,33 @@ function getDisabledReason(connection: ChannelConnection): string | null {
   return null;
 }
 
-export function ChannelSelector({ businessId, selectedDestinations, onSelectionChange, contentType }: ChannelSelectorProps) {
-  const [connections, setConnections] = useState<ChannelConnection[]>([]);
-  const [activeDestinations, setActiveDestinations] = useState<ChannelDestination[]>([]);
-  const [allDestinations, setAllDestinations] = useState<ChannelDestination[]>([]);
-  const [loading, setLoading] = useState(true);
+export function ChannelSelector({ businessId, selectedDestinations, onSelectionChange, contentType, healthData }: ChannelSelectorProps) {
+  const [localConnections, setLocalConnections] = useState<ChannelConnection[]>([]);
+  const [localActiveDestinations, setLocalActiveDestinations] = useState<ChannelDestination[]>([]);
+  const [localAllDestinations, setLocalAllDestinations] = useState<ChannelDestination[]>([]);
+  const [localLoading, setLocalLoading] = useState(!healthData);
   const [open, setOpen] = useState(false);
 
   const loadData = useCallback(async () => {
-    setLoading(true);
+    if (healthData) return;
+    setLocalLoading(true);
     const [connRes, activeDestRes, allDestRes] = await Promise.all([
       listChannelConnections(businessId),
       listChannelDestinations(businessId, { activeOnly: true }),
       listChannelDestinations(businessId, {}),
     ]);
-    if (connRes.data) setConnections(connRes.data);
-    if (activeDestRes.data) setActiveDestinations(activeDestRes.data);
-    if (allDestRes.data) setAllDestinations(allDestRes.data);
-    setLoading(false);
-  }, [businessId]);
+    if (connRes.data) setLocalConnections(connRes.data);
+    if (activeDestRes.data) setLocalActiveDestinations(activeDestRes.data);
+    if (allDestRes.data) setLocalAllDestinations(allDestRes.data);
+    setLocalLoading(false);
+  }, [businessId, healthData]);
 
   useEffect(() => { void loadData(); }, [loadData]);
+
+  const connections = healthData ? healthData.connections : localConnections;
+  const activeDestinations = healthData ? healthData.destinations.filter((d) => d.isActive) : localActiveDestinations;
+  const allDestinations = healthData ? healthData.destinations : localAllDestinations;
+  const loading = healthData ? healthData.loading : localLoading;
 
   const toggleDestination = (dest: ChannelDestination) => {
     if (!dest.isActive) return;
