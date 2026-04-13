@@ -267,54 +267,40 @@ export class AutomationExecutorService {
               break;
             }
 
-            const adapter = this.adapterRegistry.resolve('WHATSAPP');
-            if (!adapter) {
-              this.logger.warn('WhatsApp adapter not found in registry');
-              break;
-            }
-
             const destination = waConnection.destinations[0];
             const messageBody = action.message || action.templateData?.message || `Hello from ${playbookName}`;
+            const templateMeta: Record<string, unknown> = {};
             const templateName = action.templateName as string | undefined;
+            if (templateName) {
+              templateMeta.templateName = templateName;
+              templateMeta.templateLanguage = action.templateLanguage || 'en';
+              templateMeta.templateParameters = action.templateParameters;
+            }
 
-            const result = await adapter.publish(waConnection, destination, {
-              textBody: messageBody,
-              meta: {
-                recipientPhone: phone,
-                ...(templateName ? { templateName, templateLanguage: action.templateLanguage || 'en', templateParameters: action.templateParameters } : {}),
+            const flowContent = await this.prisma.client.outboundContent.create({
+              data: {
+                businessId,
+                contentType: 'whatsapp_message',
+                body: messageBody,
+                status: 'Queued',
+                contentMeta: { source: 'flow', playbookName, contactId: context.contactId, ...templateMeta },
+                tags: ['flow-action'],
               },
             });
 
-            if (result.success) {
-              const flowContent = await this.prisma.client.outboundContent.create({
-                data: {
-                  businessId,
-                  contentType: 'whatsapp_message',
-                  body: messageBody,
-                  status: 'Published',
-                  publishedAt: new Date(),
-                  tags: ['flow-action'],
-                },
-              });
-              try {
-                await this.prisma.client.outboundDelivery.create({
-                  data: {
-                    contentId: flowContent.id,
-                    destinationId: destination.id,
-                    businessId,
-                    status: 'Sent',
-                    sentAt: new Date(),
-                    externalPostId: result.externalPostId,
-                    resultSnapshot: { source: 'flow', playbookName, contactId: context.contactId },
-                  },
-                });
-              } catch (deliveryErr) {
-                this.logger.warn(`Failed to record WhatsApp delivery for playbook "${playbookName}": ${(deliveryErr as Error).message}`);
-              }
-              this.logger.log(`WhatsApp sent to ${phone} for playbook "${playbookName}"`);
-            } else {
-              this.logger.warn(`WhatsApp send failed for playbook "${playbookName}": ${result.errorMessage}`);
-            }
+            await this.prisma.client.outboundDelivery.create({
+              data: {
+                contentId: flowContent.id,
+                destinationId: destination.id,
+                businessId,
+                status: 'Queued',
+                scheduledAt: new Date(),
+                contactId: context.contactId ?? null,
+                recipientPhone: phone,
+              },
+            });
+
+            this.logger.log(`WhatsApp delivery queued for ${phone} in playbook "${playbookName}"`);
           } catch (e) {
             this.logger.warn(`Failed to send WhatsApp for playbook "${playbookName}": ${(e as Error).message}`);
           }

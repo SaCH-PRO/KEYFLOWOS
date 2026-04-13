@@ -348,7 +348,10 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
 
     const contentMeta = content.contentMeta as Record<string, unknown> | null;
     const segmentTags = (contentMeta?.segmentTags as string[] | undefined) ?? [];
-    const isAudienceSend = content.contentType === 'campaign_email' || segmentTags.length > 0;
+    const hasMessagingDest = destinations.some(
+      d => d.connection.provider === 'EMAIL' || d.connection.provider === 'GOOGLE' || d.connection.provider === 'WHATSAPP',
+    );
+    const isAudienceSend = hasMessagingDest && (content.contentType === 'campaign_email' || content.contentType === 'whatsapp_message' || segmentTags.length > 0);
 
     if (content.contentType === 'campaign_email') {
       this.validateEmailCampaignPreSend(content, destinations);
@@ -570,7 +573,10 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
 
     const contentMeta = content.contentMeta as Record<string, unknown> | null;
     const segmentTags = (contentMeta?.segmentTags as string[] | undefined) ?? [];
-    const isAudienceSend = content.contentType === 'campaign_email' || segmentTags.length > 0;
+    const hasMessagingDest = destinations.some(
+      d => d.connection.provider === 'EMAIL' || d.connection.provider === 'GOOGLE' || d.connection.provider === 'WHATSAPP',
+    );
+    const isAudienceSend = hasMessagingDest && (content.contentType === 'campaign_email' || content.contentType === 'whatsapp_message' || segmentTags.length > 0);
 
     if (content.contentType === 'campaign_email') {
       this.validateEmailCampaignPreSend(content, destinations);

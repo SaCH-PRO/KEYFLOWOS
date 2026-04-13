@@ -75,9 +75,16 @@ export class OutboundContentService {
     scheduledAt?: string | null;
     timezone?: string;
     contentMeta?: Record<string, unknown>;
+    segmentTags?: string[];
   }) {
     const existing = await this.prisma.client.outboundContent.findFirst({ where: { id, businessId, deletedAt: null } });
     if (!existing) throw new NotFoundException('Content not found');
+
+    let mergedMeta = data.contentMeta;
+    if (data.segmentTags !== undefined) {
+      const existingMeta = (existing.contentMeta as Record<string, unknown> | null) ?? {};
+      mergedMeta = { ...existingMeta, ...(mergedMeta ?? {}), segmentTags: data.segmentTags };
+    }
 
     return this.prisma.client.outboundContent.update({
       where: { id },
@@ -87,7 +94,7 @@ export class OutboundContentService {
         ...(data.status !== undefined ? { status: data.status } : {}),
         ...(data.scheduledAt !== undefined ? { scheduledAt: data.scheduledAt ? new Date(data.scheduledAt) : null } : {}),
         ...(data.timezone !== undefined ? { timezone: data.timezone } : {}),
-        ...(data.contentMeta !== undefined ? { contentMeta: data.contentMeta } : {}),
+        ...(mergedMeta !== undefined ? { contentMeta: mergedMeta } : {}),
       },
       include: { variants: true },
     });
